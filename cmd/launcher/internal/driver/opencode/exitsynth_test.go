@@ -7,9 +7,6 @@ import (
 	"spindrift.dev/launcher/internal/driver/opencode"
 )
 
-// TestSynthesizeExit_ValidOutcomeNoError_IsZero verifies that a log carrying
-// a valid SPINDRIFT_OUTCOME line in a text event, with no type:"error"
-// event anywhere, synthesizes a zero exit code.
 func TestSynthesizeExit_ValidOutcomeNoError_IsZero(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"text","part":{"text":"SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done"}}`,
@@ -24,10 +21,8 @@ func TestSynthesizeExit_ValidOutcomeNoError_IsZero(t *testing.T) {
 	}
 }
 
-// TestSynthesizeExit_ValidOutcomeWithErrorEvent_IsNonZero verifies that a
-// valid SPINDRIFT_OUTCOME line does not mask a type:"error" event elsewhere
-// in the log — opencode exits 0 even on error, so this catches what its own
-// exit code would miss.
+// opencode exits 0 even on error, so a valid outcome line must not mask an
+// error event elsewhere in the log.
 func TestSynthesizeExit_ValidOutcomeWithErrorEvent_IsNonZero(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"text","part":{"text":"SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done"}}`,
@@ -43,12 +38,9 @@ func TestSynthesizeExit_ValidOutcomeWithErrorEvent_IsNonZero(t *testing.T) {
 	}
 }
 
-// TestSynthesizeExit_NearMissOutcome_IsNonZero verifies that a log carrying
-// the SPINDRIFT_OUTCOME token but missing a required field (landing) --
-// outcome.ParseAnywhere's near-miss case (outcome.ErrNearMiss) -- still
-// synthesizes a non-zero exit code, same as no token at all: SynthesizeExit
-// only branches on ParseAnywhere's ok bool, so a near-miss line never gets
-// distinguished from "never attempted" here.
+// SynthesizeExit only branches on ParseAnywhere's ok bool, so a near-miss line
+// (outcome.ErrNearMiss, here a missing landing field) is indistinguishable from
+// no token at all.
 func TestSynthesizeExit_NearMissOutcome_IsNonZero(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"text","part":{"text":"SPINDRIFT_OUTCOME issue=42 status=ready note=done"}}`,
@@ -63,8 +55,6 @@ func TestSynthesizeExit_NearMissOutcome_IsNonZero(t *testing.T) {
 	}
 }
 
-// TestSynthesizeExit_NoOutcome_IsNonZero verifies that a log with no
-// SPINDRIFT_OUTCOME line at all synthesizes a non-zero exit code.
 func TestSynthesizeExit_NoOutcome_IsNonZero(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"text","part":{"text":"Investigating the issue."}}`,
@@ -79,8 +69,8 @@ func TestSynthesizeExit_NoOutcome_IsNonZero(t *testing.T) {
 	}
 }
 
-// TestSynthesizeExit_MissingFile_IsNonZero verifies the missing-log-file
-// contract: no evidence of a valid outcome means a non-zero code.
+// A missing log file is absence of evidence, not a read failure: SynthesizeExit
+// returns a nil error and a non-zero code.
 func TestSynthesizeExit_MissingFile_IsNonZero(t *testing.T) {
 	code, err := opencode.SynthesizeExit(filepath.Join(t.TempDir(), "does-not-exist.log"))
 	if err != nil {

@@ -3,14 +3,10 @@ package main
 import "testing"
 
 // TestValidateCaps guards the incoherent-cap-pair detection (issue #2460):
-// runWithReviewPass's maxSlices case (run.go's switch) is checked ahead of
-// its maxReviewRounds case, so a maxSlices value too small to ever let
-// reviewRounds reach maxReviewRounds silently shadows the review-round cap
-// instead of surfacing it as the stop reason. validateCaps rejects such a
-// pair at startup instead of letting the loop silently misattribute why it
-// stopped. The reachability math (2N+3 total invocations to let the review
-// pass at reviewRounds==N actually fire, N=maxReviewRounds) is spelled out
-// in run.go's own comments; this test just pins the boundary.
+// run.go's switch checks maxSlices ahead of maxReviewRounds, so a maxSlices
+// value too small to ever let reviewRounds reach maxReviewRounds silently
+// shadows the review-round cap as the stop reason. run.go spells out the
+// 2N+3 reachability math; this test pins the boundary.
 func TestValidateCaps(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -44,16 +40,13 @@ func TestValidateCaps(t *testing.T) {
 	}
 }
 
-// TestValidateCapsAcceptsShippedDefaults pins the actual --max-review-rounds
-// / --max-slices defaults main.go's flag.Int calls ship (issue #2460): a
-// fresh run with no flags overridden must not fail validateCaps at startup.
-// It references defaultMaxReviewRounds / defaultMaxSlices directly (caps.go,
-// same package) rather than hardcoding duplicate values, so a future change
-// to those constants can't drift out of sync with this test silently -- a
-// later slice wires main.go's flag.Int calls to the same constants.
+// TestValidateCapsAcceptsShippedDefaults pins the --max-review-rounds and
+// --max-slices defaults main.go ships (issue #2460): a fresh run with no
+// flags overridden must not fail validateCaps at startup. It reads
+// defaultMaxReviewRounds and defaultMaxSlices from caps.go rather than
+// hardcoding copies, so the constants cannot drift out of sync with the test.
 func TestValidateCapsAcceptsShippedDefaults(t *testing.T) {
-	// true: the shipped defaults are tuned for the review-pass loop, which
-	// is what ships by default.
+	// true: the shipped defaults are tuned for the review-pass loop.
 	if err := validateCaps(defaultMaxReviewRounds, defaultMaxSlices, true); err != nil {
 		t.Errorf("validateCaps(%d, %d, true) = %v, want nil (shipped defaults must be coherent)", defaultMaxReviewRounds, defaultMaxSlices, err)
 	}

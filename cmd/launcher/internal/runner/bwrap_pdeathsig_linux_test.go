@@ -8,15 +8,10 @@ import (
 	"testing"
 )
 
-// TestBwrapRun_ChildDiesWithLauncher verifies that Run sets Pdeathsig on the
-// cmd it builds for its direct child (whatever execTarget resolved -- "bwrap"
-// or "pasta") so that child is killed if the launcher itself dies,
-// complementing bubblewrap's own --die-with-parent flag (issue #2669), which
-// only protects bwrap against ITS immediate OS parent (pasta, in the fork
-// case) rather than the launcher. Pdeathsig only exists in
-// syscall.SysProcAttr on Linux, so this test is Linux-only, mirroring
-// setDeathSignal's own build-tagged split (bwrap_pdeathsig_linux.go /
-// bwrap_pdeathsig_other.go).
+// Bubblewrap's own --die-with-parent only kills bwrap when its immediate OS
+// parent dies (pasta, in the fork case), not when the launcher does, so Run
+// must set Pdeathsig on its direct child too (issue #2669). Pdeathsig is
+// Linux-only in syscall.SysProcAttr, hence the build tag.
 func TestBwrapRun_ChildDiesWithLauncher(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
 	orig := execCommand

@@ -8,9 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 )
 
-// checkByName finds the row named name among checks, failing the test if
-// it's absent — mirrors cmd/launcher/checks_test.go's helper of the same
-// name so a reordering of the underlying slice doesn't break these tests.
+// checkByName looks a row up by name, mirroring cmd/launcher/checks_test.go's
+// helper of the same name, so reordering the underlying slice does not break
+// these tests.
 func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check {
 	t.Helper()
 	for _, ch := range checks {
@@ -22,9 +22,9 @@ func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check 
 	return doctor.Check{}
 }
 
-// minimalValidConfig returns a Config that passes every RequiredKnobChecks/
-// CrossKnobChecks row, so a test can flip exactly the one field it cares
-// about away from a known-good baseline.
+// minimalValidConfig returns a Config that passes every RequiredKnobChecks and
+// CrossKnobChecks row, so a test can flip exactly the one field it cares about
+// away from a known-good baseline.
 func minimalValidConfig() Config {
 	return Config{
 		RepoSlug:     "owner/repo",
@@ -42,9 +42,9 @@ func minimalValidConfig() Config {
 	}
 }
 
-// minimalDeps returns Deps wired to the two-row github/github backend fixed
-// by minimalValidConfig: nil validators (github's real registry row also
-// carries none, cmd/launcher/backend.go), both axes valid, no extra rows.
+// minimalDeps returns Deps matching the github/github pairing
+// minimalValidConfig fixes. The validators are nil because github's real
+// registry row carries none either (cmd/launcher/backend.go).
 func minimalDeps() Deps {
 	return Deps{
 		Signals: func(codeForge, issueTracker string) Signals {
@@ -173,9 +173,6 @@ func TestRequiredKnobChecks_GHToken(t *testing.T) {
 	}
 }
 
-// TestRequiredKnobChecks_RepoSlugGHToken_ExemptFullyLocal verifies a fully
-// local pairing exempts both repo-slug and gh-token, even with both knobs
-// empty.
 func TestRequiredKnobChecks_RepoSlugGHToken_ExemptFullyLocal(t *testing.T) {
 	c := minimalValidConfig()
 	c.RepoSlug = ""
@@ -193,9 +190,6 @@ func TestRequiredKnobChecks_RepoSlugGHToken_ExemptFullyLocal(t *testing.T) {
 	}
 }
 
-// TestRequiredKnobChecks_RepoSlugGHToken_ExemptSelfContainedResearch verifies
-// the self-contained research exemption: ResearchDispatch && SelfContained
-// && Signals.InBoxUnreachableTracker together exempt repo-slug/gh-token.
 func TestRequiredKnobChecks_RepoSlugGHToken_ExemptSelfContainedResearch(t *testing.T) {
 	c := minimalValidConfig()
 	c.RepoSlug = ""
@@ -215,9 +209,8 @@ func TestRequiredKnobChecks_RepoSlugGHToken_ExemptSelfContainedResearch(t *testi
 	}
 }
 
-// TestRequiredKnobChecks_RepoSlug_NotExemptOtherwise pins that each half of
-// the self-contained research exemption alone is not sufficient, and that a
-// non-fully-local, non-research-exempt pairing still requires REPO_SLUG.
+// Each half of the self-contained research exemption alone is not enough, and
+// both flags together still fail without the tracker signal.
 func TestRequiredKnobChecks_RepoSlug_NotExemptOtherwise(t *testing.T) {
 	cases := []Config{
 		func() Config { c := minimalValidConfig(); c.RepoSlug = ""; c.ResearchDispatch = true; return c }(),
@@ -240,11 +233,9 @@ func TestRequiredKnobChecks_RepoSlug_NotExemptOtherwise(t *testing.T) {
 	}
 }
 
-// TestRequiredKnobChecks_DriverCredentials_Claude covers both claude arms
-// of the driver switch — the explicit "claude" value and the empty default
-// — and pins the row's error text verbatim: it is the operator-facing
-// remedy `spindrift doctor` prints, so a reworded message is a
-// user-visible change that must break a test rather than pass silently.
+// The error text is pinned verbatim because it is the operator-facing remedy
+// `spindrift doctor` prints, so rewording it must break a test rather than
+// pass silently.
 func TestRequiredKnobChecks_DriverCredentials_Claude(t *testing.T) {
 	const wantErr = "set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY"
 	for _, driver := range []string{"claude", ""} {
@@ -383,8 +374,8 @@ func TestCrossKnobChecks_ValidatorErrorPropagates(t *testing.T) {
 }
 
 func TestCrossKnobChecks_NilValidatorPasses(t *testing.T) {
-	// minimalDeps' github row carries no ValidateTracker/ValidateCodeForge —
-	// nil means "no validation beyond axis membership".
+	// A nil ValidateTracker or ValidateCodeForge means no validation beyond axis
+	// membership, and minimalDeps' github row leaves both nil.
 	checks := CrossKnobChecks(minimalValidConfig(), minimalDeps())
 	if _, err := checkByName(t, checks, "issue-tracker-config").Probe(); err != nil {
 		t.Errorf("issue-tracker-config Probe() unexpected error with nil validator: %v", err)

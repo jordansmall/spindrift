@@ -9,9 +9,8 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestReadContext_ReconcileLivenessProbe_LocalTracker_ReturnsNonNil verifies
-// reconcileLivenessProbe builds a real probe for ISSUE_TRACKER=local, the
-// only tracker reconcile's LivenessProbe check reaches (issue #2941 AC2).
+// ISSUE_TRACKER=local is the only tracker reconcile's LivenessProbe check
+// reaches (issue #2941 AC2).
 func TestReadContext_ReconcileLivenessProbe_LocalTracker_ReturnsNonNil(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
@@ -24,10 +23,8 @@ func TestReadContext_ReconcileLivenessProbe_LocalTracker_ReturnsNonNil(t *testin
 	}
 }
 
-// TestReadContext_ReconcileLivenessProbe_GithubTracker_ReturnsNil verifies
-// reconcileLivenessProbe returns nil for a non-local tracker, skipping the
-// runner build entirely for the common github/jira "nothing to do" refusal
-// (issue #2941 AC2).
+// A non-local tracker skips the runner build entirely, which is the common
+// github/jira "nothing to do" refusal (issue #2941 AC2).
 func TestReadContext_ReconcileLivenessProbe_GithubTracker_ReturnsNil(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "github"
@@ -40,9 +37,7 @@ func TestReadContext_ReconcileLivenessProbe_GithubTracker_ReturnsNil(t *testing.
 	}
 }
 
-// TestNewReadContext_FullyLocal_ConstructsClean verifies newReadContext
-// wires the IssueTracker/CodeForge for a fully-local run (ISSUE_TRACKER=
-// local, CODE_FORGE=local) — the read prefix doctor.go's cmdDoctor and
+// newReadContext is the read prefix that doctor.go's cmdDoctor and
 // reconcile_cmd.go's cmdReconcile now share instead of each building its own
 // copy inline (issue #2941).
 func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
@@ -68,11 +63,9 @@ func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
 	}
 }
 
-// TestNewReadContext_FullyLocal_ResolvesCapabilities verifies newReadContext
-// resolves capabilities once via forge.ResolveCapabilities for a
-// fully-local run (ISSUE_TRACKER=local, CODE_FORGE=local), so a later
-// consumer reads rc.capabilities instead of re-asserting interfaces itself
-// (issue #2945 slice 4).
+// newReadContext resolves capabilities once via forge.ResolveCapabilities so a
+// later consumer reads rc.capabilities instead of re-asserting interfaces
+// itself (issue #2945 slice 4).
 func TestNewReadContext_FullyLocal_ResolvesCapabilities(t *testing.T) {
 	setFullyLocalEnv(t)
 
@@ -95,11 +88,10 @@ func TestNewReadContext_FullyLocal_ResolvesCapabilities(t *testing.T) {
 	}
 }
 
-// TestReadContext_ConstructibleAgainstForgeFake verifies readContext can be
-// built directly from forge.NewFake(), the fake-based half of #2920's
-// Testing Decisions ("each tier constructible against the forge fake and
-// env fixtures") that newReadContext's env-fixture test above doesn't cover
-// (issue #2941 AC4).
+// readContext also builds straight from forge.NewFake(), the fake-based half of
+// #2920's Testing Decisions ("each tier constructible against the forge fake
+// and env fixtures") that newReadContext's env-fixture test above doesn't
+// cover (issue #2941 AC4).
 func TestReadContext_ConstructibleAgainstForgeFake(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
@@ -113,13 +105,10 @@ func TestReadContext_ConstructibleAgainstForgeFake(t *testing.T) {
 	}
 }
 
-// TestNewReadContext_InvalidConfig_ConstructsCleanly verifies newReadContext
-// never validates at construction (issue #2992, invariant with
-// reconcileLivenessProbe's own lazy-build precedent): a config
-// validateConfigChecks would reject (GIT_USER_NAME unset, failing the
-// "git-user-name" row) still comes back as a usable readContext rather than
-// newReadContext itself failing or panicking on the broken knob. Only a
-// later rc.validation() call surfaces that the config is invalid.
+// newReadContext never validates at construction (issue #2992): a config
+// validateConfigChecks would reject still comes back as a usable readContext
+// rather than failing or panicking on the broken knob. Only a later
+// rc.validation() call reports that the config is invalid.
 func TestNewReadContext_InvalidConfig_ConstructsCleanly(t *testing.T) {
 	setFullyLocalEnv(t)
 	t.Setenv("GIT_USER_NAME", "")
@@ -134,10 +123,9 @@ func TestNewReadContext_InvalidConfig_ConstructsCleanly(t *testing.T) {
 	}
 }
 
-// TestReadContext_Validation_InvalidConfig_ReturnsConfigErrNamingBrokenKnob
-// verifies validation() runs cmdDoctor's full-report classification
-// (validateConfigChecks) against rc.config and surfaces a broken Required
-// row's remedy, naming the knob to fix (issue #2992).
+// validation() runs cmdDoctor's full-report classification
+// (validateConfigChecks) against rc.config and reports a broken Required row's
+// remedy, naming the knob to fix (issue #2992).
 func TestReadContext_Validation_InvalidConfig_ReturnsConfigErrNamingBrokenKnob(t *testing.T) {
 	c := minimalValidConfig()
 	c.gitUserName = ""
@@ -153,9 +141,8 @@ func TestReadContext_Validation_InvalidConfig_ReturnsConfigErrNamingBrokenKnob(t
 	}
 }
 
-// TestReadContext_Validation_ValidConfig_ReturnsNilConfigErr verifies
-// validation() returns a nil configErr for a config that already passes
-// cmdDoctor's full-report classification (issue #2992).
+// A config that already passes cmdDoctor's full-report classification gets a
+// nil configErr (issue #2992).
 func TestReadContext_Validation_ValidConfig_ReturnsNilConfigErr(t *testing.T) {
 	rc := readContext{config: minimalValidConfig()}
 
@@ -166,15 +153,11 @@ func TestReadContext_Validation_ValidConfig_ReturnsNilConfigErr(t *testing.T) {
 	}
 }
 
-// TestReadContext_Validation_ReportSharesClassifyMemoizedProbe verifies
-// validation() calls doctorCheckSets(c) exactly once and hands back the
-// matching report half, so a route-credential Probe shared between
-// validation()'s own classify pass and the returned reportChecks Peeks its
-// credential at most once (issue #3144's guarantee, exercised through the
-// read tier added by issue #2992). Two separate doctorCheckSets(c) calls --
-// one inside validation(), a second to build reportChecks -- would instead
-// give reportChecks its own unmemoized Probe, which would re-Peek and
-// notice the env var this test unsets between the two steps.
+// validation() calls doctorCheckSets(c) exactly once, so a route-credential
+// Probe shared with the returned reportChecks Peeks its credential at most
+// once (issue #3144's guarantee, reached through the read tier added by issue
+// #2992). Two separate doctorCheckSets(c) calls would give reportChecks its
+// own unmemoized Probe, which would re-Peek and notice the unset env var.
 func TestReadContext_Validation_ReportSharesClassifyMemoizedProbe(t *testing.T) {
 	const envName = "SPINDRIFT_TEST_READCONTEXT_VALIDATION_SHARED_PROBE"
 	t.Setenv(envName, "resolvable")
@@ -191,9 +174,8 @@ credential = { env = "`+envName+`" }
 		t.Fatalf("validation().configErr = %v, want nil while %s is set", v.configErr, envName)
 	}
 
-	// Unsetting the env var now would make a fresh Peek fail; a memoized
-	// report Probe must instead keep returning the cached success from the
-	// classify pass above.
+	// A fresh Peek fails once the env var is gone; a memoized report Probe
+	// keeps returning the cached success from the classify pass above.
 	if err := os.Unsetenv(envName); err != nil {
 		t.Fatalf("os.Unsetenv(%q) failed: %v", envName, err)
 	}

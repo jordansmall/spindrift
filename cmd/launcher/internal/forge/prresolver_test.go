@@ -9,9 +9,8 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// recordingClock is a fake retry.Clock that records durations passed to
-// Sleep instead of actually sleeping, mirroring
-// internal/retry/retry_test.go's recordingClock.
+// recordingClock records the durations passed to Sleep instead of sleeping, so
+// the retry tests assert on backoff without real delay.
 type recordingClock struct {
 	sleeps []time.Duration
 }
@@ -25,9 +24,8 @@ func (r *recordingClock) Clock() retry.Clock {
 	}
 }
 
-// TestResolveOpenPR verifies forge.ResolveOpenPR's single documented absent
-// policy: a push-only Code Forge (no PRForge) and "no open PR yet" both
-// resolve to Found: false with no error; a found PR reports its URL.
+// TestResolveOpenPR pins the single absent policy: a push-only Code Forge (no
+// PRForge) and "no open PR yet" both resolve to Found: false with no error.
 func TestResolveOpenPR(t *testing.T) {
 	t.Run("push-only forge has no PR to discover", func(t *testing.T) {
 		f := forge.NewFake()
@@ -62,10 +60,9 @@ func TestResolveOpenPR(t *testing.T) {
 	})
 }
 
-// TestResolveOpenPRFiles verifies ResolveOpenPRFiles absorbs the PRForge
-// assertion and ListPRFiles call so callers don't need their own assertion
-// after resolving: push-only and no-open-PR both yield (nil, nil), a found
-// PR's changed files are returned, and a ListPRFiles failure propagates.
+// TestResolveOpenPRFiles pins that the resolver absorbs the PRForge assertion
+// and the ListPRFiles call, so a caller needs none of its own: both absent
+// cases yield (nil, nil), and a ListPRFiles failure propagates.
 func TestResolveOpenPRFiles(t *testing.T) {
 	t.Run("push-only forge has no PR to discover", func(t *testing.T) {
 		f := forge.NewFake()
@@ -112,10 +109,9 @@ func TestResolveOpenPRFiles(t *testing.T) {
 	})
 }
 
-// TestResolveOpenPRWithRetry verifies ResolveOpenPRWithRetry retries only on
-// a transient lookup error, backing off between attempts via the injected
-// retry.LinearBackoff, and never retries a definitive "no open PR" result or
-// a non-transient error (issue #2323).
+// TestResolveOpenPRWithRetry pins that only a transient lookup error retries,
+// backing off between attempts; a definitive "no open PR" result or a
+// non-transient error returns without retrying (issue #2323).
 func TestResolveOpenPRWithRetry(t *testing.T) {
 	t.Run("transient error then success adopts the PR", func(t *testing.T) {
 		f := forge.NewFake()

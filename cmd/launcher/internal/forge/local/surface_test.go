@@ -8,7 +8,6 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// currentBranch returns dir's currently checked-out branch name.
 func currentBranch(t *testing.T, dir string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
@@ -18,11 +17,9 @@ func currentBranch(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestSurfaceIntegrationBranch_CreatesLocalBranchAtIntegrationTip verifies
 // SurfaceIntegrationBranch fetches parent's Integration branch from the
-// Accumulation repo into pwd as a local branch named after parent, at the
-// Integration branch's current tip, without switching pwd off its current
-// branch (issue #1730 AC1, AC2).
+// Accumulation repo into pwd at the Integration tip, and leaves pwd on the
+// branch it was already on (issue #1730 AC1, AC2).
 func TestSurfaceIntegrationBranch_CreatesLocalBranchAtIntegrationTip(t *testing.T) {
 	setGitIdentityEnv(t)
 	parent := ResolveParent("1700", "")
@@ -49,12 +46,9 @@ func TestSurfaceIntegrationBranch_CreatesLocalBranchAtIntegrationTip(t *testing.
 	}
 }
 
-// TestSurfaceIntegrationBranch_BranchNameDecoupledFromIntegrationKey
-// verifies SurfaceIntegrationBranch creates the local branch under
-// branchName while still fetching from parent's own Integration branch —
-// the two must be independently settable so a parentless ticket can surface
-// under a title-derived name while the Integration branch it fetches from,
-// and the Integration-branch key itself, stay keyed on the stable slug
+// The local branch name and the Integration-branch key must be independently
+// settable, so a parentless ticket can surface under a title-derived name while
+// the Integration branch it fetches from stays keyed on the stable slug
 // (issue #1811).
 func TestSurfaceIntegrationBranch_BranchNameDecoupledFromIntegrationKey(t *testing.T) {
 	setGitIdentityEnv(t)
@@ -83,9 +77,8 @@ func TestSurfaceIntegrationBranch_BranchNameDecoupledFromIntegrationKey(t *testi
 	}
 }
 
-// TestSurfaceIntegrationBranch_UnchangedReRunIsNoOp verifies re-surfacing an
-// already-surfaced, unchanged ticket reports surfaced=false — the idempotent
-// no-op AC (issue #1730 AC5) — rather than repeating the notice every run.
+// Re-surfacing an already-surfaced, unchanged ticket reports surfaced=false
+// instead of repeating the notice every run (issue #1730 AC5).
 func TestSurfaceIntegrationBranch_UnchangedReRunIsNoOp(t *testing.T) {
 	setGitIdentityEnv(t)
 	parent := ResolveParent("1700", "")
@@ -108,11 +101,10 @@ func TestSurfaceIntegrationBranch_UnchangedReRunIsNoOp(t *testing.T) {
 	}
 }
 
-// TestSurfaceIntegrationBranch_RefusesWhenTargetBranchCheckedOut verifies
-// SurfaceIntegrationBranch refuses to fetch into parent's branch when it is
-// pwd's currently checked-out branch, reporting the reason through skipped
-// rather than clobbering the operator's working tree (issue #1730 AC1 safety
-// clause, mirroring console_freshness.go's checkCheckoutSafe).
+// Fetching into the branch pwd currently has checked out would clobber the
+// operator's working tree, so SurfaceIntegrationBranch reports the reason
+// through skipped instead (issue #1730 AC1 safety clause, mirroring
+// console_freshness.go's checkCheckoutSafe).
 func TestSurfaceIntegrationBranch_RefusesWhenTargetBranchCheckedOut(t *testing.T) {
 	setGitIdentityEnv(t)
 	parent := ResolveParent("1700", "")
@@ -134,10 +126,8 @@ func TestSurfaceIntegrationBranch_RefusesWhenTargetBranchCheckedOut(t *testing.T
 	}
 }
 
-// TestSurfaceIntegrationBranch_SkipsWhenIntegrationBranchAbsent verifies
-// SurfaceIntegrationBranch reports a skip, not an error, when no seam of
-// parent has landed yet — the Integration branch doesn't exist in repoPath
-// at all (issue #1730 AC3: nothing surfaced for an incomplete ticket).
+// When no seam of parent has landed yet, the Integration branch does not exist
+// in repoPath at all. That is a skip, not an error (issue #1730 AC3).
 func TestSurfaceIntegrationBranch_SkipsWhenIntegrationBranchAbsent(t *testing.T) {
 	setGitIdentityEnv(t)
 	parent := ResolveParent("1700", "")
@@ -156,12 +146,10 @@ func TestSurfaceIntegrationBranch_SkipsWhenIntegrationBranchAbsent(t *testing.T)
 	}
 }
 
-// TestSurfaceIntegrationBranch_RefusesDivergedLocalBranch verifies
-// SurfaceIntegrationBranch never force-overwrites a local branch named
-// parent that has commits of its own the Integration branch doesn't know
-// about — a non-fast-forward is reported through skipped, and the local
-// branch is left exactly as the operator left it (issue #1730 AC2: never
-// clobbering operator work).
+// SurfaceIntegrationBranch never force-overwrites a local branch carrying
+// commits the Integration branch does not know about. It reports the
+// non-fast-forward through skipped and leaves the operator's commit in place
+// (issue #1730 AC2).
 func TestSurfaceIntegrationBranch_RefusesDivergedLocalBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 	parent := ResolveParent("1700", "")

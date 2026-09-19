@@ -6,13 +6,11 @@ import (
 	"testing"
 )
 
-// TestRunOutcomeBackstop_ParsesFlagsAndEmits verifies the outcome-backstop
-// subcommand's flag parsing reaches outcomebackstop.Run with the right
-// Config: a CODE_FORGE=local repo with a base and a branch commit emits a
-// single SPINDRIFT_OUTCOME line carrying landing=<branch>, without ever
-// attempting a push (issue #2157). The commit on the branch and the
-// host-mediated relay are real, git-verified evidence, so Run now resolves
-// status=ready rather than the always-blocked default (issue #2380).
+// A CODE_FORGE=local repo with a base and a branch commit emits one
+// SPINDRIFT_OUTCOME line carrying landing=<branch> and never pushes (issue
+// #2157). The branch commit and the host-mediated relay are git-verified
+// evidence, so Run resolves status=ready, not the always-blocked default
+// (issue #2380).
 func TestRunOutcomeBackstop_ParsesFlagsAndEmits(t *testing.T) {
 	dir := t.TempDir()
 	runGitCmd(t, dir, "init", "-b", "main")
@@ -60,12 +58,9 @@ func TestRunOutcomeBackstop_ParsesFlagsAndEmits(t *testing.T) {
 	}
 }
 
-// TestRunOutcomeBackstop_RunStateFileFlagBlocksVerdict verifies the
-// -run-state-file flag reaches outcomebackstop.Config: pointing it at a
-// run-state artifact recording last_verdict=BLOCK keeps the emitted status
-// at "blocked" even though the git-observed evidence (a real commit pushed
-// via the host-mediated relay path) would otherwise resolve to "ready"
-// (issue #2459).
+// A run-state artifact recording last_verdict=BLOCK keeps the emitted status
+// at "blocked" even though the git-observed evidence (a real commit on the
+// host-mediated relay path) would otherwise resolve to "ready" (issue #2459).
 func TestRunOutcomeBackstop_RunStateFileFlagBlocksVerdict(t *testing.T) {
 	dir := t.TempDir()
 	runGitCmd(t, dir, "init", "-b", "main")
@@ -104,18 +99,11 @@ func TestRunOutcomeBackstop_RunStateFileFlagBlocksVerdict(t *testing.T) {
 	}
 }
 
-// TestRunOutcomeBackstop_DefaultRunStateFilePathIsTmpRunState verifies that
-// omitting -run-state-file defaults to /tmp/run-state.json, matching the
-// orchestrator's own --state-file default (issue #1997), rather than
-// leaving the backstop with no verdict-known path at all (issue #2459).
-//
-// This asserts the default via the flag.FlagSet's DefValue rather than by
-// invoking runOutcomeBackstop against the real path: the Box this test runs
-// in bakes sandbox = false (lib/image.nix:390), so a real orchestrator on
-// the same host could have a live /tmp/run-state.json artifact mid-write,
-// and a prior version of this test raced clobbering it (issue #2459 review
-// finding). This test never opens, reads, or writes any file at
-// /tmp/run-state.json.
+// Omitting -run-state-file defaults to /tmp/run-state.json, matching the
+// orchestrator's own --state-file default (issue #1997), so the backstop is
+// never left without a verdict-known path (issue #2459). The test reads
+// DefValue and never touches that path: the Box bakes sandbox = false, so a
+// live orchestrator artifact can sit there and an earlier version clobbered it.
 func TestRunOutcomeBackstop_DefaultRunStateFilePathIsTmpRunState(t *testing.T) {
 	fs, _ := newOutcomeBackstopFlagSet()
 
@@ -128,9 +116,8 @@ func TestRunOutcomeBackstop_DefaultRunStateFilePathIsTmpRunState(t *testing.T) {
 	}
 }
 
-// TestRunOutcomeBackstop_MissingRequiredFlagReturnsNonZero verifies a
-// missing -base fails loudly (exit 1) instead of running
-// outcomebackstop.Run against a zero-value Config.
+// A missing -base must fail loudly instead of running outcomebackstop.Run
+// against a zero-value Config.
 func TestRunOutcomeBackstop_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runOutcomeBackstop([]string{
@@ -142,10 +129,8 @@ func TestRunOutcomeBackstop_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 	}
 }
 
-// TestIsOutcomeBackstopInvocation verifies the outcome-backstop subcommand's
-// dispatch guard: a bare "outcome-backstop" first arg selects it, while
-// every other invocation shape falls through to the default Driver-invocation
-// path (or, for "bundle-out", to that other subcommand).
+// Only a bare "outcome-backstop" first arg selects the subcommand; every other
+// shape, "bundle-out" included, falls through to the default Driver path.
 func TestIsOutcomeBackstopInvocation(t *testing.T) {
 	cases := []struct {
 		name string

@@ -8,10 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// goDeclaredRoutes is the route shape that binds GOPROXY at all: one route
-// whose ecosystems block declares a go path. GONOPROXY and GOSUMDB ride
-// along with that export, so every case pinning an env-driven decision
-// needs it.
+// GOPROXY binds only when a route's ecosystems block declares a go path, and
+// GONOPROXY and GOSUMDB ride along with that export, so every case pinning an
+// env-driven decision needs this shape.
 var goDeclaredRoutes = []registrymanifest.Route{{
 	Prefix:     "r0",
 	Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/go"}},
@@ -26,30 +25,21 @@ func containsWarningSubstring(warnings []string, substr string) bool {
 	return false
 }
 
-// TestComputeGoBindings is table-driven over every GoBindingInput combination
-// ComputeGoBindings branches on. Each case's assertions mirror one (or more)
-// of the previously-separate single-shape test functions this table
-// replaces -- see the case name for which behavior it pins.
 func TestComputeGoBindings(t *testing.T) {
 	cases := []struct {
 		name   string
 		port   int
 		prefix string
-		// routes left unset means goDeclaredRoutes -- most cases below pin
-		// the env-driven GOTOOLCHAIN/GONOPROXY/GOSUMDB decisions, which
-		// only apply alongside a bound GOPROXY; a case pinning the routes
-		// axis itself sets this explicitly.
+		// A case that leaves routes unset gets goDeclaredRoutes: the
+		// env-driven GOTOOLCHAIN/GONOPROXY/GOSUMDB decisions only apply
+		// alongside a bound GOPROXY. A case pinning the routes axis sets it.
 		routes []registrymanifest.Route
 		input  GoBindingInput
 
-		// wantExports asserts an export is present with exactly this value.
 		wantExports map[string]string
-		// wantAbsentExports asserts an export is entirely absent (not just
-		// empty-valued).
-		wantAbsentExports []string
-		// wantWarningSubstrings asserts some warning contains this substring.
-		wantWarningSubstrings []string
-		// wantNoWarningSubstrings asserts no warning contains this substring.
+		// The export must be entirely absent, not just empty-valued.
+		wantAbsentExports       []string
+		wantWarningSubstrings   []string
 		wantNoWarningSubstrings []string
 	}{
 		{
@@ -146,14 +136,10 @@ func TestComputeGoBindings(t *testing.T) {
 				GONOPROXY:   "example.com/*",
 				GOSUMDB:     "sum.golang.org",
 			},
-			// GOTOOLCHAIN/GONOPROXY/GOSUMDB overrides here are the same
-			// forced values pinned by the dedicated single-field cases
-			// above; asserting them here too confirms the port-only change
-			// doesn't perturb the other three exports this input also
-			// populates. The warnings those same inputs trigger are
-			// already precisely covered by "prior GOTOOLCHAIN=auto warns",
-			// "prior GONOPROXY set warns", and "GOSUMDB off warns when
-			// prior value set" above, so this case stays Exports-only.
+			// Asserting the three forced exports here too confirms the
+			// port-only change leaves them alone. The dedicated cases above
+			// already cover the warnings these same inputs trigger, so this
+			// case stays Exports-only.
 			wantExports: map[string]string{
 				"GOPROXY":     "http://127.0.0.1:9999/r0/go",
 				"GOTOOLCHAIN": "local",
@@ -162,10 +148,9 @@ func TestComputeGoBindings(t *testing.T) {
 			},
 		},
 		{
-			// Distinct from the port-interpolation case above: pins that the
-			// route prefix, not just the port, lands in GOPROXY (issue #3142
-			// -- bindings mode has no per-ecosystem route mapping, so it
-			// binds to the first manifest route's prefix).
+			// Pins that the route prefix, not just the port, lands in GOPROXY
+			// (issue #3142: bindings mode has no per-ecosystem route mapping,
+			// so it binds to the first manifest route's prefix).
 			name:        "GOPROXY interpolates the given prefix",
 			port:        27182,
 			prefix:      "artifactory-go",
@@ -186,16 +171,11 @@ func TestComputeGoBindings(t *testing.T) {
 			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0/artifactory/api/go/go-remote"},
 		},
 		{
-			// AC3's fallback: a route declaring no go path leaves
-			// GOPROXY entirely unexported (not the bare-root URL,
-			// which was never declared for it). GONOPROXY=none and
-			// GOSUMDB=off go with it: with nothing routed through the
-			// Forwarder, GONOPROXY=none would force a repo's private paths
-			// out to Go's own default public proxy, and GOSUMDB=off would
-			// drop checksum-database verification for fetches no longer
-			// passing through a controlled mirror. GOTOOLCHAIN=local
-			// survives -- it is a fact about this Box's single baked
-			// toolchain, not about routing.
+			// AC3's fallback: a route declaring no go path leaves GOPROXY
+			// unexported, not set to the bare-root URL. GONOPROXY and GOSUMDB
+			// stay unset too, since GONOPROXY=none would push private paths to
+			// Go's public proxy and GOSUMDB=off would drop checksum
+			// verification. GOTOOLCHAIN=local is about the toolchain, not routing.
 			name:              "route with no go declaration leaves GOPROXY, GONOPROXY and GOSUMDB unset",
 			port:              27182,
 			prefix:            "r0",
@@ -208,9 +188,8 @@ func TestComputeGoBindings(t *testing.T) {
 		},
 		{
 			// Each override warning is gated with the export it announces:
-			// with no GOPROXY export there is no override to report, and
-			// the GONOPROXY wording ("every module path, private or not,
-			// now routes through the Forwarder") would be a lie.
+			// with no GOPROXY export there is no override to report, and the
+			// GONOPROXY wording would claim routing that does not happen.
 			name:   "route with no go declaration suppresses the GONOPROXY and GOSUMDB warnings",
 			port:   27182,
 			prefix: "r0",

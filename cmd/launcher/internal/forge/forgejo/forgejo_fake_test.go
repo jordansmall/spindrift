@@ -13,7 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// fakePull is one scripted pull request in fakeForgejo's in-memory backend.
 type fakePull struct {
 	Number    int
 	HTMLURL   string
@@ -45,28 +44,28 @@ var rollupToForgejoState = map[forge.RollupState]string{
 }
 
 // fakeForgejo is an in-memory stand-in for the Forgejo REST API's pull,
-// commit-status, and repo endpoints, backing forgejo's PRForge contract
-// harness (and, per issue #1961 slice 6, the CodeForge contract harness too
-// — hence its own file and exported-shaped helper methods, ready to be
-// embedded by both).
+// commit-status, and repo endpoints. It backs forgejo's PRForge contract
+// harness and, per issue #1961 slice 6, the CodeForge contract harness too,
+// so it lives in its own file and its helper methods are shaped like
+// exported ones, ready for both harnesses to embed.
 type fakeForgejo struct {
 	mu  sync.Mutex
 	srv *httptest.Server
 
 	pulls         map[string]*fakePull // keyed by PR number (string)
-	shaToNum      map[string]string    // head SHA -> PR number
+	shaToNum      map[string]string    // head SHA to PR number
 	checkQueues   map[string][]forge.RollupState
 	failingChecks map[string][]fakeStatus
 	enqueued      map[string]bool
 	autoMergeOK   bool
 
-	compareTotalCommits map[string]int // PR num -> total_commits the compare route reports
+	compareTotalCommits map[string]int // PR number to the total_commits the compare route reports
 
-	// mergeHook, when set, is invoked by the non-auto-merge POST
-	// /pulls/{index}/merge path before the pull is flipped merged. A
-	// non-nil error fails the merge request rather than flipping state —
-	// slice 6 uses this to inject a real git merge/conflict. nil (the
-	// default) keeps slice 5's plain in-memory flip.
+	// The non-auto-merge POST /pulls/{index}/merge path calls mergeHook
+	// before it flips the pull merged. A non-nil error fails the merge
+	// request instead of flipping state, which slice 6 uses to inject a
+	// real git merge conflict. The nil default keeps slice 5's plain
+	// in-memory flip.
 	mergeHook func(num string) error
 }
 
@@ -81,7 +80,6 @@ var (
 	fakeForgejoIssueNumRe  = regexp.MustCompile(`issue-(\d+)`)
 )
 
-// newFakeForgejo starts the fake server and registers its cleanup on t.
 func newFakeForgejo(t *testing.T) *fakeForgejo {
 	t.Helper()
 	f := &fakeForgejo{
@@ -96,12 +94,11 @@ func newFakeForgejo(t *testing.T) *fakeForgejo {
 	return f
 }
 
-// URL returns the fake server's base URL — the value to pass as
-// ForgejoCodeForgeConfig.BaseURL.
+// URL returns the value to pass as ForgejoCodeForgeConfig.BaseURL.
 func (f *fakeForgejo) URL() string { return f.srv.URL }
 
-// prNumFromURL extracts the trailing path segment from a PR URL, the same
-// convention the real adapter's parsePRIndex reads.
+// prNumFromURL reads the trailing path segment, the same convention the real
+// adapter's parsePRIndex uses.
 func prNumFromURL(prURL string) string {
 	trimmed := strings.TrimRight(prURL, "/")
 	idx := strings.LastIndex(trimmed, "/")
@@ -111,16 +108,16 @@ func prNumFromURL(prURL string) string {
 	return trimmed[idx+1:]
 }
 
-// SeedOpenPR registers an OPEN, non-draft pull for issue num, whose head ref
-// is the agent branch for num ("agent/issue-"+num) and head SHA is a
-// per-PR synthetic value, and returns its html_url.
+// SeedOpenPR registers an open, non-draft pull for issue num and returns its
+// html_url. The head ref must stay "agent/issue-"+num: handleCompare recovers
+// the PR number from it.
 func (f *fakeForgejo) SeedOpenPR(num string) string {
 	return f.seedPull(num, false)
 }
 
-// SeedDraftPR mirrors SeedOpenPR but marks the pull draft (draft=true) —
-// the regression coverage for issue #2408: OpenPRForBranch must adopt a
-// draft pull precisely as it adopts a non-draft one.
+// SeedDraftPR mirrors SeedOpenPR but marks the pull draft. It backs the
+// regression coverage for issue #2408: OpenPRForBranch must adopt a draft
+// pull exactly as it adopts a non-draft one.
 func (f *fakeForgejo) SeedDraftPR(num string) string {
 	return f.seedPull(num, true)
 }
@@ -151,15 +148,14 @@ func (f *fakeForgejo) seedPull(num string, draft bool) string {
 	return url
 }
 
-// SeedCheckStates scripts the sequence of RollupState values the combined
-// commit-status route pops, in order, for url's PR.
+// SeedCheckStates scripts the RollupState values the combined commit-status
+// route pops, one per call, in order.
 func (f *fakeForgejo) SeedCheckStates(url string, states []forge.RollupState) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.checkQueues[prNumFromURL(url)] = append([]forge.RollupState(nil), states...)
 }
 
-// SeedFailingCheck scripts one failing commit-status entry for url's PR.
 func (f *fakeForgejo) SeedFailingCheck(url, name, conclusion, summary string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -171,20 +167,18 @@ func (f *fakeForgejo) SeedFailingCheck(url, name, conclusion, summary string) {
 	})
 }
 
-// SeedAutoMergeAllowed scripts the repo-level auto-merge-eligibility bool the
-// repo GET route reflects into allow_merge_commits/allow_rebase/
-// allow_squash_merge.
+// SeedAutoMergeAllowed sets the auto-merge eligibility the repo GET route
+// reports through allow_merge_commits, allow_rebase, and allow_squash_merge.
 func (f *fakeForgejo) SeedAutoMergeAllowed(allowed bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.autoMergeOK = allowed
 }
 
-// SetMergeable overrides num's PR's mergeable flag — slice 6's CodeForge
-// harness flips this false alongside a real git conflict (GitRepoFixture's
-// ConflictBase) so the adapter's classifyMergeFailure, which queries
-// Mergeable via REST, reports forge.ErrMergeConflict rather than
-// forge.ErrMergeBlockedByChecks for a scripted merge failure.
+// SetMergeable overrides num's mergeable flag. Slice 6's CodeForge harness
+// sets it false alongside a real git conflict (GitRepoFixture's ConflictBase)
+// so the adapter's classifyMergeFailure, which reads Mergeable over REST,
+// reports forge.ErrMergeConflict and not forge.ErrMergeBlockedByChecks.
 func (f *fakeForgejo) SetMergeable(num string, mergeable bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -193,9 +187,9 @@ func (f *fakeForgejo) SetMergeable(num string, mergeable bool) {
 	}
 }
 
-// SeedNeedsUpdate scripts num's compare-route total_commits: >0 (needsUpdate
-// true) or 0 (false) — mirrors forgejo_prforge.go's NeedsUpdate, which reads
-// total_commits from the swapped-refs compare call.
+// SeedNeedsUpdate scripts the compare route's total_commits, nonzero for true
+// and 0 for false, because forgejo_prforge.go's NeedsUpdate reads that field
+// from the swapped-refs compare call.
 func (f *fakeForgejo) SeedNeedsUpdate(url string, needsUpdate bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -209,19 +203,16 @@ func (f *fakeForgejo) SeedNeedsUpdate(url string, needsUpdate bool) {
 	f.compareTotalCommits[prNumFromURL(url)] = n
 }
 
-// AutoMergeEnqueued reports whether the merge route recorded url's PR as
-// enqueued via merge_when_checks_succeed.
 func (f *fakeForgejo) AutoMergeEnqueued(url string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.enqueued[prNumFromURL(url)]
 }
 
-// IsDraftTitle reports whether num's currently-stored pull title carries a
-// WIP-prefix draft marker — the fake's own oracle for its served "draft"
-// field (pullPayload derives it the same way), read directly rather than
-// through the adapter's OpenPRForBranch, which no longer surfaces draft
-// status on the returned forge.PR.
+// IsDraftTitle is the fake's own oracle for the "draft" field it serves,
+// since pullPayload derives that field from the title the same way. Tests
+// read it directly because the adapter's OpenPRForBranch no longer reports
+// draft status on the forge.PR it returns.
 func (f *fakeForgejo) IsDraftTitle(num string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -232,19 +223,15 @@ func (f *fakeForgejo) IsDraftTitle(num string) bool {
 	return fakeIsDraftTitle(p.Title)
 }
 
-// fakeWIPPrefixes lists the WIP-title draft markers fakeIsDraftTitle
-// recognizes, mirroring real Forgejo's default
-// WORK_IN_PROGRESS_PREFIXES config ("WIP:,[WIP]:"). Deliberately not
-// shared with the adapter-under-test's own forgejoWIPPrefixes
-// (forgejo_prforge.go) — this fake stands in for a real server, which
-// derives its own draft field independently of this codebase's adapter.
+// fakeWIPPrefixes mirrors real Forgejo's default WORK_IN_PROGRESS_PREFIXES
+// config. Keep it separate from the adapter's own forgejoWIPPrefixes
+// (forgejo_prforge.go): this fake stands in for a real server, which derives
+// its draft field independently of this codebase's adapter.
 var fakeWIPPrefixes = []string{"WIP:", "[WIP]:"}
 
-// fakeIsDraftTitle reports whether title carries a WIP-prefix draft
-// marker, case-insensitively — mirroring how real Forgejo derives a pull's
-// served "draft" field entirely from its title (services/convert/pull.go:
-// Draft is pr.IsWorkInProgress(ctx), never an independently-settable
-// flag).
+// fakeIsDraftTitle mirrors how real Forgejo derives a pull's served "draft"
+// field entirely from its title (services/convert/pull.go sets Draft from
+// pr.IsWorkInProgress(ctx), never from an independently settable flag).
 func fakeIsDraftTitle(title string) bool {
 	upper := strings.ToUpper(strings.TrimSpace(title))
 	for _, prefix := range fakeWIPPrefixes {
@@ -418,9 +405,9 @@ func (f *fakeForgejo) handleCommitStatus(w http.ResponseWriter, _ *http.Request,
 }
 
 // handleCompare serves the swapped-refs compare route NeedsUpdate reads,
-// mirroring forgejoCompare in forgejo_prforge.go: {"total_commits": <n>}.
-// The PR number is recovered from the head ref embedded in the compare
-// path, which is always agent/issue-<num>.
+// mirroring forgejoCompare in forgejo_prforge.go. It recovers the PR number
+// from the head ref embedded in the compare path, which seedPull always
+// writes as agent/issue-<num>.
 func (f *fakeForgejo) handleCompare(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

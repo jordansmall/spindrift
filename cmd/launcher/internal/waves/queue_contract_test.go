@@ -1,7 +1,5 @@
-// This file is package waves_test: a harness that calls
-// wavestest.RunQueueContract must import wavestest, which itself imports
-// waves (see contract.go's own doc comment), so an internal (package waves)
-// test file importing wavestest would import-cycle back through it.
+// This file is package waves_test because wavestest imports waves, so an
+// internal test file importing wavestest would create an import cycle.
 package waves_test
 
 import (
@@ -12,11 +10,8 @@ import (
 	"spindrift.dev/launcher/internal/waves/wavestest"
 )
 
-// contractDispatchLabels mirrors the conventional lifecycle-label set this
-// package's own internal tests hold as testhelpers_test.go's
-// testDispatchLabels -- unexported, so unreachable from this external test
-// package; inlined here instead of duplicated as an exported var nothing
-// else needs.
+// Mirrors testhelpers_test.go's testDispatchLabels, which is unexported and
+// so unreachable from this external test package.
 var contractDispatchLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -24,15 +19,14 @@ var contractDispatchLabels = forge.DispatchLabels{
 	Failed:       "agent-failed",
 }
 
-// headlessHarness is the wavestest.Harness for NewHeadlessQueue: Claim runs
-// through a real LabelClaimer over fc, so Pending/Claim exercise the same
-// Dispatchable->InProgress label transition the headless RunContinuous path
-// uses in production, not a canned test double.
+// headlessHarness drives NewHeadlessQueue through a real LabelClaimer over
+// fc, so the contract exercises the same Dispatchable to InProgress label
+// transition production uses rather than a canned double.
 type headlessHarness struct {
 	fc    *forge.Fake
 	label string
-	// discoverCalls is a pointer so it survives struct copies -- headlessHarness
-	// is a plain value struct passed by value into wavestest.RunQueueContract.
+	// A pointer so the count survives the struct copy RunQueueContract makes
+	// when it takes the harness by value.
 	discoverCalls *int
 }
 
@@ -54,20 +48,14 @@ func (h headlessHarness) Queue() waves.Queue {
 	return waves.NewHeadlessQueue(discover, claimer, pending, "")
 }
 
-// ClaimTransitions and DiscoverCalls implement wavestest.SideEffectObserver:
-// h.fc.TransitionStateCalls is forge.Fake's own call log (fake_tracker.go),
-// so a leaked claim below Queue.Claim() -- e.g. headlessQueue.Pending
-// reaching into q.claimer directly -- shows up here even though it never
-// went through the Claimer this harness handed to NewHeadlessQueue.
+// These read forge.Fake's own call log, so a claim that bypasses Queue.Claim
+// (Pending reaching into q.claimer directly) still shows up here.
 func (h headlessHarness) ClaimTransitions() int { return len(h.fc.TransitionStateCalls) }
 func (h headlessHarness) DiscoverCalls() int    { return *h.discoverCalls }
 
-// SeedDispatchable seeds num directly onto fc carrying h.label, mirroring
-// how this package's other tests (e.g. continuous_test.go) build a
-// dispatchable issue with SetIssue rather than a live Untriaged->Dispatchable
-// TransitionState call -- forge.Fake's TransitionState is best-effort and
-// never errors on a from-state mismatch, so SetIssue is the only way to
-// deterministically land num already carrying h.label.
+// SetIssue rather than TransitionState: forge.Fake's TransitionState is
+// best-effort and never errors on a from-state mismatch, so only SetIssue
+// deterministically lands num already carrying h.label.
 func (h headlessHarness) SeedDispatchable(num string) {
 	h.fc.SetIssue(forge.Issue{Number: num, Labels: []string{h.label}})
 }
@@ -76,15 +64,14 @@ var _ wavestest.Harness = headlessHarness{}
 var _ wavestest.SideEffectObserver = headlessHarness{}
 
 // TestHeadlessQueue_QueueContract runs the shared Queue conformance suite
-// (issue #2937) against NewHeadlessQueue's own LabelClaimer-backed adapter.
+// (issue #2937) against NewHeadlessQueue's LabelClaimer-backed adapter.
 func TestHeadlessQueue_QueueContract(t *testing.T) {
 	wavestest.RunQueueContract(t, newHeadlessHarness())
 }
 
-// fakeQueueHarness is the wavestest.Harness for waves.FakeQueue itself.
-// FakeQueue's Claim always returns f.ClaimErr (nil by default) regardless
-// of prior claim state, so both calls in the contract's ClaimIdempotence
-// check return nil, same as headlessHarness.
+// FakeQueue's Claim always returns f.ClaimErr regardless of prior claim
+// state, so both calls in the contract's ClaimIdempotence check return nil,
+// same as headlessHarness.
 type fakeQueueHarness struct{ f *waves.FakeQueue }
 
 func (h fakeQueueHarness) Queue() waves.Queue { return h.f }
@@ -93,12 +80,9 @@ func (h fakeQueueHarness) Queue() waves.Queue { return h.f }
 // dispatchable-state concept of its own for Claim/Pending to observe.
 func (h fakeQueueHarness) SeedDispatchable(num string) {}
 
-// ClaimTransitions and DiscoverCalls implement wavestest.SideEffectObserver
-// directly off FakeQueue's own call-recorder fields (fake_queue.go): a leak
-// inside FakeQueue's own Pending -- e.g. reaching past
-// Queue.Claim()/Discover() to append to f.ClaimCalls or bump
-// f.DiscoverCalls directly -- shows up here the same as it would in the
-// fields any other test in this package already asserts against.
+// These read FakeQueue's own call-recorder fields, so a Pending that appends
+// to f.ClaimCalls or bumps f.DiscoverCalls without going through Claim or
+// Discover shows up here.
 func (h fakeQueueHarness) ClaimTransitions() int { return len(h.f.ClaimCalls) }
 func (h fakeQueueHarness) DiscoverCalls() int    { return h.f.DiscoverCalls }
 

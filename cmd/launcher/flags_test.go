@@ -16,14 +16,10 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 )
 
-// TestSchemaFlags_DefaultModelsMatchFixture asserts every
-// expectedDefaultModels entry (cmd/launcher/defaultmodels_gen_test.go,
-// regen-rendered from lib/default-model-fixture.nix's schemaDefaults) matches
-// its corresponding schemaFlags entry's default -- including MODEL, which
-// must stay sonnet-5 and not regress to opus-4-8 or an older release (issue
-// #2240) -- closing the dead-fixture-key gap flagged in the issue #2514
-// review (SCOUT_MODEL, REVIEW_MODEL, FILER_MODEL, and WORKER_MODEL were
-// generated but asserted nowhere).
+// MODEL must stay sonnet-5 and not regress to opus-4-8 or an older release
+// (issue #2240). The issue #2514 review found SCOUT_MODEL, REVIEW_MODEL,
+// FILER_MODEL and WORKER_MODEL generated into the fixture
+// (cmd/launcher/defaultmodels_gen_test.go) but asserted nowhere.
 func TestSchemaFlags_DefaultModelsMatchFixture(t *testing.T) {
 	for env, want := range expectedDefaultModels {
 		t.Run(env, func(t *testing.T) {
@@ -40,8 +36,8 @@ func TestSchemaFlags_DefaultModelsMatchFixture(t *testing.T) {
 	}
 }
 
-// TestSchemaFlags_BwrapUnshareNetIsBool asserts the bwrap-unshare-net entry
-// is a presence-style bool flag, not a string (issue #2145 slice A).
+// Issue #2145 slice A made bwrap-unshare-net a presence-style bool, not a
+// string.
 func TestSchemaFlags_BwrapUnshareNetIsBool(t *testing.T) {
 	for _, e := range schemaFlags {
 		if e.flag == "bwrap-unshare-net" {
@@ -54,10 +50,9 @@ func TestSchemaFlags_BwrapUnshareNetIsBool(t *testing.T) {
 	t.Fatal("bwrap-unshare-net entry not found in schemaFlags")
 }
 
-// TestSchemaFlags_PromptDirSettingsPath asserts the SPINDRIFT_PROMPT_DIR
-// entry carries the flake-module settingsPath "agents.promptDir" (issue
-// #2200 slice 1), i.e. spindriftPromptDir in lib/env-schema.nix declares
-// flakeOption = true with nixSubPath = "promptDir".
+// The settingsPath comes from spindriftPromptDir in lib/env-schema.nix,
+// which declares flakeOption = true with nixSubPath = "promptDir" (issue
+// #2200 slice 1).
 func TestSchemaFlags_PromptDirSettingsPath(t *testing.T) {
 	for _, e := range schemaFlags {
 		if e.env == "SPINDRIFT_PROMPT_DIR" {
@@ -70,9 +65,8 @@ func TestSchemaFlags_PromptDirSettingsPath(t *testing.T) {
 	t.Fatal("SPINDRIFT_PROMPT_DIR entry not found in schemaFlags")
 }
 
-// TestSchemaFlags_GenericBoolsAreBool asserts each of the six generic
-// boolean knobs converted in issue #2146 slice 1 renders as a presence-style
-// bool flag, not a string.
+// Issue #2146 slice 1 converted these six knobs from strings to
+// presence-style bools.
 func TestSchemaFlags_GenericBoolsAreBool(t *testing.T) {
 	envs := []string{
 		"AUTO_FORMAT",
@@ -98,9 +92,8 @@ func TestSchemaFlags_GenericBoolsAreBool(t *testing.T) {
 	}
 }
 
-// TestSchemaFlags_ContinuousDispatchIsBoolAlias asserts CONTINUOUS_DISPATCH
-// is a presence-style bool flag with --continuous as a schema alias (issue
-// #2147 slice 1).
+// Issue #2147 slice 1 made CONTINUOUS_DISPATCH a presence-style bool with
+// --continuous as a schema alias.
 func TestSchemaFlags_ContinuousDispatchIsBoolAlias(t *testing.T) {
 	for _, e := range schemaFlags {
 		if e.env == "CONTINUOUS_DISPATCH" {
@@ -116,10 +109,9 @@ func TestSchemaFlags_ContinuousDispatchIsBoolAlias(t *testing.T) {
 	t.Fatalf("CONTINUOUS_DISPATCH entry not found in schemaFlags")
 }
 
-// TestSchemaFlags_MergeModeChoices asserts the MERGE_MODE entry carries the
-// schema's choices enum verbatim (issue #2520 slice 1): a later slice adds a
-// generic Go guard sourced from this field instead of a hand-typed value
-// list.
+// A later slice of issue #2520 sources a generic Go guard from this choices
+// field instead of a hand-typed value list, so the entry must carry the
+// schema's enum verbatim.
 func TestSchemaFlags_MergeModeChoices(t *testing.T) {
 	want := []string{"immediate", "auto", "manual"}
 	for _, e := range schemaFlags {
@@ -133,8 +125,6 @@ func TestSchemaFlags_MergeModeChoices(t *testing.T) {
 	t.Fatal("MERGE_MODE entry not found in schemaFlags")
 }
 
-// TestExtractInputFlag_Present extracts the document path and strips both
-// tokens from the remaining args.
 func TestExtractInputFlag_Present(t *testing.T) {
 	path, remaining, err := extractInputFlag([]string{"--repo-slug", "o/r", "--input", "/nix/store/x.json", "dispatch"})
 	if err != nil {
@@ -149,7 +139,6 @@ func TestExtractInputFlag_Present(t *testing.T) {
 	}
 }
 
-// TestExtractInputFlag_Absent leaves args untouched and returns an empty path.
 func TestExtractInputFlag_Absent(t *testing.T) {
 	path, remaining, err := extractInputFlag([]string{"dispatch", "42"})
 	if err != nil {
@@ -163,8 +152,6 @@ func TestExtractInputFlag_Absent(t *testing.T) {
 	}
 }
 
-// TestExtractInputFlag_MissingValue errors instead of silently swallowing a
-// trailing --input.
 func TestExtractInputFlag_MissingValue(t *testing.T) {
 	_, _, err := extractInputFlag([]string{"--input"})
 	if err == nil {
@@ -172,7 +159,6 @@ func TestExtractInputFlag_MissingValue(t *testing.T) {
 	}
 }
 
-// TestParseFlags_SetEnv: a recognized flag is injected into the environment.
 func TestParseFlags_SetEnv(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")
 	remaining, err := parseFlags([]string{"--issue-number", "215"})
@@ -187,7 +173,6 @@ func TestParseFlags_SetEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_FlagWinsOverEnv: flag > env precedence.
 func TestParseFlags_FlagWinsOverEnv(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "1")
 	_, err := parseFlags([]string{"--issue-number", "999"})
@@ -199,9 +184,6 @@ func TestParseFlags_FlagWinsOverEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_RepoSlugFlagWinsOverEnv: CLI flag wins over env for
-// REPO_SLUG, confirming the promoted identity knob honours flag > env
-// precedence even when a settings-baked default is in play at runtime.
 func TestParseFlags_RepoSlugFlagWinsOverEnv(t *testing.T) {
 	t.Setenv("REPO_SLUG", "env-org/env-repo")
 	_, err := parseFlags([]string{"--repo-slug", "flag-org/flag-repo"})
@@ -213,7 +195,6 @@ func TestParseFlags_RepoSlugFlagWinsOverEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_EnvFallback: env is used when no flag is supplied.
 func TestParseFlags_EnvFallback(t *testing.T) {
 	t.Setenv("MAX_JOBS", "7")
 	_, err := parseFlags([]string{})
@@ -225,7 +206,6 @@ func TestParseFlags_EnvFallback(t *testing.T) {
 	}
 }
 
-// TestParseFlags_UnknownFlag: unrecognised --flag returns an error.
 func TestParseFlags_UnknownFlag(t *testing.T) {
 	_, err := parseFlags([]string{"--not-a-schema-flag", "value"})
 	if err == nil {
@@ -233,7 +213,6 @@ func TestParseFlags_UnknownFlag(t *testing.T) {
 	}
 }
 
-// TestParseFlags_PassthroughPositional: positional args are returned unchanged.
 func TestParseFlags_PassthroughPositional(t *testing.T) {
 	remaining, err := parseFlags([]string{"build", "--max-jobs", "2", "extra"})
 	if err != nil {
@@ -244,7 +223,6 @@ func TestParseFlags_PassthroughPositional(t *testing.T) {
 	}
 }
 
-// TestParseFlags_DoubleDash: args after "--" are passed through unchanged.
 func TestParseFlags_DoubleDash(t *testing.T) {
 	remaining, err := parseFlags([]string{"--", "--not-parsed"})
 	if err != nil {
@@ -255,7 +233,6 @@ func TestParseFlags_DoubleDash(t *testing.T) {
 	}
 }
 
-// TestParseFlags_MissingValue: flag with no value returns an error.
 func TestParseFlags_MissingValue(t *testing.T) {
 	_, err := parseFlags([]string{"--issue-number"})
 	if err == nil {
@@ -263,9 +240,9 @@ func TestParseFlags_MissingValue(t *testing.T) {
 	}
 }
 
-// TestSchemaFlags_ExcludesRemovedDepsKnobs: DEPS_POLL_SECS/DEPS_WAIT_SECS
-// configured the in-process dependency-wave poll, deleted by #522/#524; the
-// knobs must not survive in the schema-generated flag table (ADR 0019).
+// DEPS_POLL_SECS and DEPS_WAIT_SECS configured the in-process
+// dependency-wave poll that #522/#524 deleted, so they must not survive in
+// the schema-generated flag table (ADR 0019).
 func TestSchemaFlags_ExcludesRemovedDepsKnobs(t *testing.T) {
 	for _, removed := range []string{"DEPS_POLL_SECS", "DEPS_WAIT_SECS"} {
 		for _, entry := range schemaFlags {
@@ -276,7 +253,6 @@ func TestSchemaFlags_ExcludesRemovedDepsKnobs(t *testing.T) {
 	}
 }
 
-// TestParseFlags_SecretsExcluded: secret knobs must not appear in schemaFlags.
 func TestParseFlags_SecretsExcluded(t *testing.T) {
 	secrets := []string{"GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
 	for _, env := range secrets {
@@ -288,7 +264,6 @@ func TestParseFlags_SecretsExcluded(t *testing.T) {
 	}
 }
 
-// TestParseFlags_MultipleFlags: multiple flags are all injected.
 func TestParseFlags_MultipleFlags(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")
 	t.Setenv("MAX_JOBS", "")
@@ -304,9 +279,8 @@ func TestParseFlags_MultipleFlags(t *testing.T) {
 	}
 }
 
-// TestParseFlags_BoolFlag_BarePresence: a bare bool-kind flag (no value
-// token) sets its env var to "1" and does not consume the next arg (issue
-// #2145 slice B).
+// A bare bool-kind flag sets its env var to "1" and does not consume the
+// next arg (issue #2145 slice B).
 func TestParseFlags_BoolFlag_BarePresence(t *testing.T) {
 	t.Setenv("BWRAP_UNSHARE_NET", "")
 	remaining, err := parseFlags([]string{"dispatch", "--bwrap-unshare-net"})
@@ -321,8 +295,8 @@ func TestParseFlags_BoolFlag_BarePresence(t *testing.T) {
 	}
 }
 
-// TestParseFlags_BoolFlag_EqualsForms: the --flag=<value> equals form is ON
-// for "1"/"true" and OFF for ""/"0"/"false" (issue #2145 slice B).
+// The equals form is on for "1" and "true", off for "", "0" and "false"
+// (issue #2145 slice B).
 func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
 	cases := []struct {
 		arg  string
@@ -348,9 +322,8 @@ func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
 	}
 }
 
-// TestParseFlags_BoolFlag_SpaceSeparatedIsPositional: a token following a
-// bare bool-kind flag is never swallowed as its value — it survives as a
-// normal positional arg in remaining (issue #2145 slice B).
+// A token following a bare bool-kind flag is never swallowed as its value.
+// It survives as a normal positional arg (issue #2145 slice B).
 func TestParseFlags_BoolFlag_SpaceSeparatedIsPositional(t *testing.T) {
 	t.Setenv("BWRAP_UNSHARE_NET", "")
 	remaining, err := parseFlags([]string{"dispatch", "--bwrap-unshare-net", "1"})
@@ -371,10 +344,9 @@ func TestParseFlags_BoolFlag_SpaceSeparatedIsPositional(t *testing.T) {
 	}
 }
 
-// TestParseFlags_BoolFlag_ExplicitOffOverridesAmbient: an explicit
-// --flag=0/--flag=false/--flag= clears an already-set env var to "" rather
-// than leaving the ambient "1" in place — flag-over-env precedence applies
-// to the off case too (ADR 0020; issue #2145 slice B).
+// An explicit off form clears an already-set env var rather than leaving the
+// ambient "1" in place, because flag-over-env precedence applies to the off
+// case too (ADR 0020; issue #2145 slice B).
 func TestParseFlags_BoolFlag_ExplicitOffOverridesAmbient(t *testing.T) {
 	for _, arg := range []string{"--bwrap-unshare-net=0", "--bwrap-unshare-net=false", "--bwrap-unshare-net="} {
 		t.Run(arg, func(t *testing.T) {
@@ -390,7 +362,6 @@ func TestParseFlags_BoolFlag_ExplicitOffOverridesAmbient(t *testing.T) {
 	}
 }
 
-// TestPrintVersion_Format: version output starts with "spindrift" and includes a rev.
 func TestPrintVersion_Format(t *testing.T) {
 	var buf bytes.Buffer
 	printVersion(&buf)
@@ -403,7 +374,6 @@ func TestPrintVersion_Format(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_UsageLineNamesSpindrift: the concise help carries a usage line naming the binary.
 func TestPrintHelp_UsageLineNamesSpindrift(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
@@ -412,8 +382,6 @@ func TestPrintHelp_UsageLineNamesSpindrift(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_Concise_PointsToFullReference: the concise help must route users
-// to the full reference (man page and --help --all) rather than dumping every flag.
 func TestPrintHelp_Concise_PointsToFullReference(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
@@ -426,10 +394,9 @@ func TestPrintHelp_Concise_PointsToFullReference(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_RepoSlugNotesLocalExemption: --repo-slug's help text must
-// flag that it's required unless the run is fully local (CODE_FORGE=local
-// and ISSUE_TRACKER=local both set), not an unconditional "(required)"
-// (issue #1895).
+// --repo-slug is required unless the run is fully local (CODE_FORGE=local
+// and ISSUE_TRACKER=local both set), so its help text must not print an
+// unconditional "(required)" (issue #1895).
 func TestPrintHelp_RepoSlugNotesLocalExemption(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
@@ -448,8 +415,6 @@ func TestPrintHelp_RepoSlugNotesLocalExemption(t *testing.T) {
 	t.Fatal("help output missing --repo-slug line")
 }
 
-// TestPrintHelp_Concise_OmitsRareFlags: the concise help stays concise — it must
-// NOT enumerate the long tail of tuning knobs (those live in --help --all / man).
 func TestPrintHelp_Concise_OmitsRareFlags(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
@@ -461,21 +426,17 @@ func TestPrintHelp_Concise_OmitsRareFlags(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_ShowsDispatchSubcommand: help output names dispatch as a subcommand (not just a flag doc).
 func TestPrintHelp_ShowsDispatchSubcommand(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
 	out := buf.String()
-	// "dispatch" must appear as a standalone subcommand entry, not buried in a flag doc.
 	if !strings.Contains(out, "dispatch") {
 		t.Errorf("help output must show 'dispatch' subcommand, got:\n%s", out)
 	}
 }
 
-// TestPrintSubcommands_ConsoleFirst verifies console is the first
-// subcommand line advertised — bare `spindrift` now points operators at the
-// interactive console first (ADR 0023's "bare invocation keeps printing
-// help, now pointing at console").
+// Bare `spindrift` points operators at the interactive console first, so
+// console leads the listing (ADR 0023).
 func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
 	var buf bytes.Buffer
 	printSubcommands(&buf)
@@ -488,11 +449,9 @@ func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
 	}
 }
 
-// TestParseFlags_ContinuousAlias: --continuous is now a schema-backed bool
-// alias for --continuous-dispatch (slice 1) — it is consumed by parseFlags
-// like any other schema bool flag, setting CONTINUOUS_DISPATCH directly
-// rather than passing through to the verb handler for hand-rolled extraction
-// (issue #2033/#2147).
+// --continuous is a schema-backed bool alias, so parseFlags consumes it and
+// sets CONTINUOUS_DISPATCH directly instead of passing it through to the
+// verb handler for hand-rolled extraction (issues #2033 and #2147).
 func TestParseFlags_ContinuousAlias(t *testing.T) {
 	t.Setenv("CONTINUOUS_DISPATCH", "")
 	remaining, err := parseFlags([]string{"dispatch", "--continuous"})
@@ -507,8 +466,6 @@ func TestParseFlags_ContinuousAlias(t *testing.T) {
 	}
 }
 
-// TestParseFlags_ContinuousDispatchBareAlias: bare --continuous-dispatch (no
-// value) also sets CONTINUOUS_DISPATCH=1, same as --continuous.
 func TestParseFlags_ContinuousDispatchBareAlias(t *testing.T) {
 	t.Setenv("CONTINUOUS_DISPATCH", "")
 	remaining, err := parseFlags([]string{"dispatch", "--continuous-dispatch"})
@@ -523,10 +480,9 @@ func TestParseFlags_ContinuousDispatchBareAlias(t *testing.T) {
 	}
 }
 
-// TestPrintSubcommands_ExactOutput pins the rendered subcommand listing
-// byte-for-byte so a future subcommandRegistry-vs-format change (e.g. the
-// column-width constant in printSubcommands) can't silently misalign the
-// output the way a hand-picked width once did (issue #1575 review).
+// The listing is pinned byte-for-byte so a change to printSubcommands, such
+// as its column-width constant, cannot silently misalign the output the way
+// a hand-picked width once did (issue #1575 review).
 func TestPrintSubcommands_ExactOutput(t *testing.T) {
 	want := "Subcommands:\n" +
 		"  console                                                  browse the open backlog interactively (read-only)\n" +
@@ -546,8 +502,8 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_ShowsResearchSubcommand verifies the research dispatch kind
-// (ADR 0022) is discoverable beside dispatch, not buried in a flag doc.
+// The research dispatch kind (ADR 0022) must be discoverable beside
+// dispatch.
 func TestPrintHelp_ShowsResearchSubcommand(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
@@ -557,7 +513,6 @@ func TestPrintHelp_ShowsResearchSubcommand(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_ContainsLabelEntry: the full reference includes --label with its doc.
 func TestPrintHelpFull_ContainsLabelEntry(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -570,15 +525,11 @@ func TestPrintHelpFull_ContainsLabelEntry(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_RepoSlugAndGhTokenNoteLocalExemption verifies the full
-// reference's REPO_SLUG/GH_TOKEN doc strings, sourced from lib/env-schema.nix,
-// spell out the fully-local exemption — mirroring the existing JIRA_TOKEN
-// doc's "required when ISSUE_TRACKER=jira" precedent (issue #1895). Matches
-// on each line's leading env/flag token rather than a bare substring search,
-// so it targets only GH_TOKEN's own two rendered lines (env-only and its
-// --gh-token-file secret-file flag) and doesn't false-positive on a doc
-// string that merely mentions "GH_TOKEN" in prose (e.g. BOX_GH_TOKEN's,
-// issue #380).
+// The doc strings come from lib/env-schema.nix and must spell out the
+// fully-local exemption (issue #1895). Matching on each line's leading
+// env/flag token, not a bare substring, keeps only GH_TOKEN's own two
+// rendered lines in scope and skips docs that merely mention "GH_TOKEN" in
+// prose, such as BOX_GH_TOKEN's (issue #380).
 func TestPrintHelpFull_RepoSlugAndGhTokenNoteLocalExemption(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -601,8 +552,6 @@ func TestPrintHelpFull_RepoSlugAndGhTokenNoteLocalExemption(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_GroupsFlags: the full reference groups flags under their
-// schema-declared category headings rather than a flat dump.
 func TestPrintHelpFull_GroupsFlags(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -614,8 +563,8 @@ func TestPrintHelpFull_GroupsFlags(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_CoversEverySchemaFlag: no flag may silently drop out of the
-// full reference (e.g. a knob whose group is absent from groupOrder).
+// A knob whose group is absent from groupOrder drops out of the full
+// reference silently.
 func TestPrintHelpFull_CoversEverySchemaFlag(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -627,9 +576,8 @@ func TestPrintHelpFull_CoversEverySchemaFlag(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_BoolFlagNoValuePlaceholder: a presence-style bool flag
-// (kind = "bool", issue #2145) renders in the full reference labelled "bool"
-// and with no value placeholder — it takes no following value.
+// A presence-style bool flag takes no following value, so it renders
+// labelled "bool" with no value placeholder (issue #2145).
 func TestPrintHelpFull_BoolFlagNoValuePlaceholder(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -651,8 +599,7 @@ func TestPrintHelpFull_BoolFlagNoValuePlaceholder(t *testing.T) {
 	}
 }
 
-// TestSchemaFlags_AllHaveGroup: every generated flag row must carry a group, so
-// grouping in the full help and man page is total.
+// The full help and the man page group flags by this field.
 func TestSchemaFlags_AllHaveGroup(t *testing.T) {
 	for _, e := range schemaFlags {
 		if e.group == "" {
@@ -661,8 +608,7 @@ func TestSchemaFlags_AllHaveGroup(t *testing.T) {
 	}
 }
 
-// TestGroupOrder_CoversEverySchemaGroup: every group used by a flag must appear
-// in groupOrder, else printHelpFull would drop that group's flags.
+// printHelpFull drops the flags of any group missing from groupOrder.
 func TestGroupOrder_CoversEverySchemaGroup(t *testing.T) {
 	known := map[string]bool{}
 	for _, g := range groupOrder {
@@ -675,7 +621,6 @@ func TestGroupOrder_CoversEverySchemaGroup(t *testing.T) {
 	}
 }
 
-// TestParseFlags_AliasSetEnv: an alias flag resolves to the same env var as the long form.
 func TestParseFlags_AliasSetEnv(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")
 	remaining, err := parseFlags([]string{"--issue", "42"})
@@ -690,12 +635,11 @@ func TestParseFlags_AliasSetEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_DeprecatedAliasSetsSameEnv asserts a deprecated old flag
-// name resolves to the same env var as its renamed canonical flag (ADR 0037
-// Pass 2), for both a value-taking and a presence-style bool knob.
+// A deprecated old flag name resolves to the same env var as its renamed
+// canonical flag (ADR 0037 Pass 2), for both a value-taking and a
+// presence-style bool knob.
 func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
-	// A value-taking renamed knob: --merge-mode (deprecated) sets the same
-	// env var as the canonical --merge-policy (ADR 0037 Pass 2).
+	// --merge-mode is the deprecated name of the canonical --merge-policy.
 	t.Setenv("MERGE_MODE", "")
 	if _, err := parseFlags([]string{"--merge-mode", "auto"}); err != nil {
 		t.Fatalf("parseFlags --merge-mode: %v", err)
@@ -703,8 +647,7 @@ func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
 	if got := os.Getenv("MERGE_MODE"); got != "auto" {
 		t.Errorf("MERGE_MODE = %q, want %q (deprecated alias must set same env var)", got, "auto")
 	}
-	// A presence-style bool renamed knob: --orchestrator-enabled (deprecated)
-	// sets the same env var as the canonical --orchestrator.
+	// --orchestrator-enabled is the deprecated name of --orchestrator.
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 	if _, err := parseFlags([]string{"--orchestrator-enabled"}); err != nil {
 		t.Fatalf("parseFlags --orchestrator-enabled: %v", err)
@@ -714,8 +657,6 @@ func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_NewCanonicalFlagResolves asserts the new canonical flag
-// name resolves too, to the same env var as its deprecated alias.
 func TestParseFlags_NewCanonicalFlagResolves(t *testing.T) {
 	t.Setenv("MERGE_MODE", "")
 	if _, err := parseFlags([]string{"--merge-policy", "immediate"}); err != nil {
@@ -726,8 +667,6 @@ func TestParseFlags_NewCanonicalFlagResolves(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_MarksDeprecatedAlias: the full help lists the canonical
-// flag and marks the old name deprecated.
 func TestPrintHelpFull_MarksDeprecatedAlias(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -737,7 +676,6 @@ func TestPrintHelpFull_MarksDeprecatedAlias(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_ShowsAlias: aliased knobs show the alias next to the long form.
 func TestPrintHelpFull_ShowsAlias(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -747,7 +685,6 @@ func TestPrintHelpFull_ShowsAlias(t *testing.T) {
 	}
 }
 
-// TestParseFlags_FileFlag_ReadsToken: --<name>-file reads the file and sets the env var.
 func TestParseFlags_FileFlag_ReadsToken(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "token.txt")
 	if err := os.WriteFile(tokenFile, []byte("secret-value"), 0600); err != nil {
@@ -763,7 +700,6 @@ func TestParseFlags_FileFlag_ReadsToken(t *testing.T) {
 	}
 }
 
-// TestParseFlags_FileFlag_WinsOverEnv: file flag takes precedence over env var.
 func TestParseFlags_FileFlag_WinsOverEnv(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "token.txt")
 	if err := os.WriteFile(tokenFile, []byte("file-value"), 0600); err != nil {
@@ -779,7 +715,6 @@ func TestParseFlags_FileFlag_WinsOverEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_FileFlag_MissingFile: --<name>-file with non-existent path returns an error.
 func TestParseFlags_FileFlag_MissingFile(t *testing.T) {
 	_, err := parseFlags([]string{"--gh-token-file", "/nonexistent/path/token.txt"})
 	if err == nil {
@@ -790,7 +725,6 @@ func TestParseFlags_FileFlag_MissingFile(t *testing.T) {
 	}
 }
 
-// TestParseFlags_FileFlag_MissingValue: --<name>-file with no following arg returns an error.
 func TestParseFlags_FileFlag_MissingValue(t *testing.T) {
 	_, err := parseFlags([]string{"--gh-token-file"})
 	if err == nil {
@@ -798,7 +732,6 @@ func TestParseFlags_FileFlag_MissingValue(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_SecretKnobEnvOnly: secret knobs appear as env-only (no --flag prefix).
 func TestPrintHelpFull_SecretKnobEnvOnly(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -811,7 +744,6 @@ func TestPrintHelpFull_SecretKnobEnvOnly(t *testing.T) {
 	}
 }
 
-// TestParseFlags_FileFlag_StripsNewline: trailing newline is stripped from file content.
 func TestParseFlags_FileFlag_StripsNewline(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "token.txt")
 	if err := os.WriteFile(tokenFile, []byte("stripped-value\n"), 0600); err != nil {
@@ -827,8 +759,6 @@ func TestParseFlags_FileFlag_StripsNewline(t *testing.T) {
 	}
 }
 
-// TestParseFlags_CmdFlag_RunsCommand: --<name>-cmd runs the injected command
-// runner and sets the env var to its trimmed output.
 func TestParseFlags_CmdFlag_RunsCommand(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -848,8 +778,6 @@ func TestParseFlags_CmdFlag_RunsCommand(t *testing.T) {
 	}
 }
 
-// TestParseFlags_CmdEnv_RunsCommand: <NAME>_CMD env var (no flag) runs the
-// injected command runner and sets the env var to its trimmed output.
 func TestParseFlags_CmdEnv_RunsCommand(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -870,8 +798,6 @@ func TestParseFlags_CmdEnv_RunsCommand(t *testing.T) {
 	}
 }
 
-// TestParseFlags_CmdFlag_WinsOverCmdEnv: --<name>-cmd flag takes precedence
-// over a <NAME>_CMD env var for the same secret.
 func TestParseFlags_CmdFlag_WinsOverCmdEnv(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -896,8 +822,6 @@ func TestParseFlags_CmdFlag_WinsOverCmdEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_CmdEnv_WinsOverFileFlag: <NAME>_CMD env takes precedence
-// over a --<name>-file flag for the same secret.
 func TestParseFlags_CmdEnv_WinsOverFileFlag(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -919,8 +843,6 @@ func TestParseFlags_CmdEnv_WinsOverFileFlag(t *testing.T) {
 	}
 }
 
-// TestParseFlags_CmdFlagAndFileFlag_IsConfigError: supplying both
-// --<name>-cmd and --<name>-file for the same secret is a configuration error.
 func TestParseFlags_CmdFlagAndFileFlag_IsConfigError(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -942,8 +864,6 @@ func TestParseFlags_CmdFlagAndFileFlag_IsConfigError(t *testing.T) {
 	}
 }
 
-// TestParseFlags_CmdFlag_EmptyOutputIsError: an empty command result aborts
-// with a named, value-free error instead of setting an empty secret.
 func TestParseFlags_CmdFlag_EmptyOutputIsError(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -960,8 +880,6 @@ func TestParseFlags_CmdFlag_EmptyOutputIsError(t *testing.T) {
 	}
 }
 
-// TestParseFlags_CmdFlag_NonZeroExitIsError: a failing command aborts with a
-// named, value-free error and never leaks the command's stderr/stdout.
 func TestParseFlags_CmdFlag_NonZeroExitIsError(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -984,10 +902,8 @@ func TestParseFlags_CmdFlag_NonZeroExitIsError(t *testing.T) {
 	}
 }
 
-// TestResolveSecretCmd_NonZeroExit_NamesExitCodeAndUnlockHint: a failing
-// secret command's error names the knob, the real exit code, and a generic,
-// tool-agnostic unlock hint (issue #1972) — never the command string, stdout,
-// or stderr.
+// The error names the knob, the real exit code and a tool-agnostic unlock
+// hint, never the command string, stdout or stderr (issue #1972).
 func TestResolveSecretCmd_NonZeroExit_NamesExitCodeAndUnlockHint(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1011,9 +927,7 @@ func TestResolveSecretCmd_NonZeroExit_NamesExitCodeAndUnlockHint(t *testing.T) {
 	}
 }
 
-// TestResolveSecretCmd_EmptyOutput_NamesUnlockHint: an empty secret command
-// result's error names the knob and a generic, tool-agnostic unlock hint
-// (issue #1972).
+// Issue #1972: an empty result must still name the knob and the unlock hint.
 func TestResolveSecretCmd_EmptyOutput_NamesUnlockHint(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1033,10 +947,9 @@ func TestResolveSecretCmd_EmptyOutput_NamesUnlockHint(t *testing.T) {
 	}
 }
 
-// TestResolveSecretCmd_NonZeroExit_NeverLeaksCommandOrOutput: the unlock-hint
-// error never carries the command string or its captured stdout, even though
-// both are available to resolveSecretCmd when building the message (issue
-// #1972's exposure-model constraint).
+// resolveSecretCmd has the command string and its captured stdout to hand
+// when it builds the message, and must put neither in the error (issue
+// #1972's exposure model).
 func TestResolveSecretCmd_NonZeroExit_NeverLeaksCommandOrOutput(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1059,10 +972,9 @@ func TestResolveSecretCmd_NonZeroExit_NeverLeaksCommandOrOutput(t *testing.T) {
 	}
 }
 
-// TestResolveSecretCmd_SignalKilled_OmitsFabricatedExitCode: a command
-// terminated by a signal reports ExitCode() == -1 (not a real exit code);
-// the error must not print that sentinel as if it were one, since -1 would
-// mislead the operator (issue #1972 review finding).
+// A signal-killed command reports ExitCode() == -1, a sentinel rather than a
+// real exit code. Printing it would mislead the operator (issue #1972 review
+// finding).
 func TestResolveSecretCmd_SignalKilled_OmitsFabricatedExitCode(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1086,8 +998,6 @@ func TestResolveSecretCmd_SignalKilled_OmitsFabricatedExitCode(t *testing.T) {
 	}
 }
 
-// TestParseFlags_CmdFlag_MissingValue: --<name>-cmd with no following arg
-// returns an error.
 func TestParseFlags_CmdFlag_MissingValue(t *testing.T) {
 	_, err := parseFlags([]string{"--gh-token-cmd"})
 	if err == nil {
@@ -1095,8 +1005,8 @@ func TestParseFlags_CmdFlag_MissingValue(t *testing.T) {
 	}
 }
 
-// TestToKebab_ReplacesUnderscoresAndLowercases: toKebab mirrors lib/renderers.nix's
-// toKebab, mapping a SCREAMING_SNAKE_CASE env name to its kebab-case vault-item form.
+// toKebab mirrors lib/renderers.nix's toKebab, which maps an env name to its
+// kebab-case vault-item form.
 func TestToKebab_ReplacesUnderscoresAndLowercases(t *testing.T) {
 	cases := map[string]string{
 		"GH_TOKEN":                "gh-token",
@@ -1110,12 +1020,10 @@ func TestToKebab_ReplacesUnderscoresAndLowercases(t *testing.T) {
 	}
 }
 
-// resolveGlobalSecretCmd runs parseFlags then applySecretCmdFallback, the
-// same two-step sequence main() runs (applySecretCmdFallback must run after
-// loadedDoc is in place, so it is not folded into parseFlags itself — see
-// applySecretCmdFallback's doc comment). Callers that need a document in
-// place must set loadedDoc (and t.Cleanup it back to nil) before calling
-// this.
+// resolveGlobalSecretCmd runs the same two-step sequence main() runs.
+// applySecretCmdFallback must run after loadedDoc is in place, so it is not
+// folded into parseFlags. Callers that need a document must set loadedDoc,
+// and t.Cleanup it back to nil, before calling this.
 func resolveGlobalSecretCmd(t *testing.T, args []string) error {
 	t.Helper()
 	if _, err := parseFlags(args); err != nil {
@@ -1124,11 +1032,10 @@ func resolveGlobalSecretCmd(t *testing.T, args []string) error {
 	return applySecretCmdFallback()
 }
 
-// TestParseFlags_GlobalSecretCmd_RunsTemplate: --secret-cmd is a templated
-// fallback below every per-secret form — {name} substitutes toKebab(env), and
-// it fires only for a secret the run actually requires (GH_TOKEN here; the
-// Claude/Anthropic pair is pre-satisfied and Jira/Box tokens aren't needed by
-// default, so neither should reach secretCmdRunner).
+// --secret-cmd is a templated fallback below every per-secret form: {name}
+// substitutes toKebab(env), and it fires only for a secret the run requires.
+// The fixture pre-satisfies the Claude/Anthropic pair and leaves the Jira and
+// Box tokens unneeded, so only GH_TOKEN should reach secretCmdRunner.
 func TestParseFlags_GlobalSecretCmd_RunsTemplate(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1154,8 +1061,6 @@ func TestParseFlags_GlobalSecretCmd_RunsTemplate(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_LosesToPerSecretCmdFlag: a per-secret
-// --<name>-cmd flag pre-empts the global template — highest precedence wins.
 func TestParseFlags_GlobalSecretCmd_LosesToPerSecretCmdFlag(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1176,8 +1081,6 @@ func TestParseFlags_GlobalSecretCmd_LosesToPerSecretCmdFlag(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_LosesToCmdEnv: a per-secret <NAME>_CMD env
-// var pre-empts the global template.
 func TestParseFlags_GlobalSecretCmd_LosesToCmdEnv(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1198,8 +1101,6 @@ func TestParseFlags_GlobalSecretCmd_LosesToCmdEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_LosesToFileFlag: a per-secret --<name>-file
-// flag pre-empts the global template.
 func TestParseFlags_GlobalSecretCmd_LosesToFileFlag(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1222,9 +1123,8 @@ func TestParseFlags_GlobalSecretCmd_LosesToFileFlag(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_LosesToDirectEnv: a direct env value
-// pre-empts the global template — the lowest of the four existing forms
-// still outranks the new, fifth one.
+// A direct env value is the lowest of the four per-secret forms and still
+// outranks the template.
 func TestParseFlags_GlobalSecretCmd_LosesToDirectEnv(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1243,8 +1143,6 @@ func TestParseFlags_GlobalSecretCmd_LosesToDirectEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmdEnv_RunsTemplate: SECRET_CMD (no flag) is the
-// env-var form of the same global template.
 func TestParseFlags_GlobalSecretCmdEnv_RunsTemplate(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1266,8 +1164,6 @@ func TestParseFlags_GlobalSecretCmdEnv_RunsTemplate(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmdFlag_WinsOverEnv: --secret-cmd flag takes
-// precedence over a SECRET_CMD env var, same as every other flag-over-env form.
 func TestParseFlags_GlobalSecretCmdFlag_WinsOverEnv(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1293,9 +1189,8 @@ func TestParseFlags_GlobalSecretCmdFlag_WinsOverEnv(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_SkipsJiraWhenTrackerNotJira: the template
-// fallback is gated per knob — JIRA_TOKEN is only required when
-// ISSUE_TRACKER=jira, so it must not be sourced by the template otherwise.
+// The template fallback is gated per knob: JIRA_TOKEN is required only when
+// ISSUE_TRACKER=jira.
 func TestParseFlags_GlobalSecretCmd_SkipsJiraWhenTrackerNotJira(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1317,8 +1212,6 @@ func TestParseFlags_GlobalSecretCmd_SkipsJiraWhenTrackerNotJira(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_AppliesToJiraWhenTrackerIsJira: the same
-// knob is fetched once the run actually requires it.
 func TestParseFlags_GlobalSecretCmd_AppliesToJiraWhenTrackerIsJira(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1340,8 +1233,6 @@ func TestParseFlags_GlobalSecretCmd_AppliesToJiraWhenTrackerIsJira(t *testing.T)
 	}
 }
 
-// withExtraBackendRow registers row in the package-level backendRows table
-// for the duration of the test, restoring the original table on cleanup.
 func withExtraBackendRow(t *testing.T, row backendRow) {
 	t.Helper()
 	original := backendRows
@@ -1349,17 +1240,11 @@ func withExtraBackendRow(t *testing.T, row backendRow) {
 	t.Cleanup(func() { backendRows = original })
 }
 
-// TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar pins the same
-// class of bug as
-// TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName
-// (readonly_token_gate_test.go), but for secretRequiredThisRun's
-// JIRA_TOKEN/FORGEJO_TOKEN arms rather than the read-only token gate: a
-// backend registered under some other name that shares a stock TokenEnvVar
-// must still mark that secret required — on the tracker axis or the code
-// forge axis — or applySecretCmdFallback silently skips the vault fetch, and
-// validate() then rejects the run over a token nothing ever asked for. The
-// mirror case is a name in no row at all: backendByName misses, yielding
-// TokenEnvVar "", which must never match a knob.
+// A backend registered under another name that shares a stock TokenEnvVar,
+// on either the tracker or the code forge axis, must still mark that secret
+// required, or applySecretCmdFallback skips the vault fetch and validate()
+// then rejects the run over a token nothing asked for. A name in no row
+// yields TokenEnvVar "", which must match no knob.
 func TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1437,13 +1322,10 @@ func TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar(t *testing.T)
 	}
 }
 
-// TestApplySecretCmdFallback_UsesDocumentSettings: CODE_FORGE/ISSUE_TRACKER
-// may be set only via the Consumer flake's settings (ADR 0020), which the
-// Launcher input document carries as loadedDoc — not via env or flag. The
-// fallback must see that value, not just the ambient default, or an
-// otherwise valid run set up entirely through the document either misses a
-// secret it needs (this test: JIRA_TOKEN) or forces an unwanted vault lookup
-// for one it doesn't (a fully-local run still fetching GH_TOKEN).
+// CODE_FORGE and ISSUE_TRACKER may be set only through the Consumer flake's
+// settings (ADR 0020), which reach the launcher as loadedDoc rather than env
+// or flag. A fallback reading only the ambient default misses a secret the
+// run needs, JIRA_TOKEN here.
 func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputDocument{Settings: map[string]string{"ISSUE_TRACKER": "jira"}}
@@ -1468,15 +1350,11 @@ func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
 	}
 }
 
-// TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal: the
-// inverse of the above — CODE_FORGE=local/ISSUE_TRACKER=local set only via
-// the document must not force a GH_TOKEN vault lookup for an offline run.
-// Artifacts carries the FULLY_LOCAL bit nix would bake alongside that same
-// Settings pairing (mkHarness renders both from the same mergedDefaults, ADR
-// 0020), so this models a real document rather than an inconsistent one —
-// secretRequiredThisRun's resolveCapabilitySignals call trusts the
-// forwarded artifact only when Settings still matches the resolved pairing
-// (issue #2527 review).
+// A fully-local pairing set only through the document must not force a
+// GH_TOKEN vault lookup. Artifacts carries the FULLY_LOCAL bit nix bakes
+// alongside that Settings pairing, so the fixture models a real document:
+// secretRequiredThisRun trusts the forwarded artifact only when Settings
+// still matches the resolved pairing (ADR 0020; issue #2527 review).
 func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputDocument{
@@ -1504,9 +1382,8 @@ func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_SkipsBoxGhToken: BOX_GH_TOKEN (ADR 0016
-// two-actor separation) is opt-in with no requiredness signal of its own, so
-// the template must never auto-source it.
+// BOX_GH_TOKEN (ADR 0016 two-actor separation) is opt-in with no
+// requiredness signal of its own, so the template must never auto-source it.
 func TestParseFlags_GlobalSecretCmd_SkipsBoxGhToken(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1527,11 +1404,9 @@ func TestParseFlags_GlobalSecretCmd_SkipsBoxGhToken(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_ExplicitClaudeCmdPreemptsAnthropicFallback:
-// an explicit --claude-code-oauth-token-cmd must stop the template from
-// also fetching ANTHROPIC_API_KEY, regardless of secretKnobs' table order
-// (ANTHROPIC_API_KEY sorts before CLAUDE_CODE_OAUTH_TOKEN) — the fallback
-// pass must see every per-secret resolution parseFlags already made.
+// ANTHROPIC_API_KEY sorts before CLAUDE_CODE_OAUTH_TOKEN in secretKnobs, so
+// the fallback pass must see every per-secret resolution parseFlags already
+// made before it decides the pair is unsatisfied.
 func TestParseFlags_GlobalSecretCmd_ExplicitClaudeCmdPreemptsAnthropicFallback(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1559,8 +1434,6 @@ func TestParseFlags_GlobalSecretCmd_ExplicitClaudeCmdPreemptsAnthropicFallback(t
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_FailureIsError: a failing templated command
-// aborts with a named, value-free error, same as a failing per-secret command.
 func TestParseFlags_GlobalSecretCmd_FailureIsError(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1582,8 +1455,6 @@ func TestParseFlags_GlobalSecretCmd_FailureIsError(t *testing.T) {
 	}
 }
 
-// TestParseFlags_GlobalSecretCmd_MissingValue: --secret-cmd with no following
-// arg returns an error.
 func TestParseFlags_GlobalSecretCmd_MissingValue(t *testing.T) {
 	_, err := parseFlags([]string{"--secret-cmd"})
 	if err == nil {
@@ -1591,9 +1462,6 @@ func TestParseFlags_GlobalSecretCmd_MissingValue(t *testing.T) {
 	}
 }
 
-// TestParseFlags_NoCmdOrFile_LeavesDirectEnv: with neither a --*-cmd flag, a
-// <NAME>_CMD env var, nor a --*-file flag set, the direct env value is left
-// untouched.
 func TestParseFlags_NoCmdOrFile_LeavesDirectEnv(t *testing.T) {
 	t.Setenv("GH_TOKEN", "direct-value")
 	t.Setenv("GH_TOKEN_CMD", "")
@@ -1606,9 +1474,8 @@ func TestParseFlags_NoCmdOrFile_LeavesDirectEnv(t *testing.T) {
 	}
 }
 
-// TestIsInteractiveTTY_Composition pins the isInteractiveTTY = isStdinTTY()
-// && isStderrTTY() composition (issue #2559): both seams are package vars,
-// so all four combinations are exercised here without a real TTY.
+// Both seams are package vars, so all four combinations run here without a
+// real TTY (issue #2559).
 func TestIsInteractiveTTY_Composition(t *testing.T) {
 	origStdin, origStderr := isStdinTTY, isStderrTTY
 	t.Cleanup(func() { isStdinTTY, isStderrTTY = origStdin, origStderr })
@@ -1629,14 +1496,10 @@ func TestIsInteractiveTTY_Composition(t *testing.T) {
 	}
 }
 
-// TestTermIsTerminal_DevNull_NotATTY pins term.IsTerminal's behavior on
-// /dev/null (issue #2559): /dev/null is itself a character device, so the
-// old os.ModeCharDevice-based check wrongly treated it as an interactive
-// TTY. term.IsTerminal correctly reports it as not a terminal. This
-// exercises the real call isStdinTTY/isStderrTTY wrap directly against a
-// real non-tty file descriptor -- faking those package vars (as
-// TestIsInteractiveTTY_Composition above does) would prove nothing about
-// this regression.
+// /dev/null is a character device, so the old os.ModeCharDevice check
+// wrongly treated it as an interactive TTY (issue #2559). This runs the real
+// call isStdinTTY and isStderrTTY wrap against a real non-tty descriptor;
+// faking those package vars would prove nothing about the regression.
 func TestTermIsTerminal_DevNull_NotATTY(t *testing.T) {
 	f, err := os.Open(os.DevNull)
 	if err != nil {
@@ -1648,9 +1511,8 @@ func TestTermIsTerminal_DevNull_NotATTY(t *testing.T) {
 	}
 }
 
-// TestSecretCmdRunner_Default_RunsRealCommand: the production secretCmdRunner
-// (unfaked) actually shells out and returns stdout, so the injected seam has
-// a real implementation wired up, not just fakes in tests.
+// Every other test here fakes secretCmdRunner, so this one runs the
+// production implementation to prove the seam is wired to something real.
 func TestSecretCmdRunner_Default_RunsRealCommand(t *testing.T) {
 	out, err := secretCmdRunner("printf real-value")
 	if err != nil {
@@ -1661,10 +1523,9 @@ func TestSecretCmdRunner_Default_RunsRealCommand(t *testing.T) {
 	}
 }
 
-// TestSecretCmdRunner_Interactive_PassesStdinAndStderr: when the launcher's
-// own stdin and stderr are TTYs (issue #1971), the secret command inherits
-// them as raw file descriptors, so a vault tool's stderr prompt and stdin
-// read both work, while stdout is still captured as the secret.
+// When the launcher's own stdin and stderr are TTYs the secret command
+// inherits them as raw file descriptors, so a vault tool's prompt and stdin
+// read both work while stdout is still captured as the secret (issue #1971).
 func TestSecretCmdRunner_Interactive_PassesStdinAndStderr(t *testing.T) {
 	origInteractive := isInteractiveTTY
 	isInteractiveTTY = func() bool { return true }
@@ -1711,11 +1572,9 @@ func TestSecretCmdRunner_Interactive_PassesStdinAndStderr(t *testing.T) {
 	}
 }
 
-// TestSecretCmdRunner_NonInteractive_NoStdinAttached_NoHang: when not
-// interactive, a command that tries to read stdin gets an immediate EOF
-// instead of blocking the run, and its stderr never reaches the launcher's
-// own stderr (issue #1971 non-interactive regression: behaviour must stay
-// exactly as it was before the TTY gate existed).
+// Without a TTY, a command that reads stdin gets an immediate EOF instead of
+// blocking the run, and its stderr never reaches the launcher's own stderr.
+// Behaviour must stay as it was before the TTY gate existed (issue #1971).
 func TestSecretCmdRunner_NonInteractive_NoStdinAttached_NoHang(t *testing.T) {
 	origInteractive := isInteractiveTTY
 	isInteractiveTTY = func() bool { return false }
@@ -1758,7 +1617,6 @@ func TestSecretCmdRunner_NonInteractive_NoStdinAttached_NoHang(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_ShowsSecretFileFlags: full help lists --<name>-file flags for secret knobs.
 func TestPrintHelpFull_ShowsSecretFileFlags(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -1770,8 +1628,6 @@ func TestPrintHelpFull_ShowsSecretFileFlags(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_ShowsSecretCmdFlags: full help lists --<name>-cmd flags
-// for secret knobs, mirroring the --<name>-file section.
 func TestPrintHelpFull_ShowsSecretCmdFlags(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -1783,9 +1639,6 @@ func TestPrintHelpFull_ShowsSecretCmdFlags(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_ShowsGlobalSecretCmd: the singleton --secret-cmd/SECRET_CMD
-// template fallback is documented in the full reference, alongside the
-// per-secret cmd/file forms it sits below.
 func TestPrintHelpFull_ShowsGlobalSecretCmd(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -1797,8 +1650,6 @@ func TestPrintHelpFull_ShowsGlobalSecretCmd(t *testing.T) {
 	}
 }
 
-// TestParseFlags_NoBuildPassthrough: --no-build is returned as a remaining arg,
-// not treated as an unknown flag error.
 func TestParseFlags_NoBuildPassthrough(t *testing.T) {
 	remaining, err := parseFlags([]string{"dispatch", "--no-build"})
 	if err != nil {
@@ -1809,7 +1660,6 @@ func TestParseFlags_NoBuildPassthrough(t *testing.T) {
 	}
 }
 
-// TestParseFlags_NoBuildWithIssue: --no-build passes through with an issue number.
 func TestParseFlags_NoBuildWithIssue(t *testing.T) {
 	remaining, err := parseFlags([]string{"dispatch", "--no-build", "42"})
 	if err != nil {
@@ -1820,7 +1670,6 @@ func TestParseFlags_NoBuildWithIssue(t *testing.T) {
 	}
 }
 
-// TestDispatchNoBuildArgs: dispatch --no-build arg extraction.
 func TestDispatchNoBuildArgs(t *testing.T) {
 	noBuild, rest := dispatchNoBuildArgs([]string{"--no-build", "123"})
 	if !noBuild {
@@ -1831,7 +1680,6 @@ func TestDispatchNoBuildArgs(t *testing.T) {
 	}
 }
 
-// TestDispatchNoBuildArgs_AbsentFlag: no --no-build flag leaves noBuild false.
 func TestDispatchNoBuildArgs_AbsentFlag(t *testing.T) {
 	noBuild, rest := dispatchNoBuildArgs([]string{"42"})
 	if noBuild {
@@ -1842,7 +1690,6 @@ func TestDispatchNoBuildArgs_AbsentFlag(t *testing.T) {
 	}
 }
 
-// TestDispatchYesArgs_YesFlag: --yes sets yes=true and is removed from remaining.
 func TestDispatchYesArgs_YesFlag(t *testing.T) {
 	yes, rest := dispatchYesArgs([]string{"--yes", "42"})
 	if !yes {
@@ -1853,7 +1700,6 @@ func TestDispatchYesArgs_YesFlag(t *testing.T) {
 	}
 }
 
-// TestDispatchYesArgs_ForceAlias: --force is an alias for --yes.
 func TestDispatchYesArgs_ForceAlias(t *testing.T) {
 	yes, _ := dispatchYesArgs([]string{"--force"})
 	if !yes {
@@ -1861,7 +1707,6 @@ func TestDispatchYesArgs_ForceAlias(t *testing.T) {
 	}
 }
 
-// TestDispatchYesArgs_Absent: no --yes/--force flag leaves yes=false.
 func TestDispatchYesArgs_Absent(t *testing.T) {
 	yes, rest := dispatchYesArgs([]string{"42"})
 	if yes {
@@ -1872,9 +1717,7 @@ func TestDispatchYesArgs_Absent(t *testing.T) {
 	}
 }
 
-// TestDispatchSelfContainedArgs: --self-contained sets selfContained=true and
-// is removed from remaining; absent leaves it false and args untouched
-// (issue #2202).
+// Issue #2202 added --self-contained.
 func TestDispatchSelfContainedArgs(t *testing.T) {
 	selfContained, rest := dispatchSelfContainedArgs([]string{"--self-contained", "42"})
 	if !selfContained {
@@ -1885,8 +1728,6 @@ func TestDispatchSelfContainedArgs(t *testing.T) {
 	}
 }
 
-// TestDispatchSelfContainedArgs_Absent: no --self-contained flag leaves
-// selfContained false and args unchanged.
 func TestDispatchSelfContainedArgs_Absent(t *testing.T) {
 	selfContained, rest := dispatchSelfContainedArgs([]string{"42"})
 	if selfContained {
@@ -1897,9 +1738,8 @@ func TestDispatchSelfContainedArgs_Absent(t *testing.T) {
 	}
 }
 
-// TestParseIssuePositionals_AllBoolsPlusID: all three dispatch-family
-// booleans plus a numeric issue ID all resolve correctly in one pass
-// (issue #3054).
+// Issue #3054: all three dispatch-family booleans and a numeric issue ID
+// must resolve in one pass.
 func TestParseIssuePositionals_AllBoolsPlusID(t *testing.T) {
 	parsed := parseIssuePositionals([]string{"--no-build", "--yes", "--self-contained", "42"})
 	if !parsed.noBuild || !parsed.yes || !parsed.selfContained {
@@ -1910,8 +1750,6 @@ func TestParseIssuePositionals_AllBoolsPlusID(t *testing.T) {
 	}
 }
 
-// TestParseIssuePositionals_NoBoolsJustID: a bare numeric ID with none of the
-// booleans present leaves all three false.
 func TestParseIssuePositionals_NoBoolsJustID(t *testing.T) {
 	parsed := parseIssuePositionals([]string{"42"})
 	if parsed.noBuild || parsed.yes || parsed.selfContained {
@@ -1922,9 +1760,6 @@ func TestParseIssuePositionals_NoBoolsJustID(t *testing.T) {
 	}
 }
 
-// TestParseIssuePositionals_BoolBeforeID: "--yes 42" (bool before the ID)
-// resolves yes=true and remaining=["42"] — the flag must never be mistaken
-// for the ID itself.
 func TestParseIssuePositionals_BoolBeforeID(t *testing.T) {
 	parsed := parseIssuePositionals([]string{"--yes", "42"})
 	if !parsed.yes {
@@ -1935,10 +1770,8 @@ func TestParseIssuePositionals_BoolBeforeID(t *testing.T) {
 	}
 }
 
-// TestParseIssuePositionals_IDBeforeBool: "42 --yes" (ID before the bool,
-// the exact `spindrift recover --yes 42` shape) still resolves
-// remaining=["42"] and yes=true, not "--yes" mistaken for the issue ID
-// (issue #3054).
+// ID before the bool is the exact `spindrift recover --yes 42` shape, where
+// "--yes" was once mistaken for the issue ID (issue #3054).
 func TestParseIssuePositionals_IDBeforeBool(t *testing.T) {
 	parsed := parseIssuePositionals([]string{"42", "--yes"})
 	if !parsed.yes {
@@ -1949,14 +1782,11 @@ func TestParseIssuePositionals_IDBeforeBool(t *testing.T) {
 	}
 }
 
-// TestParseIssuePositionals_NonNumericPassedThrough: non-numeric junk mixed
-// in with the booleans and a real ID passes through unfiltered — see
-// parseIssuePositionals's doc comment (flags.go) for why (issue #3054). This
-// also covers a flag-shaped positional (e.g. a slug ID surviving a "--"
-// separator, "--odd-slug") surviving verbatim in remaining — the case a
-// prior version of this code silently dropped (issue #3055) — since
-// remaining is now used directly by every issue-taking verb with no further
-// filtering.
+// Non-numeric positionals pass through unfiltered; parseIssuePositionals's
+// doc comment in flags.go says why (issue #3054). A flag-shaped positional,
+// such as a slug ID surviving a "--" separator, must also survive verbatim,
+// the case a prior version silently dropped (issue #3055), because every
+// issue-taking verb now uses remaining with no further filtering.
 func TestParseIssuePositionals_NonNumericPassedThrough(t *testing.T) {
 	parsed := parseIssuePositionals([]string{"--no-build", "foo", "--yes", "42", "bar", "--odd-slug"})
 	if !parsed.noBuild || !parsed.yes || parsed.selfContained {
@@ -1973,7 +1803,6 @@ func TestParseIssuePositionals_NonNumericPassedThrough(t *testing.T) {
 	}
 }
 
-// TestParseFlags_YesPassthrough: --yes passes through like --no-build.
 func TestParseFlags_YesPassthrough(t *testing.T) {
 	remaining, err := parseFlags([]string{"dispatch", "--yes", "42"})
 	if err != nil {
@@ -1984,7 +1813,6 @@ func TestParseFlags_YesPassthrough(t *testing.T) {
 	}
 }
 
-// TestParseFlags_ForcePassthrough: --force passes through like --no-build.
 func TestParseFlags_ForcePassthrough(t *testing.T) {
 	remaining, err := parseFlags([]string{"dispatch", "--force"})
 	if err != nil {
@@ -1995,7 +1823,6 @@ func TestParseFlags_ForcePassthrough(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_ShowsNoBuildFlag: help output documents --no-build on dispatch.
 func TestPrintHelp_ShowsNoBuildFlag(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
@@ -2004,9 +1831,8 @@ func TestPrintHelp_ShowsNoBuildFlag(t *testing.T) {
 	}
 }
 
-// TestPrintHelpFull_ShowsContinuousFlag: the full reference documents
-// --continuous as the bare-flag alias for --continuous-dispatch 1
-// (issue #2033).
+// Issue #2033 added --continuous as the bare-flag alias for
+// --continuous-dispatch 1.
 func TestPrintHelpFull_ShowsContinuousFlag(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
@@ -2019,10 +1845,7 @@ func TestPrintHelpFull_ShowsContinuousFlag(t *testing.T) {
 	}
 }
 
-// TestValidateChoice exercises the generic choice-knob guard (issue #2520
-// slice 2): a valid value on a known choice knob is a no-op, an invalid
-// value names the flag, the bad value, and every valid choice, and an
-// unknown/non-choice env is always a no-op.
+// Issue #2520 slice 2 added the generic choice-knob guard.
 func TestValidateChoice(t *testing.T) {
 	t.Run("valid value is a no-op", func(t *testing.T) {
 		if err := validateChoice("MERGE_MODE", "auto"); err != nil {

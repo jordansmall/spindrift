@@ -16,12 +16,10 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// TestReadMissingFileReturnsNilNil verifies Read's degrade-not-error
-// contract for the ordinary case (issue #2983): no manifest was ever
-// written (no outbox mounted, or a non-orchestrator box), so the path
-// simply doesn't exist. This must return (nil, nil), never an error, so a
-// caller can treat "no manifest" identically to "empty manifest" without
-// special-casing os.IsNotExist itself.
+// Read's degrade-not-error contract (issue #2983): a path that never
+// existed (no outbox mounted, or a non-orchestrator box) returns (nil, nil)
+// so callers treat "no manifest" like "empty manifest" without checking
+// os.IsNotExist themselves.
 func TestReadMissingFileReturnsNilNil(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -35,8 +33,6 @@ func TestReadMissingFileReturnsNilNil(t *testing.T) {
 	}
 }
 
-// TestReadEmptyArrayReturnsEmptySlice verifies a present-but-empty manifest
-// (a valid JSON `[]`) parses cleanly to a zero-length, non-error result.
 func TestReadEmptyArrayReturnsEmptySlice(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -53,9 +49,6 @@ func TestReadEmptyArrayReturnsEmptySlice(t *testing.T) {
 	}
 }
 
-// TestWriteThenReadRoundTrips verifies Write and Read agree on the wire
-// format: a manifest with 2+ entries written via Write must come back from
-// Read byte-for-byte equivalent in structure.
 func TestWriteThenReadRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -76,15 +69,11 @@ func TestWriteThenReadRoundTrips(t *testing.T) {
 	}
 }
 
-// TestWriteLandEntryUsesSnakeCaseDeltaKeys pins the on-disk JSON shape of a
-// land entry's LandDelta field (issue #3244 review finding): every other
-// field in manifest.json follows the snake_case convention
-// (outcome_found, usage, land_delta), so landdelta.Delta's own fields must
-// carry the same convention rather than serializing as bare Go field names
-// (e.g. "Known" instead of "known"). Covers all three cases Delta can take
-// on a land entry -- known-counted, known-zero, and unknown-with-reason --
-// asserting the actual on-disk key names, not just that the value
-// round-trips.
+// Pins the on-disk key names of a land entry's LandDelta (issue #3244
+// review finding): landdelta.Delta once serialized as bare Go field names
+// ("Known"), breaking the snake_case convention every other manifest.json
+// field follows. The three cases are the three shapes Delta takes on a land
+// entry, so a regression in any one of them shows up here.
 func TestWriteLandEntryUsesSnakeCaseDeltaKeys(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -131,7 +120,6 @@ func TestWriteLandEntryUsesSnakeCaseDeltaKeys(t *testing.T) {
 				}
 			}
 
-			// And it must still round-trip back to an equal Delta.
 			readBack, err := Read(path)
 			if err != nil {
 				t.Fatalf("Read: %v", err)
@@ -143,9 +131,8 @@ func TestWriteLandEntryUsesSnakeCaseDeltaKeys(t *testing.T) {
 	}
 }
 
-// TestReadMalformedJSONReturnsError verifies a present-but-corrupt manifest
-// file is a real error for the caller to log, distinct from the
-// missing-file case above.
+// A corrupt manifest is a real error the caller logs, unlike the
+// missing-file case above, which returns (nil, nil).
 func TestReadMalformedJSONReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -162,15 +149,11 @@ func TestReadMalformedJSONReturnsError(t *testing.T) {
 	}
 }
 
-// TestReadOversizedFileReturnsError verifies Read bounds how much of the
-// Box-authored manifest file it will buffer into memory (issue #2983 DoS
-// finding): manifest.json is written from inside a sandboxed, potentially
-// prompt-injected or runaway Box with shell access to a 0o777 outbox mount,
-// and Read is called on every console refresh tick as well as once per
-// dispatch result on the host. A file past maxManifestBytes must be treated
-// as corrupt/suspicious evidence -- a real (nil, err), never the reserved
-// (nil, nil) "no manifest ever written" contract -- so an oversized file
-// can't silently masquerade as "no manifest" nor get fully buffered.
+// Read bounds how much of the Box-authored manifest it buffers (issue #2983
+// DoS finding): a runaway or prompt-injected Box can write any size it likes
+// to the 0o777 outbox mount, and the host calls Read on every console
+// refresh tick. Past maxManifestBytes Read returns (nil, err), never the
+// reserved (nil, nil) that means "no manifest was ever written".
 func TestReadOversizedFileReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -191,18 +174,11 @@ func TestReadOversizedFileReturnsError(t *testing.T) {
 	}
 }
 
-// TestReadFIFODoesNotHang verifies Read never blocks on a non-regular file
-// at the manifest path (issue #2983 review finding): manifest.json is
-// Box-authored, and a Box with shell access could do `mkfifo
-// /outbox/manifest.json` instead of writing a regular file. Opening a FIFO
-// read-only with no writer blocks forever, and Read runs synchronously on
-// every console refresh tick as well as once per dispatch result on the
-// host -- an unbounded block here freezes the whole operator console or
-// wedges settle. Read must reject the FIFO via O_NONBLOCK on the open call
-// itself (checked by stat-ing the resulting descriptor) and return promptly
-// with a non-nil error, never hang. The test itself is
-// bounded by a short deadline so a regression fails fast instead of hanging
-// the whole test binary/CI run.
+// A Box with shell access can mkfifo the manifest path (issue #2983 review
+// finding), and opening a writerless FIFO read-only blocks forever, freezing
+// the operator console that calls Read on every refresh tick. Read opens
+// with O_NONBLOCK and stats the descriptor. The 2s deadline keeps a
+// regression from hanging the whole test binary.
 func TestReadFIFODoesNotHang(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -233,18 +209,11 @@ func TestReadFIFODoesNotHang(t *testing.T) {
 	}
 }
 
-// TestReadConcurrentFIFOSwapDoesNotHang reproduces the TOCTOU race in the
-// Lstat-then-Open pattern (issue #2983 review finding): a Box with shell
-// access to the 0o777 outbox mount can rename a FIFO over the regular file
-// at the manifest path *between* Read's Lstat check and its subsequent
-// os.Open call. Lstat approves the regular file that existed at check time,
-// but by the time Open runs, a FIFO may be sitting at that path instead --
-// and Open, unlike the Lstat check, blocks forever with no writer on the
-// other end. A goroutine continuously swaps a FIFO and a regular file at
-// the manifest path while a concurrent loop calls Read repeatedly; every
-// individual Read call must return within a short deadline -- Read must
-// never observe a stale "it was regular" verdict from a check that no
-// longer describes the object it's about to open.
+// Reproduces the TOCTOU race in the old Lstat-then-Open pattern (issue #2983
+// review finding): a Box can rename a FIFO over the regular file between
+// Read's Lstat and its os.Open, and Open then blocks forever on a path Lstat
+// had already approved as regular. The swap goroutine and the repeated Read
+// loop exist to hit that window.
 func TestReadConcurrentFIFOSwapDoesNotHang(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -260,13 +229,10 @@ func TestReadConcurrentFIFOSwapDoesNotHang(t *testing.T) {
 				return
 			default:
 			}
-			// Swap in a regular file, then race a FIFO over it. Both
-			// swap into place via os.Rename rather than opening path
-			// directly -- opening path with O_WRONLY while a FIFO
-			// happens to be there would itself block waiting for a
-			// reader (and racing Read's own brief O_NONBLOCK open/close
-			// of that FIFO would surface as a spurious broken-pipe
-			// write error here, unrelated to the race under test).
+			// Both swaps go through os.Rename rather than opening path
+			// directly: an O_WRONLY open would block on whatever FIFO is
+			// there, and racing Read's own O_NONBLOCK open of it would
+			// report a broken pipe unrelated to the race under test.
 			regularPath := path + ".reg"
 			if err := os.WriteFile(regularPath, regular, 0o644); err != nil {
 				swapErrs <- err
@@ -302,16 +268,11 @@ func TestReadConcurrentFIFOSwapDoesNotHang(t *testing.T) {
 
 		select {
 		case <-done:
-			// Either outcome (nil entries + error for a FIFO, or a
-			// parsed manifest for a regular file) is acceptable --
-			// the only thing under test is that Read returns promptly.
-		// The regression this guards blocks *forever* -- an open of a
-		// writerless FIFO never returns -- so the bound only has to
-		// separate "returned" from "never returns". A tighter one buys
-		// no detection power and costs flakiness: at 500ms this tripped
-		// on loaded aarch64-darwin CI builders, where the swap
-		// goroutine's own syscall storm can starve this Read's
-		// goroutine of a scheduler slot for longer than that.
+			// Either outcome is fine; only prompt return is under test.
+		// The regression blocks forever, so this bound only separates
+		// "returned" from "never returns". At 500ms it tripped on loaded
+		// aarch64-darwin CI builders, where the swap goroutine starves this
+		// Read of a scheduler slot.
 		case <-time.After(5 * time.Second):
 			close(stop)
 			t.Fatal("Read: did not return within 5s during a concurrent FIFO swap -- blocked opening a stale regular-file verdict")
@@ -323,23 +284,11 @@ func TestReadConcurrentFIFOSwapDoesNotHang(t *testing.T) {
 	}
 }
 
-// TestWriteIsAtomicUnderConcurrentRead reproduces the torn-read finding
-// (issue #2983 review): Write used to truncate path in place via
-// os.WriteFile, so a Read landing inside the truncate-then-write window
-// could observe a partial file and fail with a JSON parse error even though
-// nothing was actually wrong with the manifest -- just unlucky timing. This
-// contradicts pick.go:200's documented convention that a Read failure here
-// should leave prior state stale rather than surface a spurious error.
-//
-// One goroutine calls Write in a tight loop with a varying entry count (so
-// the manifest's own on-disk byte size changes every iteration, widening
-// whatever truncate-then-write window a fixed-size overwrite might not
-// expose), while a concurrent goroutine calls Read in a tight loop for a
-// bounded duration. Every Read must either succeed or -- before the first
-// Write has ever run -- see the legitimate "no manifest yet" (nil, nil)
-// case; it must never surface a JSON syntax/unexpected-EOF error, which
-// would mean it observed a torn write. Mirrors
-// TestReadConcurrentFIFOSwapDoesNotHang's goroutine+bounded-loop shape.
+// Reproduces the torn-read finding (issue #2983 review): Write used to
+// truncate path in place via os.WriteFile, so a Read landing in the
+// truncate-then-write window saw a partial file and failed to parse it,
+// against pick.go:200's convention that a Read failure leaves prior state
+// stale rather than raising a spurious error. A JSON error here is the bug.
 func TestWriteIsAtomicUnderConcurrentRead(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
@@ -355,10 +304,9 @@ func TestWriteIsAtomicUnderConcurrentRead(t *testing.T) {
 				return
 			default:
 			}
-			// Cycling the entry count from 1 to 20 varies the marshaled
-			// byte size every iteration, unlike a fixed-shape manifest,
-			// which could get lucky and never expose an overwrite that
-			// shrinks the file mid-read.
+			// Cycling the entry count varies the marshaled byte size every
+			// iteration. A fixed-shape manifest could get lucky and never
+			// expose an overwrite that shrinks the file mid-read.
 			n := i%20 + 1
 			entries := make([]Entry, n)
 			for j := range entries {
@@ -386,14 +334,10 @@ func TestWriteIsAtomicUnderConcurrentRead(t *testing.T) {
 	<-done
 }
 
-// TestReadSymlinkReturnsError verifies Read refuses to follow a symlink at
-// the manifest path (issue #2983 review finding): a Box with shell access
-// to the 0o777 outbox mount could do `ln -s /etc/shadow
-// /outbox/manifest.json` to redirect the host's read to an arbitrary host
-// path. Read must reject the symlink itself -- via O_NOFOLLOW on the open
-// call, which fails the open outright on a symlink at the final path
-// component -- rather than opening through it and returning the target
-// file's contents.
+// A Box with shell access to the 0o777 outbox mount can symlink the manifest
+// path at an arbitrary host file (issue #2983 review finding), redirecting
+// the host's read. Read passes O_NOFOLLOW, which fails the open outright on
+// a symlink at the final path component.
 func TestReadSymlinkReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.json")

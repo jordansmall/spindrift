@@ -12,9 +12,8 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestRun_HeartbeatRawLogExact verifies that bytes written by the runner to
-// box.Output reach the log file byte-for-byte even when the heartbeat writer
-// is active.
+// The heartbeat writer tees the stream, so the log file must still hold the
+// runner's bytes exactly.
 func TestRun_HeartbeatRawLogExact(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -49,8 +48,6 @@ func TestRun_HeartbeatRawLogExact(t *testing.T) {
 	}
 }
 
-// TestRun_HeartbeatEmitsToStdout verifies that when a box writes stream-json
-// events, heartbeat lines appear on stdout (captured via pipe).
 func TestRun_HeartbeatEmitsToStdout(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -85,9 +82,8 @@ func TestRun_HeartbeatEmitsToStdout(t *testing.T) {
 	}
 }
 
-// TestRun_AnnounceEmitsToStdout verifies that Run's dispatch-start announce
-// line reaches stdout unchanged when no heartbeat sink override is
-// configured -- the non-console CLI dispatch path (issue #1829).
+// The non-console CLI dispatch path sets no heartbeat sink override, so Run's
+// dispatch-start announce line must reach stdout unchanged (issue #1829).
 func TestRun_AnnounceEmitsToStdout(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -110,13 +106,10 @@ func TestRun_AnnounceEmitsToStdout(t *testing.T) {
 	}
 }
 
-// TestRun_HeartbeatSuppressedWhenDiscardConfigured verifies that a Factory
-// with its heartbeat sink set to io.Discard (the console entry point, issue
-// #1583) writes no heartbeat lines (role headers or tool-count lines) to
-// stdout, while the log file still captures the full raw stream untouched.
-// The dispatch-start announce line ("-> #NN: title", box.go's Run) shares
-// the same discard-configured sink (issue #1829), so it is asserted absent
-// from stdout too.
+// The console entry point sets the heartbeat sink to io.Discard (issue #1583),
+// which must silence role headers and tool-count lines on stdout while leaving
+// the raw log untouched. Run's dispatch-start announce line shares that sink
+// (issue #1829), so this test checks stdout for its absence too.
 func TestRun_HeartbeatSuppressedWhenDiscardConfigured(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -164,9 +157,8 @@ func TestRun_HeartbeatSuppressedWhenDiscardConfigured(t *testing.T) {
 	}
 }
 
-// TestFix_AnnounceEmitsToStdout verifies that Fix's fix-pass announce line
-// reaches stdout unchanged when no heartbeat sink override is configured --
-// the non-console CLI dispatch path (issue #1829).
+// The non-console CLI dispatch path sets no heartbeat sink override, so Fix's
+// fix-pass announce line must reach stdout unchanged (issue #1829).
 func TestFix_AnnounceEmitsToStdout(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -189,9 +181,8 @@ func TestFix_AnnounceEmitsToStdout(t *testing.T) {
 	}
 }
 
-// TestFix_AnnounceSuppressedWhenDiscardConfigured verifies that Fix's
-// fix-pass announce line is silenced by the same discard-configured
-// heartbeat sink the console entry point sets (issue #1829).
+// Fix's announce line shares the discard-configured heartbeat sink the console
+// entry point sets, so that sink must silence it (issue #1829).
 func TestFix_AnnounceSuppressedWhenDiscardConfigured(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -215,9 +206,8 @@ func TestFix_AnnounceSuppressedWhenDiscardConfigured(t *testing.T) {
 	}
 }
 
-// TestResolveConflict_AnnounceEmitsToStdout verifies that ResolveConflict's
-// announce line reaches stdout unchanged when no heartbeat sink override is
-// configured -- the non-console CLI dispatch path (issue #1829).
+// The non-console CLI dispatch path sets no heartbeat sink override, so
+// ResolveConflict's announce line must reach stdout unchanged (issue #1829).
 func TestResolveConflict_AnnounceEmitsToStdout(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -242,10 +232,8 @@ func TestResolveConflict_AnnounceEmitsToStdout(t *testing.T) {
 	}
 }
 
-// TestResolveConflict_AnnounceSuppressedWhenDiscardConfigured verifies that
-// ResolveConflict's announce line is silenced by the same
-// discard-configured heartbeat sink the console entry point sets (issue
-// #1829).
+// ResolveConflict's announce line shares the discard-configured heartbeat sink
+// the console entry point sets, so that sink must silence it (issue #1829).
 func TestResolveConflict_AnnounceSuppressedWhenDiscardConfigured(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -271,10 +259,9 @@ func TestResolveConflict_AnnounceSuppressedWhenDiscardConfigured(t *testing.T) {
 	}
 }
 
-// TestFactory_SetHeartbeatOutPanicsAfterNew verifies the ordering contract on
-// SetHeartbeatOut (issue #1594) is enforced at runtime: calling it after New()
-// has already copied cfg into a Dispatch must panic rather than silently
-// racing or affecting only Dispatches constructed afterward.
+// New() copies cfg into the Dispatch, so a later SetHeartbeatOut would
+// silently race or reach only Dispatches built afterward. It panics instead
+// (issue #1594).
 func TestFactory_SetHeartbeatOutPanicsAfterNew(t *testing.T) {
 	dir := tempLogDir(t)
 

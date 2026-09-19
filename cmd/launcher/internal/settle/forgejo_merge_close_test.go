@@ -13,14 +13,10 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// fakeForgejoIssueServer is a minimal stateful stand-in for a Forgejo
-// instance's issue REST endpoints, tracking one issue's label set and
-// open/closed state across the GET/PUT (labels)/PATCH (state)/POST
-// (comments) calls a real merge-and-close settle run drives — unlike
-// forgejo_test.go's per-call fixed-response handlers, this needs to reflect
-// TransitionState's label swap back to verifyMerged's own GET before
-// CloseMergedIssue's GET+PATCH, and record whether the issue actually ended
-// up closed.
+// fakeForgejoIssueServer is a stateful stand-in for a Forgejo instance's issue
+// endpoints. Unlike forgejo_test.go's per-call fixed-response handlers, it must
+// reflect TransitionState's label swap back to verifyMerged's own GET before
+// CloseMergedIssue's GET and PATCH, and record whether the issue ended closed.
 type fakeForgejoIssueServer struct {
 	mu           sync.Mutex
 	state        string
@@ -96,15 +92,11 @@ func (f *fakeForgejoIssueServer) handler(t *testing.T, repoPath string, num int)
 	}
 }
 
-// TestSettle_ImmediateMergeClosesForgejoIssue is the forgejo-backed variant
-// of TestSettle_ImmediateMergeClosesIssue (issue #2259): it wires a real
-// forgejoClient (forge.NewFake there is a shared fake, not forgejo-specific)
-// pointed at an httptest server as Settle's IssueTracker, so the confirmed
-// merge case drives forgejoClient.CloseMergedIssue over a real HTTP
-// PATCH — the end-to-end path acceptance criterion #2 asks for, on top of
-// the forgejo package's own CloseMergedIssue unit tests (already landed).
-// The Code Forge stays forge.Fake (per ADR 0013, forgejo implements only the
-// IssueTracker seam — code still lands via github/git in production).
+// TestSettle_ImmediateMergeClosesForgejoIssue is the forgejo-backed variant of
+// TestSettle_ImmediateMergeClosesIssue (issue #2259): a real forgejoClient
+// pointed at an httptest server is Settle's IssueTracker, so a confirmed merge
+// drives CloseMergedIssue over a real HTTP PATCH. The Code Forge stays
+// forge.Fake because forgejo implements only the IssueTracker seam (ADR 0013).
 func TestSettle_ImmediateMergeClosesForgejoIssue(t *testing.T) {
 	const issNum = "55"
 	const repoPath = "/api/v1/repos/owner/repo"

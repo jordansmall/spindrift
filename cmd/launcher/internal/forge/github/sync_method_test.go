@@ -10,13 +10,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// prependFakeGit writes a counting-wrapper git script to a temp dir,
-// prepends that dir to PATH, and returns the dir. Each invocation of the
-// fake git records its argv to git-call-NN.txt (zero-indexed) inside the
-// dir and exits 0 unconditionally, so every git subcommand Rebase and
-// gitplumbing.GitForcePush issue (checkout, rebase/merge, push
-// --force-with-lease) succeeds. This mirrors prependFakeGH (exec_test.go)
-// but for the git binary, which Rebase also shells out to.
+// prependFakeGit puts a fake git on PATH that records each invocation's argv to
+// git-call-NN.txt (zero-indexed) in the returned dir and exits 0 unconditionally,
+// so every git subcommand Rebase and gitplumbing.GitForcePush issue succeeds.
 func prependFakeGit(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -34,8 +30,8 @@ exit 0
 	return dir
 }
 
-// readGitCallArgs reads every recorded fake-git invocation and returns each
-// as a space-joined string, in call order.
+// readGitCallArgs returns each recorded fake-git argv as one space-joined string;
+// the zero-padded file names make the glob's sorted order the call order.
 func readGitCallArgs(t *testing.T, dir string) []string {
 	t.Helper()
 	matches, err := filepath.Glob(filepath.Join(dir, "git-call-*.txt"))
@@ -53,10 +49,9 @@ func readGitCallArgs(t *testing.T, dir string) []string {
 	return calls
 }
 
-// TestRebase_SyncMethod verifies Rebase maps the sync method knob (via
-// WithSyncMethod) onto the git verb it uses to bring the PR branch up to
-// date with its base, and that leaving it unset keeps today's rebase
-// behavior byte-identical (mirroring TestMerge_MergeMethod, issue #2176).
+// TestRebase_SyncMethod pins that WithSyncMethod picks the git verb Rebase uses
+// to bring the PR branch up to date with its base, and that leaving it unset
+// still rebases (issue #2176).
 func TestRebase_SyncMethod(t *testing.T) {
 	cases := []struct {
 		name       string

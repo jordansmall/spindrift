@@ -11,9 +11,8 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 )
 
-// TestGitCheckoutRoot_NoGitAnywhere verifies gitCheckoutRoot returns "" for a
-// directory with no ".git" entry in it (called directly on the tempdir, not
-// relying on any parent -- t.TempDir() lives outside any git checkout).
+// The check runs on the tempdir itself, not on a parent: t.TempDir() lives
+// outside any git checkout, so no walk up can find a ".git" entry.
 func TestGitCheckoutRoot_NoGitAnywhere(t *testing.T) {
 	dir := t.TempDir()
 	if got := gitCheckoutRoot(dir); got != "" {
@@ -21,8 +20,6 @@ func TestGitCheckoutRoot_NoGitAnywhere(t *testing.T) {
 	}
 }
 
-// TestGitCheckoutRoot_DirWithGitIsItself verifies gitCheckoutRoot returns dir
-// itself when dir directly contains a ".git" entry.
 func TestGitCheckoutRoot_DirWithGitIsItself(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
@@ -33,10 +30,8 @@ func TestGitCheckoutRoot_DirWithGitIsItself(t *testing.T) {
 	}
 }
 
-// TestGitCheckoutRoot_NestedSubdirWalksUpToRoot verifies gitCheckoutRoot
-// walks up from a subdirectory nested under the checkout root to find the
-// ".git" entry -- doctor run from a subdirectory of a checkout must still
-// read the whole checkout.
+// Doctor run from a subdirectory of a checkout must still read the whole
+// checkout, so the lookup walks up to the ".git" entry.
 func TestGitCheckoutRoot_NestedSubdirWalksUpToRoot(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
@@ -51,10 +46,9 @@ func TestGitCheckoutRoot_NestedSubdirWalksUpToRoot(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteDriftCheck_UnsetFileReturnsNil verifies
-// registryRouteDriftCheck returns nil -- the slice-1 gate pattern -- when
-// c.registryProxyRoutesFile is unset: drift is only meaningful alongside a
-// routes file (issue #3144 slice 2).
+// Drift is only meaningful alongside a routes file, so an unset
+// registryProxyRoutesFile returns nil, the slice-1 gate pattern (issue #3144
+// slice 2).
 func TestRegistryRouteDriftCheck_UnsetFileReturnsNil(t *testing.T) {
 	c := minimalValidConfig()
 	if got := registryRouteDriftCheck(c); got != nil {
@@ -62,9 +56,7 @@ func TestRegistryRouteDriftCheck_UnsetFileReturnsNil(t *testing.T) {
 	}
 }
 
-// withDriftRepoDir points registryRouteDriftRepoDirFn at dir for the
-// duration of the test, restoring the original (production os.Getwd) seam
-// afterward.
+// The production seam behind registryRouteDriftRepoDirFn is os.Getwd.
 func withDriftRepoDir(t *testing.T, dir string) {
 	t.Helper()
 	orig := registryRouteDriftRepoDirFn
@@ -72,12 +64,10 @@ func withDriftRepoDir(t *testing.T, dir string) {
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
 }
 
-// withDriftMatchingRemote stubs registryRouteDriftOriginRemoteFn to report an
-// origin remote matching minimalValidConfig's identity (codeForge: "github",
-// repoSlug: "owner/repo") for the duration of the test, restoring the
-// original (production `git remote get-url origin`) seam afterward. Content
-// tests that don't care about identity resolution itself use this to stand
-// in for a real matching checkout without shelling out to git.
+// The stubbed remote matches minimalValidConfig's identity (codeForge:
+// "github", repoSlug: "owner/repo"), so content tests that do not care about
+// identity resolution get a matching checkout without shelling out to git.
+// The production seam is `git remote get-url origin`.
 func withDriftMatchingRemote(t *testing.T) {
 	t.Helper()
 	orig := registryRouteDriftOriginRemoteFn
@@ -85,10 +75,6 @@ func withDriftMatchingRemote(t *testing.T) {
 	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = orig })
 }
 
-// TestRegistryRouteDriftCheck_UncoveredHostFailsNamingHostAndRemedy verifies
-// a repo declaring a host no configured route covers produces a failing
-// (advisory) drift row naming that host, with a remedy naming `spindrift
-// registry discover`.
 func TestRegistryRouteDriftCheck_UncoveredHostFailsNamingHostAndRemedy(t *testing.T) {
 	repoDir := t.TempDir()
 	npmrc := "registry=https://uncovered.example.com/\n"
@@ -128,9 +114,6 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED" }
 	}
 }
 
-// TestRegistryRouteDriftCheck_FullyCoveredRepoPasses verifies a repo whose
-// every declared host is already covered by a route produces a passing
-// drift row.
 func TestRegistryRouteDriftCheck_FullyCoveredRepoPasses(t *testing.T) {
 	repoDir := t.TempDir()
 	npmrc := "registry=https://covered.example.com/\n"
@@ -164,16 +147,10 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 	}
 }
 
-// TestRegistryRouteDriftCheck_BlockGrammarRouteParsesAndReportsNoDrift pins
-// issue #3405's acceptance criterion: a route written in ADR 0048 block
-// grammar ([routes.ecosystems.<name>], rather than the retired
-// go-path/cargo-registries top-level keys) still parses cleanly through
-// registryroutes.Parse and reports no drift once it covers every host the
-// repo declares. len(checks) == 1 (rather than the check's zero-row nil
-// return) plus a passing Probe together prove the migrated grammar reached
-// the drift check rather than silently degrading down
-// TestRegistryRouteDriftCheck_UnparsableRoutesFileReturnsNil's parse-error
-// path.
+// Pins issue #3405: a route in ADR 0048 block grammar still parses through
+// registryroutes.Parse. The len(checks) == 1 assertion plus a passing Probe
+// together prove the migrated grammar reached the drift check rather than
+// degrading down the parse-error path, which returns zero rows.
 func TestRegistryRouteDriftCheck_BlockGrammarRouteParsesAndReportsNoDrift(t *testing.T) {
 	repoDir := t.TempDir()
 	npmrc := "registry=https://covered.example.com/\n"
@@ -213,10 +190,8 @@ registries = ["internal"]
 	}
 }
 
-// TestRegistryRouteDriftCheck_NoCheckoutAvailable_ReturnsNil verifies the
-// row is skipped entirely -- not a failing or passing row -- when no repo
-// checkout is available (registryRouteDriftRepoDirFn errors), since drift
-// has nothing to compare the routes file against.
+// With no checkout available, drift has nothing to compare the routes file
+// against, so the row is skipped entirely rather than failing or passing.
 func TestRegistryRouteDriftCheck_NoCheckoutAvailable_ReturnsNil(t *testing.T) {
 	orig := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return "", os.ErrNotExist }
@@ -234,11 +209,10 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NO_CHECKOUT" }
 	}
 }
 
-// TestRegistryRouteDriftCheck_EmptyRepoDirReturnsNil verifies the row is
-// skipped -- not a failing or passing row -- when the seam reports no error
-// but resolves no checkout at all (repoDir == ""), the gitCheckoutRoot "walk
-// reached the filesystem root" case: no checkout available is not the same
-// as an error resolving one, but both must suppress the row.
+// The seam reports no error but resolves no checkout (repoDir == ""), the
+// gitCheckoutRoot case where the walk reached the filesystem root. No
+// checkout available is not the same as an error resolving one, but both
+// must suppress the row.
 func TestRegistryRouteDriftCheck_EmptyRepoDirReturnsNil(t *testing.T) {
 	orig := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return "", nil }
@@ -256,10 +230,8 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_EMPTY_REPO_DIR" }
 	}
 }
 
-// TestRegistryRouteDriftCheck_UnreadableRoutesFileReturnsNil verifies the
-// row is skipped when c.registryProxyRoutesFile points at a file that can't
-// be read -- deferring to the existing registry-proxy-routes row rather than
-// this check surfacing its own read error.
+// A read error belongs to the existing registry-proxy-routes row, so this
+// check skips rather than reporting it twice.
 func TestRegistryRouteDriftCheck_UnreadableRoutesFileReturnsNil(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
@@ -269,10 +241,8 @@ func TestRegistryRouteDriftCheck_UnreadableRoutesFileReturnsNil(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteDriftCheck_UnparsableRoutesFileReturnsNil verifies the
-// row is skipped when c.registryProxyRoutesFile contains invalid TOML --
-// deferring to the existing registry-proxy-routes row rather than this
-// check surfacing its own parse error.
+// A parse error belongs to the existing registry-proxy-routes row, so this
+// check skips rather than reporting it twice.
 func TestRegistryRouteDriftCheck_UnparsableRoutesFileReturnsNil(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `not valid toml [[[`)
@@ -282,13 +252,9 @@ func TestRegistryRouteDriftCheck_UnparsableRoutesFileReturnsNil(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe verifies
-// registryRouteDriftCheckFor's Probe wraps a registrydiscover.Extract error
-// (here: malformed .cargo/config.toml) with doctor.ErrDegraded rather than
-// reporting it as an ordinary "no route covers it" finding -- an
-// indeterminate probe is distinct from a genuine drift finding.
-// registryRouteDriftCheckFor is called directly with a fixture repoDir, the
-// use its doc comment promises.
+// An indeterminate probe is distinct from a genuine drift finding, so a
+// registrydiscover.Extract error wraps doctor.ErrDegraded instead of reading
+// as an ordinary "no route covers it" result.
 func TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repoDir, ".cargo"), 0o755); err != nil {
@@ -312,13 +278,11 @@ func TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteDriftCheckFor_UncoveredHostRendersAdvisoryNotMissing
-// verifies AC2's registry-route-drift counterpart to
-// TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing
-// (bwrap_doctor_checks_test.go): a genuine drift finding ("repo names X; no
-// route covers it") renders through doctor.ReportResults as "advisory:",
-// never "MISSING:" -- the row's Advisory Tier drives that framing, so its
-// Probe error is a bare error, not a doctor.ErrDegraded wrap.
+// AC2's counterpart to
+// TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing in
+// bwrap_doctor_checks_test.go. The row's Advisory Tier drives the
+// "advisory:" framing, so a genuine drift finding carries a bare Probe
+// error, not a doctor.ErrDegraded wrap.
 func TestRegistryRouteDriftCheckFor_UncoveredHostRendersAdvisoryNotMissing(t *testing.T) {
 	repoDir := t.TempDir()
 	npmrc := "registry=https://uncovered.example.com/\n"
@@ -357,12 +321,10 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_ADVISORY_RENDER" }
 	}
 }
 
-// TestRegistryRouteDriftCheckFor_DifferingPathsOnCoveredHostIsNotDrift pins
-// that drift is host coverage only: the repo's .cargo/config.toml declares
-// two registries on one Artifactory host at different index paths, but the
-// one configured route covers that host (declaring no path at all), so the
-// Probe must succeed -- differing paths under a covered host are not a
-// drift category (ADR 0047, issue #3262).
+// Pins that drift is host coverage only. The fixture declares two registries
+// on one Artifactory host at different index paths, and the single route
+// covers that host while declaring no path, so differing paths under a
+// covered host are not a drift category (ADR 0047, issue #3262).
 func TestRegistryRouteDriftCheckFor_DifferingPathsOnCoveredHostIsNotDrift(t *testing.T) {
 	repoDir := t.TempDir()
 	writeTwoRegistryCargoFixture(t, repoDir, "artifactory.example.com")
@@ -383,11 +345,9 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_PATH_NOT_CATEGORY" }
 	}
 }
 
-// TestRegistryRouteDriftCheckFor_UncoveredHostFailureIsSilentAboutPath
-// verifies the uncovered-host finding names only the host, never the path
-// the repo declared it at -- the companion half of the "path drift is not a
-// category" pin above: absence of a path in the finding text matters just
-// as much as presence of the host.
+// The companion half of the "path drift is not a category" pin above:
+// absence of a path in the finding text matters as much as presence of the
+// host.
 func TestRegistryRouteDriftCheckFor_UncoveredHostFailureIsSilentAboutPath(t *testing.T) {
 	repoDir := t.TempDir()
 	npmrc := "registry=https://uncovered.example.com/some/path/\n"
@@ -418,14 +378,10 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED_PATH_SILENT"
 	}
 }
 
-// TestRegistryRouteDriftCheck_NonTargetCheckoutReturnsNil verifies the drift
-// row is absent when the enclosing checkout is a real git repo but its
-// origin remote does NOT match the configured Target repo (config
-// codeForge=github repoSlug="owner/repo"; checkout remote points at
-// "other/elsewhere") -- the Consumer-flake-vs-Target-repo mismatch the
-// review finding (issue #3144) flagged: without this identity gate the row
-// would report the checkout's own drift as if it were the Target repo's,
-// a false all-clear (or false failure) whenever the two roles differ.
+// The Consumer-flake-versus-Target-repo mismatch issue #3144 flagged.
+// Without this identity gate the row reports the enclosing checkout's own
+// drift as if it were the Target repo's, a false all-clear or false failure
+// whenever the two roles differ.
 func TestRegistryRouteDriftCheck_NonTargetCheckoutReturnsNil(t *testing.T) {
 	repoDir := t.TempDir()
 	mustRunGit(t, repoDir, "init")
@@ -448,24 +404,17 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NON_TARGET" }
 	}
 }
 
-// TestRegistryRouteDriftCheck_LocalForgeReadsFromAccumulationRepo verifies
-// that under CODE_FORGE=local the drift row is derived from the
-// Accumulation repo's baseBranch snapshot, never the cwd checkout:
-// registryRouteDriftRepoDirFn is stubbed to t.Fatal (the
-// TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo
-// pattern) and t.Chdir moves the process into an unrelated directory, so
-// the test fails loudly if the local path ever falls back to the
-// cwd-checkout branch. Covers both a drift and a no-drift outcome, proving
-// the same row shape (Remedy, SuccessMsg) is shared with the cwd-checkout
-// path.
+// Under CODE_FORGE=local the drift row must come from the Accumulation
+// repo's baseBranch snapshot, never the cwd checkout. The failing stub and
+// the t.Chdir into an unrelated directory both exist so a fallback to the
+// cwd-checkout branch fails loudly instead of passing from the wrong source.
+// Follows TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo.
 func TestRegistryRouteDriftCheck_LocalForgeReadsFromAccumulationRepo(t *testing.T) {
 	orig := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) {
-		// t.Error, not t.Fatal: the subtests below call this stub on their
-		// own goroutines, where FailNow on the parent t is documented
-		// misuse. Returning an error still starves the cwd-checkout path of
-		// a repo dir, so a fallback shows up as this failure, not a passing
-		// row built from the wrong source.
+		// t.Error, not t.Fatal: the subtests below call this stub on their own
+		// goroutines, where FailNow on the parent t is documented misuse.
+		// Returning an error still starves the cwd-checkout path of a repo dir.
 		t.Error("registryRouteDriftRepoDirFn called under CODE_FORGE=local; the local path must derive from the Accumulation repo, never a cwd checkout")
 		return "", errors.New("registryRouteDriftRepoDirFn must not be called under CODE_FORGE=local")
 	}
@@ -513,10 +462,9 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_COVERED" }
 	})
 }
 
-// TestRegistryRouteDriftCheck_LocalForgeMissingAccumulationRepo_ReturnsNil
-// covers AC2: a codeForgeAccumulationRepoDir that doesn't exist degrades to
-// the same nil row (skipped) the cwd-checkout path produces when no
-// checkout is available -- never a false "no drift".
+// AC2: a codeForgeAccumulationRepoDir that does not exist degrades to the
+// same skipped row the cwd-checkout path produces with no checkout
+// available, never a false "no drift".
 func TestRegistryRouteDriftCheck_LocalForgeMissingAccumulationRepo_ReturnsNil(t *testing.T) {
 	c := minimalValidLocalConfigForRoutes(filepath.Join(t.TempDir(), "does-not-exist.git"))
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -530,11 +478,9 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
 	}
 }
 
-// TestRegistryRouteDriftCheck_LocalForgeUnresolvableRef_ReturnsNil covers
-// AC2's other half: a real, reachable Accumulation repo whose baseBranch
-// names a ref it does not have also degrades to a nil row, rather than a
-// failing row surfacing a git error where a checkout-availability skip
-// belongs.
+// AC2's other half: a reachable Accumulation repo whose baseBranch names a
+// ref it does not have also skips the row, rather than failing with a git
+// error where a checkout-availability skip belongs.
 func TestRegistryRouteDriftCheck_LocalForgeUnresolvableRef_ReturnsNil(t *testing.T) {
 	accumRepo := mustLocalAccumulationRepo(t, "registry=https://uncovered.example.com/\n")
 	c := minimalValidLocalConfigForRoutes(accumRepo)
@@ -550,10 +496,6 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_BAD_REF" }
 	}
 }
 
-// TestDoctorReportChecks_WiresRegistryRouteDriftCheck verifies
-// doctorReportChecks appends registryRouteDriftCheck(c)'s row: present when
-// c.registryProxyRoutesFile is set (with a checkout available), absent when
-// it's unset.
 func TestDoctorReportChecks_WiresRegistryRouteDriftCheck(t *testing.T) {
 	withDriftRepoDir(t, t.TempDir())
 	withDriftMatchingRemote(t)
@@ -574,10 +516,8 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_WIRING" }
 	}
 }
 
-// newGitCheckoutWithRemote git-inits a fresh checkout in t.TempDir() and, when
-// remoteURL is non-empty, adds it as the "origin" remote -- the fixture shape
-// checkoutIsTargetRepo's tests need to exercise the real `git remote get-url
-// origin` seam rather than stubbing it.
+// A real checkout, not a stub, so checkoutIsTargetRepo's tests exercise the
+// actual `git remote get-url origin` seam.
 func newGitCheckoutWithRemote(t *testing.T, remoteURL string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -588,9 +528,6 @@ func newGitCheckoutWithRemote(t *testing.T, remoteURL string) string {
 	return dir
 }
 
-// TestCheckoutIsTargetRepo_GithubMatch verifies a codeForge=github config
-// matches when the checkout's origin remote is a github.com URL whose slug
-// equals c.repoSlug, in both the scp-like and https remote forms.
 func TestCheckoutIsTargetRepo_GithubMatch(t *testing.T) {
 	c := minimalValidConfig() // codeForge: "github", repoSlug: "owner/repo"
 
@@ -607,9 +544,7 @@ func TestCheckoutIsTargetRepo_GithubMatch(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_GithubMatch_CaseInsensitiveSlug verifies a
-// codeForge=github config matches when the remote's slug differs from
-// c.repoSlug only in case -- GitHub owner/repo slugs are case-insensitive.
+// GitHub owner/repo slugs are case-insensitive.
 func TestCheckoutIsTargetRepo_GithubMatch_CaseInsensitiveSlug(t *testing.T) {
 	c := minimalValidConfig() // repoSlug: "owner/repo"
 	dir := newGitCheckoutWithRemote(t, "git@github.com:Owner/Repo.git")
@@ -618,8 +553,6 @@ func TestCheckoutIsTargetRepo_GithubMatch_CaseInsensitiveSlug(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_GithubMismatch verifies a codeForge=github config
-// does not match a github.com remote naming a different slug.
 func TestCheckoutIsTargetRepo_GithubMismatch(t *testing.T) {
 	c := minimalValidConfig() // repoSlug: "owner/repo"
 	dir := newGitCheckoutWithRemote(t, "git@github.com:other/elsewhere.git")
@@ -628,9 +561,6 @@ func TestCheckoutIsTargetRepo_GithubMismatch(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_GitMatch verifies a codeForge=git config matches
-// when the remote equals c.codeForgeRemoteURL, with or without a trailing
-// ".git" on either side of the comparison.
 func TestCheckoutIsTargetRepo_GitMatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
@@ -638,7 +568,7 @@ func TestCheckoutIsTargetRepo_GitMatch(t *testing.T) {
 
 	for _, remoteURL := range []string{
 		"https://git.example.com/team/proj.git",
-		"https://git.example.com/team/proj", // no trailing ".git" -- must still match
+		"https://git.example.com/team/proj", // no trailing ".git", must still match
 	} {
 		t.Run(remoteURL, func(t *testing.T) {
 			dir := newGitCheckoutWithRemote(t, remoteURL)
@@ -649,8 +579,6 @@ func TestCheckoutIsTargetRepo_GitMatch(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_GitMismatch verifies a codeForge=git config does
-// not match a remote different from c.codeForgeRemoteURL.
 func TestCheckoutIsTargetRepo_GitMismatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
@@ -661,11 +589,9 @@ func TestCheckoutIsTargetRepo_GitMismatch(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_GitMatch_DifferentRemoteForms verifies a
-// codeForge=git config matches when the remote and c.codeForgeRemoteURL name
-// the same repo but spell it in different URL forms (scp-like ssh vs
-// ssh://) -- the raw-normalized compare fails here, so the match must come
-// from the gitremote.ParseHostSlug fallback.
+// The two remotes name the same repo in different URL forms (scp-like ssh
+// versus ssh://), so the raw-normalized compare fails and the match must
+// come from the gitremote.ParseHostSlug fallback.
 func TestCheckoutIsTargetRepo_GitMatch_DifferentRemoteForms(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
@@ -676,12 +602,9 @@ func TestCheckoutIsTargetRepo_GitMatch_DifferentRemoteForms(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_GitLocalPathMismatch pins the non-empty-parse
-// guard on the ParseHostSlug fallback (both sides parse to ("", "")): an
-// empty-equals-empty match must not identify the checkout. codeForge=git
-// with two DIFFERENT local-path remotes both parse to ("", "") via
-// gitremote.ParseHostSlug, and without the guard an EqualFold("", "") &&
-// EqualFold("", "") comparison would falsely match them.
+// Pins the non-empty-parse guard on the ParseHostSlug fallback. Two
+// different local-path remotes both parse to ("", ""), and without the guard
+// an EqualFold("", "") && EqualFold("", "") comparison falsely matches them.
 func TestCheckoutIsTargetRepo_GitLocalPathMismatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
@@ -692,9 +615,6 @@ func TestCheckoutIsTargetRepo_GitLocalPathMismatch(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_ForgejoMatch verifies a codeForge=forgejo config
-// matches when the remote's host equals c.forgejoBaseURL's host and its slug
-// equals c.repoSlug.
 func TestCheckoutIsTargetRepo_ForgejoMatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
@@ -706,10 +626,7 @@ func TestCheckoutIsTargetRepo_ForgejoMatch(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_ForgejoMatch_CaseInsensitive verifies a
-// codeForge=forgejo config matches when the remote's host and slug differ
-// from c.forgejoBaseURL's host and c.repoSlug only in case -- the forgejo
-// branch's host and slug compares are both case-insensitive.
+// The forgejo branch compares both host and slug case-insensitively.
 func TestCheckoutIsTargetRepo_ForgejoMatch_CaseInsensitive(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
@@ -721,9 +638,7 @@ func TestCheckoutIsTargetRepo_ForgejoMatch_CaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_ForgejoHostMismatch verifies a codeForge=forgejo
-// config does not match a remote on a different host than c.forgejoBaseURL,
-// even with a matching slug.
+// The slug matches here, so only the host difference can reject.
 func TestCheckoutIsTargetRepo_ForgejoHostMismatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
@@ -735,9 +650,6 @@ func TestCheckoutIsTargetRepo_ForgejoHostMismatch(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_NoOriginRemote verifies a git-init'd checkout with
-// no origin remote at all never matches -- there is nothing to compare
-// against.
 func TestCheckoutIsTargetRepo_NoOriginRemote(t *testing.T) {
 	c := minimalValidConfig()
 	dir := newGitCheckoutWithRemote(t, "")
@@ -746,9 +658,8 @@ func TestCheckoutIsTargetRepo_NoOriginRemote(t *testing.T) {
 	}
 }
 
-// TestCheckoutIsTargetRepo_LocalCodeForgeNeverMatches verifies codeForge
-// values with no remote-based Target identity (e.g. "local") never match,
-// even when the checkout has an origin remote.
+// A codeForge with no remote-based Target identity never matches, even when
+// the checkout does have an origin remote.
 func TestCheckoutIsTargetRepo_LocalCodeForgeNeverMatches(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "local"

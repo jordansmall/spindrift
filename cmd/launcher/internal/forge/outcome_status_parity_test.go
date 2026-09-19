@@ -7,15 +7,11 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// TestResearchStatusesMatchVerdictLabels guards
-// lib/prompt-contract.nix's outcomeStatusSets research row (regen-rendered
-// into outcome.ResearchStatuses, issue #2504) against silently diverging
-// from the pre-existing compiled-default research verdict vocabulary
-// (forge.ResearchVerdictLabels, verdict.go). outcome.ResearchStatuses'
-// trailing "blocked" is the research kind's own crash/no-verdict escape
-// hatch (never a configured verdict token — see verdict.go's
-// blockedVerdict), so it is stripped before comparing against the verdict
-// tokens.
+// TestResearchStatusesMatchVerdictLabels keeps lib/prompt-contract.nix's
+// outcomeStatusSets research row (rendered into outcome.ResearchStatuses,
+// issue #2504) from diverging from forge.ResearchVerdictLabels in
+// verdict.go. The trailing "blocked" is the research kind's own crash
+// escape hatch, never a configured verdict, so it is stripped first.
 func TestResearchStatusesMatchVerdictLabels(t *testing.T) {
 	if len(outcome.ResearchStatuses) == 0 {
 		t.Fatal("outcome.ResearchStatuses is empty")

@@ -13,21 +13,18 @@ import (
 	"spindrift.dev/launcher/internal/runstate"
 )
 
-// guardPromptsDir/guardRegistryPath resolve the real templates tree and
-// fragment registry from this package's own directory, the same
-// repo-root-relative convention promptassembly's own tests use (see its
-// promptsDir constant and loadTestRegistry helper) -- so this guard renders
-// through the actual templates a later edit could break, not a fixture that
-// can drift out of sync with them.
+// Both paths are relative to this package's own directory, the same convention
+// promptassembly's own tests use, so this guard renders through the actual
+// templates a later edit could break rather than a fixture that can drift out
+// of sync with them.
 const (
 	guardPromptsDir   = "../../../templates/default/prompts"
 	guardRegistryPath = "../internal/promptassembly/testdata/registry.json"
 )
 
 // guardEnv builds one orchestrator-on, fresh-work Env sitting in Assemble's
-// covered cell (mirrors promptassembly's own coveredEnv fixture), with
-// issueText forwarded as Env.IssueText -- the one axis this test varies
-// across its two Assemble calls (see loadGuardBase).
+// covered cell, mirroring promptassembly's own coveredEnv fixture. IssueText is
+// the one axis this test varies across its two Assemble calls.
 func guardEnv(issueText string) promptassembly.Env {
 	return promptassembly.Env{
 		IssueTracker:           "github",
@@ -60,8 +57,7 @@ func guardEnv(issueText string) promptassembly.Env {
 	}
 }
 
-// writeTemp writes content to a fresh file under t.TempDir() -- the
-// seeders below all take a promptFile PATH, not text, so every rendered
+// The seeders below all take a promptFile path, not text, so every rendered
 // body this test builds needs an on-disk home before it can seed anything.
 func writeTemp(t *testing.T, name, content string) string {
 	t.Helper()
@@ -72,11 +68,9 @@ func writeTemp(t *testing.T, name, content string) string {
 	return path
 }
 
-// longestCommonPrefix returns the byte-for-byte longest shared prefix
-// across every one of strs, computed purely from the strings themselves --
-// deliberately never from a value the caller already believes is that
-// prefix, so that two family members drifting apart from EACH OTHER (not
-// just from an assumed constant) still shows up here.
+// The prefix comes from the strings themselves, never from a value the caller
+// already believes is that prefix, so two family members that drift apart from
+// each other, not just from an assumed constant, still show up here.
 func longestCommonPrefix(strs ...string) string {
 	if len(strs) == 0 {
 		return ""
@@ -92,16 +86,13 @@ func longestCommonPrefix(strs ...string) string {
 	return prefix
 }
 
-// namedPromptText pairs a pass kind's label with the actual prompt text it
-// receives, for assertFamilyPrefix's diagnostics.
 type namedPromptText struct {
 	kind string
 	text string
 }
 
-// diffWindow returns a short slice of s centered on offset, for
-// assertFamilyPrefix's failure output -- printing the whole prompt (tens of
-// KB) would bury the one byte that actually matters.
+// diffWindow returns a short slice of s centered on offset. Printing the whole
+// prompt (tens of KB) in a failure would bury the one byte that matters.
 func diffWindow(s string, offset int) string {
 	const radius = 40
 	start := offset - radius
@@ -115,11 +106,8 @@ func diffWindow(s string, offset int) string {
 	return s[start:end]
 }
 
-// assertFamilyPrefix asserts every pass in the family leads with the exact
-// byte-identical block "expected" (the assembled base or review prompt),
-// failing with a diagnosis a future editor who broke prompt caching can act
-// on directly: which pass diverged, at what byte offset, and a short window
-// of both texts there -- rather than a bare boolean or a full-prompt dump.
+// expected is the assembled base or review prompt that every pass in the family
+// must lead with.
 func assertFamilyPrefix(t *testing.T, family string, passes []namedPromptText, expected string) {
 	t.Helper()
 
@@ -153,16 +141,11 @@ func assertFamilyPrefix(t *testing.T, family string, passes []namedPromptText, e
 	t.Fatalf("%s family: computed common prefix (%d bytes) does not equal the assembled %s prompt (%d bytes), though every pass individually leads with it -- the family shares MORE than the assembled prompt, which should be impossible by construction; investigate before trusting this guard", family, len(got), family, len(expected))
 }
 
-// TestPassKindsLeadWithFamilyPrefix is the end-to-end guard issue #3445
-// asks for: over the actual set of orchestrator pass kinds, every
-// implement/fix/land pass must lead with the byte-identical assembled base
-// prompt, and every review/delta-review pass must lead with the
-// byte-identical assembled review prompt -- so a later fragment or seeder
-// edit that silently reintroduces a prepend, or otherwise perturbs the
-// leading bytes, fails a test instead of only degrading prompt-cache hit
-// rate in production. Slice 4's seed_prefix_invariant_test.go guards each
-// seeder in isolation against a hand-written fixture; this asserts the
-// family-wide invariant through the real templates and fragment registry.
+// The end-to-end guard issue #3445 asks for: every implement/fix/land pass must
+// lead with the byte-identical assembled base prompt and every
+// review/delta-review pass with the assembled review prompt, so a fragment or
+// seeder edit that reintroduces a prepend fails here instead of only degrading
+// prompt-cache hit rate. seed_prefix_invariant_test.go covers seeders alone.
 func TestPassKindsLeadWithFamilyPrefix(t *testing.T) {
 	if _, err := os.Stat(guardPromptsDir); err != nil {
 		t.Fatalf("templates tree not present at %s: %v -- this guard renders nothing and asserts nothing without the real templates tree", guardPromptsDir, err)
@@ -174,10 +157,9 @@ func TestPassKindsLeadWithFamilyPrefix(t *testing.T) {
 
 	const issueText = "Fix the frobnicator so it stops double-counting widgets on retry."
 
-	// templateOnly isolates the rendered template body ALONE (Env.IssueText
-	// unset), so the layering assertion below can tell the template-body
-	// layer apart from the "# ISSUE TEXT" layer Assemble appends after it --
-	// both are baked into result.Prompt/result.ReviewPromptText together.
+	// templateOnly renders with Env.IssueText unset so the layering assertion
+	// below can tell the template body apart from the "# ISSUE TEXT" layer
+	// Assemble appends after it; both land in the same rendered string.
 	templateOnly, err := promptassembly.Assemble(guardEnv(""), reg)
 	if err != nil {
 		t.Fatalf("Assemble (no issue text): %v", err)
@@ -193,9 +175,7 @@ func TestPassKindsLeadWithFamilyPrefix(t *testing.T) {
 	basePromptFile := writeTemp(t, "base-prompt.txt", result.Prompt)
 	reviewPromptFile := writeTemp(t, "review-prompt.txt", result.ReviewPromptText)
 
-	// ---- base family: implement, fix, land ----
-
-	// implement: cold start, no run state at all.
+	// The implement pass is a cold start with no run state at all.
 	implementText := result.Prompt
 
 	fixState := runstate.RunState{
@@ -226,8 +206,6 @@ func TestPassKindsLeadWithFamilyPrefix(t *testing.T) {
 		{"fix", string(fixBytes)},
 		{"land", string(landBytes)},
 	}, result.Prompt)
-
-	// ---- review family: review round 1, review round 2, delta-review ----
 
 	reviewRound1Text := result.ReviewPromptText
 
@@ -263,21 +241,14 @@ func TestPassKindsLeadWithFamilyPrefix(t *testing.T) {
 		{"delta-review", string(deltaBytes)},
 	}, result.ReviewPromptText)
 
-	// ---- layering within each leading block: template body, then ISSUE
-	// TEXT, then (outside this section) the pass-specific seeded block ----
-
 	assertTemplateThenIssueText(t, "base", templateOnly.Prompt, result.Prompt)
 	assertTemplateThenIssueText(t, "review", templateOnly.ReviewPromptText, result.ReviewPromptText)
 }
 
-// assertTemplateThenIssueText asserts that assembled (the leading block
-// every pass kind in one family shares) is exactly templateOnly followed by
-// the "# ISSUE TEXT" section promptassembly's issueTextSection appends
-// (assemble.go) -- i.e. cross-run-stable content (the rendered template,
-// identical for every issue) precedes run-stable content (the issue
-// text, identical across a run's own passes but not across issues), which
-// in turn precedes the pass-specific block the seeders in this package
-// append. issueTextSection itself is unexported, so this checks its known
+// Cross-run-stable content (the rendered template, identical for every issue)
+// must precede run-stable content (the issue text, identical across a run's own
+// passes), which precedes the pass-specific block the seeders append.
+// promptassembly's issueTextSection is unexported, so this checks its known
 // literal header rather than reaching into promptassembly internals.
 func assertTemplateThenIssueText(t *testing.T, family, templateOnly, assembled string) {
 	t.Helper()
@@ -290,10 +261,8 @@ func assertTemplateThenIssueText(t *testing.T, family, templateOnly, assembled s
 	}
 }
 
-// scoutPromptText extracts .scout.prompt out of a rendered Result.AgentsJSON
-// string -- the scout brief isn't Result.Prompt/ReviewPromptText at all, so
-// TestScoutAndResearchPromptsLeadWithIssueText has to reach into the roster
-// JSON to get at it.
+// The scout brief is not Result.Prompt or Result.ReviewPromptText, so the
+// caller has to reach into the roster JSON to get at it.
 func scoutPromptText(t *testing.T, agentsJSON string) string {
 	t.Helper()
 	var roster map[string]struct {
@@ -309,13 +278,10 @@ func scoutPromptText(t *testing.T, agentsJSON string) string {
 	return scout.Prompt
 }
 
-// TestScoutAndResearchPromptsLeadWithIssueText extends the guard to the
-// three single-pass prompts TestPassKindsLeadWithFamilyPrefix's two
-// families (base and review) don't reach: research, self-contained
-// research, and the scout roster prompt. None of the three has a seeder or
-// a multi-pass family of its own, so the assertion here is layering
-// (rendered template body, then the "# ISSUE TEXT" section
-// assertTemplateThenIssueText already checks), not a prefix shared across
+// This extends issue #3445's guard to the three single-pass prompts the base
+// and review families do not reach: research, self-contained research, and the
+// scout roster prompt. None of the three has a seeder or a multi-pass family of
+// its own, so the assertion here is layering, not a prefix shared across
 // several passes.
 func TestScoutAndResearchPromptsLeadWithIssueText(t *testing.T) {
 	if _, err := os.Stat(guardPromptsDir); err != nil {
@@ -364,10 +330,10 @@ func TestScoutAndResearchPromptsLeadWithIssueText(t *testing.T) {
 	})
 
 	t.Run("scout", func(t *testing.T) {
-		// scout-prompt.md is the one subagent prompt referencing
-		// ${ISSUE_TEXT} directly rather than riding Assemble's automatic
-		// append (docs/reference.md) -- so it needs a roster entry wired up
-		// to actually render, unlike the base/review prompts above.
+		// scout-prompt.md is the one subagent prompt referencing ${ISSUE_TEXT}
+		// directly rather than riding Assemble's automatic append
+		// (docs/reference.md), so it needs a roster entry wired up to render at
+		// all, unlike the base and review prompts above.
 		without := guardEnv("")
 		without.AgentsJSONTemplate = `{"scout":{"model":"opus"}}`
 		without.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`

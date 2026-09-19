@@ -13,10 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/runstate"
 )
 
-// TestDeltaReviewBlockNoteEmptyFindings verifies deltaReviewBlockNote stays
-// usable even when the delta-review pass's own findings are empty -- an
-// outcome note with no findings text still owes the reader a sentence
-// explaining why the run stopped.
+// deltaReviewBlockNote must return a sentence even for empty findings, so
+// the outcome line still says why the run stopped.
 func TestDeltaReviewBlockNoteEmptyFindings(t *testing.T) {
 	got := deltaReviewBlockNote("")
 	if got == "" {
@@ -27,9 +25,7 @@ func TestDeltaReviewBlockNoteEmptyFindings(t *testing.T) {
 	}
 }
 
-// TestDeltaReviewBlockNoteCollapsesMultilineFindings verifies every
-// whitespace run -- newlines included -- collapses to a single space, since
-// outcome.Outcome.Line's grammar is line-oriented and an embedded newline
+// outcome.Outcome.Line's grammar is line-oriented, so an embedded newline
 // would corrupt the outcome line.
 func TestDeltaReviewBlockNoteCollapsesMultilineFindings(t *testing.T) {
 	findings := "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check\n\tsecond line"
@@ -44,14 +40,11 @@ func TestDeltaReviewBlockNoteCollapsesMultilineFindings(t *testing.T) {
 	}
 }
 
-// TestDeltaReviewBlockNoteTruncatesLongInputOnRuneBoundary verifies a
-// runaway reviewer message is bounded rather than left to produce an
-// unbounded outcome line, and that the cut point never splits a multi-byte
-// rune -- a byte-index truncation of a message ending in non-ASCII text
-// could otherwise corrupt the last character into invalid UTF-8.
+// A byte-index truncation of a message ending in non-ASCII text would cut
+// the last character into invalid UTF-8.
 func TestDeltaReviewBlockNoteTruncatesLongInputOnRuneBoundary(t *testing.T) {
-	// 猫 is a 3-byte rune; repeating it past the cap exercises the
-	// rune-boundary requirement byte-index truncation would violate.
+	// 猫 is a 3-byte rune, so repeating it past the cap catches a truncation
+	// that cuts mid-rune.
 	findings := strings.Repeat("猫", 2000)
 	got := deltaReviewBlockNote(findings)
 
@@ -66,9 +59,6 @@ func TestDeltaReviewBlockNoteTruncatesLongInputOnRuneBoundary(t *testing.T) {
 	}
 }
 
-// TestDeltaReviewBlockNoteShortInputUntruncated verifies input under the cap
-// passes through with only whitespace collapsing applied, no truncation
-// marker appended.
 func TestDeltaReviewBlockNoteShortInputUntruncated(t *testing.T) {
 	got := deltaReviewBlockNote("VERDICT: BLOCK\n\n## Blocking\n- run.go:1 -- nit")
 	if strings.HasSuffix(got, "…") {
@@ -76,10 +66,8 @@ func TestDeltaReviewBlockNoteShortInputUntruncated(t *testing.T) {
 	}
 }
 
-// TestScanPassOutcomeReturnsLastMatch verifies scanPassOutcome, like
-// scanPassLog's own hasOutcome scan, takes the LAST outcome line in the
-// rendered log -- e.g. a resumed session that re-emits its final line more
-// than once -- rather than the first.
+// scanPassOutcome takes the last outcome line, not the first, because a
+// resumed session can re-emit its final line more than once.
 func TestScanPassOutcomeReturnsLastMatch(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
@@ -98,9 +86,8 @@ func TestScanPassOutcomeReturnsLastMatch(t *testing.T) {
 	}
 }
 
-// TestScanPassOutcomeNoMatch verifies scanPassOutcome degrades to
-// (Outcome{}, false) on a log with no outcome line, mirroring scanPassLog's
-// own hasOutcome=false case, rather than erroring.
+// scanPassOutcome returns (Outcome{}, false) for a log with no outcome line
+// rather than erroring, matching scanPassLog's own hasOutcome=false case.
 func TestScanPassOutcomeNoMatch(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
@@ -115,9 +102,6 @@ func TestScanPassOutcomeNoMatch(t *testing.T) {
 	}
 }
 
-// TestSeedDeltaReviewPromptIncludesTriggerAndDelta verifies the seeded
-// prompt names why the gate fired, the land delta's own summary, and the
-// specific paths the delta went beyond the approving reviewer's findings.
 func TestSeedDeltaReviewPromptIncludesTriggerAndDelta(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -162,10 +146,8 @@ func TestSeedDeltaReviewPromptIncludesTriggerAndDelta(t *testing.T) {
 	}
 }
 
-// TestSeedDeltaReviewPromptFencesFindingsAndStatesTerminal verifies the
-// prior round's findings are quoted verbatim inside a fence (not parsed as
-// host structure) and the prompt tells the reviewer its verdict is
-// terminal -- no further fix lap either way.
+// The prior round's findings go inside a fence so the reviewer reads them as
+// quoted text rather than as host structure.
 func TestSeedDeltaReviewPromptFencesFindingsAndStatesTerminal(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -197,10 +179,9 @@ func TestSeedDeltaReviewPromptFencesFindingsAndStatesTerminal(t *testing.T) {
 	}
 }
 
-// TestSeedDeltaReviewPromptOmitsDeltaFocusForInvalidAnchor verifies a
-// missing/invalid ReviewedCommitAnchor degrades to omitting the delta-focus
-// section -- the same fail-open convention seedReviewPromptFromState
-// follows -- rather than erroring.
+// seedDeltaReviewPrompt omits the delta-focus section when
+// ReviewedCommitAnchor is missing or invalid rather than erroring.
+// seedReviewPromptFromState follows the same fail-open convention.
 func TestSeedDeltaReviewPromptOmitsDeltaFocusForInvalidAnchor(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")

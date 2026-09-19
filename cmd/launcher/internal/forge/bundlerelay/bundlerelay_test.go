@@ -14,10 +14,10 @@ import (
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
-// localClone returns a clone closure that does a plain local `git clone
-// bare dir` -- standing in for a backend's own gh/token-authenticated
-// clone, since Relay's contract only requires that dir end up a working
-// clone of the target repo, not how it got there.
+// localClone returns a clone closure that does a plain local `git clone bare
+// dir`, standing in for a backend's own gh/token-authenticated clone: Relay's
+// contract only requires that dir end up a working clone of the target repo,
+// not how it got there.
 func localClone(bare string) func(dir string) error {
 	return func(dir string) error {
 		if _, err := exec.Command("git", "clone", "--no-single-branch", bare, dir).CombinedOutput(); err != nil {
@@ -28,9 +28,9 @@ func localClone(bare string) func(dir string) error {
 }
 
 // seedRelayBundleCommits mirrors forgetest.SeedRelayBundle but seeds branch
-// with one commit per subject in subjects, in order, then writes a bundle of
-// base..branch -- letting a test prove CommitSubjects preserves oldest-first
-// order across more than one commit, not just the trivial single-commit case.
+// with one commit per subject, in order, so a test can prove CommitSubjects
+// preserves oldest-first order across more than one commit rather than only
+// the trivial single-commit case.
 func seedRelayBundleCommits(t *testing.T, bare, base, outboxDir, branch string, subjects ...string) {
 	t.Helper()
 	work := t.TempDir()
@@ -52,25 +52,17 @@ func newBundleRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 	repo := forgetest.NewGitRepoFixture(t, "main")
-	// A raw `git init --bare` leaves HEAD pointing at whatever
-	// init.defaultBranch happened to be at creation time (often "master"),
-	// regardless of which branch NewGitRepoFixture actually pushed -- unlike
-	// a real forge remote, which always keeps HEAD correctly pointed at its
-	// actual default branch. Point it at "main" explicitly so a
-	// --no-single-branch clone of repo.Bare (localClone) resolves "main" as
-	// a local branch, not just the remote-tracking "origin/main" --
-	// CommitSubjects's base argument needs "main" itself to resolve for
-	// `git log base..ref` to work, the same way it would against a real
-	// forge clone.
+	// A raw `git init --bare` leaves HEAD at whatever init.defaultBranch was
+	// (often "master") regardless of the branch NewGitRepoFixture pushed,
+	// unlike a real forge remote. Point it at "main" so a --no-single-branch
+	// clone resolves "main" as a local branch, not just origin/main, which
+	// CommitSubjects's base argument needs for `git log base..ref`.
 	if out, err := exec.Command("git", "-C", repo.Bare, "symbolic-ref", "HEAD", "refs/heads/main").CombinedOutput(); err != nil {
 		t.Fatalf("set bare repo HEAD to refs/heads/main: %v: %s", err, out)
 	}
 	return repo
 }
 
-// TestRelay_PushesRefToOrigin asserts a valid bundle relays ref to origin
-// via the caller-supplied clone closure, and origin's ref ends up pointing
-// at the bundled commit.
 func TestRelay_PushesRefToOrigin(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
@@ -86,10 +78,8 @@ func TestRelay_PushesRefToOrigin(t *testing.T) {
 	}
 }
 
-// TestRelay_InvalidRefErrorsBeforeFilesystemWork asserts an empty or
-// dash-prefixed ref is rejected up front, before Relay ever touches the
-// filesystem (outboxDir is a nonexistent path here, so any filesystem work
-// would itself fail differently).
+// outboxDir is a nonexistent path, so any filesystem work Relay did before
+// rejecting the ref would fail with a different error.
 func TestRelay_InvalidRefErrorsBeforeFilesystemWork(t *testing.T) {
 	for _, ref := range []string{"", "-x"} {
 		t.Run(ref, func(t *testing.T) {
@@ -111,8 +101,6 @@ func TestRelay_InvalidRefErrorsBeforeFilesystemWork(t *testing.T) {
 	}
 }
 
-// TestRelay_MissingBundleErrors asserts an empty outbox (the Box never wrote
-// a bundle) blocks the seam via an error that wraps forge.ErrBundleNotFound.
 func TestRelay_MissingBundleErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
@@ -126,9 +114,8 @@ func TestRelay_MissingBundleErrors(t *testing.T) {
 	}
 }
 
-// TestRelay_MissingOutboxDirErrors asserts a wholly-absent outbox directory
-// collapses into the same forge.ErrBundleNotFound case as a present dir with
-// no bundle file in it.
+// A wholly-absent outbox directory must collapse into the same
+// forge.ErrBundleNotFound case as a present dir holding no bundle file.
 func TestRelay_MissingOutboxDirErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := filepath.Join(t.TempDir(), "does-not-exist")
@@ -142,8 +129,8 @@ func TestRelay_MissingOutboxDirErrors(t *testing.T) {
 	}
 }
 
-// TestRelay_MalformedBundleErrors asserts a corrupt bundle file is rejected
-// by `git bundle verify` with a generic error, not forge.ErrBundleNotFound.
+// A corrupt bundle file must fail `git bundle verify` with a generic error,
+// never forge.ErrBundleNotFound, which callers treat as "the Box wrote none".
 func TestRelay_MalformedBundleErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
@@ -158,8 +145,6 @@ func TestRelay_MalformedBundleErrors(t *testing.T) {
 	}
 }
 
-// TestRelay_CloneErrorPropagatesVerbatim asserts a clone closure's own
-// fully-formatted error is returned unchanged, not re-wrapped by Relay.
 func TestRelay_CloneErrorPropagatesVerbatim(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
@@ -177,8 +162,6 @@ func TestRelay_CloneErrorPropagatesVerbatim(t *testing.T) {
 	}
 }
 
-// TestCommitSubjects_ReturnsSubjectOldestFirst asserts a single-commit branch
-// yields that one commit's subject.
 func TestCommitSubjects_ReturnsSubjectOldestFirst(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
@@ -195,10 +178,8 @@ func TestCommitSubjects_ReturnsSubjectOldestFirst(t *testing.T) {
 	}
 }
 
-// TestCommitSubjects_MultipleCommitsOldestFirst asserts a multi-commit branch
-// returns subjects in commit order (oldest first), not reversed -- proving
-// the --reverse flag on the underlying `git log` actually took effect rather
-// than happening to pass with a single commit where order is unobservable.
+// Order is unobservable with a single commit, so only two commits prove the
+// --reverse flag on the underlying `git log` took effect.
 func TestCommitSubjects_MultipleCommitsOldestFirst(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
@@ -215,25 +196,19 @@ func TestCommitSubjects_MultipleCommitsOldestFirst(t *testing.T) {
 	}
 }
 
-// TestCommitSubjects_ResolvesNonDefaultBaseBranch asserts CommitSubjects
-// resolves base even when base is not the scratch clone's default (HEAD)
-// branch -- "non-default" here meaning whatever branch the clone's HEAD
-// actually points at, "main" in this harness. A --no-single-branch clone
-// (localClone) only checks out a local branch for the clone's default
-// branch; every other branch is fetched as a remote-tracking
-// origin/<branch>, never a local branch of the same name. This matters
-// because a Target's BASE_BRANCH config need not be its default branch --
-// before the fix, `git log base..ref` against the bare base name failed for
-// any such non-default base with an "unknown revision" error, since base
-// only existed as origin/base in the scratch clone.
+// A Target's BASE_BRANCH config need not be its default branch, and a
+// --no-single-branch clone only checks out a local branch for the default one;
+// every other branch arrives as origin/<branch>. Before the fix, `git log
+// base..ref` against the bare base name failed with "unknown revision" for any
+// non-default base.
 func TestCommitSubjects_ResolvesNonDefaultBaseBranch(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
 	branch := "agent/issue-2447"
 
-	// Push "release" as a second branch off "main" directly into repo.Bare,
-	// without ever touching HEAD there -- "main" stays the clone's default
-	// branch and "release" is a genuine non-default one.
+	// Push "release" into repo.Bare without touching HEAD there, so "main"
+	// stays the clone's default branch and "release" is a genuine non-default
+	// one.
 	work := t.TempDir()
 	forgetest.Run(t, "", "clone", repo.Bare, work)
 	forgetest.Run(t, work, "checkout", "-b", "release")
@@ -251,9 +226,8 @@ func TestCommitSubjects_ResolvesNonDefaultBaseBranch(t *testing.T) {
 	}
 }
 
-// TestCommitSubjects_MissingBundleErrors asserts an empty outbox (the Box
-// never wrote a bundle) errors via forge.ErrBundleNotFound, mirroring Relay's
-// own TestRelay_MissingBundleErrors.
+// Mirrors TestRelay_MissingBundleErrors: both entry points must report a
+// missing bundle the same way.
 func TestCommitSubjects_MissingBundleErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
@@ -267,10 +241,8 @@ func TestCommitSubjects_MissingBundleErrors(t *testing.T) {
 	}
 }
 
-// TestCommitSubjects_MalformedBundleErrors asserts a corrupt bundle file is
-// rejected by `git bundle verify` with a generic error, not
-// forge.ErrBundleNotFound, mirroring Relay's own
-// TestRelay_MalformedBundleErrors.
+// Mirrors TestRelay_MalformedBundleErrors: both entry points must keep a
+// corrupt bundle distinct from a missing one.
 func TestCommitSubjects_MalformedBundleErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
@@ -285,9 +257,8 @@ func TestCommitSubjects_MalformedBundleErrors(t *testing.T) {
 	}
 }
 
-// TestCommitSubjects_DoesNotMutateOrigin asserts CommitSubjects never pushes
-// or otherwise mutates repo.Bare -- unlike Relay, whose whole job is to land
-// ref there, CommitSubjects only reads what the bundle carries.
+// Unlike Relay, whose job is to land ref on origin, CommitSubjects only reads
+// what the bundle carries.
 func TestCommitSubjects_DoesNotMutateOrigin(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
@@ -304,14 +275,11 @@ func TestCommitSubjects_DoesNotMutateOrigin(t *testing.T) {
 	}
 }
 
-// installGitLogStderrNoiseShim puts a "git" shim ahead of the real one on
-// PATH that, for a `git ... log ...` invocation only (matching CommitSubjects'
-// own `git -C dir log ...` shape, where $3 is the subcommand), first writes
-// noise to stderr and then execs the real git log with the same arguments
-// unchanged, so stdout still carries the genuine commit subject(s). Every
-// other subcommand (clone, rev-parse, bundle, fetch, checkout) delegates to
-// the real git binary untouched -- this mirrors
-// git_test.go's installHangingGitRebaseShim.
+// installGitLogStderrNoiseShim puts a "git" shim ahead of the real one on PATH
+// that writes noise to stderr for a `git ... log ...` invocation only, matching
+// CommitSubjects' own `git -C dir log ...` shape where $3 is the subcommand. It
+// then execs the real git unchanged, so stdout still carries the genuine commit
+// subjects and every other subcommand is untouched.
 func installGitLogStderrNoiseShim(t *testing.T, noise string) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
@@ -332,12 +300,9 @@ func installGitLogStderrNoiseShim(t *testing.T, noise string) {
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// TestCommitSubjects_IgnoresGitStderrNoise asserts that ambient stderr noise
-// from the underlying `git log` invocation (e.g. an advice/hint message)
-// never leaks into the parsed subjects slice -- that slice becomes the
-// reconstructed PR's title (first subject) and body bullet list in settle's
-// reconstructPRText, so stderr noise sorting first would otherwise become a
-// bogus fake PR title.
+// The subjects slice becomes the reconstructed PR's title (first subject) and
+// body bullets in settle's reconstructPRText, so a `git log` hint leaking into
+// it and sorting first would become a bogus PR title.
 func TestCommitSubjects_IgnoresGitStderrNoise(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()

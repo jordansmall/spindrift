@@ -14,10 +14,9 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// TestNewForgejoCodeForge_ImplementsPRForge asserts that NewForgejoCodeForge
-// satisfies forge.PRForge — the Forgejo Code Forge is the second full-parity
-// PRForge backend beside github (issue #1961): it opens PRs, watches CI, and
-// drives merge/auto-merge/draft-ready through the same seam.
+// Forgejo is the second full-parity PRForge backend beside github (issue
+// #1961), so it must open PRs, watch CI, and drive merge/auto-merge/draft-ready
+// through the same seam.
 func TestNewForgejoCodeForge_ImplementsPRForge(t *testing.T) {
 	var cf forge.CodeForge = forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: "https://codeberg.org",
@@ -29,15 +28,11 @@ func TestNewForgejoCodeForge_ImplementsPRForge(t *testing.T) {
 	}
 }
 
-// forgejoCodeForgeHarness is a forgetest.CodeForgeHarness backed by a real
-// bare git repo (forgetest.GitRepoFixture) for AgentBranch/BranchExists/
-// Rebase's git plumbing, plus fakeForgejo (forgejo_fake_test.go) standing in
-// for the Forgejo REST API that Merge and Rebase's PR-head resolution now
-// drive (slice 6, issue #1961): Merge/Rebase take a PR URL, not a raw branch
-// name, so SeedLandable seeds both a real git branch and an open PR whose
-// head ref names it. fakeForgejo's mergeHook performs a genuine git merge
-// against the bare repo so a scripted merge outcome (land or conflict) is
-// backed by the same git plumbing production Rebase uses directly.
+// The harness needs both halves because Merge and Rebase take a PR URL, not a
+// raw branch name (slice 6, issue #1961): a real bare git repo for the git
+// plumbing, and fakeForgejo for the REST calls that resolve the PR head. Its
+// mergeHook runs a genuine git merge against the bare repo, so a land or
+// conflict outcome comes from the same git plumbing production Rebase uses.
 type forgejoCodeForgeHarness struct {
 	t    *testing.T
 	repo *forgetest.GitRepoFixture
@@ -71,9 +66,8 @@ func newForgejoCodeForgeHarness(t *testing.T) *forgejoCodeForgeHarness {
 
 func (h *forgejoCodeForgeHarness) Forge() forge.CodeForge { return h.cf }
 
-// Unreachable returns a forge whose REST base URL points at a closed
-// httptest server (so Probe's REST call fails) and whose git remote points
-// at a nonexistent path.
+// The server is closed on purpose so Probe's REST call fails, and the git
+// remote path does not exist.
 func (h *forgejoCodeForgeHarness) Unreachable() forge.CodeForge {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	srv.Close()
@@ -92,10 +86,8 @@ func (h *forgejoCodeForgeHarness) BranchPrefix() string { return "agent/issue-" 
 
 func (h *forgejoCodeForgeHarness) branchName(num string) string { return h.BranchPrefix() + num }
 
-// SeedLandable seeds a real git branch (one commit ahead of main, carrying
-// num's marker) and an open PR whose head ref names that branch, and
-// returns the PR's html_url — the ref Merge/Rebase expect now that both are
-// PR-URL/REST-based.
+// Both a real branch (one commit ahead of main, carrying num's marker) and an
+// open PR naming it are needed: Merge and Rebase take the returned html_url.
 func (h *forgejoCodeForgeHarness) SeedLandable(num string) string {
 	h.repo.SeedBranch(h.branchName(num), num)
 	return h.fake.SeedOpenPR(num)
@@ -109,30 +101,26 @@ func (h *forgejoCodeForgeHarness) Rebased(num string) bool {
 	return h.repo.Rebased(h.branchName(num))
 }
 
-// FailNextMerge provokes a genuine conflict via GitRepoFixture.ConflictBase
-// (so realMerge's git merge actually fails) and flips the PR's mergeable
-// flag false in the fake (so the adapter's classifyMergeFailure, which
-// queries Mergeable over REST after the merge POST's non-2xx response,
-// reports forge.ErrMergeConflict rather than forge.ErrMergeBlockedByChecks).
+// ConflictBase makes realMerge's git merge genuinely fail; the mergeable flag
+// must also go false because classifyMergeFailure queries Mergeable over REST
+// after the non-2xx merge POST, and without it reports
+// forge.ErrMergeBlockedByChecks instead of forge.ErrMergeConflict.
 func (h *forgejoCodeForgeHarness) FailNextMerge(ref string) {
 	num := prNumFromURL(ref)
 	h.repo.ConflictBase(num)
 	h.fake.SetMergeable(num, false)
 }
 
-// FailNextRebase provokes a genuine conflict via GitRepoFixture.ConflictBase
-// — the underlying git adapter's real `git rebase` discovers it directly,
-// unscripted, and maps it to forge.ErrMergeConflict itself.
+// Nothing is scripted here: the git adapter's real rebase discovers the
+// conflict and maps it to forge.ErrMergeConflict itself.
 func (h *forgejoCodeForgeHarness) FailNextRebase(ref string) {
 	h.repo.ConflictBase(prNumFromURL(ref))
 }
 
-// realMerge is fakeForgejo's mergeHook: a genuine git merge of num's agent
-// branch onto main against the bare repo backing h.repo, mirroring the
-// github adapter's fake-gh-codeforge.sh `pr-merge` case. On success it
-// pushes the merge commit back to main; on conflict it aborts the merge and
-// returns an error, which the fake's merge route turns into a non-2xx
-// response for the adapter's classifyMergeFailure to interpret.
+// realMerge is fakeForgejo's mergeHook, mirroring the github adapter's
+// fake-gh-codeforge.sh pr-merge case. The error it returns on conflict is what
+// the fake's merge route turns into the non-2xx response that the adapter's
+// classifyMergeFailure interprets.
 func (h *forgejoCodeForgeHarness) realMerge(num string) error {
 	h.t.Helper()
 	work := h.t.TempDir()
@@ -157,12 +145,9 @@ func TestForgejoClient_CodeForgeContract(t *testing.T) {
 	forgetest.RunCodeForgeContract(t, newForgejoCodeForgeHarness(t))
 }
 
-// TestForgejoCodeForge_Probe_AuthFailure verifies the CodeForge seam's Probe
-// surfaces forge.ErrAuthFailure (rather than wrapping it in ErrRepoNotFound)
-// when Forgejo rejects the credentials -- the CodeForge contract suite only
-// exercises success and unreachable-backend Probe, so this covers the 401/403
-// discrimination branch forgejoCodeForge.Probe shares with the tracker's own
-// (already-tested) Probe.
+// The CodeForge contract suite only exercises success and unreachable-backend
+// Probe, so this covers the 401/403 branch: rejected credentials must report
+// forge.ErrAuthFailure, not ErrRepoNotFound.
 func TestForgejoCodeForge_Probe_AuthFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -179,9 +164,6 @@ func TestForgejoCodeForge_Probe_AuthFailure(t *testing.T) {
 	}
 }
 
-// TestForgejoCodeForge_BranchProtected_Protected verifies BranchProtected
-// reports (true, nil) when Forgejo's branch_protections list endpoint
-// returns a rule whose rule_name matches branch exactly.
 func TestForgejoCodeForge_BranchProtected_Protected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/branch_protections" {
@@ -211,10 +193,8 @@ func TestForgejoCodeForge_BranchProtected_Protected(t *testing.T) {
 	}
 }
 
-// TestForgejoCodeForge_BranchProtected_GlobRuleName verifies BranchProtected
-// matches a rule_name glob (e.g. "release/*") against branch, not just a
-// literal branch name -- Forgejo's rule_name is a glob, so a branch can be
-// protected without ever appearing verbatim as a rule_name.
+// Forgejo's rule_name is a glob, so a branch can be protected without ever
+// appearing verbatim as a rule_name.
 func TestForgejoCodeForge_BranchProtected_GlobRuleName(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -241,9 +221,8 @@ func TestForgejoCodeForge_BranchProtected_GlobRuleName(t *testing.T) {
 	}
 }
 
-// TestForgejoCodeForge_BranchProtected_NotProtected verifies BranchProtected
-// reports the definitive, successful (false, nil) result -- not an error --
-// when no listed rule_name matches branch.
+// No matching rule_name is a definitive answer, so BranchProtected must report
+// (false, nil) rather than an error.
 func TestForgejoCodeForge_BranchProtected_NotProtected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -270,12 +249,10 @@ func TestForgejoCodeForge_BranchProtected_NotProtected(t *testing.T) {
 	}
 }
 
-// TestForgejoCodeForge_BranchProtected_NoRules verifies BranchProtected
-// reports the definitive, successful (false, nil) result -- not an error --
-// when Forgejo's branch_protections list endpoint returns 200 with an empty
-// array, meaning the repo has no protection rules at all. This is the
-// genuine "no rules" signal on Gitea/Forgejo's list endpoint, distinct from
-// a 404 (see TestForgejoCodeForge_BranchProtected_GenericNotFound).
+// A 200 with an empty array is the genuine "no rules" signal on
+// Gitea/Forgejo's list endpoint, so BranchProtected must report (false, nil).
+// It is distinct from a 404 (see
+// TestForgejoCodeForge_BranchProtected_GenericNotFound).
 func TestForgejoCodeForge_BranchProtected_NoRules(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -302,14 +279,11 @@ func TestForgejoCodeForge_BranchProtected_NoRules(t *testing.T) {
 	}
 }
 
-// TestForgejoCodeForge_BranchProtected_GenericNotFound verifies
-// BranchProtected surfaces a non-nil error -- never a false "not
-// protected" -- when the branch_protections list endpoint 404s. Unlike
-// GitHub's per-branch endpoint, Forgejo's list endpoint always returns 200
-// with an empty array for a repo with no rules (see
-// TestForgejoCodeForge_BranchProtected_NoRules), so a 404 here means the
-// repo or endpoint couldn't be resolved at all (old server, wrong mount,
-// invisible repo) -- a genuine probe failure, not a definitive answer.
+// Unlike GitHub's per-branch endpoint, Forgejo's list endpoint returns 200 with
+// an empty array for a repo with no rules, so a 404 means the repo or endpoint
+// could not be resolved at all (old server, wrong mount, invisible repo). That
+// is a probe failure, so BranchProtected must error rather than report a false
+// "not protected".
 func TestForgejoCodeForge_BranchProtected_GenericNotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -334,9 +308,8 @@ func TestForgejoCodeForge_BranchProtected_GenericNotFound(t *testing.T) {
 	}
 }
 
-// TestForgejoCodeForge_BranchProtected_ProbeFailure verifies BranchProtected
-// surfaces a non-nil error -- never a false "not protected" -- when the
-// probe itself fails to determine the answer, e.g. a 403 auth failure.
+// A 403 leaves the answer undetermined, so BranchProtected must error rather
+// than report a false "not protected".
 func TestForgejoCodeForge_BranchProtected_ProbeFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

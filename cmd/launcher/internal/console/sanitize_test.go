@@ -2,10 +2,9 @@ package console
 
 import "testing"
 
-// TestSanitizeControlSequences_StripsOSCAndKeepsUTF8 verifies the OSC
-// "set window title" sequence is stripped and a multi-byte UTF-8 rune
-// adjacent to it survives untouched (#721) — a byte-range check for C1
-// controls would otherwise misfire on UTF-8 continuation bytes.
+// This test pins #721: a byte-range check for C1 controls misfires on
+// UTF-8 continuation bytes, so a rune next to a stripped OSC sequence
+// must survive untouched.
 func TestSanitizeControlSequences_StripsOSCAndKeepsUTF8(t *testing.T) {
 	in := "café \x1b]0;pwned\x07 done"
 	want := "café  done"
@@ -14,10 +13,10 @@ func TestSanitizeControlSequences_StripsOSCAndKeepsUTF8(t *testing.T) {
 	}
 }
 
-// TestSanitizeControlSequences_LeaksNonCSIOSCBodyButStripsESC documents the
-// deliberate scope noted at sanitize.go's ESC case (#1018): a DCS
-// introducer's body and terminator framing leak as visible text, but every
-// raw ESC byte is still stripped so no sequence reaches the terminal.
+// This test pins the deliberate scope noted at sanitize.go's ESC case
+// (#1018): a DCS introducer's body and terminator framing leak as visible
+// text, but every raw ESC byte is still stripped so no sequence reaches
+// the terminal.
 func TestSanitizeControlSequences_LeaksNonCSIOSCBodyButStripsESC(t *testing.T) {
 	in := "before\x1bPmalicious\x1b\\after"
 	want := "beforePmalicious\\after"
@@ -26,9 +25,8 @@ func TestSanitizeControlSequences_LeaksNonCSIOSCBodyButStripsESC(t *testing.T) {
 	}
 }
 
-// TestSanitizeControlSequences_PreservesNewlineAndTab verifies structural
-// whitespace survives sanitization even though it is technically a C0
-// control character, so rendered transcript formatting is unaffected.
+// Newline and tab are C0 controls but must survive, or rendered transcript
+// formatting breaks.
 func TestSanitizeControlSequences_PreservesNewlineAndTab(t *testing.T) {
 	in := "line one\n\tindented"
 	if got := SanitizeControlSequences(in); got != in {
@@ -36,11 +34,9 @@ func TestSanitizeControlSequences_PreservesNewlineAndTab(t *testing.T) {
 	}
 }
 
-// TestSanitizeControlSequences_RawC1SurvivesAsReplacementChar verifies a
-// raw invalid C1 byte (0x9b, 0x9d) decodes as U+FFFD, which is outside
-// the 0x80-0x9f range check, so it survives sanitization rather than
-// being stripped (#1019) — documented, harmless behavior, not a strip
-// bug.
+// A raw invalid C1 byte decodes as U+FFFD, outside the 0x80-0x9f range
+// check, so it survives instead of being stripped (#1019). That is
+// documented harmless behavior, not a strip bug.
 func TestSanitizeControlSequences_RawC1SurvivesAsReplacementChar(t *testing.T) {
 	for _, raw := range []byte{0x9b, 0x9d} {
 		in := string([]byte{'a', raw, 'b'})

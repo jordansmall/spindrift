@@ -7,15 +7,10 @@ import (
 	"testing"
 )
 
-// resolveLayoutForbiddenCallees names the functions resolveLayout's call
-// graph must never reach: the two globals that pick a lipgloss renderer
-// (colorProfile, rendererFor), the two ways a Role turns into rendered text
-// (roleStyle, styledText), and the one remaining helper that still pays for
-// a real lipgloss.Style.Render (renderBoxedColumn). Reaching any of them
-// from resolveLayout is the #3019 regression itself: a render happening
-// while resolveLayout computes the console's render geometry, rather than
-// the pure predictions (headerGeometry, detailModalLabelLinesCappedWith
-// driven by plainText) that replaced it.
+// Reaching any of these from resolveLayout is the #3019 regression itself: a
+// lipgloss render (a renderer pick, a Role turned into styled text, or a real
+// Style.Render) happening while resolveLayout computes the console's render
+// geometry, instead of the pure predictions that replaced it.
 var resolveLayoutForbiddenCallees = map[string]bool{
 	"colorProfile":      true,
 	"rendererFor":       true,
@@ -24,36 +19,17 @@ var resolveLayoutForbiddenCallees = map[string]bool{
 	"renderBoxedColumn": true,
 }
 
-// TestResolveLayoutCallGraphNeverRenders walks the package-local call graph
-// reachable from resolveLayout and fails if it reaches a function named in
-// resolveLayoutForbiddenCallees, or any function whose body calls a
-// `.Render(` method — the two ways #3019's fix (predicting a rendered
-// line/label count instead of rendering and counting) could regress
-// without any behavioral test noticing, since the predicted and rendered
-// output agree by construction
-// (TestHeaderGeometry_MirrorsRenderBoxedHeader and
-// TestDetailModalLabelLinesWith_PlainText_MatchesStyledStripped pin that).
-//
-// An edge is recorded for a function value named anywhere in a body, not
-// just in call position: the #3019 regression this guard exists to catch
-// is exactly a styler passed as an *argument* (detailModalScrollBudget's
-// plainText swapped for styledText), which never appears as call.Fun.
-// Receiver methods are walked too, so a reachable method's own
-// `.Render(` call or forbidden call doesn't hide behind fd.Recv != nil.
-// Naming a function is not proof of calling it, so the graph is a
-// deliberate over-approximation: a local variable shadowing a function
-// name, or a same-named method on an unrelated type, yields an edge that
-// no real call backs. The bias only ever costs a false failure, never a
-// missed regression.
-// The failure message spells out the call path from resolveLayout to the
-// offending function, so a future regression is diagnosable without
-// re-deriving the chain by hand.
+// Guards #3019: resolveLayout must reach no renderer, no styler and no .Render(
+// call. A behavioral test cannot catch that regression because the predicted and
+// rendered counts agree by construction. An edge is recorded wherever a function
+// is named, not only in call position (#3019 passed styledText as an argument),
+// so the graph over-approximates and can only fail falsely, never miss.
 func TestResolveLayoutCallGraphNeverRenders(t *testing.T) {
 	fset := token.NewFileSet()
 	files := layoutThreadingSourceFiles(t, fset)
 
-	declaredFuncs := map[string]bool{}   // plain (non-method) function names declared in this package
-	declaredMethods := map[string]bool{} // receiver method names declared in this package
+	declaredFuncs := map[string]bool{}
+	declaredMethods := map[string]bool{}
 	var funcDecls []*ast.FuncDecl
 	for _, file := range files {
 		for _, decl := range file.Decls {
@@ -70,19 +46,17 @@ func TestResolveLayoutCallGraphNeverRenders(t *testing.T) {
 		}
 	}
 
-	calls := map[string][]string{}         // caller func name -> callee func names, in source order
-	callsRenderMethod := map[string]bool{} // func name -> body directly calls some x.Render(...)
+	// calls maps each caller's name to the names it reaches, in source order,
+	// so a failure can print the path that got there.
+	calls := map[string][]string{}
+	callsRenderMethod := map[string]bool{}
 
 	for _, fd := range funcDecls {
 		name := fd.Name.Name
-		// visit records an edge for every *ast.Ident naming a declared
-		// plain function or a forbidden callee, and — for a
-		// *ast.SelectorExpr — an edge for its Sel only when Sel names a
-		// declared method (never a bare package-qualified call like
-		// lipgloss.Width or a struct field read like m.Width, since
-		// neither is a declared method of this package). SelectorExpr
-		// recurses into X by hand and returns false so ast.Inspect's own
-		// traversal never revisits Sel as a bare ident.
+		// On a SelectorExpr, visit recurses into X itself and returns false so
+		// ast.Inspect never revisits Sel as a bare ident. Sel yields an edge
+		// only when it names a declared method, which keeps package calls like
+		// lipgloss.Width and field reads like m.Width out of the graph.
 		var visit func(n ast.Node) bool
 		visit = func(n ast.Node) bool {
 			switch node := n.(type) {

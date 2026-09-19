@@ -8,16 +8,13 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// neverTerminated is a terminated func that never fires — the ordinary case
-// for these tests, which are only about the poll-loop state machine itself.
 func neverTerminated() bool { return false }
 
-// alwaysTerminated is a terminated func that fires on its very first call.
 func alwaysTerminated() bool { return true }
 
-// terminatedAfter returns a terminated func that returns false for its
-// first n calls and true from call n+1 onward, letting a test allow exactly
-// n polls to happen (observing their evidence) before abandonment fires.
+// terminatedAfter stays false for its first n calls, so a test can let
+// exactly n polls happen, and their evidence accumulate, before abandonment
+// fires.
 func terminatedAfter(n int) func() bool {
 	calls := 0
 	return func() bool {
@@ -26,11 +23,10 @@ func terminatedAfter(n int) func() bool {
 	}
 }
 
-// scriptedCheckState returns a checkState func that walks states in order,
-// returning err (if non-nil) instead of a state on the given zero-based
-// call indices, and repeats the final entry once the script is exhausted so
-// a test can let the loop run out the deadline without over-specifying every
-// poll.
+// scriptedCheckState walks states in order, returning an errAt error instead
+// of a state on those zero-based call indices. It repeats the final entry once
+// the script runs out, so a test can let the loop run the deadline out without
+// spelling every poll.
 func scriptedCheckState(states []forge.RollupState, errAt map[int]error) func() (forge.RollupState, error) {
 	i := 0
 	return func() (forge.RollupState, error) {
@@ -45,9 +41,6 @@ func scriptedCheckState(states []forge.RollupState, errAt map[int]error) func() 
 	}
 }
 
-// countingCheckState wraps a scripted checkState func, counting how many
-// times it was called so a test can assert checkState was (or was not)
-// invoked a specific number of times.
 type countingCheckState struct {
 	fn    func() (forge.RollupState, error)
 	calls int
@@ -62,9 +55,6 @@ func (c *countingCheckState) check() (forge.RollupState, error) {
 	return c.fn()
 }
 
-// watchPollCase is one table-driven scenario for watch.poll's state
-// machine: interval/window arithmetic, the registration split, error
-// propagation, and abandonment.
 type watchPollCase struct {
 	name string
 
@@ -89,8 +79,8 @@ type watchPollCase struct {
 	checkSleeps bool
 	wantSleeps  []time.Duration
 
-	// useCounting routes checkState through countingCheckState so
-	// wantCallCount can be asserted.
+	// useCounting routes checkState through countingCheckState so a case can
+	// assert wantCallCount.
 	useCounting    bool
 	checkCallCount bool
 	wantCallCount  int
@@ -99,9 +89,8 @@ type watchPollCase struct {
 func TestWatchPoll(t *testing.T) {
 	cases := []watchPollCase{
 		{
-			// A zero pollInterval still floors to 1 for elapsed tracking, so
-			// the loop advances and terminates at the deadline instead of
-			// hot-spinning forever.
+			// Flooring a zero pollInterval to 1 keeps elapsed advancing, so the
+			// loop ends at the deadline instead of hot-spinning forever.
 			name:               "actualIv floors to 1 when pollInterval is 0",
 			pollInterval:       0,
 			deadline:           2,
@@ -113,11 +102,9 @@ func TestWatchPoll(t *testing.T) {
 			wantElapsed:        2,
 		},
 		{
-			// A deadline smaller than registrationWindowPolls*actualIv still
-			// lets a settled-SUCCESS-only sequence resolve to gateGreen with
-			// windowElapsed true once the deadline-clamped window elapses,
-			// instead of falling through to gateTerminal (issue #2475
-			// follow-up).
+			// A deadline smaller than registrationWindowPolls*actualIv clamps
+			// the window, so a SUCCESS-only sequence still resolves to gateGreen
+			// instead of falling through to gateTerminal (issue #2475 follow-up).
 			name:                "registration window clamps to a smaller deadline",
 			pollInterval:        1,
 			deadline:            1,
@@ -132,9 +119,8 @@ func TestWatchPoll(t *testing.T) {
 			wantSleeps:          []time.Duration{1 * time.Second, 1 * time.Second},
 		},
 		{
-			// The registration window elapsing on a SUCCESS-only sequence
-			// (windowElapsed true, sawNonTerminal false) is trusted as proof
-			// CI already finished.
+			// poll treats the window elapsing with no non-terminal state ever
+			// seen as proof CI already finished.
 			name:                "window elapses on SUCCESS-only sequence",
 			pollInterval:        1,
 			deadline:            10,
@@ -145,10 +131,8 @@ func TestWatchPoll(t *testing.T) {
 			wantWindowElapsed:   true,
 		},
 		{
-			// A genuine non-terminal state observed before the window
-			// elapses registers this run's own checks on real evidence
-			// (sawNonTerminal true, windowElapsed false) rather than via the
-			// window fallback.
+			// Real non-terminal evidence registers this run's own checks, so the
+			// window fallback stays unused.
 			name:                "genuine PENDING observed before window elapses",
 			pollInterval:        1,
 			deadline:            10,
@@ -159,9 +143,6 @@ func TestWatchPoll(t *testing.T) {
 			wantWindowElapsed:   false,
 		},
 		{
-			// The ordinary requireRegistration=false path: a first-poll
-			// SUCCESS confirms green without any window logic getting
-			// involved.
 			name:               "no registration required confirms on first poll",
 			pollInterval:       1,
 			deadline:           10,
@@ -173,8 +154,6 @@ func TestWatchPoll(t *testing.T) {
 			wantElapsed:        0,
 		},
 		{
-			// A CheckState error on the very first poll surfaces as
-			// gateTerminal with the error attached.
 			name:         "CheckState error on first poll",
 			pollInterval: 1,
 			deadline:     10,
@@ -184,9 +163,6 @@ func TestWatchPoll(t *testing.T) {
 			wantErr:      errFirstPollBoom,
 		},
 		{
-			// A CheckState error on the confirmation re-poll (after an
-			// initial SUCCESS) also surfaces as gateTerminal with the error
-			// attached.
 			name:         "CheckState error on confirmation poll",
 			pollInterval: 1,
 			deadline:     10,
@@ -196,8 +172,6 @@ func TestWatchPoll(t *testing.T) {
 			wantErr:      errConfirmPollBoom,
 		},
 		{
-			// terminated() returning true immediately yields gateAbandoned
-			// without ever calling checkState.
 			name:           "terminated before any poll never calls checkState",
 			pollInterval:   1,
 			deadline:       10,
@@ -209,8 +183,8 @@ func TestWatchPoll(t *testing.T) {
 			wantCallCount:  0,
 		},
 		{
-			// A FAILURE/ERROR rollup returns gateRedRetry immediately,
-			// without consulting the registration guard at all.
+			// poll returns gateRedRetry for a red rollup without consulting the
+			// registration guard.
 			name:                "genuine red returns immediately",
 			pollInterval:        1,
 			deadline:            10,
@@ -221,10 +195,8 @@ func TestWatchPoll(t *testing.T) {
 			wantWindowElapsed:   false,
 		},
 		{
-			// Abandonment after a couple of successful polls have already
-			// observed non-terminal evidence must carry that accumulated
-			// evidence through in the returned observation
-			// (sawNonTerminal=true, elapsed=2), not a zero-value literal.
+			// Abandonment must return the evidence the earlier polls gathered
+			// (sawNonTerminal true, elapsed 2), not a zero-value observation.
 			name:               "abandonment after prior polls preserves accumulated evidence",
 			pollInterval:       1,
 			deadline:           10,

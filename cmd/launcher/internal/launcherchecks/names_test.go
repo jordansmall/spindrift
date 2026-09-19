@@ -51,10 +51,9 @@ func assertRegistryFilter(t *testing.T, got []string, flag func(backend.Descript
 	}
 }
 
-// TestTrackerNamesFromRegistry_MirrorsRegistry proves the shared helper is a
-// faithful, order-preserving filter of backend.Registry — the single source
-// both the launcher-startup rows' "must be ..." list and any other consumer
-// read, rather than a per-caller copy of the loop.
+// The helper must stay an order-preserving filter of backend.Registry, the one
+// source the launcher-startup rows and every other consumer read instead of
+// keeping a per-caller copy of the loop.
 func TestTrackerNamesFromRegistry_MirrorsRegistry(t *testing.T) {
 	got := TrackerNamesFromRegistry()
 	if len(got) == 0 {

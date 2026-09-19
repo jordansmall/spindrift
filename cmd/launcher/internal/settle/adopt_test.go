@@ -12,10 +12,8 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestSettleAdopted_ConsoleUsesLandingLabel verifies that SettleAdopted's
-// operator-report console print uses the landing= label, not the stale pr=
-// label (issue #655) — prURL here may be a res.URL discovery, not always
-// literally a PR under the wire grammar's landing vocabulary.
+// The console report must say landing=, not the stale pr= (issue #655):
+// prURL here may be a res.URL discovery, not always literally a PR.
 func TestSettleAdopted_ConsoleUsesLandingLabel(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)
@@ -35,17 +33,15 @@ func TestSettleAdopted_ConsoleUsesLandingLabel(t *testing.T) {
 	}
 }
 
-// TestSettleAdopted_ImmediateMergeFailureStaysComplete verifies that
-// SettleAdopted in immediate mode does not demote the issue to agent-failed
-// when the merge itself fails after CI goes green (spec: merge-blocked stays
-// at agent-complete).
+// In immediate mode, a merge that fails after CI goes green must not demote
+// the issue to agent-failed: merge-blocked stays at agent-complete.
 func TestSettleAdopted_ImmediateMergeFailureStaysComplete(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	// A leading PENDING proves this run's own checks registered — issue
+	// The leading PENDING proves this run's own checks registered. Issue
 	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
@@ -62,9 +58,8 @@ func TestSettleAdopted_ImmediateMergeFailureStaysComplete(t *testing.T) {
 	}
 }
 
-// TestSettleAdopted_ManualModeStaysComplete verifies that SettleAdopted in
-// manual (and auto) mode leaves the issue at agent-complete and never swaps
-// it to agent-failed after CI reaches green without a merge.
+// In manual and auto mode, CI reaching green without a merge must leave the
+// issue at agent-complete and never swap it to agent-failed.
 func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
 	for _, mode := range []string{"manual", "auto"} {
 		t.Run(mode, func(t *testing.T) {
@@ -72,8 +67,8 @@ func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
 			c.MergeMode = mode
 			fc := forge.NewFake(testDispatchLabels)
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-			// A leading PENDING proves this run's own checks registered —
-			// issue #1652's adopted-path gate does not trust an immediate
+			// The leading PENDING proves this run's own checks registered.
+			// Issue #1652's adopted-path gate does not trust an immediate
 			// SUCCESS alone.
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 			s := newTestSettle(c, fc, fc)
@@ -91,14 +86,13 @@ func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
 	}
 }
 
-// TestSettleAdopted_RedFollowsSelfHeal verifies that a red CI on an adopted
-// PR is demoted to agent-failed once fix passes are exhausted. Also asserts
-// (issue #2328) that SettleAdopted's landingFailed print carries
-// selfHealAdopted's own classified reason rather than the old hardcoded "CI
-// or merge failed" literal.
+// SettleAdopted must demote a red CI on an adopted PR to agent-failed once
+// fix passes are exhausted, and its landingFailed print must carry
+// selfHealAdopted's own classified reason rather than the old hardcoded
+// literal (issue #2328).
 func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	c := baseConfig()
-	c.MaxFixAttempts = 0 // no fix passes — just mark failed
+	c.MaxFixAttempts = 0 // no fix passes, so the run just marks failed
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
@@ -136,14 +130,11 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	}
 }
 
-// TestSettleAdopted_StaleSuccessMergesAfterWindow verifies the issue #2475
-// fix directly at the SettleAdopted seam: an adopted PR whose rollup reads
-// SUCCESS on every poll, with no PENDING/EXPECTED/NONE ever proving this
-// run's own checks registered, still merges once the bounded registration
-// window (registrationWindowPolls) elapses — a settled SUCCESS that never
-// produces a fresh non-terminal poll is treated as proof CI already
-// finished, not proof it's still mid-registration, so it no longer times out
-// and demotes the issue the way issue #1652's original absolute guard did.
+// This test pins the issue #2475 fix at the SettleAdopted seam: an adopted
+// PR whose rollup reads SUCCESS on every poll, with no PENDING/EXPECTED/NONE
+// ever proving this run's own checks registered, still merges once the
+// bounded registration window (registrationWindowPolls) elapses. Issue
+// #1652's original absolute guard timed such a PR out and demoted the issue.
 func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 	c := baseConfig()
 	c.MergePollTimeout = 10 // comfortably longer than registrationWindowPolls(3) * actualIv(1)
@@ -167,18 +158,11 @@ func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 	}
 }
 
-// TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow is the "still
-// waits" counterpart to TestSettleAdopted_StaleSuccessMergesAfterWindow: the
-// deadline (MergePollTimeout==1) is shorter than the registration window
-// (registrationWindowPolls(3) * actualIv(1) == 3), so the guard must still be
-// withholding trust when the deadline is hit, unlike the sibling test where
-// MergePollTimeout(10) leaves comfortable slack past the window for the
-// SUCCESS to get accepted. An all-SUCCESS rollup that hasn't yet cleared the
-// registration window must be rejected (times out, demotes to
-// agent-failed), not merged. It also verifies the registration-guard-specific
-// terminal reason (issue #2476) reaches the issue comment, not just the
-// console log — gateTerminalReasonRegistration's distinct wording must be
-// visible wherever the caller (a human triaging agent-failed) looks.
+// This test is the "still waits" counterpart to
+// TestSettleAdopted_StaleSuccessMergesAfterWindow: MergePollTimeout(1) is
+// shorter than registrationWindowPolls(3) * actualIv(1), so an all-SUCCESS
+// rollup must time out and demote rather than merge, and the registration
+// guard's own terminal reason (issue #2476) must reach the issue comment.
 func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
 	c := baseConfig()
 	c.MergePollTimeout = 1 // less than registrationWindowPolls(3) * actualIv(1)
@@ -205,10 +189,9 @@ func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
 	}
 }
 
-// TestSettleAdopted_PushOnlyForgeSkipsVerify verifies that SettleAdopted's
-// landingMerged case guards the verifyMerged call against a push-only
-// forge's nil s.pr (issue #697), mirroring gate.go's "ready" case guard
-// (silent skip, no logging when s.pr is nil).
+// The landingMerged case must guard verifyMerged against a push-only forge's
+// nil s.pr (issue #697), mirroring gate.go's "ready" case: silent skip, no
+// logging.
 func TestSettleAdopted_PushOnlyForgeSkipsVerify(t *testing.T) {
 	const branch = "agent/issue-1"
 
@@ -226,13 +209,11 @@ func TestSettleAdopted_PushOnlyForgeSkipsVerify(t *testing.T) {
 	}
 }
 
-// TestSettleAdopted_GreenMergesAndCompletes verifies the green-CI path merges
-// the adopted PR and reaches agent-complete without dispatching any fix pass.
 func TestSettleAdopted_GreenMergesAndCompletes(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{"agent-in-progress"}})
-	// A leading PENDING proves this run's own checks registered — issue
+	// The leading PENDING proves this run's own checks registered. Issue
 	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)

@@ -9,11 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/waves/wavestest"
 )
 
-// TestRunContinuousQueue_Pending verifies Pending delegates to the closure
-// it was built with rather than hardcoding a value -- unlike headless's
-// waves.QueueFromDiscoverer adapter, whose Pending is an unconditional
-// no-op, nothing in this package exercised
-// runContinuousQueue.Pending/.ReportStaleDrain directly before this test.
+// Nothing in this package exercised runContinuousQueue.Pending or
+// ReportStaleDrain directly before this test, unlike headless's
+// waves.QueueFromDiscoverer adapter whose Pending is an unconditional no-op.
 func TestRunContinuousQueue_Pending(t *testing.T) {
 	q := runContinuousQueue{pending: func() int { return 3 }}
 
@@ -26,8 +24,6 @@ func TestRunContinuousQueue_Pending(t *testing.T) {
 	}
 }
 
-// TestRunContinuousQueue_ReportStaleDrain verifies ReportStaleDrain
-// actually invokes the closure it was built with.
 func TestRunContinuousQueue_ReportStaleDrain(t *testing.T) {
 	called := false
 	q := runContinuousQueue{report: func(waves.StaleDrainReport) { called = true }}
@@ -39,10 +35,9 @@ func TestRunContinuousQueue_ReportStaleDrain(t *testing.T) {
 	}
 }
 
-// TestRunContinuousQueue_EnsureLogDirExists verifies EnsureLogDirExists is a
-// plain no-op: it returns nil and never touches the filesystem (issue
-// #3036) -- Console's Queue has no on-disk log directory of its own,
-// unlike headless's filesystem-backed adapter.
+// EnsureLogDirExists must never touch the filesystem (issue #3036): Console's
+// Queue has no on-disk log directory of its own, unlike headless's
+// filesystem-backed adapter.
 func TestRunContinuousQueue_EnsureLogDirExists(t *testing.T) {
 	dir := t.TempDir()
 	logDir := filepath.Join(dir, ".spindrift", "logs")
@@ -59,9 +54,8 @@ func TestRunContinuousQueue_EnsureLogDirExists(t *testing.T) {
 // consoleHarness backs the shared wavestest.RunQueueContract suite with a
 // bare runContinuousQueue.
 type consoleHarness struct {
-	// discoverCalls is a pointer so it survives struct copies --
-	// consoleHarness is a plain value struct passed by value into
-	// wavestest.RunQueueContract.
+	// discoverCalls is a pointer so it survives the struct copy
+	// wavestest.RunQueueContract makes when it takes the harness by value.
 	discoverCalls *int
 }
 
@@ -77,16 +71,15 @@ func (h consoleHarness) Queue() waves.Queue {
 	}
 }
 
-// SeedDispatchable is a no-op: runContinuousQueue.Claim is a permanent
-// no-op regardless of backing state (see its doc comment in launcher.go),
-// so there is no dispatchable state for this harness to seed.
+// runContinuousQueue.Claim is a permanent no-op regardless of backing state
+// (see its doc comment in launcher.go), so there is no dispatchable state to
+// seed.
 func (consoleHarness) SeedDispatchable(num string) {}
 
-// ClaimTransitions and DiscoverCalls implement wavestest.SideEffectObserver:
 // DiscoverCalls counts this harness's own discover closure, so a leak like
-// Pending calling through to Discover shows up here. ClaimTransitions is a
-// constant 0 -- runContinuousQueue.Claim is a documented permanent no-op
-// with no backing collaborator a leak could transition.
+// Pending calling through to Discover shows up here. ClaimTransitions returns
+// a constant 0 because Claim is a documented permanent no-op with no backing
+// collaborator a leak could transition.
 func (h consoleHarness) ClaimTransitions() int { return 0 }
 func (h consoleHarness) DiscoverCalls() int    { return *h.discoverCalls }
 

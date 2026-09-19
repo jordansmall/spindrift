@@ -42,13 +42,11 @@ func writeTwoRegistryCargoFixture(t *testing.T, dir, host string) {
 	}
 }
 
-// TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys pins the
-// 2026-09-04 field shape (ADR 0047 / spec #3253): one Artifactory host
-// fronting two cargo registries collapses to a single route, and the
-// written file carries only match-host/auth-scheme/credential -- no
-// upstream-origin (Artifactory's plain-https default-port URL derives it)
-// and none of the declared index paths. A second, unmatched host in the
-// same run exercises the env-placeholder arm alongside it.
+// Pins the 2026-09-04 field shape (ADR 0047 / spec #3253): one Artifactory
+// host fronting two cargo registries collapses to a single route, and the
+// written file carries only match-host, auth-scheme and credential. No
+// upstream-origin (Artifactory's plain-https default-port URL derives it) and
+// none of the declared index paths.
 func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing.T) {
 	repoDir := t.TempDir()
 	writeTwoRegistryCargoFixture(t, repoDir, "artifactory.example.com")
@@ -123,10 +121,6 @@ func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing
 	}
 }
 
-// TestRunRegistryDiscover_CargoFixtureEndToEnd_WritesParseableRoutesFile drives
-// a cargo .cargo/config.toml fixture through the full runRegistryDiscover
-// pipeline and checks the written file round-trips through
-// registryroutes.Parse into the expected route and report/stdout lines.
 func TestRunRegistryDiscover_CargoFixtureEndToEnd_WritesParseableRoutesFile(t *testing.T) {
 	repoDir := t.TempDir()
 	writeCargoFixture(t, repoDir, "foo", "https://cargo.example.com/index")
@@ -185,12 +179,9 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_WritesParseableRoutesFile(t *t
 	}
 }
 
-// TestRunRegistryDiscover_CargoFixtureEndToEnd_RegistryNameCarriesThrough
-// drives a cargo fixture whose host matches a cargo-credentials store through
-// the full runRegistryDiscover pipeline, and confirms the cargo registry name
-// (a cargo-credentials-only companion field, see discover.go's RegistryName
-// handling) survives Render and comes back out of registryroutes.Parse on the
-// parsed route's Credential.
+// The cargo registry name is a cargo-credentials-only companion field (see
+// discover.go's RegistryName handling), so this checks it survives Render and
+// comes back out of registryroutes.Parse on the parsed route's Credential.
 func TestRunRegistryDiscover_CargoFixtureEndToEnd_RegistryNameCarriesThrough(t *testing.T) {
 	repoDir := t.TempDir()
 	writeCargoFixture(t, repoDir, "mycorp", "https://cargo.example.com/index")
@@ -230,10 +221,6 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_RegistryNameCarriesThrough(t *
 	}
 }
 
-// TestRunRegistryDiscover_UnmatchedHost_EnvPlaceholderAndHint verifies that a
-// host no configured store matches gets an env-placeholder credential in the
-// written file, and that stdout names the stores searched and hints at the
-// placeholder env var to set.
 func TestRunRegistryDiscover_UnmatchedHost_EnvPlaceholderAndHint(t *testing.T) {
 	repoDir := t.TempDir()
 	writeCargoFixture(t, repoDir, "foo", "https://cargo.example.com/index")
@@ -275,10 +262,6 @@ func TestRunRegistryDiscover_UnmatchedHost_EnvPlaceholderAndHint(t *testing.T) {
 	}
 }
 
-// TestRunRegistryDiscover_ExistingFile_RefusesWithoutForce_OverwritesWithForce
-// verifies that a pre-existing routes file is left untouched and reported as
-// an error on stderr without --force, and is overwritten when --force is
-// passed.
 func TestRunRegistryDiscover_ExistingFile_RefusesWithoutForce_OverwritesWithForce(t *testing.T) {
 	repoDir := t.TempDir()
 	writeCargoFixture(t, repoDir, "foo", "https://cargo.example.com/index")
@@ -330,14 +313,11 @@ func TestRunRegistryDiscover_ExistingFile_RefusesWithoutForce_OverwritesWithForc
 	}
 }
 
-// TestRunRegistryDiscover_NeverWritesCredentialValue drives runRegistryDiscover
-// with the real registrydiscover.StoreLookup against a netrc file whose
-// password is the sentinel secret, so the sentinel has a genuine channel into
-// the pipeline: StoreLookup reads it off disk, matches it to the fixture
-// repo's cargo.example.com host, and the route it produces flows through
-// Discover and WriteFile same as any real credential match would. If the
-// writer ever started embedding a resolved value instead of a store
-// reference, this sentinel is what would show up in the file.
+// Uses the real registrydiscover.StoreLookup, not a stub, so the sentinel
+// password has a genuine channel into the pipeline: StoreLookup reads it off
+// disk, matches the fixture repo's cargo.example.com host, and the route it
+// produces flows through Discover and WriteFile as any real match would. A
+// writer embedding resolved values instead of store references would leak it.
 func TestRunRegistryDiscover_NeverWritesCredentialValue(t *testing.T) {
 	repoDir := t.TempDir()
 	writeCargoFixture(t, repoDir, "foo", "https://cargo.example.com/index")
@@ -374,15 +354,11 @@ func TestRunRegistryDiscover_NeverWritesCredentialValue(t *testing.T) {
 	}
 }
 
-// TestRunRegistryDiscover_ReportDistinguishesSkippedFromNoRegistryDeclared
-// verifies that a config file naming only a non-http/unusable registry URL
-// (here, .npmrc's local-path value) is reported as skipped, never mislabeled
-// as declaring no registry at all.
 func TestRunRegistryDiscover_ReportDistinguishesSkippedFromNoRegistryDeclared(t *testing.T) {
 	repoDir := t.TempDir()
 	writeCargoFixture(t, repoDir, "foo", "https://cargo.example.com/index")
-	// .npmrc names a registry, but its value is non-http -- this must not
-	// print as "no registry declared".
+	// .npmrc names a registry whose value is non-http, so the report must call
+	// it skipped rather than "no registry declared".
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=/local/path\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile .npmrc: %v", err)
 	}
@@ -412,9 +388,6 @@ func TestRunRegistryDiscover_ReportDistinguishesSkippedFromNoRegistryDeclared(t 
 	}
 }
 
-// TestCmdRegistryDiscover_WrongArgCount_UsageError verifies that
-// cmdRegistryDiscover rejects any argument count other than exactly two
-// positionals with a usage message and exit code 1.
 func TestCmdRegistryDiscover_WrongArgCount_UsageError(t *testing.T) {
 	for _, args := range [][]string{
 		{},
@@ -432,13 +405,10 @@ func TestCmdRegistryDiscover_WrongArgCount_UsageError(t *testing.T) {
 	}
 }
 
-// TestCmdRegistryDiscover_ForceFlagAnyPosition_StillTwoPositionals verifies
-// that --force is recognized wherever it appears in argv and doesn't count
-// against the two required positionals.
 func TestCmdRegistryDiscover_ForceFlagAnyPosition_StillTwoPositionals(t *testing.T) {
-	// Hermetic: without this, cmdRegistryDiscover's default stores read the
-	// real $HOME (only harmless here because repoDir's registry fixture
-	// keeps the lookup from ever touching a real ~/.netrc).
+	// Without this, cmdRegistryDiscover's default stores read the real $HOME,
+	// harmless here only because repoDir's registry fixture keeps the lookup
+	// from ever touching a real ~/.netrc.
 	t.Setenv("HOME", t.TempDir())
 
 	repoDir := t.TempDir()
@@ -455,10 +425,9 @@ func TestCmdRegistryDiscover_ForceFlagAnyPosition_StillTwoPositionals(t *testing
 	}
 }
 
-// TestCmdRegistryDiscover_HomeDirUnavailable_ErrorsInsteadOfProceeding
-// covers os.UserHomeDir failing: it must surface as a command error, not
-// silently fall back to zero configured stores (which used to make every
-// unmatched-host report line name no stores at all).
+// os.UserHomeDir failing must fail the command, not silently fall back to zero
+// configured stores, which used to make every unmatched-host report line name
+// no stores at all.
 func TestCmdRegistryDiscover_HomeDirUnavailable_ErrorsInsteadOfProceeding(t *testing.T) {
 	t.Setenv("HOME", "")
 
@@ -476,10 +445,9 @@ func TestCmdRegistryDiscover_HomeDirUnavailable_ErrorsInsteadOfProceeding(t *tes
 	}
 }
 
-// TestRunRegistryDiscover_ZeroRoutes_RefusesToWriteAndNamesRepoDir covers a
-// repoDir with no registry config at all (indistinguishable from a
-// mistyped path): it must not produce a routes file that
-// registryroutes.Parse then rejects for declaring zero [[routes]] entries.
+// A repoDir with no registry config is indistinguishable from a mistyped path,
+// and must not produce a routes file that registryroutes.Parse then rejects for
+// declaring zero [[routes]] entries.
 func TestRunRegistryDiscover_ZeroRoutes_RefusesToWriteAndNamesRepoDir(t *testing.T) {
 	repoDir := t.TempDir()
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
@@ -504,13 +472,10 @@ func TestRunRegistryDiscover_ZeroRoutes_RefusesToWriteAndNamesRepoDir(t *testing
 	}
 }
 
-// TestRunRegistryDiscover_PortOnlyHost_RefusesToWriteAndReportsSkipped
-// covers the finding that a port-only registry URL (.npmrc's
-// "registry=http://:8080/") must never write a routes file --
-// registryroutes.Parse rejects an empty match-host, so this must land in
-// the zero-routes path (same as TestRunRegistryDiscover_ZeroRoutes...)
-// rather than the success path, and the report must name the file as
-// declaring only an unusable URL, not as declaring nothing at all.
+// A port-only registry URL must land in the zero-routes path rather than the
+// success path, because registryroutes.Parse rejects an empty match-host. The
+// report must name the file as declaring only an unusable URL, not as
+// declaring nothing at all.
 func TestRunRegistryDiscover_PortOnlyHost_RefusesToWriteAndReportsSkipped(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=http://:8080/\n"), 0o644); err != nil {
@@ -535,11 +500,6 @@ func TestRunRegistryDiscover_PortOnlyHost_RefusesToWriteAndReportsSkipped(t *tes
 	}
 }
 
-// TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections
-// verifies that a single run's report correctly sorts a matched host, an
-// unmatched host, and a config-present-but-empty file into their own
-// sections, alongside the matched route's summary line and the unmatched
-// host's env hint.
 func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t *testing.T) {
 	repoDir := t.TempDir()
 	writeCargoFixture(t, repoDir, "foo", "https://cargo.example.com/index")
@@ -587,11 +547,10 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 	}
 }
 
-// TestDefaultRegistryDiscoverStores verifies the store list matches the
-// documented search order (netrc, npmrc, cargo-credentials,
-// gradle-properties) with paths under $HOME -- acceptance criterion 3 of
-// issue #3407: this list must come from credresolver's kind table, not a
-// hand-maintained parallel copy.
+// The store list must match the documented search order (netrc, npmrc,
+// cargo-credentials, gradle-properties) with paths under $HOME. Acceptance
+// criterion 3 of issue #3407: this list comes from credresolver's kind table,
+// not a hand-maintained parallel copy.
 func TestDefaultRegistryDiscoverStores(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -7,14 +7,8 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// --- DispatchLabels tests ---
-
-// testLabels is the conventional lifecycle-label set, mirrored from
-// lib/env-schema.nix and pinned against the agent workflows by
-// nix/checks/dispatch-labels.nix (issue #460). NewFake and the production
-// adapters (Exec, Local, Jira) take labels as an explicit constructor
-// argument rather than baking in a copy, so forge_test shares this one value
-// instead of each test restating the four label strings.
+// testLabels mirrors lib/env-schema.nix and is pinned against the agent
+// workflows by nix/checks/dispatch-labels.nix (issue #460).
 var testLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -46,27 +40,21 @@ func TestDispatchLabels_AllLabels(t *testing.T) {
 	}
 }
 
-// --- IssueTracker / CodeForge type-seam tests ---
-
-// TestFake_ImplementsIssueTracker asserts that *Fake satisfies IssueTracker.
 func TestFake_ImplementsIssueTracker(t *testing.T) {
 	var _ forge.IssueTracker = forge.NewFake()
 }
 
-// TestFake_ImplementsCodeForge asserts that *Fake satisfies CodeForge.
 func TestFake_ImplementsCodeForge(t *testing.T) {
 	var _ forge.CodeForge = forge.NewFake()
 }
 
-// TestFake_ImplementsPRForge asserts that *Fake satisfies the optional
-// PRForge surface, matching the github adapter's shape.
+// The Fake must offer optional PRForge because the github adapter does.
 func TestFake_ImplementsPRForge(t *testing.T) {
 	var _ forge.PRForge = forge.NewFake()
 }
 
-// TestFake_AsPushOnly_HidesPRForge verifies that AsPushOnly wraps a Fake so a
-// type assertion against PRForge reports absence, matching the git adapter's
-// shape — the mechanism Settle uses in place of the removed PushOnly() flag.
+// AsPushOnly gives the Fake the git adapter's shape, which is how Settle
+// detects push-only forges now that the PushOnly() flag is gone.
 func TestFake_AsPushOnly_HidesPRForge(t *testing.T) {
 	f := forge.NewFake()
 	cf := f.AsPushOnly()
@@ -75,17 +63,14 @@ func TestFake_AsPushOnly_HidesPRForge(t *testing.T) {
 	}
 }
 
-// TestFake_ImplementsBranchProtectionForge asserts that *Fake satisfies the
-// optional BranchProtectionForge surface (issue #2570), matching the
-// github/forgejo adapters' shape.
+// The Fake must offer optional BranchProtectionForge because the
+// github/forgejo adapters do (issue #2570).
 func TestFake_ImplementsBranchProtectionForge(t *testing.T) {
 	var _ forge.BranchProtectionForge = forge.NewFake()
 }
 
-// TestFake_AsPushOnly_HidesBranchProtectionForge verifies that AsPushOnly
-// wraps a Fake so a type assertion against BranchProtectionForge reports
-// absence, matching the push-only git adapter's shape — git has no
-// branch-protection API to query.
+// The push-only git adapter has no branch-protection API to query, so the
+// AsPushOnly wrapper must hide it too.
 func TestFake_AsPushOnly_HidesBranchProtectionForge(t *testing.T) {
 	f := forge.NewFake()
 	cf := f.AsPushOnly()
@@ -94,10 +79,8 @@ func TestFake_AsPushOnly_HidesBranchProtectionForge(t *testing.T) {
 	}
 }
 
-// TestFake_AsLocal_HidesBranchProtectionForge verifies that AsLocal wraps a
-// Fake so a type assertion against BranchProtectionForge reports absence,
-// matching CODE_FORGE=local's host-mediated adapter shape — local has no
-// branch-protection concept to query.
+// CODE_FORGE=local has no branch-protection concept, so the AsLocal wrapper
+// must hide it.
 func TestFake_AsLocal_HidesBranchProtectionForge(t *testing.T) {
 	f := forge.NewFake()
 	cf := f.AsLocal()
@@ -106,11 +89,8 @@ func TestFake_AsLocal_HidesBranchProtectionForge(t *testing.T) {
 	}
 }
 
-// TestFake_AsGithubReadOnly_ImplementsBranchProtectionForge asserts that
-// AsGithubReadOnly's wrapper — the github-shaped Fake — satisfies
-// BranchProtectionForge and returns the values SetBranchProtected scripts,
-// proving the wiring a github/forgejo-shaped forge needs for the
-// branch-protection doctor row (issue #2570).
+// The github-shaped Fake must report the values SetBranchProtected scripts,
+// which is the wiring the branch-protection doctor row needs (issue #2570).
 func TestFake_AsGithubReadOnly_ImplementsBranchProtectionForge(t *testing.T) {
 	f := forge.NewFake()
 	f.SetBranchProtected("main", true)
@@ -129,16 +109,13 @@ func TestFake_AsGithubReadOnly_ImplementsBranchProtectionForge(t *testing.T) {
 	}
 }
 
-// TestFake_ImplementsLandingRecorder asserts that *Fake satisfies the
-// optional LandingRecorder surface, matching the local adapter's shape.
+// The Fake must offer optional LandingRecorder because the local adapter does.
 func TestFake_ImplementsLandingRecorder(t *testing.T) {
 	var _ forge.LandingRecorder = forge.NewFake()
 }
 
-// TestFake_AsNoLandingRecorder_HidesLandingRecorder verifies that
-// AsNoLandingRecorder wraps a Fake so a type assertion against
-// LandingRecorder reports absence, matching the github/jira adapters' shape
-// — the mechanism Settle uses to no-op RecordLanding for them.
+// AsNoLandingRecorder gives the Fake the github/jira adapters' shape, which
+// is how Settle decides to no-op RecordLanding for them.
 func TestFake_AsNoLandingRecorder_HidesLandingRecorder(t *testing.T) {
 	f := forge.NewFake()
 	it := f.AsNoLandingRecorder()
@@ -147,25 +124,20 @@ func TestFake_AsNoLandingRecorder_HidesLandingRecorder(t *testing.T) {
 	}
 }
 
-// TestFake_ImplementsIssueCloser asserts that *Fake satisfies the optional
-// IssueCloser surface, matching the local adapter's shape.
+// The Fake must offer optional IssueCloser because the local adapter does.
 func TestFake_ImplementsIssueCloser(t *testing.T) {
 	var _ forge.IssueCloser = forge.NewFake()
 }
 
-// TestFake_ImplementsHostPostedCommenter asserts that *Fake satisfies the
-// optional HostPostedCommenter surface (issue #1914/#1916) — trivially true
-// today since it shares Comment's exact signature with the base IssueTracker
-// interface every tracker (github, local, jira) already implements.
+// HostPostedCommenter (issue #1914/#1916) shares Comment's exact signature
+// with the base IssueTracker, so every tracker satisfies it today and this
+// assertion is trivially true.
 func TestFake_ImplementsHostPostedCommenter(t *testing.T) {
 	var _ forge.HostPostedCommenter = forge.NewFake()
 }
 
-// TestFake_DoesNotImplementHostPostedIssueFilerByDefault verifies a bare
-// *Fake (unwrapped) does not satisfy the optional HostPostedIssueFiler
-// surface (issue #2018), matching every real adapter's shape today — no
-// adapter implements host-posted issue filing yet, mirroring
-// forge.DraftPRCreator's own "no adapter implements it yet" posture.
+// No real adapter implements host-posted issue filing yet (issue #2018), the
+// same posture forge.DraftPRCreator holds, so a bare Fake must not either.
 func TestFake_DoesNotImplementHostPostedIssueFilerByDefault(t *testing.T) {
 	f := forge.NewFake()
 	if _, ok := any(f).(forge.HostPostedIssueFiler); ok {
@@ -173,12 +145,9 @@ func TestFake_DoesNotImplementHostPostedIssueFilerByDefault(t *testing.T) {
 	}
 }
 
-// TestFake_AsIssueFiler_ImplementsHostPostedIssueFiler asserts that
-// AsIssueFiler wraps a Fake so it satisfies the optional
-// HostPostedIssueFiler surface — the read-only issue-filing relay channel
-// (issue #2018). Discovered by type assertion the same way DraftPRCreator
-// is; only reachable through this wrapper, matching createDraftPR's
-// AsGithubReadOnly()-only restriction.
+// The read-only issue-filing relay (issue #2018) is reachable only through
+// the AsIssueFiler wrapper, matching createDraftPR's AsGithubReadOnly-only
+// restriction.
 func TestFake_AsIssueFiler_ImplementsHostPostedIssueFiler(t *testing.T) {
 	f := forge.NewFake()
 	it := f.AsIssueFiler()
@@ -187,19 +156,15 @@ func TestFake_AsIssueFiler_ImplementsHostPostedIssueFiler(t *testing.T) {
 	}
 }
 
-// TestFake_ImplementsLabeledTracker asserts that *Fake satisfies the
-// optional LabeledTracker surface, matching the github/local adapters'
-// shape — PickIssue's double-box guard (#1742) relies on this to skip a
+// PickIssue's double-box guard (#1742) uses LabeledTracker to skip a
 // ListIssues round-trip for a state the tracker's label family leaves
-// unmapped.
+// unmapped, so the Fake must offer it like the github/local adapters.
 func TestFake_ImplementsLabeledTracker(t *testing.T) {
 	var _ forge.LabeledTracker = forge.NewFake()
 }
 
-// TestFake_AsNoLandingRecorder_HidesIssueCloser verifies that
-// AsNoLandingRecorder also hides IssueCloser, matching the github/jira
-// adapters' shape (neither implements either optional write) — the mechanism
-// reconcile uses to no-op for them.
+// Neither github nor jira implements either optional write, so the same
+// wrapper hides IssueCloser as well, which is how reconcile no-ops for them.
 func TestFake_AsNoLandingRecorder_HidesIssueCloser(t *testing.T) {
 	f := forge.NewFake()
 	it := f.AsNoLandingRecorder()
@@ -208,8 +173,6 @@ func TestFake_AsNoLandingRecorder_HidesIssueCloser(t *testing.T) {
 	}
 }
 
-// TestFake_CloseIssue_SetsIssueClosed verifies CloseIssue flips the issue's
-// State to IssueClosed and records the call.
 func TestFake_CloseIssue_SetsIssueClosed(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
@@ -229,8 +192,6 @@ func TestFake_CloseIssue_SetsIssueClosed(t *testing.T) {
 		t.Errorf("CloseIssueCalls = %v, want [42]", f.CloseIssueCalls)
 	}
 }
-
-// --- TransitionState tests ---
 
 func TestFake_TransitionState_DispatchableToInProgress(t *testing.T) {
 	f := forge.NewFake(testLabels)
@@ -279,12 +240,10 @@ func TestFake_TransitionState_InProgressToComplete(t *testing.T) {
 	}
 }
 
-// TestFake_TransitionState_ClaimStripsStaleTerminalLabels mirrors the github
-// adapter's behavior (exec_issues.go): a claim (Dispatchable -> InProgress)
-// strips any stale terminal label (agent-failed, agent-complete) the issue
-// still carries from a prior run, not just the from-state label — the Fake
-// must match the real adapter here or a launcher-level test using the Fake
-// could pass while the real GitHub backend still misbehaves (#1985).
+// A claim strips stale terminal labels left by a prior run, not just the
+// from-state label, mirroring the github adapter (exec_issues.go). If the
+// Fake diverges here, a launcher-level test can pass while the real GitHub
+// backend still misbehaves (#1985).
 func TestFake_TransitionState_ClaimStripsStaleTerminalLabels(t *testing.T) {
 	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent", "agent-failed"}})
@@ -310,7 +269,7 @@ func TestFake_TransitionState_ClaimStripsStaleTerminalLabels(t *testing.T) {
 
 func TestFake_TransitionState_MissingIssueIsNoOp(t *testing.T) {
 	f := forge.NewFake()
-	// Best-effort: unknown issue number must not error.
+	// Transitions are best-effort, so an unknown issue number must not error.
 	if err := f.TransitionState("999", forge.InProgress, forge.Failed); err != nil {
 		t.Fatalf("TransitionState on missing issue: %v", err)
 	}
@@ -326,10 +285,6 @@ func TestFake_TransitionState_Err(t *testing.T) {
 	}
 }
 
-// --- CompleteVerdict tests ---
-
-// researchLabels mirrors ResearchDispatchLabels/ResearchVerdictLabels so
-// research-kind Fake tests don't restate the label strings.
 var researchLabels = forge.ResearchDispatchLabels()
 var researchVerdictLabels = forge.ResearchVerdictLabels()
 
@@ -382,11 +337,9 @@ func TestFake_CompleteVerdict_MissingInProgressErrors(t *testing.T) {
 	}
 }
 
-// TestFake_CompleteVerdict_UnconfiguredInProgressSkipsCheck verifies that
-// when InProgress has no configured label (DispatchLabels zero value),
-// CompleteVerdict skips the precondition check entirely — mirroring exec's
-// `if remove != ""` guard (github/exec_issues.go) — rather than always
-// erroring because no label can ever satisfy the check.
+// With InProgress unconfigured, no label can ever satisfy the precondition,
+// so CompleteVerdict skips the check rather than always erroring. This
+// mirrors exec's `if remove != ""` guard (github/exec_issues.go).
 func TestFake_CompleteVerdict_UnconfiguredInProgressSkipsCheck(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{})
 	f.VerdictLabels = researchVerdictLabels
@@ -397,10 +350,9 @@ func TestFake_CompleteVerdict_UnconfiguredInProgressSkipsCheck(t *testing.T) {
 	}
 }
 
-// TestFake_CompleteVerdict_UnconfiguredVerdictLabelErrors verifies that
-// CompleteVerdict errors rather than appending an empty label when
-// VerdictLabels has no label configured for the requested verdict —
-// mirroring the real adapter's add == "" guard (github/exec_issues.go).
+// An unconfigured verdict label must error rather than append an empty
+// label, mirroring the real adapter's add == "" guard
+// (github/exec_issues.go).
 func TestFake_CompleteVerdict_UnconfiguredVerdictLabelErrors(t *testing.T) {
 	f := forge.NewFake(researchLabels)
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
@@ -418,8 +370,6 @@ func TestFake_CompleteVerdict_UnconfiguredVerdictLabelErrors(t *testing.T) {
 	}
 }
 
-// --- ListIssues(DispatchState) tests ---
-
 func TestFake_ListIssues_ByDispatchState(t *testing.T) {
 	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "1", State: "OPEN", Labels: []string{"ready-for-agent"}})
@@ -433,7 +383,7 @@ func TestFake_ListIssues_ByDispatchState(t *testing.T) {
 	if len(dispatchable) != 2 {
 		t.Fatalf("want 2 Dispatchable issues, got %d: %+v", len(dispatchable), dispatchable)
 	}
-	// Canonical order: ascending number.
+	// ListIssues returns issues in ascending number order.
 	if dispatchable[0].Number != "1" || dispatchable[1].Number != "3" {
 		t.Errorf("wrong order: %v", dispatchable)
 	}
@@ -447,16 +397,13 @@ func TestFake_ListIssues_ByDispatchState(t *testing.T) {
 	}
 }
 
-// TestFake_ListIssues_UnmappedStateMatchesEveryOpenIssue mirrors the two
-// real adapters' behavior for a DispatchState with no configured label
-// (research's Complete, ADR 0022): GitHub's `--label ""` is ignored by `gh`
-// and returns every open issue; Local's `frontmatter.State == ""` matches
-// every untriaged issue. A Fake that only matched issues literally carrying
-// an empty-string label masked the false-match bug #1742 fixed (the #1709
-// regression test's fixture had no labels, so the old Fake wrongly returned
-// none for the unmapped query and never exercised the guard).
+// For a state with no configured label (research's Complete, ADR 0022) both
+// real adapters match every open issue: `gh` ignores `--label ""`, and Local
+// treats `frontmatter.State == ""` as untriaged. A Fake matching only a
+// literal empty-string label masked the false-match bug #1742 fixed, because
+// the #1709 fixture had no labels and never exercised the guard.
 func TestFake_ListIssues_UnmappedStateMatchesEveryOpenIssue(t *testing.T) {
-	f := forge.NewFake(researchLabels)                           // Complete: "" — unmapped
+	f := forge.NewFake(researchLabels)                           // Complete has no label
 	f.SetIssue(forge.Issue{Number: "1", State: forge.IssueOpen}) // untriaged, no labels
 	f.SetIssue(forge.Issue{Number: "2", State: forge.IssueOpen, Labels: []string{"agent-research-in-progress"}})
 	f.SetIssue(forge.Issue{Number: "9", State: forge.IssueClosed})
@@ -470,13 +417,8 @@ func TestFake_ListIssues_UnmappedStateMatchesEveryOpenIssue(t *testing.T) {
 	}
 }
 
-// --- ListOpenIssues tests ---
-
-// TestFake_ListOpenIssues_AllStatesAscendingExcludesClosed verifies
-// ListOpenIssues returns every open issue regardless of dispatch label
-// (including one with none at all), ascending by number, and skips closed
-// issues — the full backlog the Console browses, unlike ListIssues which
-// filters to a single dispatch state.
+// ListOpenIssues returns the full backlog the Console browses, so it ignores
+// dispatch labels entirely, unlike ListIssues which filters to one state.
 func TestFake_ListOpenIssues_AllStatesAscendingExcludesClosed(t *testing.T) {
 	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "3", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
@@ -495,8 +437,6 @@ func TestFake_ListOpenIssues_AllStatesAscendingExcludesClosed(t *testing.T) {
 		t.Errorf("wrong order: %v", issues)
 	}
 }
-
-// --- DepsOf tests ---
 
 func TestFake_DepsOf_ParsesBody(t *testing.T) {
 	f := forge.NewFake()
@@ -550,20 +490,15 @@ func TestFake_DepsOf_MissingIssue(t *testing.T) {
 	}
 }
 
-// --- BlocksOf tests ---
-
-// TestFake_ImplementsBlockersLister asserts that *Fake satisfies the
-// optional BlockersLister surface, matching the github/jira adapters'
-// shape — the mechanism a detail-render caller (issue #1744) uses to
-// resolve a single ticket's Blocks section without a whole-backlog scan.
+// A detail-render caller (issue #1744) uses BlockersLister to resolve one
+// ticket's Blocks section without scanning the whole backlog, so the Fake
+// must offer it like the github/jira adapters.
 func TestFake_ImplementsBlockersLister(t *testing.T) {
 	var _ forge.BlockersLister = forge.NewFake()
 }
 
-// TestFake_BlocksOf_ReturnsReverseOfNativeDeps verifies BlocksOf(num)
-// returns every issue whose NativeDeps names num as a blocker — the
-// reverse of DepsOf, resolved from the same scripted native relationships
-// (issue #1744).
+// BlocksOf is the reverse of DepsOf, resolved from the same scripted native
+// relationships (issue #1744).
 func TestFake_BlocksOf_ReturnsReverseOfNativeDeps(t *testing.T) {
 	f := forge.NewFake()
 	f.NativeDeps = map[string][]string{"42": {"7"}, "43": {"7"}, "44": {"9"}}
@@ -578,8 +513,6 @@ func TestFake_BlocksOf_ReturnsReverseOfNativeDeps(t *testing.T) {
 	}
 }
 
-// TestFake_BlocksOf_NoneDeclareIt verifies BlocksOf returns none for an
-// issue nothing else's NativeDeps names as a blocker.
 func TestFake_BlocksOf_NoneDeclareIt(t *testing.T) {
 	f := forge.NewFake()
 	f.NativeDeps = map[string][]string{"42": {"7"}}
@@ -605,8 +538,6 @@ func equalDeps(a, b []forge.Dependency) bool {
 	return true
 }
 
-// --- TouchesOf tests ---
-
 func TestFake_TouchesOf_ParsesBody(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{
@@ -624,17 +555,13 @@ func TestFake_TouchesOf_ParsesBody(t *testing.T) {
 	}
 }
 
-// --- PriorClaimState tests ---
-
-// TestFake_ImplementsPriorClaimStateReader asserts that *Fake satisfies the
-// optional PriorClaimStateReader surface (issue #2477).
+// The Fake must offer optional PriorClaimStateReader (issue #2477).
 func TestFake_ImplementsPriorClaimStateReader(t *testing.T) {
 	var _ forge.PriorClaimStateReader = forge.NewFake()
 }
 
-// TestFake_PriorClaimState_UnscriptedReturnsNotFound verifies that an issue
-// number with no PriorClaimStates entry reports ok=false, err=nil — the
-// "fresh dispatch, never previously terminal" case.
+// No entry means a fresh dispatch that was never terminal, so PriorClaimState
+// reports ok=false with a nil error.
 func TestFake_PriorClaimState_UnscriptedReturnsNotFound(t *testing.T) {
 	f := forge.NewFake()
 
@@ -647,8 +574,6 @@ func TestFake_PriorClaimState_UnscriptedReturnsNotFound(t *testing.T) {
 	}
 }
 
-// TestFake_PriorClaimState_ScriptedReturnsState verifies that a scripted
-// PriorClaimStates entry is returned with ok=true.
 func TestFake_PriorClaimState_ScriptedReturnsState(t *testing.T) {
 	f := forge.NewFake()
 	f.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
@@ -665,8 +590,6 @@ func TestFake_PriorClaimState_ScriptedReturnsState(t *testing.T) {
 	}
 }
 
-// TestFake_PriorClaimState_Err verifies that a non-nil PriorClaimStateErr is
-// returned instead of consulting PriorClaimStates.
 func TestFake_PriorClaimState_Err(t *testing.T) {
 	f := forge.NewFake()
 	f.PriorClaimStateErr = forge.ErrAuthFailure
@@ -676,8 +599,6 @@ func TestFake_PriorClaimState_Err(t *testing.T) {
 		t.Fatal("want error, got nil")
 	}
 }
-
-// --- ParseBlockerRefs tests (moved from main package) ---
 
 func TestParseBlockerRefs_Empty(t *testing.T) {
 	refs := forge.ParseBlockerRefs("")
@@ -838,8 +759,7 @@ func TestParseBlockerRefs_MultipleInlineSpansOnOneLine(t *testing.T) {
 	}
 }
 
-// TestParseBlockerRefs_Issue847FencedExampleDoesNotWedge reconstructs the
-// #847 leak: a real "## Blocked by" section reads None, but a fenced
+// The #847 leak: a real "## Blocked by" section reads None, but a fenced
 // example of the dispatch log format quotes "blocked by #N" lines that the
 // inline keyword matcher used to capture as real refs.
 func TestParseBlockerRefs_Issue847FencedExampleDoesNotWedge(t *testing.T) {
@@ -849,9 +769,8 @@ func TestParseBlockerRefs_Issue847FencedExampleDoesNotWedge(t *testing.T) {
 	}
 }
 
-// TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef reconstructs
-// issue #1278's "## Blocked by" body: a "- None" sentinel bullet that
-// mentions a #N ref only as explanatory prose must not yield that ref.
+// Issue #1278's body: a "- None" sentinel bullet that mentions a #N ref only
+// as explanatory prose must not yield that ref.
 func TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef(t *testing.T) {
 	body := "## Blocked by\n\n- None — can start immediately. Follow-up cleanup to #1277 (merged).\n"
 	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
@@ -859,9 +778,8 @@ func TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef(t *testing.T) {
 	}
 }
 
-// TestParseBlockerRefs_SentinelBulletDoesNotSuppressOtherBullets confirms
-// a "- None" sentinel bullet only cancels itself — a genuine blocker
-// declared in another bullet of the same section still surfaces.
+// A "- None" sentinel bullet cancels only itself, so a genuine blocker in
+// another bullet of the same section still counts.
 func TestParseBlockerRefs_SentinelBulletDoesNotSuppressOtherBullets(t *testing.T) {
 	body := "## Blocked by\n\n- None\n- #42\n"
 	refs := forge.ParseBlockerRefs(body)
@@ -870,10 +788,9 @@ func TestParseBlockerRefs_SentinelBulletDoesNotSuppressOtherBullets(t *testing.T
 	}
 }
 
-// TestParseBlockerRefs_SentinelBulletDoesNotAffectInlineFormat confirms the
-// sentinel check is scoped to the section-bullet path only: an inline
-// "depends on #N" elsewhere in the body still surfaces even when the
-// "## Blocked by" section itself is a sentinel.
+// The sentinel check is scoped to the section-bullet path, so an inline
+// "depends on #N" elsewhere in the body still counts even when the
+// "## Blocked by" section is a sentinel.
 func TestParseBlockerRefs_SentinelBulletDoesNotAffectInlineFormat(t *testing.T) {
 	body := "## Blocked by\n\n- None\n\nUnrelated prose that depends on #99 for context.\n"
 	refs := forge.ParseBlockerRefs(body)
@@ -882,8 +799,7 @@ func TestParseBlockerRefs_SentinelBulletDoesNotAffectInlineFormat(t *testing.T) 
 	}
 }
 
-// TestParseBlockerRefs_SentinelBulletNA covers the "N/A" spelling of the
-// sentinel, case-insensitively.
+// The sentinel also accepts the "N/A" spelling, case-insensitively.
 func TestParseBlockerRefs_SentinelBulletNA(t *testing.T) {
 	body := "## Blocked by\n\n- n/a\n"
 	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
@@ -891,11 +807,9 @@ func TestParseBlockerRefs_SentinelBulletNA(t *testing.T) {
 	}
 }
 
-// TestParseBlockerRefs_HyphenatedWordIsNotSentinel confirms a bullet that
-// merely starts with the letters "none" hyphen-joined into a longer word
-// (no separating whitespace) is not mistaken for the "None" sentinel —
-// the sentinel's dash-continuation tolerance is for a genuine em-dash or
-// spaced hyphen, not word-internal punctuation.
+// The sentinel's dash-continuation tolerance covers a genuine em-dash or a
+// spaced hyphen, not word-internal punctuation, so a bullet starting with
+// "none" hyphen-joined into a longer word is not a sentinel.
 func TestParseBlockerRefs_HyphenatedWordIsNotSentinel(t *testing.T) {
 	body := "## Blocked by\n\n- None-existent blocker, see #42\n"
 	refs := forge.ParseBlockerRefs(body)
@@ -904,10 +818,8 @@ func TestParseBlockerRefs_HyphenatedWordIsNotSentinel(t *testing.T) {
 	}
 }
 
-// TestParseBlockerRefs_SentinelBulletIgnoresSameLineInlineKeyword confirms
-// a sentinel bullet suppresses a #N ref even when that ref arrives via an
-// inline trigger phrase ("blocked by #N") on the same line, not just via
-// prose mentioning "#N" directly.
+// A sentinel bullet suppresses a #N ref even when the ref arrives via an
+// inline trigger phrase on the same line, not just via bare prose.
 func TestParseBlockerRefs_SentinelBulletIgnoresSameLineInlineKeyword(t *testing.T) {
 	body := "## Blocked by\n\n- None — blocked by #7\n"
 	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
@@ -915,9 +827,8 @@ func TestParseBlockerRefs_SentinelBulletIgnoresSameLineInlineKeyword(t *testing.
 	}
 }
 
-// TestParseBlockerRefs_SentinelBulletEnDashContinuation confirms the
-// sentinel's dash continuation tolerates an en-dash ("–", U+2013), which
-// authors substitute as often as the em-dash the issue names.
+// Authors substitute an en-dash (U+2013) as often as the em-dash the issue
+// names, so the sentinel's dash continuation must tolerate it.
 func TestParseBlockerRefs_SentinelBulletEnDashContinuation(t *testing.T) {
 	body := "## Blocked by\n\n- None – see #5\n"
 	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
@@ -925,7 +836,6 @@ func TestParseBlockerRefs_SentinelBulletEnDashContinuation(t *testing.T) {
 	}
 }
 
-// containsLabel is a test helper (not imported from main package).
 func containsLabel(labels []string, target string) bool {
 	for _, l := range labels {
 		if l == target {

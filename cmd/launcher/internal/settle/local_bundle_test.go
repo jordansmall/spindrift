@@ -9,12 +9,11 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// TestSettle_LocalForge_BlockedPostsNoteAsComment verifies that a local
-// Dispatch's blocked status posts the outcome's note field as a comment via
-// Comment(num, note) — the host-mediated substitute for the gh issue comment
+// A local Dispatch's blocked status posts the outcome's note as a comment via
+// Comment(num, note), the host-mediated substitute for the gh issue comment
 // call the Box's issue-prompt runs under github (ADR 0032, issue #1692). The
-// tracker's LandingRecorder-implementing shape (plain forge.NewFake()) is
-// this test suite's "local" convention (see AsLocal/AsNoLandingRecorder).
+// tracker's LandingRecorder-implementing shape (plain forge.NewFake()) is this
+// suite's "local" convention (see AsLocal/AsNoLandingRecorder).
 func TestSettle_LocalForge_BlockedPostsNoteAsComment(t *testing.T) {
 	const issNum = "42"
 	fc := forge.NewFake(testDispatchLabels)
@@ -46,15 +45,11 @@ func TestSettle_LocalForge_BlockedPostsNoteAsComment(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_LocalForge_MergeConflictThenRebaseSucceedsRetriesWithoutPanic
-// asserts that when MaxRebaseAttempts > 0 (the schema default is 3, not
-// baseConfig's 0), a merge conflict followed by a clean Rebase doesn't crash:
-// mergeImmediate's reactive retry loop unconditionally re-waits for CI on
-// every successful Rebase (rewaitAfterForcePush -> gateToGreen ->
-// s.pr.CheckState), but a push-only forge (s.pr == nil, git and local alike)
-// has no CI to wait for. Concurrent seams landing onto the same Integration
-// branch make this conflict-then-clean-rebase sequence a routine occurrence
-// under CODE_FORGE=local specifically, not a rare edge case.
+// With MaxRebaseAttempts > 0 (the schema default is 3, not baseConfig's 0), a
+// merge conflict followed by a clean Rebase must not crash: mergeImmediate's
+// retry loop unconditionally re-waits for CI after every successful Rebase,
+// but a push-only forge (s.pr == nil, git and local alike) has no CI to wait
+// for. Concurrent seams on one Integration branch make this routine, not rare.
 func TestSelfHeal_LocalForge_MergeConflictThenRebaseSucceedsRetriesWithoutPanic(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -80,12 +75,10 @@ func TestSelfHeal_LocalForge_MergeConflictThenRebaseSucceedsRetriesWithoutPanic(
 	}
 }
 
-// TestSelfHeal_LocalForge_MergeConflictAfterRelayBlocksNotFails asserts a
-// merge conflict (the Integration branch has diverged since the bundle was
+// A merge conflict (the Integration branch diverged since the bundle was
 // built) blocks the seam the same way a missing bundle does, but only after
-// the relay itself has already succeeded — the conflict is a property of the
-// merge, not the relay (ADR 0033: "a conflicting merge leaves the seam
-// unlanded and blocked").
+// the relay itself succeeded: the conflict is a property of the merge, not the
+// relay (ADR 0033, "a conflicting merge leaves the seam unlanded and blocked").
 func TestSelfHeal_LocalForge_MergeConflictAfterRelayBlocksNotFails(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -113,11 +106,10 @@ func TestSelfHeal_LocalForge_MergeConflictAfterRelayBlocksNotFails(t *testing.T)
 	}
 }
 
-// TestSelfHeal_LocalForge_RelaysBundleBeforeMergeAndRecordsLandingRef asserts
-// the CODE_FORGE=local landing path (ADR 0033): before Merge is attempted,
-// the Box's outbox bundle is relayed in via the forge's optional
-// forge.BundleRelay hook; once merged, the richer forge.LandingRef value —
-// not the raw branch name — is what gets recorded as the issue's landing:.
+// The CODE_FORGE=local landing path (ADR 0033): before Merge is attempted the
+// Box's outbox bundle is relayed in via the forge's optional forge.BundleRelay
+// hook; once merged, the richer forge.LandingRef value, not the raw branch
+// name, is what gets recorded as the issue's landing:.
 func TestSelfHeal_LocalForge_RelaysBundleBeforeMergeAndRecordsLandingRef(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -151,13 +143,11 @@ func TestSelfHeal_LocalForge_RelaysBundleBeforeMergeAndRecordsLandingRef(t *test
 	}
 }
 
-// TestSelfHeal_LocalForge_UsesPerIssueCodeForgeForMerge asserts that when
-// Config.CodeForgeForIssue is set, mergeImmediate's RelayBundle/Merge calls
-// land through the resolved-for-this-issue instance it returns, not the
-// single cf New() received — CODE_FORGE=local's per-seam Integration branch
-// keying (ADR 0033, issue #1734): a mixed-parent batch must merge each seam
-// through its own resolved instance, not whichever one the run's shared cf
-// happened to be constructed with.
+// When Config.CodeForgeForIssue is set, mergeImmediate's RelayBundle and Merge
+// calls must land through the resolved-for-this-issue instance it returns, not
+// the single cf New() received (ADR 0033, issue #1734). CODE_FORGE=local keys
+// the Integration branch per seam, so a mixed-parent batch must merge each seam
+// through its own resolved instance.
 func TestSelfHeal_LocalForge_UsesPerIssueCodeForgeForMerge(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -194,12 +184,11 @@ func TestSelfHeal_LocalForge_UsesPerIssueCodeForgeForMerge(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording asserts
 // LandingRef is a best-effort enrichment: a resolution failure after a
-// successful merge must never turn an actual land into a failure — the seam
-// stays landingMerged, it's only the richer landing: overwrite that's
-// skipped (RecordLanding keeps whatever recordLanding wrote earlier from the
-// outcome line's raw landing= field).
+// successful merge must never turn an actual land into a failure. The seam
+// stays landingMerged and only the richer landing: overwrite is skipped, so
+// RecordLanding keeps what recordLanding wrote earlier from the outcome line's
+// raw landing= field.
 func TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -224,11 +213,10 @@ func TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording(t *testi
 	}
 }
 
-// TestSelfHeal_LocalForge_NilOutboxDirFailsLoudly asserts a misconfigured
-// Settle — a Code Forge implementing forge.BundleRelay but no OutboxDir
-// resolver supplied — errors instead of silently relaying against an empty
-// path, so a wiring bug surfaces immediately rather than as a confusing
-// "bundle missing" note pointing at "/seam.bundle".
+// A misconfigured Settle (a Code Forge implementing forge.BundleRelay with no
+// OutboxDir resolver supplied) must error instead of silently relaying against
+// an empty path, so a wiring bug shows up immediately rather than as a
+// confusing "bundle missing" note pointing at "/seam.bundle".
 func TestSelfHeal_LocalForge_NilOutboxDirFailsLoudly(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -247,10 +235,9 @@ func TestSelfHeal_LocalForge_NilOutboxDirFailsLoudly(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_LocalForge_MissingBundleBlocksNotFails asserts a RelayBundle
-// failure (missing/malformed bundle, ADR 0033) leaves the seam unlanded via
-// the same merge-blocked-stays-complete posture an ordinary push failure
-// already gets (TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed) —
+// A RelayBundle failure (missing or malformed bundle, ADR 0033) leaves the
+// seam unlanded with the same merge-blocked-stays-complete posture an ordinary
+// push failure gets (TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed):
 // never demoted to agent-failed, and Merge itself is never attempted.
 func TestSelfHeal_LocalForge_MissingBundleBlocksNotFails(t *testing.T) {
 	c := baseConfig()
@@ -282,14 +269,11 @@ func TestSelfHeal_LocalForge_MissingBundleBlocksNotFails(t *testing.T) {
 	}
 }
 
-// TestSettle_LocalForge_HostileLandingIgnored_UsesAgentBranch asserts issue
-// #1949's fix on the push-only local landing path: a bundle carrying a
-// hostile landing=main (or any ref not the issue's own AgentBranch) must
-// never steer RelayBundle or Merge — both are derived host-side from
-// cf.AgentBranch(num), the same rule the read-only github draft-PR path now
-// follows, so a malicious outcome line can, at worst, land on the issue's
-// own branch inside the Accumulation repo (still gated behind the normal
-// rebase/merge path), never a ref of the Box's choosing.
+// Issue #1949's fix on the push-only local landing path: a bundle carrying a
+// hostile landing=main (or any ref that is not the issue's own AgentBranch)
+// must never steer RelayBundle or Merge. Both are derived host-side from
+// cf.AgentBranch(num), so a malicious outcome line can at worst land on the
+// issue's own branch in the Accumulation repo, never a ref of the Box's choice.
 func TestSettle_LocalForge_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
 	const issNum = "1"
 	const hostileLanding = "main"

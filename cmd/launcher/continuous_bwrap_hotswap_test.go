@@ -11,25 +11,12 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// sequencedEval is a local freshness.Evaluator whose Eval call returns a
-// different outPath on each successive call against the image attr.
-// freshness.Fake has no built-in way to vary its response across calls (its
-// OutPath field is a single, call-invariant value), and
-// TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted
-// genuinely needs two DIFFERENT stale outpaths across fresh()'s two
-// in-process calls to model a derivation that evaluates differently each
-// time at the identical rev -- the host-taint signature ADR 0043 names.
-// launcherAttr/launcherOutPath are a fixed side channel, not sequenced: the
-// swap branch now requires the launcher dimension to be genuinely evaluated
-// and fresh (issue #2682 review finding), so a call against launcherAttr
-// must return the same outpath every time rather than consuming an entry
-// from outPaths, which stays reserved for the image attr's own sequence.
-// Defined locally rather than added to freshness.Fake since it's a narrow,
-// single-test need. mu guards calls since RunContinuous may, in general,
-// invoke fresh() from more than one goroutine over the run's life (even
-// though every actual call here is serialized under RunContinuous's own
-// mutex -- see fresh()'s own doc comment in main.go).
+// sequencedEval varies its outPath across successive Eval calls against the
+// image attr, which freshness.Fake cannot do. Calls against launcherAttr are a
+// fixed side channel that never consume the sequence: the swap branch needs a
+// genuinely evaluated, fresh launcher dimension (issue #2682 review finding).
 type sequencedEval struct {
+	// mu guards Eval; RunContinuous may call fresh() from more than one goroutine.
 	mu              sync.Mutex
 	outPaths        []string
 	calls           int
@@ -54,13 +41,11 @@ func (e *sequencedEval) Eval(pwd, rev, attr string) (string, error) {
 // TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling is
 // the core regression test for issue #2682 / ADR 0043: under bwrap, a
 // stale-image/fresh-launcher verdict must hot-swap the agent-closure
-// generation in place -- realize synchronously, bind the new generation via
-// Factory.SetAgentGeneration, and keep refilling -- rather than draining and
-// exiting with waves.ErrImageStale (exit 4) the way the OCI path (and the
-// pre-#2682 bwrap path) does.
+// generation in place and keep refilling, rather than draining and exiting
+// with waves.ErrImageStale (exit 4) the way the OCI path does.
 func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
-	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct -- never matches loadedHash
+	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct from loadedHash
 
 	c := baseConfig()
 	c.continuousDispatch = true
@@ -72,16 +57,11 @@ func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
-	// flakeLauncherAttr is configured and genuinely evaluated fresh: the
-	// swap branch requires the launcher dimension to have actually been
-	// probed (ADR 0043: "The launcher dimension of the probe is a
-	// prerequisite for the swap, not a companion improvement to it" --
-	// issue #2682 review finding), not merely defaulted true by an
-	// unconfigured attr. staleEval below (freshness.Fake.OutPath) returns
-	// the same outpath for every attr, so the launcher tip hash equals
-	// staleHash too -- loadedLauncherHash is set to staleHash so the
-	// launcher dimension is genuinely evaluated AND fresh, isolating
-	// image-only staleness exactly like the previous unset-attr shape did.
+	// The swap branch requires the launcher dimension to have been genuinely
+	// probed, not merely defaulted true by an unconfigured attr (ADR 0043,
+	// issue #2682 review finding). staleEval returns the same outpath for every
+	// attr, so setting loadedLauncherHash to staleHash makes the launcher
+	// dimension both evaluated and fresh, isolating image-only staleness.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
 
@@ -132,17 +112,11 @@ func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *
 	}
 }
 
-// TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale proves
-// "when both moved, the launcher wins" (ADR 0043): a bwrap verdict where
-// BOTH the image and the launcher dimensions are stale must still drain and
-// exit with waves.ErrImageStale (exit 4), exactly like the pre-#2682 path --
-// not attempt a swap. res.LauncherFresh false is what keeps this shape out
-// of the hot-swap branch. It does NOT assert zero Realizer calls: the image
-// dimension alone still genuinely diverges here (TipTag non-empty), so the
-// pre-existing background realize (freshness.RealizeTip, issue #2679,
-// unrelated to the swap) still fires on the drain path exactly as it always
-// has -- this test only needs to prove no SWAP (no bound generation, no
-// Box launch) was attempted.
+// TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale proves "when
+// both moved, the launcher wins" (ADR 0043): a bwrap verdict where both
+// dimensions are stale must drain and exit with waves.ErrImageStale (exit 4),
+// never swap. It asserts no swap rather than zero Realizer calls, because the
+// unrelated background realize (issue #2679) still fires on the drain path.
 func TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale(t *testing.T) {
 	const loadedImageHash = "11111111111111111111111111111111"    // 32 chars, the loaded closure
 	const staleImageHash = "22222222222222222222222222222222"     // 32 chars, distinct
@@ -165,9 +139,9 @@ func TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale(t *testing.T
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// No open issue at all: the stale verdict short-circuits the bootstrap
-	// refill before any discover/dispatch happens, so this test needs no
-	// dispatchable issue to observe the drain exit.
+	// No open issue: the stale verdict short-circuits the bootstrap refill
+	// before any discover or dispatch, so the drain exit is observable without
+	// one.
 	cf := it
 
 	fr := runner.NewFake()
@@ -195,16 +169,11 @@ func TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale(t *testing.T
 	}
 }
 
-// TestRunContinuousDispatch_OCIImageOnlyStale_StillDrains proves "hot-swap is
-// bwrap-only; the OCI path keeps the drain-exit unchanged" (ADR 0043): the
-// exact image-only-stale/launcher-fresh shape that hot-swaps under bwrap
-// (TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling)
-// must still drain and exit 4 under an OCI runnerKind. Asserted on the
-// return code, not on realizeFake's call count: RealizeTip's own background
-// (async, fire-and-forget) call may or may not have completed by the time
-// runContinuousDispatch returns, so asserting a call count here would either
-// race or duplicate TestRunContinuousDispatch_StaleRealizesTipInBackground's
-// own coverage of that async path.
+// TestRunContinuousDispatch_OCIImageOnlyStale_StillDrains proves the hot-swap
+// is bwrap-only (ADR 0043): the same image-only-stale, launcher-fresh shape
+// that hot-swaps under bwrap must still drain and exit 4 under an OCI
+// runnerKind. It asserts the return code, not realizeFake's call count, since
+// RealizeTip's background call may not have finished by the time this returns.
 func TestRunContinuousDispatch_OCIImageOnlyStale_StillDrains(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded image
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
@@ -219,9 +188,8 @@ func TestRunContinuousDispatch_OCIImageOnlyStale_StillDrains(t *testing.T) {
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#image"
 	c.imageTag = "spindrift:" + loadedHash
-	// c.runnerKind left at its zero value ("") -- OCI-ish, per
-	// TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts's
-	// own convention.
+	// c.runnerKind is left at its zero value (""), which reads as OCI, matching
+	// TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts.
 
 	dir, _ := newStaleProbeRepo(t)
 
@@ -265,19 +233,18 @@ func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) 
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
-	// flakeLauncherAttr configured and genuinely fresh -- see
-	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling's
-	// own comment for why this is required to reach the swap branch at all.
+	// flakeLauncherAttr is configured and genuinely fresh. See
+	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling
+	// for why the swap branch requires it.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
 
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// A dispatchable issue is present so a successful swap (the bug this
-	// test guards against not happening) would actually reach dispatch --
-	// making "zero RunCalls" a meaningful assertion below, not a vacuous one
-	// from an empty queue.
+	// A dispatchable issue is present so a successful swap, the bug this test
+	// guards against, would reach dispatch. That makes "zero RunCalls" below a
+	// meaningful assertion rather than a vacuous one from an empty queue.
 	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
 	cf := it
 
@@ -303,32 +270,14 @@ func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) 
 }
 
 // TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted proves a
-// bwrap hot-swap can reach errImageHostTainted (exit 5) via the SAME
-// guard.Classify mechanism the existing OCI drain path uses (issue #2113),
-// not a second mechanism (ADR 0043: "It gets the same halt, not a second
-// mechanism").
-//
-// Shape: one process, two in-process fresh() calls, not two separate
-// runContinuousDispatch calls. Two separate processes can't reproduce a
-// host-tainted SWAP -- a successful swap's currentImageTag only lives inside
-// that one process's own closure, so a second process's Probe at the
-// unchanged rev is a fresh divergence against the original baked tag, not
-// specifically a repeat of the first process's own divergence. This test
-// instead drives two dispatchable issues with maxParallel=1, so
-// waves.RunContinuous's refill triggers fresh() twice within ONE
-// runContinuousDispatch call: once for issue #1's bootstrap dispatch, and
-// again once issue #1's Box completes and frees the slot for issue #2. A
-// local sequencedEval (see its own doc comment above) returns a DIFFERENT
-// stale outpath on the second Eval call than the first, modeling a
-// host-realized derivation that evaluates differently each time at the
-// identical rev -- so fresh()'s first call swaps successfully (Rebuild),
-// and its second call, at the same rev with a new divergent outpath, hits
-// guard.Classify's NonConverging case and halts HostTainted instead of
-// swapping forever.
+// bwrap hot-swap reaches errImageHostTainted (exit 5) through the same
+// guard.Classify mechanism the OCI drain path uses (issue #2113, ADR 0043).
+// Two issues with maxParallel=1 force two fresh() calls inside one run,
+// because a swap's new tag lives only in that one process's own closure.
 func TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111"         // 32 chars, the loaded closure
 	const staleHash1 = "22222222222222222222222222222222"         // 32 chars, call 1's stale outpath
-	const staleHash2 = "33333333333333333333333333333333"         // 32 chars, call 2's DIFFERENT stale outpath
+	const staleHash2 = "33333333333333333333333333333333"         // 32 chars, call 2's different stale outpath
 	const loadedLauncherHash = "44444444444444444444444444444444" // 32 chars, the fixed, always-fresh launcher
 
 	c := baseConfig()
@@ -341,10 +290,9 @@ func TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted(t *testin
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
-	// flakeLauncherAttr configured and genuinely fresh on both fresh() calls
-	// -- see sequencedEval's own doc comment for why launcherAttr/
-	// launcherOutPath are a fixed side channel rather than part of the
-	// image's own outPaths sequence.
+	// flakeLauncherAttr is configured and fresh on both fresh() calls. See
+	// sequencedEval's doc comment for why launcherAttr and launcherOutPath are
+	// a fixed side channel rather than part of the image's outPaths sequence.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = loadedLauncherHash
 
@@ -383,19 +331,13 @@ func TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted(t *testin
 }
 
 // TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBinding
-// proves slice 2's fix for issue #2682's blocking bug: under a nixInBox
-// Consumer (c.nixConfigFile set -- the same gate bwrapAdapter.IsReady/Run
-// use to decide the /nix/var overlay is in play), a successful hot-swap must
-// call the snapshotGeneration seam (main.go's own package-level seam over
-// runner.SnapshotGeneration, mirroring bwrap.go's execCommand/statHostNixDB
-// seam convention) with the swap's own pwd/closure BEFORE binding the
-// generation onto the Factory -- otherwise every subsequent Box launch would
-// fail bwrapAdapter.Run's "nix-var snapshot ... no longer exists" stat guard
-// against a directory nothing ever wrote (ADR 0043: "A swap therefore adds a
-// generation named for the closure it was taken against").
+// pins slice 2's fix for issue #2682's blocking bug: under a nixInBox Consumer
+// (c.nixConfigFile set), a successful hot-swap must call snapshotGeneration
+// with the swap's own pwd and closure before binding the generation, or every
+// later Box launch fails bwrapAdapter.Run's "no longer exists" stat guard.
 func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBinding(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
-	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct -- never matches loadedHash
+	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct from loadedHash
 
 	c := baseConfig()
 	c.continuousDispatch = true
@@ -408,9 +350,9 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBindin
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	c.nixConfigFile = "/fake/nix.conf" // nixInBox on
-	// flakeLauncherAttr configured and genuinely fresh -- see
-	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling's
-	// own comment for why this is required to reach the swap branch at all.
+	// flakeLauncherAttr is configured and genuinely fresh. See
+	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling
+	// for why the swap branch requires it.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
 
@@ -465,14 +407,10 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBindin
 }
 
 // TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBackToDrain
-// proves the snapshotGeneration seam's failure path mirrors RealizeSync's
-// own: a failed snapshot must fall back to the ordinary drain (exit 4)
-// instead of binding a generation whose on-disk snapshot dir doesn't exist,
-// which would only surface later as every subsequent Box launch's own
-// "no longer exists" stat-guard failure instead of failing cleanly here
-// (the same "a failed realize falls back to draining" acceptance criterion
-// issue #2682 already established for RealizeSync, extended to this new
-// failure mode).
+// proves the snapshotGeneration seam's failure path mirrors RealizeSync's: a
+// failed snapshot must drain (exit 4) rather than bind a generation whose
+// snapshot dir does not exist, which would otherwise appear only as every
+// later Box launch's "no longer exists" stat-guard failure (issue #2682).
 func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBackToDrain(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
@@ -488,19 +426,18 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBa
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	c.nixConfigFile = "/fake/nix.conf" // nixInBox on
-	// flakeLauncherAttr configured and genuinely fresh -- see
-	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling's
-	// own comment for why this is required to reach the swap branch at all.
+	// flakeLauncherAttr is configured and genuinely fresh. See
+	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling
+	// for why the swap branch requires it.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
 
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// A dispatchable issue is present so a successful swap (the bug this
-	// test guards against not happening) would actually reach dispatch --
-	// making "zero RunCalls" a meaningful assertion below, not a vacuous one
-	// from an empty queue.
+	// A dispatchable issue is present so a successful swap, the bug this test
+	// guards against, would reach dispatch. That makes "zero RunCalls" below a
+	// meaningful assertion rather than a vacuous one from an empty queue.
 	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
 	cf := it
 
@@ -530,16 +467,11 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBa
 	}
 }
 
-// TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain pins
-// the swap branch's launcher-dimension prerequisite (issue #2682 review
-// finding): Probe hard-codes LauncherFresh true whenever flakeLauncherAttr
-// is unconfigured (freshness's own "not configured is not stale" contract),
-// so without an explicit c.flakeLauncherAttr != "" gate an unconfigured
-// launcher dimension would hot-swap forever with no incidental restart ever
-// catching a launcher-side change (ADR 0043: "The launcher dimension of the
-// probe is a prerequisite for the swap, not a companion improvement to
-// it"). c.flakeLauncherAttr is left at its zero value here -- an otherwise
-// textbook Box-only-stale shape must still drain like the pre-#2682 path.
+// TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain pins the
+// swap branch's launcher-dimension prerequisite (issue #2682 review finding):
+// Probe hard-codes LauncherFresh true when flakeLauncherAttr is unconfigured,
+// so without an explicit gate an otherwise textbook Box-only-stale shape would
+// hot-swap forever and never catch a launcher-side change (ADR 0043).
 func TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
@@ -554,15 +486,14 @@ func TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain(t *tes
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
-	// c.flakeLauncherAttr left unset (baseConfig's zero value).
+	// c.flakeLauncherAttr is deliberately left unset (baseConfig's zero value).
 
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// A dispatchable issue is present so a successful swap (the bug this
-	// test guards against) would actually reach dispatch -- making "zero
-	// RunCalls" a meaningful assertion below, not a vacuous one from an
-	// empty queue.
+	// A dispatchable issue is present so a successful swap, the bug this test
+	// guards against, would reach dispatch. That makes "zero RunCalls" below a
+	// meaningful assertion rather than a vacuous one from an empty queue.
 	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
 	cf := it
 
@@ -587,14 +518,10 @@ func TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain(t *tes
 }
 
 // TestRunContinuousDispatch_BwrapEmptyTipTag_FallsBackToDrain pins the
-// strings.HasPrefix(res.TipTag, "/nix/store/") guard in fresh()'s swap
-// branch (issue #2682 review finding): reachable whenever Probe's image eval
-// yields an empty out-path (Applicable true, ImageFresh false, TipTag ""),
-// which makes RealizeSync a genuine no-op (startRealize's own
-// res.TipTag == "" guard, freshness/realize.go) rather than a failure -- so
-// without this guard an empty TipTag would sail past RealizeSync's error
-// check and get bound as a live generation with no real store path. The
-// guard must instead fall back to the ordinary drain.
+// strings.HasPrefix(res.TipTag, "/nix/store/") guard in fresh()'s swap branch
+// (issue #2682 review finding): an empty image out-path makes RealizeSync a
+// no-op rather than a failure, so without the guard the swap would bind an
+// empty TipTag as a live generation with no store path instead of draining.
 func TestRunContinuousDispatch_BwrapEmptyTipTag_FallsBackToDrain(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111"         // 32 chars, the loaded closure
 	const loadedLauncherHash = "44444444444444444444444444444444" // 32 chars, the loaded launcher

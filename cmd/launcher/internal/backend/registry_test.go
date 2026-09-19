@@ -40,12 +40,10 @@ func TestQuickstartEligible(t *testing.T) {
 	}
 }
 
-// TestRelayCapableAndHostPostingCapable pins the two read-only capability
-// bits (issue #2526) that mkHarness's eval assert (slice 2) will read
-// straight off the registry rows: RelayCapable (forge axis -- bundle-relay
-// always, plus draft-PR-create + commit-subjects when the backend has a PR
-// concept) and HostPostingCapable (tracker axis -- host-posted comments +
-// issue-filing).
+// TestRelayCapableAndHostPostingCapable pins the two read-only capability bits
+// (issue #2526) that mkHarness's eval assert reads straight off the registry
+// rows: RelayCapable on the forge axis and HostPostingCapable on the tracker
+// axis.
 func TestRelayCapableAndHostPostingCapable(t *testing.T) {
 	relayCases := []struct {
 		name string

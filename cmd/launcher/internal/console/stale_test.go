@@ -14,10 +14,9 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// TestLauncher_TryLaunch_StaleFreshnessChecker_HoldsNewLaunches verifies a
-// Launcher whose Fresh checker reports the loaded image stale never claims
-// a queued pick — the pick holds at PickQueued — and StaleStatus reports
-// the stale verdict and its message for the banner (issue #652 AC1).
+// A stale Fresh verdict never claims a queued pick, so the pick holds at
+// PickQueued, and StaleStatus reports the verdict and its message for the
+// banner (issue #652 AC1).
 func TestLauncher_TryLaunch_StaleFreshnessChecker_HoldsNewLaunches(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -71,13 +70,10 @@ func TestLauncher_TryLaunch_StaleFreshnessChecker_HoldsNewLaunches(t *testing.T)
 	}
 }
 
-// TestLauncher_TryLaunch_NotApplicableFreshnessChecker_DoesNotHoldLaunches
-// verifies a Fresh checker reporting Applicable=false — the freshness.Probe
-// verdict for a pwd that isn't a git repository (issue #1579), mirroring the
-// pre-existing bwrap-runtime not-applicable case — never holds a queued pick:
-// dispatch proceeds against the already-loaded image and StaleStatus reports
-// no held-launch state, unlike the Applicable=true/Fresh=false case in
-// TestLauncher_TryLaunch_StaleFreshnessChecker_HoldsNewLaunches above.
+// A Fresh checker reporting Applicable=false, the freshness.Probe verdict for a
+// pwd that isn't a git repository (issue #1579), never holds a queued pick:
+// dispatch proceeds against the already-loaded image and StaleStatus reports no
+// held-launch state, unlike the Applicable=true, Fresh=false case above.
 func TestLauncher_TryLaunch_NotApplicableFreshnessChecker_DoesNotHoldLaunches(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -128,10 +124,8 @@ func TestLauncher_TryLaunch_NotApplicableFreshnessChecker_DoesNotHoldLaunches(t 
 	}
 }
 
-// TestLauncher_TryLaunch_StaleDuringRun_RunningBoxFinishesUnaffected
-// verifies a Box already running when the freshness checker turns stale
-// rides out to its normal settle — staleness only gates a slot refill, it
-// never touches an in-flight Dispatch (issue #652 AC2).
+// Staleness only gates a slot refill, so a Box already running when the checker
+// turns stale rides out to its normal settle (issue #652 AC2).
 func TestLauncher_TryLaunch_StaleDuringRun_RunningBoxFinishesUnaffected(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -184,10 +178,9 @@ func TestLauncher_TryLaunch_StaleDuringRun_RunningBoxFinishesUnaffected(t *testi
 	}
 }
 
-// TestLauncher_Rebuild_Success_ClearsStaleAndResumesHeldLaunch verifies a
-// successful RebuildFn clears the stale gate and resumes draining, so a
-// pick that held at PickQueued through the stale window launches without
-// being re-picked (issue #652 AC3/AC4).
+// A successful RebuildFn clears the stale gate and resumes draining, so a pick
+// that held at PickQueued through the stale window launches without being
+// re-picked (issue #652 AC3/AC4).
 func TestLauncher_Rebuild_Success_ClearsStaleAndResumesHeldLaunch(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -245,10 +238,8 @@ func TestLauncher_Rebuild_Success_ClearsStaleAndResumesHeldLaunch(t *testing.T) 
 	}
 }
 
-// TestLauncher_Rebuild_Success_PropagatesCapturedOutput verifies a non-empty
-// RebuildFn output string threads through to StaleStatus's 5th return value
-// — every other Rebuild test in this file returns "", which never exercised
-// this leg of the propagation (issue #1129).
+// A non-empty RebuildFn output threads through to StaleStatus. Every other
+// Rebuild test here returns "", so this leg was never exercised (issue #1129).
 func TestLauncher_Rebuild_Success_PropagatesCapturedOutput(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -287,10 +278,9 @@ func TestLauncher_Rebuild_Success_PropagatesCapturedOutput(t *testing.T) {
 	}
 }
 
-// TestLauncher_Rebuild_Success_PropagatesBranchSwitchNotice verifies a
-// non-empty RebuildFn notice threads through to StaleStatus's 6th return
-// value — the seam consoleGitSync's off-branch switch notice (issue #1141)
-// needs to reach the console's rendered status through.
+// A non-empty RebuildFn notice threads through to StaleStatus, so
+// consoleGitSync's off-branch switch notice (issue #1141) reaches the console's
+// rendered status.
 func TestLauncher_Rebuild_Success_PropagatesBranchSwitchNotice(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -329,10 +319,9 @@ func TestLauncher_Rebuild_Success_PropagatesBranchSwitchNotice(t *testing.T) {
 	}
 }
 
-// TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld verifies a failing
-// RebuildFn surfaces the error through StaleStatus and leaves the queued
-// pick held — a failed rebuild must never silently resume launches (issue
-// #652 AC5).
+// A failing RebuildFn surfaces the error through StaleStatus and leaves the
+// queued pick held. A failed rebuild must never silently resume launches
+// (issue #652 AC5).
 func TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -397,17 +386,11 @@ func TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld(t *testing.T) {
 	}
 }
 
-// TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks
-// reproduces the reviewer-flagged race (#652): with MaxParallel=2, one
-// slot's refill already saw a stale verdict and latched RunContinuous's own
-// one-shot `stale` flag for that whole invocation, while the other slot's
-// Box is still running. A concurrent Rebuild success flips the checker
-// fresh and calls tryLaunch, but that call is a no-op — the drain that
-// launched the running Box hasn't returned yet, so l.launching is still
-// true. Once the running Box finishes, RunContinuous's completion callback
-// short-circuits on its latched stale flag without ever consulting fresh()
-// again, so the *second* pick must not be permanently stranded at
-// PickQueued: drain must re-check freshness before deciding to park.
+// This test reproduces the reviewer-flagged race (#652): with MaxParallel=2,
+// slot 2's refill latched RunContinuous's one-shot stale flag while slot 1's
+// Box was still running, so a concurrent Rebuild's tryLaunch was a no-op
+// (l.launching still true) and the completion callback never consulted fresh()
+// again. Drain must re-check freshness or the second pick strands at PickQueued.
 func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
@@ -435,9 +418,9 @@ func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *
 	}
 	t.Cleanup(factory.Cleanup)
 
-	// Fresh reports fresh exactly once (slot 1 claiming #42), then stale
-	// (slot 2's refill, latching RunContinuous's one-shot flag) — until
-	// RebuildFn flips forcedFresh, which every call checks first.
+	// Fresh reports fresh exactly once (slot 1 claiming #42), then stale, which
+	// latches RunContinuous's one-shot flag on slot 2's refill, until RebuildFn
+	// flips forcedFresh, which every call checks first.
 	var calls atomic.Int32
 	var forcedFresh atomic.Bool
 	launch := &Launcher{
@@ -484,9 +467,8 @@ func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *
 	waitForPickStates(t, launch.queue, map[string]PickState{"42": PickSettled, "43": PickSettled})
 }
 
-// TestLauncher_Rebuild_MarksRebuildingWhileInFlight verifies StaleStatus
-// reports Rebuilding while RebuildFn is still running — the "progress
-// surfaced" half of issue #652 AC3 — and clears it once RebuildFn returns.
+// StaleStatus reports Rebuilding while RebuildFn is still running, the progress
+// half of issue #652 AC3, and clears it once RebuildFn returns.
 func TestLauncher_Rebuild_MarksRebuildingWhileInFlight(t *testing.T) {
 	release := make(chan struct{})
 	launch := &Launcher{
@@ -516,10 +498,9 @@ func TestLauncher_Rebuild_MarksRebuildingWhileInFlight(t *testing.T) {
 	}
 }
 
-// TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately verifies a retry's
-// Rebuild call clears the previous attempt's rebuildErr as soon as the
-// launch guard passes, not only once the retry's own RebuildFn returns —
-// otherwise StaleStatus briefly reports rebuilding=true alongside the stale
+// A retry's Rebuild clears the previous attempt's rebuildErr as soon as the
+// launch guard passes, not only once the retry's own RebuildFn returns.
+// Otherwise StaleStatus briefly reports rebuilding=true alongside the stale
 // error from the prior failed attempt (issue #760).
 func TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately(t *testing.T) {
 	release := make(chan struct{})
@@ -564,11 +545,10 @@ func TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately(t *testing.T) {
 	launch.Wait()
 }
 
-// TestLauncher_FreshnessChecker_SignalsOnlyOnFreshToStaleTransition verifies
-// the closure freshnessChecker returns calls signalRefresh only on the
-// fresh->stale edge, not on every verdict (issue #1124): a repeated stale
-// verdict and a fresh verdict must not signal, since Rebuild already signals
-// the stale->fresh clear itself.
+// The closure that freshnessChecker returns calls signalRefresh only when a
+// fresh verdict turns stale, not on every verdict (issue #1124). A repeated
+// stale verdict and a fresh verdict must not signal, since Rebuild already
+// signals the clear back to fresh itself.
 func TestLauncher_FreshnessChecker_SignalsOnlyOnFreshToStaleTransition(t *testing.T) {
 	var fresh bool
 	launch := &Launcher{

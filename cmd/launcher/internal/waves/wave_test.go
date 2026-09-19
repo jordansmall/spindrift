@@ -16,9 +16,9 @@ import (
 )
 
 // countingForge wraps a *forge.Fake and counts InProgress transitions
-// atomically. Embedding the concrete *Fake (rather than an interface)
-// promotes its full IssueTracker + CodeForge + PRForge surface, so a
-// countingForge value satisfies whichever seam(s) a call site needs.
+// atomically. It embeds the concrete *Fake rather than an interface so that one
+// value satisfies whichever of IssueTracker, CodeForge and PRForge a call site
+// needs.
 type countingForge struct {
 	*forge.Fake
 	claimCount *int32
@@ -57,8 +57,8 @@ func (r *signalRunner) Run(_ runner.Box) error {
 	return nil
 }
 
-// TestDispatchWave_ClaimsGatedByMaxParallel verifies that claimer.Claim is
-// called only after acquiring the semaphore slot, so at most maxParallel
+// TestDispatchWave_ClaimsGatedByMaxParallel pins that claimer.Claim runs only
+// after the goroutine acquires its semaphore slot, so at most maxParallel
 // issues are claimed at any point in time.
 func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 	c := baseConfig()
@@ -89,21 +89,21 @@ func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 		close(waveDone)
 	}()
 
-	// Block until the first run starts (sem is held; second goroutine cannot claim yet).
+	// While the first run holds the only semaphore slot, the second goroutine
+	// cannot claim yet.
 	select {
 	case <-fr.firstStarted:
 	case <-time.After(5 * time.Second):
 		t.Fatal("first run never started")
 	}
 
-	// With the fix: claim happens after sem acquire, so exactly 1 claim so far.
-	// With the bug: both claims happen before any goroutine acquires the sem.
+	// Before the fix, both claims happened before any goroutine acquired the
+	// semaphore.
 	got := atomic.LoadInt32(&count)
 	if got != 1 {
 		t.Errorf("claims while first run is active: got %d, want 1", got)
 	}
 
-	// Release the first run and wait for all work to finish.
 	close(fr.release)
 	select {
 	case <-waveDone:
@@ -111,16 +111,14 @@ func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 		t.Fatal("dispatchWave did not complete")
 	}
 
-	// Both issues must have been claimed by the end.
 	if got = atomic.LoadInt32(&count); got != 2 {
 		t.Errorf("total claims after dispatchWave: got %d, want 2", got)
 	}
 }
 
-// TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim verifies that when the
-// first container fails, the semaphore slot is freed and the next issue can be
-// claimed. This is the acceptance-criteria scenario: MAX_PARALLEL=1, failing first
-// container, later issues only claimed after the slot frees.
+// TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim pins that a
+// failing first container still frees its semaphore slot, so the next issue is
+// claimed once the slot frees.
 func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
 	const prURL = "https://github.com/owner/repo/pull/2"
 
@@ -137,13 +135,11 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 	cfc := &countingForge{Fake: fc, claimCount: &count}
 
 	fr := runner.NewFake()
-	// The succeeding box must still report an outcome — an empty log there
-	// would (correctly, since #1605) also demote to failedLabel, muddying
-	// this test's real target: semaphore release, not settle's missing-
-	// outcome handling. The line lands in both boxes' logs (no per-call
-	// targeting beyond call order), but the failing box returns a non-nil
-	// Run error, which routes through classification instead of outcome
-	// parsing — so the injected line is inert there.
+	// The succeeding box must still report an outcome, because an empty log
+	// also demotes to failedLabel (since #1605) and would muddy this test's
+	// target of semaphore release. The line lands in both boxes' logs, but the
+	// failing box returns a non-nil Run error, which routes through
+	// classification instead of outcome parsing, so the line is inert there.
 	var calls int32
 	fr.RunFunc = func(box runner.Box) error {
 		n := atomic.AddInt32(&calls, 1)
@@ -152,9 +148,9 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 				prURL, box.Env["RUN_NONCE"])
 		}
 		if n == 1 {
-			return boxErr // first slot: fail
+			return boxErr
 		}
-		return nil // second: succeed
+		return nil
 	}
 
 	dir := tempLogDir(t)
@@ -166,14 +162,12 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 		{Number: "2", Title: "second"},
 	}, claimer)
 
-	// Both issues must have been claimed — the failing first container must not
-	// prevent the second issue from being dispatched.
 	if got := atomic.LoadInt32(&count); got != 2 {
 		t.Errorf("total claims after dispatchWave with failing first box: got %d, want 2", got)
 	}
 
-	// Exactly one issue must carry failedLabel (the one whose box exited non-zero).
-	// We don't assert which number failed — goroutine scheduling is non-deterministic.
+	// Which issue number carries failedLabel is not asserted, because goroutine
+	// scheduling is non-deterministic.
 	failed := 0
 	for _, num := range []string{"1", "2"} {
 		iss, err := fc.Issue(num)
@@ -189,11 +183,10 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 	}
 }
 
-// TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition verifies that
-// when the runner reports the issue's container is already running,
-// dispatchWave skips it as a distinct outcome: no failed-transition, the
-// live run's in-progress claim stands untouched, no settle/merge attempt is
-// made, and a distinct output line names the issue (issue #562).
+// TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition pins that when
+// the runner reports the container is already running, dispatchWave skips the
+// issue without a failed transition or a settle attempt, leaves the live run's
+// in-progress claim alone, and prints a line naming the issue (issue #562).
 func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1
@@ -232,11 +225,10 @@ func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) 
 	}
 }
 
-// TestDispatchWave_FailedBoxWithEmptyLogPrintsErrToStderr verifies that a box
-// that never launched at all (RunErr with no log output, so Result.Err is
-// populated per dispatch/retry.go) has its reason surfaced on stderr next to
-// the terse FAILED line, matching retry.go's own "?? #N: %v" diagnostic
-// convention (issue #3119).
+// TestDispatchWave_FailedBoxWithEmptyLogPrintsErrToStderr pins that a box which
+// never launched (RunErr with no log output, so Result.Err is populated) has
+// its reason printed on stderr next to the terse FAILED line, matching
+// retry.go's "?? #N: %v" convention (issue #3119).
 func TestDispatchWave_FailedBoxWithEmptyLogPrintsErrToStderr(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1
@@ -262,10 +254,10 @@ func TestDispatchWave_FailedBoxWithEmptyLogPrintsErrToStderr(t *testing.T) {
 	}
 }
 
-// TestDispatchWave_FailedBoxWithLogOutputPrintsNoExtraStderr verifies that a
-// box that ran and genuinely failed (left content in its log) leaves
-// Result.Err nil, so dispatchWave prints no extra "??" diagnostic beyond the
-// terse FAILED line (issue #3119).
+// TestDispatchWave_FailedBoxWithLogOutputPrintsNoExtraStderr pins that a box
+// which ran and genuinely failed (leaving content in its log) leaves Result.Err
+// nil, so dispatchWave prints no extra "??" diagnostic beyond the terse FAILED
+// line (issue #3119).
 func TestDispatchWave_FailedBoxWithLogOutputPrintsNoExtraStderr(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1
@@ -292,10 +284,10 @@ func TestDispatchWave_FailedBoxWithLogOutputPrintsNoExtraStderr(t *testing.T) {
 	}
 }
 
-// TestDispatchWave_GatesEachIssueAfterBoxCompletes verifies that the merge gate runs
-// inside each goroutine immediately after its box exits. An issue with a "ready"
-// outcome and green CI must reach completeLabel before dispatchWave returns, without
-// waiting for sibling boxes to finish.
+// TestDispatchWave_GatesEachIssueAfterBoxCompletes pins that the merge gate
+// runs inside each goroutine right after its own box exits, so an issue with a
+// "ready" outcome and green CI reaches completeLabel without waiting for
+// sibling boxes.
 func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	const prURL = "https://github.com/owner/repo/pull/10"
 
@@ -307,8 +299,6 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
-	// The fake runner writes the outcome line into the log file (via box.Output)
-	// before returning, simulating a box that ran successfully and emitted its result.
 	fr := runner.NewFake()
 	fr.RunFunc = func(box runner.Box) error {
 		if box.Output != nil {
@@ -333,11 +323,10 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	}
 }
 
-// TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR verifies that a
-// CODE_FORGE=git outcome carrying a branch ref (not a PR URL) lands cleanly
-// through the same dispatchWave→settle.Settle path used for github: the issue reaches
-// agent-complete and is never demoted to agent-failed by a PR-shaped
-// post-merge check that does not apply to a push-only forge.
+// TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR pins that a
+// CODE_FORGE=git outcome carrying a branch ref instead of a PR URL still lands
+// through the dispatchWave and settle.Settle path: the issue reaches
+// agent-complete and no PR-shaped post-merge check demotes it to agent-failed.
 func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	const branch = "agent/issue-1"
 
@@ -347,10 +336,9 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 
 	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
-	// The real git Code Forge has no PR concept — PRState always errors. A
-	// settle path that (incorrectly) called verifyMerged for a push-only
-	// forge would read this as "not merged" and wrongly demote the issue to
-	// failed.
+	// The real git Code Forge has no PR concept, so PRState always errors. A
+	// settle path that wrongly called verifyMerged for a push-only forge would
+	// read that error as "not merged" and demote the issue to failed.
 	fc.PRStateErr = errors.New("PRState: not supported by the git Code Forge (push-only, no PR concept)")
 
 	fr := runner.NewFake()
@@ -383,12 +371,11 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	}
 }
 
-// TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed verifies that a
-// CODE_FORGE=git outcome carrying status=merged (a status the grammar
-// documents as valid, outcome.go:24) never reaches verifyMerged's PR-state
-// check: the git Code Forge's PRState always errors, so an unguarded call
-// would wrongly demote the issue to agent-failed even though nothing is
-// actually wrong.
+// TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed pins that a
+// CODE_FORGE=git outcome carrying status=merged (valid per the grammar in
+// outcome.go) never reaches verifyMerged's PR-state check: the git Code Forge's
+// PRState always errors, so an unguarded call would demote a healthy issue to
+// agent-failed.
 func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 	const branch = "agent/issue-1"
 

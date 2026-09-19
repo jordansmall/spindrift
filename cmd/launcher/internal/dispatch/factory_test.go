@@ -6,10 +6,8 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestFactory_AgentGenerationNilBeforeSet verifies that a freshly constructed
-// Factory's AgentGeneration() returns nil until SetAgentGeneration is ever
-// called -- nil means "use the runner adapter's own startup-baked default",
-// matching runner.Box.ClosureGeneration's own nil-means-default contract.
+// A nil generation means "use the runner adapter's own startup-baked default",
+// matching runner.Box.ClosureGeneration's nil-means-default contract.
 func TestFactory_AgentGenerationNilBeforeSet(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -25,8 +23,6 @@ func TestFactory_AgentGenerationNilBeforeSet(t *testing.T) {
 	}
 }
 
-// TestFactory_SetAgentGenerationThenGet verifies SetAgentGeneration/
-// AgentGeneration round-trip the same pointer.
 func TestFactory_SetAgentGenerationThenGet(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -46,10 +42,8 @@ func TestFactory_SetAgentGenerationThenGet(t *testing.T) {
 	}
 }
 
-// TestFactory_SetAgentGenerationAfterNewStillApplies verifies that, unlike
-// SetHeartbeatOut, SetAgentGeneration carries no before-any-New() panic
-// guard: a hot-swap must be able to land after dispatching has already
-// started, so calling it after New() must not panic.
+// Unlike SetHeartbeatOut, SetAgentGeneration carries no before-any-New() panic
+// guard: a hot-swap has to be able to land after dispatching already started.
 func TestFactory_SetAgentGenerationAfterNewStillApplies(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -70,10 +64,7 @@ func TestFactory_SetAgentGenerationAfterNewStillApplies(t *testing.T) {
 	}
 }
 
-// TestRun_BoxClosureGenerationDefaultNil verifies that a Factory that never
-// calls SetAgentGeneration still produces Boxes with ClosureGeneration ==
-// nil -- today's unchanged default behavior for every non-bwrap-hotswap
-// caller.
+// Every non-bwrap-hotswap caller depends on this unchanged nil default.
 func TestRun_BoxClosureGenerationDefaultNil(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -97,9 +88,6 @@ func TestRun_BoxClosureGenerationDefaultNil(t *testing.T) {
 	}
 }
 
-// TestRun_BoxClosureGenerationSnapshottedAtNew verifies the end-to-end wire:
-// a generation set on the Factory before New() reaches the runner.Box the
-// runner adapter actually receives, as ClosureGeneration.
 func TestRun_BoxClosureGenerationSnapshottedAtNew(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -126,12 +114,10 @@ func TestRun_BoxClosureGenerationSnapshottedAtNew(t *testing.T) {
 	}
 }
 
-// TestDispatch_KeepsAgentGenerationSnapshotFromNewDespiteLaterSwap verifies
-// issue #2682's acceptance criterion end-to-end: a Dispatch minted before a
-// hot-swap lands must keep launching Boxes with the generation it snapshotted
-// at its own New() -- even after Factory.SetAgentGeneration is called again
-// later and even across a Run() that happens after that later call -- while a
-// Dispatch minted after the swap picks up the new generation.
+// Pins issue #2682: a Dispatch minted before a hot-swap keeps launching Boxes
+// with the generation it snapshotted at its own New(), even across a Run() that
+// happens after a later SetAgentGeneration, while a Dispatch minted after the
+// swap picks up the new generation.
 func TestDispatch_KeepsAgentGenerationSnapshotFromNewDespiteLaterSwap(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -142,14 +128,11 @@ func TestDispatch_KeepsAgentGenerationSnapshotFromNewDespiteLaterSwap(t *testing
 	}
 	defer f.Cleanup()
 
-	// d1 is minted before any swap -- its snapshot is nil.
 	d1 := f.New("1", "pre-swap")
 
-	// A hot-swap lands after d1 was already minted.
 	gen := runner.NewAgentGeneration("/nix/store/swap-agent-closure")
 	f.SetAgentGeneration(&gen)
 
-	// d1 must still finish on what it started with (nil), not the swap.
 	if result := d1.Run(); !result.Success {
 		t.Fatalf("d1.Run: want Success=true, got %+v", result)
 	}
@@ -160,7 +143,6 @@ func TestDispatch_KeepsAgentGenerationSnapshotFromNewDespiteLaterSwap(t *testing
 		t.Errorf("d1 Box.ClosureGeneration after later swap: want nil (snapshot from before swap), got %+v", got)
 	}
 
-	// d2 is minted after the swap -- it must pick up the new generation.
 	d2 := f.New("2", "post-swap")
 	if result := d2.Run(); !result.Success {
 		t.Fatalf("d2.Run: want Success=true, got %+v", result)

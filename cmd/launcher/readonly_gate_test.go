@@ -6,11 +6,8 @@ import (
 	"testing"
 )
 
-// TestReadOnlyCapabilityGate_ReadWriteIsNoOp verifies that
-// checkReadOnlyCapabilityGate never rejects a backend combination when
-// BOX_FORGE_AND_ISSUE_ACCESS is read-write (the default) — read-write must
-// stay a complete no-op regardless of which forge/tracker names are
-// selected, even a combination that would fail under read-only (git/jira).
+// The git/jira pair fails under read-only, so this fixture pins that read-write
+// is a complete no-op rather than a gate that happens to pass.
 func TestReadOnlyCapabilityGate_ReadWriteIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-write"
@@ -21,14 +18,11 @@ func TestReadOnlyCapabilityGate_ReadWriteIsNoOp(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCapabilityGate_Table exercises checkReadOnlyCapabilityGate
-// (issue #2526 slice 3) purely by (BOX_FORGE_AND_ISSUE_ACCESS, CODE_FORGE,
-// ISSUE_TRACKER) name, now that mkHarness's readOnlyCapabilityOk eval assert
-// (issue #2526 slice 2) already proves every combination a Consumer can bake
-// into an image coherent at `nix build` time — the Go gate has shrunk to a
-// registry lookup by name, a backstop for a runtime override of these three
-// knobs past what nix validated, so it no longer needs live cf/it fixtures
-// at all.
+// mkHarness's readOnlyCapabilityOk eval assert (issue #2526 slice 2) already
+// proves every combination a Consumer can bake into an image, so the Go gate
+// (issue #2526 slice 3) has shrunk to a registry lookup by name that backstops a
+// runtime override of these three knobs. That is why these cases need no live
+// cf/it fixtures.
 func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -61,10 +55,8 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 			wantErr:      false,
 		},
 		{
-			// git is relay-incapable on the forge axis (no host-mediation
-			// seam at all) — fails regardless of which tracker pairs with
-			// it, and the error must name CODE_FORGE=git and bundle-relay,
-			// not the tracker.
+			// git has no host-mediation seam on the forge axis, so it fails
+			// whatever tracker pairs with it.
 			name:         "read-only git forge fails naming CODE_FORGE and bundle-relay",
 			access:       "read-only",
 			codeForge:    "git",
@@ -78,9 +70,8 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 			},
 		},
 		{
-			// jira is host-posting-incapable on the tracker axis — fails
-			// even though github (the forge) is fully capable, and the
-			// error must name ISSUE_TRACKER=jira and issue-filing.
+			// jira cannot post from the host, so the pair fails even though
+			// the github forge is capable.
 			name:         "read-only github/jira fails naming ISSUE_TRACKER and issue-filing",
 			access:       "read-only",
 			codeForge:    "github",
@@ -94,8 +85,8 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 			},
 		},
 		{
-			// Both axes incapable: the forge axis (checked first, matching
-			// the gate's own check order) must win the error message.
+			// Both axes are incapable, and the gate checks the forge axis
+			// first, so the forge message must win.
 			name:         "read-only git/jira fails on the forge axis first",
 			access:       "read-only",
 			codeForge:    "git",
@@ -107,12 +98,10 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 			},
 		},
 		{
-			// An unregistered CODE_FORGE name is a lookup miss, not a
-			// capability-incapable registered backend -- Validate() should
-			// already reject this earlier, but this gate is a
-			// defense-in-depth backstop and must not misattribute the miss
-			// to "does not implement bundle-relay" (a claim that presumes a
-			// registered row to check a bit on).
+			// Validate() rejects an unregistered name earlier, so this gate
+			// is only the backstop, and it must report a lookup miss rather
+			// than "does not implement bundle-relay", a claim that presumes
+			// a registered row to check a bit on.
 			name:         "read-only unregistered CODE_FORGE fails naming it unregistered, not capability-incapable",
 			access:       "read-only",
 			codeForge:    "bogus-forge",
@@ -129,9 +118,6 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 			},
 		},
 		{
-			// Same, on the tracker axis: an unregistered ISSUE_TRACKER name
-			// must not be misattributed as "does not implement host-posted
-			// comments and issue-filing" either.
 			name:         "read-only unregistered ISSUE_TRACKER fails naming it unregistered, not capability-incapable",
 			access:       "read-only",
 			codeForge:    "github",
@@ -180,18 +166,11 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCapabilityGate_ErrorTextHasNoSentinelPrefix pins the exact
-// operator-facing text checkReadOnlyCapabilityGate produces (review finding
-// on issue #2942, AC5: "Gate semantics, wording, and exit codes are
-// byte-identical for the existing four gates"). Before issue #2942 this gate
-// returned a plain, unwrapped error; wrapping it with
-// fmt.Errorf("%w: ...", errLaunchGateConfigInvalid, ...) prepends the
-// sentinel's own text ("launch gate config invalid: ") to every message
-// dispatch/recover/preview print verbatim to stderr, a wording regression.
-// The message must start with "BOX_FORGE_AND_ISSUE_ACCESS", not the
-// sentinel text, while errors.Is(err, errLaunchGateConfigInvalid) must still
-// hold so doctor.go's exit-code classification (doctorExitCodeFor) keeps
-// working.
+// Issue #2942's AC5 keeps this gate's wording byte-identical to the four older
+// gates: wrapping with fmt.Errorf("%w: ...", errLaunchGateConfigInvalid, ...)
+// would prepend the sentinel's own text to the message dispatch, recover and
+// preview print verbatim to stderr. errors.Is must still hold so doctor.go's
+// doctorExitCodeFor keeps classifying the exit code.
 func TestReadOnlyCapabilityGate_ErrorTextHasNoSentinelPrefix(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"

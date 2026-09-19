@@ -6,14 +6,11 @@ import (
 	"testing"
 )
 
-// TestIssuePromptCheckDiffRedirectDiscipline is a content-invariant guard
-// (issue #3215) for the CHECK section's redirect-to-file discipline: the
-// existing "never `cat` a whole build/test log into context" rule must
-// extend to diffs, since a bare `git diff` streamed to the conversation
-// hits the same tool-result truncation cap a streamed build log does. This
-// section is shared verbatim with fix-prompt.md via the CHECK block
-// injection (lib/mkHarness.nix); mkharness-prompt-fix-check-no-drift pins
-// that propagation, so this test only needs to check issue-prompt.md.
+// Issue #3215 extended the CHECK section's redirect-to-file rule from build
+// logs to diffs, because a bare `git diff` streamed to the conversation hits
+// the same tool-result truncation cap. mkHarness injects the CHECK block
+// verbatim into fix-prompt.md and mkharness-prompt-fix-check-no-drift pins
+// that propagation, so this test only checks issue-prompt.md.
 func TestIssuePromptCheckDiffRedirectDiscipline(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "issue-prompt.md"))

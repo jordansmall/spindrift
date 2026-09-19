@@ -8,10 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestPickIssue_PromotesAndReturnsQueuedMsg verifies PickIssue promotes num
-// through the Untriaged->Dispatchable transition and wraps the result into a
-// PickQueuedMsg Update can apply directly — the Pick record's kind defaults
-// to work when the caller doesn't override it (#646 AC7).
+// PickIssue promotes num through the Untriaged to Dispatchable transition and
+// wraps the result in a PickQueuedMsg Update can apply directly. The Pick
+// record's kind defaults to work when the caller doesn't override it (#646 AC7).
 func TestPickIssue_PromotesAndReturnsQueuedMsg(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
@@ -35,10 +34,9 @@ func TestPickIssue_PromotesAndReturnsQueuedMsg(t *testing.T) {
 	}
 }
 
-// TestPickIssue_TransitionErr_ReturnsDissolvedMsg verifies a promotion that
-// races (issue closed, relabeled, or claimed by another loop) surfaces as
-// PickDissolvedMsg with the tracker's error as the reason, rather than a
-// silently-queued pick the tracker never actually recorded.
+// A promotion that races (issue closed, relabeled, or claimed by another loop)
+// surfaces as PickDissolvedMsg with the tracker's error as the reason, rather
+// than a silently-queued pick the tracker never actually recorded.
 func TestPickIssue_TransitionErr_ReturnsDissolvedMsg(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
@@ -55,8 +53,7 @@ func TestPickIssue_TransitionErr_ReturnsDissolvedMsg(t *testing.T) {
 	}
 }
 
-// TestPickIssue_LeavesIssueDispatchable_NeverInProgress verifies a pick
-// stops at the promotion step — the issue is Dispatchable, never
+// A pick stops at the promotion step: the issue is Dispatchable, never
 // InProgress, until something actually claims and launches it (#646 AC3).
 func TestPickIssue_LeavesIssueDispatchable_NeverInProgress(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
@@ -73,10 +70,9 @@ func TestPickIssue_LeavesIssueDispatchable_NeverInProgress(t *testing.T) {
 	}
 }
 
-// TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition verifies a
-// pick on an issue already claimed by a live Box is rejected outright —
-// never relabeled Dispatchable on top of its existing InProgress label,
-// which would let a second Box's claim succeed for the same issue (#707).
+// PickIssue rejects a pick on an issue a live Box already claimed, and never
+// relabels it Dispatchable on top of its existing InProgress label, which would
+// let a second Box's claim succeed for the same issue (#707).
 func TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
@@ -103,9 +99,8 @@ func TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition(t *testing
 	}
 }
 
-// TestPickIssue_AlreadyComplete_ReturnsDissolvedMsg_NoTransition mirrors
-// TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition for the other
-// terminal state a stray pick must never relabel out of (#707).
+// This test mirrors the AlreadyInProgress case for the other terminal state a
+// stray pick must never relabel out of (#707).
 func TestPickIssue_AlreadyComplete_ReturnsDissolvedMsg_NoTransition(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", Complete: "agent-complete"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
@@ -132,11 +127,9 @@ func TestPickIssue_AlreadyComplete_ReturnsDissolvedMsg_NoTransition(t *testing.T
 	}
 }
 
-// TestPickIssue_ClosedIssue_ReturnsDissolvedMsg_NoTransition verifies a pick
-// on an issue GitHub already closed is rejected outright, even when it still
-// carries no dispatch label — a closed issue must never be promoted onto the
-// dispatch lifecycle just because a dispatch label was never cleaned up
-// (#1851).
+// PickIssue rejects a pick on an issue GitHub already closed, even when it
+// carries no dispatch label: an uncleaned dispatch label must not drag a closed
+// issue back onto the dispatch lifecycle (#1851).
 func TestPickIssue_ClosedIssue_ReturnsDissolvedMsg_NoTransition(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueClosed})
@@ -156,10 +149,9 @@ func TestPickIssue_ClosedIssue_ReturnsDissolvedMsg_NoTransition(t *testing.T) {
 	}
 }
 
-// TestPickIssue_IssueLookupErr_ReturnsDissolvedMsg verifies a tracker.Issue
-// failure (network fault, deleted issue) surfaces as a PickDissolvedMsg
-// carrying the tracker's error, rather than falling through to the
-// InProgress/Complete checks with a zero-value Issue.
+// A tracker.Issue failure (network fault, deleted issue) surfaces as a
+// PickDissolvedMsg carrying the tracker's error, rather than falling through to
+// the InProgress/Complete checks with a zero-value Issue.
 func TestPickIssue_IssueLookupErr_ReturnsDissolvedMsg(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.IssueErr = errBoom
@@ -178,14 +170,11 @@ func TestPickIssue_IssueLookupErr_ReturnsDissolvedMsg(t *testing.T) {
 	}
 }
 
-// TestPickIssue_ResearchKind_UntriagedIssue_ReturnsQueuedMsg verifies a
-// KindResearch pick on an untriaged Backlog issue queues instead of
+// A KindResearch pick on an untriaged Backlog issue queues instead of
 // dissolving (#1742). Research's DispatchLabels leaves Complete unmapped
-// (ADR 0022: a research dispatch reaches Complete via verdict labels, not
-// a Complete label) — the double-box guard must recognize an unmapped
-// state as "never present" rather than querying it and false-matching
-// every open issue, which used to reject every research pick with a bogus
-// "already complete" reason.
+// because a research dispatch reaches Complete via verdict labels (ADR 0022),
+// so the double-box guard must read an unmapped state as "never present";
+// querying it false-matched every open issue and rejected every research pick.
 func TestPickIssue_ResearchKind_UntriagedIssue_ReturnsQueuedMsg(t *testing.T) {
 	f := forge.NewFake(forge.ResearchDispatchLabels())
 	f.SetIssue(forge.Issue{Number: "42", Title: "worth researching"})
@@ -201,10 +190,8 @@ func TestPickIssue_ResearchKind_UntriagedIssue_ReturnsQueuedMsg(t *testing.T) {
 	}
 }
 
-// TestPickAllReady_ReturnsOneMsgPerCurrentlyDispatchableIssue verifies
-// PickAllReady picks exactly the issues currently Dispatchable on the
-// tracker, and nothing else — an issue with no dispatch label yet is left
-// alone (#647 AC3).
+// PickAllReady picks exactly the issues currently Dispatchable on the tracker
+// and nothing else: an issue with no dispatch label yet is left alone (#647 AC3).
 func TestPickAllReady_ReturnsOneMsgPerCurrentlyDispatchableIssue(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -226,9 +213,9 @@ func TestPickAllReady_ReturnsOneMsgPerCurrentlyDispatchableIssue(t *testing.T) {
 	}
 }
 
-// TestPickAllReady_ListIssuesErr_ReturnsDissolvedMsg verifies a ListIssues
-// failure surfaces to the operator as a PickDissolvedMsg instead of a silently
-// dropped nil — the asymmetry with PickIssue's error handling (#728).
+// A ListIssues failure surfaces to the operator as a PickDissolvedMsg instead
+// of a silently dropped nil, closing the asymmetry with PickIssue's error
+// handling (#728).
 func TestPickAllReady_ListIssuesErr_ReturnsDissolvedMsg(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.ListIssuesErr = errBoom
@@ -244,11 +231,10 @@ func TestPickAllReady_ListIssuesErr_ReturnsDissolvedMsg(t *testing.T) {
 	}
 }
 
-// TestPickAllReady_MakesExactlyOneListIssuesCall verifies the bulk pick skips
-// PickIssue's per-issue terminal-state re-verification — every issue in the
-// loop already came from the Dispatchable snapshot, so InProgress/Complete
-// are guaranteed false (#707's mutual-exclusivity contract) and re-checking
-// them wastes 2 ListIssues round-trips per issue for nothing (#987).
+// The bulk pick skips PickIssue's per-issue terminal-state re-verification:
+// every issue in the loop already came from the Dispatchable snapshot, so
+// InProgress/Complete are guaranteed false (#707's mutual-exclusivity contract)
+// and re-checking them wastes 2 ListIssues round trips per issue (#987).
 func TestPickAllReady_MakesExactlyOneListIssuesCall(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -267,12 +253,10 @@ func TestPickAllReady_MakesExactlyOneListIssuesCall(t *testing.T) {
 	}
 }
 
-// TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe verifies
-// that when the InProgress list issueInState consults hits ResultPageLimit
-// and num isn't in the page, PickIssue fails safe (dissolves the pick)
-// instead of concluding num isn't InProgress and re-opening the #707
-// double-box hole — a real ListIssues page cap could be hiding num beyond
-// the boundary.
+// When the InProgress list issueInState consults hits ResultPageLimit and num
+// isn't in the page, PickIssue fails safe and dissolves the pick instead of
+// concluding num isn't InProgress and re-opening the #707 double-box hole. A
+// real ListIssues page cap could be hiding num beyond the boundary.
 func TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
@@ -294,10 +278,8 @@ func TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe(t *testing.
 	}
 }
 
-// TestPickIssue_CompleteListAtPageLimit_TargetMissing_FailsSafe mirrors
-// TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe for the
-// Complete check issueInState runs second — a page-limited Complete list
-// must fail safe exactly like a page-limited InProgress one.
+// This test mirrors the InProgress page-limit case for the Complete check
+// issueInState runs second: a page-limited Complete list fails safe the same way.
 func TestPickIssue_CompleteListAtPageLimit_TargetMissing_FailsSafe(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", Complete: "agent-complete"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
@@ -319,9 +301,8 @@ func TestPickIssue_CompleteListAtPageLimit_TargetMissing_FailsSafe(t *testing.T)
 	}
 }
 
-// TestPickIssue_TargetFoundWithinFullPage_ReturnsDissolvedMsg verifies a full
-// page never shadows num when it IS on that page — the fail-safe error only
-// fires on a miss, so a match found within a page at the cap still reports
+// A full page never shadows num when it is on that page. The fail-safe error
+// only fires on a miss, so a match found within a page at the cap still reports
 // InProgress correctly, same as a match on a small page.
 func TestPickIssue_TargetFoundWithinFullPage_ReturnsDissolvedMsg(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
@@ -341,24 +322,19 @@ func TestPickIssue_TargetFoundWithinFullPage_ReturnsDissolvedMsg(t *testing.T) {
 	}
 }
 
-// fullyPaginatedFake wraps forge.Fake and additionally implements
-// forge.FullyPaginated, reporting true — a stand-in for the forgejo/jira
-// adapters, which now walk every page of ListIssues, so a result at or
-// above forge.ResultPageLimit is a complete set, never a truncated one.
+// fullyPaginatedFake wraps forge.Fake and implements forge.FullyPaginated as a
+// stand-in for the forgejo and jira adapters, which walk every page of
+// ListIssues, so a result at or above forge.ResultPageLimit is a complete set.
 type fullyPaginatedFake struct {
 	*forge.Fake
 }
 
 func (fullyPaginatedFake) WalksAllPages() bool { return true }
 
-// TestPickIssue_InProgressListAtPageLimit_FullyPaginated_NotTruncated
-// verifies that a tracker implementing forge.FullyPaginated is exempt from
-// issueInState's page-limit fail-safe (#707/#986): unlike
-// TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe's plain
-// forge.Fake, a full-looking InProgress page from a fully-paginating
-// tracker is trusted as complete, so a target missing from it means "not
-// InProgress" rather than "possibly truncated" — the pick proceeds instead
-// of dissolving with a truncation error.
+// issueInState exempts a tracker implementing forge.FullyPaginated from its
+// page-limit fail-safe (#707/#986): it trusts a full-looking InProgress page
+// from such a tracker as complete, so a missing target means "not InProgress"
+// rather than "possibly truncated" and the pick proceeds instead of dissolving.
 func TestPickIssue_InProgressListAtPageLimit_FullyPaginated_NotTruncated(t *testing.T) {
 	f := fullyPaginatedFake{forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})}
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})

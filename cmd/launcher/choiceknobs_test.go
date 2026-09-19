@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// TestSplitChoiceKnobRegistry_PreservesOrderWithinGroups proves
-// splitChoiceKnobRegistry partitions by AfterCrossKnobChecks while preserving
-// each group's original registry order, mirroring
-// TestSplitGateRegistryByNetwork's shape for the sibling gate registry.
 func TestSplitChoiceKnobRegistry_PreservesOrderWithinGroups(t *testing.T) {
 	registry := []choiceKnobRow{
 		{Env: "A", AfterCrossKnobChecks: false},
@@ -43,19 +39,10 @@ func envNames(rows []choiceKnobRow) []string {
 	return names
 }
 
-// TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks pins
-// that the real package-level choiceKnobRegistry has exactly one row with
-// AfterCrossKnobChecks: true, and that row is BOX_FORGE_AND_ISSUE_ACCESS.
-// Unlike TestSplitChoiceKnobRegistry_PreservesOrderWithinGroups (a synthetic
-// A-E registry that only exercises splitChoiceKnobRegistry's partitioning
-// logic in the abstract), this reads choiceKnobRegistry itself.
+// This test reads the registry row's own field, so a flipped
+// AfterCrossKnobChecks fails right here. The same flip also breaks
 // TestValidate_RegistryProxyCredentialErrorPrecedesBoxForgeAndIssueAccessChoiceError
-// (main_test.go) also breaks if the flag is flipped, but only indirectly --
-// via validate()'s error-precedence outcome when a cross-knob check and the
-// BOX_FORGE_AND_ISSUE_ACCESS choice are both broken at once. This test pins
-// the row's own field directly, so it stays a narrower, more localized
-// signal when it fails: a flip here fails right at the registry, before it
-// ever gets a chance to manifest as a precedence bug in validate().
+// (main_test.go), but only indirectly, through validate()'s error precedence.
 func TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks(t *testing.T) {
 	var afterRows []string
 	for _, r := range choiceKnobRegistry {
@@ -72,14 +59,10 @@ func TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks(t *
 	}
 }
 
-// TestChoiceKnobRegistry_HasSixExpectedRows pins choiceKnobRegistry's full
-// row membership and order, not just the single AfterCrossKnobChecks row
-// TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks
-// covers above. Without this, a knob silently dropped from the registry (or
-// renamed to an Env string schemaFlags no longer recognizes) would leave
-// that knob's choice unvalidated by both validate() and validateConfig(),
-// with the rest of the suite staying green -- validateChoice is a no-op for
-// an Env absent from schemaFlags, so nothing else would notice the gap.
+// A knob dropped from the registry, or renamed to an Env that schemaFlags no
+// longer recognizes, goes unvalidated by both validate() and validateConfig()
+// while the rest of the suite stays green, because validateChoice is a no-op
+// for an Env absent from schemaFlags. Only full membership catches that.
 func TestChoiceKnobRegistry_HasSixExpectedRows(t *testing.T) {
 	want := []string{
 		"MERGE_MODE",
@@ -96,13 +79,8 @@ func TestChoiceKnobRegistry_HasSixExpectedRows(t *testing.T) {
 	}
 }
 
-// TestValidateChoiceKnobsFailFast_ReturnsFirstError proves
-// validateChoiceKnobsFailFast returns the first row's error and never
-// evaluates rows after it -- mirroring
-// TestWalkGateRegistry_StopsAtFirstFailure's shape (launchgates_test.go):
-// each row's Value closure appends its own Env to a shared calls slice, so
-// the assertion can pin exactly which rows got evaluated, not just the
-// returned error.
+// Each row's Value closure appends its own Env to a shared calls slice, so the
+// test pins which rows were evaluated, not just the returned error.
 func TestValidateChoiceKnobsFailFast_ReturnsFirstError(t *testing.T) {
 	var calls []string
 	c := config{schemaConfig: schemaConfig{mergeMode: "bogus"}}
@@ -128,9 +106,6 @@ func TestValidateChoiceKnobsFailFast_ReturnsFirstError(t *testing.T) {
 	}
 }
 
-// TestValidateChoiceKnobsErrors_CollectsAll proves validateChoiceKnobsErrors
-// walks every row rather than stopping at the first failure, returning one
-// error per failing row.
 func TestValidateChoiceKnobsErrors_CollectsAll(t *testing.T) {
 	c := config{schemaConfig: schemaConfig{mergeMode: "bogus", overlapGate: "bogus"}}
 	rows := []choiceKnobRow{
@@ -154,14 +129,11 @@ func TestValidateChoiceKnobsErrors_CollectsAll(t *testing.T) {
 	}
 }
 
-// TestChoiceKnobRegistry_InjectedRowReachesBothValidators proves AC3: a 7th
-// row appended to the package-level choiceKnobRegistry reaches both
-// validate() and validateConfig() with zero edits to either function. It
-// uses CODE_FORGE -- a real schemaFlags env with non-empty choices that isn't
-// one of the six knobs already in the registry -- rather than a made-up env
-// name, since validateChoice returns nil for any env absent from
-// schemaFlags and so could never prove the injected row was actually
-// walked.
+// AC3: a 7th row appended to choiceKnobRegistry reaches both validate() and
+// validateConfig() with no edits to either function. The row uses CODE_FORGE, a
+// real schemaFlags env with choices that is not already in the registry,
+// because validateChoice returns nil for any env absent from schemaFlags and a
+// made-up name could never prove the injected row was walked.
 func TestChoiceKnobRegistry_InjectedRowReachesBothValidators(t *testing.T) {
 	withChoiceKnobRegistry(t, append(append([]choiceKnobRow{}, choiceKnobRegistry...), choiceKnobRow{
 		Env:   "CODE_FORGE",

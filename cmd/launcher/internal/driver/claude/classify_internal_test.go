@@ -20,10 +20,9 @@ func TestIsAgentContentEvent_SyntheticSentinel(t *testing.T) {
 	}
 }
 
-// TestParseResetsAtText covers parseResetsAtText's human-readable
-// "resets <clock-time>(am|pm) (UTC)" and "resets <Weekday> <clock-time>(am|pm)
-// (UTC)" parsing (issue #2443). All cases share a fixed reference "now" of
-// 2026-08-12 10:00:00 UTC, a Wednesday, so results are deterministic.
+// TestParseResetsAtText pins parseResetsAtText's handling of the human-readable
+// "resets ..." markers (issue #2443). Cases that set no now of their own share a
+// fixed 2026-08-12 10:00 UTC, a Wednesday, so the weekday rolls are deterministic.
 func TestParseResetsAtText(t *testing.T) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
 
@@ -125,12 +124,10 @@ func TestParseResetsAtText(t *testing.T) {
 	}
 }
 
-// TestClassifyAt_PinnedClock_PlainTextResetsAt pins classifyAt's now
-// parameter to a fixed instant and asserts an exact non-nil ResetAt epoch
-// for a plain-text OAuth reset marker with no date component (issue #2443).
-// Sibling to TestClassify_OAuthPlainTextResetsAt_ExactEpoch (which covers all
-// three OAuth plain-text markers via the exported claude.ClassifyAt); this
-// one exercises the unexported classifyAt directly for the session-limit case.
+// Pinning now makes the ResetAt of a dateless plain-text OAuth marker exactly
+// assertable (issue #2443). This test takes the unexported classifyAt;
+// TestClassify_OAuthPlainTextResetsAt_ExactEpoch covers all three markers
+// through the exported claude.ClassifyAt.
 func TestClassifyAt_PinnedClock_PlainTextResetsAt(t *testing.T) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
 	logPath := WriteLog(t, `You've hit your session limit · resets 6:30pm (UTC)`)

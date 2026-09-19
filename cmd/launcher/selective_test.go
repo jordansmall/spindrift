@@ -17,8 +17,6 @@ import (
 // errBoom is a scripted error for tests that simulate a failing forge call.
 var errBoom = errors.New("boom")
 
-// TestSelectiveListDispatch_AllLabeledNoPrompt: when all listed issues carry the
-// ready-for-agent label no confirmation is needed and all are dispatched.
 func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -45,21 +43,17 @@ func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 	if len(fr.RunCalls) != 3 {
 		t.Errorf("RunCalls: got %d, want 3", len(fr.RunCalls))
 	}
-	// No confirmation prompt was needed.
 	if strings.Contains(stdout.String(), "[y/N]") {
 		t.Errorf("unexpected confirmation prompt in output: %s", stdout.String())
 	}
 }
 
-// TestSelectiveListDispatch_UnlabeledWarnsAndPrompts: unlabeled issue triggers
-// warning and a single batched prompt; y confirms.
 func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
 	c.maxParallel = 4
 
 	fc := forge.NewFake()
-	// #12 is labeled, #15 is not.
 	fc.SetIssue(forge.Issue{Number: "12", Title: "labeled", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
@@ -88,7 +82,6 @@ func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_UnlabeledAbortOnN: answering n aborts with non-zero.
 func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -114,7 +107,6 @@ func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_YesFlagSkipsPrompt: --yes skips the confirmation.
 func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -128,7 +120,7 @@ func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := testNewSettle(c, fc, testWired(fc), fc)
 
-	stdin := &bytes.Buffer{} // no input; would hang if prompt fired
+	stdin := &bytes.Buffer{} // No input, so the test would hang if the prompt fired.
 	stdout := &bytes.Buffer{}
 
 	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, true, stdin, stdout)
@@ -140,7 +132,6 @@ func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_NonInteractiveAbort: no TTY and no --yes → abort.
 func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -154,7 +145,7 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := testNewSettle(c, fc, testWired(fc), fc)
 
-	stdin := &bytes.Buffer{} // EOF immediately = non-interactive
+	stdin := &bytes.Buffer{} // An empty buffer reads EOF at once, which is the non-interactive case.
 	stdout := &bytes.Buffer{}
 
 	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, stdin, stdout)
@@ -166,18 +157,15 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_BlockerOrderedAhead: when #99 (already done — issue
-// closed) blocks #15 and both are in the list, #15 is not evicted and both are
-// dispatched.
 func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
 	c.maxParallel = 4
 
 	fc := forge.NewFake()
-	// #99 is already done — issue closed (PR merged + auto-close).
+	// A closed #99 is one whose PR merged and auto-closed it, so it counts as done.
 	fc.SetIssue(forge.Issue{Number: "99", Title: "blocker", State: "CLOSED", Labels: []string{c.label}})
-	// #15 is blocked by #99 (in the list and closed → edge satisfied).
+	// #99 is in the list and closed, so #15's edge is satisfied.
 	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.label},
 		Body: "## Blocked by\n- #99\n"})
 
@@ -193,25 +181,22 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
 
-	// Both should be dispatched.
 	if len(fr.RunCalls) != 2 {
 		t.Errorf("RunCalls: got %d, want 2 (in-list blocker must not cause eviction)", len(fr.RunCalls))
 	}
 }
 
-// TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker is
-// the regression test for #524's acceptance criterion: `dispatch 12 15`
-// where #15 is blocked by in-list, unmerged #12 dispatches #12 only in one
-// invocation; #15 is not claimed. The exact remaining-list/re-run-command
-// output is covered at the waves-package level (drainMaxJobs writes it to
-// stdout directly, not through the io.Writer this test's caller injects).
+// Regression test for #524: `dispatch 12 15`, where #15 is blocked by in-list,
+// unmerged #12, dispatches #12 only in one invocation and never claims #15. The
+// remaining-list and re-run-command output is covered in the waves package,
+// because drainMaxJobs writes it to stdout directly rather than through the
+// io.Writer this test's caller injects.
 func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
 	c.maxParallel = 4
 
 	fc := forge.NewFake()
-	// #12 is open (not merged/closed) and blocks #15; both are in the list.
 	fc.SetIssue(forge.Issue{Number: "12", Title: "blocker", State: "OPEN", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.label},
 		Body: "## Blocked by\n- #12\n"})
@@ -241,8 +226,6 @@ func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *te
 	}
 }
 
-// TestSelectiveListDispatch_UnmetExternalEviction: #15 is blocked by #99 (not
-// in list, not merged) — #15 is evicted and nothing is dispatched.
 func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -273,8 +256,6 @@ func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_WithList_ShowsAnnotations: when a list of issue numbers is
-// given, preview shows each issue with its blockers annotated inline.
 func TestPreviewIssues_WithList_ShowsAnnotations(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -297,18 +278,15 @@ func TestPreviewIssues_WithList_ShowsAnnotations(t *testing.T) {
 	if !strings.Contains(out, "#99") {
 		t.Errorf("output missing #99; got:\n%s", out)
 	}
-	// #15 should show its blocker annotation.
 	if !strings.Contains(out, "blocked by #99") {
 		t.Errorf("output missing blocker annotation for #15; got:\n%s", out)
 	}
 }
 
-// TestPreviewIssues_WithList_DepsOfCheckFailure_AnnotatesDistinctly verifies
-// that previewIssues with an explicit issue list — which routes to
-// previewSelectiveList, the second call site sharing this gap with the
-// bare-preview path (#1420) — also threads result.Failed into waves.Input so
-// a DepsOf call failure renders distinctly instead of a plain zero-blocker
-// line.
+// Regression test for #1420 at the second call site: previewIssues with an
+// explicit issue list routes to previewSelectiveList, which must also thread
+// result.Failed into waves.Input so a DepsOf call failure renders distinctly
+// instead of as a plain zero-blocker line.
 func TestPreviewIssues_WithList_DepsOfCheckFailure_AnnotatesDistinctly(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -334,8 +312,6 @@ func TestPreviewIssues_WithList_DepsOfCheckFailure_AnnotatesDistinctly(t *testin
 	}
 }
 
-// TestPreviewIssues_WithList_ShowsEviction: an issue evicted due to unmet
-// external blocker is shown with a notice (not included in would-dispatch list).
 func TestPreviewIssues_WithList_ShowsEviction(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -357,8 +333,6 @@ func TestPreviewIssues_WithList_ShowsEviction(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_WithList_ShowsUnlabeledWarning: unlabeled issue gets a
-// warning but no confirmation prompt.
 func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -376,7 +350,6 @@ func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	if !strings.Contains(out, "⚠") || !strings.Contains(out, "15") {
 		t.Errorf("output missing unlabeled warning for #15; got:\n%s", out)
 	}
-	// No prompt in preview mode.
 	if strings.Contains(out, "[y/N]") {
 		t.Errorf("preview must not prompt; got:\n%s", out)
 	}
@@ -385,8 +358,6 @@ func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_WithList_NoMutatingCalls: preview with list makes no
-// mutating forge calls (no TransitionState, no Comment).
 func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -409,12 +380,10 @@ func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 	}
 }
 
-// TestEvictUnmetBlockers_EvictsExternalUnmet verifies that an issue whose only
-// blocker is NOT in the list (and not yet merged) is evicted with a notice.
 func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
 	fc := forge.NewFake()
-	// #15 is in the list; it is blocked by #99 which is NOT in the list and is open.
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Labels: []string{}})
+	// #99 is open and absent from the issues list below, so #15's edge stays unmet.
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{}})
 
 	issues := []issue{{number: "15", title: "needs 99"}}
@@ -433,11 +402,9 @@ func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
 	}
 }
 
-// TestEvictUnmetBlockers_NoticeAnnotatesSource verifies the eviction notice
-// carries the source (native relationship vs body-text parsing) the evicted
-// blocker ref was resolved from, mirroring preview's annotation so an
-// operator can tell drift between a stale body section and native links
-// apart from the notice alone.
+// The eviction notice must name where the blocker ref came from (a native
+// relationship or body text), mirroring preview's annotation, so an operator can
+// tell a stale body section apart from native links using the notice alone.
 func TestEvictUnmetBlockers_NoticeAnnotatesSource(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Labels: []string{}})
@@ -457,14 +424,11 @@ func TestEvictUnmetBlockers_NoticeAnnotatesSource(t *testing.T) {
 	}
 }
 
-// TestEvictUnmetBlockers_KeepsInListBlocker verifies that when the blocker is
-// also in the list the dependent is retained (will be ordered behind it).
 func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Title: "blocker", Labels: []string{}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "depends on 10", Labels: []string{}})
 
-	// Both in the list; #15 blocked by #10 (also in list).
 	issues := []issue{
 		{number: "10", title: "blocker"},
 		{number: "15", title: "depends on 10"},
@@ -481,12 +445,10 @@ func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
 	}
 }
 
-// TestEvictUnmetBlockers_KeepsMergedBlocker verifies that a closed/merged
-// external blocker (not in list) satisfies the edge (no eviction).
 func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Labels: []string{}})
-	// #99 is CLOSED (merged) — satisfies the edge even though not in list.
+	// A closed #99 means it merged, so the edge holds even though it is not in the list.
 	fc.SetIssue(forge.Issue{Number: "99", State: "CLOSED", Labels: []string{}})
 
 	issues := []issue{{number: "15", title: "needs 99"}}
@@ -502,16 +464,15 @@ func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 	}
 }
 
-// TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases verifies
-// the real seed-branch wiring (#2130, not a stubbed Config.SeedScopeOf): under
-// CODE_FORGE=local, evictUnmetBlockers resolves the dependent's own
-// localloop.SeedScopeResolver(it, cf) live, so an external blocker whose
-// landing has already reached the dependent's own integration/<parent> seed
-// branch satisfies the edge -- no eviction.
+// Regression test for #2130, exercising the real seed-branch wiring rather than
+// a stubbed Config.SeedScopeOf. Under CODE_FORGE=local, evictUnmetBlockers
+// resolves the dependent's own localloop.SeedScopeResolver(it, cf) live, so an
+// external blocker whose landing already reached the dependent's own
+// integration/<parent> seed branch satisfies the edge and nothing is evicted.
 func TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases(t *testing.T) {
 	fc := forge.NewFake()
 	landing := "integration/999@shaXYZ"
-	// #15 (the dependent) shares #99's own parent: frontmatter.
+	// #15 and the blocker share the parent whose seed branch the landing reached.
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Parent: "shared-parent"})
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
 	fc.SetLandingContained(landing, "shared-parent", true, nil)
@@ -530,16 +491,14 @@ func TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases(t *testi
 	}
 }
 
-// TestEvictUnmetBlockers_LocalForge_CrossParentBlockerLandingHolds is the
-// mirror of the above: the blocker's landing reached a *different* parent's
-// seed branch than the dependent's own, so the real wiring must still evict
-// -- the dependent's own containment check, not any parent's, gates it.
+// The mirror of the test above: the blocker's landing reached a different
+// parent's seed branch than the dependent's own, so the real wiring must still
+// evict. The dependent's own containment check gates it, not any parent's.
 func TestEvictUnmetBlockers_LocalForge_CrossParentBlockerLandingHolds(t *testing.T) {
 	fc := forge.NewFake()
 	landing := "integration/999@shaXYZ"
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Parent: "dependents-own-parent"})
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
-	// The landing reached "some-other-parent"'s seed branch, not #15's own.
 	fc.SetLandingContained(landing, "some-other-parent", true, nil)
 	fc.SetLandingContained(landing, "dependents-own-parent", false, nil)
 	cf := fc.AsLocal()
@@ -560,13 +519,11 @@ func TestEvictUnmetBlockers_LocalForge_CrossParentBlockerLandingHolds(t *testing
 	}
 }
 
-// TestEvictUnmetBlockers_CascadingEviction verifies that when A is evicted
-// because of an unmet external blocker, B (which depends on A) is also evicted.
 func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 	fc := forge.NewFake()
-	// #99 blocks #10 (both in list); but #99 is blocked by #200 (external, unmet).
 	fc.SetIssue(forge.Issue{Number: "10", Title: "depends on 99", Labels: []string{}})
 	fc.SetIssue(forge.Issue{Number: "99", Title: "depends on 200", Labels: []string{}})
+	// #200 is open and absent from the issues list, so nothing satisfies #99's edge.
 	fc.SetIssue(forge.Issue{Number: "200", State: "OPEN", Labels: []string{}})
 
 	issues := []issue{
@@ -574,8 +531,8 @@ func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 		{number: "10", title: "depends on 99"},
 	}
 	edges := map[string][]string{
-		"99": {"200"}, // external unmet blocker
-		"10": {"99"},  // in-list blocker (but 99 will be evicted)
+		"99": {"200"},
+		"10": {"99"},
 	}
 
 	kept, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges}, issues)
@@ -588,10 +545,9 @@ func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched
-// verifies that selective dispatch threads NewReadiness's failed set (#1103)
-// through to the wave engine: an issue whose own DepsOf call errored is held
-// for retry, not dispatched and not cascade-failed, while an unaffected
+// Regression test for #1103: selective dispatch threads NewReadiness's failed
+// set through to the wave engine, so an issue whose own DepsOf call errored is
+// held for retry rather than dispatched or cascade-failed, while an unaffected
 // sibling still dispatches normally.
 func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 	c := baseConfig()
@@ -633,8 +589,8 @@ func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *tes
 }
 
 // failDepsOf wraps a *forge.Fake so DepsOf errors for num, simulating a
-// transient tracker failure — mirrors console/queue_test.go's helper of the
-// same name.
+// transient tracker failure. It mirrors the helper of the same name in
+// console/queue_test.go.
 type failDepsOf struct {
 	*forge.Fake
 	num string
@@ -647,10 +603,9 @@ func (r failDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
 	return r.Fake.DepsOf(num)
 }
 
-// writeLocalReadyIssue writes a minimal local-tracker issue file named
-// slug+".md" under dir, its frontmatter "state" set to label — matching how
-// toIssue folds the state marker into Labels, so containsLabel(fi.Labels,
-// label) finds it the same way it would for a real dispatch label.
+// writeLocalReadyIssue writes a minimal local-tracker issue file at dir/slug.md
+// with its frontmatter state set to label. toIssue folds the state marker into
+// Labels, so containsLabel finds it the same way it would a real dispatch label.
 func writeLocalReadyIssue(t *testing.T, dir, slug, label string) {
 	t.Helper()
 	data := "---\ntitle: " + slug + "\nstate: " + label + "\nlabels: []\ncreated: 2026-07-09T12:00:00Z\n---\nbody\n"
@@ -659,14 +614,11 @@ func writeLocalReadyIssue(t *testing.T, dir, slug, label string) {
 	}
 }
 
-// TestSelectiveListDispatch_LocalTrackerSlugID_ResolvesOnlyThatIssue is issue
-// #3055's acceptance criterion 1: under a real local.LocalTracker (not a
-// forge.Fake keyed by an arbitrary string), a non-numeric slug ID resolves
-// via LocalTracker.Issue (which reads dir/<slug>.md directly — the slug IS
-// the filename, no numeric parsing anywhere in the lookup) and dispatches
-// only that one issue. A second ready-for-agent issue in the same dir is
-// left untouched, proving this took the selective path rather than falling
-// through to a full-queue drain that would have picked it up too.
+// Issue #3055, acceptance criterion 1: under a real local.LocalTracker, a
+// non-numeric slug ID resolves via LocalTracker.Issue, which reads dir/<slug>.md
+// directly with no numeric parsing, and dispatches only that issue. A second
+// ready-for-agent issue in the same dir stays untouched, proving this took the
+// selective path and not a full-queue drain that would have picked it up too.
 func TestSelectiveListDispatch_LocalTrackerSlugID_ResolvesOnlyThatIssue(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -706,14 +658,11 @@ func TestSelectiveListDispatch_LocalTrackerSlugID_ResolvesOnlyThatIssue(t *testi
 	}
 }
 
-// TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing is issue
-// #3055's acceptance criterion 2: an unresolvable ID exits non-zero with an
-// error naming it, and — because fetchSelectiveIssues fails fast on the
-// first Issue() error, before selectiveListDispatch ever reaches
-// waves.Dispatch — a valid ID earlier in the list is not dispatched either.
-// forge.Fake's Issue() returns the same "issue <id> not found" shape a real
-// backend adapter would for an unknown ID (numeric or slug — the tracker
-// interface never distinguishes the two).
+// Issue #3055, acceptance criterion 2: an unresolvable ID exits non-zero with an
+// error naming it, and a valid ID earlier in the list is not dispatched either,
+// because fetchSelectiveIssues fails fast on the first Issue() error before
+// selectiveListDispatch reaches waves.Dispatch. forge.Fake's Issue() returns the
+// same not-found shape a real backend adapter would, slug or numeric alike.
 func TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -721,7 +670,7 @@ func TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing(t *testing.T
 
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "12", Title: "resolvable", Labels: []string{c.label}})
-	// "SPIN-99" is never registered — Issue("SPIN-99") errors.
+	// SPIN-99 is never registered, so Issue("SPIN-99") errors.
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
@@ -743,11 +692,9 @@ func TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing(t *testing.T
 	}
 }
 
-// TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder is issue
-// #3055's acceptance criterion 3 at the selective.go layer: fetchSelectiveIssues
-// treats every ID as an opaque string (no numeric/slug branch anywhere in its
-// loop), so a mixed list resolves in the exact order given regardless of
-// which entries are numeric and which are slugs.
+// Issue #3055, acceptance criterion 3, at the selective.go layer:
+// fetchSelectiveIssues treats every ID as an opaque string with no numeric or
+// slug branch in its loop, so a mixed list resolves in the exact order given.
 func TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"

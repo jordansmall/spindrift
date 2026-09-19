@@ -2,9 +2,6 @@ package ecosystem
 
 import "testing"
 
-// TestParsePnpmRegistryConfig_RegistryLine verifies that
-// pnpm-workspace.yaml's top-level "registry:" key and a quoted
-// "@scope:registry" catalog key both parse into their own Declaration.
 func TestParsePnpmRegistryConfig_RegistryLine(t *testing.T) {
 	content := `
 packages:
@@ -34,8 +31,6 @@ catalog:
 	}
 }
 
-// TestParsePnpmRegistryConfig_RepeatedURLDeduped verifies that the same
-// registry URL declared twice yields only one Declaration.
 func TestParsePnpmRegistryConfig_RepeatedURLDeduped(t *testing.T) {
 	content := `
 registry: https://pnpm.example.com/registry
@@ -51,9 +46,6 @@ catalog:
 	}
 }
 
-// TestParsePnpmRegistryConfig_NonRegistrySuffixKeyNotDeclared verifies that
-// a key merely ending in "registry" (not the literal "registry" key or a
-// "@scope:registry" scoped key) is not mistaken for a registry declaration.
 func TestParsePnpmRegistryConfig_NonRegistrySuffixKeyNotDeclared(t *testing.T) {
 	decls, namedAny, err := pnpmRow.ConfigParser("myregistry: https://sneaky.example.com\n")
 	if err != nil {
@@ -67,9 +59,6 @@ func TestParsePnpmRegistryConfig_NonRegistrySuffixKeyNotDeclared(t *testing.T) {
 	}
 }
 
-// TestParsePnpmRegistryConfig_ListItemRegistryKeyNotDeclared verifies that a
-// "registry:" key nested under a YAML list item (not a top-level or scoped
-// key) is not parsed as a declaration.
 func TestParsePnpmRegistryConfig_ListItemRegistryKeyNotDeclared(t *testing.T) {
 	content := `
 mirrors:
@@ -87,9 +76,6 @@ mirrors:
 	}
 }
 
-// TestParsePnpmRegistryConfig_FullLineCommentYieldsNoDeclaration verifies
-// that a line that is entirely a "#" comment is never mistaken for a
-// registry declaration.
 func TestParsePnpmRegistryConfig_FullLineCommentYieldsNoDeclaration(t *testing.T) {
 	content := `
 packages:
@@ -108,9 +94,6 @@ packages:
 	}
 }
 
-// TestParsePnpmRegistryConfig_TrailingInlineCommentStripped verifies that a
-// space-then-"#" trailing comment after a registry value is stripped from
-// the extracted URL.
 func TestParsePnpmRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
 	decls, _, err := pnpmRow.ConfigParser("registry: https://pnpm.example.com/registry # our mirror\n")
 	if err != nil {
@@ -125,8 +108,8 @@ func TestParsePnpmRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
 	}
 }
 
-// TestParsePnpmRegistryConfig_NeverStampsEcosystemOrConfigPath verifies the
-// pure-hook contract directly.
+// The ConfigParser hook is pure: registrydiscover's walker stamps Ecosystem
+// and ConfigPath after the call returns, so the hook must leave both unset.
 func TestParsePnpmRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
 	decls, _, err := pnpmRow.ConfigParser("registry: https://pnpm.example.com/registry\n")
 	if err != nil {

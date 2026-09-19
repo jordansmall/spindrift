@@ -11,12 +11,10 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// TestLocalCodeForge_LandingContained_IntegrationRef_TrueAfterCleanLand
-// asserts LandingContained reports contained=true for the exact
-// LandingIntegrationRef LandingRef resolved right after a clean Merge — the
-// no-network "is this seam actually merged into scope's Integration branch"
-// check reconcile and the wave gate both rely on (ADR 0029, ADR 0033, issue
-// #2151).
+// Pins contained=true for the LandingIntegrationRef that LandingRef resolves
+// right after a clean Merge. This is the no-network "is this seam merged into
+// scope's Integration branch" check that reconcile and the wave gate both rely
+// on (ADR 0029, ADR 0033, issue #2151).
 func TestLocalCodeForge_LandingContained_IntegrationRef_TrueAfterCleanLand(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -59,10 +57,8 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_TrueAfterCleanLand(t *te
 	}
 }
 
-// TestLocalCodeForge_LandingContained_PRURL_ReturnsFalseNil asserts
-// LandingContained reports contained=false, no error, for a LandingPRURL
-// reaching the local-only path — a shape that never touches git, mirroring
-// the "malformed landing" posture a genuine containment miss gets.
+// A LandingPRURL reaching the local-only path never touches git, and gets the
+// same contained=false, no error posture as a genuine containment miss.
 func TestLocalCodeForge_LandingContained_PRURL_ReturnsFalseNil(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -82,11 +78,8 @@ func TestLocalCodeForge_LandingContained_PRURL_ReturnsFalseNil(t *testing.T) {
 	}
 }
 
-// TestLocalCodeForge_LandingContained_IntegrationRef_UnknownSHA asserts
-// LandingContained reports contained=false, no error, for an IntegrationRef
-// whose sha the repo has never seen — never a genuine Go error, since a
-// stale or forged ref must leave the seam-issue open exactly like an
-// uncontained one.
+// A sha the repo has never seen is never a genuine Go error: a stale or forged
+// ref must leave the seam issue open exactly like an uncontained one.
 func TestLocalCodeForge_LandingContained_IntegrationRef_UnknownSHA(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -106,13 +99,10 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_UnknownSHA(t *testing.T)
 	}
 }
 
-// TestLocalCodeForge_LandingContained_IntegrationRef_DashPrefixedSHA asserts
-// LandingContained rejects a sha starting with "-" as no ancestor outright,
-// via the "--" end-of-options guard passed to git merge-base, rather than
-// having it misread as an option — a Landing constructed directly (bypassing
-// forge.ParseLanding, which would classify a dash-prefixed sha as a
-// LandingBranchRef instead) to exercise LandingContained's own defense in
-// depth.
+// The "--" end-of-options guard LandingContained passes to merge-base keeps a
+// sha starting with "-" from being read as an option. This test builds the
+// Landing directly because forge.ParseLanding would classify a dash-prefixed
+// sha as a LandingBranchRef, skipping that guard entirely.
 func TestLocalCodeForge_LandingContained_IntegrationRef_DashPrefixedSHA(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -132,13 +122,9 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_DashPrefixedSHA(t *testi
 	}
 }
 
-// TestLocalCodeForge_LandingContained_IntegrationRef_InstanceAgnostic asserts
-// LandingContained checks scope's own named Integration branch, not whichever
-// parent this particular CodeForge instance was constructed with (issue
-// #1734: a single shared instance now checks containment for every parent in
-// a mixed batch, not just the one it happened to be built for). A landing for
-// parent 2200, checked through a CodeForge instance built for parent 1694
-// with scope naming parent 2200, still reports contained=true.
+// LandingContained checks scope's own named Integration branch, not the parent
+// this CodeForge instance was built with: one shared instance checks
+// containment for every parent in a mixed batch (issue #1734).
 func TestLocalCodeForge_LandingContained_IntegrationRef_InstanceAgnostic(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -147,10 +133,9 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_InstanceAgnostic(t *test
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent1))
 	cf1 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent1, "Test Bot", "bot@example.com", "agent/issue-")
 
-	// parent2's Integration branch doesn't exist yet -- cf2's RelayBundle
-	// creates it from cf1's own Integration branch tip on demand
-	// (ensureIntegrationBranch), exactly like a second broad ticket's first
-	// seam landing in the same run.
+	// parent2's Integration branch doesn't exist yet, so cf2's RelayBundle
+	// creates it from cf1's Integration branch tip (ensureIntegrationBranch),
+	// like a second broad ticket's first seam landing in the same run.
 	cf2 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent2, "Test Bot", "bot@example.com", "agent/issue-")
 	outbox := t.TempDir()
 	branch := "agent/issue-2201"
@@ -181,11 +166,9 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_InstanceAgnostic(t *test
 	}
 }
 
-// TestLocalCodeForge_LandingContained_IntegrationRef_FalseForOtherParent
-// asserts LandingContained reports contained=false, no error, when scope
-// names a parent whose Integration branch the landing's commit never
-// reached — the cross-seam case the wave gate's own dependent-parent
-// containment check (#2130) relies on.
+// The wave gate's dependent-parent containment check (#2130) relies on this
+// cross-seam case: scope names a parent whose Integration branch the landing's
+// commit never reached.
 func TestLocalCodeForge_LandingContained_IntegrationRef_FalseForOtherParent(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -226,10 +209,9 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_FalseForOtherParent(t *t
 	}
 }
 
-// TestLocalCodeForge_LandingContained_IntegrationRef_ErrorsOnGenuineGitFailure
-// asserts LandingContained returns a real error — not contained=false — when
-// git itself cannot even run, distinct from every "not contained" outcome
-// above, which all come from git running fine and reporting non-ancestry.
+// A git that cannot even run must produce a real error, not contained=false,
+// unlike every "not contained" outcome above, where git runs fine and reports
+// non-ancestry.
 func TestLocalCodeForge_LandingContained_IntegrationRef_ErrorsOnGenuineGitFailure(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -247,11 +229,9 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_ErrorsOnGenuineGitFailur
 	}
 }
 
-// TestLocalCodeForge_LandingContained_BranchRef_FalseBeforeMerge asserts
-// LandingContained reports contained=false, no error, for a BranchRef
-// landing whose branch is relayed into the Accumulation repo but never
-// merged onto scope's Integration branch — the pre-merge state Reconcile's
-// healing path must never mistake for a genuine repair opportunity.
+// A branch relayed into the Accumulation repo but never merged onto scope's
+// Integration branch is the pre-merge state Reconcile's healing path must never
+// mistake for a genuine repair opportunity.
 func TestLocalCodeForge_LandingContained_BranchRef_FalseBeforeMerge(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -282,11 +262,9 @@ func TestLocalCodeForge_LandingContained_BranchRef_FalseBeforeMerge(t *testing.T
 	}
 }
 
-// TestLocalCodeForge_LandingContained_BranchRef_TrueAfterMerge asserts
-// LandingContained reports contained=true once a BranchRef's branch has
-// actually landed onto scope's Integration branch — the healing path's
-// confirmation that a stuck BranchRef landing really did merge, and the tip
-// resolution reconciliation's discovery path (issue #2151) both rely on.
+// Once a BranchRef's branch has actually landed, contained=true is how the
+// healing path confirms a stuck landing really did merge, and tip resolution
+// reconciliation's discovery path relies on the same answer (issue #2151).
 func TestLocalCodeForge_LandingContained_BranchRef_TrueAfterMerge(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -317,11 +295,9 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueAfterMerge(t *testing.T) 
 	}
 }
 
-// TestLocalCodeForge_LandingContained_BranchRef_FalseForNonexistentBranch
-// asserts LandingContained reports contained=false, no error, for a
-// BranchRef naming a branch the Accumulation repo has never seen — never
-// relayed, or a since-abandoned attempt — the same "stays open" posture as a
-// genuinely uncontained one, not a hard error.
+// A BranchRef naming a branch the Accumulation repo has never seen, because it
+// was never relayed or the attempt was abandoned, gets the same "stays open"
+// posture as a genuinely uncontained one, not a hard error.
 func TestLocalCodeForge_LandingContained_BranchRef_FalseForNonexistentBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -341,14 +317,10 @@ func TestLocalCodeForge_LandingContained_BranchRef_FalseForNonexistentBranch(t *
 	}
 }
 
-// TestLocalCodeForge_LandingContained_BranchRef_TrueForRebasedLanding asserts
-// LandingContained reports contained=true for a seam that landed via rebase
-// (issue #1889) even though its own branch ref in the Accumulation repo
-// still points at its pre-rebase tip — the state a lost or malformed
-// `landing:` record leaves reconcile's healing path to re-derive from patch
-// content, since rebasing onto a since-advanced integration tip gives the
-// landed commit a new sha the branch ref's own (stale) ancestry can no
-// longer see (issue #1890).
+// A seam that landed via rebase (issue #1889) keeps a branch ref pointing at
+// its pre-rebase tip, so the landed commit's new sha is invisible to that stale
+// ancestry. Reconcile's healing path re-derives containment from patch content
+// instead (issue #1890).
 func TestLocalCodeForge_LandingContained_BranchRef_TrueForRebasedLanding(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -366,9 +338,9 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueForRebasedLanding(t *test
 	}
 	preLandSHA := revParse(t, repo.Bare, "refs/heads/"+branch)
 
-	// Advance the integration branch with an unrelated commit, so replaying
-	// branch's own commit onto it is a genuine rebase (a new sha), not a
-	// no-op fast-forward — mirroring land_test.go's own two-seam setup.
+	// Advance the integration branch with an unrelated commit so replaying
+	// branch's own commit onto it is a genuine rebase (a new sha), not a no-op
+	// fast-forward, mirroring land_test.go's two-seam setup.
 	other := t.TempDir()
 	run(t, "", "clone", repo.Bare, other)
 	run(t, other, "checkout", IntegrationBranch(parent))
@@ -381,10 +353,9 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueForRebasedLanding(t *test
 	run(t, other, "commit", "-m", "other seam")
 	run(t, other, "push", "origin", IntegrationBranch(parent))
 
-	// Land branch by rebasing it onto the now-advanced integration tip and
-	// fast-forwarding integration to the result directly, deliberately
-	// bypassing cf.Merge — which would resync refs/heads/branch to the
-	// rebased result and defeat the point of this test — standing in for a
+	// Land branch by rebasing it onto the advanced integration tip and
+	// fast-forwarding integration to the result, bypassing cf.Merge, which
+	// would resync refs/heads/branch to the rebased result. This test needs a
 	// landing whose branch ref never got resynced in the Accumulation repo.
 	rebaseWork := t.TempDir()
 	run(t, "", "clone", repo.Bare, rebaseWork)
@@ -410,12 +381,10 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueForRebasedLanding(t *test
 	}
 }
 
-// TestLocalCodeForge_LandingContained_BranchRef_TrueForMultiCommitRebasedLanding
-// asserts a multi-commit seam that lands via rebase — every commit replayed
-// as a new sha — still reports contained=true when every one of them is
-// patch-equivalent to the integration branch, not just the oldest one (issue
-// #1890): a bundle relays a branch's entire base..branch range, so a real
-// seam is routinely more than one commit.
+// A rebase replays every commit of a multi-commit seam with a new sha, and all
+// of them must be patch-equivalent to the integration branch, not just the
+// oldest (issue #1890). A bundle relays a branch's whole base..branch range, so
+// a real seam is routinely more than one commit.
 func TestLocalCodeForge_LandingContained_BranchRef_TrueForMultiCommitRebasedLanding(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -466,12 +435,9 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueForMultiCommitRebasedLand
 	}
 }
 
-// TestLocalCodeForge_LandingContained_BranchRef_FalseWhenLaterCommitNeverLanded
-// asserts LandingContained still reports contained=false for a multi-commit
-// seam whose oldest commit's patch reached the integration branch but whose
-// newest commit's never did — patch-equivalence must clear every commit
-// `git cherry` reports on the branch, not just the first line, or a
-// genuinely-unlanded seam would self-heal to closed (issue #1890).
+// Patch-equivalence must clear every commit `git cherry` reports on the branch,
+// not just the first line, or a genuinely unlanded seam would self-heal to
+// closed (issue #1890).
 func TestLocalCodeForge_LandingContained_BranchRef_FalseWhenLaterCommitNeverLanded(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -498,8 +464,8 @@ func TestLocalCodeForge_LandingContained_BranchRef_FalseWhenLaterCommitNeverLand
 	writeAndCommit(t, other, "other.txt", "other")
 	run(t, other, "push", "origin", IntegrationBranch(parent))
 
-	// Land only the oldest commit's patch onto integration — the newest
-	// commit genuinely never lands.
+	// Land only the oldest commit's patch onto integration; the newest commit
+	// genuinely never lands.
 	partial := t.TempDir()
 	run(t, "", "clone", repo.Bare, partial)
 	run(t, partial, "checkout", IntegrationBranch(parent))
@@ -522,10 +488,9 @@ func TestLocalCodeForge_LandingContained_BranchRef_FalseWhenLaterCommitNeverLand
 	}
 }
 
-// TestLocalCodeForge_LandingContained_BranchRef_ErrorsOnGenuineGitFailure
-// asserts LandingContained returns a real error — not contained=false — when
-// git itself cannot even run, distinct from the "branch not found" outcome
-// above, which comes from git running fine and reporting no such ref.
+// A git that cannot even run must produce a real error, not contained=false,
+// unlike the "branch not found" outcome above, where git runs fine and reports
+// no such ref.
 func TestLocalCodeForge_LandingContained_BranchRef_ErrorsOnGenuineGitFailure(t *testing.T) {
 	setGitIdentityEnv(t)
 

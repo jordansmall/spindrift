@@ -16,13 +16,10 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// TestResolveRegistryRoutesFromFile_MissingFile_WrapsReadError proves the
-// read-error wrapper at registryroutesresolve.go:38 fires and names both the
-// knob (REGISTRY_PROXY_ROUTES_FILE) and the unreadable path: production only
-// reaches this wrapper via buildRegistryProxyRoutes, which the checks.go
-// registry-proxy-routes row's identical read/Parse/Peek (checks.go:307-321)
-// always shadows by failing first -- this test calls
-// resolveRegistryRoutesFromFile directly to exercise the wrapper on its own.
+// Production reaches the read-error wrapper only through
+// buildRegistryProxyRoutes, which the checks.go registry-proxy-routes row's
+// identical read/Parse/Peek always shadows by failing first, so this test calls
+// resolveRegistryRoutesFromFile directly.
 func TestResolveRegistryRoutesFromFile_MissingFile_WrapsReadError(t *testing.T) {
 	missing := t.TempDir() + "/does-not-exist.toml"
 
@@ -41,11 +38,9 @@ func TestResolveRegistryRoutesFromFile_MissingFile_WrapsReadError(t *testing.T) 
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_InvalidTOML_PropagatesParseError proves
-// an unparseable routes file surfaces registryroutes.Parse's own error
-// unwrapped -- resolveRegistryRoutesFromFile passes a Parse failure straight
-// through (registryroutesresolve.go:42), so this pins that the "err" branch
-// really does return, rather than swallowing or re-wrapping, Parse's error.
+// resolveRegistryRoutesFromFile passes a Parse failure straight through, so this
+// pins that the error branch returns Parse's own error rather than swallowing or
+// re-wrapping it.
 func TestResolveRegistryRoutesFromFile_InvalidTOML_PropagatesParseError(t *testing.T) {
 	invalid := writeRoutesFile(t, `not valid toml [[[`)
 
@@ -61,15 +56,10 @@ func TestResolveRegistryRoutesFromFile_InvalidTOML_PropagatesParseError(t *testi
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_ResolveFailure_NamesRoute proves a route
-// whose credential fails to resolve (here, an unset env var) is reported
-// through resolveRegistryRoutesFromFile's own "resolving credential for
-// route %q" wrap (registryroutesresolve.go:48), naming the offending
-// route's match-host -- distinct from, and never reached through, the
-// checks.go Peek gate's "route %q: %w" wrap that shadows this path in
-// production (see
-// TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute
-// in bootstrap_test.go for that gate).
+// The wrap under test is resolveRegistryRoutesFromFile's own "resolving
+// credential for route %q". Production reaches the checks.go Peek gate's wrap
+// instead; TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute
+// in bootstrap_test.go covers that gate.
 func TestResolveRegistryRoutesFromFile_ResolveFailure_NamesRoute(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -89,11 +79,6 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_RESOLVE_CRED_DOES_NOT_EXIST" }
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_ValidFile_ResolvesCredential is the
-// happy path: a valid routes file with its route's env credential set
-// returns the route with its credential resolved to that env var's value,
-// carrying MatchHost/UpstreamOrigin/AuthScheme straight from the parsed
-// route.
 func TestResolveRegistryRoutesFromFile_ValidFile_ResolvesCredential(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_HAPPY_CRED", "s3kr1t")
 	path := writeRoutesFile(t, `
@@ -125,10 +110,8 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_CargoRegistriesBlockReadIntoEcosystems
-// verifies that a route's [routes.ecosystems.cargo] registries key (ADR 0048,
-// issue #3405; the top-level cargo-registries key it replaces is retired) is
-// read straight onto the returned registryproxy.Route's Ecosystems block --
+// The [routes.ecosystems.cargo] registries key replaces the retired top-level
+// cargo-registries key (ADR 0048, issue #3405). The Route's Ecosystems block is
 // the only place a cargo registries list travels from here on (issue #3404).
 func TestResolveRegistryRoutesFromFile_CargoRegistriesBlockReadIntoEcosystems(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_CARGO_REGISTRIES_CRED", "s3kr1t")
@@ -154,11 +137,9 @@ registries = ["example-remote", "another_one"]
 	}
 }
 
-// TestBuildRegistryProxyRoutes_FilePath_AssignsPrefixes verifies that
-// buildRegistryProxyRoutes runs registryproxy.AssignPrefixes over the
-// routes-file path's synthesized routes, so every production route table
-// carries a Prefix (issue #3142) -- resolveRegistryRoutesFromFile itself
-// leaves Prefix unset, only buildRegistryProxyRoutes assigns it.
+// Every production route table must carry a Prefix (issue #3142).
+// resolveRegistryRoutesFromFile leaves Prefix unset; only
+// buildRegistryProxyRoutes runs registryproxy.AssignPrefixes.
 func TestBuildRegistryProxyRoutes_FilePath_AssignsPrefixes(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_PREFIX_CRED", "s3kr1t")
 	path := writeRoutesFile(t, `
@@ -196,12 +177,10 @@ registries = ["example-remote"]
 	}
 }
 
-// TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil pins the issue #3145
-// acceptance criterion: with no routes file, dispatch behaves exactly as a
-// proxy-less dispatch does. The five scalar REGISTRY_PROXY_* knobs that used
-// to synthesize a bridge route are retired (ADR 0044/0045) and no longer
-// exist on config, so registryProxyRoutesFile empty is the only input
-// buildRegistryProxyRoutes still looks at.
+// Issue #3145: with no routes file, dispatch behaves exactly as a proxy-less
+// dispatch does. The five scalar REGISTRY_PROXY_* knobs that used to synthesize
+// a bridge route are retired (ADR 0044/0045), so an empty
+// registryProxyRoutesFile is the only input buildRegistryProxyRoutes reads.
 func TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil(t *testing.T) {
 	c := config{}
 
@@ -214,11 +193,9 @@ func TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil(t *testing.T) {
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_HostRooted_LeavesUpstreamEmpty proves a
-// route is projected with Upstream left empty --
 // resolveRegistryRoutesFromFile does no derivation of its own; that is
-// buildRegistryProxyRoutes's job, so a caller that only needs the
-// parse/credential step keeps working with no Target-repo checkout.
+// buildRegistryProxyRoutes's job. A caller that needs only the parse and
+// credential step keeps working with no Target-repo checkout.
 func TestResolveRegistryRoutesFromFile_HostRooted_LeavesUpstreamEmpty(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -237,10 +214,9 @@ match-host = "host.example.com"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_NoRepoCheckout_FailsClosed proves a
-// host-rooted route fails the launch, naming its match-host, when
-// registryRouteDriftRepoDirFn resolves no checkout at all (repoDir == "") --
-// fail closed rather than serving the route unenforced.
+// When registryRouteDriftRepoDirFn resolves no checkout at all (repoDir == ""),
+// the launch must fail naming the match-host rather than serve the route
+// unenforced.
 func TestBuildRegistryProxyRoutes_HostRooted_NoRepoCheckout_FailsClosed(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -264,12 +240,9 @@ match-host = "host.example.com"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_NotTargetRepo_FailsClosed proves a
-// host-rooted route fails closed when registryRouteDriftRepoDirFn resolves a
-// checkout that checkoutIsTargetRepo does not positively identify as the
-// Target repo (here, c.codeForge is left unset, the default case
-// checkoutIsTargetRepo always refuses) -- the same "treat as absent" gate
-// the doctor drift row uses.
+// c.codeForge is left unset, so checkoutIsTargetRepo hits its default case and
+// refuses to identify the resolved checkout as the Target repo. The route must
+// fail closed, the same "treat as absent" gate the doctor drift row uses.
 func TestBuildRegistryProxyRoutes_HostRooted_NotTargetRepo_FailsClosed(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -290,10 +263,9 @@ match-host = "host.example.com"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_NoMatchingHost_FailsClosed proves a
-// host-rooted route fails closed, naming its own match-host, when the
-// derived path-set has no HostPathSet for that host -- the Target repo
-// checkout resolves fine but declares no registry there.
+// The Target repo checkout resolves fine but declares no registry on that host,
+// so the derived path-set has no HostPathSet for it and the route must fail
+// closed naming its own match-host.
 func TestBuildRegistryProxyRoutes_HostRooted_NoMatchingHost_FailsClosed(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://other.example.com/npm\n"), 0o644); err != nil {
@@ -323,10 +295,6 @@ match-host = "host.example.com"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_DerivesUpstreamAndEnforcedPaths is
-// the happy path: a host-rooted route matching a host the Target repo
-// checkout declares a registry on gets its Upstream and EnforcedPaths filled
-// in from the derived HostPathSet.
 func TestBuildRegistryProxyRoutes_HostRooted_DerivesUpstreamAndEnforcedPaths(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
@@ -363,10 +331,9 @@ match-host = "host.example.com"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_AllowExtendsDerivedPaths covers
-// issue #3258 AC3: a repo whose .npmrc only derives "/npm" gets its
-// derivation gap patched by one "allow" line in the route TOML, ending up
-// with EnforcedPaths covering both the derived and the allow-declared path.
+// Issue #3258 AC3: one "allow" line in the route TOML patches the derivation gap
+// of a repo whose .npmrc only derives "/npm", so EnforcedPaths ends up covering
+// both the derived and the allow-declared path.
 func TestBuildRegistryProxyRoutes_HostRooted_AllowExtendsDerivedPaths(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
@@ -401,14 +368,10 @@ allow = ["/dl"]
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_AllowPathForwardsLikeDerivedPath is
-// the full "recourse loop" acceptance demo for issue #3258: a routes file
-// declares allow = ["/dl"] on top of a repo that only derives "/npm", and
-// the resulting route table, wired straight into registryproxy.New, forwards
-// a request under the allow-only "/dl" path exactly like one under the
-// derived "/npm" path (200, route credential attached), while a path under
-// neither still 403s -- proving host-rooted enforcement is unconditional and
-// allow never loosens it.
+// Issue #3258's acceptance demo: with the route table wired straight into
+// registryproxy.New, a request under the allow-only "/dl" path forwards exactly
+// like one under the derived "/npm" path, while a path under neither still 403s.
+// Host-rooted enforcement stays unconditional and allow never loosens it.
 func TestBuildRegistryProxyRoutes_HostRooted_AllowPathForwardsLikeDerivedPath(t *testing.T) {
 	var gotPaths []string
 	var gotAuths []string
@@ -480,13 +443,10 @@ credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_DerivesEnforcedSubtrees proves that
-// applyHostPathSet, reached via buildRegistryProxyRoutes end to end, tags
-// each derived path with its declaring ecosystem in EnforcedSubtrees (issue
-// #3259) -- not just the flat, untagged EnforcedPaths the Forwarder's own
-// admission check already used. A repo declaring both an npm and a yarn
-// registry on the same host-rooted host must produce one tagged subtree per
-// declaration, each carrying its own Ecosystem.
+// Issue #3259: applyHostPathSet tags each derived path with its declaring
+// ecosystem in EnforcedSubtrees, not just the flat, untagged EnforcedPaths the
+// Forwarder's admission check already used. The fixture declares both an npm and
+// a yarn registry on one host, so each declaration must get its own tag.
 func TestBuildRegistryProxyRoutes_HostRooted_DerivesEnforcedSubtrees(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
@@ -527,11 +487,10 @@ match-host = "host.example.com"
 	}
 }
 
-// TestApplyHostPathSet_TrimsTrailingSlashFromOrigin proves the Upstream
-// assignment strips a trailing "/" from HostPathSet.Origin before handing it
-// to registryproxy, whose New rejects a host-rooted Upstream carrying any
-// path -- registrypathset.Derive never actually emits a trailing slash, but
-// this pins the defensive trim directly rather than relying on that holding.
+// registryproxy.New rejects a host-rooted Upstream carrying any path, so the
+// Upstream assignment trims a trailing "/" from HostPathSet.Origin.
+// registrypathset.Derive never emits one, so this pins the defensive trim
+// directly rather than relying on that holding.
 func TestApplyHostPathSet_TrimsTrailingSlashFromOrigin(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
@@ -551,8 +510,6 @@ func TestApplyHostPathSet_TrimsTrailingSlashFromOrigin(t *testing.T) {
 	}
 }
 
-// TestApplyHostPathSet_NoMatchingHost_NamesRoute proves a route whose
-// match-host has no entry in sets fails, naming the route's match-host.
 func TestApplyHostPathSet_NoMatchingHost_NamesRoute(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "unknown.example.com"}
 
@@ -571,9 +528,8 @@ func TestApplyHostPathSet_NoMatchingHost_NamesRoute(t *testing.T) {
 	}
 }
 
-// TestApplyHostPathSet_AllowAppendsAfterDerivedPaths proves route.Allow lands
-// in EnforcedPaths after every derived subtree, in declaration order --
-// issue #3258's additive merge.
+// Issue #3258's additive merge: route.Allow lands in EnforcedPaths after every
+// derived subtree, in declaration order.
 func TestApplyHostPathSet_AllowAppendsAfterDerivedPaths(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/extra"}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -593,13 +549,9 @@ func TestApplyHostPathSet_AllowAppendsAfterDerivedPaths(t *testing.T) {
 	}
 }
 
-// TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated proves an
-// Allow entry equal to an already-derived subtree path lands in
-// EnforcedPaths once, not twice -- a duplicate would otherwise ride into the
-// 403 body's path-set listing and read confusingly to an operator. A second
-// Allow entry that names a genuinely new path still appends normally, so the
-// dedupe only swallows the exact-duplicate case and doesn't drop real
-// gap-patching entries.
+// A duplicated path would appear twice in the 403 body's path-set listing and
+// confuse an operator. The second Allow entry names a genuinely new path, so the
+// dedupe must drop only the exact duplicate, never a real gap-patching entry.
 func TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/npm", "/extra"}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -619,12 +571,9 @@ func TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T)
 	}
 }
 
-// TestApplyHostPathSet_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosystems
-// proves that on a host declaring both a cargo and an npm subtree,
-// EnforcedPaths keeps both (every ecosystem) and EnforcedSubtrees tags each
-// with its own ecosystem, rather than one ecosystem's filter dropping the
-// other's tag (the pre-#3400 shape kept only cargo's subtrees, in the
-// since-deleted Route.CargoIndexBases field).
+// The pre-#3400 shape kept only cargo's subtrees, in the since-deleted
+// Route.CargoIndexBases field. On a host declaring both a cargo and an npm
+// subtree, one ecosystem's filter must no longer drop the other's tag.
 func TestApplyHostPathSet_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosystems(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
@@ -651,11 +600,9 @@ func TestApplyHostPathSet_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosyst
 	}
 }
 
-// TestApplyHostPathSet_EnforcedSubtreesTwoCargoSubtreesInDerivationOrder
-// proves that two cargo registries sharing one host (the two-registries-one-
-// host shape) both land in EnforcedSubtrees, in the same order Subtrees
-// carries them -- derivation order survives the projection, not just the
-// filtered cargo-only subset the pre-#3400 shape kept it on.
+// Two cargo registries share one host. Derivation order must survive the
+// projection into EnforcedSubtrees, not just the filtered cargo-only subset the
+// pre-#3400 shape kept it on.
 func TestApplyHostPathSet_EnforcedSubtreesTwoCargoSubtreesInDerivationOrder(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
@@ -679,14 +626,10 @@ func TestApplyHostPathSet_EnforcedSubtreesTwoCargoSubtreesInDerivationOrder(t *t
 	}
 }
 
-// TestApplyHostPathSet_EcosystemsBlockDeclaredPathForRowWithNoDedicatedField
-// proves declaredPaths walks ecosystem.Table's rows generically, reading
-// each row's Ecosystems block, rather than a renamed hand list of the
-// fields gradle and go used to get: npm has no dedicated declared-path
-// field of its own (its path is normally derived, never operator-declared),
-// yet a [routes.ecosystems.npm] block's "path" key still lands its own
-// npm-tagged EnforcedSubtrees entry and, deduped, its own EnforcedPaths
-// entry, exactly as gradle's or go's declared block would.
+// declaredPaths walks ecosystem.Table's rows generically rather than a renamed
+// hand list of the fields gradle and go used to get. npm has no dedicated
+// declared-path field of its own, yet a [routes.ecosystems.npm] "path" key must
+// still land its own npm-tagged subtree and, deduped, its own EnforcedPaths entry.
 func TestApplyHostPathSet_EcosystemsBlockDeclaredPathForRowWithNoDedicatedField(t *testing.T) {
 	route := registryproxy.Route{
 		MatchHost:  "host.example.com",
@@ -717,12 +660,10 @@ func TestApplyHostPathSet_EcosystemsBlockDeclaredPathForRowWithNoDedicatedField(
 	}
 }
 
-// TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree proves a
-// gradle-path that exactly duplicates an Allow entry (both naming the same
-// path) still lands a "gradle"-tagged EnforcedSubtrees entry -- the paths
-// dedupe must never suppress the subtree tag, or GradleInitScript finds no
-// gradle-tagged entry and silently renders the inert no-redirect script even
-// though the path itself is enforced.
+// The paths dedupe must never suppress the subtree tag when a gradle path
+// duplicates an Allow entry, or GradleInitScript finds no gradle-tagged entry
+// and silently renders the inert no-redirect script even though the path itself
+// is enforced.
 func TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/maven2"}, Ecosystems: registryvocab.RouteEcosystems{"gradle": registryvocab.RouteDeclaration{"path": "/maven2"}}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -746,11 +687,9 @@ func TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree(t *testin
 	}
 }
 
-// TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree
-// proves a gradle-path that exactly duplicates an already-derived subtree
-// path (e.g. npm and gradle both configured at "/npm") still lands its own
-// "gradle"-tagged EnforcedSubtrees entry alongside the derived "npm" one --
-// EnforcedPaths still dedupes to a single occurrence of the shared path.
+// npm and gradle are both configured at "/npm": the gradle declaration must
+// still land its own tagged EnforcedSubtrees entry alongside the derived npm
+// one, while EnforcedPaths dedupes to a single occurrence.
 func TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Ecosystems: registryvocab.RouteEcosystems{"gradle": registryvocab.RouteDeclaration{"path": "/npm"}}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -774,13 +713,9 @@ func TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree(
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_GradlePathRidesAlongWithNpm proves
-// that a route's gradle-path (issue #3259) is appended to both
-// EnforcedPaths and EnforcedSubtrees, tagged "gradle", alongside whatever
-// other ecosystem's config the Target repo checkout makes discoverable on
-// the same host -- gradle-path alone never establishes the host-rooted
-// route's upstream origin, but it can ride along once some other ecosystem
-// (here, npm) already has.
+// Issue #3259: a gradle path alone never establishes a host-rooted route's
+// upstream origin, but it rides along once another ecosystem (here npm) has
+// established one, landing in both EnforcedPaths and EnforcedSubtrees.
 func TestBuildRegistryProxyRoutes_HostRooted_GradlePathRidesAlongWithNpm(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
@@ -825,12 +760,9 @@ path = "/gradle-maven"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_GradlePathAlone_NoOriginFailsClosed
-// proves that a gradle-path declaration alone, with no other ecosystem's
-// config discoverable on the same host, still cannot resolve a host-rooted
-// route's upstream origin -- the existing "declares no registry on that
-// host" error must still fire, extended to mention the declaration's own
-// limitation by its [routes.ecosystems.gradle] spelling.
+// A gradle declaration alone resolves no upstream origin, so the "declares no
+// registry on that host" error must still fire, extended to name the
+// declaration's own limitation by its [routes.ecosystems.gradle] spelling.
 func TestBuildRegistryProxyRoutes_HostRooted_GradlePathAlone_NoOriginFailsClosed(t *testing.T) {
 	repoDir := t.TempDir()
 
@@ -863,11 +795,10 @@ path = "/gradle-maven"
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_GradlePathBlockReadIntoEcosystems
-// verifies that a route's [routes.ecosystems.gradle] path key (ADR 0048,
-// issue #3405; the retired gradle-path field it replaces was issue #3259) is
-// read straight onto the returned registryproxy.Route's Ecosystems block --
-// the same treatment cargo's registries block gets.
+// The [routes.ecosystems.gradle] path key replaces the retired gradle-path field
+// (ADR 0048, issue #3405; the field itself was issue #3259) and is read straight
+// onto the Route's Ecosystems block, the same treatment cargo's registries block
+// gets.
 func TestResolveRegistryRoutesFromFile_GradlePathBlockReadIntoEcosystems(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -889,13 +820,10 @@ path = "/gradle-maven"
 	}
 }
 
-// TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree mirrors
-// TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree
-// (issue #3260): a go-path that exactly duplicates an Allow entry still
-// lands its own "go"-tagged EnforcedSubtrees entry -- the paths dedupe must
-// never suppress the subtree tag, or a go binding renderer finds no
-// go-tagged entry and silently exports no GOPROXY even though the path
-// itself is enforced.
+// Issue #3260, mirroring the gradle case: the paths dedupe must never suppress
+// the subtree tag when a go path duplicates an Allow entry, or a go binding
+// renderer finds no go-tagged entry and silently exports no GOPROXY even though
+// the path itself is enforced.
 func TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/go-modules"}, Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/go-modules"}}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -919,12 +847,9 @@ func TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree(t *testing.T)
 	}
 }
 
-// TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree
-// mirrors TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree
-// (issue #3260): a go-path that exactly duplicates an already-derived
-// subtree path (e.g. npm and go both configured at "/npm") still lands its
-// own "go"-tagged EnforcedSubtrees entry alongside the derived "npm" one --
-// EnforcedPaths still dedupes to a single occurrence of the shared path.
+// Issue #3260, mirroring the gradle case: npm and go are both configured at
+// "/npm", so the go declaration must still land its own tagged EnforcedSubtrees
+// entry while EnforcedPaths dedupes to a single occurrence.
 func TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/npm"}}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -948,12 +873,10 @@ func TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree(t *t
 	}
 }
 
-// TestApplyHostPathSet_WithoutGoPathTagsNoGoSubtree pins the absence half of
-// the go-path contract (issue #3260): a host-rooted route that declares no
-// go-path must leave EnforcedSubtrees free of any "go"-tagged entry, even
-// when another declared path (here gradle-path) is present. A stray go tag
-// would make the go binding renderer export a GOPROXY the operator never
-// asked for, aimed at some other ecosystem's subtree.
+// Issue #3260's absence half: a route declaring no go path must leave
+// EnforcedSubtrees free of any go-tagged entry, even with another declared path
+// present. A stray go tag would make the go binding renderer export a GOPROXY
+// the operator never asked for, aimed at another ecosystem's subtree.
 func TestApplyHostPathSet_WithoutGoPathTagsNoGoSubtree(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Ecosystems: registryvocab.RouteEcosystems{"gradle": registryvocab.RouteDeclaration{"path": "/maven2"}}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -975,13 +898,10 @@ func TestApplyHostPathSet_WithoutGoPathTagsNoGoSubtree(t *testing.T) {
 	}
 }
 
-// TestApplyHostPathSet_GradlePathAndGoPathCoexistBothTagged pins that a
-// single route may declare both operator-declared path fields at once --
-// gradle and go serve unrelated ecosystems, so nothing about applying one
-// should exclude the other. Both must land in EnforcedPaths and both must
-// produce their own tagged EnforcedSubtrees entry, go first -- declaredPaths
-// walks ecosystem.Table in its own load-bearing order (cargo, npm, yarn,
-// pnpm, go, gradle), so go's block is always applied before gradle's.
+// gradle and go serve unrelated ecosystems, so applying one must never exclude
+// the other. The go block lands first because declaredPaths walks
+// ecosystem.Table in its own load-bearing order (cargo, npm, yarn, pnpm, go,
+// gradle).
 func TestApplyHostPathSet_GradlePathAndGoPathCoexistBothTagged(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Ecosystems: registryvocab.RouteEcosystems{"gradle": registryvocab.RouteDeclaration{"path": "/maven2"}, "go": registryvocab.RouteDeclaration{"path": "/go-modules"}}}
 	sets := map[string]registrypathset.HostPathSet{
@@ -1010,13 +930,9 @@ func TestApplyHostPathSet_GradlePathAndGoPathCoexistBothTagged(t *testing.T) {
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_GoPathRidesAlongWithNpm mirrors
-// TestBuildRegistryProxyRoutes_HostRooted_GradlePathRidesAlongWithNpm
-// (issue #3260): a route's go-path is appended to both EnforcedPaths and
-// EnforcedSubtrees, tagged "go", alongside whatever other ecosystem's
-// config the Target repo checkout makes discoverable on the same host --
-// go-path alone never establishes the host-rooted route's upstream origin,
-// but it can ride along once some other ecosystem (here, npm) already has.
+// Issue #3260, mirroring the gradle case: a go path alone never establishes a
+// host-rooted route's upstream origin, but it rides along once another ecosystem
+// (here npm) has established one.
 func TestBuildRegistryProxyRoutes_HostRooted_GoPathRidesAlongWithNpm(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
@@ -1061,17 +977,10 @@ path = "/go-modules"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_GoGradleCargoBlocksCoexist pins
-// issue #3403's acceptance criterion: a single host-rooted route may declare
-// go, gradle, and cargo blocks together via [routes.ecosystems.<name>]. Go
-// and gradle's declared paths ride along the npm-derived origin the same way
-// their retired go-path/gradle-path fields did in
-// TestBuildRegistryProxyRoutes_HostRooted_GoPathRidesAlongWithNpm and its
-// gradle sibling above, go still applied before gradle (ecosystem.Table
-// order); cargo's block carries no path at all, so it neither adds to
-// EnforcedPaths/EnforcedSubtrees nor needs an origin of its own -- only its
-// registries list, and the block itself, must survive resolution onto the
-// returned registryproxy.Route.
+// Issue #3403: one host-rooted route may declare go, gradle, and cargo blocks
+// together, go still applied before gradle (ecosystem.Table order). Cargo's block
+// carries no path, so it adds nothing to EnforcedPaths or EnforcedSubtrees and
+// needs no origin; only its registries list must survive resolution.
 func TestBuildRegistryProxyRoutes_HostRooted_GoGradleCargoBlocksCoexist(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
@@ -1135,13 +1044,9 @@ registries = ["internal", "crates-remote"]
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_GoPathAlone_NoOriginFailsClosed
-// mirrors TestBuildRegistryProxyRoutes_HostRooted_GradlePathAlone_NoOriginFailsClosed
-// (issue #3260): a go-path declaration alone, with no other ecosystem's
-// config discoverable on the same host, still cannot resolve a host-rooted
-// route's upstream origin -- the existing "declares no registry on that
-// host" error must still fire, extended to mention the declaration's own
-// limitation by its [routes.ecosystems.go] spelling.
+// Issue #3260, mirroring the gradle case: a go declaration alone resolves no
+// upstream origin, so the "declares no registry on that host" error must still
+// fire, extended to name the limitation by its [routes.ecosystems.go] spelling.
 func TestBuildRegistryProxyRoutes_HostRooted_GoPathAlone_NoOriginFailsClosed(t *testing.T) {
 	repoDir := t.TempDir()
 
@@ -1174,11 +1079,9 @@ path = "/go-modules"
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_GoPathBlockReadIntoEcosystems verifies
-// that a route's [routes.ecosystems.go] path key (ADR 0048, issue #3405; the
-// retired go-path field it replaces was issue #3260) is read straight onto
-// the returned registryproxy.Route's Ecosystems block -- the same treatment
-// gradle's path block gets.
+// The [routes.ecosystems.go] path key replaces the retired go-path field (ADR
+// 0048, issue #3405; the field itself was issue #3260) and is read straight onto
+// the Route's Ecosystems block, the same treatment gradle's path block gets.
 func TestResolveRegistryRoutesFromFile_GoPathBlockReadIntoEcosystems(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -1200,13 +1103,10 @@ path = "/go-modules"
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_RetiredEcosystemKeyRefusedAtLaunchGate
-// pins the issue #3405 acceptance criterion at the launch gate itself (ADR
-// 0048): resolveRegistryRoutesFromFile propagates registryroutes.Parse's
-// retirement error unwrapped, so a routes file still spelling a route's
-// ecosystem the retired top-level way (go-path here) never reaches
-// buildRegistryProxyRoutes -- the error must name both the offending route
-// and the retired key, not just be non-nil.
+// Issue #3405 and ADR 0048 at the launch gate: resolveRegistryRoutesFromFile
+// propagates Parse's retirement error unwrapped, so a routes file still spelling
+// the retired top-level way (go-path here) never reaches
+// buildRegistryProxyRoutes. The error must name the route and the retired key.
 func TestResolveRegistryRoutesFromFile_RetiredEcosystemKeyRefusedAtLaunchGate(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -1229,12 +1129,10 @@ go-path = "/go-modules"
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_MixedSources_ResolvesEachRouteCredential
-// exercises the real Resolve path (not doctor's Peek) across a routes file
-// mixing the three sources added for issue #3140 -- exec, npmrc, and
-// gradle-properties -- alongside the pre-existing env source, asserting each
-// route's resolved Credential value lands correctly and is paired with the
-// right route by match-host.
+// Issue #3140 added the exec, npmrc, and gradle-properties sources. This
+// exercises the real Resolve path, not doctor's Peek, across all three plus the
+// pre-existing env source, checking each credential pairs with the right route
+// by match-host.
 func TestResolveRegistryRoutesFromFile_MixedSources_ResolvesEachRouteCredential(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_MIXED_ENV_CRED", "tok-env")
 
@@ -1291,12 +1189,10 @@ credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 	}
 }
 
-// mustLocalAccumulationRepo builds a throwaway working checkout on "main",
-// writes .npmrc there (npmrc == "" skips the write, leaving the checkout
-// declaring no registry at all), commits it, then seeds a fresh bare
-// Accumulation repo from that checkout via local.SeedAccumulationRepo --
-// the same seed path bootstrap()'s seedAccumulationRepoIfHostMediated runs
-// before dispatch -- and returns the Accumulation repo's path.
+// mustLocalAccumulationRepo seeds a bare Accumulation repo from a throwaway
+// "main" checkout through local.SeedAccumulationRepo, the same seed path
+// bootstrap()'s seedAccumulationRepoIfHostMediated runs before dispatch. An
+// empty npmrc skips the write, leaving the checkout declaring no registry.
 func mustLocalAccumulationRepo(t *testing.T, npmrc string) string {
 	t.Helper()
 	checkout := mustSeedableCheckout(t)
@@ -1315,8 +1211,8 @@ func mustLocalAccumulationRepo(t *testing.T, npmrc string) string {
 }
 
 // minimalValidLocalConfigForRoutes returns minimalValidConfig() switched to
-// CODE_FORGE=local with accumRepo wired in as the Accumulation repo -- the
-// config shape resolveHostRootedUpstreams' host-mediated branch reads from.
+// CODE_FORGE=local with accumRepo wired in, the config shape
+// resolveHostRootedUpstreams' host-mediated branch reads from.
 func minimalValidLocalConfigForRoutes(accumRepo string) config {
 	c := minimalValidConfig()
 	c.codeForge = "local"
@@ -1325,15 +1221,11 @@ func minimalValidLocalConfigForRoutes(accumRepo string) config {
 	return c
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo
-// covers issue #3310 AC1 and AC2's positive half: under CODE_FORGE=local, a
-// host-rooted route derives Upstream and EnforcedPaths from the
-// Accumulation repo's baseBranch snapshot, not from a cwd checkout --
+// Issue #3310 AC1 and AC2's positive half: under CODE_FORGE=local the route
+// derives from the Accumulation repo's baseBranch snapshot, not a cwd checkout.
 // t.Chdir moves the process into an unrelated directory and
-// registryRouteDriftRepoDirFn is stubbed to t.Fatal (the
-// TestBuildRegistryProxyRoutes_LegacyOnly_NeverConsultsRepoDir pattern), so
-// the test fails loudly if the local path ever falls back to the
-// cwd-checkout branch.
+// registryRouteDriftRepoDirFn is stubbed to t.Fatal, so a fallback to the
+// cwd-checkout branch fails loudly.
 func TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo(t *testing.T) {
 	accumRepo := mustLocalAccumulationRepo(t, "registry=https://host.example.com/npm\n")
 
@@ -1368,14 +1260,10 @@ match-host = "host.example.com"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_Local_CheckoutOnlyConfigIgnored
-// covers issue #3310 AC2's negative half: a .npmrc committed to the working
-// checkout's "main" branch after the Accumulation repo was already seeded
-// from that checkout never reaches the Accumulation repo (SeedAccumulationRepo
-// is not re-run), so the derived snapshot still declares nothing for
-// host.example.com and the route must fail closed naming it -- proving the
-// local derivation reads only what actually landed in the Accumulation
-// repo, not whatever the working checkout currently holds.
+// Issue #3310 AC2's negative half: the .npmrc is committed to the checkout after
+// SeedAccumulationRepo already ran and is never re-seeded, so the derived
+// snapshot still declares nothing and the route must fail closed. The local
+// derivation reads only what landed in the Accumulation repo.
 func TestBuildRegistryProxyRoutes_HostRooted_Local_CheckoutOnlyConfigIgnored(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	accumRepo := filepath.Join(t.TempDir(), "accum.git")
@@ -1405,10 +1293,9 @@ match-host = "host.example.com"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_Local_MissingAccumulationRepo_FailsClosed
-// covers issue #3310 AC3: a codeForgeAccumulationRepoDir that doesn't exist
-// (or isn't a git repo) fails the launch closed, naming the route's
-// match-host, rather than falling back to an unenforced route.
+// Issue #3310 AC3: a codeForgeAccumulationRepoDir that doesn't exist, or isn't a
+// git repo, fails the launch closed naming the route's match-host rather than
+// falling back to an unenforced route.
 func TestBuildRegistryProxyRoutes_HostRooted_Local_MissingAccumulationRepo_FailsClosed(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -1426,11 +1313,9 @@ match-host = "host.example.com"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_HostRooted_Local_NoMatchingHost_FailsClosed
-// covers issue #3310 AC3's other half: a real, reachable Accumulation repo
-// whose baseBranch snapshot declares no registry at all still fails the
-// route closed, naming its match-host, the same way the pre-#3310
-// cwd-checkout path already does for an unmatched host.
+// Issue #3310 AC3's other half: a reachable Accumulation repo whose baseBranch
+// snapshot declares no registry still fails the route closed, the same way the
+// pre-#3310 cwd-checkout path does for an unmatched host.
 func TestBuildRegistryProxyRoutes_HostRooted_Local_NoMatchingHost_FailsClosed(t *testing.T) {
 	accumRepo := mustLocalAccumulationRepo(t, "")
 
@@ -1450,12 +1335,10 @@ match-host = "host.example.com"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_UpstreamOrigin_OverridesDerivedOrigin covers
-// the non-default scheme/port half of ADR 0047's optional upstream-origin: a
+// ADR 0047's optional upstream-origin, non-default scheme and port half: a
 // repo's committed config names the paths but its URL cannot always name the
-// origin the launcher must actually dial (here, a non-default port), so the
-// declared origin wins over the derived one while the derived subtrees stay
-// exactly as they were.
+// origin the launcher must dial (here a non-default port), so the declared
+// origin wins while the derived subtrees stay as they were.
 func TestBuildRegistryProxyRoutes_UpstreamOrigin_OverridesDerivedOrigin(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
@@ -1497,13 +1380,10 @@ upstream-origin = "https://host.example.com:8443"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_ResolvesEmpty
-// covers ADR 0047's other upstream-origin case: a host serving only
-// ecosystems no committed config names, so nothing derives for it. The
-// declared origin alone establishes the route, and the enforced set is
-// empty -- which registryproxy reads as "refuse everything", the correct
-// default-deny outcome for a route that declares no path to admit. A
-// non-default scheme and port ride through to Upstream verbatim.
+// ADR 0047's other upstream-origin case: on a host no committed config names,
+// the declared origin alone establishes the route and the enforced set is empty,
+// which registryproxy reads as "refuse everything", the correct default-deny
+// outcome for a route that declares no path to admit.
 func TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_ResolvesEmpty(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://other.example.com/npm\n"), 0o644); err != nil {
@@ -1541,10 +1421,9 @@ upstream-origin = "http://host.example.com:8081"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_AllowIsTheSet
-// pins what a declared-origin route on an underived host actually enforces:
-// exactly what it declares itself -- allow entries, then each declared path
-// -- with no derived subtree mixed in.
+// A declared-origin route on an underived host enforces exactly what it declares
+// itself: allow entries, then each declared path, with no derived subtree mixed
+// in.
 func TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_AllowIsTheSet(t *testing.T) {
 	repoDir := t.TempDir()
 
@@ -1584,10 +1463,8 @@ path = "/gradle-maven"
 	}
 }
 
-// TestBuildRegistryProxyRoutes_NoUpstreamOrigin_UndeclaredHost_FailsClosed
-// proves the gap upstream-origin fills is still a closed door without it: a
-// route on a host nothing derives for, and with no declared origin, fails
-// the launch naming the route and both real remedies -- never the retired
+// Without a declared origin, a route on a host nothing derives for still fails
+// the launch, naming the route and both real remedies, never the retired
 // upstream-base-url knob.
 func TestBuildRegistryProxyRoutes_NoUpstreamOrigin_UndeclaredHost_FailsClosed(t *testing.T) {
 	repoDir := t.TempDir()

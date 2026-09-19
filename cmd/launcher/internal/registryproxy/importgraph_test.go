@@ -11,36 +11,13 @@ import (
 	"testing"
 )
 
-// TestImportGraphExcludesEcosystemDiscoveryAndPathSet pins ADR 0047's design
-// boundary as a tripwire: registryproxy's own shipped code must never
-// transitively import internal/ecosystem, internal/registrydiscover, or
-// internal/registrypathset. Those three packages hold ecosystem discovery
-// and path-set derivation; registryproxy's job is only to run whatever
-// registryvocab.RewriteRow table its caller (the launcher) hands it (see
-// New's rewriteRows parameter) -- a caller-supplied leaf/manifest split that
-// an accidental import the other way would quietly erode.
-//
-// It walks only non-test *.go files. This package's own _test.go files
-// (registryproxy_test.go, this file's siblings) legitimately import
-// internal/ecosystem to drive cargo's real rewrite row through the
-// round-trip tests -- that's a test-only exception the walk below is
-// deliberately blind to, not a hole in the guard: it is the shipped
-// package's import set that matters here, and go/parser's ImportsOnly mode
-// on the non-test files is what pins that.
-//
-// This does not shell out to `go list`: it computes the closure itself with
-// go/parser, following every spindrift.dev/launcher/... import to its
-// directory under the module root and recursing, with a visited set so a
-// cycle can't loop forever.
-//
-// This test rides the launcher-go-test check defined in nix/checks/go.nix,
-// which nix/checks/default.nix already puts in sourceChecks and which is
-// absent from imageOnlyCheckNames, so it reaches both `nix flake check` and
-// `checks-inbox` with no new nix wiring (mirrors
-// internal/ecosystem/containment_test.go's own reasoning for itself).
+// TestImportGraphExcludesEcosystemDiscoveryAndPathSet pins ADR 0047's boundary:
+// registryproxy runs only the registryvocab.RewriteRow table its caller hands
+// New, so its shipped code must never transitively import internal/ecosystem,
+// internal/registrydiscover, or internal/registrypathset. The walk skips
+// _test.go files, which do import internal/ecosystem for the round-trip tests.
 func TestImportGraphExcludesEcosystemDiscoveryAndPathSet(t *testing.T) {
-	// The module root is "../.." from this package's own directory
-	// (internal/registryproxy) -- go.mod lives there.
+	// go.mod lives two directories up, at the module root.
 	const moduleRoot = "../.."
 	moduleName := readModuleName(t, filepath.Join(moduleRoot, "go.mod"))
 	rootImport := moduleName + "/internal/registryproxy"
@@ -83,7 +60,6 @@ func TestImportGraphExcludesEcosystemDiscoveryAndPathSet(t *testing.T) {
 	}
 }
 
-// readModuleName reads the "module " directive out of the go.mod at path.
 func readModuleName(t *testing.T, path string) string {
 	t.Helper()
 	f, err := os.Open(path)
@@ -102,8 +78,6 @@ func readModuleName(t *testing.T, path string) string {
 	return ""
 }
 
-// importDir maps importPath to its directory on disk, given moduleRoot is
-// where moduleName's go.mod lives.
 func importDir(moduleRoot, moduleName, importPath string) string {
 	rel := strings.TrimPrefix(importPath, moduleName+"/")
 	if rel == importPath {
@@ -112,11 +86,8 @@ func importDir(moduleRoot, moduleName, importPath string) string {
 	return filepath.Join(moduleRoot, rel)
 }
 
-// nonTestImports returns every import path named by dir's non-test *.go
-// files, parsed in ImportsOnly mode (no need to type-check or even parse
-// function bodies -- only the import block matters here). Fails the test
-// loudly rather than returning an error, so a directory this walk can't
-// read never lets the walk pass vacuously.
+// nonTestImports fails the test rather than returning an error, so a directory
+// this walk cannot read never lets the walk pass vacuously.
 func nonTestImports(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -147,8 +118,6 @@ func nonTestImports(t *testing.T, dir string) []string {
 	return imports
 }
 
-// importChain renders the root -> ... -> pkg path through parent, the
-// cheapest-to-keep evidence for why pkg turned up in the closure at all.
 func importChain(parent map[string]string, root, pkg string) string {
 	chain := []string{pkg}
 	for cur := pkg; ; {

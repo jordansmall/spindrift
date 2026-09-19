@@ -10,10 +10,9 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 )
 
-// fakeGitlabRow constructs a minimal stand-in backendRow for a hypothetical
-// future "gitlab" adapter package — never a real backend, just enough of a
-// row to exercise both the tracker and code-forge axes plus the token/
-// doctor-hint machinery those axes carry.
+// fakeGitlabRow stands in for a hypothetical future "gitlab" adapter package.
+// It is never a real backend, just enough of a row to exercise both the tracker
+// and code-forge axes plus the token and doctor-hint machinery they carry.
 func fakeGitlabRow() backendRow {
 	return backendRow{
 		Descriptor: backend.Descriptor{
@@ -40,36 +39,16 @@ func fakeGitlabRow() backendRow {
 	}
 }
 
-// TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges pins issue
-// #2267's acceptance criterion #5: registering a new backend requires only a
-// row plus an adapter package. It appends a fake "gitlab" backendRow
-// (fakeGitlabRow, above — standing in for what a real future adapter
-// package's row would look like) directly to the package-level backendRows
-// registry, with no change whatsoever to validate(), newIssueTracker(),
-// newCodeForge(), boxTokenResolver(), or runDoctor()'s doctor-hint lookup —
-// then drives every one of those dispatch sites with ISSUE_TRACKER=gitlab /
-// CODE_FORGE=gitlab and checks each one routes to the new row instead of
-// falling back to github's default or failing validation. Every assertion
-// below was red-confirmed by temporarily commenting out the backendRows =
-// append(...) line below (and swapping the two t.Fatal[f] calls that would
-// otherwise short-circuit later assertions to t.Error[f]) and re-running:
-// each assertion failed on its own, proving none is vacuously true.
-//
-// No longer includes a doctor-reporting assertion: reportReadOnlyTokenGates,
-// which used to walk backendRows generically for doctor's read-only-token-gate
-// reporting, was retired by issue #2942 in favor of gateRegistry's fixed
-// github/forgejo entries. That fixed set matches what bootstrap.go's
-// enforcement path (the six checkReadOnly*Gate calls) already hardcoded — a
-// third backend's readOnlyTokenGate field was never actually enforced at
-// dispatch time either, only reported, so the retired assertion was pinning
-// a reporting-only guarantee with no matching enforcement, which #2942's
-// enforce-equals-report design deliberately retires.
+// TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges pins issue #2267
+// acceptance criterion #5: a new backend needs only a row plus an adapter
+// package. It appends a fake row to backendRows and drives validate(),
+// newIssueTracker(), newCodeForge(), boxTokenResolver(), and runDoctor()'s hint
+// lookup, none of which knows the new backend exists.
 func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	original := backendRows
 	backendRows = append(append([]backendRow{}, original...), fakeGitlabRow())
 	defer func() { backendRows = original }()
 
-	// backendByName finds the new row by name.
 	row, ok := backendByName("gitlab")
 	if !ok {
 		t.Fatal("backendByName(\"gitlab\") ok = false, want true")
@@ -81,8 +60,6 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 		t.Errorf("backendByName(\"gitlab\") validAsTracker/validAsCodeForge = %v/%v, want true/true", row.ValidAsTracker, row.ValidAsCodeForge)
 	}
 
-	// validate() accepts ISSUE_TRACKER=gitlab / CODE_FORGE=gitlab with no
-	// axis-validity edit and runs the row's own validateTracker.
 	c := minimalValidConfig()
 	c.issueTracker = "gitlab"
 	c.codeForge = "gitlab"
@@ -90,22 +67,16 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 		t.Errorf("validate() with ISSUE_TRACKER=CODE_FORGE=gitlab = %v, want nil", err)
 	}
 
-	// newIssueTracker dispatches to the row's constructor, not the github
-	// fallback.
 	it := newIssueTracker(c)
 	if _, ok := it.(*forge.Fake); !ok {
 		t.Fatalf("newIssueTracker(gitlab) returned %T, want *forge.Fake (the row's constructor)", it)
 	}
 
-	// newCodeForge dispatches to the row's constructor, not the github
-	// fallback.
 	cf := newCodeForge(c, local.SanitizedParent{}, it)
 	if _, ok := cf.(*forge.Fake); !ok {
 		t.Fatalf("newCodeForge(gitlab) returned %T, want *forge.Fake (the row's constructor)", cf)
 	}
 
-	// boxTokenResolver's registry walk honors the new row's
-	// tokenEnvVar/boxTokenEnvVar pair.
 	t.Setenv("BOX_GITLAB_TOKEN", "box-gitlab-tok")
 	resolved := boxTokenResolver(func(num, name string) string {
 		return "unresolved-fallthrough"
@@ -114,8 +85,7 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 		t.Errorf("boxTokenResolver resolved GITLAB_TOKEN = %q, want %q", resolved, "box-gitlab-tok")
 	}
 
-	// runDoctor's hint lookup (backendByName(c.issueTracker)) resolves the
-	// new row's doctor hints.
+	// This backendByName call is the lookup runDoctor uses for its hints.
 	hintRow, ok := backendByName(c.issueTracker)
 	if !ok {
 		t.Fatal("backendByName(c.issueTracker) ok = false, want true")
@@ -126,16 +96,17 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	if hintRow.DoctorSlugHint != "GITLAB_BASE_URL" {
 		t.Errorf("doctorSlugHint = %q, want %q", hintRow.DoctorSlugHint, "GITLAB_BASE_URL")
 	}
+
+	// Do not re-add a read-only-token-gate assertion here. Issue #2942 retired
+	// it: gateRegistry holds fixed github/forgejo entries, so a third backend's
+	// gate was only ever reported, never enforced at dispatch.
 }
 
-// TestValidateIssueTracker_InvalidMessageListsRuntimeRegisteredBackend pins
-// issue #2520 slice 4: the ISSUE_TRACKER-invalid error's "must be ..." list
-// must be computed dynamically from backendRows (filtered by
-// ValidAsTracker), not a hand-typed literal string in main.go. It appends a
-// fake "gitlab" backendRow (fakeGitlabRow, above) at runtime and asserts the
-// rejection message for a genuinely unknown ISSUE_TRACKER value now mentions
-// "gitlab" -- a literal string in main.go could never see this runtime
-// addition, so this only passes when the list is sourced from backendRows.
+// TestValidateIssueTracker_InvalidMessageListsRuntimeRegisteredBackend pins issue
+// #2520 slice 4: the ISSUE_TRACKER-invalid error's "must be ..." list comes from
+// backendRows filtered by ValidAsTracker, not a hand-typed literal in main.go.
+// The test appends the fake row at runtime, which a literal list could never
+// see, so the message names "gitlab" only when the list comes from backendRows.
 func TestValidateIssueTracker_InvalidMessageListsRuntimeRegisteredBackend(t *testing.T) {
 	original := backendRows
 	backendRows = append(append([]backendRow{}, original...), fakeGitlabRow())

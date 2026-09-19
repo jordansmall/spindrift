@@ -13,28 +13,22 @@ import (
 
 // This file drives findResponseRewriteRow and the learning path
 // (learnRewriteBase/learnedAdmits) with a registryvocab.RewriteRow for an
-// invented ecosystem tag ("widget") that names no real ecosystem.Table row
-// -- independent of cargo, so these pin the matching/learning mechanism
-// itself rather than anything cargo-specific (issue #3400).
+// invented ecosystem tag ("widget") that names no real ecosystem.Table row,
+// so these tests pin the matching and learning mechanism itself rather than
+// anything cargo-specific (issue #3400).
 
-// fakeAssetBody is the tiny JSON shape the fake rows below rewrite: one or
-// two absolute-URL fields naming a downloadable asset, the same "one field
-// names a URL to rewrite" shape as cargo's dl, but under names no real row
-// uses.
+// fakeAssetBody has the same "one field names a URL to rewrite" shape as
+// cargo's dl, but under field names no real row uses.
 type fakeAssetBody struct {
 	Asset     string `json:"asset,omitempty"`
 	Primary   string `json:"primary,omitempty"`
 	Secondary string `json:"secondary,omitempty"`
 }
 
-// rewriteFakeAssetField classifies one absolute-URL field and, when it can
-// be repointed at the Forwarder, returns the edit carrying the rewritten
-// value in its To -- shared by both rewriters below so each states only its
-// own outcome contract instead of re-deriving the parse/host-check cascade.
-// The returned outcome classifies that one field -- RewriteNone for a
-// missing or unparseable value, RewriteSkippedForeignHost for one naming a
-// host other than the route's own match-host -- and each caller decides
-// what that means for the body as a whole.
+// rewriteFakeAssetField classifies one absolute-URL field and, when it can be
+// repointed at the Forwarder, returns the rewritten value in the edit's To.
+// The outcome describes that one field, so each caller decides what it means
+// for the body as a whole.
 func rewriteFakeAssetField(raw string, rc registryvocab.RewriteContext) (registryvocab.RewriteEdit, registryvocab.RewriteOutcome) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
@@ -48,11 +42,7 @@ func rewriteFakeAssetField(raw string, rc registryvocab.RewriteContext) (registr
 }
 
 // rewriteFakeSingleAsset rewrites doc.Asset the same way cargo's
-// rewriteCargoDL rewrites dl: RewriteNone when there's no asset field to
-// find, RewriteSkippedForeignHost when it names a host other than the
-// route's own match-host, otherwise RewriteApplied with the asset
-// repointed at the Forwarder and LearnedPath set to the asset's own
-// route-relative path.
+// rewriteCargoDL rewrites dl.
 func rewriteFakeSingleAsset(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
 	var doc fakeAssetBody
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -77,10 +67,9 @@ func rewriteFakeSingleAsset(body []byte, rc registryvocab.RewriteContext) regist
 	}
 }
 
-// rewriteFakeDualAssets rewrites both Primary and Secondary, each against
-// the route's own match-host, and reports one edit per field -- pinning
-// that a RewriteResult with more than one edit gets every edit logged and
-// every LearnedPath learned, not just the first.
+// rewriteFakeDualAssets reports one edit per field, pinning that a
+// RewriteResult with more than one edit gets every edit logged and every
+// LearnedPath learned, not just the first.
 func rewriteFakeDualAssets(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
 	var doc fakeAssetBody
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -105,13 +94,11 @@ func rewriteFakeDualAssets(body []byte, rc registryvocab.RewriteContext) registr
 	return registryvocab.RewriteResult{Body: newBody, Edits: edits, Outcome: registryvocab.RewriteApplied}
 }
 
-// rewriteFakeMixedAssets rewrites doc.Primary against the route's own
-// match-host and reports doc.Secondary's foreign host as a declined edit
-// (empty To) in the very same RewriteApplied result -- pinning that a
-// packument-shaped body can carry both an applied edit and a declined one
-// side by side (issue #3401). rewriteFakeAssetField already returns a
-// From-only edit for RewriteSkippedForeignHost, which is exactly the
-// empty-To shape a declined edit needs.
+// rewriteFakeMixedAssets pins that one packument-shaped body can carry both
+// an applied edit and a declined one side by side (issue #3401).
+// rewriteFakeAssetField already returns a From-only edit for
+// RewriteSkippedForeignHost, which is the empty-To shape a declined edit
+// needs.
 func rewriteFakeMixedAssets(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
 	var doc fakeAssetBody
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -135,18 +122,16 @@ func rewriteFakeMixedAssets(body []byte, rc registryvocab.RewriteContext) regist
 	return registryvocab.RewriteResult{Body: newBody, Edits: edits, Outcome: registryvocab.RewriteApplied}
 }
 
-// rewriteFakeSkipNoEdits reports a deliberate skip carrying no edits at
-// all -- a shape a caller-supplied row is free to produce (it decided not
-// to touch the body without singling out any one value), which must not be
-// reported as if nothing rewritable had been found.
+// rewriteFakeSkipNoEdits reports a deliberate skip carrying no edits at all.
+// A caller-supplied row may decline to touch the body without singling out any
+// one value, and that must not be reported as if nothing rewritable had been
+// found.
 func rewriteFakeSkipNoEdits(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
 	return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteSkippedForeignHost}
 }
 
-// fakeManifestRow matches "GET <base>/manifest.json" under the "widget"
-// ecosystem tag, the same request shape cargo's config.json row matches
-// under "cargo" -- but tagged for an ecosystem no ecosystem.Table row
-// declares.
+// fakeManifestRow matches the same request shape cargo's config.json row
+// matches, but tagged for an ecosystem no ecosystem.Table row declares.
 func fakeManifestRow(rewrite func([]byte, registryvocab.RewriteContext) registryvocab.RewriteResult) registryvocab.RewriteRow {
 	return registryvocab.RewriteRow{
 		Name:      "widget manifest.json",
@@ -159,12 +144,9 @@ func fakeManifestRow(rewrite func([]byte, registryvocab.RewriteContext) registry
 	}
 }
 
-// TestFakeRewriteRow_MatchesAndLearns verifies the full round trip for a
-// made-up ecosystem: a manifest.json fetch under a "widget"-tagged base gets
-// its asset field rewritten to the Forwarder, and the edit's LearnedPath is
-// then admitted on a follow-up request that the route's static EnforcedPaths
-// alone would refuse -- the "learning" half of ADR 0047, pinned here
-// independent of cargo.
+// The edit's LearnedPath must be admitted on a follow-up request that the
+// route's static EnforcedPaths alone would refuse: the "learning" half of
+// ADR 0047, pinned here independent of cargo.
 func TestFakeRewriteRow_MatchesAndLearns(t *testing.T) {
 	const assetBody = `{"asset":"https://widget.example.com/downloads/pkg-1.0.tar.gz"}`
 
@@ -193,9 +175,8 @@ func TestFakeRewriteRow_MatchesAndLearns(t *testing.T) {
 	}
 	prefix := routes[0].Prefix
 
-	// The static enforced set is "/index" only, so "/downloads/..." must
-	// start out refused -- otherwise a later 200 there wouldn't prove
-	// anything was learned.
+	// The static enforced set is "/index" only, so "/downloads/..." must start
+	// out refused, or a later 200 there would prove nothing.
 	preRR := httptest.NewRecorder()
 	preReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/downloads/pkg-1.0.tar.gz", nil)
 	p.ServeHTTP(preRR, preReq)
@@ -226,12 +207,10 @@ func TestFakeRewriteRow_MatchesAndLearns(t *testing.T) {
 	}
 }
 
-// TestFakeRewriteRow_EcosystemTagMismatchNeverMatches verifies the
-// ecosystem-tag keying itself: a row declared for one ecosystem tag never
-// matches against a route's base tagged for a different ecosystem, even
-// when the row's method and path shape would otherwise fit exactly. This is
-// the case most worth pinning, since a bug here would let one ecosystem's
-// row rewrite another's response.
+// A row declared for one ecosystem tag must never match a route base tagged
+// for a different ecosystem, even when the row's method and path shape fit
+// exactly. A bug here would let one ecosystem's row rewrite another's
+// response.
 func TestFakeRewriteRow_EcosystemTagMismatchNeverMatches(t *testing.T) {
 	const assetBody = `{"asset":"https://widget.example.com/downloads/pkg-1.0.tar.gz"}`
 
@@ -241,8 +220,8 @@ func TestFakeRewriteRow_EcosystemTagMismatchNeverMatches(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	// The route's own subtree is tagged "widget", but the row below is
-	// tagged "gadget" -- same method, same path shape, different ecosystem.
+	// The route's subtree is tagged "widget" and the row below "gadget": same
+	// method, same path shape, different ecosystem.
 	routes := AssignPrefixes([]Route{{
 		MatchHost:        "widget.example.com",
 		EnforcedPaths:    []string{"/index"},
@@ -270,11 +249,9 @@ func TestFakeRewriteRow_EcosystemTagMismatchNeverMatches(t *testing.T) {
 	}
 }
 
-// TestFakeRewriteRow_MultipleEditsAllLoggedAndAllLearned verifies a
-// RewriteResult carrying more than one edit gets every edit logged and
-// every LearnedPath learned -- the result is a list now, so a caller that
-// only looked at the first edit would silently regress once a row ever
-// needs to rewrite more than one field.
+// The result carries a list of edits, so a caller that only looked at the
+// first one would silently regress once a row needs to rewrite more than one
+// field.
 func TestFakeRewriteRow_MultipleEditsAllLoggedAndAllLearned(t *testing.T) {
 	const manifestBody = `{"primary":"https://widget.example.com/primary/pkg.tar.gz","secondary":"https://widget.example.com/mirror/pkg.tar.gz"}`
 
@@ -326,10 +303,9 @@ func TestFakeRewriteRow_MultipleEditsAllLoggedAndAllLearned(t *testing.T) {
 	}
 }
 
-// TestFakeRewriteRow_SkipWithNoEditsLogsAsASkip verifies a deliberate skip
-// that names no edited value still reports itself as a skip, rather than
-// falling through to the RewriteNone line and misreporting the row as
-// having found nothing rewritable.
+// A deliberate skip that names no edited value must still report itself as a
+// skip, rather than falling through to the RewriteNone line and misreporting
+// the row as having found nothing rewritable.
 func TestFakeRewriteRow_SkipWithNoEditsLogsAsASkip(t *testing.T) {
 	const manifestBody = `{"asset":"https://widget.example.com/downloads/pkg-1.0.tar.gz"}`
 
@@ -373,13 +349,10 @@ func TestFakeRewriteRow_SkipWithNoEditsLogsAsASkip(t *testing.T) {
 	}
 }
 
-// TestFakeRewriteRow_MixedAppliedAndDeclinedEdits verifies a RewriteApplied
-// result that carries both an applied edit and a declined (foreign-host)
-// edit side by side: the applied field is rewritten and its path admitted,
-// the declined field is left byte-identical and logged as a skip, and --
-// critically -- nothing is learned from it (issue #3401's mixed-packument
-// gap: an empty-To edit's LearnedPath must never be normalized to "/" and
-// admit the whole host).
+// Issue #3401's mixed-packument gap: when one result carries both an applied
+// edit and a declined (foreign-host) edit, nothing may be learned from the
+// declined one. An empty-To edit's LearnedPath must never be normalized to
+// "/" and admit the whole host.
 func TestFakeRewriteRow_MixedAppliedAndDeclinedEdits(t *testing.T) {
 	const manifestBody = `{"primary":"https://widget.example.com/primary/pkg.tar.gz","secondary":"https://cdn.example.com/mirror/pkg.tar.gz"}`
 
@@ -429,7 +402,6 @@ func TestFakeRewriteRow_MixedAppliedAndDeclinedEdits(t *testing.T) {
 		t.Errorf("declined edit logged as if it had been rewritten: %q", logged)
 	}
 
-	// The applied edit's path must be admitted...
 	primaryRR := httptest.NewRecorder()
 	primaryReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/primary/pkg.tar.gz", nil)
 	p.ServeHTTP(primaryRR, primaryReq)
@@ -437,9 +409,8 @@ func TestFakeRewriteRow_MixedAppliedAndDeclinedEdits(t *testing.T) {
 		t.Errorf("applied edit's path: status = %d, want %d (learned path must be admitted)", primaryRR.Code, http.StatusOK)
 	}
 
-	// ...but the declined edit's path must still be refused: nothing was
-	// learned from it, so it must not fall back to admitting the root
-	// subtree either.
+	// Nothing was learned from the declined edit, so its path must still be
+	// refused rather than falling back to admitting the root subtree.
 	mirrorRR := httptest.NewRecorder()
 	mirrorReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/mirror/pkg.tar.gz", nil)
 	p.ServeHTTP(mirrorRR, mirrorReq)
@@ -448,10 +419,9 @@ func TestFakeRewriteRow_MixedAppliedAndDeclinedEdits(t *testing.T) {
 	}
 }
 
-// TestFakeRewriteRow_ForeignHostAndNoneBothRelayUntouched verifies both
-// non-applied outcomes relay the response body untouched -- a
-// RewriteSkippedForeignHost asset (naming a host other than the route's own
-// match-host) and a RewriteNone body (no recognizable asset field at all).
+// Both non-applied outcomes must relay the response body untouched: a
+// RewriteSkippedForeignHost asset naming a host other than the route's own
+// match-host, and a RewriteNone body with no recognizable asset field at all.
 func TestFakeRewriteRow_ForeignHostAndNoneBothRelayUntouched(t *testing.T) {
 	testCases := []struct {
 		name string

@@ -12,12 +12,9 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgejo"
 )
 
-// prReader is a local, minimal interface covering exactly the PR-object read
-// methods this slice adds to forgejoCodeForge. It lets these tests assert
-// the concrete adapter satisfies the growing PR surface without asserting
-// the full forge.PRForge interface, which forgejoCodeForge does not yet
-// fully implement (later slices add the remaining methods, at which point a
-// direct forge.PRForge assertion becomes possible).
+// prReader covers only the PR-object methods forgejoCodeForge implements so
+// far. Asserting forge.PRForge directly would fail until later slices add the
+// remaining methods.
 type prReader interface {
 	PRState(url string) (forge.PRState, error)
 	HeadCommitSHA(url string) (string, error)
@@ -34,10 +31,6 @@ type prReader interface {
 	MarkDraft(prURL string) error
 }
 
-// newPullServer stands in for the Forgejo REST API's pull endpoints: a
-// single GET /pulls/{index} for a fixed pull payload, and GET /pulls for
-// list-based lookups (OpenPRForBranch/PRForBranch), scripted by the caller's
-// handler.
 func newPRForgeTestForge(t *testing.T, handler http.HandlerFunc) prReader {
 	t.Helper()
 	srv := httptest.NewServer(handler)
@@ -71,8 +64,6 @@ func pullJSON(number int, state string, merged, mergeable, draft bool, title, he
 	return string(b)
 }
 
-// TestPRState_Open verifies PRState maps an open, unmerged pull to
-// forge.PROpen.
 func TestPRState_Open(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206" {
@@ -90,8 +81,6 @@ func TestPRState_Open(t *testing.T) {
 	}
 }
 
-// TestPRState_Closed verifies PRState maps a closed, unmerged pull to
-// forge.PRClosed.
 func TestPRState_Closed(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(pullJSON(206, "closed", false, false, false, "add feature", "agent/issue-206", "abc123", "main")))
@@ -105,9 +94,8 @@ func TestPRState_Closed(t *testing.T) {
 	}
 }
 
-// TestPRState_Merged verifies PRState maps a merged pull to forge.PRMerged
-// regardless of its raw state string (Forgejo reports merged pulls as
-// state=closed, merged=true).
+// Forgejo reports a merged pull as state=closed, merged=true, so PRState must
+// read merged rather than the raw state string.
 func TestPRState_Merged(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(pullJSON(206, "closed", true, false, false, "add feature", "agent/issue-206", "abc123", "main")))
@@ -121,7 +109,6 @@ func TestPRState_Merged(t *testing.T) {
 	}
 }
 
-// TestHeadCommitSHA verifies HeadCommitSHA returns the pull's head.sha.
 func TestHeadCommitSHA(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(pullJSON(206, "open", false, true, false, "add feature", "agent/issue-206", "deadbeef", "main")))
@@ -135,8 +122,6 @@ func TestHeadCommitSHA(t *testing.T) {
 	}
 }
 
-// TestMergeable_True verifies Mergeable maps mergeable=true to
-// forge.MergeableMergeable.
 func TestMergeable_True(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(pullJSON(206, "open", false, true, false, "add feature", "agent/issue-206", "abc123", "main")))
@@ -150,8 +135,6 @@ func TestMergeable_True(t *testing.T) {
 	}
 }
 
-// TestMergeable_False verifies Mergeable maps mergeable=false to
-// forge.MergeableConflicting.
 func TestMergeable_False(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(pullJSON(206, "open", false, false, false, "add feature", "agent/issue-206", "abc123", "main")))
@@ -165,8 +148,6 @@ func TestMergeable_False(t *testing.T) {
 	}
 }
 
-// TestOpenPRForBranch_Found verifies OpenPRForBranch returns the open,
-// non-draft pull matching branch.
 func TestOpenPRForBranch_Found(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls" {
@@ -190,10 +171,9 @@ func TestOpenPRForBranch_Found(t *testing.T) {
 	}
 }
 
-// TestOpenPRForBranch_AdoptsDraftPR verifies OpenPRForBranch adopts a draft
-// pull (title-prefixed "WIP:" or draft=true) precisely as it adopts a
-// non-draft one (issue #2408). Draft status is no longer reported through
-// the returned forge.PR, so this only asserts the adoption itself.
+// OpenPRForBranch must adopt a draft pull exactly as it adopts a non-draft one
+// (issue #2408). The returned forge.PR no longer carries draft status, so this
+// asserts only the adoption.
 func TestOpenPRForBranch_AdoptsDraftPR(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[" + pullJSON(206, "open", false, true, true, "WIP: add feature", "agent/issue-206", "abc123", "main") + "]"))
@@ -210,8 +190,6 @@ func TestOpenPRForBranch_AdoptsDraftPR(t *testing.T) {
 	}
 }
 
-// TestOpenPRForBranch_Absent verifies OpenPRForBranch reports ok=false when
-// no open pull's head matches branch.
 func TestOpenPRForBranch_Absent(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[]"))
@@ -225,8 +203,8 @@ func TestOpenPRForBranch_Absent(t *testing.T) {
 	}
 }
 
-// TestPRForBranch_Found verifies PRForBranch returns the URL of any pull
-// (regardless of state or draft) whose head matches branch.
+// Unlike OpenPRForBranch, PRForBranch matches a pull in any state, so the
+// fixture deliberately serves a closed and merged one.
 func TestPRForBranch_Found(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("state") != "all" {
@@ -246,8 +224,6 @@ func TestPRForBranch_Found(t *testing.T) {
 	}
 }
 
-// TestPRForBranch_Absent verifies PRForBranch reports ok=false when no
-// pull's head matches branch.
 func TestPRForBranch_Absent(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[]"))
@@ -261,10 +237,8 @@ func TestPRForBranch_Absent(t *testing.T) {
 	}
 }
 
-// forgejoPullsPage renders count open, non-draft pulls as a Forgejo
-// pulls-list JSON page, numbered start, start+1, ..., start+count-1, each
-// with a distinct head ref "branch-N" so a test can target one on a
-// specific page.
+// Each pull gets a distinct head ref "branch-N" so a test can target one that
+// lands on a specific page.
 func forgejoPullsPage(start, count int) string {
 	var parts []string
 	for i := 0; i < count; i++ {
@@ -274,16 +248,9 @@ func forgejoPullsPage(start, count int) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
-// TestOpenPRForBranch_WalksAllPages verifies listPulls (via the
-// OpenPRForBranch seam) walks every page of the Forgejo pulls-list endpoint
-// via rest.Client.Paginate rather than fetching a single bounded page (issue
-// #2265): the server serves forge.ResultPageLimit pulls on page 1 (a full
-// page) and a short final page of 2 pulls on page 2, with the target branch
-// only present on the short page 2. The test asserts every request carries
-// the expected "page"/"limit"/"state" query params, that the server never
-// sees a request for a page beyond the short page, and that the pull on the
-// later page is still found (proving the pages were merged, not just the
-// first one consulted).
+// listPulls once fetched a single bounded page (issue #2265). The target branch
+// sits only on the short second page, so finding it proves Paginate merged both
+// pages instead of consulting the first.
 func TestOpenPRForBranch_WalksAllPages(t *testing.T) {
 	const pageSize = forge.ResultPageLimit
 	var gotPages []string
@@ -306,11 +273,10 @@ func TestOpenPRForBranch_WalksAllPages(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		switch page {
 		case 1:
-			// A full page (pageSize pulls), numbered 1..pageSize.
 			w.Write([]byte(forgejoPullsPage(1, pageSize)))
 		case 2:
-			// A short page (2 < pageSize), signals the walk is done. The
-			// target branch lives here, on the second page.
+			// A short page (2 < pageSize) is how the server tells Paginate the
+			// walk is done.
 			w.Write([]byte(forgejoPullsPage(pageSize+1, 2)))
 		default:
 			t.Errorf("server received request for page %d, want no request beyond the short page 2", page)
@@ -346,11 +312,10 @@ func TestOpenPRForBranch_WalksAllPages(t *testing.T) {
 	}
 }
 
-// pullHandler returns a handler serving GET /pulls/206 with a fixed pull
-// (head sha "abc123", head ref "agent/issue-206", base ref "main"), and
-// delegating any other path to next — the shared fixture the CheckState/
-// FailureDetail/ListPRFiles/NeedsUpdate tests below layer their own
-// commit-status/compare/files handler on top of.
+// pullHandler serves a fixed pull (head sha "abc123", head ref
+// "agent/issue-206", base ref "main") and delegates every other path to next,
+// so the CheckState, FailureDetail and NeedsUpdate tests below script only
+// their own endpoint.
 func pullHandler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/owner/repo/pulls/206" {
@@ -361,8 +326,6 @@ func pullHandler(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// TestCheckState_Success verifies CheckState maps a combined status of
-// state=success to forge.StateSuccess.
 func TestCheckState_Success(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/commits/abc123/status" {
@@ -380,8 +343,6 @@ func TestCheckState_Success(t *testing.T) {
 	}
 }
 
-// TestCheckState_Pending verifies CheckState maps state=pending to
-// forge.StatePending.
 func TestCheckState_Pending(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"state":"pending","total_count":1}`))
@@ -395,8 +356,6 @@ func TestCheckState_Pending(t *testing.T) {
 	}
 }
 
-// TestCheckState_Failure verifies CheckState maps state=failure to
-// forge.StateFailure.
 func TestCheckState_Failure(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"state":"failure","total_count":1}`))
@@ -410,8 +369,6 @@ func TestCheckState_Failure(t *testing.T) {
 	}
 }
 
-// TestCheckState_Error verifies CheckState maps state=error to
-// forge.StateError.
 func TestCheckState_Error(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"state":"error","total_count":1}`))
@@ -425,8 +382,6 @@ func TestCheckState_Error(t *testing.T) {
 	}
 }
 
-// TestCheckState_NoneEmptyState verifies CheckState maps an empty state
-// string to forge.StateNone.
 func TestCheckState_NoneEmptyState(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"state":"","total_count":0}`))
@@ -440,9 +395,8 @@ func TestCheckState_NoneEmptyState(t *testing.T) {
 	}
 }
 
-// TestCheckState_NoneZeroTotalCount verifies CheckState maps a zero
-// total_count to forge.StateNone even when state carries a nonempty value —
-// e.g. a commit with no statuses registered at all.
+// A commit with no statuses registered can still report a nonempty state, so
+// total_count=0 must win and map to forge.StateNone.
 func TestCheckState_NoneZeroTotalCount(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"state":"success","total_count":0}`))
@@ -456,8 +410,6 @@ func TestCheckState_NoneZeroTotalCount(t *testing.T) {
 	}
 }
 
-// TestFailureDetail_Empty verifies FailureDetail returns "" when every
-// status on the head commit is passing.
 func TestFailureDetail_Empty(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/commits/abc123/statuses" {
@@ -475,9 +427,6 @@ func TestFailureDetail_Empty(t *testing.T) {
 	}
 }
 
-// TestFailureDetail_RendersFailingStatus verifies FailureDetail renders a
-// failing status's context, upper-cased state, and description, while
-// omitting a passing status entirely.
 func TestFailureDetail_RendersFailingStatus(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`[
@@ -503,9 +452,8 @@ func TestFailureDetail_RendersFailingStatus(t *testing.T) {
 	}
 }
 
-// TestFailureDetail_Bounded verifies FailureDetail truncates its rendered
-// excerpt to at most 4000 bytes even when many failing statuses, each with a
-// long description, would otherwise produce a larger excerpt.
+// The fixture renders well past 4000 bytes on purpose. Shrink it and the
+// truncation never fires, so the test passes while checking nothing.
 func TestFailureDetail_Bounded(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		longDesc := strings.Repeat("x", 500)
@@ -529,8 +477,6 @@ func TestFailureDetail_Bounded(t *testing.T) {
 	}
 }
 
-// TestListPRFiles verifies ListPRFiles returns every filename in the pull's
-// changed-files listing.
 func TestListPRFiles(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206/files" {
@@ -549,16 +495,14 @@ func TestListPRFiles(t *testing.T) {
 	}
 }
 
-// TestNeedsUpdate_True verifies NeedsUpdate reports true when the compare
-// API reports commits the head branch has not yet incorporated.
 func TestNeedsUpdate_True(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/repos/owner/repo/compare/") {
 			http.NotFound(w, r)
 			return
 		}
-		// The refs are swapped to head...base so total_commits counts the
-		// behind set against Forgejo's ahead-only compare; pin that order.
+		// Forgejo's compare endpoint counts only commits ahead, so the refs go
+		// in head...base order and total_commits counts the behind set instead.
 		if got := r.URL.Path; !strings.HasSuffix(got, "/compare/agent/issue-206...main") {
 			t.Errorf("compare path = %q, want head...base order .../compare/agent/issue-206...main", got)
 		}
@@ -573,8 +517,6 @@ func TestNeedsUpdate_True(t *testing.T) {
 	}
 }
 
-// TestNeedsUpdate_False verifies NeedsUpdate reports false when the compare
-// API reports zero commits the head branch is missing from base.
 func TestNeedsUpdate_False(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"total_commits":0}`))
@@ -588,8 +530,6 @@ func TestNeedsUpdate_False(t *testing.T) {
 	}
 }
 
-// TestCanAutoMerge_True verifies CanAutoMerge reports true when the repo
-// permits at least one merge style (here, only allow_rebase is set).
 func TestCanAutoMerge_True(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo" {
@@ -607,8 +547,6 @@ func TestCanAutoMerge_True(t *testing.T) {
 	}
 }
 
-// TestCanAutoMerge_False verifies CanAutoMerge reports false when the repo
-// permits no merge style at all.
 func TestCanAutoMerge_False(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"allow_merge_commits":false,"allow_rebase":false,"allow_squash_merge":false}`))
@@ -622,10 +560,8 @@ func TestCanAutoMerge_False(t *testing.T) {
 	}
 }
 
-// TestEnqueueAutoMerge_PostsMergeWhenChecksSucceed verifies EnqueueAutoMerge
-// POSTs to the pull's merge endpoint with merge_when_checks_succeed=true, so
-// Forgejo enqueues native scheduled merge-when-checks-succeed rather than
-// merging immediately.
+// The merge_when_checks_succeed flag is what makes Forgejo schedule the merge.
+// Without it the same POST merges the pull immediately.
 func TestEnqueueAutoMerge_PostsMergeWhenChecksSucceed(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -660,8 +596,6 @@ func TestEnqueueAutoMerge_PostsMergeWhenChecksSucceed(t *testing.T) {
 	}
 }
 
-// TestMarkReady_StripsWIPPrefix verifies MarkReady PATCHes the title with
-// the WIP prefix stripped when the PR is currently a draft.
 func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -703,8 +637,6 @@ func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 	}
 }
 
-// TestMarkReady_AlreadyReadyNoOp verifies MarkReady issues no PATCH and
-// returns nil when the PR is already not a draft.
 func TestMarkReady_AlreadyReadyNoOp(t *testing.T) {
 	patched := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -737,14 +669,9 @@ func TestMarkReady_AlreadyReadyNoOp(t *testing.T) {
 	}
 }
 
-// TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle verifies MarkReady
-// PATCHes the title with the "[WIP]:" prefix stripped when the pull's
-// draft field is true even though the title carries the "[WIP]:"
-// convention rather than the narrower "WIP:" one — MarkReady must gate on
-// isDraftPull (draft field OR either WIP-title convention), not on
-// isDraftTitle's narrower "WIP:"-only check, so a stranded "[WIP]:"-titled
-// draft PR (see OpenPRForBranch's adoption of any draft PR) can still be
-// marked ready.
+// MarkReady must gate on isDraftPull (the draft field or either WIP-title
+// convention), not isDraftTitle's narrower "WIP:"-only check. Gating on the
+// narrow check strands a "[WIP]:"-titled draft PR that OpenPRForBranch adopted.
 func TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -786,8 +713,6 @@ func TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle(t *testing.T) {
 	}
 }
 
-// TestMarkDraft_AddsWIPPrefix verifies MarkDraft PATCHes the title with a
-// leading "WIP: " when the PR is currently ready (not draft).
 func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -829,8 +754,6 @@ func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
 	}
 }
 
-// TestMarkDraft_AlreadyDraftNoOp verifies MarkDraft issues no PATCH and
-// returns nil when the PR is already a draft (WIP-titled).
 func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 	patched := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -863,14 +786,9 @@ func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 	}
 }
 
-// TestMarkDraft_AlreadyDraftFieldNoOpWithoutWIPTitle verifies MarkDraft
-// issues no PATCH and returns nil when the pull's draft field is already
-// true even though the title carries no WIP-title convention — the
-// symmetric case to TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle.
-// MarkDraft must gate on isDraftPull (draft field OR either WIP-title
-// convention), the same predicate MarkReady uses, not on isDraftTitle's
-// narrower title-only check: otherwise a pull that's already draft by field
-// but plainly titled would be redundantly PATCHed back to draft.
+// The symmetric case to TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle.
+// MarkDraft must gate on the same isDraftPull predicate, or a pull already
+// draft by field but plainly titled gets redundantly PATCHed back to draft.
 func TestMarkDraft_AlreadyDraftFieldNoOpWithoutWIPTitle(t *testing.T) {
 	patched := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

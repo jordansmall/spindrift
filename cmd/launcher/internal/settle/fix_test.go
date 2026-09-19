@@ -27,9 +27,8 @@ func fixPasses(d *dispatch.Fake) []int {
 	return passes
 }
 
-// TestSelfHeal_ForwardsFailureDetailToFix verifies that on genuine-red,
-// selfHeal captures fc.FailureDetail(pr) and forwards it as the second
-// argument to Fix — the fix box's CI_FAILURE_SUMMARY (issue #426).
+// On genuine red, selfHeal must forward fc.FailureDetail(pr) to Fix as the fix
+// box's CI_FAILURE_SUMMARY (issue #426).
 func TestSelfHeal_ForwardsFailureDetailToFix(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
@@ -49,10 +48,8 @@ func TestSelfHeal_ForwardsFailureDetailToFix(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_EmptyFailureDetailFallsBackWithNoError verifies that when
-// FailureDetail returns an error (fetch failed) or "" (nothing scripted),
-// selfHeal still dispatches the fix pass with an empty summary rather than
-// failing the fix pass outright — the fetch is best-effort.
+// A FailureDetail that errors or returns "" must still dispatch the fix pass
+// with an empty summary. The fetch is best-effort.
 func TestSelfHeal_EmptyFailureDetailFallsBackWithNoError(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
@@ -97,7 +94,7 @@ func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 }
 
 func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
-	c := fixConfig(0) // no fix passes allowed
+	c := fixConfig(0)
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
@@ -127,7 +124,8 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	// First poll: FAILURE; after fix box: SUCCESS (plus confirmation poll)
+	// First poll is FAILURE, then SUCCESS after the fix box, plus the
+	// confirmation poll.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
@@ -148,14 +146,11 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_ReadOnlyFixPassRelaysBundleBeforeRecheck verifies that after
-// a fix pass, the box's outbox bundle is relayed in (forge.BundleRelay)
-// before the loop re-polls CI, for a Code Forge that implements it (the
-// github read-only adapter's shape, issue #1919). Under
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only the fix Box holds no push-capable
-// token — its own agent bundles its work to the outbox instead of pushing
-// directly (issue #1979) — so without this relay the PR's head never
-// actually changes and CI would just re-report the same failure forever.
+// After a fix pass the box's outbox bundle must be relayed in
+// (forge.BundleRelay) before the loop re-polls CI, on a Code Forge that
+// implements it (issue #1919). A read-only fix Box holds no push-capable token
+// and bundles its work instead (issue #1979), so without the relay the PR head
+// never moves and CI re-reports the same failure forever.
 func TestSelfHeal_ReadOnlyFixPassRelaysBundleBeforeRecheck(t *testing.T) {
 	c := fixConfig(3)
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
@@ -183,24 +178,20 @@ func TestSelfHeal_ReadOnlyFixPassRelaysBundleBeforeRecheck(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_ReadOnlyFixPassRelaysBeforeNoOpCheck verifies that the relay
-// (issue #1979) runs before the no-op fix-pass detection (issue #1980) gets
-// to compare head SHAs. A read-only Box never pushes directly — ever,
-// whether its fix pass was a genuine no-op or real work — so
-// s.pr.HeadCommitSHA(pr) never visibly moves until the relay lands the
-// bundle. If the no-op check ran first, it would misread every read-only
-// fix pass as a no-op and abort self-heal on the very first attempt,
-// regardless of MaxFixAttempts, defeating the whole point of #1979.
+// The relay (issue #1979) must run before the no-op fix-pass detection (issue
+// #1980) compares head SHAs. A read-only Box never pushes directly, so
+// s.pr.HeadCommitSHA(pr) never moves until the relay lands the bundle. A
+// no-op check running first would misread every read-only fix pass as a no-op
+// and abort self-heal on the first attempt, whatever MaxFixAttempts says.
 func TestSelfHeal_ReadOnlyFixPassRelaysBeforeNoOpCheck(t *testing.T) {
 	c := fixConfig(3)
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
-	// Scripted constant: models the read-only Box's own direct-push
-	// visibility, which never moves regardless of what the fix pass did —
-	// only the relay call (not exercised by this Fake's HeadCommitSHA model)
-	// actually lands new work in production.
+	// The read-only Box's direct-push visibility never moves, whatever the fix
+	// pass did. Only the relay call lands new work in production, and this
+	// Fake's HeadCommitSHA model does not cover it.
 	fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1"})
 	cf := fc.AsGithubReadOnly()
 	s := newTestSettle(c, fc, cf)
@@ -213,12 +204,10 @@ func TestSelfHeal_ReadOnlyFixPassRelaysBeforeNoOpCheck(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_ReadOnlyFixPassRelayFailureIsNonFatal verifies that a
-// RelayBundle failure after a fix pass (a crashed Box that left no bundle,
-// say) is logged but never blocks or crashes the retry loop — it falls
-// through to the next gateToGreen poll like any other fix pass that didn't
-// change the outcome, exhausting normally rather than being treated as its
-// own distinct terminal condition.
+// A RelayBundle failure after a fix pass (a crashed Box that left no bundle,
+// say) is logged but must never block or crash the retry loop. It falls
+// through to the next gateToGreen poll and exhausts normally rather than
+// becoming its own terminal condition.
 func TestSelfHeal_ReadOnlyFixPassRelayFailureIsNonFatal(t *testing.T) {
 	c := fixConfig(1)
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
@@ -254,7 +243,6 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 	c := fixConfig(2)
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	// All polls return FAILURE — never fixed.
 	fc.SetCheckStates(testPR, []forge.RollupState{
 		forge.StateFailure,
 		forge.StateFailure,
@@ -275,7 +263,6 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 	if len(passes) != 2 {
 		t.Errorf("expected %d fix calls (maxFixAttempts), got %d: %v", c.MaxFixAttempts, len(passes), passes)
 	}
-	// Fix passes should be numbered 1, 2
 	for i, p := range passes {
 		if p != i+1 {
 			t.Errorf("passes[%d]=%d, want %d", i, p, i+1)
@@ -289,13 +276,11 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_FixFailureStopsImmediately verifies that when d.Fix reports
-// !Success, selfHeal lands failed right away instead of re-polling the same
-// (unchanged) head and burning the rest of the fix-pass budget against the
-// identical cached rollup (issue #1980). The rollup is scripted FAILURE on
-// every poll — standing in for a head that never advances because the fix
-// box never pushed — so a buggy loop that keeps retrying would burn all 3
-// passes instead of stopping after the first.
+// When d.Fix reports !Success, selfHeal must land failed right away instead of
+// re-polling the unchanged head and burning the rest of the fix-pass budget
+// against the identical cached rollup (issue #1980). The rollup is scripted
+// FAILURE on every poll, standing in for a head that never advances, so a
+// buggy loop would burn all 3 passes instead of stopping after the first.
 func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
@@ -333,11 +318,10 @@ func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_FixFailureWithErrSurfacesReason verifies that when d.Fix
-// returns a Result whose Err is set — the box-never-launched case
-// (dispatch/retry.go, issue #3119) — selfHeal surfaces that reason on
-// stderr alongside the existing status=fix-failed line, matching the
-// "?? #N: %v" diagnostic convention retry.go and waves already use.
+// When d.Fix returns a Result whose Err is set, the box-never-launched case
+// (dispatch/retry.go, issue #3119), selfHeal must print that reason on stderr
+// alongside the status=fix-failed line, matching the "?? #N: %v" diagnostic
+// convention retry.go and waves already use.
 func TestSelfHeal_FixFailureWithErrSurfacesReason(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
@@ -369,17 +353,11 @@ func TestSelfHeal_FixFailureWithErrSurfacesReason(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_FixNoOpUnchangedHead verifies that when d.Fix reports
-// Success but leaves the PR's head commit SHA unchanged, selfHeal lands
+// A Fix that reports Success but leaves the PR head SHA unchanged must land
 // failed right away instead of re-polling the identical cached rollup as a
-// fresh genuine red (issue #1980). The rollup is scripted FAILURE on every
-// poll — standing in for a head that never advances — so a buggy loop that
-// trusts the stale rollup would burn all 3 passes instead of stopping after
-// the first. It also verifies the no-op-confirm pause sleeps through the
-// injected clock rather than a bare time.Sleep (issue #2502): a
-// recordingClock only records what is actually routed through it, so a bare
-// time.Sleep would leave sleeps empty here even though a real sleep
-// happened.
+// fresh genuine red (issue #1980). The no-op-confirm pause must also sleep
+// through the injected clock rather than a bare time.Sleep (issue #2502):
+// recordingClock only records the sleeps routed through it.
 func TestSelfHeal_FixNoOpUnchangedHead(t *testing.T) {
 	c := fixConfig(3)
 	sleeps, clock := recordingClock()
@@ -389,8 +367,8 @@ func TestSelfHeal_FixNoOpUnchangedHead(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{
 		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
 	})
-	// Same SHA before, immediately after, and on the confirm re-read: the
-	// fix box exited zero but never pushed a new commit.
+	// Same SHA before, immediately after, and on the confirm re-read: the fix
+	// box exited zero but never pushed a new commit.
 	fc.SetHeadCommitSHAs(testPR, []string{"sha-unchanged", "sha-unchanged", "sha-unchanged"})
 	s := newTestSettle(c, fc, fc)
 
@@ -415,19 +393,18 @@ func TestSelfHeal_FixNoOpUnchangedHead(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_FixAdvanceConfirmedAfterTransientSameRead verifies that a
-// head-SHA read landing back the same value right after Fix returns (GitHub
-// API replication lag momentarily serving the pre-push snapshot) is not
-// mistaken for a no-op fix pass: a confirm re-read showing the head did
-// advance must let the loop proceed to green, mirroring gateToGreen's own
-// confirm-poll pattern for a SUCCESS rollup (issue #1980).
+// A head-SHA read returning the same value right after Fix (GitHub API
+// replication lag serving the pre-push snapshot) must not be mistaken for a
+// no-op fix pass: a confirm re-read showing the head advanced lets the loop
+// proceed to green, mirroring gateToGreen's confirm-poll for a SUCCESS rollup
+// (issue #1980).
 func TestSelfHeal_FixAdvanceConfirmedAfterTransientSameRead(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
-	// before, immediate-after (stale read, same as before), confirm re-read
-	// (shows the real advance).
+	// The reads are before, immediately after (stale, same as before), and the
+	// confirm re-read that shows the real advance.
 	fc.SetHeadCommitSHAs(testPR, []string{"sha-a", "sha-a", "sha-b"})
 	s := newTestSettle(c, fc, fc)
 
@@ -446,7 +423,7 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	c := fixConfig(1)
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	// ERROR is genuine red just like FAILURE; fix pass should be triggered.
+	// ERROR counts as genuine red just like FAILURE.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateError, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
@@ -461,11 +438,9 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_PendingTimeoutNoFix also verifies (issue #2476) that the
-// generic ci-timeout reason — not just the registration-guard flavor — is
-// posted as an issue comment on gate-terminal failure, not just logged to
-// the console: singling out only the new registration flavor would be an
-// inconsistent, surprising carve-out.
+// This test also checks that the generic ci-timeout reason, not just the
+// registration-guard one, is posted as an issue comment on gate-terminal
+// failure rather than only logged to the console (issue #2476).
 func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	c := fixConfig(3)
 	c.MergePollTimeout = 0 // expire immediately

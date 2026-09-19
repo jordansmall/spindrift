@@ -2,8 +2,6 @@ package forgejo
 
 import "testing"
 
-// TestParsePRIndex_HappyPath verifies parsePRIndex extracts the trailing
-// numeric path segment from a Forgejo PR html_url.
 func TestParsePRIndex_HappyPath(t *testing.T) {
 	got, err := parsePRIndex("https://forge.test/owner/repo/pulls/206")
 	if err != nil {
@@ -14,25 +12,19 @@ func TestParsePRIndex_HappyPath(t *testing.T) {
 	}
 }
 
-// TestParsePRIndex_RejectsEmpty verifies parsePRIndex errors on a URL with no
-// trailing path segment.
 func TestParsePRIndex_RejectsEmpty(t *testing.T) {
 	if _, err := parsePRIndex("https://forge.test/owner/repo/pulls/"); err == nil {
 		t.Fatal("parsePRIndex(...) with empty trailing segment: want error, got nil")
 	}
 }
 
-// TestParsePRIndex_RejectsNonNumeric verifies parsePRIndex errors when the
-// trailing path segment is not a number.
 func TestParsePRIndex_RejectsNonNumeric(t *testing.T) {
 	if _, err := parsePRIndex("https://forge.test/owner/repo/pulls/abc"); err == nil {
 		t.Fatal("parsePRIndex(...) with non-numeric trailing segment: want error, got nil")
 	}
 }
 
-// TestIsDraftTitle_RecognizesBothWIPPrefixes verifies isDraftTitle
-// recognizes both Forgejo default WIP prefixes ("WIP:" and "[WIP]:"),
-// case-insensitively, and returns false for a plain title.
+// Forgejo ships two default WIP prefixes, so both cases must stay in the table.
 func TestIsDraftTitle_RecognizesBothWIPPrefixes(t *testing.T) {
 	tests := []struct {
 		title string
@@ -50,9 +42,6 @@ func TestIsDraftTitle_RecognizesBothWIPPrefixes(t *testing.T) {
 	}
 }
 
-// TestStripWIPPrefix_StripsBracketedPrefix verifies stripWIPPrefix strips
-// the "[WIP]:" convention down to the bare title, mirroring its existing
-// "WIP:" handling.
 func TestStripWIPPrefix_StripsBracketedPrefix(t *testing.T) {
 	got := stripWIPPrefix("[WIP]: add feature")
 	if got != "add feature" {
@@ -60,9 +49,7 @@ func TestStripWIPPrefix_StripsBracketedPrefix(t *testing.T) {
 	}
 }
 
-// TestForgejoMergeDo verifies forgejoMergeDo maps the MergeMethod knob's
-// value onto the "Do" field value Forgejo's merge endpoint expects, with an
-// empty (unset) method defaulting to "rebase" — mirroring the github
+// An unset or unrecognized method falls back to "rebase", matching the github
 // adapter's mergeMethodFlag default.
 func TestForgejoMergeDo(t *testing.T) {
 	tests := []struct {

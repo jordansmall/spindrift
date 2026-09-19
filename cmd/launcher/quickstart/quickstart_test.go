@@ -204,12 +204,10 @@ func TestRunQuickstart_RuntimeInvalid_RejectedAndReprompted(t *testing.T) {
 	}
 }
 
-// TestRunQuickstart_RuntimeChosen_AbsentFromPATH_WarnsAndAsksConfirmation
-// covers the issue #2561 UX fix: choosing a valid runtime whose binary isn't
-// on PATH must warn and ask for confirmation right away, rather than
-// silently writing the flake and letting the failure surface later at
-// `spindrift build`. Declining the confirmation must abort before any file
-// is written.
+// Covers the issue #2561 UX fix: choosing a valid runtime whose binary isn't
+// on PATH must warn and ask for confirmation right away, rather than silently
+// writing the flake and letting the failure appear later at `spindrift build`.
+// Declining the confirmation must abort before any file is written.
 func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_WarnsAndAsksConfirmation(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -280,9 +278,9 @@ func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_ConfirmedProceeds(t *testing
 func TestRunQuickstart_RancherSelected_WarningNamesNerdctl(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
-	// bwrap is on PATH so runner.Probe succeeds and offers a default, but
-	// the operator picks rancher instead, which has no nerdctl on PATH —
-	// triggering the WARNING + confirmation.
+	// bwrap is on PATH so runner.Probe succeeds and offers a default, but the
+	// operator picks rancher instead, which has no nerdctl on PATH. That
+	// triggers the WARNING and the confirmation.
 	env := fakeEnvironment{runtimes: map[string]bool{"bwrap": true}}
 	stdin := strings.NewReader(strings.Join([]string{
 		"jordansmall/spindrift",
@@ -549,9 +547,9 @@ func TestRunQuickstart_DeclineRuntimeConfirmation_ForceDoesNotBackUpExistingFile
 		t.Fatalf("seed flake.nix: %v", err)
 	}
 	var out bytes.Buffer
-	// bwrap is on PATH (so runner.Probe succeeds and offers a default), but
-	// the operator picks podman instead, which is NOT on PATH — triggering
-	// the WARNING + "Proceed anyway...?" confirmation. Answering "n" declines.
+	// bwrap is on PATH (so runner.Probe succeeds and offers a default), but the
+	// operator picks podman instead, which is NOT on PATH. That triggers the
+	// WARNING and the "Proceed anyway...?" confirmation, which "n" declines.
 	env := fakeEnvironment{runtimes: map[string]bool{"bwrap": true}}
 	stdin := strings.NewReader(strings.Join([]string{
 		"jordansmall/spindrift",
@@ -795,7 +793,7 @@ func TestRunQuickstart_InsideGitWorkTree_FinishLineRemindsGitAdd(t *testing.T) {
 		t.Fatalf("expected closing summary (at or after %q) to remind the operator to `git add` the written files, got:\n%s", finishLineMarker, finishBlock)
 	}
 	// The reminder must name the trackable files explicitly rather than
-	// pointing at "the files above" — that phrase also covers harness.env,
+	// pointing at "the files above". That phrase also covers harness.env,
 	// which is gitignored and holds a live GH/Forgejo token plus a Claude
 	// credential (issue #2567).
 	for _, name := range []string{"flake.nix", ".gitignore", ".envrc"} {
@@ -808,10 +806,8 @@ func TestRunQuickstart_InsideGitWorkTree_FinishLineRemindsGitAdd(t *testing.T) {
 	}
 }
 
-// TestRunQuickstart_NotInsideGitWorkTree_FinishLineOmitsGitAddReminder is the
-// negative counterpart of TestRunQuickstart_InsideGitWorkTree_FinishLineRemindsGitAdd:
-// outside a git work tree there is nothing to `git add`, so the reminder must
-// not appear.
+// The negative counterpart of the test above: outside a git work tree there is
+// nothing to `git add`, so the reminder must not appear.
 func TestRunQuickstart_NotInsideGitWorkTree_FinishLineOmitsGitAddReminder(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -875,7 +871,7 @@ func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
 		"ada@example.com",       // git user email
-		// no GH_TOKEN line — ambient GH_TOKEN must be reused without a prompt
+		// no GH_TOKEN line, the ambient GH_TOKEN must be reused without a prompt
 		"claude-oauth-faketoken", // CLAUDE_CODE_OAUTH_TOKEN
 	}, "\n") + "\n")
 
@@ -896,11 +892,9 @@ func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 	}
 }
 
-// TestRunQuickstart_GithubTokenEnvVar_ReadFromDescriptor pins the github
-// token-acquisition path to backend.GitHub.TokenEnvVar rather than a
-// hardcoded "GH_TOKEN" literal: it swaps in a registry with a differently
-// named TokenEnvVar (mirroring the registry-override pattern used by
-// TestDoctorHints_RegistryDriven) and asserts the ambient lookup follows the
+// Pins the github token-acquisition path to backend.GitHub.TokenEnvVar rather
+// than a hardcoded "GH_TOKEN" literal: it swaps in a registry with a
+// differently named TokenEnvVar and asserts the ambient lookup follows the
 // descriptor, not the literal.
 func TestRunQuickstart_GithubTokenEnvVar_ReadFromDescriptor(t *testing.T) {
 	original := backend.Registry
@@ -920,7 +914,7 @@ func TestRunQuickstart_GithubTokenEnvVar_ReadFromDescriptor(t *testing.T) {
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
 		"ada@example.com",       // git user email
-		// no GitHub token line — ambient CUSTOM_GH_TOKEN must be reused without a prompt
+		// no GitHub token line, the ambient CUSTOM_GH_TOKEN must be reused without a prompt
 	}, "\n") + "\n")
 
 	env := fakeEnvironment{
@@ -957,7 +951,7 @@ func TestRunQuickstart_FineGrainedToken_PrintsRequiredPermissions(t *testing.T) 
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
-		"github_pat_finegrainedtoken", // fine-grained PAT — cannot be introspected
+		"github_pat_finegrainedtoken", // fine-grained PAT, cannot be introspected
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
@@ -1099,7 +1093,7 @@ func TestRunQuickstart_BlankTokenInput_FallsBackToGHAuthToken(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
-		"", // blank GitHub token — falls back to `gh auth token`
+		"", // blank GitHub token, so the wizard falls back to `gh auth token`
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
@@ -1129,7 +1123,7 @@ func TestRunQuickstart_GHAuthTokenFallbackFails_AbortsWithoutWriting(t *testing.
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
-		"", // blank GitHub token — falls back to `gh auth token`, which fails below
+		"", // blank GitHub token, so the wizard falls back to `gh auth token`, which fails below
 	}, "\n") + "\n")
 
 	env := fakeEnvironment{ghAuthTokenErr: errors.New("gh: not logged in"), runtimes: map[string]bool{"podman": true}}
@@ -1173,7 +1167,7 @@ func TestRunQuickstart_UnknownTokenPrefix_AcceptedWithoutAudit(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
-		"ghs_installationtoken", // app-installation token — neither fine-grained nor classic/OAuth
+		"ghs_installationtoken", // app-installation token, neither fine-grained nor classic/OAuth
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
@@ -1202,7 +1196,7 @@ func TestRunQuickstart_AmbientTokenBroadScope_StillRequiresACCEPT(t *testing.T) 
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
 		"ada@example.com",       // git user email
-		// no GH_TOKEN line — reused from the ambient env below
+		// no GH_TOKEN line, the token is reused from the ambient env below
 		"ACCEPT", // literal acceptance of the over-broad-scope warning
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
@@ -1237,7 +1231,7 @@ func TestRunQuickstart_GHAuthTokenEmpty_AbortsWithoutWriting(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
-		"", // blank GitHub token — falls back to `gh auth token`, which returns ""
+		"", // blank GitHub token, so the wizard falls back to `gh auth token`, which returns ""
 	}, "\n") + "\n")
 
 	env := fakeEnvironment{ghAuthToken: "", runtimes: map[string]bool{"podman": true}}
@@ -1378,10 +1372,10 @@ func TestRunQuickstart_Force_BackupReserveNonIsExistErr_ReturnsErrorInsteadOfHan
 		t.Fatalf("seed harness.env: %v", err)
 	}
 
-	// Remove write permission on dir so the backup-name reservation
-	// (os.OpenFile with O_CREATE|O_EXCL) fails with EACCES rather than
-	// "already exists" — the loop must surface that error instead of
-	// spinning forever treating every non-ENOENT stat as "name taken".
+	// Removing write permission on dir makes the backup-name reservation
+	// (os.OpenFile with O_CREATE|O_EXCL) fail with EACCES rather than "already
+	// exists". The loop must report that error instead of spinning forever
+	// treating every non-ENOENT stat as "name taken".
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatalf("chmod dir: %v", err)
 	}
@@ -1407,16 +1401,11 @@ func TestRunQuickstart_Force_BackupReserveNonIsExistErr_ReturnsErrorInsteadOfHan
 func TestRunQuickstart_Force_BackupRenameErr_CleansUpReservedBakFile(t *testing.T) {
 	dir := t.TempDir()
 
-	// Seed flake.nix as a directory rather than a regular file. The clobber
-	// check only stats the path, so this directory still counts as
-	// "existing" and gets queued for backup. The backup-name reservation
-	// (os.OpenFile with O_CREATE|O_EXCL against flake.nix.bak) then
-	// succeeds, since that name doesn't exist yet — but the follow-up
-	// os.Rename from a directory onto that freshly reserved, non-directory
-	// bak file fails with ENOTDIR. That reproduces the "reservation
-	// succeeded, rename failed" path without needing any filesystem
-	// abstraction seam: the reserved, empty flake.nix.bak must not be left
-	// behind afterward.
+	// Seeding flake.nix as a directory makes the clobber check queue it for
+	// backup (that check only stats the path), the O_CREATE|O_EXCL reservation
+	// of flake.nix.bak succeed, and the follow-up rename of a directory onto
+	// that regular file fail with ENOTDIR. That reproduces "reservation
+	// succeeded, rename failed" without a filesystem seam.
 	if err := os.Mkdir(filepath.Join(dir, "flake.nix"), 0o755); err != nil {
 		t.Fatalf("seed flake.nix as a directory: %v", err)
 	}
@@ -1444,9 +1433,8 @@ func TestRunQuickstart_Force_BackupRenameErr_CleansUpReservedBakFile(t *testing.
 func TestRunQuickstart_Force_BackupRenameErr_RollsBackEarlierBackups(t *testing.T) {
 	dir := t.TempDir()
 
-	// Seed flake.nix as a regular file so its backup rename succeeds first,
-	// then seed harness.env as a directory so its backup rename fails with
-	// ENOTDIR (directory-to-file rename) — the exact repro from issue
+	// flake.nix is a regular file so its backup rename succeeds, harness.env is
+	// a directory so its rename fails with ENOTDIR, the repro from issue
 	// #2733's research comment. The loop must undo flake.nix's already-
 	// succeeded rename before returning harness.env's error, leaving the
 	// directory exactly as it was before the backup loop started.
@@ -1597,12 +1585,10 @@ func TestRunQuickstart_Force_SecondRun_PreservesBothBackups(t *testing.T) {
 		return &out
 	}
 
-	// First forced run: flake.nix/harness.env exist with "v1" content, so
-	// they get backed up before regeneration.
 	runOnce()
 
-	// Simulate a second run's worth of pre-existing files by writing "v2"
-	// content back into place.
+	// Writing "v2" content back into place gives the second run its own
+	// pre-existing files to back up.
 	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("v2 flake"), 0o644); err != nil {
 		t.Fatalf("reseed flake.nix: %v", err)
 	}
@@ -1610,7 +1596,6 @@ func TestRunQuickstart_Force_SecondRun_PreservesBothBackups(t *testing.T) {
 		t.Fatalf("reseed harness.env: %v", err)
 	}
 
-	// Second forced run: must not clobber the first run's backups.
 	secondOut := runOnce()
 
 	if !strings.Contains(secondOut.String(), "backed up: flake.nix -> flake.nix.bak.000001\n") {
@@ -1867,13 +1852,10 @@ func TestRunQuickstart_AmbientAnthropicAPIKey_ReusedWithoutPrompt(t *testing.T) 
 }
 
 // passingForge returns a forge.Fake with a resolved repo and all four work
-// labels already present, so doctor validation succeeds without prompting —
-// the default most finish-line-agnostic tests want. Quickstart's own
-// doctor.Run call (issue #2570) always probes branch protection for
-// defaultBaseBranch, the same "main" value the generated flake.nix runs
-// under since quickstart doesn't prompt for BASE_BRANCH; scripting that
-// branch as protected here keeps the branch-protection row from failing
-// every happy-path finish-line test as an unrelated side effect.
+// labels already present, so doctor validation succeeds without prompting.
+// Quickstart's doctor.Run call (issue #2570) always probes branch protection
+// for defaultBaseBranch, so scripting that branch as protected keeps the
+// branch-protection row from failing every happy-path finish-line test.
 func passingForge() *forge.Fake {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -1910,8 +1892,8 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	f := forge.NewFake()
 	f.ProbeRepo = "jordansmall/spindrift"
 	f.SetBranchProtected(defaultBaseBranch, true)
-	// three work labels missing; research, priority, and ambiguous-spec
-	// labels all present
+	// Three work labels are missing; the research, priority, and
+	// ambiguous-spec labels are all present.
 	f.Labels = append(append(append([]string{"ready-for-agent"}, research...), priority...), ambiguous...)
 	f.LabelsSeq = [][]string{
 		append(append(append([]string{"ready-for-agent"}, research...), priority...), ambiguous...),
@@ -1950,14 +1932,11 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	}
 }
 
-// TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand covers
-// the two post-write failure paths (issue #2563): the scaffold files are
-// already on disk by the time either doctor.Run or the finish-line build
+// Covers the two post-write failure paths (issue #2563): the scaffold files
+// are already on disk by the time either doctor.Run or the finish-line build
 // subprocess fails, so the error must name them and point at rerunning the
-// failed step directly instead of sending the operator back through the
-// whole wizard (and never suggests --force, which only governs the
-// pre-write clobber guard). The two cases differ only in how the failure is
-// injected and which rerun command is expected.
+// failed step directly instead of sending the operator back through the whole
+// wizard. It must never suggest --force, which only governs the clobber guard.
 func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testing.T) {
 	cases := []struct {
 		name               string
@@ -1976,12 +1955,9 @@ func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testi
 			wantThenBuild: true,
 		},
 		{
-			// Covers the doctor-failure-inside-a-work-tree path, which the
-			// "doctor" case above (run outside a git work tree) leaves
-			// unpinned: doctor.Run can fail for reasons unrelated to the
-			// untracked scaffold files, but the reminder and the
-			// postWriteFailure git-add clause must still fire regardless of
-			// which post-write step failed.
+			// doctor.Run can fail for reasons unrelated to the untracked
+			// scaffold files, but the reminder and postWriteFailure's git-add
+			// clause must still fire whichever post-write step failed.
 			name:               "doctor_insideGitWorkTree",
 			forge:              func() *forge.Fake { f := forge.NewFake(); f.ProbeErr = forge.ErrAuthFailure; return f }(),
 			runErr:             nil,
@@ -1997,14 +1973,11 @@ func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testi
 			wantRerun: strings.Join(spindriftBuildArgs, " "),
 		},
 		{
-			// Covers issue #2567 bug A/B: inside a git work tree, an
-			// untracked flake.nix is invisible to the `nix develop`
-			// subprocess the build step shells out to, so the build step
-			// fails for exactly the reason the git-add reminder exists to
-			// prevent. The reminder must still land on the transcript
-			// before the failing step runs, and the returned error itself
-			// must mention `git add` so the rerun command it hands the
-			// operator doesn't just fail the same way again.
+			// Issue #2567 bug A/B: inside a git work tree an untracked
+			// flake.nix is invisible to the `nix develop` subprocess the build
+			// step shells out to, so the build fails for exactly the reason
+			// the reminder exists to prevent. The error itself must mention
+			// `git add` so the rerun command does not fail the same way.
 			name:               "build_insideGitWorkTree",
 			forge:              passingForge(),
 			runErr:             fmt.Errorf("exit status 1"),
@@ -2073,11 +2046,8 @@ func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testi
 				}
 			}
 
-			// postWriteFailure embeds the git-add clause directly into the
-			// returned error's message whenever the run was inside a git
-			// work tree, independent of which post-write step failed — so
-			// the rerun command it hands the operator doesn't just fail the
-			// same way again.
+			// postWriteFailure embeds the git-add clause in the returned error
+			// whenever the run was inside a work tree, whichever step failed.
 			if tc.insideGitWorkTree && !strings.Contains(err.Error(), "git add") {
 				t.Errorf("expected the returned error itself to mention `git add` (so the rerun command it hands the operator doesn't just fail the same way again), got: %v", err)
 			}
@@ -2216,11 +2186,10 @@ func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 }
 
 // TestRender_Github_Golden byte-compares renderFlakeNix's output for a fixed
-// github-tracker answers fixture against a committed golden file. This same
-// golden is also nix-evaluated against the real spindrift flake module by
-// nix/checks/quickstart-golden.nix, which imports this identical file
-// directly (no separate copy), so the fixture values here must stay in sync
-// with what that check expects to evaluate cleanly.
+// github-tracker fixture against a committed golden file.
+// nix/checks/quickstart-golden.nix imports that same file and evaluates it
+// against the real spindrift flake module, so the fixture values here must
+// stay in sync with what that check expects to evaluate cleanly.
 func TestRender_Github_Golden(t *testing.T) {
 	a := answers{
 		repoSlug:         "jordansmall/spindrift-consumer-example",
@@ -2272,19 +2241,11 @@ func TestRender_Forgejo_Golden(t *testing.T) {
 	}
 }
 
-// TestGoldenBroken_MatchesGithubExceptKnownDiffs byte-pins
-// testdata/golden/broken/flake.nix against testdata/golden/github/flake.nix,
-// asserting they are identical except for two deliberate diff regions
-// (issue #2565, tracked further by issue #2735): a 5-line comment block
-// explaining the fixture is deliberately broken, and the infra.runtime value
-// itself, which the broken fixture sets outside the runtime enum so a
-// separate nix check can assert this scaffold throws at eval time.
-// github/flake.nix's own renderer output is already independently
-// byte-pinned by TestRender_Github_Golden, so this test doesn't add new
-// coverage for accidental renderer changes to github/flake.nix's content —
-// what it newly covers is drift in the two known-diff regions themselves
-// (the comment block and the infra.runtime line's shape) plus any other,
-// unexpected divergence between the two files beyond those two regions.
+// Byte-pins testdata/golden/broken/flake.nix against the github golden,
+// asserting they are identical except for two deliberate diff regions (issue
+// #2565, tracked further by issue #2735): a 5-line comment block explaining
+// the fixture is deliberately broken, and the infra.runtime value, which the
+// broken fixture sets outside the enum so a nix check can assert it throws.
 func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 	broken, err := os.ReadFile("testdata/golden/broken/flake.nix")
 	if err != nil {
@@ -2299,9 +2260,8 @@ func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 	githubLines := strings.Split(string(github), "\n")
 
 	// Known diff region 1: broken/flake.nix carries a 5-line comment block
-	// (issue #2565) right after the shared "Generated by quickstart..." /
-	// "reference: docs/flake-options.md" comment and right before
-	// "spindrift = {", with no counterpart in github/flake.nix.
+	// (issue #2565) between the shared "reference: docs/flake-options.md"
+	// comment and "spindrift = {", with no counterpart in github/flake.nix.
 	wantComment := []string{
 		`          # Deliberately broken guard fixture (issue #2565): infra.runtime is`,
 		`          # set to a value outside the runtime enum, so a later nix check can`,
@@ -2342,16 +2302,14 @@ func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 		}
 	}
 
-	// Strip exactly the known comment block from a copy of broken's lines.
 	trimmedBroken := make([]string, 0, len(brokenLines)-len(wantComment))
 	trimmedBroken = append(trimmedBroken, brokenLines[:commentStart]...)
 	trimmedBroken = append(trimmedBroken, brokenLines[commentStart+len(wantComment):]...)
 
 	// Known diff region 2: the infra.runtime line itself. Pin the
-	// deliberately-broken value, but only assert the *shape* of the github
-	// value — the specific default runtime is already pinned by
-	// TestRender_Github_Golden, and pinning it a second time here would make
-	// a legitimate default-runtime change fail in two places.
+	// deliberately-broken value, but assert only the shape of the github value.
+	// TestRender_Github_Golden already pins the default runtime, and pinning it
+	// again here would make a legitimate change fail in two places.
 	const wantBrokenRuntime = `            infra.runtime = "not-a-real-runtime";`
 	const runtimeLinePrefix = `            infra.runtime = "`
 	const runtimeLineSuffix = `";`
@@ -2373,8 +2331,6 @@ func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 		t.Fatalf("testdata/golden/github/flake.nix line %d: expected an infra.runtime line matching %q...%q, got %q", runtimeIdx+1, runtimeLinePrefix, runtimeLineSuffix, githubLines[runtimeIdx])
 	}
 
-	// Normalize the known-different infra.runtime line on both sides, then
-	// the remaining lines must be identical.
 	const runtimePlaceholder = "            infra.runtime = <normalized>;"
 	trimmedBroken[runtimeIdx] = runtimePlaceholder
 	normalizedGithub := make([]string, len(githubLines))
@@ -2466,12 +2422,10 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 	}
 }
 
-// TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit pins that
-// validateBackendChoice is genuinely registry-driven: appending a fake
+// Pins that validateBackendChoice is registry-driven: appending a fake
 // eligible "gitlab" descriptor to backend.Registry makes
-// validateBackendChoice("gitlab") pass with zero quickstart-side code
-// change, proving the choice list derives from backend.QuickstartEligible()
-// rather than a hardcoded slice.
+// validateBackendChoice("gitlab") pass with no quickstart-side change, proving
+// the choice list derives from backend.QuickstartEligible().
 func TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit(t *testing.T) {
 	original := backend.Registry
 	backend.Registry = append(append([]backend.Descriptor{}, original...), backend.Descriptor{
@@ -2486,11 +2440,10 @@ func TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit(t *testing.
 	}
 }
 
-// TestDoctorHints_RegistryDriven pins that doctorHints resolves through
-// backend.ByName rather than a hardcoded github/forgejo branch: appending a
-// fake "gitlab" descriptor to backend.Registry makes
-// doctorHints("gitlab") return its hints with zero quickstart-side code
-// change.
+// Pins that doctorHints resolves through backend.ByName rather than a
+// hardcoded github/forgejo branch: appending a fake "gitlab" descriptor to
+// backend.Registry makes doctorHints("gitlab") return its hints with no
+// quickstart-side change.
 func TestDoctorHints_RegistryDriven(t *testing.T) {
 	if gotToken, gotSlug := doctorHints("github"); gotToken != "" || gotSlug != "" {
 		t.Errorf(`doctorHints("github") = (%q, %q), want ("", "")`, gotToken, gotSlug)
@@ -2514,12 +2467,10 @@ func TestDoctorHints_RegistryDriven(t *testing.T) {
 	}
 }
 
-// TestRenderHarnessEnv_RegistryDriven pins that renderHarnessEnv resolves its
-// harness.env token line's env-var name through backend.ByName rather than a
-// hardcoded github/forgejo branch: appending a fake "gitlab" descriptor with
-// its own TokenEnvVar to backend.Registry makes renderHarnessEnv("gitlab", ...)
-// emit that descriptor's env var, not a GH_TOKEN fallback, with zero
-// quickstart-side code change for the new backend.
+// Pins that renderHarnessEnv resolves its token line's env-var name through
+// backend.ByName rather than a hardcoded github/forgejo branch: a fake
+// "gitlab" descriptor with its own TokenEnvVar makes renderHarnessEnv emit
+// that env var, not a GH_TOKEN fallback, with no quickstart-side change.
 func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 	original := backend.Registry
 	backend.Registry = append(append([]backend.Descriptor{}, original...), backend.Descriptor{
@@ -2540,9 +2491,8 @@ func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 	}
 }
 
-// TestRenderHarnessEnv_DocumentsCommandFormIndirection pins that every secret
-// line renderHarnessEnv emits is preceded by a comment documenting the
-// <NAME>_CMD vault-indirection convention from
+// Pins that every secret line renderHarnessEnv emits is preceded by a comment
+// documenting the <NAME>_CMD vault-indirection convention from
 // templates/default/harness.env.example, not just the bare plaintext line.
 func TestRenderHarnessEnv_DocumentsCommandFormIndirection(t *testing.T) {
 	out := renderHarnessEnv("github", "ghp_faketoken", "claude-oauth-faketoken", "")
@@ -2561,19 +2511,11 @@ func TestRenderHarnessEnv_DocumentsCommandFormIndirection(t *testing.T) {
 	}
 }
 
-// TestRenderHarnessEnv_FileLevelPreamble pins that renderHarnessEnv's output
-// opens with a file-level preamble — matching
-// templates/default/harness.env.example's framing — documenting that vault
-// indirection via <NAME>_CMD is preferred over a plaintext value ("fetch
-// recipes, not live credentials") and that SECRET_CMD sets a single
-// templated fallback command. The fallback line must not claim that a
-// secret's own <NAME>_CMD is the only thing that outranks SECRET_CMD: per
-// the resolution precedence in docs/reference.md, the plaintext value the
-// wizard always writes below also wins over SECRET_CMD, so it's a no-op
-// in every wizard-generated harness.env unless the operator removes that
-// value (or adds <NAME>_CMD). Without this, the guided (quickstart) path
-// teaches less than the hand-authored template it's meant to match, or
-// worse, misleads the operator about which value actually takes effect.
+// Pins the file-level preamble renderHarnessEnv opens with, matching
+// templates/default/harness.env.example's framing. The SECRET_CMD line must
+// not claim a secret's own <NAME>_CMD is the only thing that outranks it: per
+// docs/reference.md's precedence, the plaintext value the wizard always writes
+// wins too, so SECRET_CMD is a no-op until the operator removes that value.
 func TestRenderHarnessEnv_FileLevelPreamble(t *testing.T) {
 	out := renderHarnessEnv("github", "ghp_faketoken", "claude-oauth-faketoken", "")
 
@@ -2594,39 +2536,33 @@ func TestRenderHarnessEnv_FileLevelPreamble(t *testing.T) {
 	}
 }
 
-// harnessEnvExampleNameRe extracts the secret's env-var NAME from
-// the second line of one of templates/default/harness.env.example's
-// per-secret comment blocks (scanned out to its `<NAME>=` sentinel line, not
-// a fixed length), e.g. `# GH_TOKEN_CMD="rbw get spindrift-gh-token"`
-// yields "GH_TOKEN".
+// harnessEnvExampleNameRe extracts the secret's env-var NAME from the second
+// line of one of templates/default/harness.env.example's per-secret comment
+// blocks: `# GH_TOKEN_CMD="rbw get spindrift-gh-token"` yields "GH_TOKEN".
 var harnessEnvExampleNameRe = regexp.MustCompile(`^# (\w+)_CMD="rbw get spindrift-`)
 
-// harnessEnvExampleSentinel matches a stanza's bare `<NAME>=` line (no
-// value) — the line that terminates one secret's comment block in
+// harnessEnvExampleSentinel matches a stanza's bare `<NAME>=` line (no value),
+// the line that terminates one secret's comment block in
 // templates/default/harness.env.example.
 var harnessEnvExampleSentinel = regexp.MustCompile(`^\w+=$`)
 
 // harnessEnvExampleStartLine is the first line of the comment block
-// harnessEnvSecretLine (quickstart.go) renders for every secret, derived
-// from its actual output rather than hand-copied, so the two tests below
-// that scan templates/default/harness.env.example for this line can never
-// drift from the string they exist to catch drift in.
+// harnessEnvSecretLine (quickstart.go) renders for every secret, derived from
+// its actual output rather than hand-copied, so the two tests below that scan
+// the template for this line can never drift from the string they guard.
 var harnessEnvExampleStartLine = strings.SplitN(harnessEnvSecretLine("X", ""), "\n", 2)[0]
 
 // envSchemaSecretTrueRe matches a whole `secret = true;` entry line in
-// lib/env-schema.nix, tolerating indentation and an optional trailing
-// `#` comment. Anchored to the full line, so a `#`-prefixed comment line
-// never matches — though a `/* */` block comment containing the token
-// still would.
+// lib/env-schema.nix, tolerating indentation and a trailing `#` comment.
+// Anchored to the full line, so a `#`-prefixed comment line never matches,
+// though a `/* */` block comment containing the token still would.
 var envSchemaSecretTrueRe = regexp.MustCompile(`^\s*secret\s*=\s*true;\s*(#.*)?$`)
 
-// countEnvSchemaSecrets counts `secret = true;` entries in
-// lib/env-schema.nix — the attribute lib/renderers.nix's
-// renderHarnessEnvExample filters on to generate
-// templates/default/harness.env.example. That makes it an independent,
-// upstream count: a stanza dropped whole from the generated fixture
-// leaves this count unchanged, so comparing the two catches what
-// scanning the fixture alone cannot.
+// countEnvSchemaSecrets counts `secret = true;` entries in lib/env-schema.nix,
+// the attribute lib/renderers.nix's renderHarnessEnvExample filters on to
+// generate templates/default/harness.env.example. The count is independent and
+// upstream: a stanza dropped whole from the generated fixture leaves it
+// unchanged, so comparing the two catches what scanning the fixture cannot.
 func countEnvSchemaSecrets(t *testing.T) int {
 	t.Helper()
 
@@ -2654,21 +2590,11 @@ func readHarnessEnvExampleLines(t *testing.T) []string {
 	return strings.Split(readRepoFile(t, "templates", "default", "harness.env.example"), "\n")
 }
 
-// TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample pins that the
-// <NAME>_CMD comment block plus its trailing blank-value `NAME=` line and
-// blank separator line — as harnessEnvSecretLine renders it for every
-// secret — is byte-identical (mod name substitution) to the corresponding
-// stanza in the git-committed, Nix-generated fixture
-// templates/default/harness.env.example (pinned Nix-side by
-// nix/checks/schema-drift.nix's harness-env-example check). The block is
-// scanned dynamically out to its `NAME=` sentinel line rather than assuming
-// a fixed length, so appending or removing a comment line on either side
-// still surfaces as drift. found is also checked against
-// countEnvSchemaSecrets's count, not just against zero — see that
-// function's doc comment for why. This test does not cover the file-level
-// preamble, which is a deliberate condensation on the Go side (see
-// harnessEnvPreamble's doc comment and
-// TestHarnessEnvPreamble_TokensMatchTemplate below).
+// Pins that the stanza harnessEnvSecretLine renders for every secret is
+// byte-identical (mod name substitution) to the matching stanza in the
+// Nix-generated fixture templates/default/harness.env.example. found is
+// checked against countEnvSchemaSecrets's count, not just against zero, for
+// the reason that function's doc comment gives.
 func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
 	templatePath := filepath.Join("..", "..", "..", "templates", "default", "harness.env.example")
 	lines := readHarnessEnvExampleLines(t)
@@ -2731,14 +2657,11 @@ func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
 	}
 }
 
-// TestHarnessEnvPreamble_TokensMatchTemplate pins that
-// harnessEnvPreamble (quickstart.go), though a deliberate condensation of
+// Pins that harnessEnvPreamble (quickstart.go), a deliberate condensation of
 // templates/default/harness.env.example's file-level preamble rather than a
-// verbatim copy (see harnessEnvPreamble's doc comment), still names the same
-// three load-bearing tokens the template's preamble documents: the
-// SECRET_CMD fallback knob, its {name} substitution placeholder, and the
-// <NAME>_CMD per-secret override form. "Not equal" is not the same as
-// "unchecked" — this closes that gap without forcing full-text equality.
+// verbatim copy, still names the same three load-bearing tokens the template's
+// preamble documents: the SECRET_CMD fallback knob, its {name} substitution
+// placeholder, and the <NAME>_CMD per-secret override form.
 func TestHarnessEnvPreamble_TokensMatchTemplate(t *testing.T) {
 	templatePath := filepath.Join("..", "..", "..", "templates", "default", "harness.env.example")
 	lines := readHarnessEnvExampleLines(t)
@@ -2866,21 +2789,11 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 	}
 }
 
-// parseLegacySettingsSections reads lib/legacy-settings-section.nix (the
-// frozen ADR-0037-Pass-2 knob -> section map, shared with
-// cmd/launcher/main_test.go's parseLegacySettingsSectionNames, which parses
-// the same file but only keeps the distinct section names) and returns the
-// full knob -> section map. Test-only: production code never parses this
-// file directly (lib/flakeModule.nix consumes it as Nix data), so this
-// helper has no non-test counterpart. Deliberately a local, package-private
-// duplicate of cmd/launcher's parseLegacySettingsSectionNames parsing logic
-// rather than a shared helper: the two callers keep different shapes (this
-// one keeps the full knob -> section map, that one keeps only the distinct
-// section names), and the duplication is small enough that a shared helper
-// package would cost more than it saves. The same call stands for every
-// test-only Nix scanner these two packages duplicate — stripNixLineComments
-// and the crude cross-check scanners countLegacySettingsRows /
-// countStructuralPathShapes included.
+// parseLegacySettingsSections reads lib/legacy-settings-section.nix (the frozen
+// ADR-0037-Pass-2 knob -> section map) and returns the full map. Deliberately a
+// package-private duplicate of cmd/launcher/main_test.go's
+// parseLegacySettingsSectionNames, which keeps only the distinct section names:
+// the shapes differ, and a shared test-only package would cost more than it saves.
 func parseLegacySettingsSections(t *testing.T) map[string]string {
 	t.Helper()
 	return parseLegacySettingsSectionsContent(t, readRepoFile(t, "lib", "legacy-settings-section.nix"))
@@ -2907,16 +2820,10 @@ func parseLegacySettingsSectionsContent(t *testing.T, content string) map[string
 }
 
 // stripNixLineComments strips Nix line comments (an unescaped '#' to end of
-// line) from content before regex-matching, so a commented-out row that
-// merely looks like a real data row (e.g. `# historical note: repoSlug =
-// "sandbox";`) is never picked up as one. Sufficient for the flat, plain
-// attrset lib/legacy-settings-section.nix fixture this package parses, which
-// contains no string literals with '#' in them; deliberately not a general
-// Nix tokenizer. Package-private duplicate of
-// cmd/launcher/main_test.go's helper of the same name and shape — see the
-// doc comment on parseLegacySettingsSections above for why these test-only
-// parse helpers are duplicated across the package boundary rather than
-// shared.
+// line) before regex-matching, so a commented-out row that merely looks like a
+// real data row is never picked up as one. Sufficient for the flat attrset
+// lib/legacy-settings-section.nix fixture, which holds no string literals
+// containing '#'; deliberately not a general Nix tokenizer.
 func stripNixLineComments(content string) string {
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
@@ -2927,15 +2834,11 @@ func stripNixLineComments(content string) string {
 	return strings.Join(lines, "\n")
 }
 
-// TestParseLegacySettingsSections_ParsesRealFile is the canary for
-// parseLegacySettingsSections: it proves the regex parses the real
-// lib/legacy-settings-section.nix rather than pinning that file's full
-// output, so a row added there needs no edit here. It spot-checks four
-// representative knobs, then cross-checks the parsed entry count against
-// countLegacySettingsRows. There is no separate drift guard behind this one:
-// deprecatedPathSpellings below builds its denylist directly off this same
-// map, so a regex that silently under-matches would quietly shrink that
-// denylist and nothing else would notice.
+// The canary for parseLegacySettingsSections: it proves the regex parses the
+// real lib/legacy-settings-section.nix rather than pinning that file's full
+// output, so a row added there needs no edit here. Nothing else guards it:
+// deprecatedPathSpellings below builds its denylist off this same map, so a
+// regex that silently under-matches would quietly shrink that denylist.
 func TestParseLegacySettingsSections_ParsesRealFile(t *testing.T) {
 	got := parseLegacySettingsSections(t)
 
@@ -2959,19 +2862,11 @@ func TestParseLegacySettingsSections_ParsesRealFile(t *testing.T) {
 	}
 }
 
-// countLegacySettingsRows counts `knob = "section";` row lines in
-// legacy-settings-section.nix content by trimmed-line shape alone, never by
-// rowRe — the regex parseLegacySettingsSectionsContent itself uses. Counting
-// the file a second, independent way is what gives
-// TestParseLegacySettingsSections_ParsesRealFile's cross-check its teeth: a
-// regex regression moves one count and not the other, so the two disagree.
-// The fixture is a flat attrset one row per line, so every line that is not
-// blank or a brace is a row.
-//
-// Deliberately a package-private near-duplicate of cmd/launcher's
-// countStructuralPathShapes — see the doc comment on
-// parseLegacySettingsSections above for why these test-only Nix scanners are
-// duplicated across the package boundary rather than shared.
+// countLegacySettingsRows counts `knob = "section";` rows by trimmed-line shape
+// alone, never by rowRe, the regex parseLegacySettingsSectionsContent uses.
+// Counting the file a second, independent way gives
+// TestParseLegacySettingsSections_ParsesRealFile's cross-check its teeth. The
+// fixture is a flat attrset, one row per line, so every non-brace line is a row.
 func countLegacySettingsRows(t *testing.T, content string) int {
 	t.Helper()
 
@@ -2987,11 +2882,9 @@ func countLegacySettingsRows(t *testing.T, content string) int {
 	return rows
 }
 
-// TestParseLegacySettingsSectionsContent_IgnoresNixComments guards against
-// the regex matching inside Nix line comments: a `#`-prefixed comment line
-// that merely looks like a real `knob = "section";` row (e.g. "# historical
-// note: repoSlug = \"sandbox\";") must never overwrite or add to the parsed
-// knob -> section map.
+// Guards against the regex matching inside Nix line comments: a `#`-prefixed
+// line that merely looks like a real `knob = "section";` row must never
+// overwrite or add to the parsed knob -> section map.
 func TestParseLegacySettingsSectionsContent_IgnoresNixComments(t *testing.T) {
 	const synthetic = `{
   repoSlug = "repository";
@@ -3008,45 +2901,10 @@ func TestParseLegacySettingsSectionsContent_IgnoresNixComments(t *testing.T) {
 }
 
 // deprecatedPathSpellings returns the old settings.<section>.<knob> shim
-// spellings TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings denylists.
-// The old flat structural-shim spelling for runtime ("runtime = " with no
-// leading "infra.") is checked separately by assertNoDeprecatedPathSpellings
-// since, unlike these, it can't be told apart from the canonical
-// infra.runtime spelling by substring alone.
-//
-// The list is fully derived from parseLegacySettingsSections: every
-// knob -> section row in lib/legacy-settings-section.nix (all ~53 of them)
-// becomes one "settings.<section>.<knob>" entry here, not just the subset
-// quickstart's generated flake.nix is known to render today.
-// Over-inclusion is intentional and free: assertNoDeprecatedPathSpellings
-// only ever does an absence check against generated flake.nix, so an entry
-// quickstart never emits simply never matches — there's no false-positive
-// risk to trade for completeness. That also means a knob added to
-// lib/legacy-settings-section.nix is automatically covered here with no
-// human hand-add step, and the denylist is provably derived from Nix
-// source rather than hand-picked.
-//
-// This list is intentionally kept separate from
-// cmd/launcher/main_test.go's deprecatedDocSpellings, which checks doc
-// prose (README.md, docs/**/*.md) rather than generated flake.nix output —
-// different granularity (knob-level here vs. section-level there) for a
-// different artifact — even though both now cross-check against the same
-// canonical lib/legacy-settings-section.nix.
-//
-// Subsumes issue #2685 ("derive deprecated-path spellings denylist from
-// flakeModule"): that issue's suggested source, lib/flakeModule.nix's
-// oldFlatShims, is still live (built from structuralOptions) — it was never
-// extracted or moved anywhere. It generates a different, unrelated
-// deprecated-spelling family: the flat structural shims (e.g. "nixInBox",
-// "runtime"), not the settings.<section>.<knob> spellings this list
-// targets. The actual canonical source for settings.<section>.<knob>
-// spellings is lib/legacy-settings-section.nix (legacySettingsSection),
-// which feeds lib/flakeModule.nix's sectionKnobs and mkSectionOption — the
-// code that actually builds the settings.<section>.<knob> shim options this
-// denylist targets. So lib/legacy-settings-section.nix, parsed here via
-// parseLegacySettingsSections, is the correct "equivalent structure" issue
-// #2685's AC1 allows for this family — not a claim that oldFlatShims moved
-// there.
+// spellings TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings denylists,
+// derived from every row in lib/legacy-settings-section.nix rather than
+// hand-picked. Over-inclusion is free: the check is absence-only against
+// generated flake.nix. Subsumes issue #2685, which named a different family.
 func deprecatedPathSpellings(t *testing.T) []string {
 	t.Helper()
 
@@ -3060,9 +2918,8 @@ func deprecatedPathSpellings(t *testing.T) []string {
 
 // assertNoDeprecatedPathSpellings reads flake.nix from dir and fails t if it
 // contains any deprecatedPathSpellings substring, or a bare flat `runtime =`
-// assignment (the old structural-shim spelling; distinguished from the
-// canonical `infra.runtime =` line-by-line so it survives a template
-// reindent, unlike a hardcoded-whitespace substring check would).
+// assignment (the old structural-shim spelling, told apart from the canonical
+// `infra.runtime =` line-by-line so it survives a template reindent).
 func assertNoDeprecatedPathSpellings(t *testing.T, dir string) {
 	t.Helper()
 
@@ -3083,16 +2940,11 @@ func assertNoDeprecatedPathSpellings(t *testing.T, dir string) {
 	}
 }
 
-// TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings regression-guards
-// renderFlakeNix against a deprecated path spelling creeping back in. This is
-// exactly how the runtime bug shipped in a prior slice: renderFlakeNix
-// hand-typed a bare `runtime = "%s";` line (the old flat structural-shim
-// spelling lib/flakeModule.nix's oldFlatShims warns on) instead of using the
-// generated pathRuntime constant, and no test caught it because the existing
-// tests only asserted the presence of an expected string, never the absence
-// of a known-deprecated one. Exercises both the github and forgejo backend
-// branches of renderFlakeNix, since only the forgejo branch emits
-// forge.backend / issues.forgejo.baseURL at all.
+// Guards renderFlakeNix against a deprecated path spelling creeping back in:
+// it once hand-typed a bare `runtime = "%s";` line instead of the generated
+// pathRuntime constant, and the tests only asserted the presence of an
+// expected string, never the absence of a deprecated one. Both subtests are
+// needed: only the forgejo branch emits forge.backend and issues.forgejo.baseURL.
 func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 	t.Run("github", func(t *testing.T) {
 		dir := t.TempDir()
@@ -3138,17 +2990,11 @@ func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 	})
 }
 
-// TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit pins
-// that a QuickstartEligible backend registered only in backend.Registry, with
-// its own TokenAcquirer registered in tokenAcquirers, can acquire its token
-// end-to-end through runQuickstart with zero edits to runQuickstart itself:
-// the operator picks the fake "gitlab" backend at the prompt (proving the
-// backendName-discard bug is fixed), the fake gitlab TokenAcquirer is
-// dispatched (not the github or forgejo path), and the resulting token lands
-// in harness.env under the descriptor's own TokenEnvVar — with no GH_TOKEN
-// line at all, proving the export at the bottom of runQuickstart is keyed off
-// the acquired token's descriptor rather than a "!= forgejo" backend-name
-// guard.
+// Pins that a QuickstartEligible backend registered only in backend.Registry,
+// with its own TokenAcquirer in tokenAcquirers, acquires its token end-to-end
+// with no edit to runQuickstart: the fake gitlab acquirer is dispatched, and
+// its token lands in harness.env under the descriptor's own TokenEnvVar with
+// no GH_TOKEN line, so the export is keyed off the descriptor, not the name.
 func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *testing.T) {
 	originalRegistry := backend.Registry
 	backend.Registry = append(append([]backend.Descriptor{}, originalRegistry...), backend.Descriptor{
@@ -3201,17 +3047,11 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 	}
 }
 
-// TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidance
-// covers the six ways acquireForgejoToken's single, no-retry prompt can
-// fail, each asserting its own actionable-guidance wording: an invalid
-// token the API rejects (ErrAuthFailure); a non-auth probe failure covering
-// both an unreachable host and a wrong repo slug on a reachable host (Probe
-// cannot disambiguate the two, so both fall into the same generic
-// unreachable-or-wrong-slug guidance); a genuine 404 (ErrNotFound), which
-// must not fall into the unmapped-status guidance; an unmapped non-2xx
-// status Probe's rest.Client surfaces as a rest.StatusError; a malformed
-// response body surfaced as a rest.DecodeError; and an empty token from a
-// user who just hits enter.
+// Covers the six ways acquireForgejoToken's single, no-retry prompt can fail,
+// each asserting its own guidance wording: a token the API rejects; a non-auth
+// probe failure (Probe cannot tell an unreachable host from a wrong repo slug,
+// so both share one message); a genuine 404, which must not fall into the
+// unmapped-status branch; an unmapped status; a decode failure; an empty token.
 func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidance(t *testing.T) {
 	cases := []struct {
 		name                 string
@@ -3228,10 +3068,9 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 			wantAbsentSubstrings: []string{"FORGEJO_TOKEN", "FORGEJO_BASE_URL"},
 		},
 		{
-			// An unreachable host: Do never gets an HTTP response, so the
-			// error chain carries neither StatusError nor DecodeError --
-			// this is the one case acquireForgejoToken genuinely cannot
-			// disambiguate from a wrong repo slug.
+			// An unreachable host: Do never gets an HTTP response, so the error
+			// chain carries neither StatusError nor DecodeError. This is the
+			// one case acquireForgejoToken cannot tell from a wrong repo slug.
 			name:           "NonAuthProbeFailure",
 			token:          "some-token",
 			probeErr:       fmt.Errorf("%w: %w", forge.ErrRepoNotFound, errors.New("dial tcp: connection refused")),
@@ -3245,13 +3084,11 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 			},
 		},
 		{
-			// A genuine wrong repo slug on a reachable host: the API answers
-			// 404, which forgejoStatusMap maps to forge.ErrNotFound and Do
-			// chains alongside rest.StatusError{404}. This must NOT fall
-			// into the generic "instance responded with HTTP status" branch
-			// -- a 404 is the single most likely quickstart failure, and
-			// that branch sends the operator to the instance's logs instead
-			// of at the actual wrong-slug hypothesis.
+			// A wrong repo slug on a reachable host: the API answers 404, which
+			// forgejoStatusMap maps to forge.ErrNotFound alongside
+			// rest.StatusError{404}. It must NOT fall into the generic
+			// "instance responded with HTTP status" branch, which sends the
+			// operator to the logs instead of the wrong-slug hypothesis.
 			name:  "NotFoundProbeFailure",
 			token: "some-token",
 			probeErr: fmt.Errorf("%w: %w", forge.ErrRepoNotFound,
@@ -3270,7 +3107,7 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 			wantAbsentSubstrings: []string{
 				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
 				// A real (non-2xx) status response is not the "unreachable
-				// or wrong repo slug" ambiguity — the instance answered.
+				// or wrong repo slug" ambiguity: the instance answered.
 				"repo slug is wrong", "instance is unreachable",
 			},
 		},
@@ -3281,8 +3118,8 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 			wantSubstrings: []string{quickstartRerunCmd, "parsed"},
 			wantAbsentSubstrings: []string{
 				"FORGEJO_TOKEN", "FORGEJO_BASE_URL",
-				// A parse/decode failure means the instance responded — not
-				// the "unreachable or wrong repo slug" ambiguity.
+				// A parse/decode failure means the instance responded, so it
+				// is not the "unreachable or wrong repo slug" ambiguity.
 				"repo slug is wrong", "instance is unreachable",
 			},
 		},

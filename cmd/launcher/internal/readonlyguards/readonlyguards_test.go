@@ -11,9 +11,9 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// runGitCmd runs `git -C dir <args>`, failing the test on error. Mirrors the
-// runGitCmd helper in cmd/launcher/driver-exec/bundleout_cmd_test.go
-// (different package, so not importable directly).
+// runGitCmd duplicates the helper of the same name in
+// cmd/launcher/driver-exec/bundleout_cmd_test.go, which is in a different
+// package and so cannot be imported here.
 func runGitCmd(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -24,8 +24,6 @@ func runGitCmd(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// runShim execs the installed shim at shimDir/argv0 with args, returning its
-// stdout+stderr combined and exit code.
 func runShim(t *testing.T, shimDir, argv0 string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(filepath.Join(shimDir, argv0), args...)
@@ -41,13 +39,9 @@ func runShim(t *testing.T, shimDir, argv0 string, args ...string) (string, int) 
 	return string(out), code
 }
 
-// TestInstall_CommandShimRejectsGuardedSubcommand covers the base case: a
-// single command-shim row installs a shim binary that, invoked with its
-// guarded subcommand, rejects with the row's exact RuntimeMessage -- never
-// its (prompt-validator-facing) Message -- and a non-zero exit code, never
-// reaching the real binary. Message and RuntimeMessage are deliberately
-// given distinct text here to pin that the renderer uses RuntimeMessage,
-// not Message (issue #2509 Finding 2).
+// Message and RuntimeMessage carry deliberately different text so the test
+// pins that the shim renders RuntimeMessage, not the prompt-validator-facing
+// Message (issue #2509 Finding 2).
 func TestInstall_CommandShimRejectsGuardedSubcommand(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
@@ -87,9 +81,8 @@ func TestInstall_CommandShimRejectsGuardedSubcommand(t *testing.T) {
 	}
 }
 
-// requireExecutable skips the test if fname isn't found on PATH -- used by
-// tests that need a real, no-op stand-in binary to prove the exec-through
-// path actually reaches it.
+// requireExecutable skips the test when name is absent from PATH. Tests use it
+// to get a real no-op binary that proves the exec-through path reaches it.
 func requireExecutable(t *testing.T, name string) string {
 	t.Helper()
 	path, err := exec.LookPath(name)
@@ -99,9 +92,8 @@ func requireExecutable(t *testing.T, name string) string {
 	return path
 }
 
-// TestInstall_CommandShimPassesThroughUnguardedSubcommand proves the
-// exec-through indirection: a subcommand not named by any row for this
-// argv0 reaches the real binary via the .real-<argv0> file, unmodified.
+// A subcommand that no row names for this argv0 reaches the real binary
+// unmodified, via the path the shim reads from the sibling .real-<argv0> file.
 func TestInstall_CommandShimPassesThroughUnguardedSubcommand(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
@@ -131,8 +123,6 @@ func TestInstall_CommandShimPassesThroughUnguardedSubcommand(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	// The exec-through indirection: the shim reads the real binary's path
-	// from the sibling .real-gh file rather than hardcoding it.
 	realFile := filepath.Join(shimDir, ".real-gh")
 	realBytes, err := os.ReadFile(realFile)
 	if err != nil {
@@ -142,18 +132,17 @@ func TestInstall_CommandShimPassesThroughUnguardedSubcommand(t *testing.T) {
 		t.Fatalf(".real-gh contents = %q, want %q", realBytes, realTrue)
 	}
 
-	// "gh pr list" is not a guarded subcommand -- it must fall through to
-	// the real binary (here, `true`, which always exits 0).
+	// "gh pr list" is unguarded, so it falls through to the real binary, here
+	// `true`, which always exits 0.
 	got, code := runShim(t, shimDir, "gh", "pr", "list")
 	if code != 0 {
 		t.Fatalf("shim exit code = %d, want 0 (passthrough); output=%q", code, got)
 	}
 }
 
-// TestInstall_GhAPIMutationRejectsMutatingMethod covers the
-// "gh-api-mutation" kind: -X/--method POST/PATCH/PUT/DELETE (any case,
-// either flag spelling) is rejected with the row's message; a plain read
-// (no method flag, or an explicit GET) passes through to the real binary.
+// The "gh-api-mutation" kind must reject a mutating method in any case and in
+// either flag spelling, so the cases cover -X and --method, joined and
+// separated, upper, lower and mixed case.
 func TestInstall_GhAPIMutationRejectsMutatingMethod(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
@@ -212,10 +201,8 @@ func TestInstall_GhAPIMutationRejectsMutatingMethod(t *testing.T) {
 	}
 }
 
-// TestInstall_GitHookRow proves a git-hook row's Message ends up, verbatim,
-// in both the pre-push and pre-receive hooks installed under
-// RepoDir/.git/hooks for a normal (non-bare) working copy, and that the
-// installed hook actually rejects (exits non-zero) when invoked.
+// A git-hook row's Message must reach both the pre-push and pre-receive hooks
+// verbatim, and the installed hook must exit non-zero when git runs it.
 func TestInstall_GitHookRow(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
@@ -259,15 +246,11 @@ func TestInstall_GitHookRow(t *testing.T) {
 	}
 }
 
-// TestInstall_GitHookRow_ExtraRepoDirs proves a git-hook row installs into
-// every dir named by cfg.ExtraRepoDirs, in addition to cfg.RepoDir --
-// issue #2509 Finding 1: agent/entrypoint.sh's install_readonly_guards must
-// install the guard at BOTH the decoy repo (RepoDir, blocking a plain `git
-// push`/origin push, whose pushurl is repointed there) AND $WORK_DIR itself
-// (an ExtraRepoDirs entry, blocking a push to any explicit URL or
-// non-origin remote, neither of which goes through origin's pushurl) --
-// losing the second install regresses to the pre-forge-403 behavior issue
-// #2463 exists to prevent.
+// Issue #2509 Finding 1: agent/entrypoint.sh's install_readonly_guards must
+// install the guard at both the decoy repo (RepoDir, which catches a plain
+// `git push` to origin, whose pushurl is repointed there) and $WORK_DIR itself
+// (an ExtraRepoDirs entry, which catches a push to an explicit URL or a
+// non-origin remote). Losing the second install regresses the fix in #2463.
 func TestInstall_GitHookRow_ExtraRepoDirs(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
@@ -297,7 +280,7 @@ func TestInstall_GitHookRow_ExtraRepoDirs(t *testing.T) {
 		t.Fatalf("result.HookInstalled = false, want true")
 	}
 
-	// repoDir is bare -- hooks land directly under repoDir/hooks.
+	// repoDir is bare, so hooks land directly under repoDir/hooks.
 	for _, name := range []string{"pre-push", "pre-receive"} {
 		hookPath := filepath.Join(repoDir, "hooks", name)
 		content, err := os.ReadFile(hookPath)
@@ -309,7 +292,7 @@ func TestInstall_GitHookRow_ExtraRepoDirs(t *testing.T) {
 		}
 	}
 
-	// extraDir is a normal working copy -- hooks land under
+	// extraDir is a normal working copy, so hooks land under
 	// extraDir/.git/hooks.
 	for _, name := range []string{"pre-push", "pre-receive"} {
 		hookPath := filepath.Join(extraDir, ".git", "hooks", name)
@@ -329,12 +312,10 @@ func TestInstall_GitHookRow_ExtraRepoDirs(t *testing.T) {
 	}
 }
 
-// TestInstall_GitHookRow_BareRepo proves a git-hook row targeting a bare
-// repository (no .git subdirectory -- repoDir itself is the bare git
-// directory, per `git init --bare`) installs its hooks directly under
-// repoDir/hooks, not repoDir/.git/hooks -- the path a bare repo never has,
-// and one git itself never consults, which would otherwise leave the guard
-// silently absent even though Result.HookInstalled reports true.
+// A bare repo has no .git subdirectory, so hooks must land under
+// repoDir/hooks. Installing them at repoDir/.git/hooks, a path git never
+// consults, leaves the guard silently absent while Result.HookInstalled still
+// reports true.
 func TestInstall_GitHookRow_BareRepo(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
@@ -360,7 +341,6 @@ func TestInstall_GitHookRow_BareRepo(t *testing.T) {
 		t.Fatalf("result.HookInstalled = false, want true")
 	}
 
-	// A bare repo has no .git subdirectory -- the hook must not land there.
 	wrongPath := filepath.Join(repoDir, ".git", "hooks", "pre-receive")
 	if _, err := os.Stat(wrongPath); err == nil {
 		t.Fatalf("hook installed at %s, want it absent (bare repo has no .git dir)", wrongPath)
@@ -387,9 +367,6 @@ func TestInstall_GitHookRow_BareRepo(t *testing.T) {
 	}
 }
 
-// TestInstall_PromptOnlyRowProducesNoArtifact proves a prompt-only row is
-// skipped entirely: no shim file, no .real-<argv0> file, no hook content
-// mentioning it, and Install reports nothing installed.
 func TestInstall_PromptOnlyRowProducesNoArtifact(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
@@ -431,10 +408,8 @@ func TestInstall_PromptOnlyRowProducesNoArtifact(t *testing.T) {
 	}
 }
 
-// TestInstall_GroupsByArgv0Generically proves grouping is derived from the
-// marker's own first word rather than hardcoded to "gh": a synthetic
-// "widget" argv0, alongside "gh", produces two independent shims, each only
-// guarding its own subcommands.
+// The synthetic "widget" argv0 alongside "gh" pins that grouping comes from the
+// marker's own first word rather than a hardcoded "gh".
 func TestInstall_GroupsByArgv0Generically(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
@@ -491,8 +466,6 @@ func TestInstall_GroupsByArgv0Generically(t *testing.T) {
 		}
 	}
 
-	// The "widget" shim must guard "widget launch" but not know about "gh
-	// pr create" at all -- and vice versa.
 	got, code := runShim(t, shimDir, "widget", "launch")
 	if code == 0 {
 		t.Errorf("widget launch: exit code = 0, want non-zero; output=%q", got)
@@ -509,7 +482,6 @@ func TestInstall_GroupsByArgv0Generically(t *testing.T) {
 		t.Errorf("gh pr create: output = %q, want it to contain the gh message", got)
 	}
 
-	// Unguarded subcommands on each still pass through to the real binary.
 	if _, code := runShim(t, shimDir, "widget", "status"); code != 0 {
 		t.Errorf("widget status: exit code = %d, want 0 (passthrough)", code)
 	}
@@ -518,13 +490,10 @@ func TestInstall_GroupsByArgv0Generically(t *testing.T) {
 	}
 }
 
-// TestInstall_CommandShimSkipsMissingBinary proves a group whose argv0 has
-// no resolvable real binary (RealBinary returns an error, e.g. exec.LookPath
-// finding nothing on PATH) is skipped rather than failing Install outright:
-// not every Box's image bakes every registry-named binary (fj/forgejo-cli is
-// baked only for a forgejo-backend Consumer), so a github-backend Box must
-// still install the "gh" shim and the git-hook guard even though "fj" is
-// nowhere on its PATH (issue #2509).
+// Not every Box's image bakes every registry-named binary: fj is baked only for
+// a forgejo-backend Consumer. A group whose argv0 has no resolvable real binary
+// is therefore skipped instead of failing Install, so a github-backend Box
+// still gets the "gh" shim and the git-hook guard (issue #2509).
 func TestInstall_CommandShimSkipsMissingBinary(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
@@ -598,11 +567,9 @@ func TestInstall_CommandShimSkipsMissingBinary(t *testing.T) {
 	}
 }
 
-// TestInstall_FullRegistry loads the real thirteen-row forbiddenMarkers
-// fixture (promptassembly/testdata/forbidden-markers.json) and installs it
-// end to end: both command shims (argv0s "fj" and "gh", every row of both
-// now enforce=="command-shim", issue #2509) and the one git-hook guard,
-// with every subcommand row's message reachable for both argv0s.
+// This installs the real forbiddenMarkers fixture end to end rather than a
+// hand-built row set, so a registry change that drops a shim or a message shows
+// up here. Every fj and gh row enforces as a command shim (issue #2509).
 func TestInstall_FullRegistry(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
@@ -681,9 +648,8 @@ func TestInstall_FullRegistry(t *testing.T) {
 	}
 }
 
-// TestInstall_GitHookRowMissingRepoDir proves Install returns a non-nil
-// error, rather than panicking or silently no-op'ing, when rows contains a
-// git-hook row but cfg.RepoDir is empty.
+// A git-hook row with an empty cfg.RepoDir must return an error rather than
+// panic or silently do nothing.
 func TestInstall_GitHookRowMissingRepoDir(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
@@ -708,12 +674,9 @@ func TestInstall_GitHookRowMissingRepoDir(t *testing.T) {
 	}
 }
 
-// TestInstall_SkipGitHookIgnoresGitHookRows proves that cfg.SkipGitHook ==
-// true makes Install treat git-hook rows as absent entirely: no error even
-// though RepoDir is empty, no hook artifact rendered or installed, and
-// Result.HookInstalled stays false -- the command-shim guard this cfg's
-// forgejo (outbox-incapable) caller still wants must install regardless
-// (issue #2509).
+// cfg.SkipGitHook makes Install treat git-hook rows as absent, so an empty
+// RepoDir is not an error. The outbox-incapable forgejo caller that sets it
+// still wants its command-shim guard installed (issue #2509).
 func TestInstall_SkipGitHookIgnoresGitHookRows(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
@@ -758,9 +721,8 @@ func TestInstall_SkipGitHookIgnoresGitHookRows(t *testing.T) {
 	}
 }
 
-// TestInstall_CommandShimRowMissingShimDir proves Install returns a
-// non-nil error, rather than panicking or silently no-op'ing, when rows
-// contains a command-shim row but cfg.ShimDir is empty.
+// A command-shim row with an empty cfg.ShimDir must return an error rather than
+// panic or silently do nothing.
 func TestInstall_CommandShimRowMissingShimDir(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{

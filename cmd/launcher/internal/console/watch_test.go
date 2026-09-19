@@ -14,11 +14,10 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestReconcileWatches_NilWatcher_IsNoOp verifies reconcileWatches leaves a
-// launch-less session (or one where fsnotify.NewWatcher failed at startup,
-// newTeaModel's own nil-watcher fallback) alone rather than panicking on the
-// nil watcher — the console's other refresh paths still cover it, per-Msg,
-// off the poll tick alone (issue #1748).
+// reconcileWatches must leave a launch-less session alone (or one where
+// fsnotify.NewWatcher failed at startup and newTeaModel fell back to a nil
+// watcher) rather than panicking on that nil watcher. The console's other
+// refresh paths still cover it (issue #1748).
 func TestReconcileWatches_NilWatcher_IsNoOp(t *testing.T) {
 	tm := teaModel{
 		pwd:          t.TempDir(),
@@ -34,10 +33,8 @@ func TestReconcileWatches_NilWatcher_IsNoOp(t *testing.T) {
 	}
 }
 
-// TestReconcileWatches_AddsRunningPickLogPath verifies reconcileWatches adds
-// an fsnotify watch on a running pick's current log path — the "watches are
-// added when a pick starts running / its log path appears" acceptance
-// criterion (issue #1748).
+// reconcileWatches adds a watch on a running pick's current log path as soon
+// as that log appears (issue #1748).
 func TestReconcileWatches_AddsRunningPickLogPath(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -72,10 +69,8 @@ func TestReconcileWatches_AddsRunningPickLogPath(t *testing.T) {
 	}
 }
 
-// TestReconcileWatches_RemovesWatchWhenPickStopsRunning verifies
-// reconcileWatches drops the fsnotify watch (and the watchedPaths bookkeeping
-// entry) for a pick that has left PickRunning — the "removed ... when it
-// stops" half of the same acceptance criterion (issue #1748).
+// reconcileWatches drops both the fsnotify watch and the watchedPaths
+// bookkeeping entry once a pick leaves PickRunning (issue #1748).
 func TestReconcileWatches_RemovesWatchWhenPickStopsRunning(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -112,11 +107,9 @@ func TestReconcileWatches_RemovesWatchWhenPickStopsRunning(t *testing.T) {
 	}
 }
 
-// TestReconcileWatches_NewPassPath_WatchesNewDropsOld verifies a pick whose
-// latest pass log moves — a fix pass starting after the initial run — gets
-// its new pass log watched and its old pass log's watch dropped, rather than
-// watching both or neither ("a new Dispatch pass's new log path gets
-// watched", issue #1748 AC).
+// When a pick's latest pass log moves, as it does when a fix pass starts after
+// the initial run, the new pass log gets watched and the old one's watch is
+// dropped, rather than watching both or neither (issue #1748).
 func TestReconcileWatches_NewPassPath_WatchesNewDropsOld(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -163,11 +156,10 @@ func TestReconcileWatches_NewPassPath_WatchesNewDropsOld(t *testing.T) {
 	}
 }
 
-// TestWaitLogWrite_TranslatesWriteEventToLogWriteMsg verifies the tea.Cmd
-// waitLogWrite returns blocks until a write to a watched path, then
-// translates it into logWriteMsg — the signal that lets Update's
-// post-switch refreshPickDecorations call run within moments of new log
-// bytes landing, rather than waiting for the next pollTickMsg (issue #1748).
+// waitLogWrite returns a tea.Cmd that blocks until a write to a watched path,
+// then translates it into logWriteMsg. That message lets Update call
+// refreshPickDecorations within moments of new log bytes landing instead of
+// waiting for the next pollTickMsg (issue #1748).
 func TestWaitLogWrite_TranslatesWriteEventToLogWriteMsg(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "issue-9.log")
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
@@ -211,11 +203,10 @@ func TestWaitLogWrite_TranslatesWriteEventToLogWriteMsg(t *testing.T) {
 	}
 }
 
-// TestTea_LogWrite_RefreshesRunningRowHeartbeat_NotPoll verifies a running
-// pick's row heartbeat updates off a real fsnotify write event, with the
-// pollTickMsg fallback interval set far longer than the test's own timeout —
-// so a passing waitForOutput here can only be explained by the fsnotify path,
-// not the poll (issue #1748 AC1/AC2).
+// A running pick's row heartbeat updates off a real fsnotify write event. The
+// pollTickMsg fallback interval is deliberately set far longer than the test's
+// own timeout, so a passing waitForOutput here can only be explained by the
+// fsnotify path and not by the poll (issue #1748).
 func TestTea_LogWrite_RefreshesRunningRowHeartbeat_NotPoll(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -254,10 +245,8 @@ func TestTea_LogWrite_RefreshesRunningRowHeartbeat_NotPoll(t *testing.T) {
 
 	waitForOutput(t, tm, "99 turn")
 
-	// A live Dispatch (Pick #42 is still PickRunning) routes "q" through the
-	// quit-confirm prompt rather than quitting directly — "d" (drain)
-	// confirms it, same as every other running-launch teatest quit in this
-	// package.
+	// Pick #42 is still PickRunning, so the live Dispatch routes "q" through the
+	// quit-confirm prompt rather than quitting directly; "d" (drain) confirms it.
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")

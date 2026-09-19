@@ -7,18 +7,17 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestNew_ImplementsSettler asserts that the concrete type New returns
-// satisfies Settler, the seam callers depend on so tests can inject a Fake.
+// Callers hold the Settler interface rather than *Settle so tests can inject a
+// fake. New's return type must keep satisfying it.
 func TestNew_ImplementsSettler(t *testing.T) {
 	fc := forge.NewFake()
 	var _ Settler = New(Config{}, fc, fc)
 }
 
-// TestNew_ReadsPRForgeAndLandingRecorderFromConfigCapabilities asserts New's
-// pr/landing fields are a strict read of cfg.Capabilities (issue #2945),
-// never re-derived from cf/it via its own type assertion: a mismatched
-// (zero-value) Capabilities yields nil pr/landing even though the cf/it
-// fakes handed to New do implement forge.PRForge/forge.LandingRecorder.
+// New reads pr/landing straight out of cfg.Capabilities (issue #2945) instead
+// of re-deriving them from cf/it with its own type assertion. A zero-value
+// Capabilities therefore yields nil pr/landing even though the fakes passed in
+// do implement forge.PRForge and forge.LandingRecorder.
 func TestNew_ReadsPRForgeAndLandingRecorderFromConfigCapabilities(t *testing.T) {
 	fc := forge.NewFake()
 	cf := fc.AsGithubReadOnly()
@@ -42,11 +41,9 @@ func TestNew_ReadsPRForgeAndLandingRecorderFromConfigCapabilities(t *testing.T) 
 	}
 }
 
-// newTestSettle constructs a Settle for tests that don't care about
-// capability-resolution mechanics: it derives cfg.Capabilities from it/cf
-// via the same forge.ResolveCapabilities production code path uses, so
-// existing tests keep asserting on pr/landing behavior for whatever fake
-// shape they already pass, without each test wiring Capabilities by hand.
+// newTestSettle derives cfg.Capabilities through the same
+// forge.ResolveCapabilities call production code uses, so tests that only care
+// about pr/landing behavior need not wire Capabilities by hand.
 func newTestSettle(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	cfg.Capabilities = forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 	return New(cfg, it, cf)

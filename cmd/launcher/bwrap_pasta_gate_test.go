@@ -9,11 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// withFakePasta prepends a temp dir containing an executable "pasta" (or, if
-// present=false, an empty temp dir) to PATH for the duration of the test, so
-// checkBwrapPastaGate's exec.LookPath("pasta") call can be driven
-// deterministically regardless of what the real test-runner's PATH happens
-// to contain.
+// withFakePasta pins PATH to a temp dir that either holds an executable
+// "pasta" or holds nothing, so exec.LookPath("pasta") does not depend on what
+// the real test runner's PATH contains.
 func withFakePasta(t *testing.T, present bool) {
 	t.Helper()
 	dir := t.TempDir()
@@ -26,13 +24,10 @@ func withFakePasta(t *testing.T, present bool) {
 	t.Setenv("PATH", dir)
 }
 
-// TestBwrapPastaGate_BwrapDefaultModeMissingPastaFails is the RED case (issue
-// #2666): RUNNER_KIND=bwrap with the new isolate-by-default NETWORK_MODE
-// (unset/"open", not "host"/"none") requires pasta on PATH. Without this
-// gate, a bwrap Box would silently reach the pasta-wrap branch in
-// bwrap.go's buildArgs with pasta missing, and bwrap itself would fail deep
-// inside sandbox startup rather than the launcher refusing to launch with an
-// actionable message up front.
+// RUNNER_KIND=bwrap with the isolate-by-default NETWORK_MODE requires pasta on
+// PATH (issue #2666). Without this gate, buildArgs reaches the pasta-wrap
+// branch with pasta missing and bwrap fails deep inside sandbox startup instead
+// of the launcher refusing up front with an actionable message.
 func TestBwrapPastaGate_BwrapDefaultModeMissingPastaFails(t *testing.T) {
 	withFakePasta(t, false)
 	c := minimalValidConfig()
@@ -51,8 +46,6 @@ func TestBwrapPastaGate_BwrapDefaultModeMissingPastaFails(t *testing.T) {
 	}
 }
 
-// TestBwrapPastaGate_BwrapDefaultModePastaPresentSucceeds is the paired GREEN
-// case: the same config with pasta on PATH must not error.
 func TestBwrapPastaGate_BwrapDefaultModePastaPresentSucceeds(t *testing.T) {
 	withFakePasta(t, true)
 	c := minimalValidConfig()
@@ -64,10 +57,9 @@ func TestBwrapPastaGate_BwrapDefaultModePastaPresentSucceeds(t *testing.T) {
 	}
 }
 
-// TestBwrapPastaGate_NetworkModeHostIsNoOp verifies the documented opt-out
-// (NETWORK_MODE=host, issue #2666) never reaches ValidatePasta -- bwrap.go's
-// buildArgs never wraps the exec target with pasta under it, so it must be
-// safe to launch even with pasta missing from PATH entirely.
+// NETWORK_MODE=host is the documented opt-out (issue #2666). buildArgs never
+// wraps the exec target with pasta under it, so the gate must pass even with
+// pasta absent from PATH.
 func TestBwrapPastaGate_NetworkModeHostIsNoOp(t *testing.T) {
 	withFakePasta(t, false)
 	c := minimalValidConfig()
@@ -79,8 +71,8 @@ func TestBwrapPastaGate_NetworkModeHostIsNoOp(t *testing.T) {
 	}
 }
 
-// TestBwrapPastaGate_NetworkModeNoneIsNoOp verifies the fully-offline mode
-// (bare --unshare-net, no pasta helper) never reaches ValidatePasta either.
+// The fully-offline mode is a bare --unshare-net with no pasta helper, so it
+// never reaches ValidatePasta either.
 func TestBwrapPastaGate_NetworkModeNoneIsNoOp(t *testing.T) {
 	withFakePasta(t, false)
 	c := minimalValidConfig()
@@ -92,8 +84,7 @@ func TestBwrapPastaGate_NetworkModeNoneIsNoOp(t *testing.T) {
 	}
 }
 
-// TestBwrapPastaGate_NonBwrapRunnerKindIsNoOp verifies the gate never
-// consults PATH for the OCI adapter, which has no pasta dependency at all.
+// The OCI adapter has no pasta dependency, so the gate must not consult PATH.
 func TestBwrapPastaGate_NonBwrapRunnerKindIsNoOp(t *testing.T) {
 	withFakePasta(t, false)
 	c := minimalValidConfig()
@@ -105,9 +96,9 @@ func TestBwrapPastaGate_NonBwrapRunnerKindIsNoOp(t *testing.T) {
 	}
 }
 
-// TestBwrapPastaGate_UnsetRunnerKindIsNoOp verifies the Go zero value for
-// runnerKind (RUNNER_KIND unset, which runnerForKind treats as the OCI
-// adapter) is also routed as a no-op, not mistaken for bwrap.
+// The config deliberately leaves runnerKind at its zero value, meaning
+// RUNNER_KIND unset, which runnerForKind treats as the OCI adapter. The gate
+// must route that as a no-op, not mistake it for bwrap.
 func TestBwrapPastaGate_UnsetRunnerKindIsNoOp(t *testing.T) {
 	withFakePasta(t, false)
 	c := minimalValidConfig()

@@ -13,17 +13,15 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// fakeGHPRForge is a stateful stand-in for the gh CLI, backing the
-// prforgeHarness below.
+// fakeGHPRForge is a stateful stand-in for the gh CLI.
 //
 //go:embed testdata/fake-gh-prforge.sh
 var fakeGHPRForge string
 
-// prforgeHarness is a forgetest.PRForgeHarness backed by a real bare git
-// repo (forgetest.GitRepoFixture, the fake gh script's REMOTE) plus a
-// scripted `gh` stand-in for every PR-indirection call (pr list/view/merge/
-// ready, api graphql) — mirroring codeforgeHarness's split between real git
-// plumbing and scripted PR-shaped lookups.
+// prforgeHarness is a forgetest.PRForgeHarness backed by a real bare git repo
+// (forgetest.GitRepoFixture, the fake gh script's REMOTE) plus a scripted gh
+// stand-in for every PR-indirection call. Real git plumbing runs for real and
+// only the PR-shaped lookups are scripted, as in codeforgeHarness.
 type prforgeHarness struct {
 	t        *testing.T
 	repo     *forgetest.GitRepoFixture
@@ -75,16 +73,16 @@ func (h *prforgeHarness) prURL(num string) string {
 }
 
 // SeedOpenPR creates branch agent/issue-<num> one commit ahead of main's
-// current tip, pushes it, and registers the head/base/prstate/branch
-// mappings the fake gh script's `pr list`/`pr view`/`pr merge` handlers
-// look up. Returns the PR URL every PRForge method expects.
+// current tip, pushes it, and registers the head/base/prstate/branch mappings
+// the fake gh script's pr list, pr view and pr merge handlers look up.
+// Returns the PR URL every PRForge method expects.
 func (h *prforgeHarness) SeedOpenPR(num string) string {
 	return h.seedPR(num, false)
 }
 
-// SeedDraftPR mirrors SeedOpenPR but marks the PR draft (isDraft=true) —
-// the regression coverage for issue #2408: OpenPRForBranch must adopt a
-// draft PR precisely as it adopts a non-draft one.
+// SeedDraftPR mirrors SeedOpenPR but marks the PR draft (isDraft=true).
+// Regression coverage for issue #2408: OpenPRForBranch must adopt a draft PR
+// precisely as it adopts a non-draft one.
 func (h *prforgeHarness) SeedDraftPR(num string) string {
 	return h.seedPR(num, true)
 }
@@ -178,10 +176,9 @@ func TestExecClient_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
 }
 
-// draftState reads back the fake gh script's own scripted draft flag for PR
-// num — STATE_DIR/prs/<num>/draft, the file the script's pr-ready case
-// writes "true"/"false" to. Used as the oracle for MarkReady/MarkDraft's
-// effect now that OpenPRForBranch (the github adapter's own call) no longer
+// draftState reads back the fake gh script's own draft flag for PR num from
+// STATE_DIR/prs/<num>/draft, the file the script's pr-ready case writes. It is
+// the oracle for MarkReady and MarkDraft now that OpenPRForBranch no longer
 // round-trips isDraft at all (#2503).
 func (h *prforgeHarness) draftState(url string) string {
 	h.t.Helper()
@@ -192,14 +189,11 @@ func (h *prforgeHarness) draftState(url string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-// TestExecClient_MarkReadyClearsDraft verifies MarkReady's `gh pr ready`
-// call actually flips the fake script's scripted draft state — the fake gh
-// script's pr-ready case previously just `exit 0`'d without touching the
-// draft state file, making it unfaithful to real `gh pr ready`'s effect on
-// GitHub's draft state (issue #2408). The oracle reads the fake script's own
-// state file directly rather than round-tripping through
-// OpenPRForBranch's draft field, since the github adapter no longer
-// populates a draft field on the PR it returns (#2503).
+// MarkReady must actually flip the fake script's draft state: the script's
+// pr-ready case once exited 0 without touching the draft file, so it was
+// unfaithful to real gh pr ready (issue #2408). The oracle reads that state
+// file directly rather than round-tripping through OpenPRForBranch, which no
+// longer populates a draft field on the PR it returns (#2503).
 func TestExecClient_MarkReadyClearsDraft(t *testing.T) {
 	h := newPRForgeHarness(t)
 	const num = "220"
@@ -214,10 +208,9 @@ func TestExecClient_MarkReadyClearsDraft(t *testing.T) {
 	}
 }
 
-// TestExecClient_MarkDraftSetsDraft is the inverse of
-// TestExecClient_MarkReadyClearsDraft: MarkDraft's `gh pr ready --undo` call
-// must flip an open PR back to draft, verified against the same fake-script
-// state file oracle.
+// Inverse of TestExecClient_MarkReadyClearsDraft: MarkDraft's gh pr ready
+// --undo call must flip an open PR back to draft, checked against the same
+// fake-script state file oracle.
 func TestExecClient_MarkDraftSetsDraft(t *testing.T) {
 	h := newPRForgeHarness(t)
 	const num = "221"
@@ -232,16 +225,11 @@ func TestExecClient_MarkDraftSetsDraft(t *testing.T) {
 	}
 }
 
-// TestExecClient_HeadCommitSHA verifies the real adapter's HeadCommitSHA
-// (gh pr view --json headRefOid) reports the branch's actual current tip,
-// and that the value changes once a new commit genuinely lands on it — the
-// signal settle's selfHealGate compares before and after a fix pass to tell
-// a real push apart from a no-op fix (issue #1980). Kept outside the shared
-// forgetest.RunPRForgeContract suite: forge.Fake's own HeadCommitSHA
-// deliberately synthesizes a fresh value on every unscripted call (so
-// settle's untouched fix-pass tests keep modeling "the push advanced the
-// head" without scripting a SHA), which would make the "stays the same
-// without a push" half of this test meaningless for that harness.
+// HeadCommitSHA is the signal settle's selfHealGate compares before and after
+// a fix pass to tell a real push apart from a no-op fix (issue #1980). Kept
+// outside the shared forgetest.RunPRForgeContract suite because forge.Fake
+// synthesizes a fresh value on every unscripted call, which would make the
+// "stays the same without a push" half of this test meaningless there.
 func TestExecClient_HeadCommitSHA(t *testing.T) {
 	h := newPRForgeHarness(t)
 	const num = "210"

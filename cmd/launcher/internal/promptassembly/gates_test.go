@@ -2,20 +2,11 @@ package promptassembly
 
 import "testing"
 
-// TestGatesSkillsBaking covers the CAVEMAN_BAKED/TDD_BAKED/COMMIT_BAKED/
-// CODE_REVIEW_BAKED/AUTO_FORMAT_BAKED/AUTO_LINT_BAKED/CHECK_HYGIENE_BAKED/
-// CODE_COMMENTS_BAKED gates (entrypoint.sh phase_prompt_assembly, lines
-// 733-739): each fires only when the corresponding skill was actually baked
-// at DRIVER_SKILLS_DIR/<name>/SKILL.md — a per-skill presence flag the CLI
-// boundary resolves via a filesystem stat before ever reaching this pure
-// Env, so Gates itself only branches on the already-resolved bool.
-// AUTO_FORMAT_BAKED/AUTO_LINT_BAKED exist for consistency/completeness of
-// the generated skill-baked family, not because any fragment row gates on
-// them -- auto-format/auto-lint's prompt steps key off the AUTO_FORMAT/
-// AUTO_LINT knob gates instead. CHECK_HYGIENE_BAKED and CODE_COMMENTS_BAKED
-// (issue #3220, #3221) each do gate a fragment row (lib/fragments.nix),
-// anchoring the prompt to the harness-owned skill only once it's actually
-// baked.
+// Each *_BAKED gate (entrypoint.sh phase_prompt_assembly) fires only when the
+// CLI boundary found the skill at DRIVER_SKILLS_DIR/<name>/SKILL.md, so Gates
+// only branches on the already-resolved bool. AUTO_FORMAT_BAKED and
+// AUTO_LINT_BAKED gate no fragment row and exist for family completeness;
+// CHECK_HYGIENE_BAKED and CODE_COMMENTS_BAKED each gate one (issues #3220, #3221).
 func TestGatesSkillsBaking(t *testing.T) {
 	cases := []struct {
 		name string
@@ -137,15 +128,11 @@ func TestGatesSkillsBaking(t *testing.T) {
 	}
 }
 
-// TestGatesOrchestratorReviewLoop covers ORCHESTRATOR (entrypoint.sh:
-// 761-762), the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR exactly-one-on
-// pairing it drives (entrypoint.sh: 771-779), and FILER_ENABLED/
-// WORKER_PROVISIONED (entrypoint.sh: 781-799) -- since issue #2533, all four
-// gates are plain passthroughs of nix-precomputed Env fields
-// (ReviewLoopInline/ReviewLoopOrchestrator/FilerEnabled/WorkerProvisioned)
-// rather than derived in-box from OrchestratorEnabled/AgentsJSONTemplate, so
-// each case sets its Env fields explicitly rather than relying on Gates to
-// re-derive them.
+// Since issue #2533, ORCHESTRATOR, the REVIEW_LOOP_INLINE/ORCHESTRATOR
+// exactly-one-on pair, FILER_ENABLED and WORKER_PROVISIONED (entrypoint.sh:
+// 761-799) are passthroughs of nix-precomputed Env fields rather than derived
+// in-box, so each case sets those fields explicitly instead of relying on
+// Gates to re-derive them.
 func TestGatesOrchestratorReviewLoop(t *testing.T) {
 	cases := []struct {
 		name string
@@ -223,22 +210,11 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 			},
 		},
 		{
-			// ReviewLoopInline/ReviewLoopOrchestrator's zero value: the
-			// shape a version-skew dispatch leaves behind, not just a
-			// stray `Env{}` literal. BOX_REVIEW_LOOP_INLINE/ORCHESTRATOR
-			// are dispatch-time-only forwards (issue #2533) with no baked
-			// preamble default, so an older host launcher binary that
-			// predates issue #2533 (and therefore never sets either env
-			// var) dispatching against a newer box image leaves both false
-			// here even though ORCHESTRATOR_ENABLED itself -- a
-			// pre-existing knob issue #2533 left untouched -- still arrives
-			// correctly. Before issue #2533, entrypoint.sh's own bash
-			// negation of $ORCHESTRATOR guaranteed exactly one of the pair
-			// fired regardless; Gates now reproduces that same negation as
-			// a version-skew safety net (falling back to the live
-			// ORCHESTRATOR gate computed a few lines above) rather than
-			// leaving both off and breaking the exactly-one-true invariant
-			// (env.go: 78-91).
+			// The zero value here is what a version-skew dispatch leaves
+			// behind, not a stray `Env{}`: a host launcher predating issue
+			// #2533 never sets BOX_REVIEW_LOOP_INLINE/ORCHESTRATOR, which
+			// have no baked default. Gates reproduces entrypoint.sh's old
+			// bash negation so exactly one of the pair stays on (env.go: 78-91).
 			name: "both review-loop fields empty, orchestrator off: falls open to inline",
 			env: Env{
 				OrchestratorEnabled: false,
@@ -264,12 +240,10 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 			},
 		},
 		{
-			// Both fields forwarded true (issue #2533 review): the two
-			// fields cross a process boundary independently of each other,
-			// so a stuck/duplicated forward can in principle leave both
-			// true rather than only ever both-false. The same repair as
-			// the both-false case above must apply here too, or Gates
-			// renders both review-loop prompt sections at once.
+			// The two fields cross a process boundary independently, so a
+			// stuck or duplicated forward can leave both true, not only both
+			// false (issue #2533 review). The both-false repair must apply
+			// here too, or Gates renders both review-loop sections at once.
 			name: "both review-loop fields true, orchestrator off: repairs to inline",
 			env: Env{
 				OrchestratorEnabled:    false,
@@ -309,9 +283,9 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 	}
 }
 
-// TestGatesScoutProvisioned covers SCOUT_PROVISIONED (issue #3157): a plain
-// passthrough of the nix-resolved Env.ScoutProvisioned roster fact, the same
-// shape as FILER_ENABLED/WORKER_PROVISIONED above.
+// SCOUT_PROVISIONED is a plain passthrough of the nix-resolved
+// Env.ScoutProvisioned roster fact (issue #3157), the same shape as
+// FILER_ENABLED and WORKER_PROVISIONED above.
 func TestGatesScoutProvisioned(t *testing.T) {
 	cases := []struct {
 		name string
@@ -331,11 +305,9 @@ func TestGatesScoutProvisioned(t *testing.T) {
 	}
 }
 
-// TestGatesScoutAbsent covers SCOUT_ABSENT (issue #3157): the exact
-// complement of SCOUT_PROVISIONED, the same paired shape as
-// REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR -- exactly one of the two
-// gates is ever on for a given Env, so the `# SCOUT` section's body (the
-// concatenation of both arms' vars) never renders both or neither.
+// SCOUT_ABSENT is the exact complement of SCOUT_PROVISIONED (issue #3157). The
+// `# SCOUT` section's body concatenates both arms' vars, so exactly one gate
+// must be on or the section renders both arms or neither.
 func TestGatesScoutAbsent(t *testing.T) {
 	cases := []struct {
 		name             string
@@ -359,11 +331,9 @@ func TestGatesScoutAbsent(t *testing.T) {
 	}
 }
 
-// TestGatesTDDUnbaked covers TDD_UNBAKED (issue #3219): the exact
-// complement of TDD_BAKED, the same paired shape as SCOUT_PROVISIONED/
-// SCOUT_ABSENT above -- the IMPLEMENT section's test-first body is the
-// concatenation of both arms' vars, so exactly one of the anchor line and
-// the full inline red/green/refactor fallback ever renders.
+// TDD_UNBAKED is the exact complement of TDD_BAKED (issue #3219). The IMPLEMENT
+// section's test-first body concatenates both arms' vars, so exactly one of the
+// anchor line and the inline red/green/refactor fallback ever renders.
 func TestGatesTDDUnbaked(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -387,11 +357,9 @@ func TestGatesTDDUnbaked(t *testing.T) {
 	}
 }
 
-// TestGatesCommitUnbaked covers COMMIT_UNBAKED (issue #3222): the exact
-// complement of COMMIT_BAKED, the same paired shape as TDD_UNBAKED/TDD_BAKED
-// above -- the COMMIT section's format-rules body is the concatenation of
-// both arms' vars, so exactly one of the anchor line and the inline
-// Conventional Commits rules ever renders.
+// COMMIT_UNBAKED is the exact complement of COMMIT_BAKED (issue #3222). The
+// COMMIT section's format-rules body concatenates both arms' vars, so exactly
+// one of the anchor line and the inline Conventional Commits rules renders.
 func TestGatesCommitUnbaked(t *testing.T) {
 	cases := []struct {
 		name             string
@@ -415,12 +383,10 @@ func TestGatesCommitUnbaked(t *testing.T) {
 	}
 }
 
-// TestGatesCodeReviewUnbaked covers CODE_REVIEW_UNBAKED (issue #3222): the
-// exact complement of CODE_REVIEW_BAKED, the same paired shape as
-// TDD_UNBAKED/COMMIT_UNBAKED above -- the review prompt's
-// dimensions-hunting body is the concatenation of both arms' vars, so
-// exactly one of the anchor line and the inline SPEC/CORRECTNESS/SECURITY/
-// STANDARDS & SMELLS coaching ever renders.
+// CODE_REVIEW_UNBAKED is the exact complement of CODE_REVIEW_BAKED (issue
+// #3222). The review prompt's dimensions-hunting body concatenates both arms'
+// vars, so exactly one of the anchor line and the inline SPEC/CORRECTNESS/
+// SECURITY/STANDARDS & SMELLS coaching ever renders.
 func TestGatesCodeReviewUnbaked(t *testing.T) {
 	cases := []struct {
 		name                 string
@@ -444,16 +410,11 @@ func TestGatesCodeReviewUnbaked(t *testing.T) {
 	}
 }
 
-// TestGatesCoordinatorScoutBrief covers COORDINATOR_SCOUT_BRIEF (issue
-// #3157): a computed conjunction of Env.WorkerProvisioned and
-// Env.ScoutProvisioned, not a passthrough of either alone -- the
-// coordinator's scout-brief guidance is only meaningful when there's both a
-// worker to delegate to and a scout that wrote a brief, and the fragment
-// registry allows only one gate per row, so all four combinations need
-// covering to pin down that it's an AND, not an OR or either field alone.
-// It also shares WORKER_SCOUT_BRIEF's work-only restriction: a research
-// dispatch never writes a brief, so a research-kind env must gate false even
-// with both fields on.
+// COORDINATOR_SCOUT_BRIEF is a conjunction of WorkerProvisioned and
+// ScoutProvisioned (issue #3157), so all four combinations are covered to pin
+// that it is an AND rather than an OR or either field alone. It shares
+// WORKER_SCOUT_BRIEF's work-only restriction: a research dispatch never writes
+// a brief, so it gates false even with both fields on.
 func TestGatesCoordinatorScoutBrief(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -479,12 +440,11 @@ func TestGatesCoordinatorScoutBrief(t *testing.T) {
 	}
 }
 
-// TestGatesWorkerScoutBrief covers WORKER_SCOUT_BRIEF (issue #3157): a
-// work-only conjunction of Env.ScoutProvisioned and dispatch kind --
-// ScoutProvisioned alone is a roster-presence fact true on a research
-// dispatch too, but research-prompt.md never delegates a scout or writes a
-// brief, so the gate must also check DispatchKind, defaulting empty to
-// "work" the same way gates_tracker.go/assemble.go already do.
+// WORKER_SCOUT_BRIEF is work-only (issue #3157): ScoutProvisioned alone is a
+// roster-presence fact that holds on a research dispatch too, but
+// research-prompt.md never delegates a scout or writes a brief, so the gate
+// also checks DispatchKind, defaulting empty to "work" as gates_tracker.go and
+// assemble.go do.
 func TestGatesWorkerScoutBrief(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -508,10 +468,9 @@ func TestGatesWorkerScoutBrief(t *testing.T) {
 	}
 }
 
-// TestGatesBoxAccess covers the OPEN A PULL REQUEST push step gate
-// (entrypoint.sh: 940-957): exactly one of BOX_ACCESS_READ_WRITE/
-// BOX_ACCESS_READ_ONLY is ever on, selected solely by BOX_WRITE_ENABLED --
-// independent of ISSUE_TRACKER/CODE_FORGE.
+// Exactly one of BOX_ACCESS_READ_WRITE and BOX_ACCESS_READ_ONLY is ever on for
+// the OPEN A PULL REQUEST push step (entrypoint.sh: 940-957), selected solely
+// by BOX_WRITE_ENABLED, independent of ISSUE_TRACKER and CODE_FORGE.
 func TestGatesBoxAccess(t *testing.T) {
 	cases := []struct {
 		name            string
@@ -548,14 +507,11 @@ func TestGatesBoxAccess(t *testing.T) {
 	}
 }
 
-// TestGatesCodeForgeBackend covers the CODE_FORGE-backend gate family
-// (entrypoint.sh: 958-989): ForgeBackend -- nix's precomputed equivalent of
-// CODE_FORGE (defaulting to "github" when empty), resolved upstream rather
-// than re-derived by Gates itself (issue #2533) -- is a GH or FORGEJO
-// backend suffix, only forgejo diverging from the shared gh-flavored path.
-// OPEN_PR_CREATE_RW_<suffix> forks further on BOX_ACCESS_READ_WRITE (only
-// the read-write create step splits on the backend); FIX_CI_READ_<suffix>
-// fires unconditionally on the resolved backend, regardless of box access.
+// ForgeBackend is nix's precomputed equivalent of CODE_FORGE (entrypoint.sh:
+// 958-989), resolved upstream rather than re-derived by Gates (issue #2533).
+// Only forgejo diverges from the shared gh-flavored path.
+// OPEN_PR_CREATE_RW_<suffix> forks further on BOX_ACCESS_READ_WRITE, while
+// FIX_CI_READ_<suffix> fires on the resolved backend regardless of box access.
 func TestGatesCodeForgeBackend(t *testing.T) {
 	cases := []struct {
 		name            string
@@ -620,22 +576,11 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 			},
 		},
 		{
-			// ForgeBackend's zero value: the shape a version-skew dispatch
-			// leaves behind, not just a stray `Env{}` literal. BOX_FORGE_
-			// BACKEND is a dispatch-time-only forward (issue #2533) with no
-			// baked preamble default, so an older host launcher binary that
-			// predates issue #2533 (and therefore never sets that env var
-			// at all) dispatching against a newer box image leaves
-			// ForgeBackend empty here even though the access-forge gate
-			// family is fully wired up. Before issue #2533, entrypoint.sh's
-			// own bash "${CODE_FORGE:-github}" defaulting guaranteed a real
-			// gate fired regardless (including FIX_CI_READ's unconditional-
-			// on-backend fork); Gates now reproduces that same default arm
-			// as a version-skew safety net so an old-launcher/new-box
-			// pairing renders the GH arm instead of silently dropping
-			// every PR-create/CI-read instruction for the run. This pins
-			// that fail-open contract so a future change can't silently
-			// reintroduce the fail-closed regression.
+			// An empty ForgeBackend is what a version-skew dispatch leaves
+			// behind: a host launcher predating issue #2533 never sets
+			// BOX_FORGE_BACKEND, which has no baked default. Gates repeats
+			// entrypoint.sh's old "${CODE_FORGE:-github}" default, so the run
+			// gets the GH arm instead of no PR-create or CI-read step at all.
 			name:            "empty ForgeBackend falls open to GH default",
 			forgeBackend:    "",
 			boxWriteEnabled: true,
@@ -647,12 +592,11 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 			},
 		},
 		{
-			// Same version-skew shape as above, but CodeForge itself --
-			// still forwarded on Env for exactly this fallback (env.go:
-			// 133-138) -- says "forgejo". The fallback must re-derive from
-			// CodeForge, not hardcode the GH arm regardless of it (issue
-			// #2533 review): hardcoding GH here would instruct the agent to
-			// drive `gh` against a Forgejo forge.
+			// Same version-skew shape, but CodeForge says "forgejo" (it is
+			// still forwarded on Env for exactly this fallback, env.go:
+			// 133-138). The fallback must re-derive from CodeForge: a
+			// hardcoded GH arm would tell the agent to drive `gh` against a
+			// Forgejo forge (issue #2533 review).
 			name:            "empty ForgeBackend with CodeForge=forgejo falls open to FORGEJO",
 			forgeBackend:    "",
 			codeForge:       "forgejo",

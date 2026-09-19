@@ -12,13 +12,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields verifies
-// newGatedContext succeeds against a clean, fully-local config (mirroring
-// TestNewReadContext_FullyLocal_ConstructsClean in readcontext_test.go) and
-// that the returned gatedContext carries the same populated config/
-// issueTracker/codeForge trio newReadContext alone would give — the
-// validate+gate prologue this issue adds must not change what a clean run
-// gets back, only reject an unclean one.
+// The validate+gate prologue must not change what a clean run gets back, only
+// reject an unclean one: a clean fully-local config still yields the populated
+// config/issueTracker/codeForge trio newReadContext alone would give.
 func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("CODE_FORGE", "local")
@@ -47,16 +43,9 @@ func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 	}
 }
 
-// TestNewGatedContext_ResearchKind_AppliesKindAndLabel verifies newGatedContext
-// threads its kind param through to newReadContext's applyDispatchKind call
-// (issue #2944 slice 1) the same way bootstrap() applies it today: a
-// dispatchKindResearch call against an otherwise-clean config must come back
-// with gc.config.dispatchKind set to the research kind and gc.config.label
-// swapped to the fixed research family's Dispatchable label (forge.
-// ResearchDispatchLabels), not whatever GH_LABEL_DISPATCHABLE the ambient
-// config would otherwise carry for work. See
-// TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField below for
-// the selfContained param's own coverage.
+// newGatedContext must thread its kind param through to newReadContext's
+// applyDispatchKind call (issue #2944 slice 1), so the label comes from the
+// fixed research family, not from the ambient GH_LABEL_DISPATCHABLE for work.
 func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("CODE_FORGE", "local")
@@ -82,17 +71,10 @@ func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 	}
 }
 
-// TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField verifies
-// newGatedContext threads its selfContained param through to newReadContext
-// (issue #2944 slice 1) the same way bootstrap() applies it today for the
-// research kind's no-repo sub-mode (issue #2202): a selfContained=true call
-// must come back with gc.config.selfContained set, and — since
-// repoRequirementExempt (internal/launcherchecks) exempts this exact
-// combination (dispatchKindResearch + selfContained + ISSUE_TRACKER=local's
-// InBoxUnreachableTracker) from the REPO_SLUG/GH_TOKEN requirement — must
-// succeed without either of those set. This only proves the field
-// assignment; see TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate
-// below for proof the param actually reaches validate(c).
+// newGatedContext must thread selfContained through for research's no-repo
+// sub-mode (issues #2944 slice 1, #2202). REPO_SLUG and GH_TOKEN stay unset on
+// purpose: repoRequirementExempt (internal/launcherchecks) exempts exactly this
+// combination, so setting them would hide a regression in that exemption.
 func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("CODE_FORGE", "local")
@@ -115,12 +97,9 @@ func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing
 	}
 }
 
-// TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate verifies the
-// selfContained param actually reaches validate(c), not just the config
-// struct: validate rejects selfContained=true paired with dispatchKindWork
-// (main.go's "--self-contained is only valid for the research dispatch
-// kind" check) outright, before any gate runs, so a selfContained=true call
-// with dispatchKindWork must fail with that exact message.
+// This pins that selfContained reaches validate(c), not just the config struct:
+// validate rejects selfContained paired with dispatchKindWork before any gate
+// runs.
 func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("CODE_FORGE", "local")
@@ -146,12 +125,8 @@ func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) 
 	}
 }
 
-// TestNewGatedContext_InvalidConfig_SurfacesValidateError verifies
-// newGatedContext returns validate(c)'s own error for a config with a
-// broken required knob (bogus MERGE_MODE, same technique doctor_test.go's
-// TestDoctorReport_ConfigInvalid_NamesEveryBrokenKnob uses) and never
-// reaches the gate registry at all — a config validate() rejects has no
-// business being gate-checked.
+// A config validate() rejects must never be gate-checked: the broken
+// MERGE_MODE has to come back as validate's own error.
 func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("CODE_FORGE", "local")
@@ -177,13 +152,10 @@ func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 	}
 }
 
-// TestNewGatedContext_FailingRegistryGate_SurfacesGateError verifies
-// newGatedContext surfaces a gateRegistry failure: CODE_FORGE=git is not
-// RelayCapable (internal/backend/registry_gen.go), so pairing it with
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only trips checkReadOnlyCapabilityGate,
-// the registry's first entry, on an otherwise-valid config -- proving
-// newGatedContext actually walks gateRegistry after validate() passes,
-// rather than only ever exercising the validate() short-circuit above.
+// CODE_FORGE=git is not RelayCapable (internal/backend/registry_gen.go), so
+// pairing it with read-only access trips checkReadOnlyCapabilityGate on an
+// otherwise-valid config. That proves newGatedContext walks gateRegistry at
+// all, rather than only ever exercising the validate() short-circuit above.
 func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	t.Setenv("REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "ghp_test")
@@ -211,20 +183,15 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	}
 }
 
-// TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates verifies
-// newGatedContext enforces bootstrap.go's exact interleaved gate order
-// (capability, network-mode, bwrap-pasta, bwrap-overlay, gh-token,
-// forgejo-token) rather than gateRegistry's order followed by the bwrap
-// gates: with BOTH the bwrap-pasta gate and the read-only-token-github gate
-// primed to fail, the returned error must be bwrap-pasta's -- proving
-// newGatedContext reaches and stops at bwrap-pasta before it ever reaches
-// (and makes the live network call inside) the token gate.
+// newGatedContext must keep bootstrap.go's interleaved gate order (capability,
+// network-mode, bwrap-pasta, bwrap-overlay, gh-token, forgejo-token), not
+// gateRegistry's order followed by the bwrap gates. Both bwrap-pasta and the
+// token gate are primed to fail, so bwrap-pasta's error winning proves the walk
+// stops before the token gate's live network call.
 func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
-	// A PATH containing only a fake "true" -- RUNTIME's own required-knob
-	// check needs *something* resolvable -- but no "pasta", forces
-	// runner.ValidatePasta() to fail deterministically (same technique as
-	// withFakePasta in bwrap_pasta_gate_test.go), without depending on this
-	// host's real pasta installation.
+	// A PATH holding only a fake "true" satisfies RUNTIME's required-knob check
+	// while leaving pasta absent, so runner.ValidatePasta() fails whatever this
+	// host has installed.
 	withFixtureBinary(t, "true")
 
 	t.Setenv("REPO_SLUG", "owner/repo")
@@ -240,9 +207,8 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Setenv("RUNNER_KIND", "bwrap")
 	t.Setenv("NETWORK_MODE", "open") // not host/none, so checkBwrapPastaGate actually calls runner.ValidatePasta()
-	// BOX_GH_TOKEN intentionally unset: the read-only-token-github gate
-	// would also fail here (see readonly_token_gate.go), if the walk ever
-	// reached it.
+	// BOX_GH_TOKEN stays unset so the read-only-token-github gate
+	// (readonly_token_gate.go) would also fail if the walk reached it.
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchKindWork, false)
@@ -261,22 +227,15 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	}
 }
 
-// TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates is
-// BwrapPastaGateRunsBeforeTokenGates' pair for the second bwrap gate:
-// checkBwrapOverlayGate's own runner.ValidateOverlay() has no injectable
-// exec seam from this package (internal/runner's execCommand is
-// package-private), and its outcome is a real kernel probe -- a devbox or
-// CI runner with unprivileged-userns-overlayfs support would make it pass
-// regardless of what's misconfigured elsewhere, so forcing a genuine
-// failure needs bwrap itself absent from PATH (ValidateOverlay's own
-// runner.execCommand("bwrap", ...) call then fails outright, before it ever
-// gets to probe overlay support) rather than depending on kernel behavior.
-// NETWORK_MODE=host makes checkBwrapPastaGate a documented no-op so only
-// the overlay gate's failure is in play.
+// The pair of TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates, for the
+// second bwrap gate. ValidateOverlay() has no injectable exec seam from this
+// package and ends in a real kernel probe that passes on any host with
+// unprivileged-userns-overlayfs, so the only deterministic failure is bwrap
+// absent from PATH. NETWORK_MODE=host makes checkBwrapPastaGate a no-op.
 func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
-	// A PATH containing only a fake "true" -- RUNTIME's own required-knob
-	// check needs *something* resolvable -- but no "bwrap", forces
-	// runner.ValidateOverlay()'s exec("bwrap", ...) to fail deterministically.
+	// A PATH holding only a fake "true" satisfies RUNTIME's required-knob check
+	// while leaving bwrap absent, so ValidateOverlay()'s exec("bwrap", ...)
+	// fails before it can probe overlay support.
 	withFixtureBinary(t, "true")
 
 	t.Setenv("REPO_SLUG", "owner/repo")
@@ -294,8 +253,8 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	t.Setenv("NETWORK_MODE", "host") // checkBwrapPastaGate no-ops (issue #2666), isolating the overlay gate's failure
 	t.Setenv("NIX_STORE_WRITABLE", "true")
 	t.Setenv("NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
-	// BOX_GH_TOKEN intentionally unset: the read-only-token-github gate
-	// would also fail here, if the walk ever reached it.
+	// BOX_GH_TOKEN stays unset so the read-only-token-github gate would also
+	// fail if the walk reached it.
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchKindWork, false)
@@ -314,17 +273,13 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	}
 }
 
-// TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates is the
-// other half of bootstrap.go's order: capability and network-mode run
-// BEFORE the bwrap gates, not after. With CODE_FORGE=git (not RelayCapable,
-// same fixture as TestNewGatedContext_FailingRegistryGate_SurfacesGateError)
-// tripping checkReadOnlyCapabilityGate, AND the bwrap-pasta gate also primed
-// to fail (pasta absent from PATH), the capability gate's error must win --
-// proving newGatedContext never reaches the bwrap gates once an earlier
-// registry gate has already failed.
+// The other half of bootstrap.go's order: capability and network-mode run
+// before the bwrap gates. Both the capability gate and bwrap-pasta are primed
+// to fail, so the capability gate's error winning proves the walk stops at the
+// earlier registry gate.
 func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *testing.T) {
-	// pasta absent from PATH would fail checkBwrapPastaGate if the walk
-	// ever reached it.
+	// pasta absent from PATH would fail checkBwrapPastaGate if the walk reached
+	// it.
 	withFixtureBinary(t, "true")
 
 	t.Setenv("REPO_SLUG", "owner/repo")
@@ -358,26 +313,11 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	}
 }
 
-// TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError
-// verifies newGatedContext surfaces a checkNetworkModeRuntimeGate failure --
-// the registry's second entry, network-mode-runtime -- specifically:
-// NETWORK_MODE=no-host-loopback paired with RUNNER_KIND=bwrap has no
-// rendering distinct from the isolated-by-default NETWORK_MODE=open
-// (main.go's checkNetworkModeRuntimeGate doc comment), a combination this
-// gate exists to reject at runtime since mkHarness's eval assert only ever
-// sees what a Consumer flake bakes, never a runtime override. This is the
-// gate no existing test tripped through newGatedContext: deleting the
-// network-mode-runtime entry from gateRegistry left every other test in this
-// file and launchgates_test.go green, so this test is the pin against a
-// silent regression there. BOX_FORGE_AND_ISSUE_ACCESS is set explicitly to
-// "read-write" so the read-only-capability gate -- the registry's first
-// entry -- stays a no-op and never trips first. It's set explicitly, not
-// merely left unset, because a dogfood Box's own ambient environment
-// carries BOX_FORGE_AND_ISSUE_ACCESS=read-only
-// (spindrift dogfoods itself, ADR 0018/issue #470) -- an unset t.Setenv would
-// silently inherit that, making the read-only-token-github gate applicable
-// and fail on its own unset BOX_GH_TOKEN before ever reaching this test's
-// intended failure.
+// This is the only test that trips the registry's network-mode-runtime entry:
+// deleting that entry from gateRegistry left every other test here and in
+// launchgates_test.go green. BOX_FORGE_AND_ISSUE_ACCESS is set explicitly to
+// read-write, not left unset, because a dogfood Box's ambient environment
+// carries read-only (ADR 0018, issue #470) and would trip an earlier gate.
 func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *testing.T) {
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
 	t.Setenv("REPO_SLUG", "owner/repo")
@@ -410,12 +350,11 @@ func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *test
 	}
 }
 
-// withFixtureBinary points PATH at a fresh temp dir containing a single
-// executable named name that immediately exits 0 -- enough for RUNTIME's own
-// required-knob check (doctor.RuntimeCheck) to find something on PATH to
-// resolve, while leaving every other binary (pasta, bwrap, ...) absent so a
-// gate that shells out to one fails deterministically regardless of what
-// happens to be installed on the host running the test.
+// withFixtureBinary points PATH at a temp dir holding one executable that exits
+// 0. That is enough for RUNTIME's required-knob check (doctor.RuntimeCheck) to
+// resolve something, while every other binary (pasta, bwrap, and the rest) is
+// absent, so a gate that shells out to one fails whatever the host has
+// installed.
 func withFixtureBinary(t *testing.T, name string) {
 	t.Helper()
 	dir := t.TempDir()

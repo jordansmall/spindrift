@@ -2,17 +2,11 @@ package main
 
 import "testing"
 
-// TestWorkerPromptOperativeContract is a content-invariant guard (issue
-// #3225) for worker-prompt.md's operative rules: the scope-quarantine rule,
-// the turn-budget/checkpoint obligation, the batching-into-one-patch rule
-// and its `git apply --recount -C1 --reject` mechanics (issue #3420), the
-// no-narration rule, the inlined code-comments policy, the check-output
-// bounding guidance (both issue #3419), and the final-report shape. Issue
-// #3225 cut the batching paragraph's coordinator-side rationale clause ("a
-// long-running worker replays its whole accumulated context on every turn,
-// so fewer, larger checks cost less than many small ones") while keeping the
-// operative batching rule itself; pinning each clause here first means that
-// cut can't silently take a rule with it.
+// TestWorkerPromptOperativeContract guards worker-prompt.md's operative rules
+// against silent content drift (issues #3225, #3419, #3420). Issue #3225 cut
+// the batching paragraph's coordinator-side rationale clause while keeping the
+// operative batching rule itself, so this table pins each clause separately and
+// a later cut cannot quietly take a rule with it.
 func TestWorkerPromptOperativeContract(t *testing.T) {
 	assertPromptClauses(t, "worker-prompt.md", []promptClause{
 		{

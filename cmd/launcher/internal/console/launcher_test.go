@@ -15,9 +15,8 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// TestLauncher_CapDefaultsToMaxParallel verifies the session's live
-// parallelism cap (issue #653) starts at MaxParallel, with nothing running
-// yet, before any Dispatch has launched.
+// The session's live parallelism cap (issue #653) starts at MaxParallel, with
+// nothing running yet, before any Dispatch has launched.
 func TestLauncher_CapDefaultsToMaxParallel(t *testing.T) {
 	launch := &Launcher{MaxParallel: 3}
 	if got := launch.Cap(); got != 3 {
@@ -28,9 +27,8 @@ func TestLauncher_CapDefaultsToMaxParallel(t *testing.T) {
 	}
 }
 
-// TestLauncher_PollInterval_FallsBackToDefault verifies a Launcher with no
-// test override reports defaultPollInterval, the background backlog poll's
-// production cadence (#647 AC5).
+// A Launcher with no test override reports defaultPollInterval, the background
+// backlog poll's production cadence (#647 AC5).
 func TestLauncher_PollInterval_FallsBackToDefault(t *testing.T) {
 	launch := &Launcher{}
 	if got, want := launch.PollInterval(), 3*time.Minute; got != want {
@@ -38,10 +36,9 @@ func TestLauncher_PollInterval_FallsBackToDefault(t *testing.T) {
 	}
 }
 
-// TestLauncher_Pick_QueuesAndReturnsSnapshot verifies Pick mutates the
-// private queue and hands back the fresh snapshot synchronously, in the
-// same call — the tea side never has to pull Queue itself to see the row it
-// just landed (issue #1542).
+// Pick mutates the private queue and hands back the fresh snapshot in the same
+// call, so the tea side never has to pull Queue itself to see the row it just
+// landed (issue #1542).
 func TestLauncher_Pick_QueuesAndReturnsSnapshot(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -57,13 +54,11 @@ func TestLauncher_Pick_QueuesAndReturnsSnapshot(t *testing.T) {
 	}
 }
 
-// TestLauncher_Pick_ResearchKind_PromotesOnResearchTracker verifies a
-// KindResearch pick promotes through l.ResearchTracker — carrying the
-// agent-research label family — rather than the work tracker the caller
-// passed in, and that the work tracker sees no call at all (issue #1708):
-// the two kinds' promotions must land on different tracker instances, since
-// each instance's TransitionState resolves the same canonical DispatchState
-// values through its own baked-in label family.
+// A KindResearch pick promotes through l.ResearchTracker, which carries the
+// agent-research label family, not the work tracker the caller passed in
+// (issue #1708). Each tracker instance resolves the same canonical
+// DispatchState values through its own baked-in label family, so the two
+// kinds' promotions must land on different instances.
 func TestLauncher_Pick_ResearchKind_PromotesOnResearchTracker(t *testing.T) {
 	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	workTracker.SetIssue(forge.Issue{Number: "42", Title: "research this"})
@@ -91,9 +86,8 @@ func TestLauncher_Pick_ResearchKind_PromotesOnResearchTracker(t *testing.T) {
 	}
 }
 
-// TestLauncher_Unpick_RemovesAndReturnsSnapshot verifies Unpick drops the
-// queued pick from the private queue and hands back the fresh snapshot
-// synchronously (issue #1542).
+// Unpick drops the queued pick from the private queue and hands back the fresh
+// snapshot synchronously (issue #1542).
 func TestLauncher_Unpick_RemovesAndReturnsSnapshot(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
@@ -107,10 +101,9 @@ func TestLauncher_Unpick_RemovesAndReturnsSnapshot(t *testing.T) {
 	}
 }
 
-// TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes verifies Wait
-// doesn't return while tryLaunch's background RunContinuous drain still has
-// a Box in flight — quitting the console must never race the caller's
-// cleanup (e.g. the driver-cache teardown) against a live Dispatch (#646).
+// Wait must not return while tryLaunch's background RunContinuous drain still
+// has a Box in flight: quitting the console must never race the caller's
+// cleanup, such as the driver-cache teardown, against a live Dispatch (#646).
 func TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -160,11 +153,10 @@ func TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes(t *testing.T) {
 	}
 }
 
-// TestLauncher_TryLaunch_SkipsWhenQueueEmpty verifies tryLaunch never spawns
-// a drain goroutine when Queue has nothing queued or held (#754) — the
-// background poll tick (tea.go pollTickMsg) fires this every interval
-// regardless of queue state, so an empty queue must be a real no-op rather
-// than a wasted RunContinuous pass.
+// tryLaunch never spawns a drain goroutine when Queue has nothing queued or
+// held (#754). The background poll tick (tea.go pollTickMsg) fires this every
+// interval regardless of queue state, so an empty queue has to be a real no-op
+// rather than a wasted RunContinuous pass.
 func TestLauncher_TryLaunch_SkipsWhenQueueEmpty(t *testing.T) {
 	launch := &Launcher{queue: NewQueue()}
 	launch.tryLaunch(nil, "")
@@ -185,16 +177,11 @@ func TestLauncher_TryLaunch_SkipsWhenQueueEmpty(t *testing.T) {
 	}
 }
 
-// TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand
-// verifies a background-poll-driven tryLaunch call (tea.go's pollTickMsg
-// case, which fires every interval regardless of queue state) still
-// re-evaluates and launches a held pick whose blocker cleared out-of-band —
-// another agent or a human merge, with no sibling Dispatch in this session
-// to trigger RunContinuous's own refill-on-completion. See Queue.Empty's
-// doc comment (#650) for why #754's queue-empty skip in tryLaunch must
-// gate on PickHeld as well as PickQueued, or this regresses — restores the
-// coverage the pre-Bubble-Tea-rewrite TestRun_HeldPick_LaunchesOnBackgroundPollAfterDrainIdles
-// carried.
+// A background-poll-driven tryLaunch call still re-evaluates and launches a
+// held pick whose blocker cleared out-of-band, with no sibling Dispatch in this
+// session to trigger RunContinuous's own refill-on-completion. See Queue.Empty's
+// doc comment (#650) for why #754's queue-empty skip in tryLaunch must gate on
+// PickHeld as well as PickQueued, or this regresses.
 func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -228,9 +215,9 @@ func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testi
 	// Blocker clears out-of-band: no Add, no operator action.
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed})
 
-	// Stands in for the background poll tick (tea.go pollTickMsg) firing on
-	// its own interval — the only thing left to re-evaluate a held pick
-	// once its blocker clears with nothing else driving a fresh drain.
+	// Stands in for the background poll tick (tea.go pollTickMsg) firing on its
+	// own interval, the only thing left to re-evaluate a held pick once its
+	// blocker clears with nothing else driving a fresh drain.
 	launch.tryLaunch(f, dir)
 	launch.Wait()
 
@@ -239,12 +226,11 @@ func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testi
 	}
 }
 
-// TestLauncher_TryLaunch_ResearchPick_UsesResearchFactoryAndSettle verifies
-// drain routes a KindResearch pick through ResearchFactory/ResearchSettle —
-// never the work Factory/Settle — claiming on ResearchTracker's own
+// drain routes a KindResearch pick through ResearchFactory/ResearchSettle,
+// never the work Factory/Settle, claiming on ResearchTracker's own
 // agent-research label family (issue #1708). Both stacks share MaxParallel=1
-// and thus the same underlying dispatch.Factory-driven Box run; only the
-// wiring (which tracker claims, which Settler settles) differs by kind.
+// and the same underlying dispatch.Factory-driven Box run; only which tracker
+// claims and which Settler settles differ by kind.
 func TestLauncher_TryLaunch_ResearchPick_UsesResearchFactoryAndSettle(t *testing.T) {
 	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	researchTracker := forge.NewFake(forge.ResearchDispatchLabels())
@@ -304,19 +290,11 @@ func TestLauncher_TryLaunch_ResearchPick_UsesResearchFactoryAndSettle(t *testing
 	}
 }
 
-// TestLauncher_Pick_ResearchKind_UntriagedIssue_LaunchesAndSettles drives a
-// KindResearch pick through the actual operator gesture — Launcher.Pick,
-// then tryLaunch, exactly as pickHighlighted (tea.go) chains them — starting
-// from an untriaged Backlog issue with no labels at all, rather than
-// pre-seeding queue state or the agent-research label directly (#1742). This
-// is the exact shape that used to false-fire: research's DispatchLabels
-// leaves Complete unmapped, so the pre-fix double-box guard queried
-// ListIssues(Complete), got every open issue back, and dissolved the pick
-// with a bogus "already complete" reason before it ever reached
-// transitionToDispatchable, let alone tryLaunch/drain. Confirms the full
-// chain — queue, not dissolve; promote onto agent-research; claim; run;
-// settle through ResearchSettle, never the work Settler — actually reaches
-// drain rather than just PickIssue's promotion step in isolation.
+// Drives a KindResearch pick through the real operator gesture, Pick then
+// tryLaunch, from an untriaged issue with no labels rather than pre-seeded
+// queue state (#1742). That shape used to false-fire: research's DispatchLabels
+// leaves Complete unmapped, so the double-box guard's ListIssues(Complete)
+// returned every open issue and dissolved the pick before it reached drain.
 func TestLauncher_Pick_ResearchKind_UntriagedIssue_LaunchesAndSettles(t *testing.T) {
 	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	researchTracker := forge.NewFake(forge.ResearchDispatchLabels())
@@ -374,9 +352,8 @@ func TestLauncher_Pick_ResearchKind_UntriagedIssue_LaunchesAndSettles(t *testing
 	}
 }
 
-// TestLauncher_Stacks_ResearchFailedLabelIsResearchFamily verifies the
-// research stack's failedLabel is the fixed agent-research-failed label, not
-// l.FailedLabel (the work family's own failed label) — a research pick's
+// The research stack's failedLabel is the fixed agent-research-failed label,
+// not l.FailedLabel (the work family's own failed label). A research pick's
 // blocker-readiness check must never consult the wrong family when deciding
 // whether a blocker counts as failed (issue #1708).
 func TestLauncher_Stacks_ResearchFailedLabelIsResearchFamily(t *testing.T) {
@@ -400,14 +377,11 @@ func TestLauncher_Stacks_ResearchFailedLabelIsResearchFamily(t *testing.T) {
 	}
 }
 
-// TestLauncher_TryLaunch_ResearchPickNoResearchStack_DrainStopsInsteadOfSpinning
-// verifies drain terminates instead of busy-spinning forever when a
-// KindResearch pick is queued but no research stack is wired (ResearchFactory/
-// ResearchTracker both nil): the work-only stacks() never claims a
-// research-kind pick, so the old unconditional q.hasQueued() check treated
-// that untouched pick as "still work to do" and looped without ever making
-// progress. The pick is left stranded at PickQueued — there is truly nowhere
-// for it to launch — but drain itself must still return (issue #1708).
+// drain terminates instead of busy-spinning when a KindResearch pick is queued
+// but no research stack is wired: the work-only stacks() never claims it, so
+// the old unconditional q.hasQueued() check read that untouched pick as still
+// work to do and looped forever. The pick stays stranded at PickQueued, with
+// nowhere to launch, but drain itself still returns (issue #1708).
 func TestLauncher_TryLaunch_ResearchPickNoResearchStack_DrainStopsInsteadOfSpinning(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 
@@ -432,11 +406,10 @@ func TestLauncher_TryLaunch_ResearchPickNoResearchStack_DrainStopsInsteadOfSpinn
 	}
 }
 
-// TestLauncher_TryLaunch_BoxFailureReachesPickFailed verifies that a Box
-// which runs and exits non-zero moves its queue row to the terminal
-// PickFailed state instead of stranding it at PickRunning — the gap issue
-// #705 closes: RunContinuous's failure branch previously transitioned only
-// the tracker issue, never the Console's own queue.
+// A Box that runs and exits non-zero moves its queue row to the terminal
+// PickFailed state instead of stranding it at PickRunning. That is the gap
+// issue #705 closes: RunContinuous's failure branch previously transitioned
+// only the tracker issue, never the Console's own queue.
 func TestLauncher_TryLaunch_BoxFailureReachesPickFailed(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
@@ -467,10 +440,8 @@ func TestLauncher_TryLaunch_BoxFailureReachesPickFailed(t *testing.T) {
 	}
 }
 
-// TestLauncher_LiveIssues_ExcludesPickFailed verifies LiveIssues filters out
-// a PickFailed row rather than only ever seeing PickRunning rows in
-// practice (issue #974) — the exclusion was true by construction but had no
-// test asserting it directly.
+// LiveIssues filters out a PickFailed row (issue #974). The exclusion was true
+// by construction but had no test asserting it directly.
 func TestLauncher_LiveIssues_ExcludesPickFailed(t *testing.T) {
 	launch := &Launcher{queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "41", Title: "running one", State: PickRunning})
@@ -483,13 +454,11 @@ func TestLauncher_LiveIssues_ExcludesPickFailed(t *testing.T) {
 	}
 }
 
-// TestLauncher_TryLaunch_RacingAddNeverStrands stress-tests the lost-wakeup
-// window between a drain's last (empty) discover() and l.launching clearing:
-// a second pick is Add()ed and tryLaunch is called from a separate goroutine
-// timed to race the first pick's Box finishing. Run many times so real
-// goroutine-scheduling jitter has a chance to land in that window; every
-// iteration must still settle both picks — a stranded PickQueued pick means
-// the race reopened (#646).
+// Stress-tests the lost-wakeup window between a drain's last empty discover()
+// and l.launching clearing: a second pick is added and tryLaunch called from a
+// separate goroutine timed to race the first pick's Box finishing. Many
+// iterations give goroutine-scheduling jitter a chance to land in that window;
+// a stranded PickQueued pick means the race reopened (#646).
 func TestLauncher_TryLaunch_RacingAddNeverStrands(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
@@ -519,13 +488,11 @@ func TestLauncher_TryLaunch_RacingAddNeverStrands(t *testing.T) {
 			launch.tryLaunch(f, dir)
 		}()
 
-		// Poll for both picks settled instead of Launcher.Wait(): the
-		// racing goroutine above may call tryLaunch (wg.Add) after this
-		// drain's wg has already dropped to zero, and a concurrent Add
-		// racing a Wait observing zero is the exact misuse
-		// sync.WaitGroup's own contract forbids — a test-only concern, not
-		// a production one (Run only calls Wait once, after its single
-		// read loop has already stopped accepting "p" commands).
+		// Poll for both picks settled instead of Launcher.Wait(): the racing
+		// goroutine above may call tryLaunch (wg.Add) after this drain's wg
+		// has dropped to zero, and a concurrent Add racing a Wait that
+		// observed zero is the misuse sync.WaitGroup's contract forbids. Run
+		// calls Wait once, after its read loop stops, so production is safe.
 		deadline := time.Now().Add(2 * time.Second)
 		for {
 			snap := launch.queue.Snapshot()

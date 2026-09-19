@@ -32,19 +32,17 @@ type hostMediationHarness struct {
 
 	mu         sync.Mutex
 	relayedSHA map[string]string
-	// comments maps a pre-registered issue number to its posted bodies, so
-	// far. An issue number absent from this map 404s -- the fault case,
-	// exactly like contract_test.go's forgejoHarness comment route.
+	// Keys are pre-registered issue numbers. A number absent from this map
+	// 404s, the fault case, exactly like contract_test.go's forgejoHarness
+	// comment route.
 	comments map[string][]string
-	// filedIssues maps an assigned issue number to the title/body/labels
-	// PostIssue filed it with, so far -- nextIssueNum hands out the next
-	// number, mirroring Forgejo's own auto-incrementing issue numbering.
+	// filedIssues records what PostIssue filed, keyed by the number
+	// nextIssueNum hands out, mirroring Forgejo's own auto-incrementing
+	// issue numbering.
 	filedIssues  map[int]filedIssue
 	nextIssueNum int
 }
 
-// filedIssue records a PostIssue call's title, body, and labels as observed
-// by the hostMediationHarness's issue-creation and set-labels routes.
 type filedIssue struct {
 	Title  string
 	Body   string
@@ -110,13 +108,11 @@ func (h *hostMediationHarness) handle(w http.ResponseWriter, r *http.Request) {
 			"html_url": "https://forge.test/owner/repo/pulls/999",
 		})
 	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls":
-		// Only reachable via OpenPRForBranch, itself only reached after the
-		// already-exists-adopt head's 409 create above -- the
-		// DraftPRCreationAdoptsExisting scenario (issue #2407 slice 3). The
-		// seeded PR is a draft, matching CreateDraftPR's own real output
-		// (forgejo always creates a "WIP:"-prefixed draft PR), so this
-		// exercises OpenPRForBranch's draft-inclusive contract (issue
-		// #2408).
+		// Reached only via OpenPRForBranch after the adopt head's 409 create
+		// above, the DraftPRCreationAdoptsExisting scenario (issue #2407
+		// slice 3). The seeded PR is a draft because CreateDraftPR really
+		// makes a WIP-prefixed draft, so this pins OpenPRForBranch's
+		// draft-inclusive contract (issue #2408).
 		json.NewEncoder(w).Encode([]map[string]any{
 			{
 				"number":   2407,

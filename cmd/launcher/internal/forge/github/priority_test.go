@@ -6,14 +6,11 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestExecClient_Priority_ResolvedFromLabels is a wiring smoke test, not the
-// exhaustive label-matching matrix — that lives in forge.ResolvePriority's
-// own TestResolvePriority (priority_test.go in the forge package), which
-// every IssueTracker adapter shares instead of re-deriving the same switch
-// (mirrors DispatchLabels.ClaimRemoveLabels's shared-helper precedent).
-// This just confirms the three call sites in exec_issues.go (ListIssues,
-// ListOpenIssues, Issue) actually call it, exercised through the
-// contract_test.go fake-gh harness.
+// TestExecClient_Priority_ResolvedFromLabels is a wiring smoke test. Every
+// IssueTracker adapter shares forge.ResolvePriority rather than re-deriving
+// the label switch, so the exhaustive matrix lives in the forge package's
+// TestResolvePriority. This only confirms the three call sites in
+// exec_issues.go (ListIssues, ListOpenIssues, Issue) call it.
 func TestExecClient_Priority_ResolvedFromLabels(t *testing.T) {
 	h := newGithubHarness(t)
 	h.SeedIssue(forge.Issue{

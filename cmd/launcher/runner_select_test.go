@@ -7,15 +7,11 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestRunnerForKind_And_BuildRunnerForKind covers bootstrap's/cmdReconcile's
-// runnerForKind and build()'s buildRunnerForKind together (issue #2538
-// review finding): both must key solely on c.runnerKind ("bwrap" selects the
-// bwrap adapter, anything else — including "oci" and the empty-string
-// default — selects the OCI adapter), never c.runtime; they differ only in
-// which constructor the bwrap arm calls. Since the concrete adapter types
-// (bwrapAdapter, ociAdapter) are unexported, this asserts via
-// reflect.TypeOf against a runner built by calling the corresponding
-// exported constructor directly.
+// TestRunnerForKind_And_BuildRunnerForKind pins that both selectors key solely
+// on c.runnerKind, never c.runtime (issue #2538 review finding): "bwrap" picks
+// the bwrap adapter, and anything else, including "oci" and the empty default,
+// picks the OCI adapter. The adapter types are unexported, so the test compares
+// reflect.TypeOf against a runner from the matching exported constructor.
 func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 	rc := runner.Config{}
 	pwd := "/pwd"

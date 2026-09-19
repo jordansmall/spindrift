@@ -6,12 +6,9 @@ import (
 	"testing"
 )
 
-// TestReviewLoopOrchestratorFragmentInstructsDispositionsFile is a
-// content-invariant guard for issue #2550: the fix pass's own instruction
-// fragment (review-loop-orchestrator.md) must tell the agent to write a
-// dispositions file separate from the free-form pass-summary file, in a
-// terse per-finding line format, at the path the orchestrator's
-// --dispositions-path flag defaults to.
+// Issue #2550: the fragment must tell the agent to write dispositions to a
+// file separate from the pass summary, at the path --dispositions-path
+// defaults to.
 func TestReviewLoopOrchestratorFragmentInstructsDispositionsFile(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	content := readPromptFile(t, repoRoot, "fragments/review-loop-orchestrator.md")
@@ -29,12 +26,9 @@ func TestReviewLoopOrchestratorFragmentInstructsDispositionsFile(t *testing.T) {
 	}
 }
 
-// TestReviewLoopOrchestratorFragmentInstructsDecisionsFile is a
-// content-invariant guard for issue #2695: the fix pass's own instruction
-// fragment (review-loop-orchestrator.md) must tell the agent to write a
-// decisions file separate from both the free-form pass-summary file and the
-// dispositions file, in a terse per-decision line format, at the path the
-// orchestrator's --decisions-path flag defaults to.
+// Issue #2695: the fragment must tell the agent to write decisions to a file
+// separate from both the pass summary and the dispositions, at the path
+// --decisions-path defaults to.
 func TestReviewLoopOrchestratorFragmentInstructsDecisionsFile(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	content := readPromptFile(t, repoRoot, "fragments/review-loop-orchestrator.md")

@@ -15,7 +15,7 @@ var classifyTests = []struct {
 	lines       []string
 	wantClass   driverkit.Class
 	wantReason  driverkit.Reason
-	wantResetAt *time.Time // nil means expect nil
+	wantResetAt *time.Time
 }{
 	{
 		name: "RateLimit_WithResetsAt",
@@ -67,9 +67,8 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Bare "Overloaded" plain-text marker — exercises the lowest-priority
-		// Overloaded pattern, which is not reached by overloaded_error or
-		// "529 Overloaded" test strings.
+		// Exercises the lowest-priority bare "Overloaded" pattern, which the
+		// overloaded_error and "529 Overloaded" cases never reach.
 		name: "Overloaded_PlainText",
 		lines: []string{
 			`Overloaded`,
@@ -79,8 +78,8 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Anthropic mid-stream 5xx server error: structured JSON error type
-		// (issue #815) — maps onto the existing Overloaded reason.
+		// Anthropic mid-stream 5xx server error as a structured JSON error
+		// type, mapped onto the existing Overloaded reason (issue #815).
 		name: "Overloaded_ServerError_ErrorType",
 		lines: []string{
 			`{"type":"error","error":{"type":"server_error","message":"Server error"}}`,
@@ -90,11 +89,9 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// The claude CLI's synthetic terminator for a mid-stream 5xx: an
-		// assistant-typed event with model:"<synthetic>" and a top-level
-		// "error":"server_error" field. It is a CLI-injected terminator, not
-		// agent-authored content, so isAgentContentEvent must not swallow it
-		// (issue #815).
+		// The claude CLI's synthetic terminator for a mid-stream 5xx is a
+		// CLI-injected event, not agent-authored content, so
+		// isAgentContentEvent must not swallow it (issue #815).
 		name: "Overloaded_SyntheticServerErrorTerminator",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}],"stop_reason":"stop_sequence"},"error":"server_error"}`,
@@ -105,11 +102,9 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// A genuine assistant turn (real model, no top-level "error" field)
-		// that quotes "server_error" verbatim in its own prose — e.g. a box
-		// working on this classifier's error-handling code — must not be
-		// mistaken for the CLI's synthetic terminator; the #579 self-poison
-		// guard still applies (issue #815).
+		// A genuine assistant turn that quotes "server_error" in its own prose
+		// must not be mistaken for the CLI's synthetic terminator. The #579
+		// self-poison guard still applies (issue #815).
 		name: "Terminal_SelfPoisoning_ServerErrorMarkerInGenuineAssistantContent",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Adding a server_error transient pattern test case"}]}}`,
@@ -119,11 +114,9 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// The claude CLI's normal terminal type:"result" line echoes the
-		// preceding assistant turn's text into its "result" field on an
-		// ordinary (non-error) completion. If that text quoted a transient
-		// marker in genuine prose, the echo must not be scanned as a fresh
-		// signal (issue #818).
+		// The CLI's ordinary, non-error type:"result" line echoes the preceding
+		// assistant turn's text into "result". That echo must not be scanned
+		// as a fresh signal (issue #818).
 		name: "Terminal_SelfPoisoning_ServerErrorMarkerEchoedInResultLine",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Fixing the server_error guard now."}]}}`,
@@ -135,9 +128,8 @@ var classifyTests = []struct {
 	},
 	{
 		// A type:"system" heartbeat line (see heartbeat_test.go) can land
-		// between the genuine assistant turn and the echoing type:"result"
-		// line. It is neither agent content nor the result line, so it
-		// must not consume the pending echo -- the guard must see past it
+		// between the genuine assistant turn and the echoing result line. It
+		// must not consume the pending echo, so the guard has to see past it
 		// to the real result line (issue #1197).
 		name: "Terminal_SelfPoisoning_ServerErrorMarkerEchoedAfterInterveningSystemLine",
 		lines: []string{
@@ -150,9 +142,7 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Multiple intervening non-content lines (e.g. more than one
-		// heartbeat) must all be skipped transparently -- the pending
-		// echo is only consumed by the type:"result" line itself, no
+		// Only the type:"result" line itself consumes the pending echo, no
 		// matter how many non-content lines come first (issue #1197).
 		name: "Terminal_SelfPoisoning_ServerErrorMarkerEchoedAfterMultipleInterveningLines",
 		lines: []string{
@@ -166,16 +156,11 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Real-world ordering: a genuine assistant turn (real model) quotes
-		// "server_error" verbatim in its own prose, then the claude CLI
-		// injects its synthetic mid-stream terminator right after. The #579
-		// guard resets sr when the genuine turn is scanned, but that reset is
-		// immaterial here — the terminator line carries its own top-level
-		// "error":"server_error" field, which matchTransient re-matches on
-		// that very next line, independent of the earlier reset (issue #815).
-		// Locks in the invariant against a future isAgentContentEvent/scanLog
-		// change that widens the reset window and swallows the terminator's
-		// own marker too.
+		// The #579 guard resets sr when the genuine turn is scanned, but that
+		// reset is immaterial: the terminator carries its own top-level
+		// "error":"server_error", which matchTransient re-matches on the next
+		// line. Pins that against a future isAgentContentEvent or scanLog
+		// change that widens the reset window (issue #815).
 		name: "Transient_GenuineAssistantContent_ThenSyntheticServerErrorTerminator",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Investigating the server_error transient pattern before writing the fix"}]}}`,
@@ -187,12 +172,10 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// A genuine is_error:true result line whose "result" text
-		// coincidentally matches the immediately preceding genuine assistant
-		// turn's transient marker must still be scanned as a fresh signal —
-		// the echo-suppression guard (issue #818) only applies to ordinary
-		// (is_error:false) completions, since only those echo the assistant
-		// turn's text verbatim (issue #1196).
+		// The echo-suppression guard (issue #818) applies only to
+		// is_error:false completions, since only those echo the assistant
+		// turn's text, so a genuine is_error:true result that coincidentally
+		// matches the preceding marker is still a fresh signal (issue #1196).
 		name: "Transient_GenuineIsErrorResultCoincidentallyMatchesPrecedingMarker",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Investigating the rate_limit_error handling code now."}]}}`,
@@ -203,18 +186,11 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Stronger canary than the same-marker case above: the genuine
-		// turn quotes "rate_limit_error" while the synthetic terminator
-		// carries "server_error" -- two different transientPatterns
-		// entries mapping to two different Reasons. Unlike the
-		// same-marker case, this outcome is NOT invariant to the #579
-		// guard: if isAgentContentEvent stopped exempting the genuine
-		// turn from the normal scan, its own "rate_limit_error" text
-		// would set sr.found=true with RateLimit, and the terminator's
-		// "server_error" would never be scanned (matchTransient only
-		// runs when !sr.found), so the test would assert RateLimit and
-		// fail. Verified experimentally: disabling isAgentContentEvent's
-		// special-case branch makes this test fail (issue #1199).
+		// Unlike the same-marker case above, this outcome is not invariant to
+		// the #579 guard: if isAgentContentEvent stopped exempting the genuine
+		// turn, its "rate_limit_error" would set sr.found and the terminator's
+		// "server_error" would never be scanned. Disabling that branch makes
+		// this test fail (issue #1199).
 		name: "Transient_GenuineAssistantContent_RateLimitMarker_ThenSyntheticServerErrorTerminator",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Investigating the rate_limit_error transient pattern before writing the fix"}]}}`,
@@ -304,7 +280,7 @@ var classifyTests = []struct {
 	},
 	{
 		name:        "Terminal_NoLog",
-		lines:       nil, // no lines — will use a nonexistent file
+		lines:       nil, // The runner points this case at a nonexistent file.
 		wantClass:   driverkit.Terminal,
 		wantReason:  driverkit.TaskFailed,
 		wantResetAt: nil,
@@ -317,7 +293,6 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Claude Code session-limit: structured JSON error type.
 		name: "RateLimit_SessionLimit_ErrorType",
 		lines: []string{
 			`{"type":"error","error":{"type":"usage_limit_reached","message":"Claude Code usage limit reached"}}`,
@@ -327,7 +302,6 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Claude Code session-limit with a resetsAt field — ResetAt must propagate.
 		name: "RateLimit_SessionLimit_WithResetsAt",
 		lines: []string{
 			`{"type":"error","error":{"type":"usage_limit_reached","message":"Claude Code usage limit reached"},"resetsAt":1783192800}`,
@@ -337,7 +311,6 @@ var classifyTests = []struct {
 		wantResetAt: func() *time.Time { t := time.Unix(1783192800, 0).UTC(); return &t }(),
 	},
 	{
-		// Claude Code session-limit: plain-text fallback message.
 		name: "RateLimit_SessionLimit_PlainText",
 		lines: []string{
 			`Claude Code usage limit reached`,
@@ -346,19 +319,16 @@ var classifyTests = []struct {
 		wantReason:  driverkit.RateLimit,
 		wantResetAt: nil,
 	},
-	// RateLimit_OAuthSessionLimit_PlainText, RateLimit_OAuthWeeklyLimit_PlainText,
-	// and RateLimit_OAuthOpusLimit_PlainText — the same three OAuth plain-text
-	// "resets ... (UTC)" markers — live in
+	// The three OAuth plain-text "resets ... (UTC)" cases live in
 	// TestClassify_OAuthPlainTextResetsAt_ExactEpoch instead of this table:
-	// this runner uses Classify/the real wall clock, so ResetAt's fixed epoch
-	// can't be pinned here without flaking near a day/week boundary; that other
-	// test uses ClassifyAt with a fixed now instead.
+	// this runner uses Classify and the real wall clock, so a fixed epoch
+	// would flake near a day or week boundary. That test uses ClassifyAt with
+	// a fixed now.
 	{
-		// Same synthetic-terminator shape as SyntheticTerminator below, but
-		// with no top-level "error" field — isAgentContentEvent then treats
-		// the line as ordinary agent content and clears the candidate, so
-		// this stays Terminal. Documents that #1539's fix depends on the
-		// CLI setting "error" on this event, matching the real captured log.
+		// Same synthetic-terminator shape as the case below but with no
+		// top-level "error" field, so isAgentContentEvent treats the line as
+		// ordinary agent content and clears the candidate. #1539's fix depends
+		// on the CLI setting "error" on this event.
 		name: "Terminal_OAuthSessionLimit_NoErrorField_Swallowed",
 		lines: []string{
 			`{"type":"assistant","message":{"id":"a2645b97-8af6-46ec-aa20-7cde65f631ea","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your session limit · resets 6:30pm (UTC)"}]},"session_id":"e89ee32d-c257-468d-c90b-5549c606b8bd","uuid":"1f7d9873-9ac8-4f1a-a7a5-d6ed1a3a6793"}`,
@@ -368,9 +338,7 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Real captured log from issue #1539: the CLI's rate_limit_event pair,
-		// the synthetic-terminator assistant notice, and the terminal
-		// is_error:true/429 result line. ResetAt must propagate from the
+		// Real captured log from issue #1539. ResetAt must propagate from the
 		// rate_limit_event's "resetsAt" field.
 		name: "RateLimit_OAuthSessionLimit_SyntheticTerminator",
 		lines: []string{
@@ -384,10 +352,9 @@ var classifyTests = []struct {
 		wantResetAt: func() *time.Time { t := time.Unix(1784399400, 0).UTC(); return &t }(),
 	},
 	{
-		// Rate-limit markers nested inside an assistant message's own content
-		// (the agent's prose about rate-limit code, or a diff/test fixture it
-		// wrote) must not poison classification — no terminating API error
-		// event means Terminal, not RateLimit (issue #579).
+		// Rate-limit markers inside an assistant message's own content must not
+		// poison classification: with no terminating API error event the run
+		// is Terminal, not RateLimit (issue #579).
 		name: "Terminal_SelfPoisoning_MarkersOnlyInAssistantContent",
 		lines: []string{
 			`{"type":"assistant","message":{"content":[{"type":"text","text":"Adding a rate_limit_error test case with 429 Too Many Requests and resetsAt:1783963200 fixture data"}]}}`,
@@ -397,9 +364,9 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Rate-limit markers nested inside a tool_result turn (the agent
-		// grepping/catting its own rate-limit source or a fixture log) must
-		// not poison classification either (issue #579).
+		// Rate-limit markers inside a tool_result turn (the agent reading its
+		// own rate-limit source or a fixture log) must not poison
+		// classification either (issue #579).
 		name: "Terminal_SelfPoisoning_MarkersOnlyInToolResultContent",
 		lines: []string{
 			`{"type":"user","message":{"content":[{"type":"tool_result","content":"logs/issue-565.log:1: rate_limit_error 429 Too Many Requests \"resetsAt\":1783963200"}]}}`,
@@ -409,10 +376,9 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// A genuine terminating rate-limit event followed by continued,
-		// substantive agent activity means the run recovered — the earlier
-		// event is not the reason the box eventually exited, so it must not
-		// be attributed as the cause (issue #579).
+		// A genuine rate-limit event followed by continued agent activity means
+		// the run recovered, so that event is not why the box exited and must
+		// not be attributed as the cause (issue #579).
 		name: "Terminal_RecoveredMidRun429NotAttributed",
 		lines: []string{
 			`{"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"},"resetsAt":1783192800}`,
@@ -425,13 +391,11 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Redacted reconstruction of the box log that stranded
-		// agent-issue-565 (issue #579): the box edits rate-limit-handling
-		// code, its own diff/test-fixture content quotes rate_limit_error /
-		// 429 / a fixture "resetsAt" timestamp, and it then OOM-dies with no
-		// SPINDRIFT_OUTCOME line and no genuine terminating API error event.
-		// Must classify as Terminal/TaskFailed — no multi-hour hold on the
-		// fixture timestamp.
+		// Redacted reconstruction of the box log that stranded agent-issue-565:
+		// the box edits rate-limit code, its own fixture content quotes
+		// rate_limit_error, 429 and a fixture "resetsAt", then it dies with no
+		// SPINDRIFT_OUTCOME and no genuine API error event. Must be Terminal,
+		// with no multi-hour hold on the fixture timestamp (issue #579).
 		name: "Terminal_Issue565Reconstruction_NoHoldOnFixtureResetsAt",
 		lines: []string{
 			`{"type":"assistant","message":{"content":[{"type":"text","text":"Working on issue #565: hold-and-retry rate-limited boxes."}]}}`,
@@ -445,10 +409,10 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// A claude-code build that predates the --agents flag rejects it
-		// outright with a plain-text CLI-usage error. Distinct from the
-		// generic Terminal/TaskFailed bucket so the operator gets a hint the
-		// fix is to bump claude-code (issue #1552).
+		// A claude-code build predating the --agents flag rejects it with a
+		// plain-text usage error. It gets its own Reason, apart from the
+		// generic TaskFailed bucket, so the operator sees that the fix is to
+		// bump claude-code (issue #1552).
 		name: "Terminal_UnsupportedFlag_UnknownAgentsOption",
 		lines: []string{
 			`==> claude implementing issue #142 on agent/issue-142`,
@@ -459,10 +423,9 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// A genuine assistant turn (real model) whose own prose quotes the
-		// unknown-option marker verbatim — e.g. a box working on this very
-		// classifier case — must not be misattributed as the CLI rejecting
-		// --agents; the #579 self-poison guard still applies (issue #1552).
+		// A genuine assistant turn quoting the unknown-option marker in its own
+		// prose must not be misattributed as the CLI rejecting --agents. The
+		// #579 self-poison guard still applies (issue #1552).
 		name: "Terminal_SelfPoisoning_UnknownAgentsOptionInGenuineAssistantContent",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Adding a classifier case for error: unknown option '--agents'"}]}}`,
@@ -472,11 +435,9 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// The claude CLI's normal terminal type:"result" line echoes the
-		// preceding assistant turn's text into its "result" field on an
-		// ordinary (non-error) completion. If that text quoted the
-		// unknown-option marker in genuine prose, the echo must not be
-		// scanned as a fresh signal (issue #818, applied to #1552).
+		// The CLI's ordinary, non-error result line echoes the preceding
+		// assistant turn's text, and that echo must not be scanned as a fresh
+		// signal (issue #818, applied to #1552).
 		name: "Terminal_SelfPoisoning_UnknownAgentsOptionEchoedInResultLine",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Fixing the unknown option '--agents' guard now."}]}}`,
@@ -487,8 +448,8 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// Issue numbers, byte counts, or port numbers containing "429" or "529"
-		// must not be mistaken for API rate-limit / overload errors.
+		// Issue numbers, byte counts and port numbers containing "429" or
+		// "529" must not be mistaken for API rate-limit or overload errors.
 		name: "Terminal_NoBareDigitFalsePositive",
 		lines: []string{
 			`Closes #1429`,
@@ -502,14 +463,11 @@ var classifyTests = []struct {
 	},
 }
 
-// TestClassify_RateLimitBeatsBareOverloaded_SameLine locks in claude's
-// intra-extras ordering: the specific "429 Too Many Requests" -> RateLimit
-// marker precedes the bare "Overloaded" -> Overloaded fallback within
-// transientExtras, so a line carrying both classifies as RateLimit
-// (first-match wins). Both markers are claude extras, not shared base —
-// driverkit.BaseTransientPatterns holds only Network markers — so reordering
-// them within the extras list is what would flip this line to Overloaded
-// (issue #2149).
+// Locks in claude's intra-extras ordering: the specific "429 Too Many
+// Requests" marker precedes the bare "Overloaded" fallback within
+// transientExtras, so a line carrying both classifies as RateLimit. Both are
+// claude extras, not shared base, so reordering that extras list is what would
+// flip this line to Overloaded (issue #2149).
 func TestClassify_RateLimitBeatsBareOverloaded_SameLine(t *testing.T) {
 	logPath := claude.WriteLog(t, `Error: 429 Too Many Requests — server Overloaded`)
 
@@ -525,9 +483,8 @@ func TestClassify_RateLimitBeatsBareOverloaded_SameLine(t *testing.T) {
 	}
 }
 
-// TestClassify_OversizedLine_ChunkMatchesMarker locks in the chunk-matching
-// oversized-line policy: a marker planted past the internal 4 MiB scan
-// buffer, inside one giant line, must still be found.
+// Locks in the chunk-matching oversized-line policy: a marker planted past the
+// internal 4 MiB scan buffer, inside one giant line, must still be found.
 func TestClassify_OversizedLine_ChunkMatchesMarker(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
 	path := filepath.Join(t.TempDir(), "big.log")
@@ -598,17 +555,11 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-// TestClassify_OAuthPlainTextResetsAt_ExactEpoch covers the three OAuth
-// plain-text rate-limit markers whose "resets ... (UTC)" suffix carries a
-// clock time (and, for the weekly variant, a weekday) but no date:
-// extractResetsAt falls back to parseResetsAtText, which rolls the next
-// occurrence of that clock time forward from now. This uses claude.ClassifyAt
-// with a fixed reference now (2026-08-12 10:00:00 UTC, a Wednesday — the same
-// reference classify_internal_test.go's TestParseResetsAtText uses) rather
-// than the real wall clock, so each case's resolved ResetAt is fully
-// deterministic and can be asserted against an exact epoch instead of loose
-// clock/weekday/bounds checks — see classifyTests for the fixed-epoch table
-// this doesn't fit (its runner uses Classify/real-clock, not ClassifyAt).
+// Covers the three OAuth plain-text markers whose "resets ... (UTC)" suffix
+// carries a clock time but no date, so extractResetsAt falls back to
+// parseResetsAtText and rolls forward from now. ClassifyAt with a fixed now
+// (2026-08-12 10:00:00 UTC, a Wednesday, the same reference
+// TestParseResetsAtText uses) makes each ResetAt assertable as an exact epoch.
 func TestClassify_OAuthPlainTextResetsAt_ExactEpoch(t *testing.T) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
 
@@ -618,23 +569,20 @@ func TestClassify_OAuthPlainTextResetsAt_ExactEpoch(t *testing.T) {
 		wantResetAt time.Time
 	}{
 		{
-			// Claude Code OAuth/subscription session-limit: plain-text notice
-			// carried in the CLI's synthetic-terminator assistant event (issue
-			// #1539) — distinct wording from the API-key usage_limit_reached form.
+			// Plain-text notice carried in the CLI's synthetic-terminator
+			// assistant event, worded differently from the API-key
+			// usage_limit_reached form (issue #1539).
 			name:        "RateLimit_OAuthSessionLimit_PlainText",
 			line:        `You've hit your session limit · resets 6:30pm (UTC)`,
 			wantResetAt: time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC),
 		},
 		{
-			// Sibling wording for the weekly-quota variant of the same OAuth
-			// notice. Aug 12 2026 is a Wednesday; the next Monday is Aug 17 2026.
+			// Aug 12 2026 is a Wednesday, so the next Monday is Aug 17 2026.
 			name:        "RateLimit_OAuthWeeklyLimit_PlainText",
 			line:        `You've hit your weekly limit · resets Mon 12:00am (UTC)`,
 			wantResetAt: time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC),
 		},
 		{
-			// Sibling wording for the per-model Opus-quota variant of the same
-			// OAuth notice.
 			name:        "RateLimit_OAuthOpusLimit_PlainText",
 			line:        `You've hit your Opus limit · resets 6:30pm (UTC)`,
 			wantResetAt: time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC),
@@ -667,15 +615,11 @@ func TestClassify_OAuthPlainTextResetsAt_ExactEpoch(t *testing.T) {
 	}
 }
 
-// TestClassify_OAuthSessionLimit_TaskNotification covers issue #2443's exact
-// captured log shape: an OAuth session-limit run with no paired
-// rate_limit_event JSON line, so ResetAt can only come from the plain-text
-// "resets 11:10pm (UTC)" fallback. The synthetic-terminator assistant event
-// (line 3) re-populates resetsAt via that fallback after the preceding
-// tool_result turn (line 2) clears any candidate under the #579 self-poison
-// guard. Uses ClassifyAt with a fixed now (rather than the classifyTests
-// table's Classify/real-clock runner) since the fallback's resolved ResetAt
-// depends on now.
+// Issue #2443's captured log shape: an OAuth session-limit run with no paired
+// rate_limit_event line, so ResetAt can only come from the plain-text "resets
+// 11:10pm (UTC)" fallback. The synthetic-terminator event re-populates resetsAt
+// after the preceding tool_result turn clears the candidate under the #579
+// guard. Uses ClassifyAt with a fixed now, since the fallback depends on now.
 func TestClassify_OAuthSessionLimit_TaskNotification(t *testing.T) {
 	logPath := claude.WriteLog(t,
 		`{"type":"system","subtype":"task_notification","task_id":"aa24ca2b1b465489b","tool_use_id":"toolu_01DkvcwtBco2hyARyZuhFqax","status":"failed","output_file":"/tmp/claude-1000/-work/1b098c96-0158-f1c7-e7da-777c6edcf041/tasks/aa24ca2b1b465489b.output","summary":"Agent terminated early due to an API error: You've hit your session limit · resets 11:10pm (UTC)","uuid":"7e18a671-13d9-4b65-9400-fb5193cac2bd","session_id":"1b098c96-0158-f1c7-e7da-777c6edcf041"}`,

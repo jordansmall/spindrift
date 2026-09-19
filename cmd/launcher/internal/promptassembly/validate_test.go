@@ -6,10 +6,8 @@ import (
 	"testing"
 )
 
-// TestValidateNoGatesActive covers the baseline no-op case: every gate the
-// four validateMarkers rows key off of is off (kind "work", box write
-// enabled, orchestrator off), so Validate must never reject or warn
-// regardless of Prompt/AgentsJSON content.
+// Every gate the validateMarkers rows key off of is off here, so Validate must
+// neither reject nor warn whatever the Prompt and AgentsJSON contain.
 func TestValidateNoGatesActive(t *testing.T) {
 	e := Env{DispatchKind: "work", BoxWriteEnabled: true, OrchestratorEnabled: false}
 	result := Result{Prompt: "no markers anywhere", AgentsJSON: ""}
@@ -23,9 +21,8 @@ func TestValidateNoGatesActive(t *testing.T) {
 	}
 }
 
-// TestValidateReadOnlyResearchReject covers the verdict-comment-relay row: a
-// research + read-only dispatch whose rendered prompt is missing
-// SPINDRIFT_COMMENT must reject.
+// Pins the verdict-comment-relay row: a read-only research dispatch whose
+// rendered prompt lacks SPINDRIFT_COMMENT must reject.
 func TestValidateReadOnlyResearchReject(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: false}
 	result := Result{Prompt: "research stub, no verdict-comment marker here"}
@@ -40,8 +37,7 @@ func TestValidateReadOnlyResearchReject(t *testing.T) {
 	}
 }
 
-// TestValidateReadOnlyResearchPass covers the same gate as above, but with
-// SPINDRIFT_COMMENT present -- no reject.
+// The verdict-comment-relay row's no-false-positive case.
 func TestValidateReadOnlyResearchPass(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: false}
 	result := Result{Prompt: "research stub\n\nPost your verdict with SPINDRIFT_COMMENT here"}
@@ -52,14 +48,11 @@ func TestValidateReadOnlyResearchPass(t *testing.T) {
 	}
 }
 
-// TestValidateReadWriteResearchFilerRelayReject covers the same
-// verdict-comment-relay row's other trigger (issue #2593): a research
-// dispatch with the Filer provisioned forces FILER_FILE_RELAY (and the
-// read-only-shaped research-verdict-github-readonly.md fragment) even when
+// The verdict-comment-relay row's other trigger (issue #2593): a research
+// dispatch with the Filer provisioned forces FILER_FILE_RELAY even when
 // BoxWriteEnabled is true, per gates_tracker.go's researchForceRelay. A
-// rendered prompt missing SPINDRIFT_COMMENT under that gate is exactly the
-// unrecoverable verdict-loss case the reject row exists to prevent, so this
-// must reject even though BOX_ACCESS_READ_ONLY is false.
+// missing SPINDRIFT_COMMENT there loses the verdict unrecoverably, so this
+// rejects even though BOX_ACCESS_READ_ONLY is false.
 func TestValidateReadWriteResearchFilerRelayReject(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: true, FilerEnabled: true}
 	result := Result{Prompt: "research stub, no verdict-comment marker here"}
@@ -74,9 +67,7 @@ func TestValidateReadWriteResearchFilerRelayReject(t *testing.T) {
 	}
 }
 
-// TestValidateReadWriteResearchFilerRelayPass covers the same gate as
-// TestValidateReadWriteResearchFilerRelayReject, but with SPINDRIFT_COMMENT
-// present -- no reject, no false positive.
+// The issue #2593 gate's no-false-positive case.
 func TestValidateReadWriteResearchFilerRelayPass(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: true, FilerEnabled: true}
 	result := Result{Prompt: "research stub\n\nPost your verdict with SPINDRIFT_COMMENT here"}
@@ -87,9 +78,8 @@ func TestValidateReadWriteResearchFilerRelayPass(t *testing.T) {
 	}
 }
 
-// TestValidateOrchestratorEnabledReject covers the reviewer-verdict row: the
-// orchestrator on with a rendered review prompt missing VERDICT: must
-// reject.
+// Pins the reviewer-verdict row: the orchestrator on with a rendered review
+// prompt missing VERDICT: must reject.
 func TestValidateOrchestratorEnabledReject(t *testing.T) {
 	e := Env{OrchestratorEnabled: true}
 	result := Result{
@@ -106,10 +96,9 @@ func TestValidateOrchestratorEnabledReject(t *testing.T) {
 	}
 }
 
-// TestValidateOrchestratorEnabledNoFalsePositive covers the no-false-positive
-// acceptance criterion (issue #2249 #3): when Result.ReviewPromptText is
-// empty (as when the orchestrator is off, or a research/fix-pass dispatch),
-// the reviewer-verdict gate is never active regardless of content.
+// Acceptance criterion 3 of issue #2249, no false positives: an empty
+// Result.ReviewPromptText (a research or fix-pass dispatch) leaves the
+// reviewer-verdict gate inactive whatever the content.
 func TestValidateOrchestratorEnabledNoFalsePositive(t *testing.T) {
 	e := Env{OrchestratorEnabled: true, BoxWriteEnabled: true}
 	result := Result{ReviewPromptText: ""}
@@ -123,8 +112,8 @@ func TestValidateOrchestratorEnabledNoFalsePositive(t *testing.T) {
 	}
 }
 
-// TestValidateBoxAccessReadOnlyWarn covers the pr-intent row: read-only,
-// non-research, prompt missing SPINDRIFT_PR_INTENT -- advisory only.
+// Pins the pr-intent row: a read-only, non-research prompt missing
+// SPINDRIFT_PR_INTENT warns rather than rejects.
 func TestValidateBoxAccessReadOnlyWarn(t *testing.T) {
 	e := Env{DispatchKind: "work", BoxWriteEnabled: false}
 	result := Result{Prompt: "issue stub, no PR-intent marker here"}
@@ -139,10 +128,8 @@ func TestValidateBoxAccessReadOnlyWarn(t *testing.T) {
 	mustContain(t, warnings[0], "SPINDRIFT_PR_INTENT")
 }
 
-// TestValidateFilerFileRelayWarn covers the issue-intent row: a filer-relay
-// dispatch (filer configured, orchestrator on, read-only) whose filer prompt
-// (extracted from AgentsJSON) is missing SPINDRIFT_ISSUE_INTENT -- advisory
-// only.
+// Pins the issue-intent row, which scans the filer prompt extracted from
+// AgentsJSON rather than result.Prompt, and warns rather than rejects.
 func TestValidateFilerFileRelayWarn(t *testing.T) {
 	e := Env{
 		DispatchKind:        "work",
@@ -163,15 +150,11 @@ func TestValidateFilerFileRelayWarn(t *testing.T) {
 	mustContain(t, strings.Join(warnings, "\n"), "SPINDRIFT_ISSUE_INTENT")
 }
 
-// TestValidateResearchFileRelayWarn covers the research-issue-intent row: a
-// research dispatch with the Filer provisioned (so FILER_FILE_RELAY resolves
-// true, issue #2593) whose own rendered prompt (result.Prompt, not the
-// filer's) is missing SPINDRIFT_ISSUE_INTENT -- advisory only. AgentsJSON's
-// filer.prompt already carries the marker, so the pre-existing issue-intent
-// row (which scans AgentsJSON, not Prompt) doesn't also warn here -- isolates
-// this case to the new row alone. Prompt already carries SPINDRIFT_COMMENT so
-// the verdict-comment-relay row (also gate-active here per issue #2593's
-// FILER_FILE_RELAY OR condition) doesn't reject first.
+// Pins the research-issue-intent row (issue #2593), which scans result.Prompt,
+// not the filer's. The fixture is tuned so only that row fires: filer.prompt
+// already carries SPINDRIFT_ISSUE_INTENT to keep the issue-intent row quiet,
+// and Prompt already carries SPINDRIFT_COMMENT so verdict-comment-relay does
+// not reject first.
 func TestValidateResearchFileRelayWarn(t *testing.T) {
 	e := Env{DispatchKind: "research", FilerEnabled: true, BoxWriteEnabled: true}
 	result := Result{
@@ -189,15 +172,10 @@ func TestValidateResearchFileRelayWarn(t *testing.T) {
 	mustContain(t, warnings[0], "SPINDRIFT_ISSUE_INTENT")
 }
 
-// TestValidateResearchFileRelayNoFalsePositiveMarkerPresent covers the
-// research-issue-intent row's no-false-positive case: same gate-active Env,
-// but result.Prompt already carries SPINDRIFT_ISSUE_INTENT -- no warning from
-// this row. AgentsJSON's filer.prompt also carries the marker, so the
-// pre-existing issue-intent row (which scans AgentsJSON, not Prompt) doesn't
-// independently warn either -- isolates this case to the new row alone.
-// Prompt also carries SPINDRIFT_COMMENT so the verdict-comment-relay row
-// (also gate-active here per issue #2593's FILER_FILE_RELAY OR condition)
-// doesn't reject first.
+// The research-issue-intent row's no-false-positive case, with the same
+// isolating fixture as TestValidateResearchFileRelayWarn: filer.prompt carries
+// the marker so the issue-intent row stays quiet, and Prompt carries
+// SPINDRIFT_COMMENT so verdict-comment-relay does not reject first.
 func TestValidateResearchFileRelayNoFalsePositiveMarkerPresent(t *testing.T) {
 	e := Env{DispatchKind: "research", FilerEnabled: true, BoxWriteEnabled: true}
 	result := Result{
@@ -214,10 +192,8 @@ func TestValidateResearchFileRelayNoFalsePositiveMarkerPresent(t *testing.T) {
 	}
 }
 
-// TestValidateResearchFileRelayNoFalsePositiveGateOff covers the
-// research-issue-intent row's other no-false-positive case: a work-kind
-// dispatch (gate never active regardless of FilerEnabled) with no marker in
-// Prompt -- no warning from this row.
+// A work-kind dispatch leaves the research-issue-intent gate inactive however
+// FilerEnabled is set, so a missing marker draws no warning.
 func TestValidateResearchFileRelayNoFalsePositiveGateOff(t *testing.T) {
 	e := Env{DispatchKind: "work", FilerEnabled: true, BoxWriteEnabled: true}
 	result := Result{Prompt: "issue stub, no issue-intent marker here"}
@@ -231,11 +207,9 @@ func TestValidateResearchFileRelayNoFalsePositiveGateOff(t *testing.T) {
 	}
 }
 
-// TestValidateDataDrivenSeverity is the data-driven proof (issue #2318):
-// patching the pr-intent row's Severity to "reject" (with the same gate-
-// active-marker-missing scenario TestValidateBoxAccessReadOnlyWarn exercises)
-// must flip Validate's outcome to a reject, proving it dispatches on
-// row.Severity/row.When data rather than a hardcoded per-id switch.
+// Issue #2318: patching the pr-intent row's Severity to "reject" must flip
+// Validate's outcome, proving it dispatches on the row's Severity and When
+// data rather than a hardcoded per-id switch.
 func TestValidateDataDrivenSeverity(t *testing.T) {
 	e := Env{DispatchKind: "work", BoxWriteEnabled: false}
 	result := Result{Prompt: "issue stub, no PR-intent marker here"}
@@ -257,9 +231,9 @@ func TestValidateDataDrivenSeverity(t *testing.T) {
 	}
 }
 
-// TestLoadValidateMarkersParsesAllRows round-trips testdata/validate-markers.json
-// -- the hand transcription of lib/prompt-contract.nix's validateMarkers
-// registry -- into []ValidateMarkerRow and asserts the decoded fields match.
+// testdata/validate-markers.json is a hand transcription of
+// lib/prompt-contract.nix's validateMarkers registry, so this round trip is
+// what catches the two drifting apart.
 func TestLoadValidateMarkersParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/validate-markers.json")
 	if err != nil {
@@ -283,8 +257,6 @@ func TestLoadValidateMarkersParsesAllRows(t *testing.T) {
 	}
 }
 
-// TestLoadValidateMarkersMalformed covers the error path: invalid JSON must
-// return a non-nil, wrapped error, never panic.
 func TestLoadValidateMarkersMalformed(t *testing.T) {
 	f, err := os.Open("testdata/malformed.json")
 	if err != nil {
@@ -297,29 +269,23 @@ func TestLoadValidateMarkersMalformed(t *testing.T) {
 	}
 }
 
-// TestLoadValidateMarkersFileMalformed exercises LoadValidateMarkersFile's
-// own error path alongside LoadValidateMarkers's.
 func TestLoadValidateMarkersFileMalformed(t *testing.T) {
 	if _, err := LoadValidateMarkersFile("testdata/malformed.json"); err == nil {
 		t.Fatal("LoadValidateMarkersFile(malformed) = nil error, want non-nil")
 	}
 }
 
-// TestLoadValidateMarkersFileNonexistent covers a nonexistent path: a
-// wrapped, non-nil error, never a panic.
 func TestLoadValidateMarkersFileNonexistent(t *testing.T) {
 	if _, err := LoadValidateMarkersFile("testdata/does-not-exist.json"); err == nil {
 		t.Fatal("LoadValidateMarkersFile(nonexistent) = nil error, want non-nil")
 	}
 }
 
-// TestValidateMarkerMessageVerbatim guards each row's pre-rendered Message
-// field surfacing verbatim (byte-for-byte, marker already interpolated by
-// the nix registry) as Validate's reject-error/warn-entry text -- the
-// data-driven successor to the hardcoded per-When switch this test used to
-// drive directly (issue #2318 parent; message text moved to the registry by
-// #2405). Each case is a scenario tuned so exactly one row's gate is active
-// with its marker missing, isolating that row's message in the outcome.
+// Each row's pre-rendered Message must reach Validate's reject error or warn
+// entry byte for byte, with the marker already interpolated by the nix
+// registry (issue #2318; message text moved to the registry by #2405). Every
+// case is tuned so exactly one row's gate is active with its marker missing,
+// which isolates that row's message in the outcome.
 func TestValidateMarkerMessageVerbatim(t *testing.T) {
 	rows := testValidateMarkerRows()
 	rowMessage := func(id string) string {
@@ -388,9 +354,9 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 			FilerEnabled:        true,
 		}
 		result := Result{
-			// Already carries SPINDRIFT_PR_INTENT so the boxAccessReadOnly
-			// row's gate, also active under this Env, doesn't also warn --
-			// isolates this case to the filerFileRelay row alone.
+			// Carries SPINDRIFT_PR_INTENT so the boxAccessReadOnly row, whose
+			// gate is also active here, stays quiet and leaves only the
+			// filerFileRelay row's warning.
 			Prompt:     "issue stub with SPINDRIFT_PR_INTENT already present",
 			AgentsJSON: `{"filer":{"prompt":"no marker here"}}`,
 		}
@@ -409,9 +375,9 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 	})
 }
 
-// testValidateMarkerRows returns the five validateMarkers rows in
-// lib/prompt-contract.nix's own order, for tests that don't need to load
-// them from testdata/validate-markers.json.
+// The rows stay in lib/prompt-contract.nix's own order, because
+// TestLoadValidateMarkersParsesAllRows compares them against the testdata file
+// index by index.
 func testValidateMarkerRows() []ValidateMarkerRow {
 	return []ValidateMarkerRow{
 		{
@@ -457,10 +423,9 @@ func testValidateMarkerRows() []ValidateMarkerRow {
 	}
 }
 
-// mustContain is a small helper asserting substr appears in s; the marker
-// alone suffices for the gate-logic tests above, since
-// TestValidateMarkerMessageVerbatim separately guards each row's exact
-// message text against the registry's Message field.
+// The gate-logic tests match on the marker alone, because
+// TestValidateMarkerMessageVerbatim separately guards each row's exact message
+// text against the registry's Message field.
 func mustContain(t *testing.T, s, substr string) {
 	t.Helper()
 	if !strings.Contains(s, substr) {

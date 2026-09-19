@@ -13,10 +13,9 @@ import (
 	"testing"
 )
 
-// flakeLockNixpkgsRef reads the repo's own flake.lock and returns the pinned
-// nixpkgs flake-ref, so the throwaway devShell this test builds below reuses
-// the exact revision the rest of the build already has cached instead of
-// triggering an unrelated fetch.
+// flakeLockNixpkgsRef returns the nixpkgs flake-ref pinned in the repo's own
+// flake.lock, so the throwaway devShell below reuses a revision the build
+// already has cached instead of triggering an unrelated fetch.
 func flakeLockNixpkgsRef(t *testing.T) string {
 	t.Helper()
 	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
@@ -47,7 +46,6 @@ func flakeLockNixpkgsRef(t *testing.T) string {
 	return fmt.Sprintf("github:%s/%s/%s", n.Locked.Owner, n.Locked.Repo, n.Locked.Rev)
 }
 
-// runIn runs name/args to completion in dir, failing the test on error.
 func runIn(t *testing.T, dir, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)
@@ -57,10 +55,10 @@ func runIn(t *testing.T, dir, name string, args ...string) {
 	}
 }
 
-// chdir switches the process's working directory to dir and returns a func
-// that restores the previous one — buildCmd's `nix develop .#<name>` resolves
-// the flake against the process cwd, so exercising a real devShell needs it
-// pointed at the throwaway flake this test writes, not the package dir.
+// chdir points the process cwd at dir and returns a restore func. buildCmd's
+// `nix develop .#<name>` resolves the flake against the process cwd, so
+// exercising a real devShell needs it on the throwaway flake this test writes,
+// not the package dir.
 func chdir(t *testing.T, dir string) func() {
 	t.Helper()
 	prev, err := os.Getwd()
@@ -77,16 +75,11 @@ func chdir(t *testing.T, dir string) func() {
 	}
 }
 
-// TestRunDevshellRealNixKeepsHarnessToolsReachable proves the invariant
-// buildCmd's own comment and ADR 0014 rely on but no prior test checked
-// (issue #798): a real `nix develop` devShell that names neither git nor gh
-// still leaves both reachable to the wrapped command. lib/image.nix bakes
-// harness tools (git, gh, jq, driver-exec) at /bin and sets the container's
-// PATH to it; nix develop's default (non---pure) PATH handling prepends the
-// devShell's own paths onto whatever PATH already existed rather than
-// replacing it, so /bin survives at the tail — this test builds a devShell
-// with no packages at all and confirms git/gh (from the caller's own PATH,
-// standing in for the image's /bin bake) are still resolvable inside it.
+// TestRunDevshellRealNixKeepsHarnessToolsReachable pins the invariant buildCmd
+// and ADR 0014 rely on but no earlier test checked (issue #798): a real
+// `nix develop` devShell naming neither git nor gh still leaves both reachable.
+// Non-pure nix develop prepends the devShell's own paths onto the existing PATH,
+// so the image's /bin bake survives at the tail, and the caller's PATH stands in.
 func TestRunDevshellRealNixKeepsHarnessToolsReachable(t *testing.T) {
 	for _, bin := range []string{"nix", "git", "gh"} {
 		if _, err := exec.LookPath(bin); err != nil {
@@ -118,11 +111,11 @@ func TestRunDevshellRealNixKeepsHarnessToolsReachable(t *testing.T) {
 	runIn(t, dir, "git", "init", "-q")
 	runIn(t, dir, "git", "add", "-A")
 
-	// The shellHook marker distinguishes an actual devShell entry from
-	// run()'s relaunch-on-launch-failure fallback (run.go:59), which reruns
-	// the Driver directly (no devShell, no marker) if the wrap never
-	// produces output — without this check, a broken throwaway devShell
-	// would silently degrade to the direct case and still pass.
+	// The shellHook marker distinguishes a real devShell entry from run()'s
+	// relaunch-on-launch-failure fallback (run.go:59), which reruns the Driver
+	// directly with no devShell and no marker if the wrap produces no output.
+	// Without the check, a broken throwaway devShell would silently degrade to
+	// that path and still pass.
 	bin := writeFakeDriver(t, dir, "fake-driver", `set -e
 [ "$SPINDRIFT_TEST_DEVSHELL_MARKER" = "798" ] || { echo "devshell not entered"; exit 1; }
 command -v git >/dev/null || { echo "git not on PATH"; exit 1; }

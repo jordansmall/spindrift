@@ -13,9 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// TestParse_SingleValidRouteBearerNetrc verifies that a minimal, valid routes
-// file (ADR 0045) parses into one Route carrying the fields the TOML named,
-// with its Credential mapped onto credresolver's netrc source.
+// Pins the minimal valid routes file of ADR 0045 and its mapping onto
+// credresolver's netrc source.
 func TestParse_SingleValidRouteBearerNetrc(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -45,9 +44,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_AuthSchemeAbsentDefaultsToBearer verifies that a route with no
-// auth-scheme key at all defaults to "bearer" (ADR 0045), not an empty
-// string that later code would have to special-case.
+// ADR 0045 defaults a missing auth-scheme to "bearer", not to an empty string
+// that later code would have to special-case.
 func TestParse_AuthSchemeAbsentDefaultsToBearer(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -63,8 +61,7 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_AuthSchemeUnknownValueIsError verifies that an auth-scheme
-// naming neither "bearer", "basic", nor "header:<Name>" is rejected.
+// The only valid schemes are "bearer", "basic", and "header:<Name>".
 func TestParse_AuthSchemeUnknownValueIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -81,8 +78,6 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_AuthSchemeValidValuesAccepted verifies that "basic" and a
-// "header:<Name>" naming a non-empty header name both parse cleanly.
 func TestParse_AuthSchemeValidValuesAccepted(t *testing.T) {
 	for _, scheme := range []string{"basic", "header:X-Api-Key"} {
 		t.Run(scheme, func(t *testing.T) {
@@ -103,9 +98,6 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_AuthSchemeHeaderWithEmptyNameIsError verifies that
-// "header:" naming an empty header name is rejected rather than silently
-// accepted as some header-less scheme.
 func TestParse_AuthSchemeHeaderWithEmptyNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -119,11 +111,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_AuthSchemeHeaderWithInvalidNameIsError verifies that a
-// "header:<Name>" whose Name is not a valid RFC 7230 header field name is
-// rejected at Parse -- accepting it would pass validation only to 502 every
-// proxied request once Go's http layer rejects the header name at request
-// time.
+// A header name that is not valid under RFC 7230 has to fail at Parse:
+// accepting it would pass validation only to 502 every proxied request once
+// Go's http layer rejects the name at request time.
 func TestParse_AuthSchemeHeaderWithInvalidNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -140,10 +130,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_CargoBlockRegistriesValidNamesAreParsed verifies that a route's
-// optional [routes.ecosystems.cargo] registries key (ADR 0048, issue #3405)
-// decodes onto Ecosystems.Strings("cargo", "registries") unchanged, in file
-// order.
+// The optional [routes.ecosystems.cargo] registries key (ADR 0048, issue
+// #3405) decodes unchanged, in file order.
 func TestParse_CargoBlockRegistriesValidNamesAreParsed(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -163,9 +151,7 @@ registries = ["example-remote", "another_one", "third-3"]
 	}
 }
 
-// TestParse_CargoBlockRegistriesAbsentIsNil verifies that a route with no
-// [routes.ecosystems.cargo] block at all parses with
-// Ecosystems.Strings("cargo", "registries") nil -- the block is optional.
+// The [routes.ecosystems.cargo] block is optional.
 func TestParse_CargoBlockRegistriesAbsentIsNil(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -181,10 +167,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_CargoBlockRegistriesEmptyNameIsError verifies that an empty
-// string in [routes.ecosystems.cargo] registries is rejected -- an empty
-// name would flow into a CARGO_REGISTRIES__TOKEN env var name malformed the
-// same way an empty registry name would.
+// An empty registry name would flow into a malformed CARGO_REGISTRIES__TOKEN
+// env var name.
 func TestParse_CargoBlockRegistriesEmptyNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -206,11 +190,9 @@ registries = [""]
 	}
 }
 
-// TestParse_CargoBlockRegistriesInvalidCharsIsError verifies that a
-// [routes.ecosystems.cargo] registries name outside cargo's bare-key charset
-// ([A-Za-z0-9_-]) is rejected -- these names flow into a
-// CARGO_REGISTRIES_<NAME>_TOKEN shell env var name, so a name like
-// "evil; rm" could otherwise smuggle shell metadata into a sourced env file.
+// Names outside cargo's bare-key charset ([A-Za-z0-9_-]) flow into a
+// CARGO_REGISTRIES_<NAME>_TOKEN shell env var name, so a name like "evil; rm"
+// could otherwise smuggle shell metadata into a sourced env file.
 func TestParse_CargoBlockRegistriesInvalidCharsIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -229,9 +211,6 @@ registries = ["evil; rm"]
 	}
 }
 
-// TestParse_CargoBlockRegistriesDuplicateNameIsError verifies that the same
-// [routes.ecosystems.cargo] registries name repeated within one route is
-// rejected.
 func TestParse_CargoBlockRegistriesDuplicateNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -250,9 +229,7 @@ registries = ["example-remote", "example-remote"]
 	}
 }
 
-// TestParse_AllowAbsentIsNil verifies that a route with no allow key at all
-// parses with a nil Route.Allow, and that omitting the field entirely
-// (back-compat, ADR 0047) is not an error.
+// Omitting allow entirely stays valid for back-compat (ADR 0047).
 func TestParse_AllowAbsentIsNil(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -268,11 +245,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_AllowValidPatternsAreParsed verifies that a route's optional
-// allow array (ADR 0047, issue #3258) decodes onto Route.Allow unchanged, in
-// file order, for a single-entry pattern and a multi-entry list alike. The
-// fixture is a plain host-rooted route, the only shape a routes file has
-// since ADR 0047 (issue #3261).
+// The optional allow array (ADR 0047, issue #3258) decodes unchanged, in file
+// order. The fixture is a plain host-rooted route, the only shape a routes
+// file has since ADR 0047 (issue #3261).
 func TestParse_AllowValidPatternsAreParsed(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -300,10 +275,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_AllowInvalidPatternIsError verifies that an allow pattern not
-// already in canonical subtree-root form (see validateAllowPatterns) is
-// rejected, and that the error names both the offending route and the exact
-// bad pattern.
+// An allow pattern must already be in the canonical subtree-root form that
+// validateAllowPatterns defines.
 
 func TestParse_AllowInvalidPatternIsError(t *testing.T) {
 	for _, tc := range []struct {
@@ -337,11 +310,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_GradleBlockPathValidIsNormalized verifies that a valid
-// [routes.ecosystems.gradle] path key (ADR 0048, issue #3405; the retired
-// gradle-path field it replaces was issue #3259) decodes onto
-// Route.Ecosystems's "gradle" path with a trailing slash stripped,
-// mirroring upstream-origin's own trailing-slash normalization.
+// The [routes.ecosystems.gradle] path key (ADR 0048, issue #3405; the retired
+// gradle-path field it replaces was issue #3259) is stored with a trailing
+// slash stripped, mirroring upstream-origin's own normalization.
 func TestParse_GradleBlockPathValidIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -360,9 +331,7 @@ path = "/maven/"
 	}
 }
 
-// TestParse_GradleBlockPathAbsentIsEmpty verifies that a route omitting the
-// [routes.ecosystems.gradle] block altogether parses cleanly with
-// Route.Ecosystems's "gradle" path left "" -- the block is optional.
+// The [routes.ecosystems.gradle] block is optional.
 func TestParse_GradleBlockPathAbsentIsEmpty(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -378,8 +347,6 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_GradleBlockPathMissingLeadingSlashIsError verifies that a
-// [routes.ecosystems.gradle] path not starting with "/" is rejected.
 func TestParse_GradleBlockPathMissingLeadingSlashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -398,9 +365,6 @@ path = "maven"
 	}
 }
 
-// TestParse_GradleBlockPathWhitespaceIsError verifies that a
-// [routes.ecosystems.gradle] path containing whitespace (leading, trailing,
-// or embedded) is rejected.
 func TestParse_GradleBlockPathWhitespaceIsError(t *testing.T) {
 	for _, path := range []string{" /maven", "/maven ", "/mav en"} {
 		t.Run(path, func(t *testing.T) {
@@ -420,9 +384,6 @@ path = "` + path + `"
 	}
 }
 
-// TestParse_GradleBlockPathDotDotSegmentIsError verifies that a
-// [routes.ecosystems.gradle] path containing a ".." segment is rejected as
-// basic hygiene against a malformed declaration.
 func TestParse_GradleBlockPathDotDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -441,10 +402,8 @@ path = "/maven/../etc"
 	}
 }
 
-// TestParse_GradleBlockPathDotSegmentIsError verifies that a
-// [routes.ecosystems.gradle] path containing a "." segment is rejected --
-// path.Clean-based consumers downstream can never produce or match such a
-// value.
+// The path.Clean-based consumers downstream can never produce or match a "."
+// segment.
 func TestParse_GradleBlockPathDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -463,12 +422,9 @@ path = "/maven/./release"
 	}
 }
 
-// TestParse_GradleBlockPathEmptySegmentIsError verifies that a
-// [routes.ecosystems.gradle] path containing an interior doubled slash (an
-// empty segment) is rejected --
-// path.Clean-based consumers downstream can never produce or match such a
-// value, and the trailing-slash case alone is already covered by
-// TestParse_GradleBlockPathTrailingDoubleSlashIsNormalized.
+// The path.Clean-based consumers downstream can never produce or match an
+// interior doubled slash. The trailing-slash case is covered by
+// TestParse_GradleBlockPathTrailingDoubleSlashIsNormalized instead.
 func TestParse_GradleBlockPathEmptySegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -487,15 +443,11 @@ path = "/maven//release"
 	}
 }
 
-// TestParse_GradleBlockPathShellMetacharacterIsError verifies that a
-// [routes.ecosystems.gradle] path containing "$" or "`" is rejected: the
-// path key is operator-declared but ultimately flows into
-// gradleRedirectScript's Groovy double-quoted string
-// literal (ecosystem.GradleInitScript), where an unescaped "$" triggers
-// Groovy's GString interpolation at init-script load time. Both cases splice
-// tc.path into a TOML basic (double-quoted) string, so the path itself must
-// avoid TOML's own escape syntax -- the "\" case is exercised separately in
-// TestParse_GradleBlockPathBackslashIsError via a TOML literal string instead.
+// The path key is operator-declared but flows into gradleRedirectScript's
+// Groovy double-quoted string literal (ecosystem.GradleInitScript), where an
+// unescaped "$" triggers GString interpolation at init-script load time. Both
+// cases splice tc.path into a TOML basic string, so the "\" case lives in
+// TestParse_GradleBlockPathBackslashIsError, which uses a TOML literal string.
 func TestParse_GradleBlockPathShellMetacharacterIsError(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -524,11 +476,9 @@ path = "` + tc.path + `"
 	}
 }
 
-// TestParse_GradleBlockPathBackslashIsError verifies that a
-// [routes.ecosystems.gradle] path containing "\" is rejected, the same as
-// "$" and "`" above. It uses a TOML
-// literal (single-quoted) string so the backslash reaches Parse unescaped,
-// rather than being consumed as a TOML basic-string escape sequence.
+// The fixture uses a TOML literal (single-quoted) string so the backslash
+// reaches Parse unescaped rather than being consumed as a TOML basic-string
+// escape sequence.
 func TestParse_GradleBlockPathBackslashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -547,11 +497,9 @@ path = '/maven/\release'
 	}
 }
 
-// TestParse_GradleBlockPathBareRootIsError verifies that
-// [routes.ecosystems.gradle] path = "/" is rejected: the path key only ever
-// adds a subtree on top of an already-resolved host-rooted route, so "the
-// whole host" needs no special field and declaring it is an error naming
-// that limitation explicitly.
+// The path key only adds a subtree on top of an already-resolved host-rooted
+// route, so "the whole host" needs no special field and declaring it is an
+// error naming that limitation.
 func TestParse_GradleBlockPathBareRootIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -570,12 +518,10 @@ path = "/"
 	}
 }
 
-// TestParse_GradleBlockPathDoubleSlashWholeHostIsError verifies that
-// [routes.ecosystems.gradle] path = "//" is rejected the same way as "/":
-// TrimSuffix only strips one
-// trailing slash, so a naive normalization would leave "/" -- a
-// specific-looking path that is really the same rejected whole-host value
-// -- rather than collapsing to "" and hitting the bare-root check.
+// TrimSuffix strips only one trailing slash, so a naive normalization would
+// leave "/", a specific-looking path that is really the same rejected
+// whole-host value, rather than collapsing to "" and hitting the bare-root
+// check.
 func TestParse_GradleBlockPathDoubleSlashWholeHostIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -594,11 +540,9 @@ path = "//"
 	}
 }
 
-// TestParse_GradleBlockPathTrailingDoubleSlashIsNormalized verifies that
-// [routes.ecosystems.gradle] path = "/foo//" normalizes all the way down to
-// "/foo" -- not the
-// "/foo/" a single TrimSuffix leaves behind, which would render a
-// double-slash init-script URL that strict Maven registries 404 on.
+// "/foo//" must normalize all the way to "/foo", not the "/foo/" a single
+// TrimSuffix leaves behind, which would render a double-slash init-script URL
+// that strict Maven registries 404 on.
 func TestParse_GradleBlockPathTrailingDoubleSlashIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -617,11 +561,9 @@ path = "/foo//"
 	}
 }
 
-// TestParse_GoBlockPathValidIsNormalized verifies that a valid
-// [routes.ecosystems.go] path key (ADR 0048, issue #3405; the retired
-// go-path field it replaces was issue #3260) decodes onto
-// Route.Ecosystems's "go" path with a trailing slash stripped, mirroring
-// [routes.ecosystems.gradle] path's own trailing-slash normalization.
+// The [routes.ecosystems.go] path key (ADR 0048, issue #3405; the retired
+// go-path field it replaces was issue #3260) is stored with a trailing slash
+// stripped, mirroring [routes.ecosystems.gradle] path.
 func TestParse_GoBlockPathValidIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -640,9 +582,7 @@ path = "/go/"
 	}
 }
 
-// TestParse_GoBlockPathAbsentIsEmpty verifies that a route omitting the
-// [routes.ecosystems.go] block altogether parses cleanly with
-// Route.Ecosystems's "go" path left "" -- the block is optional.
+// The [routes.ecosystems.go] block is optional.
 func TestParse_GoBlockPathAbsentIsEmpty(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -658,8 +598,6 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_GoBlockPathMissingLeadingSlashIsError verifies that a
-// [routes.ecosystems.go] path not starting with "/" is rejected.
 func TestParse_GoBlockPathMissingLeadingSlashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -678,9 +616,6 @@ path = "go"
 	}
 }
 
-// TestParse_GoBlockPathWhitespaceIsError verifies that a
-// [routes.ecosystems.go] path containing whitespace (leading, trailing, or
-// embedded) is rejected.
 func TestParse_GoBlockPathWhitespaceIsError(t *testing.T) {
 	for _, path := range []string{" /go", "/go ", "/g o"} {
 		t.Run(path, func(t *testing.T) {
@@ -700,9 +635,6 @@ path = "` + path + `"
 	}
 }
 
-// TestParse_GoBlockPathDotDotSegmentIsError verifies that a
-// [routes.ecosystems.go] path containing a ".." segment is rejected as
-// basic hygiene against a malformed declaration.
 func TestParse_GoBlockPathDotDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -721,10 +653,8 @@ path = "/go/../etc"
 	}
 }
 
-// TestParse_GoBlockPathDotSegmentIsError verifies that a
-// [routes.ecosystems.go] path containing a "." segment is rejected --
-// path.Clean-based consumers downstream can never produce or match such a
-// value.
+// The path.Clean-based consumers downstream can never produce or match a "."
+// segment.
 func TestParse_GoBlockPathDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -743,12 +673,9 @@ path = "/go/./release"
 	}
 }
 
-// TestParse_GoBlockPathEmptySegmentIsError verifies that a
-// [routes.ecosystems.go] path containing an interior doubled slash (an
-// empty segment) is rejected -- path.Clean-based consumers downstream can
-// never produce or match such a value, and the
-// trailing-slash case alone is already covered by
-// TestParse_GoBlockPathTrailingDoubleSlashIsNormalized.
+// The path.Clean-based consumers downstream can never produce or match an
+// interior doubled slash. The trailing-slash case is covered by
+// TestParse_GoBlockPathTrailingDoubleSlashIsNormalized instead.
 func TestParse_GoBlockPathEmptySegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -767,13 +694,11 @@ path = "/go//release"
 	}
 }
 
-// TestParse_GoBlockPathShellMetacharacterIsError verifies that a
-// [routes.ecosystems.go] path containing "$" or "`" is rejected: the path
-// key is operator-declared but ultimately flows into a shell-sourced
-// "export GOPROXY='<value>'" line (bindregistry_cmd.go,
-// registrymanifest.go) -- a GOPROXY URL path has no legitimate use for
-// those bytes, and the same ban keeps it and
-// [routes.ecosystems.gradle] path from drifting via validateDeclaredPath.
+// The path key is operator-declared but flows into a shell-sourced
+// "export GOPROXY='<value>'" line (bindregistry_cmd.go, registrymanifest.go).
+// A GOPROXY URL path has no legitimate use for those bytes, and the shared ban
+// keeps this key and [routes.ecosystems.gradle] path from drifting via
+// validateDeclaredPath.
 func TestParse_GoBlockPathShellMetacharacterIsError(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -802,11 +727,9 @@ path = "` + tc.path + `"
 	}
 }
 
-// TestParse_GoBlockPathBackslashIsError verifies that a
-// [routes.ecosystems.go] path containing "\" is rejected, the same as "$"
-// and "`" above. It uses a TOML literal
-// (single-quoted) string so the backslash reaches Parse unescaped, rather
-// than being consumed as a TOML basic-string escape sequence.
+// The fixture uses a TOML literal (single-quoted) string so the backslash
+// reaches Parse unescaped rather than being consumed as a TOML basic-string
+// escape sequence.
 func TestParse_GoBlockPathBackslashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -825,11 +748,9 @@ path = '/go/\release'
 	}
 }
 
-// TestParse_GoBlockPathBareRootIsError verifies that
-// [routes.ecosystems.go] path = "/" is rejected: the path key only ever
-// adds a subtree on top of an already-resolved host-rooted route, so "the
-// whole host" needs no special field and declaring it is an error naming
-// that limitation explicitly.
+// The path key only adds a subtree on top of an already-resolved host-rooted
+// route, so "the whole host" needs no special field and declaring it is an
+// error naming that limitation.
 func TestParse_GoBlockPathBareRootIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -848,12 +769,10 @@ path = "/"
 	}
 }
 
-// TestParse_GoBlockPathDoubleSlashWholeHostIsError verifies that
-// [routes.ecosystems.go] path = "//" is rejected the same way as "/":
-// TrimSuffix only strips one trailing
-// slash, so a naive normalization would leave "/" -- a specific-looking
-// path that is really the same rejected whole-host value -- rather than
-// collapsing to "" and hitting the bare-root check.
+// TrimSuffix strips only one trailing slash, so a naive normalization would
+// leave "/", a specific-looking path that is really the same rejected
+// whole-host value, rather than collapsing to "" and hitting the bare-root
+// check.
 func TestParse_GoBlockPathDoubleSlashWholeHostIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -872,10 +791,9 @@ path = "//"
 	}
 }
 
-// TestParse_GoBlockPathTrailingDoubleSlashIsNormalized verifies that
-// [routes.ecosystems.go] path = "/foo//" normalizes all the way down to
-// "/foo" -- not the "/foo/" a single TrimSuffix leaves behind, which would
-// render a double-slash GOPROXY URL that some proxies 404 on.
+// "/foo//" must normalize all the way to "/foo", not the "/foo/" a single
+// TrimSuffix leaves behind, which would render a double-slash GOPROXY URL that
+// some proxies 404 on.
 func TestParse_GoBlockPathTrailingDoubleSlashIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -894,11 +812,9 @@ path = "/foo//"
 	}
 }
 
-// TestParse_NpmrcSourceMapsToCredresolverConfig verifies that the npmrc
-// source maps onto credresolver's npmrc FileFormat, carrying the route's
-// match host through as Credential.MatchHost -- npmrcFileResolver keys its
-// lookup on the route's match host, not UpstreamURL, since npmrc has no
-// analogous upstream-URL concept (credresolver.go).
+// npmrcFileResolver keys its lookup on the route's match host, not
+// UpstreamURL, since npmrc has no analogous upstream-URL concept
+// (credresolver.go).
 func TestParse_NpmrcSourceMapsToCredresolverConfig(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -921,10 +837,8 @@ credential = { npmrc = "~/.npmrc" }
 	}
 }
 
-// TestParse_GradlePropertiesWithKeySourceMapsToCredresolverConfig verifies
-// that the gradle-properties source maps onto credresolver's
-// gradle-properties FileFormat, with its required "key" companion carried
-// through as Credential.PropertyKey (ADR 0045: the shape is path + key).
+// ADR 0045 shapes the gradle-properties source as a path plus a required "key"
+// companion, which lands in Credential.PropertyKey.
 func TestParse_GradlePropertiesWithKeySourceMapsToCredresolverConfig(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -947,9 +861,7 @@ credential = { gradle-properties = "/home/build/.gradle/gradle.properties", key 
 	}
 }
 
-// TestParse_GradlePropertiesWithoutKeyIsError verifies that
-// gradle-properties without its required "key" companion is rejected --
-// mirroring cargo-credentials' registry-name requirement (ADR 0045).
+// Mirrors cargo-credentials' registry-name requirement (ADR 0045).
 func TestParse_GradlePropertiesWithoutKeyIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -965,9 +877,7 @@ credential = { gradle-properties = "/home/build/.gradle/gradle.properties" }
 	}
 }
 
-// TestParse_KeyWithoutGradlePropertiesIsError verifies that "key" is
-// rejected when the credential's source is not gradle-properties -- "key" is
-// documented as gradle-properties' companion key only, mirroring
+// "key" is documented as gradle-properties' companion only, mirroring
 // registry-name's cargo-credentials-only rule.
 func TestParse_KeyWithoutGradlePropertiesIsError(t *testing.T) {
 	const doc = `
@@ -984,10 +894,8 @@ credential = { env = "SOME_ENV", key = "mavenToken" }
 	}
 }
 
-// TestParse_ExecSourceMapsToCredresolverConfig verifies that the exec
-// source's argv array decodes onto Credential.ExecArgv, and that the route's
-// match host rides along as Credential.MatchHost -- execResolver names the
-// route in a failed command's error, not to select behavior.
+// The match host rides along as Credential.MatchHost because execResolver
+// names the route in a failed command's error, not to select behavior.
 func TestParse_ExecSourceMapsToCredresolverConfig(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1008,9 +916,7 @@ credential = { exec = ["op", "read", "op://vault/item"] }
 	}
 }
 
-// TestParse_ExecEmptyArrayIsError verifies that an exec credential naming an
-// empty argv array is rejected -- an empty argv would reach exec.Command
-// with no program name at all.
+// An empty argv would reach exec.Command with no program name at all.
 func TestParse_ExecEmptyArrayIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1026,9 +932,7 @@ credential = { exec = [] }
 	}
 }
 
-// TestParse_ExecArrayWithNonStringElementIsError verifies that an exec argv
-// array containing a non-string element (here, a bare integer) is rejected
-// rather than panicking or silently coercing it.
+// A non-string element must be rejected, not silently coerced.
 func TestParse_ExecArrayWithNonStringElementIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1044,10 +948,7 @@ credential = { exec = ["op", 5] }
 	}
 }
 
-// TestParse_ExecValueNotArrayIsError verifies that an "exec" credential given
-// a TOML string (rather than an array) is rejected by parseExecArgv's
-// v.([]any) type assertion, naming the offending key and what shape it must
-// be.
+// parseExecArgv's v.([]any) type assertion is what rejects a TOML string here.
 func TestParse_ExecValueNotArrayIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1064,10 +965,8 @@ credential = { exec = "op read" }
 	}
 }
 
-// TestParse_ExecArgv0EmptyIsError verifies that an exec argv whose first
-// element is the empty string is rejected -- an empty argv[0] would reach
-// exec.Command as an empty program name and fail with a bare OS error that
-// never names the offending route.
+// An empty argv[0] would reach exec.Command as an empty program name and fail
+// with a bare OS error that never names the offending route.
 func TestParse_ExecArgv0EmptyIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1086,10 +985,8 @@ credential = { exec = ["", "x"] }
 	}
 }
 
-// TestParse_NonExecSourceWithNonStringValueIsError verifies that a
-// non-"exec" credential key given a non-string value (here, a TOML array
-// where env expects a string) is rejected -- catching the case go-toml's
-// decode into map[string]any can no longer reject for us at decode-time.
+// Decoding into map[string]any means go-toml no longer rejects this shape at
+// decode time, so Parse has to.
 func TestParse_NonExecSourceWithNonStringValueIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1105,10 +1002,9 @@ credential = { env = ["not", "a", "string"] }
 	}
 }
 
-// TestParse_ExistingSourcesAlsoSetMatchHost verifies that parseCredential
-// sets Credential.MatchHost for every source, not only exec and npmrc --
-// harmless for the sources that ignore it, but a single unconditional
-// assignment is simpler to reason about than one gated per source.
+// parseCredential sets MatchHost for every source, not only exec and npmrc:
+// harmless for the sources that ignore it, and one unconditional assignment is
+// simpler to reason about than one gated per source.
 func TestParse_ExistingSourcesAlsoSetMatchHost(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1124,9 +1020,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_UnknownTopLevelKeyIsError verifies that strict decoding rejects
-// a top-level key outside "routes" -- silently dropping a typo'd key would
-// mean the operator's intended config never took effect.
+// Silently dropping a typo'd top-level key would mean the operator's intended
+// config never took effect.
 func TestParse_UnknownTopLevelKeyIsError(t *testing.T) {
 	const doc = `
 enforce-allowlist-globally = true
@@ -1141,9 +1036,6 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_UnknownRouteLevelKeyIsError verifies that strict decoding
-// rejects an unknown key inside a [[routes]] entry, e.g. a typo of
-// match-host.
 func TestParse_UnknownRouteLevelKeyIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1156,10 +1048,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_ZeroRoutesIsError verifies that a routes file declaring no
-// [[routes]] entries at all is rejected -- an empty routes file is
-// indistinguishable from a typo (e.g. a stray top-level table name) and
-// silently disabling the registry proxy this way would be surprising.
+// An empty routes file is indistinguishable from a typo, such as a stray
+// top-level table name, and silently disabling the registry proxy that way
+// would surprise the operator.
 func TestParse_ZeroRoutesIsError(t *testing.T) {
 	_, err := Parse([]byte(""))
 	if err == nil {
@@ -1167,10 +1058,8 @@ func TestParse_ZeroRoutesIsError(t *testing.T) {
 	}
 }
 
-// TestParse_EmptyMatchHostIsErrorNamingRouteByIndex verifies that a route
-// with an empty (or absent) match-host is rejected, and that the error
-// names the route by its 1-based position since match-host itself -- the
-// field routes are otherwise identified by -- is what's missing.
+// The error names the route by its 1-based position because match-host, the
+// field routes are otherwise identified by, is what is missing.
 func TestParse_EmptyMatchHostIsErrorNamingRouteByIndex(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1185,10 +1074,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_MatchHostWithWhitespaceIsError verifies that a match-host with
-// leading or trailing whitespace is rejected -- it parses clean but can
-// never be a real registry hostname, so silently accepting it would corrupt
-// the route's derived path prefix.
+// A padded match-host parses clean but can never be a real registry hostname,
+// so accepting it would corrupt the route's derived path prefix.
 func TestParse_MatchHostWithWhitespaceIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1204,10 +1091,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_DuplicateMatchHostIsErrorNamingHost verifies that two routes
-// naming the same match-host are rejected -- a Box-inbound request's Host
-// header could otherwise match either one, an ambiguity the file's author
-// should resolve rather than the parser guessing "first wins".
+// A Box-inbound request's Host header could otherwise match either route, an
+// ambiguity the file's author should resolve rather than the parser guessing
+// "first wins".
 func TestParse_DuplicateMatchHostIsErrorNamingHost(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1227,13 +1113,11 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_DuplicateMatchHostAfterNormalizationIsError verifies that three
-// routes whose match-host strings differ only in case or a trailing ":port"
-// are rejected as duplicates -- the proxy's own route selection
-// (registryvocab.HostKey) lowercases and strips the port before comparing, so
-// "H.Example", "h.example:443", and "h.example" all collapse onto the same
-// key at request time; letting the raw-string check here accept the file
-// would silently shadow the file's second and third routes with the first.
+// The proxy's route selection (registryvocab.HostKey) lowercases and strips
+// the port before comparing, so "H.Example", "h.example:443" and "h.example"
+// all collapse onto one key at request time. Letting the raw-string check here
+// accept the file would silently shadow the second and third routes with the
+// first.
 func TestParse_DuplicateMatchHostAfterNormalizationIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1257,11 +1141,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_DuplicateMatchHostBracketedIPv6WithAndWithoutPortIsError verifies
-// that a bracketed IPv6 match-host with no port and the same host with an
-// explicit port collapse onto the same route -- an inbound "Host:
-// [::1]:443" normalizes (net.SplitHostPort) to "::1", so "[::1]" must
-// normalize the same way or it would never match its own route.
+// An inbound "Host: [::1]:443" normalizes (net.SplitHostPort) to "::1", so
+// "[::1]" must normalize the same way or it would never match its own route.
 func TestParse_DuplicateMatchHostBracketedIPv6WithAndWithoutPortIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1278,9 +1159,7 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_CredentialWithNoSourceIsErrorNamingRoute verifies that a
-// present-but-empty credential inline table (credential = {}) is rejected --
-// an operator who wrote the table meant to configure something, unlike
+// An operator who wrote credential = {} meant to configure something, unlike
 // TestParse_CredentialKeyAbsentIsUnauthenticated below, where the key is
 // missing altogether.
 func TestParse_CredentialWithNoSourceIsErrorNamingRoute(t *testing.T) {
@@ -1298,11 +1177,9 @@ credential = {}
 	}
 }
 
-// TestParse_CredentialKeyAbsentIsUnauthenticated verifies that a route
-// omitting the credential key altogether parses successfully with a zero
-// Credential -- an unauthenticated pass-through route (ADR 0045), distinct
-// from the present-but-empty credential = {} case above, which still
-// errors.
+// Omitting the credential key is an unauthenticated pass-through route (ADR
+// 0045), distinct from the present-but-empty credential = {} case above, which
+// still errors.
 func TestParse_CredentialKeyAbsentIsUnauthenticated(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1320,9 +1197,6 @@ match-host = "artifactory.example.com"
 	}
 }
 
-// TestParse_CredentialWithMultipleSourcesIsErrorNamingThem verifies that a
-// credential naming two sources at once is rejected and that the error
-// names both offending keys, not just the fact that there's a problem.
 func TestParse_CredentialWithMultipleSourcesIsErrorNamingThem(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1338,12 +1212,9 @@ credential = { env = "SOME_ENV", netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_CredentialSourceWithEmptyValueIsErrorNamingKey verifies that a
-// credential naming a source key with an empty string value is rejected --
-// present-but-empty must not count as "exactly one source" the way an
-// absent key correctly doesn't, since credresolver.Resolve on an empty
-// source silently returns no credential (registryproxy.go then sends the
-// request with no auth header at all), turning an operator's typo'd or
+// Present-but-empty must not count as "exactly one source": credresolver.Resolve
+// on an empty source returns no credential and registryproxy.go then sends the
+// request with no auth header at all, turning an operator's typo'd or
 // unsubstituted TOML value into a silent unauthenticated pass-through.
 func TestParse_CredentialSourceWithEmptyValueIsErrorNamingKey(t *testing.T) {
 	for _, doc := range []string{
@@ -1380,13 +1251,10 @@ credential = { cargo-credentials = "" }
 	}
 }
 
-// TestParse_CargoCredentialsRegistryNameEmptyIsGenericEmptyValueError pins
-// down which of the two "registry-name is wrong" messages fires when
-// registry-name is present but set to "": the generic empty-value check (the
-// same one every other credential key goes through) fires first and names
-// "registry-name", not the companion-required message that fires only when
-// registry-name is absent entirely (see
-// TestParse_CargoCredentialsWithoutRegistryNameIsError below).
+// Two messages can fire for a wrong registry-name. When it is present but "",
+// the generic empty-value check every credential key goes through fires first,
+// not the companion-required message that fires only when registry-name is
+// absent entirely (TestParse_CargoCredentialsWithoutRegistryNameIsError).
 func TestParse_CargoCredentialsRegistryNameEmptyIsGenericEmptyValueError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1403,10 +1271,8 @@ credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = 
 	}
 }
 
-// TestParse_CargoCredentialsWithoutRegistryNameIsCompanionRequiredError pins
-// down the companion-required message's exact text, distinguishing it from
-// the generic empty-value message pinned above -- this fires only when
-// registry-name is absent from the table, not merely empty.
+// Pins the companion-required message's exact text, which fires only when
+// registry-name is absent from the table rather than merely empty.
 func TestParse_CargoCredentialsWithoutRegistryNameIsCompanionRequiredError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1423,9 +1289,8 @@ credential = { cargo-credentials = "~/.cargo/credentials.toml" }
 	}
 }
 
-// TestParse_CredentialUnknownKeyIsErrorNamingRouteAndKey verifies that a
-// credential key outside credentialSourceKeys plus the registry-name/key
-// companions is rejected, naming both the route and the offending key.
+// The accepted set is credentialSourceKeys plus the registry-name and key
+// companions.
 func TestParse_CredentialUnknownKeyIsErrorNamingRouteAndKey(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1444,11 +1309,9 @@ credential = { pypirc = "~/.pypirc" }
 	}
 }
 
-// TestParse_RegistryNameWithoutCargoCredentialsIsError verifies that
-// registry-name is rejected when the credential's source is not
-// cargo-credentials -- registry-name is documented as cargo-credentials'
-// companion key only, and silently dropping it for other sources would
-// contradict that without telling the operator.
+// registry-name is documented as cargo-credentials' companion key only, and
+// silently dropping it for other sources would contradict that without telling
+// the operator.
 func TestParse_RegistryNameWithoutCargoCredentialsIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1467,9 +1330,7 @@ credential = { env = "SOME_ENV", registry-name = "example-remote" }
 	}
 }
 
-// TestParse_CargoCredentialsWithoutRegistryNameIsError verifies that
-// cargo-credentials without its registry-name companion is rejected at
-// Parse, phrased in TOML-key vocabulary rather than credresolver's own
+// Parse phrases this in TOML-key vocabulary rather than credresolver's own
 // scalar-env-knob error, since a routes-file operator never sees the scalar
 // knobs.
 func TestParse_CargoCredentialsWithoutRegistryNameIsError(t *testing.T) {
@@ -1490,10 +1351,8 @@ credential = { cargo-credentials = "~/.cargo/credentials.toml" }
 	}
 }
 
-// TestParse_CargoCredentialsSourceMapsRegistryNameCompanion verifies that
-// the cargo-credentials source maps onto credresolver's cargo-credentials
-// FileFormat, and that its registry-name companion key rides along as
-// Credential.RegistryName rather than being rejected as a second source.
+// The registry-name companion rides along as Credential.RegistryName rather
+// than being rejected as a second source.
 func TestParse_CargoCredentialsSourceMapsRegistryNameCompanion(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1516,9 +1375,7 @@ credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = 
 	}
 }
 
-// TestParse_EnvAndFileSourcesMapToCredresolverConfig verifies the remaining
-// two credential sources' mapping onto credresolver.Config: env's value
-// becomes FromEnv with no FileFormat, and file's value becomes FromFile with
+// env's value becomes FromEnv with no FileFormat; file's becomes FromFile with
 // FileFormat "raw".
 func TestParse_EnvAndFileSourcesMapToCredresolverConfig(t *testing.T) {
 	for name, doc := range map[string]string{
@@ -1556,11 +1413,9 @@ credential = { file = "/run/secrets/registry-token" }
 	}
 }
 
-// TestParse_RetiredUpstreamBaseURLIsError verifies that a routes file still
-// declaring upstream-base-url is rejected with the retired-key remedy (ADR
-// 0047, issue #3261): the error names the key, the route, and the migration,
-// and prints a replacement [[routes]] stanza that itself parses -- i.e. one
-// carrying neither retired key.
+// The retired-key remedy (ADR 0047, issue #3261) names the key, the route and
+// the migration, and prints a replacement [[routes]] stanza that itself
+// parses, meaning one carrying neither retired key.
 func TestParse_RetiredUpstreamBaseURLIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1593,8 +1448,7 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_RetiredEnforceAllowlistFalseIsError verifies that detection is by
-// presence, not truthiness: an explicit enforce-allowlist = false is as
+// Detection is by presence, not truthiness: enforce-allowlist = false is as
 // retired as a true one (ADR 0047, issue #3261), since enforcement is now
 // unconditional and allow is the only recourse.
 func TestParse_RetiredEnforceAllowlistFalseIsError(t *testing.T) {
@@ -1616,9 +1470,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_RetiredKeysBothDeclaredNamesBoth verifies that a route declaring
-// both retired keys is reported once, naming both keys rather than stopping
-// at the first.
+// Both retired keys are reported in one error rather than stopping at the
+// first.
 func TestParse_RetiredKeysBothDeclaredNamesBoth(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1636,10 +1489,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_RetiredUpstreamBaseURLStanzaEchoesDeclaredKeys verifies that the
-// replacement stanza is built from the offending route's own remaining keys,
-// not a generic template: auth-scheme and allow survive as top-level keys,
-// and the three retired per-ecosystem keys (also retired here, ADR 0048)
+// The replacement stanza is built from the offending route's own remaining
+// keys, not a generic template: auth-scheme and allow survive as top-level
+// keys, and the three retired per-ecosystem keys (also retired here, ADR 0048)
 // survive as their equivalent [routes.ecosystems.<name>] blocks.
 func TestParse_RetiredUpstreamBaseURLStanzaEchoesDeclaredKeys(t *testing.T) {
 	const doc = `
@@ -1675,12 +1527,11 @@ go-path = "/go"
 	}
 }
 
-// TestParse_RetiredUpstreamBaseURLStanzaOriginOnlyWhenNonDefault verifies
-// that the replacement stanza carries upstream-origin only when the retired
-// URL said something a committed config can't: a non-default scheme or an
-// explicit port. A plain https URL on the default port adds nothing the
-// match-host doesn't already say, so no upstream-origin line is printed --
-// and when one is, it is the origin alone, never the retired URL's path.
+// The stanza carries upstream-origin only when the retired URL said something
+// a committed config cannot: a non-default scheme or an explicit port. A plain
+// https URL on the default port adds nothing match-host does not already say,
+// and when an origin is printed it is the origin alone, never the retired
+// URL's path.
 func TestParse_RetiredUpstreamBaseURLStanzaOriginOnlyWhenNonDefault(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -1719,9 +1570,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_RetiredUpstreamBaseURLDoesNotEchoUserinfo verifies that the
-// retirement error never echoes a credential embedded in the retired URL:
-// this error reaches stderr and CI logs.
+// The retirement error reaches stderr and CI logs, so it must never echo a
+// credential embedded in the retired URL.
 func TestParse_RetiredUpstreamBaseURLDoesNotEchoUserinfo(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1738,10 +1588,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_UpstreamOriginAccepted verifies that the optional
-// upstream-origin key (ADR 0047, issue #3261) decodes onto
-// Route.UpstreamOrigin, normalized with any trailing "/" stripped, and that
-// a route omitting it stores "".
+// The optional upstream-origin key (ADR 0047, issue #3261) is stored with any
+// trailing "/" stripped, and a route omitting it stores "".
 func TestParse_UpstreamOriginAccepted(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -1771,10 +1619,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_UpstreamOriginInvalidIsError verifies that upstream-origin is an
-// origin, not a URL: a path (or query, or fragment) is rejected, as are
-// userinfo, a relative or non-http(s) URL, and an empty host. Every such
-// error names both the offending route and the key.
+// upstream-origin is an origin, not a URL: a path, query, fragment, userinfo,
+// a relative or non-http(s) URL, and an empty host are all rejected.
 func TestParse_UpstreamOriginInvalidIsError(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -1810,9 +1656,6 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_UpstreamOriginWithUserinfoDoesNotEcho verifies that an
-// upstream-origin carrying userinfo is rejected without echoing the
-// credential back into the error.
 func TestParse_UpstreamOriginWithUserinfoDoesNotEcho(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1829,11 +1672,10 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_MinimalHostRootedRouteParses verifies that the post-retirement
-// minimal route -- match-host plus a credential, no upstream key at all --
-// parses, and that allow, gradle-path, and go-path now coexist with it
-// freely: every route is host-rooted, so the legacy-route rejections those
-// three keys used to hit are gone (ADR 0047, issue #3261).
+// Every route is host-rooted since ADR 0047 (issue #3261), so allow,
+// gradle-path and go-path coexist freely with a minimal route of match-host
+// plus a credential; the legacy-route rejections those three keys used to hit
+// are gone.
 func TestParse_MinimalHostRootedRouteParses(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1866,10 +1708,9 @@ path = "/go"
 	}
 }
 
-// TestParse_UpstreamOriginFeedsCredentialUpstreamURL verifies that a
-// declared upstream-origin, not the "https://" + match-host stand-in, is
-// what a route's credential carries as its UpstreamURL -- the netrc source
-// keys its machine-name match on that value.
+// A declared upstream-origin, not the "https://" + match-host stand-in, is
+// what the credential carries as UpstreamURL: the netrc source keys its
+// machine-name match on that value.
 func TestParse_UpstreamOriginFeedsCredentialUpstreamURL(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1886,11 +1727,10 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestUpstreamOriginFor covers the single rule three call sites share -- the
-// migration stanza Parse prints, the retired-scalar-knob stanza the launch
-// gate prints, and what "spindrift registry discover" writes -- so a remedy
-// telling an operator what to write can never disagree with the generator
-// that writes it for them.
+// Three call sites share this rule: the migration stanza Parse prints, the
+// retired-scalar-knob stanza the launch gate prints, and what "spindrift
+// registry discover" writes. A remedy telling an operator what to write can
+// never disagree with the generator that writes it for them.
 func TestUpstreamOriginFor(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1930,10 +1770,8 @@ func TestUpstreamOriginFor(t *testing.T) {
 	}
 }
 
-// TestParse_EcosystemsBlockPathIsNormalized verifies that a
-// [routes.ecosystems.<name>] block's "path" key is validated by the same
-// canonical-path rules gradle-path and go-path always used, and that the
-// normalized value lands in Route.Ecosystems (issue #3403).
+// A [routes.ecosystems.<name>] block's "path" key follows the same
+// canonical-path rules gradle-path and go-path always used (issue #3403).
 func TestParse_EcosystemsBlockPathIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1952,9 +1790,7 @@ path = "/maven/"
 	}
 }
 
-// TestParse_EcosystemsCargoRegistriesUnderCargoParses verifies that
-// [routes.ecosystems.cargo]'s "registries" key is validated by cargo's own
-// RouteDeclaration hook and lands in Route.Ecosystems.
+// Cargo's own RouteDeclaration hook is what validates the "registries" key.
 func TestParse_EcosystemsCargoRegistriesUnderCargoParses(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1974,10 +1810,8 @@ registries = ["internal", "crates-remote"]
 	}
 }
 
-// TestParse_EcosystemsRegistriesUnderNonCargoIsError verifies that
-// "registries" -- cargo's own key -- is rejected under a different
-// ecosystem's block, naming the route and the offending key: a nil
-// RouteDeclaration hook (gradle's) accepts no key beyond "path" at all.
+// "registries" is cargo's own key, and a nil RouteDeclaration hook (gradle's)
+// accepts no key beyond "path" at all.
 func TestParse_EcosystemsRegistriesUnderNonCargoIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1999,9 +1833,7 @@ registries = ["internal"]
 	}
 }
 
-// TestParse_EcosystemsUnknownEcosystemNameIsError verifies that a
-// [routes.ecosystems.<name>] block naming an ecosystem with no
-// ecosystem.Table row is rejected, naming the route and the unknown name.
+// An ecosystem is unknown when it has no ecosystem.Table row.
 func TestParse_EcosystemsUnknownEcosystemNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2023,9 +1855,6 @@ path = "/maven"
 	}
 }
 
-// TestParse_EcosystemsPathNotStringIsError verifies that a block's "path"
-// key with a non-string value is rejected, naming the route and the block
-// spelling "ecosystems.<name>.path".
 func TestParse_EcosystemsPathNotStringIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2044,15 +1873,11 @@ path = 5
 	}
 }
 
-// TestParse_RetiredKeyAlongsideItsBlockIsError verifies that a route naming
-// the same ecosystem both via a retired top-level key and via its
-// [routes.ecosystems.<name>] block is refused by the retirement gate -- the
-// retired key alone is refused, before either side is validated -- and that
-// the printed stanza names the retired key and merges its value into the
-// ecosystem's existing block rather than dropping either. One case per
-// retired key: all three resolve through the same retiredRouteKeys table,
-// and a regression isolated to one of them would otherwise let its value
-// silently vanish from the stanza.
+// The retirement gate refuses the retired key before either side is validated,
+// and the printed stanza merges its value into the ecosystem's existing block
+// rather than dropping either. One case per retired key: all three resolve
+// through the same retiredRouteKeys table, and a regression isolated to one of
+// them would otherwise let its value silently vanish from the stanza.
 func TestParse_RetiredKeyAlongsideItsBlockIsError(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -2118,14 +1943,11 @@ registries = ["b"]
 	}
 }
 
-// TestParse_RetiredKeyStanzaMatchesBlockDoc verifies that a routes file
-// spelling the three retired top-level keys (cargo-registries, gradle-path,
-// go-path) is refused (ADR 0048, issue #3405), and that its printed
-// replacement stanza parses to the exact same Route.Ecosystems value as an
-// equivalent file already written with [routes.ecosystems.<name>] blocks --
-// an operator who pastes the stanza back ends up with the same route a
-// downstream consumer (the manifest, the resolver) would have seen either
-// way.
+// The three retired top-level keys are refused (ADR 0048, issue #3405), and
+// the printed stanza must parse to the same Route.Ecosystems as a file already
+// written with [routes.ecosystems.<name>] blocks, so an operator who pastes it
+// back gets the route a downstream consumer (the manifest, the resolver) would
+// have seen either way.
 func TestParse_RetiredKeyStanzaMatchesBlockDoc(t *testing.T) {
 	const retiredDoc = `
 [[routes]]
@@ -2168,11 +1990,9 @@ path = "/go/"
 	}
 }
 
-// TestParseRoutes_FakeRowRouteDeclarationHookSeesBlockKey drives parseRoutes
-// -- the internal seam Parse wraps -- with a fake row rather than a real
-// ecosystem, verifying the hook is called with exactly the key and value
-// the block named, and that the block itself lands unchanged in
-// Route.Ecosystems.
+// Drives parseRoutes, the internal seam Parse wraps, with a fake row rather
+// than a real ecosystem, so the hook contract is tested without depending on
+// any shipped ecosystem's rules.
 func TestParseRoutes_FakeRowRouteDeclarationHookSeesBlockKey(t *testing.T) {
 	var gotKey string
 	var gotValue any
@@ -2204,9 +2024,8 @@ widget = "gizmo"
 	}
 }
 
-// TestParseRoutes_FakeRowNilHookRejectsNonPathKey verifies that a row with a
-// nil RouteDeclaration hook -- "this row's block accepts no key beyond
-// path" -- rejects any other key, naming it in the error.
+// A nil RouteDeclaration hook means "this row's block accepts no key beyond
+// path".
 func TestParseRoutes_FakeRowNilHookRejectsNonPathKey(t *testing.T) {
 	row := ecosystem.Row{Name: "fake"}
 	const doc = `
@@ -2226,10 +2045,9 @@ widget = "gizmo"
 	}
 }
 
-// TestParseRoutes_FakeRowHookErrorIsWrappedWithBlockSpelling verifies that a
-// hook error -- a bare noun-phrase per RouteDeclarationValidator's contract
-// -- is wrapped with the block's own "ecosystems.<name>.<key>" spelling,
-// not the hook's own words alone.
+// A hook error is a bare noun phrase per RouteDeclarationValidator's contract,
+// so the caller must wrap it with the block's own "ecosystems.<name>.<key>"
+// spelling.
 func TestParseRoutes_FakeRowHookErrorIsWrappedWithBlockSpelling(t *testing.T) {
 	row := ecosystem.Row{
 		Name: "fake",
@@ -2257,11 +2075,10 @@ widget = "gizmo"
 	}
 }
 
-// TestParseRoutes_RetiredCargoRegistriesFiresBeforeRowsAreConsulted pins
-// that the retirement gate (ADR 0048, issue #3405) runs before parseRoutes
-// ever looks at rows: a legacy cargo-registries key is refused even when
-// rows omits cargo entirely, rather than reaching past the gate to whatever
-// row-lookup rejection buildRouteEcosystems would otherwise produce.
+// The retirement gate (ADR 0048, issue #3405) runs before parseRoutes looks at
+// rows: a legacy cargo-registries key is refused even when rows omits cargo
+// entirely, rather than reaching the row-lookup rejection buildRouteEcosystems
+// would otherwise produce.
 func TestParseRoutes_RetiredCargoRegistriesFiresBeforeRowsAreConsulted(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2281,10 +2098,9 @@ cargo-registries = ["a"]
 	}
 }
 
-// TestParse_RetiredKeyStanzaEchoesEcosystemBlocks verifies that the
-// replacement stanza carries the route's [routes.ecosystems.<name>] blocks
-// too, not just its top-level keys: an operator who pastes back a stanza
-// missing them silently loses every per-ecosystem declaration the route had.
+// The stanza carries the route's [routes.ecosystems.<name>] blocks too, not
+// just its top-level keys: an operator who pastes back a stanza missing them
+// silently loses every per-ecosystem declaration the route had.
 func TestParse_RetiredKeyStanzaEchoesEcosystemBlocks(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2315,10 +2131,8 @@ registries = ["internal"]
 	}
 }
 
-// TestParse_RetiredKeyStanzaRoundTripsThroughParse verifies the promise the
-// retirement error actually makes -- "paste this stanza back" -- by feeding
-// the printed stanza to Parse and checking the ecosystem declarations
-// survive the round trip intact.
+// Checks the promise the retirement error makes, "paste this stanza back", by
+// feeding the printed stanza to Parse.
 func TestParse_RetiredKeyStanzaRoundTripsThroughParse(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2364,11 +2178,10 @@ registries = ["internal", "crates-remote"]
 	}
 }
 
-// TestParse_RetiredKeyStanzaEchoesLegacyKeyAndBlockTogether verifies that a
-// route mixing spellings -- a legacy top-level per-ecosystem key for one
-// ecosystem, a block for another -- carries both as blocks in the
-// replacement stanza, after every top-level key, as TOML requires of a
-// sub-table inside a [[routes]] entry.
+// A route mixing spellings, a legacy top-level key for one ecosystem and a
+// block for another, carries both as blocks in the replacement stanza, after
+// every top-level key, as TOML requires of a sub-table inside a [[routes]]
+// entry.
 func TestParse_RetiredKeyStanzaEchoesLegacyKeyAndBlockTogether(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2411,11 +2224,10 @@ registries = ["internal"]
 	}
 }
 
-// TestParse_RetiredKeyStanzaQuotesKeysThatNeedQuoting verifies that a stanza
-// echoing a block whose ecosystem name or key was written as a quoted TOML
-// key quotes it back, so the stanza an operator is told to paste back still
-// parses. The pasted stanza is expected to fail validation here (nothing
-// named "bad name" is an ecosystem), just not to fail to parse.
+// A block whose ecosystem name or key was written as a quoted TOML key must be
+// quoted back, so the stanza an operator is told to paste still parses. The
+// pasted stanza is expected to fail validation here (nothing named "bad name"
+// is an ecosystem), just not to fail to parse.
 func TestParse_RetiredKeyStanzaQuotesKeysThatNeedQuoting(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2449,11 +2261,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_EcosystemsLegacyKeyErrorWording pins the full error text a
-// retired top-level key produces, regardless of whether its value would
-// otherwise have been valid: cargo-registries = [""] would fail cargo's own
-// "names an empty string" check past the gate, but the gate refuses the key
-// itself first, so that check is never reached.
+// Pins the full error text a retired top-level key produces: cargo-registries
+// = [""] would fail cargo's own empty-name check past the gate, but the gate
+// refuses the key itself first, so that check is never reached.
 func TestParse_EcosystemsLegacyKeyErrorWording(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2471,12 +2281,10 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_EcosystemsEmptyDeclarationShapes pins what an empty declaration
-// parses to in block grammar: an empty block, and an empty list under a
-// block, are both blocks the operator wrote, so each is preserved exactly
-// as declared rather than collapsing to "declared nothing". The retired
-// spelling of the same thing has no parse at all --
-// TestParse_RetiredEcosystemKeyEmptyValueIsStillRefused covers it.
+// An empty block, and an empty list under a block, are both blocks the
+// operator wrote, so each is preserved exactly as declared rather than
+// collapsing to "declared nothing". The retired spelling of the same thing has
+// no parse at all (TestParse_RetiredEcosystemKeyEmptyValueIsStillRefused).
 func TestParse_EcosystemsEmptyDeclarationShapes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -2519,11 +2327,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestRetiredRouteKeysResolveToRows pins that every key retiredRouteKeys
-// lists resolves to an ecosystem.Table row via
-// ecosystem.RowByRetiredRouteKey. mergeRetiredRouteEcosystems panics on a
-// key that does not, so this test is what keeps that panic unreachable:
-// only a row dropping its RetiredRouteKey out from under that list could
+// mergeRetiredRouteEcosystems panics on a key that resolves to no
+// ecosystem.Table row, so this test is what keeps that panic unreachable: only
+// a row dropping its RetiredRouteKey out from under retiredRouteKeys could
 // trip it.
 func TestRetiredRouteKeysResolveToRows(t *testing.T) {
 	for _, entry := range retiredRouteKeys {
@@ -2533,10 +2339,9 @@ func TestRetiredRouteKeysResolveToRows(t *testing.T) {
 	}
 }
 
-// TestRawRouteRetiredKeyTagsMatchEcosystemConsts pins rawRoute's toml tags
-// for the three retired top-level keys to the ecosystem consts that own
-// their spelling. A Go struct tag cannot reference a const, so this is the
-// only thing keeping the decoder's spelling and the row's from drifting.
+// A Go struct tag cannot reference a const, so this test is the only thing
+// keeping rawRoute's toml tags for the three retired keys and the ecosystem
+// consts that own their spelling from drifting apart.
 func TestRawRouteRetiredKeyTagsMatchEcosystemConsts(t *testing.T) {
 	cases := []struct {
 		field string
@@ -2560,11 +2365,9 @@ func TestRawRouteRetiredKeyTagsMatchEcosystemConsts(t *testing.T) {
 	}
 }
 
-// TestParse_RetiredEcosystemKeyIsError verifies that each of the three
-// retired per-ecosystem top-level keys (ADR 0048, issue #3405) is refused on
-// its own, naming the route and the key, and that the printed replacement
-// stanza parses and carries the equivalent [routes.ecosystems.<name>]
-// block.
+// Each of the three retired per-ecosystem top-level keys (ADR 0048, issue
+// #3405) is refused on its own, and the printed stanza must parse and carry
+// the equivalent [routes.ecosystems.<name>] block.
 func TestParse_RetiredEcosystemKeyIsError(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -2646,13 +2449,10 @@ cargo-registries = ["a", "b"]
 	}
 }
 
-// TestParse_RetiredKeyStanzaExplicitBlockWinsOnConflict verifies the merge
-// rule when a route declares an ecosystem both via its retired top-level
-// key and via an explicit [routes.ecosystems.<name>] block: this is a
-// single retirement error (there is no more separate "both declared"
-// rejection), and the printed replacement stanza keeps only the explicit
-// block's own value, dropping the legacy one rather than emitting a block
-// with the key twice.
+// When a route declares an ecosystem both ways, this is a single retirement
+// error (there is no separate "both declared" rejection) and the printed
+// stanza keeps only the explicit block's value, dropping the legacy one rather
+// than emitting a block with the key twice.
 func TestParse_RetiredKeyStanzaExplicitBlockWinsOnConflict(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2686,11 +2486,9 @@ path = "/explicit"
 	}
 }
 
-// TestParse_RetiredKeysAcrossBothADRsNamesAllInOneError verifies that a
-// route declaring a retired ADR 0047 key alongside a retired ADR 0048 key
-// produces one error naming every offending key, with both ADRs' rationale
-// present -- not two separate rejections a caller could only observe one at
-// a time.
+// A retired ADR 0047 key alongside a retired ADR 0048 key produces one error
+// naming every offending key, with both ADRs' rationale, not two separate
+// rejections a caller could only observe one at a time.
 func TestParse_RetiredKeysAcrossBothADRsNamesAllInOneError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2711,12 +2509,9 @@ go-path = "/go"
 	}
 }
 
-// TestParse_RetiredEcosystemKeyStanzaKeepsDeclaredUpstreamOrigin verifies
-// that a route declaring its own upstream-origin alongside a retired
-// per-ecosystem key gets that exact origin back in the replacement stanza.
-// Dropping it would print a stanza that parses clean but silently falls
-// back to the origin derived from match-host, losing the operator's port
-// and scheme.
+// Dropping a declared upstream-origin would print a stanza that parses clean
+// but silently falls back to the origin derived from match-host, losing the
+// operator's port and scheme.
 func TestParse_RetiredEcosystemKeyStanzaKeepsDeclaredUpstreamOrigin(t *testing.T) {
 	const origin = "https://acme.example:8443"
 	const doc = `
@@ -2752,10 +2547,9 @@ go-path = "/go-modules"
 	}
 }
 
-// TestParse_RetiredEcosystemKeyEmptyValueIsStillRefused verifies that
-// detection is by presence, not truthiness: a routes file that still spells
-// a retired key with an empty value is as retired as one with a real value,
-// the same rule enforce-allowlist = false already follows.
+// Detection is by presence, not truthiness: a retired key spelled with an
+// empty value is as retired as one with a real value, the same rule
+// enforce-allowlist = false already follows.
 func TestParse_RetiredEcosystemKeyEmptyValueIsStillRefused(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -2794,8 +2588,8 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// kindRoundTripFixture supplies the credential inline table (minus braces)
-// and the expected decoded values for one credresolver.Kind, so
+// kindRoundTripFixture supplies one credresolver.Kind's credential inline
+// table (minus braces) and expected decoded values, so
 // TestParse_AllKindsRoundTripThroughRetiredKeyStanza can walk
 // credresolver.Kinds() without hardcoding per-kind assertions.
 type kindRoundTripFixture struct {
@@ -2815,15 +2609,11 @@ var kindRoundTripFixtures = map[string]kindRoundTripFixture{
 	"gradle-properties": {credentialTOML: `gradle-properties = "/home/build/.gradle/gradle.properties", key = "mavenToken"`, wantValue: "/home/build/.gradle/gradle.properties", wantCompanion: "mavenToken"},
 }
 
-// TestParse_AllKindsRoundTripThroughRetiredKeyStanza is issue #3407's
-// acceptance criterion 2: for every credresolver.Kind, a retired-key stanza
-// carrying that kind's credential inline table names the kind's source key
-// (and companion, where it has one) in the printed replacement, and
-// re-parsing that replacement produces a credresolver.Config carrying the
-// same source value, file format, and companion value. Walking
-// credresolver.Kinds() rather than hand-listing the seven means an eighth
-// kind is covered the moment it's added to the table, so long as a fixture
-// is added here too.
+// Issue #3407's acceptance criterion 2: for every credresolver.Kind, the
+// printed replacement names that kind's source key (and companion, where it
+// has one) and re-parses to the same source value, file format and companion.
+// Walking credresolver.Kinds() rather than hand-listing the seven means an
+// eighth kind is covered as soon as it is added, given a fixture here too.
 func TestParse_AllKindsRoundTripThroughRetiredKeyStanza(t *testing.T) {
 	for _, kind := range credresolver.Kinds() {
 		kind := kind
@@ -2893,12 +2683,9 @@ var kindMissingCompanionFixtures = map[string]string{
 	"gradle-properties": `gradle-properties = "/home/build/.gradle/gradle.properties"`,
 }
 
-// TestParse_MissingCompanionKeyIsErrorForEveryKind is issue #3407's
-// acceptance criterion 2's second half: for every kind with a CompanionKey,
-// omitting the companion fails naming both the route and the companion key
-// -- mirroring TestParse_GradlePropertiesWithoutKeyIsError, generalized
-// across credresolver.Kinds() so a future companion-bearing kind is covered
-// without a new hand-written test.
+// Issue #3407's acceptance criterion 2, second half: generalizes
+// TestParse_GradlePropertiesWithoutKeyIsError across credresolver.Kinds(), so
+// a future companion-bearing kind is covered without a new hand-written test.
 func TestParse_MissingCompanionKeyIsErrorForEveryKind(t *testing.T) {
 	for _, kind := range credresolver.Kinds() {
 		if kind.CompanionKey == "" {

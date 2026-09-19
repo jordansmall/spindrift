@@ -8,10 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// goldenHeaderModel builds a Model that exercises the titled border, the
-// status line, and a representative alert (stale) and notice (dogfood) —
-// enough role/glyph combinations in one frame to catch a styling regression
-// without every alert needing its own snapshot.
+// The fixture packs a stale alert and a dogfood notice into one frame so the
+// snapshot covers enough role and glyph combinations to catch a styling
+// regression without a separate snapshot per alert.
 func goldenHeaderModel() Model {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 24})
@@ -27,11 +26,9 @@ func goldenHeaderModel() Model {
 	return m
 }
 
-// TestView_Header_Golden_Styled pins the header's exact byte output —
-// titled border, status line, and alerts, all styled by role (ADR 0031) —
-// on a color-capable terminal, so a change to the palette-resolver or the
-// glyph set shows up as a diff here instead of silently shipping (issue
-// #1499 AC).
+// Pins the header's exact bytes with role styling (ADR 0031) on a
+// color-capable terminal, so a change to the palette resolver or the glyph
+// set shows up as a diff here instead of shipping silently (issue #1499 AC).
 func TestView_Header_Golden_Styled(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -39,10 +36,8 @@ func TestView_Header_Golden_Styled(t *testing.T) {
 	golden.RequireEqual(t, []byte(View(goldenHeaderModel())))
 }
 
-// TestView_Header_Golden_NoColor pins the same header's exact byte output
-// under NO_COLOR, verifying it degrades to readable plain text — no ANSI
-// escape sequences at all — rather than just "some subset of styling"
-// (issue #1499 AC).
+// Pins the same header under NO_COLOR, which must degrade to plain text with
+// no ANSI escape sequences at all, not just less styling (issue #1499 AC).
 func TestView_Header_Golden_NoColor(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("TERM", "xterm-256color")
@@ -50,11 +45,9 @@ func TestView_Header_Golden_NoColor(t *testing.T) {
 	golden.RequireEqual(t, []byte(View(goldenHeaderModel())))
 }
 
-// goldenDockedModel builds a Model with the docked sidebar open at a
-// representative terminal size — wide enough to dock, short enough to keep
-// the golden file small — so the bordered list/sidebar panels, the docked
-// footer hints, and the width/height budget math all land in one snapshot
-// (issue #1755).
+// The size is the narrowest width that still docks, and short enough to keep
+// the golden file small, so one snapshot covers the bordered panels, the
+// docked footer hints, and the width and height budget math (issue #1755).
 func goldenDockedModel() Model {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 12})
@@ -63,10 +56,9 @@ func goldenDockedModel() Model {
 	return m
 }
 
-// TestView_Docked_Golden_Styled pins the docked list/sidebar panels' exact
-// byte output — rounded RoleDim borders around both columns — on a
-// color-capable terminal, so a change to the border styling or the
-// width/height budget math shows up as a diff here (issue #1755 AC).
+// Pins the docked panels' exact bytes, rounded RoleDim borders around both
+// columns, so a change to the border styling or the budget math shows up as
+// a diff here (issue #1755 AC).
 func TestView_Docked_Golden_Styled(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -74,9 +66,9 @@ func TestView_Docked_Golden_Styled(t *testing.T) {
 	golden.RequireEqual(t, []byte(View(goldenDockedModel())))
 }
 
-// TestView_Docked_Golden_NoColor pins the same docked layout's exact byte
-// output under NO_COLOR, verifying the panel borders degrade to plain ASCII
-// glyphs with no ANSI escape sequences at all (issue #1755 AC).
+// Pins the same docked layout under NO_COLOR, where the panel borders must
+// degrade to plain ASCII glyphs with no ANSI escape sequences (issue #1755
+// AC).
 func TestView_Docked_Golden_NoColor(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("TERM", "xterm-256color")

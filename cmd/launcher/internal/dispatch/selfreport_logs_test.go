@@ -6,14 +6,11 @@ import (
 	"testing"
 )
 
-// TestResolveFromLogs verifies that ResolveFromLogs walks every pass log for
-// an issue through the same outcome.Resolve seam a live dispatch's
-// outcomeResult already applies to one log, with a later pass overriding an
-// earlier one ("last pass wins") exactly as outcomeResult does within one
-// log. Both fixture lines here parse the full SPINDRIFT_OUTCOME grammar, so
-// they populate Resolved.Outcome/Found (the genuine tier) AND
-// Resolved.SelfReport/SelfReportFound (the self-report walk that runs
-// unconditionally alongside it, issue #2268 slice 1) at once.
+// ResolveFromLogs walks every pass log for an issue through the same
+// outcome.Resolve seam a live dispatch applies to one log, and a later pass
+// overrides an earlier one. Both fixture lines parse the full
+// SPINDRIFT_OUTCOME grammar, so they populate the genuine tier and the
+// self-report walk that runs alongside it (issue #2268 slice 1) at once.
 func TestResolveFromLogs(t *testing.T) {
 	dir := t.TempDir()
 	logDir := HostLogDirFor(dir)
@@ -65,10 +62,8 @@ func TestResolveFromLogs(t *testing.T) {
 	}
 }
 
-// TestResolveFromLogsNoLogs verifies that ResolveFromLogs returns
-// Resolved{Found: false} with no error when no pass log exists on disk at
-// all — the same not-found-is-not-an-error convention outcome.Resolve itself
-// applies.
+// Not-found is not an error: with no pass log on disk, ResolveFromLogs
+// returns Resolved{Found: false} and nil, matching outcome.Resolve.
 func TestResolveFromLogsNoLogs(t *testing.T) {
 	dir := t.TempDir()
 
@@ -81,12 +76,9 @@ func TestResolveFromLogsNoLogs(t *testing.T) {
 	}
 }
 
-// TestResolveFromLogsNearMissPropagatesError verifies that a near-miss
-// leading-token line (a bare-word paraphrase like "SPINDRIFT_OUTCOME:
-// success" that doesn't parse the full grammar) surfaces as an error from
-// ResolveFromLogs, exactly as outcome.Resolve documents for a single log:
-// with the nonce gate retired (ADR 0039), a near-miss is Resolve's own
-// error, not a fallback to the self-report tier.
+// ADR 0039 retired the nonce gate, so a near-miss leading-token line that
+// does not parse the full grammar is Resolve's own error, not a fallback to
+// the self-report tier.
 func TestResolveFromLogsNearMissPropagatesError(t *testing.T) {
 	dir := t.TempDir()
 	logDir := HostLogDirFor(dir)

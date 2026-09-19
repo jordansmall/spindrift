@@ -17,12 +17,10 @@ import (
 //go:embed testdata/fake-gh-codeforge.sh
 var fakeGHCodeForge string
 
-// codeforgeHarness is a forgetest.CodeForgeHarness backed by a real bare
-// git repo (forgetest.GitRepoFixture, the fake gh script's REMOTE) plus a
-// scripted `gh` stand-in for the PR-indirection calls (repo clone, pr view,
-// pr merge, repo/auth probes) — Rebase's own checkout/rebase/force-push run
-// against real git straight through, exactly as the production adapter
-// does.
+// codeforgeHarness implements forgetest.CodeForgeHarness against a real bare
+// git repo (forgetest.GitRepoFixture, the fake gh script's REMOTE) and scripts
+// `gh` only for the PR-indirection calls. Rebase's own checkout, rebase and
+// force-push run against real git, exactly as the production adapter does.
 type codeforgeHarness struct {
 	t      *testing.T
 	repo   *forgetest.GitRepoFixture
@@ -81,10 +79,8 @@ func prNum(ref string) string {
 	return parts[len(parts)-1]
 }
 
-// SeedLandable creates branch agent/issue-<num> one commit ahead of main's
-// current tip, pushes it, and registers the head/base mapping the fake gh
-// script's `pr view`/`pr merge` handlers look up. Returns the PR URL
-// Merge/Rebase expect.
+// SeedLandable writes the head/base files that the fake gh script's `pr view`
+// and `pr merge` handlers read back.
 func (h *codeforgeHarness) SeedLandable(num string) string {
 	branch := h.branchName(num)
 	h.repo.SeedBranch(branch, num)

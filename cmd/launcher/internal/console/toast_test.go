@@ -11,9 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestPickTransitionToast_QueuedToRunning_ReturnsStartedToast verifies a pick
-// moving into PickRunning between two snapshots produces a "started" toast
-// naming the pick's number and title (issue #1830 AC1).
+// Issue #1830 AC1: the toast names the pick's number and title.
 func TestPickTransitionToast_QueuedToRunning_ReturnsStartedToast(t *testing.T) {
 	old := []Pick{{Number: "1818", Title: "fix the thing", State: PickQueued}}
 	updated := []Pick{{Number: "1818", Title: "fix the thing", State: PickRunning}}
@@ -25,11 +23,9 @@ func TestPickTransitionToast_QueuedToRunning_ReturnsStartedToast(t *testing.T) {
 	}
 }
 
-// TestPickTransitionToast_TitleWithControlSequence_Sanitized verifies a
-// title carrying a raw OSC control sequence (an untrusted GitHub issue
-// title, same threat model #721 hardened the backlog/queue title rows
-// against) is sanitized before it reaches the toast text, matching every
-// other title-render call site's SanitizeControlSequences precedent (issue
+// An issue title is untrusted input, the same threat model #721 hardened the
+// backlog and queue title rows against, so the toast text runs through
+// SanitizeControlSequences like every other title-render call site (issue
 // #1830 review finding).
 func TestPickTransitionToast_TitleWithControlSequence_Sanitized(t *testing.T) {
 	old := []Pick{{Number: "1818", Title: "fix \x1b]0;pwned\x07it", State: PickQueued}}
@@ -42,8 +38,7 @@ func TestPickTransitionToast_TitleWithControlSequence_Sanitized(t *testing.T) {
 	}
 }
 
-// TestPickTransitionToast_RunningToSettled_ReturnsSettledToast verifies a
-// pick moving into PickSettled produces a "settled" toast (issue #1830 AC1).
+// Issue #1830 AC1.
 func TestPickTransitionToast_RunningToSettled_ReturnsSettledToast(t *testing.T) {
 	old := []Pick{{Number: "1818", Title: "fix the thing", State: PickRunning}}
 	updated := []Pick{{Number: "1818", Title: "fix the thing", State: PickSettled}}
@@ -55,8 +50,7 @@ func TestPickTransitionToast_RunningToSettled_ReturnsSettledToast(t *testing.T) 
 	}
 }
 
-// TestPickTransitionToast_RunningToFailed_ReturnsFailedToast verifies a pick
-// moving into PickFailed produces a "failed" toast (issue #1830 AC1).
+// Issue #1830 AC1.
 func TestPickTransitionToast_RunningToFailed_ReturnsFailedToast(t *testing.T) {
 	old := []Pick{{Number: "1818", Title: "fix the thing", State: PickRunning}}
 	updated := []Pick{{Number: "1818", Title: "fix the thing", State: PickFailed}}
@@ -68,8 +62,7 @@ func TestPickTransitionToast_RunningToFailed_ReturnsFailedToast(t *testing.T) {
 	}
 }
 
-// TestPickTransitionToast_QueuedToHeld_ReturnsHeldToast verifies a pick
-// moving into PickHeld produces a "held" toast (issue #1830 AC1).
+// Issue #1830 AC1.
 func TestPickTransitionToast_QueuedToHeld_ReturnsHeldToast(t *testing.T) {
 	old := []Pick{{Number: "1818", Title: "fix the thing", State: PickQueued}}
 	updated := []Pick{{Number: "1818", Title: "fix the thing", State: PickHeld}}
@@ -81,11 +74,10 @@ func TestPickTransitionToast_QueuedToHeld_ReturnsHeldToast(t *testing.T) {
 	}
 }
 
-// TestPickTransitionToast_PickAbsentFromOld_NoToast verifies a pick with no
-// prior snapshot to compare against — the startup bootstrap snapshot
-// (initialQueueSyncCmd), or a freshly queued pick — never fires a toast:
-// there is no observed transition, just an unknown starting state (issue
-// #1830, "detected from the console's own state").
+// A pick with no prior snapshot (the startup bootstrap snapshot from
+// initialQueueSyncCmd, or a freshly queued pick) has an unknown starting
+// state, not an observed transition, so it fires no toast (issue #1830,
+// "detected from the console's own state").
 func TestPickTransitionToast_PickAbsentFromOld_NoToast(t *testing.T) {
 	var old []Pick
 	updated := []Pick{{Number: "1818", Title: "fix the thing", State: PickRunning}}
@@ -96,8 +88,6 @@ func TestPickTransitionToast_PickAbsentFromOld_NoToast(t *testing.T) {
 	}
 }
 
-// TestPickTransitionToast_NoStateChange_NoToast verifies an unchanged pick
-// between two snapshots produces no toast.
 func TestPickTransitionToast_NoStateChange_NoToast(t *testing.T) {
 	old := []Pick{{Number: "1818", Title: "fix the thing", State: PickRunning}}
 	updated := []Pick{{Number: "1818", Title: "fix the thing", State: PickRunning}}
@@ -108,9 +98,7 @@ func TestPickTransitionToast_NoStateChange_NoToast(t *testing.T) {
 	}
 }
 
-// TestUpdate_QueueSnapshotMsg_SetsToastOnTransition verifies a QueueSnapshotMsg
-// that moves a pick into PickRunning sets Model.Toast to the "started" line
-// (issue #1830 AC1).
+// Issue #1830 AC1.
 func TestUpdate_QueueSnapshotMsg_SetsToastOnTransition(t *testing.T) {
 	m := NewModel()
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{{Number: "1818", Title: "fix the thing", State: PickQueued}}})
@@ -123,8 +111,7 @@ func TestUpdate_QueueSnapshotMsg_SetsToastOnTransition(t *testing.T) {
 	}
 }
 
-// TestUpdate_ToastDismissedMsg_ClearsToast verifies ToastDismissedMsg clears
-// Model.Toast — the tea layer fires it on the operator's next keypress or the
+// The tea layer fires ToastDismissedMsg on the operator's next keypress or the
 // auto-dismiss timer, whichever comes first (issue #1830 AC2).
 func TestUpdate_ToastDismissedMsg_ClearsToast(t *testing.T) {
 	m := NewModel()
@@ -137,9 +124,8 @@ func TestUpdate_ToastDismissedMsg_ClearsToast(t *testing.T) {
 	}
 }
 
-// TestTea_Toast_ClearsOnNextKey verifies a visible toast clears on the
-// operator's next keypress in ModeList — the same clear-on-any-key precedent
-// QueueEnterNotice already uses (issue #1830 AC2).
+// A toast clears on any key in ModeList, the same precedent QueueEnterNotice
+// already uses (issue #1830 AC2).
 func TestTea_Toast_ClearsOnNextKey(t *testing.T) {
 	m := NewModel()
 	m.Toast = "#1818 started: fix the thing"
@@ -153,10 +139,8 @@ func TestTea_Toast_ClearsOnNextKey(t *testing.T) {
 	}
 }
 
-// TestTea_QueueSnapshotMsg_ToastDismissTick_ClearsToast verifies a
-// QueueSnapshotMsg transition arms a dismiss tick that, once fired with the
-// generation it armed under, clears the toast — the auto-dismiss half of
-// issue #1830 AC2.
+// The dismiss tick clears the toast only when it carries the generation the
+// transition armed it with. This is the auto-dismiss half of issue #1830 AC2.
 func TestTea_QueueSnapshotMsg_ToastDismissTick_ClearsToast(t *testing.T) {
 	tm := teaModel{m: NewModel()}
 	next, _ := tm.Update(QueueSnapshotMsg{Picks: []Pick{{Number: "1818", Title: "fix the thing", State: PickQueued}}})
@@ -175,11 +159,8 @@ func TestTea_QueueSnapshotMsg_ToastDismissTick_ClearsToast(t *testing.T) {
 	}
 }
 
-// TestTea_ToastDismissTick_DropsStaleGeneration verifies a straggler dismiss
-// tick from a toast a newer one already replaced is dropped rather than
-// clearing the newer toast — the same stale-generation guard
-// sidebarActivityTickMsg already uses (issue #1830 AC2, "a stale dismiss
-// timer from a replaced toast must not clear the newer toast").
+// A straggler tick from a replaced toast must not clear the newer toast (issue
+// #1830 AC2), the same stale-generation guard sidebarActivityTickMsg uses.
 func TestTea_ToastDismissTick_DropsStaleGeneration(t *testing.T) {
 	tm := teaModel{m: NewModel()}
 	next, _ := tm.Update(QueueSnapshotMsg{Picks: []Pick{
@@ -216,8 +197,7 @@ func TestTea_ToastDismissTick_DropsStaleGeneration(t *testing.T) {
 	}
 }
 
-// TestView_Toast_Renders verifies a visible toast renders as its own line
-// (issue #1830 AC1).
+// Issue #1830 AC1: the toast gets its own line.
 func TestView_Toast_Renders(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m.Toast = "#1818 started: fix the thing"
@@ -228,10 +208,8 @@ func TestView_Toast_Renders(t *testing.T) {
 	}
 }
 
-// TestView_Toast_NeverOverflowsHeight verifies a visible toast's own line is
-// accounted for in the body's row budget — the frame never renders more than
-// Height total lines while a toast is showing, the body list shrinking by
-// exactly the toast's one row instead (issue #1830 AC3).
+// The body's row budget must absorb the toast's line, so the frame stays
+// within Height and the list shrinks by exactly one row (issue #1830 AC3).
 func TestView_Toast_NeverOverflowsHeight(t *testing.T) {
 	const height = 10
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: height})
@@ -248,10 +226,9 @@ func TestView_Toast_NeverOverflowsHeight(t *testing.T) {
 	}
 }
 
-// TestBodyBudget_Toast_ShrinksByOneRow verifies bodyBudget — the same figure
-// Update's scroll/cursor clamps use — accounts for a visible toast exactly
-// the way View does, so the two never diverge (issue #1830 AC3, mirroring
-// the QueueEnterNotice precedent already in bodyBudget).
+// bodyBudget feeds Update's scroll and cursor clamps, so it must count a
+// visible toast the way View does or the two diverge (issue #1830 AC3,
+// mirroring the QueueEnterNotice precedent already in bodyBudget).
 func TestBodyBudget_Toast_ShrinksByOneRow(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	without := bodyBudget(m)
@@ -264,22 +241,18 @@ func TestBodyBudget_Toast_ShrinksByOneRow(t *testing.T) {
 	}
 }
 
-// TestView_Toast_LongTitleClipsToWidth verifies a toast built from an
-// arbitrarily long issue title never renders wider than the terminal — an
-// unclipped toast line would wrap onto a second terminal row the one-row
-// reserved-lines budget never accounts for, overflowing the frame (issue
-// #1830 AC3 review finding).
+// An unclipped toast line wraps onto a second terminal row that the one-row
+// reserved-lines budget never accounts for, overflowing the frame (issue #1830
+// AC3 review finding).
 func TestView_Toast_LongTitleClipsToWidth(t *testing.T) {
 	const width, height = 40, 10
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
 	m.Toast = "#1818 started: " + strings.Repeat("a very long issue title ", 10)
 
 	out := View(m)
-	// lipgloss.Width, not runewidth.StringWidth: on a color-capable ambient
-	// TERM the panel border carries ANSI codes (ADR 0031), which
-	// runewidth.StringWidth counts as display width and lipgloss's
-	// ANSI-aware measurement does not (mirrors the sidebar-panel width
-	// check in view_test.go).
+	// lipgloss.Width, not runewidth.StringWidth: on a color-capable ambient TERM
+	// the panel border carries ANSI codes (ADR 0031) that runewidth counts as
+	// display width and lipgloss does not. Mirrors view_test.go's panel check.
 	for i, line := range strings.Split(out, "\n") {
 		if got := lipgloss.Width(line); got > width {
 			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)

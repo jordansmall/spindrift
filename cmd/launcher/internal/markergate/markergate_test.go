@@ -11,13 +11,13 @@ import (
 )
 
 // wantSubstitutedOutcomeShape is the one hand-typed transcription of the
-// outcome fieldShape with a run's issue/landing filled in -- the drift
+// outcome fieldShape with a run's issue/landing filled in. It is the drift
 // alarm if lib/prompt-contract.nix's fieldShape changes.
 const wantSubstitutedOutcomeShape = "issue=7 landing=agent/issue-7 status=<status> note=<text>"
 
-// writeLog writes contents to a temp log file and returns its path, for
-// tests driving PR-intent presence/absence through the real log-scanning
-// path rather than a stand-in string field.
+// writeLog writes contents to a temp log file and returns its path, so tests
+// drive PR-intent presence and absence through the real log-scanning path
+// rather than a stand-in string field.
 func writeLog(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "driver.log")
@@ -43,10 +43,9 @@ func TestRenderNudgePrompt_OutcomeAbsent(t *testing.T) {
 	}
 }
 
-// TestRenderNudgePrompt_OutcomeScanError pins that a genuine I/O error
-// scanning LogPath for a near-miss line surfaces to the caller instead of
-// being swallowed, while the rendered prompt still falls back to the
-// fail-safe "marker absent" wording (nearMiss == "").
+// A genuine I/O error scanning LogPath for a near-miss line must reach the
+// caller instead of being swallowed, while the rendered prompt still falls
+// back to the fail-safe "marker absent" wording (nearMiss == "").
 func TestRenderNudgePrompt_OutcomeScanError(t *testing.T) {
 	dirPath := t.TempDir()
 	got, err := RenderNudgePrompt(NudgeConfig{Marker: MarkerOutcome, LogPath: dirPath})
@@ -84,8 +83,8 @@ func TestRenderNudgePrompt_OutcomeNearMiss(t *testing.T) {
 	}
 	// Pins against the registry-rendered fieldShape, not a fresh hand-typed literal.
 	fieldShape := outcome.MarkerChannelFieldShapes[outcome.Token]
-	// The generic grammar-restatement sentence keeps literal placeholder
-	// tokens, distinct from the substituted "For this run" sentence.
+	// The generic grammar sentence keeps literal placeholder tokens, unlike
+	// the substituted "For this run" sentence checked below.
 	if !strings.Contains(got, outcome.Token+" "+fieldShape) {
 		t.Fatalf("expected literal placeholder grammar sentence, got %q", got)
 	}
@@ -164,10 +163,9 @@ func TestShouldNudgeOutcome_NoLogFile(t *testing.T) {
 	}
 }
 
-// TestShouldNudgeOutcome_ScanError pins that a genuine I/O error scanning
-// LogPath is distinguishable from the absent-marker case above: both read
-// as "should nudge" (the fail-safe direction), but only this one carries a
-// non-nil, path-naming error.
+// A genuine I/O error scanning LogPath must stay distinguishable from the
+// absent-marker case above: both read as "should nudge" (the fail-safe
+// direction), but only this one carries a non-nil, path-naming error.
 func TestShouldNudgeOutcome_ScanError(t *testing.T) {
 	dirPath := t.TempDir()
 	got, err := ShouldNudgeOutcome(NudgeConfig{LogPath: dirPath})
@@ -204,12 +202,11 @@ func TestShouldNudgeOutcome_FullyValidLine(t *testing.T) {
 	}
 }
 
-// TestShouldNudgeOutcome_FieldedEmptyLandingDoesNotNudge pins review-round-2
-// bug 1: the deleted bash gate only checked field-marker presence
-// (landing=/status=, any value including empty), not outcome.Parse's full
-// grammar validity, which rejects an empty landing as ErrNearMiss. A
-// status=ready line with an empty landing value satisfied the deleted
-// bash's fielded test and must not nudge here either.
+// Pins review-round-2 bug 1: the deleted bash gate only checked field-marker
+// presence (landing=/status=, any value including empty), not outcome.Parse's
+// full grammar validity, which rejects an empty landing as ErrNearMiss. A
+// status=ready line with an empty landing satisfied the deleted bash's fielded
+// test and must not nudge here either.
 func TestShouldNudgeOutcome_FieldedEmptyLandingDoesNotNudge(t *testing.T) {
 	logPath := writeLog(t, outcome.Token+" issue=7 landing= status=ready note=done\n")
 	got, err := ShouldNudgeOutcome(NudgeConfig{LogPath: logPath})
@@ -221,13 +218,11 @@ func TestShouldNudgeOutcome_FieldedEmptyLandingDoesNotNudge(t *testing.T) {
 	}
 }
 
-// TestShouldNudgeOutcome_FieldedLineFollowedByLaterNonFieldedLineDoesNotNudge
-// pins review-round-2 bug 2 (ordering): the deleted bash filtered to fielded
-// lines FIRST, then took the last of those, so a later token-leading line
-// carrying neither field marker (e.g. a bare "SPINDRIFT_OUTCOME: all set"
-// paraphrase) never shadowed an earlier genuine fielded line. The prior Go
-// implementation instead took the unconditional last token-leading line,
-// which would wrongly flip this case to nudge.
+// Pins review-round-2 bug 2 (ordering): the deleted bash filtered to fielded
+// lines first, then took the last of those, so a later token-leading line
+// carrying neither field marker never shadowed an earlier genuine fielded
+// line. The prior Go implementation took the unconditional last token-leading
+// line, which wrongly flipped this case to nudge.
 func TestShouldNudgeOutcome_FieldedLineFollowedByLaterNonFieldedLineDoesNotNudge(t *testing.T) {
 	logPath := writeLog(t, outcome.Token+" issue=7 landing=agent/issue-7 status=ready note=done\n"+outcome.Token+": all set\n")
 	got, err := ShouldNudgeOutcome(NudgeConfig{LogPath: logPath})
@@ -254,11 +249,10 @@ func TestShouldNudgePRIntent_ReadyNoPRIntentLine(t *testing.T) {
 	}
 }
 
-// TestShouldNudgePRIntent_SpoofedNonceIsError pins that a PR-intent line
-// carrying the token but a nonce that fails to verify against cfg.Nonce
-// (spoof or corruption) is distinguishable from the no-token-at-all case
-// above: both still nudge (fail-safe), but only this one carries a non-nil
-// error naming the scanned path.
+// A PR-intent line carrying the token but a nonce that fails to verify against
+// cfg.Nonce (spoof or corruption) must stay distinguishable from the
+// no-token-at-all case above: both still nudge (fail-safe), but only this one
+// carries a non-nil error naming the scanned path.
 func TestShouldNudgePRIntent_SpoofedNonceIsError(t *testing.T) {
 	logPath := writeLog(t, outcome.PRIntentToken+" wrong-nonce dGVzdA==\n")
 	got, err := ShouldNudgePRIntent(NudgeConfig{
@@ -307,11 +301,10 @@ func TestShouldNudgePRIntent_NonReadyStatus(t *testing.T) {
 	}
 }
 
-// TestShouldNudgePRIntent_ReadyEmptyLanding pins review finding A: a
-// status=ready outcome line with an empty landing field used to nudge under
-// the deleted bash logic, but outcome.Parse rejects an empty landing as
-// ErrNearMiss -- ShouldNudgePRIntent must use outcome.ReadyBeforeNote's
-// looser substring test instead, so this case must still nudge.
+// Pins review finding A: a status=ready outcome line with an empty landing
+// field used to nudge under the deleted bash logic, and outcome.Parse rejects
+// an empty landing as ErrNearMiss, so ShouldNudgePRIntent must use
+// outcome.ReadyBeforeNote's looser substring test and still nudge here.
 func TestShouldNudgePRIntent_ReadyEmptyLanding(t *testing.T) {
 	logPath := writeLog(t, "")
 	got, err := ShouldNudgePRIntent(NudgeConfig{
@@ -327,10 +320,10 @@ func TestShouldNudgePRIntent_ReadyEmptyLanding(t *testing.T) {
 	}
 }
 
-// TestShouldNudgePRIntent_StatusMentionOnlyInNote pins review finding B: a
-// line with no real status= field, only a "status=ready" mention inside
-// free-text note, must not nudge -- outcome.Parse's field extraction scans
-// the whole line including note text and would wrongly nudge here.
+// Pins review finding B: a line with no real status= field, only a
+// "status=ready" mention inside free-text note, must not nudge.
+// outcome.Parse's field extraction scans the whole line including note text
+// and would wrongly nudge here.
 func TestShouldNudgePRIntent_StatusMentionOnlyInNote(t *testing.T) {
 	logPath := writeLog(t, "")
 	got, err := ShouldNudgePRIntent(NudgeConfig{
@@ -346,12 +339,11 @@ func TestShouldNudgePRIntent_StatusMentionOnlyInNote(t *testing.T) {
 	}
 }
 
-// TestShouldNudgePRIntent_MalformedPRIntentPayloadStillNudges pins the
-// tightened presence rule (review round 3): a line leading with the
-// PR-intent token and a matching nonce, but a payload that fails the
-// strict base64 decode, no longer counts as present the way the deleted
-// bash gate's looser "token + nonce + two fields" check did. It must nudge
-// again rather than treat the malformed attempt as satisfying the gate.
+// Pins the tightened presence rule (review round 3): a line leading with the
+// PR-intent token and a matching nonce, but a payload that fails the strict
+// base64 decode, no longer counts as present the way the deleted bash gate's
+// looser "token + nonce + two fields" check did. It must nudge again rather
+// than treat the malformed attempt as satisfying the gate.
 func TestShouldNudgePRIntent_MalformedPRIntentPayloadStillNudges(t *testing.T) {
 	logPath := writeLog(t, outcome.PRIntentToken+" abc123 not-valid-base64!!!\n")
 	got, err := ShouldNudgePRIntent(NudgeConfig{
@@ -359,8 +351,8 @@ func TestShouldNudgePRIntent_MalformedPRIntentPayloadStillNudges(t *testing.T) {
 		OriginalOutcomeLine: outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done",
 		LogPath:             logPath,
 	})
-	// A matching-nonce line whose base64 payload fails to decode is a
-	// corrupted attempt, not an absent marker -- same non-nil-error family
+	// A matching-nonce line whose base64 payload fails to decode is a corrupted
+	// attempt, not an absent marker, so it joins the same non-nil-error family
 	// as TestShouldNudgePRIntent_SpoofedNonceIsError.
 	if err == nil {
 		t.Fatalf("ShouldNudgePRIntent() error = nil, want non-nil (malformed base64 payload)")
@@ -407,11 +399,10 @@ func TestResolve_PRIntentEmptySetsOpLine_AttemptsSubstituted(t *testing.T) {
 	}
 }
 
-// TestResolve_MalformedPRIntentPayloadEmitsOpLine mirrors
-// TestShouldNudgePRIntent_MalformedPRIntentPayloadStillNudges for the
-// resolve phase: a malformed payload must give up (OpLine set) rather than
-// be mistaken for a genuine PR-intent line, and the corruption surfaces as
-// a non-nil error via Resolve's errors.Join.
+// Mirrors TestShouldNudgePRIntent_MalformedPRIntentPayloadStillNudges for the
+// resolve phase: a malformed payload must give up (OpLine set) rather than be
+// mistaken for a genuine PR-intent line, and the corruption reaches the caller
+// as a non-nil error via Resolve's errors.Join.
 func TestResolve_MalformedPRIntentPayloadEmitsOpLine(t *testing.T) {
 	logPath := writeLog(t, outcome.PRIntentToken+" abc123 not-valid-base64!!!\n")
 	got, err := Resolve(ResolveConfig{Attempts: 1, LogPath: logPath, Nonce: "abc123"})
@@ -423,11 +414,10 @@ func TestResolve_MalformedPRIntentPayloadEmitsOpLine(t *testing.T) {
 	}
 }
 
-// TestResolve_ScanErrorsJoined pins that Resolve joins both scanner errors
-// (the PR-intent scan over LogPath and the near-miss scan over
-// ResumedDriverTextLogPath) via errors.Join, rather than reporting only one
-// -- both paths are independently reachable and a caller diagnosing a stuck
-// resume needs to see both.
+// Resolve must join both scanner errors (the PR-intent scan over LogPath and
+// the near-miss scan over ResumedDriverTextLogPath) via errors.Join rather
+// than report only one. Both paths are independently reachable, and a caller
+// diagnosing a stuck resume needs to see both.
 func TestResolve_ScanErrorsJoined(t *testing.T) {
 	prIntentLogPath := writeLog(t, outcome.PRIntentToken+" wrong-nonce dGVzdA==\n")
 	nearMissDirPath := t.TempDir()

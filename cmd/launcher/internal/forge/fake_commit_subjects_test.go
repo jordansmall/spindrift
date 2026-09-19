@@ -5,11 +5,10 @@ import (
 	"testing"
 )
 
-// TestFake_BareFakeDoesNotSatisfyBundleCommitSubjects proves commitSubjects
-// stays unexported on HostMediationFake, the same isolation relayBundle and
-// createDraftPR already have (see fake_hostmediation.go's HostMediationFake
-// doc comment): a bare *Fake used as a CodeForge elsewhere must never
-// silently start satisfying forge.BundleCommitSubjects too.
+// commitSubjects stays unexported on HostMediationFake, the same isolation
+// relayBundle and createDraftPR have, so a bare *Fake used as a CodeForge
+// elsewhere never silently starts satisfying forge.BundleCommitSubjects. See
+// HostMediationFake's doc comment in fake_hostmediation.go.
 func TestFake_BareFakeDoesNotSatisfyBundleCommitSubjects(t *testing.T) {
 	f := NewFake()
 	if _, ok := any(f).(BundleCommitSubjects); ok {
@@ -17,8 +16,6 @@ func TestFake_BareFakeDoesNotSatisfyBundleCommitSubjects(t *testing.T) {
 	}
 }
 
-// TestFake_AsGithubReadOnlySatisfiesBundleCommitSubjects proves
-// AsGithubReadOnly()'s wrapper implements forge.BundleCommitSubjects.
 func TestFake_AsGithubReadOnlySatisfiesBundleCommitSubjects(t *testing.T) {
 	cf := NewFake().AsGithubReadOnly()
 	if _, ok := cf.(BundleCommitSubjects); !ok {
@@ -26,8 +23,7 @@ func TestFake_AsGithubReadOnlySatisfiesBundleCommitSubjects(t *testing.T) {
 	}
 }
 
-// TestFake_CommitSubjectsDefaultsToNilNil proves an unscripted Fake returns
-// (nil, nil) by default, mirroring RelayBundle's own zero-value default when
+// An unscripted Fake mirrors RelayBundle's own zero-value default when
 // RelayBundleErr is unset.
 func TestFake_CommitSubjectsDefaultsToNilNil(t *testing.T) {
 	cf := NewFake().AsGithubReadOnly().(BundleCommitSubjects)
@@ -37,8 +33,6 @@ func TestFake_CommitSubjectsDefaultsToNilNil(t *testing.T) {
 	}
 }
 
-// TestFake_CommitSubjectsResultScriptsSuccess proves CommitSubjectsResult
-// scripts the returned subjects.
 func TestFake_CommitSubjectsResultScriptsSuccess(t *testing.T) {
 	fc := NewFake()
 	fc.CommitSubjectsResult = []string{"a", "b"}
@@ -53,8 +47,6 @@ func TestFake_CommitSubjectsResultScriptsSuccess(t *testing.T) {
 	}
 }
 
-// TestFake_CommitSubjectsErrScriptsFailure proves CommitSubjectsErr scripts
-// the returned error and nils out the subjects.
 func TestFake_CommitSubjectsErrScriptsFailure(t *testing.T) {
 	fc := NewFake()
 	wantErr := errors.New("boom")
@@ -70,8 +62,6 @@ func TestFake_CommitSubjectsErrScriptsFailure(t *testing.T) {
 	}
 }
 
-// TestFake_CommitSubjectsCallsRecordsInvocations proves every call is
-// recorded in order with its exact arguments.
 func TestFake_CommitSubjectsCallsRecordsInvocations(t *testing.T) {
 	fc := NewFake()
 	cf := fc.AsGithubReadOnly().(BundleCommitSubjects)

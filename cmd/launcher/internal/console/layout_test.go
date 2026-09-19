@@ -2,9 +2,6 @@ package console
 
 import "testing"
 
-// TestResolveLayout_NoSidebarNoDetail_Plain verifies a Model with neither a
-// Sidebar nor a DetailModal open resolves to arrangementPlain — the fallback
-// arrangement none of the sidebar/detail special cases claim.
 func TestResolveLayout_NoSidebarNoDetail_Plain(t *testing.T) {
 	m := Model{Width: 100, Height: 40}
 	l := resolveLayout(m)
@@ -19,10 +16,9 @@ func TestResolveLayout_NoSidebarNoDetail_Plain(t *testing.T) {
 	}
 }
 
-// TestResolveLayout_SidebarDocked verifies a wide-enough, non-zoomed
-// Sidebar resolves to arrangementSidebarDocked on both arrangement and
-// sidebarArrangement, with sidebarWidth/sidebarHeight matching the same
-// computeSidebarWidth/bodyBudget math View and Update already key off of.
+// resolveLayout must not re-derive the docked geometry: sidebarWidth and
+// sidebarHeight have to match the computeSidebarWidth/bodyBudget math View
+// and Update already key off.
 func TestResolveLayout_SidebarDocked(t *testing.T) {
 	m := Model{Width: 200, Height: 40, Sidebar: &SidebarState{Number: "1"}}
 	if !sidebarFits(m) {
@@ -47,9 +43,6 @@ func TestResolveLayout_SidebarDocked(t *testing.T) {
 	}
 }
 
-// TestResolveLayout_SidebarModal verifies a Sidebar too narrow to dock, but
-// wide/tall enough for the floating modal box, resolves to
-// arrangementSidebarModal with sidebarHeight matching sidebarModalScrollBudget.
 func TestResolveLayout_SidebarModal(t *testing.T) {
 	m := Model{Width: 60, Height: 24, Sidebar: &SidebarState{Number: "1"}}
 	if sidebarFits(m) {
@@ -80,9 +73,7 @@ func TestResolveLayout_SidebarModal(t *testing.T) {
 	}
 }
 
-// TestResolveLayout_SidebarFullscreen verifies a Sidebar too small even for
-// the floating modal box falls back to arrangementSidebarFullscreen, with
-// sidebarHeight matching the whole-terminal headerFooterLines/
+// sidebarHeight must match the whole-terminal headerFooterLines and
 // trailingNewlineRow budget renderSidebarFullscreen itself uses.
 func TestResolveLayout_SidebarFullscreen(t *testing.T) {
 	m := Model{Width: 30, Height: 24, Sidebar: &SidebarState{Number: "1"}}
@@ -102,10 +93,9 @@ func TestResolveLayout_SidebarFullscreen(t *testing.T) {
 	}
 }
 
-// TestResolveLayout_SidebarZoomed_ForcesOffDocked verifies SidebarZoom
-// steers a Sidebar off the docked arrangement even on a terminal wide enough to
-// dock it — landing on Modal or Fullscreen per whether the floating box
-// itself still fits, mirroring View's own sidebarModal condition.
+// SidebarZoom steers a sidebar off the docked arrangement even on a terminal
+// wide enough to dock it, landing on modal or fullscreen per whether the
+// floating box still fits. This mirrors View's own sidebarModal condition.
 func TestResolveLayout_SidebarZoomed_ForcesOffDocked(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -130,13 +120,11 @@ func TestResolveLayout_SidebarZoomed_ForcesOffDocked(t *testing.T) {
 	}
 }
 
-// TestResolveLayout_DetailFullscreen_OverridesArrangement_ButNotSidebarArrangement
-// pins the slice's key subtlety: a too-small-to-float DetailModal forces
-// arrangement to arrangementDetailFullscreen even with a simultaneously
-// dockable Sidebar, but sidebarArrangement must still read
-// arrangementSidebarDocked — Update's sidebar-viewport clamp needs the
-// sidebar's own answer regardless of whether the detail modal is
-// currently pre-empting the render.
+// A too-small-to-float DetailModal forces arrangement to
+// arrangementDetailFullscreen even with a dockable Sidebar, but
+// sidebarArrangement must still read arrangementSidebarDocked: Update's
+// sidebar-viewport clamp needs the sidebar's own answer whether or not the
+// detail modal is pre-empting the render.
 func TestResolveLayout_DetailFullscreen_OverridesArrangement_ButNotSidebarArrangement(t *testing.T) {
 	m := Model{
 		Width:       200,
@@ -160,10 +148,8 @@ func TestResolveLayout_DetailFullscreen_OverridesArrangement_ButNotSidebarArrang
 	}
 }
 
-// TestResolveLayout_DetailModalFields_MirrorHelpers pins the "no
-// re-derivation" invariant for the detail-modal-derived fields: each must
-// equal calling the existing helper directly against the same Model, across
-// both the floating-box and fullscreen-fallback cases.
+// Each detail-modal field must equal the existing helper called directly
+// against the same Model, so resolveLayout never re-derives them.
 func TestResolveLayout_DetailModalFields_MirrorHelpers(t *testing.T) {
 	sizes := []struct{ width, height int }{
 		{100, 40}, // floating box fits
@@ -199,11 +185,9 @@ func TestResolveLayout_DetailModalFields_MirrorHelpers(t *testing.T) {
 	}
 }
 
-// TestResolveLayout_ListContentBudget pins listContentBudget's own formula
-// against l.bodyBudget directly — l.bodyBudget minus listFooterLines
-// (clamped at 0) in ModeList, l.bodyBudget unchanged otherwise — rather
-// than against the listContentBudget(m) helper, so the assertion still
-// holds once that mirror-helper is inlined away.
+// The wanted value recomputes listContentBudget's formula from l.bodyBudget
+// instead of calling listContentBudget(m), so the assertion still holds once
+// that mirror helper is inlined away.
 func TestResolveLayout_ListContentBudget(t *testing.T) {
 	cases := []Model{
 		{Width: 100, Height: 40, Mode: ModeList},
@@ -224,9 +208,6 @@ func TestResolveLayout_ListContentBudget(t *testing.T) {
 	}
 }
 
-// TestResolveLayout_CompactAndBodyBudget_MirrorHelpers pins the same
-// no-re-derivation invariant for the two fields shared by every arrangement,
-// with and without a docked sidebar in play.
 func TestResolveLayout_CompactAndBodyBudget_MirrorHelpers(t *testing.T) {
 	cases := []Model{
 		{Width: 100, Height: 40},

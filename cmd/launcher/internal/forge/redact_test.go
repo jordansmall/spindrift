@@ -2,14 +2,11 @@ package forge
 
 import "testing"
 
-// TestRedactURLCredentials_StripsUserinfo verifies that a URL's embedded
-// userinfo (user:pass@) is stripped wherever it occurs in a string, while
-// the rest of the string — including the host/path — is left untouched.
 // CODE_FORGE_REMOTE_URL commonly carries embedded credentials
-// (https://oauth2:<token>@host/repo.git) for hosts without a credential
-// helper, and git's own error text echoes that URL verbatim on auth/network
-// failures — this guards the redaction those errors need before they reach
-// a public issue comment.
+// (https://oauth2:<token>@host/repo.git) for hosts without a credential helper,
+// and git's own error text echoes that URL verbatim on auth and network
+// failures, so the redaction has to run before those errors reach a public
+// issue comment.
 func TestRedactURLCredentials_StripsUserinfo(t *testing.T) {
 	cases := []struct {
 		name string

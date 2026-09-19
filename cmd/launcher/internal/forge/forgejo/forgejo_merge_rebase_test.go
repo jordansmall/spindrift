@@ -14,8 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// newMergeTestForge stands up a forge.CodeForge pointed at an httptest
-// server, configured with mergeMethod, for the Merge REST tests below.
 func newMergeTestForge(t *testing.T, mergeMethod string, handler http.HandlerFunc) forge.CodeForge {
 	t.Helper()
 	srv := httptest.NewServer(handler)
@@ -29,9 +27,6 @@ func newMergeTestForge(t *testing.T, mergeMethod string, handler http.HandlerFun
 	}, nil, "unused")
 }
 
-// TestMerge_Success_DefaultRebase verifies Merge POSTs to the pull's merge
-// endpoint with "Do":"rebase" (the default merge style) and
-// delete_branch_after_merge:true, and returns nil on a 2xx response.
 func TestMerge_Success_DefaultRebase(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -58,8 +53,6 @@ func TestMerge_Success_DefaultRebase(t *testing.T) {
 	}
 }
 
-// TestMerge_Success_SquashConfig verifies a "squash" MergeMethod config maps
-// onto "Do":"squash" in the merge request body.
 func TestMerge_Success_SquashConfig(t *testing.T) {
 	var gotBody map[string]any
 	cf := newMergeTestForge(t, "squash", func(w http.ResponseWriter, r *http.Request) {
@@ -74,10 +67,9 @@ func TestMerge_Success_SquashConfig(t *testing.T) {
 	}
 }
 
-// TestMerge_Conflict verifies Merge returns an error satisfying
-// errors.Is(err, forge.ErrMergeConflict) when the merge endpoint refuses the
-// merge and the pull's own mergeable field reports false — distinguishing a
-// genuine content conflict from a checks-blocked PR (issue #566).
+// Forgejo's refusal statuses (405/409) do not say whether the PR has a content
+// conflict or is blocked by checks. The pull's own mergeable field, false here,
+// is what tells the two apart (issue #566).
 func TestMerge_Conflict(t *testing.T) {
 	cf := newMergeTestForge(t, "", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -95,10 +87,8 @@ func TestMerge_Conflict(t *testing.T) {
 	}
 }
 
-// TestMerge_BlockedByChecks verifies Merge returns an error satisfying
-// errors.Is(err, forge.ErrMergeBlockedByChecks) when the merge endpoint
-// refuses the merge but the pull's own mergeable field reports true — the
-// PR itself is fine, it's blocked by pending/failing required checks.
+// The merge endpoint refuses but mergeable is true, so the PR itself is fine
+// and pending or failing required checks are what block it (issue #566).
 func TestMerge_BlockedByChecks(t *testing.T) {
 	cf := newMergeTestForge(t, "", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -116,13 +106,11 @@ func TestMerge_BlockedByChecks(t *testing.T) {
 	}
 }
 
-// TestMerge_NonRefusalStatus_SurfacesRawError verifies Merge does NOT fold a
-// non-refusal failure status (403 token lacks merge scope, 429 rate limit,
-// 500 server error) into ErrMergeConflict or ErrMergeBlockedByChecks. Only
-// Forgejo's "not mergeable" refusal statuses (405/409) are disambiguated via
-// the pull's mergeable field; every other non-2xx must surface as a raw error
-// naming the status, mirroring the github adapter which gates on
-// IsMergeConflict(stderr) before classifying (exec_pr.go, issue #566).
+// Only Forgejo's refusal statuses (405/409) get disambiguated through the
+// pull's mergeable field. Every other non-2xx must come back as a raw error
+// naming the status, so a 403, 429 or 500 is never misread as a conflict. The
+// github adapter gates the same way on IsMergeConflict(stderr) before it
+// classifies (exec_pr.go, issue #566).
 func TestMerge_NonRefusalStatus_SurfacesRawError(t *testing.T) {
 	for _, status := range []int{
 		http.StatusForbidden,
@@ -162,11 +150,8 @@ func TestMerge_NonRefusalStatus_SurfacesRawError(t *testing.T) {
 	}
 }
 
-// TestRebase_ResolvesHeadBranchAndRebases verifies Rebase resolves prURL to
-// its PR's head branch via the REST GET pull endpoint, then delegates to the
-// underlying git adapter's Rebase against a real bare-repo fixture: the
-// fixture's branch ends up incorporating the base branch's latest commit,
-// and Rebased(branch) confirms it.
+// The fixture advances the base branch after seeding the head branch, so a
+// no-op Rebase cannot pass: only a real rebase pulls in that later commit.
 func TestRebase_ResolvesHeadBranchAndRebases(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")

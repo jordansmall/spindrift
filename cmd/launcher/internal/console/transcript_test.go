@@ -9,9 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 )
 
-// TestDrillIn_SinglePass_RendersWithBoundary verifies DrillIn loads the
-// initial run's log, renders it through the given Driver, and marks the
-// single pass boundary — the base case before any fix/conflict pass exists.
+// This is the base case, before any fix or conflict pass exists.
 func TestDrillIn_SinglePass_RendersWithBoundary(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -44,9 +42,8 @@ func TestDrillIn_SinglePass_RendersWithBoundary(t *testing.T) {
 	}
 }
 
-// TestDrillIn_ControlSequences_StrippedFromRendered verifies ANSI/control
-// sequences embedded in untrusted model text reach the rendered pane
-// stripped, while the raw byte-exact copy keeps them intact (#721).
+// Untrusted model text can carry ANSI and control sequences: the rendered
+// pane strips them, the raw byte-exact copy keeps them (#721).
 func TestDrillIn_ControlSequences_StrippedFromRendered(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -84,9 +81,8 @@ func TestDrillIn_ControlSequences_StrippedFromRendered(t *testing.T) {
 	}
 }
 
-// TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries verifies an
-// initial run plus a fix pass render as one transcript spanning both, in
-// chronological order, each with its own boundary marker (#648 AC3).
+// An initial run plus a fix pass render as one transcript in chronological
+// order, each with its own boundary marker (#648 AC3).
 func TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -116,10 +112,9 @@ func TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries(t *testing.T) 
 	}
 }
 
-// TestSidebarTranscriptCache_UnchangedStat_SkipsReDrillIn verifies a second
-// Refresh against the same, untouched pass logs returns the cached render
-// rather than re-running DrillIn — the Transcript analogue of
-// SidebarActivityCache's own stat-based skip (issue #1736).
+// A second Refresh over untouched pass logs returns the cached render rather
+// than re-running DrillIn, matching SidebarActivityCache's stat-based skip
+// (issue #1736).
 func TestSidebarTranscriptCache_UnchangedStat_SkipsReDrillIn(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -154,9 +149,8 @@ func TestSidebarTranscriptCache_UnchangedStat_SkipsReDrillIn(t *testing.T) {
 	}
 }
 
-// TestDrillIn_NoLogsOnDisk_ReturnsErr verifies drilling into an issue with
-// no Dispatch history yet surfaces an error instead of an empty transcript
-// that could be mistaken for a Dispatch that ran and said nothing.
+// An issue with no Dispatch history must report an error, not an empty
+// transcript a reader could mistake for a Dispatch that ran and said nothing.
 func TestDrillIn_NoLogsOnDisk_ReturnsErr(t *testing.T) {
 	dir := t.TempDir()
 	drv, err := driver.New("claude")

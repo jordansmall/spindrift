@@ -5,13 +5,9 @@ import (
 	"testing"
 )
 
-// boxEnvRow mirrors one row of lib/promptassembly-boxenv.nix (issue #2979):
-// the Go field EnvFromEnviron populates, the Box env var it reads, and the
-// read rule ("kind") that drives the generated loader line. Hand-typed here,
-// not imported from Nix, so this test is the anti-vacuity root the generated
-// cmd/launcher/internal/promptassembly/boxenv_gen.go is checked against —
-// exactly as gates_test.go hand-types its expectations rather than reading
-// lib/baked-skills.nix.
+// boxEnvRow mirrors one row of lib/promptassembly-boxenv.nix (issue #2979).
+// It is hand-typed rather than imported from Nix so it stays an independent
+// check on the generated boxenv_gen.go, like gates_test.go's expectations.
 type boxEnvRow struct {
 	field string
 	env   string
@@ -86,12 +82,9 @@ var boxEnvKinds = map[string]boxEnvKindSpec{
 	},
 }
 
-// TestBoxEnvKinds_CoversEveryRowKind is the AC #3 coverage guard, in the
-// shape of TestGroupOrder_CoversEverySchemaGroup (cmd/launcher/flags_test.go):
-// every kind a row in boxEnvRows names must have a boxEnvKinds entry, and
-// every boxEnvKinds entry must be exercised by at least one row, so the
-// table can neither miss a kind setValueAndExpect/zeroValueFor would panic
-// on nor rot with an entry nothing uses.
+// TestBoxEnvKinds_CoversEveryRowKind is issue #2979's AC #3 coverage guard:
+// the kind table can neither miss a kind setValueAndExpect or zeroValueFor
+// would panic on nor keep an entry no row uses.
 func TestBoxEnvKinds_CoversEveryRowKind(t *testing.T) {
 	used := map[string]bool{}
 	for _, row := range boxEnvRows {
@@ -107,8 +100,6 @@ func TestBoxEnvKinds_CoversEveryRowKind(t *testing.T) {
 	}
 }
 
-// setValueAndExpect returns the env var value to set for a row's kind, and
-// the resulting field value EnvFromEnviron must produce from it.
 func setValueAndExpect(row boxEnvRow) (setValue string, want interface{}) {
 	spec, ok := boxEnvKinds[row.kind]
 	if !ok {
@@ -117,10 +108,10 @@ func setValueAndExpect(row boxEnvRow) (setValue string, want interface{}) {
 	return spec.setValue(row), spec.want(row)
 }
 
-// zeroValueFor is the zero value EnvFromEnviron must leave an unset covered
-// field at, keyed by kind rather than reflect.Zero(fieldType) — a row's kind
-// alone determines its Go type (presence/equals1 -> bool, string -> string,
-// int -> int), so this stays independent of Env's own field declarations.
+// zeroValueFor keys on kind rather than reflect.Zero(fieldType) because a
+// row's kind alone determines its Go type (presence and equals1 are bool,
+// string is string, int is int), which keeps it independent of Env's own
+// field declarations.
 func zeroValueFor(kind string) interface{} {
 	spec, ok := boxEnvKinds[kind]
 	if !ok {
@@ -130,21 +121,15 @@ func zeroValueFor(kind string) interface{} {
 }
 
 // TestEnvFromEnviron covers every lib/promptassembly-boxenv.nix row (issue
-// #2979): setting exactly the one env var a row reads from must produce an
-// Env with exactly that field populated and every other covered field left
-// at its zero value — the read-one-leave-rest-alone contract the generated
-// boxenv_gen.go's EnvFromEnviron must satisfy.
+// #2979): the generated EnvFromEnviron must populate only the field whose env
+// var is set and leave every other covered field at its zero value.
 func TestEnvFromEnviron(t *testing.T) {
 	for _, row := range boxEnvRows {
 		row := row
 		t.Run(row.field, func(t *testing.T) {
-			// This test itself runs inside a spindrift Box (issue #2979's own
-			// dispatch), so the ambient OS environment already carries real
-			// values for several of these vars (ISSUE_NUMBER, RUN_NONCE, ...).
-			// Clear every covered var first so only the row under test
-			// is actually set, regardless of what the outer dispatch left
-			// behind — t.Setenv restores each var's prior value once this
-			// subtest ends.
+			// This test runs inside a spindrift Box, whose ambient environment
+			// already sets several of these vars (ISSUE_NUMBER, RUN_NONCE, and
+			// others), so clear every covered var before setting the row's own.
 			for _, other := range boxEnvRows {
 				t.Setenv(other.env, "")
 			}
@@ -172,11 +157,10 @@ func TestEnvFromEnviron(t *testing.T) {
 	}
 }
 
-// TestEnvFromEnviron_FixPassMalformed covers FixPass's degrade-on-error rule
-// (mirroring cmd/launcher/main.go's atoiSchema helper, which this generated
-// file can't call directly since that helper is private to package main):
+// TestEnvFromEnviron_FixPassMalformed covers FixPass's degrade-on-error rule:
 // a non-numeric FIX_PASS must degrade to 0, not propagate a strconv error or
-// panic.
+// panic. It mirrors cmd/launcher/main.go's atoiSchema, which the generated
+// file cannot call because that helper is private to package main.
 func TestEnvFromEnviron_FixPassMalformed(t *testing.T) {
 	t.Setenv("FIX_PASS", "not-a-number")
 
@@ -186,10 +170,9 @@ func TestEnvFromEnviron_FixPassMalformed(t *testing.T) {
 	}
 }
 
-// TestEnvFromEnviron_SelfContainedRequiresExactlyOne covers the equals1 kind's
-// strict comparison: only the literal "1" satisfies it, matching
-// entrypoint.sh's "$SELF_CONTAINED" == "1" check — any other non-empty value
-// (e.g. "true") must NOT satisfy it.
+// TestEnvFromEnviron_SelfContainedRequiresExactlyOne covers the equals1 kind:
+// only the literal "1" satisfies it, matching entrypoint.sh's
+// "$SELF_CONTAINED" == "1" check, so a value like "true" must not.
 func TestEnvFromEnviron_SelfContainedRequiresExactlyOne(t *testing.T) {
 	t.Setenv("SELF_CONTAINED", "true")
 

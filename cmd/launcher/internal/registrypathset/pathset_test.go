@@ -10,10 +10,9 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// admits is test-only sugar for asserting on a derived HostPathSet's
-// admission behavior: registryvocab.PathSet.Admits owns the rule now
-// (issue #3398), so this just projects Subtrees down to their roots and
-// delegates rather than reimplementing the rule here.
+// registryvocab.PathSet.Admits owns the admission rule (issue #3398), so this
+// helper projects Subtrees down to their roots and delegates rather than
+// reimplementing the rule here.
 func (s HostPathSet) admits(requestPath string) bool {
 	roots := make(registryvocab.PathSet, len(s.Subtrees))
 	for i, sub := range s.Subtrees {
@@ -22,10 +21,6 @@ func (s HostPathSet) admits(requestPath string) bool {
 	return roots.Admits(requestPath)
 }
 
-// writeFixture writes body to repo-relative path rel under dir, creating any
-// parent directories -- the same t.TempDir() fixture-repo convention
-// registrydiscover's own tests use, so a path-set test reads as the repo tree
-// an operator would actually commit.
 func writeFixture(t *testing.T, dir, rel, body string) {
 	t.Helper()
 	full := filepath.Join(dir, rel)
@@ -37,11 +32,10 @@ func writeFixture(t *testing.T, dir, rel, body string) {
 	}
 }
 
-// TestDerive_TwoCargoRegistriesOneHost is the derivation's central departure
-// from Discover, which dedupes by host and drops the second registry: an
-// Artifactory-shaped repo declaring an internal and a remote cargo registry on
-// one host must derive both index subtrees, or the enforced path-set would
-// refuse the crates the second registry serves.
+// Discover dedupes by host and drops the second registry. Derive must not: a
+// repo declaring an internal and a remote cargo registry on one host needs both
+// index subtrees, or the enforced path set refuses the crates the second
+// registry serves.
 func TestDerive_TwoCargoRegistriesOneHost(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".cargo/config.toml", `
@@ -69,13 +63,11 @@ index = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/index
 	}
 }
 
-// TestDerive_SameHostOriginDisagreementMerges pins the same-host merge across
-// ecosystems and files: two declarations disagreeing on scheme and port still
-// yield one HostPathSet holding both subtrees, since enforcement keys on the
-// registryvocab.HostKey-normalized host a route matched and a second entry
-// for that host would be unreachable. ecosystem.Table runs npm before yarn,
-// so the .npmrc declaration is the first one and its https Origin is the
-// one kept.
+// Two declarations disagreeing on scheme and port still merge into one
+// HostPathSet, because enforcement keys on the registryvocab.HostKey-normalized
+// host and a second entry for that host would be unreachable. ecosystem.Table
+// runs npm before yarn, so the .npmrc declaration comes first and its https
+// Origin is the one kept.
 func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=https://host.example.com/npm\n")
@@ -98,12 +90,10 @@ func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 	}
 }
 
-// TestDerive_ExactRepeatWithinHostDedupes pins the exact-repeat drop: two
-// declarations of one subtree contribute one. The two hosts differ only in
-// case deliberately -- equivalent hosts but distinct strings, so the npm
-// row's own ConfigParser's byte-equal dedupe passes both through and
-// Derive's own dedupe, over the registryvocab.HostKey-folded host, is what
-// has to collapse them.
+// The two hosts differ only in case deliberately: equivalent hosts but distinct
+// strings, so the npm row's byte-equal dedupe passes both through and Derive's
+// own dedupe, over the registryvocab.HostKey-folded host, is what must collapse
+// them.
 func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=https://x.example.com/npm\n@scope:registry=https://X.example.com/npm\n")
@@ -122,11 +112,9 @@ func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 	}
 }
 
-// TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets pins
-// registryvocab.HostKey's bracket branch, which only a port-less IPv6
-// literal reaches: Host must unbracket, to stay comparable with a route's
-// own match-host, while Origin keeps the brackets, since that is the
-// authority a client actually dials.
+// Only a port-less IPv6 literal reaches registryvocab.HostKey's bracket branch.
+// Host unbrackets to stay comparable with a route's match-host, while Origin
+// keeps the brackets because that is the authority a client dials.
 func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=http://[::1]/npm\n")
@@ -145,9 +133,9 @@ func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
 	}
 }
 
-// TestDerive_NoNpmConfigDerivesNoNpmPaths pins absence of declaration to
-// absence of binding: neither an empty repo nor one declaring only cargo may
-// derive an npm path, since nothing in the snapshot names an npm registry.
+// Absence of declaration means absence of binding: neither an empty repo nor
+// one declaring only cargo may derive an npm path, because nothing in the
+// snapshot names an npm registry.
 func TestDerive_NoNpmConfigDerivesNoNpmPaths(t *testing.T) {
 	t.Run("empty repo", func(t *testing.T) {
 		got, err := Derive(t.TempDir())
@@ -181,9 +169,8 @@ index = "sparse+https://cargo.example.com/index"
 	})
 }
 
-// TestDerive_BareHostDerivesRootSubtree pins the bare-host rule: a public
-// registry declared with no path at all (the shape of a stock .npmrc) is a
-// whole-host registry, so it derives the root subtree rather than nothing.
+// A public registry declared with no path at all (the shape of a stock .npmrc)
+// is a whole-host registry, so it derives the root subtree rather than nothing.
 func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=https://registry.npmjs.org\n")
@@ -202,10 +189,9 @@ func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
 	}
 }
 
-// TestDerive_HostNormalizedOriginKeepsPort pins the two host renderings apart:
-// Host is registryvocab.HostKey-normalized so it compares equal to a
-// route's match-host, while Origin keeps the port (and the case url.Parse
-// preserves) so it stays a usable upstream origin.
+// Host is registryvocab.HostKey-normalized so it compares equal to a route's
+// match-host, while Origin keeps the port (and the case url.Parse preserves) so
+// it stays a usable upstream origin.
 func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=https://HOST.example.com:8443/repo/npm\n")
@@ -224,18 +210,15 @@ func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 	}
 }
 
-// TestDerive_ArtifactoryFieldShape is acceptance criterion 3: the shape the
-// 2026-09-04 field run actually hit -- an internal and a remote cargo registry
-// on one Artifactory host, with crates.io replaced through the remote so
-// public dependencies resolve there -- must derive a set that admits that
-// run's real request paths and refuses the host's registry API surface.
+// This test is acceptance criterion 3, over the shape the 2026-09-04 field run
+// hit: an internal and a remote cargo registry on one Artifactory host, with
+// crates.io replaced through the remote. The derived set must admit that run's
+// real request paths and refuse the host's other registry API endpoints.
 func TestDerive_ArtifactoryFieldShape(t *testing.T) {
 	dir := t.TempDir()
-	// [source.crates-io]/[source.remote] is the stanza that makes crates.io
-	// traffic land on the remote index. The cargo row's ConfigParser reads
-	// only [registries.*], which is sufficient here: the remote registry the
-	// replacement points at is itself declared, so its subtree is derived
-	// either way.
+	// The [source.*] stanzas send crates.io traffic to the remote index. The
+	// cargo row's ConfigParser reads only [registries.*], which is enough here
+	// because the remote registry the replacement points at is itself declared.
 	writeFixture(t, dir, ".cargo/config.toml", `
 [registries.internal]
 index = "sparse+https://artifacts.example.com/artifactory/api/cargo/internal/index"
@@ -277,18 +260,17 @@ registry = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/in
 	}
 
 	refuse := []string{
-		// Credential-minting and administrative endpoints on the same host.
-		// No declaration names them, so the operator credential must never be
+		// Credential-minting and administrative endpoints on the same host. No
+		// declaration names them, so the operator credential must never be
 		// steerable at them.
 		"/artifactory/api/security/token",
 		"/artifactory/api/repositories",
 		"/artifactory/api/cargo/remote/index/../../security/token",
-		// The cargo download endpoint is a sibling of the index, not under
-		// it, so nothing committed in the repo declares it and refusing it is
+		// The cargo download endpoint is a sibling of the index, not under it,
+		// so nothing committed in the repo declares it and refusing it is
 		// correct today. Spec #3253 decision 3 has the Forwarder learn the dl
-		// base from upstream's own config.json and add that subtree,
-		// same-host pinned -- a later ticket. This derivation must not invent
-		// a dl path here.
+		// base from upstream's config.json in a later ticket. This derivation
+		// must not invent a dl path.
 		"/artifactory/api/cargo/remote/v1/crates/axum/0.7.5/download",
 	}
 	for _, p := range refuse {
@@ -298,9 +280,8 @@ registry = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/in
 	}
 }
 
-// inTreeFixtures maps an ecosystem.Table row name to a minimal committed
-// config body for that row's InTreeConfigPath, declaring one registry with a
-// distinguishable path.
+// inTreeFixtures maps an ecosystem.Table row name to a minimal config body for
+// that row's InTreeConfigPath, each declaring one distinguishable path.
 var inTreeFixtures = map[string]string{
 	"cargo": "[registries.mycorp]\nindex = \"sparse+https://cargo.example.com/repo/cargo/index\"\n",
 	"npm":   "registry=https://npm.example.com/repo/npm\n",
@@ -308,17 +289,11 @@ var inTreeFixtures = map[string]string{
 	"pnpm":  "registry: https://pnpm.example.com/repo/pnpm\n",
 }
 
-// TestDerive_CoversEveryInTreeEcosystem guards the derivation the way
-// ecosystem.TestConfigParserMatchesInTreeConfigPath guards the rows, one step
-// further along: that guard proves an in-tree ecosystem.Table row has a
-// parser, while
-// this one proves the row's parsed declaration actually reaches a subtree. An
-// ecosystem whose config parses but silently derives no path would leave the
-// proxy refusing every request that ecosystem makes, with no other test
-// failing. Rows with an empty InTreeConfigPath derive nothing by design -- go,
-// whose path lives on the route rather than in the repo, and gradle, which
-// commits no config this scan can read -- so they are excluded here rather
-// than left unstated.
+// ecosystem.TestConfigParserMatchesInTreeConfigPath proves an in-tree row has a
+// parser; this one proves the row's declaration reaches a subtree. An ecosystem
+// whose config parses but derives no path would leave the proxy refusing every
+// request that ecosystem makes, with no other test failing. Rows with an empty
+// InTreeConfigPath (go, gradle) derive nothing by design and are excluded.
 func TestDerive_CoversEveryInTreeEcosystem(t *testing.T) {
 	inTree := make(map[string]string)
 	for _, row := range ecosystem.Table {
@@ -370,9 +345,9 @@ func TestDerive_CoversEveryInTreeEcosystem(t *testing.T) {
 	}
 }
 
-// TestDerive_DeterministicOverSnapshot pins the acceptance criterion that the
-// snapshot directory alone is the input: two calls over one unchanged fixture
-// must agree exactly, which map iteration order in the grouping would break.
+// The snapshot directory alone is the input, so two calls over one unchanged
+// fixture must agree exactly. Map iteration order in the grouping would break
+// this.
 func TestDerive_DeterministicOverSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".cargo/config.toml", `

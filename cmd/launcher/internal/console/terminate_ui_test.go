@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// TestUpdate_TerminateRequestedMsg_SetsPending verifies "k <num>" arms a
-// pending confirm on the model — Terminate (ADR 0024, issue #649) requires
-// an explicit confirm before acting.
+// Terminate (ADR 0024, issue #649) requires an explicit confirm before it
+// acts, so "k <num>" only arms a pending confirm on the model.
 func TestUpdate_TerminateRequestedMsg_SetsPending(t *testing.T) {
 	m := NewModel()
 	m = Update(m, TerminateRequestedMsg{Number: "42"})
@@ -20,9 +19,6 @@ func TestUpdate_TerminateRequestedMsg_SetsPending(t *testing.T) {
 	}
 }
 
-// TestUpdate_TerminateConfirmedMsg_ClearsPending verifies a confirmed
-// terminate clears the pending confirm so the next render returns to the
-// normal backlog/queue view.
 func TestUpdate_TerminateConfirmedMsg_ClearsPending(t *testing.T) {
 	m := NewModel()
 	m = Update(m, TerminateRequestedMsg{Number: "42"})
@@ -33,8 +29,6 @@ func TestUpdate_TerminateConfirmedMsg_ClearsPending(t *testing.T) {
 	}
 }
 
-// TestUpdate_TerminateCancelledMsg_ClearsPending verifies declining the
-// confirm clears the pending state without acting.
 func TestUpdate_TerminateCancelledMsg_ClearsPending(t *testing.T) {
 	m := NewModel()
 	m = Update(m, TerminateRequestedMsg{Number: "42"})
@@ -45,8 +39,6 @@ func TestUpdate_TerminateCancelledMsg_ClearsPending(t *testing.T) {
 	}
 }
 
-// TestView_TerminateConfirm_ShowsConfirmPrompt verifies the operator sees an
-// explicit confirm prompt naming the issue before Terminate acts.
 func TestView_TerminateConfirm_ShowsConfirmPrompt(t *testing.T) {
 	m := NewModel()
 	m.Mode = ModeTerminateConfirm
@@ -58,10 +50,9 @@ func TestView_TerminateConfirm_ShowsConfirmPrompt(t *testing.T) {
 	}
 }
 
-// TestView_TerminateConfirm_FooterStyledDim verifies the terminate confirm
-// prompt's y/N/q/ctrl+c hint renders dim (RoleDim, "\x1b[90m") via the
-// shared footer renderer, the same treatment the other migrated footers
-// already got (issue #1793).
+// Issue #1793 moved this footer to the shared renderer, so the y/N/q/ctrl+c
+// hint must come out dim (RoleDim, "\x1b[90m") like the other migrated
+// footers.
 func TestView_TerminateConfirm_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")

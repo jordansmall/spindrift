@@ -10,9 +10,8 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestFSProbe_LogStale_NoLogIsStale verifies an issue that never wrote a Box
-// log counts as stale — a genuine orphan with no history is not held
-// indefinitely waiting for a log that will never appear.
+// An orphan with no history must not be held forever waiting for a log that
+// will never appear, so no log at all counts as stale.
 func TestFSProbe_LogStale_NoLogIsStale(t *testing.T) {
 	p := NewFSProbe(t.TempDir(), runner.NewFake())
 	if !p.LogStale("42") {
@@ -20,8 +19,6 @@ func TestFSProbe_LogStale_NoLogIsStale(t *testing.T) {
 	}
 }
 
-// TestFSProbe_LogStale_RecentLogIsNotStale verifies a log written within the
-// staleness threshold reports the issue as still live.
 func TestFSProbe_LogStale_RecentLogIsNotStale(t *testing.T) {
 	pwd := t.TempDir()
 	writeLog(t, pwd, "42")
@@ -33,8 +30,6 @@ func TestFSProbe_LogStale_RecentLogIsNotStale(t *testing.T) {
 	}
 }
 
-// TestFSProbe_LogStale_OldLogIsStale verifies a log last written beyond the
-// staleness threshold reports the issue as dead.
 func TestFSProbe_LogStale_OldLogIsStale(t *testing.T) {
 	pwd := t.TempDir()
 	writeLog(t, pwd, "42")
@@ -46,8 +41,6 @@ func TestFSProbe_LogStale_OldLogIsStale(t *testing.T) {
 	}
 }
 
-// TestFSProbe_ContainerLive_Present verifies ContainerLive reports live and
-// reachable when the runner reports a matching sandbox running.
 func TestFSProbe_ContainerLive_Present(t *testing.T) {
 	r := runner.NewFake()
 	r.RunningNames = []string{dispatch.BoxName("42")}
@@ -59,8 +52,6 @@ func TestFSProbe_ContainerLive_Present(t *testing.T) {
 	}
 }
 
-// TestFSProbe_ContainerLive_Absent verifies ContainerLive reports not-live,
-// reachable when the runner answers with no matching sandbox.
 func TestFSProbe_ContainerLive_Absent(t *testing.T) {
 	p := NewFSProbe(t.TempDir(), runner.NewFake())
 	live, reachable := p.ContainerLive("42")
@@ -69,9 +60,8 @@ func TestFSProbe_ContainerLive_Absent(t *testing.T) {
 	}
 }
 
-// TestFSProbe_ContainerLive_Unreachable verifies ContainerLive reports
-// unreachable — not live — when the runtime itself cannot be queried, so
-// Run never mistakes "couldn't check" for "confirmed absent".
+// A runtime that cannot be queried reports unreachable and not live, so Run
+// never mistakes "couldn't check" for "confirmed absent".
 func TestFSProbe_ContainerLive_Unreachable(t *testing.T) {
 	r := runner.NewFake()
 	r.ListRunningErr = os.ErrClosed

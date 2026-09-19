@@ -7,12 +7,9 @@ import (
 	"testing"
 )
 
-// TestForgejoHarnessLabels asserts the harness seeds both label families the
-// dispatch lifecycle needs: the four triage/dispatch labels (mirrored from
-// testLabels in contract_test.go) and the three research verdict labels
-// (forge.ResearchVerdictLabels). Every color must be a bare 6-hex-digit
-// string with no leading "#" — the adapter's CreateLabel prepends the "#"
-// itself (forgejo.go:446), so a helper-supplied "#" would double up.
+// Colors must be bare 6-hex-digit strings with no leading "#". The adapter's
+// CreateLabel prepends the "#" itself (forgejo.go:446), so a helper-supplied
+// "#" would double up.
 func TestForgejoHarnessLabels(t *testing.T) {
 	labels := forgejoHarnessLabels()
 
@@ -57,9 +54,6 @@ func TestForgejoHarnessLabels(t *testing.T) {
 	}
 }
 
-// TestForgejoContainerRunArgsFixedPort asserts the fixed-port shape: the
-// host port is published explicitly, and the throwaway-container flags
-// (--rm, INSTALL_LOCK) are present.
 func TestForgejoContainerRunArgsFixedPort(t *testing.T) {
 	args := forgejoContainerRunArgs("podman", "spindrift-forgejo-harness", "codeberg.org/forgejo/forgejo:1.21", 49213)
 
@@ -80,8 +74,7 @@ func TestForgejoContainerRunArgsFixedPort(t *testing.T) {
 	}
 }
 
-// TestForgejoContainerRunArgsEphemeralPort asserts hostPort==0 publishes
-// without a host port, letting the runtime pick one.
+// A hostPort of 0 publishes without a host port so the runtime picks one.
 func TestForgejoContainerRunArgsEphemeralPort(t *testing.T) {
 	args := forgejoContainerRunArgs("docker", "spindrift-forgejo-harness", "codeberg.org/forgejo/forgejo:1.21", 0)
 
@@ -96,9 +89,8 @@ func TestForgejoContainerRunArgsEphemeralPort(t *testing.T) {
 	}
 }
 
-// TestParseForgejoHostPortMultiline exercises a realistic `docker port
-// <name> 3000` / `podman port <name> 3000` output: an ipv4 line, and an ipv6
-// line that must not shadow the first parsed port.
+// The fixture mirrors real `docker port <name> 3000` output. Its trailing ipv6
+// line must not shadow the port parsed from the ipv4 line.
 func TestParseForgejoHostPortMultiline(t *testing.T) {
 	out := "0.0.0.0:49153\n[::]:49153\n"
 	port, err := parseForgejoHostPort(out)
@@ -110,7 +102,6 @@ func TestParseForgejoHostPortMultiline(t *testing.T) {
 	}
 }
 
-// TestParseForgejoHostPortSingleLine exercises a single 127.0.0.1 line.
 func TestParseForgejoHostPortSingleLine(t *testing.T) {
 	port, err := parseForgejoHostPort("127.0.0.1:41000\n")
 	if err != nil {
@@ -121,8 +112,8 @@ func TestParseForgejoHostPortSingleLine(t *testing.T) {
 	}
 }
 
-// TestParseForgejoHostPortEmpty asserts empty/unparseable input errors
-// instead of silently returning a zero port.
+// Unparseable input must error rather than return a zero port the caller then
+// dials.
 func TestParseForgejoHostPortEmpty(t *testing.T) {
 	if _, err := parseForgejoHostPort(""); err == nil {
 		t.Error("parseForgejoHostPort: expected error for empty input, got nil")
@@ -132,9 +123,8 @@ func TestParseForgejoHostPortEmpty(t *testing.T) {
 	}
 }
 
-// TestForgejoAdminCreateArgs asserts the admin-bootstrap argv creates an
-// admin user with a password that doesn't need changing on first login (the
-// harness has no interactive terminal to satisfy a forced change).
+// The admin password must not need changing on first login. The harness has no
+// interactive terminal to satisfy a forced change.
 func TestForgejoAdminCreateArgs(t *testing.T) {
 	args := forgejoAdminCreateArgs("spindrift-admin", "s3cr3t-pass", "admin@example.invalid")
 
@@ -155,9 +145,8 @@ func TestForgejoAdminCreateArgs(t *testing.T) {
 	}
 }
 
-// TestForgejoTokenGenArgs asserts the token-minting argv requests a raw,
-// all-scopes token — raw so the harness can read the token straight off
-// stdout without parsing table output.
+// The token must be raw so the harness reads it straight off stdout instead of
+// parsing table output.
 func TestForgejoTokenGenArgs(t *testing.T) {
 	args := forgejoTokenGenArgs("spindrift-admin")
 
@@ -172,8 +161,6 @@ func TestForgejoTokenGenArgs(t *testing.T) {
 	}
 }
 
-// TestForgejoVersionURL asserts the version-endpoint URL is built correctly
-// both with and without a trailing slash on baseURL.
 func TestForgejoVersionURL(t *testing.T) {
 	cases := []struct {
 		baseURL string

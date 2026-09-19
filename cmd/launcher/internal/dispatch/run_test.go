@@ -8,8 +8,6 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestRun_CallsRunnerWithCorrectBox verifies that Run invokes runner.Run with
-// a Box containing the expected issue number, name, and env keys.
 func TestRun_CallsRunnerWithCorrectBox(t *testing.T) {
 	t.Setenv("GH_TOKEN", "secret")
 	dir := tempLogDir(t)
@@ -46,9 +44,8 @@ func TestRun_CallsRunnerWithCorrectBox(t *testing.T) {
 	}
 }
 
-// TestRun_ForwardsRunNonceIntoBoxEnv verifies Run forwards the Dispatch's
-// own per-run nonce (issue #1937) as Box.Env["RUN_NONCE"], and that a
-// second Dispatch built by the same Factory gets a different nonce.
+// Each Dispatch carries its own per-run nonce (issue #1937), so two
+// Dispatch values from one Factory must not share one.
 func TestRun_ForwardsRunNonceIntoBoxEnv(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -77,8 +74,6 @@ func TestRun_ForwardsRunNonceIntoBoxEnv(t *testing.T) {
 	}
 }
 
-// TestRun_TerminalFailurePropagates verifies that a terminal box failure is
-// reported as Result.Success=false without retry.
 func TestRun_TerminalFailurePropagates(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -101,8 +96,6 @@ func TestRun_TerminalFailurePropagates(t *testing.T) {
 	}
 }
 
-// TestRun_PopulatesBoxDriverCacheDir verifies Run forwards the Dispatch's
-// per-issue driver-cache directory onto the dispatched Box.
 func TestRun_PopulatesBoxDriverCacheDir(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -127,11 +120,9 @@ func TestRun_PopulatesBoxDriverCacheDir(t *testing.T) {
 	}
 }
 
-// TestRun_PopulatesBoxOutboxDir verifies Run forwards a fresh, existing
-// per-issue outbox directory onto the dispatched Box (CODE_FORGE=local, ADR
-// 0033) — the runner's mount code only produces the writable /outbox mount
-// when the source directory already exists (candidateMount), so runOnce must
-// create it, not merely name it.
+// Under CODE_FORGE=local (ADR 0033) the runner's candidateMount only
+// produces the writable /outbox mount when the source directory already
+// exists, so runOnce must create the directory, not merely name it.
 func TestRun_PopulatesBoxOutboxDir(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -162,10 +153,8 @@ func TestRun_PopulatesBoxOutboxDir(t *testing.T) {
 	}
 }
 
-// TestRun_NoOutboxDirForNonLocalCodeForge verifies that a Box dispatched
-// under any CodeForge other than "local" gets no outbox directory at all —
-// creating .spindrift/outbox/<num> on every dispatch would otherwise litter
-// the github/git-flow majority with a directory nothing ever mounts.
+// Creating .spindrift/outbox/<num> on every dispatch would litter the
+// github/git-flow majority with a directory nothing ever mounts.
 func TestRun_NoOutboxDirForNonLocalCodeForge(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -189,12 +178,9 @@ func TestRun_NoOutboxDirForNonLocalCodeForge(t *testing.T) {
 	}
 }
 
-// TestRun_PopulatesBoxOutboxDir_GithubReadOnly verifies Run provisions the
-// same writable per-issue outbox for CODE_FORGE=github under
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1918) as it already does for
-// CODE_FORGE=local: the Box writes seam.bundle there instead of pushing, so
-// the launcher's github BundleRelay needs a real mounted directory to find
-// it in.
+// Under BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1918) the github Box
+// writes seam.bundle to the outbox instead of pushing, so the launcher's
+// BundleRelay needs a real mounted directory to find it in.
 func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -226,9 +212,7 @@ func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 	}
 }
 
-// TestRun_NoOutboxDirForGithubReadWrite verifies a github Box dispatched
-// under the default BOX_FORGE_AND_ISSUE_ACCESS=read-write gets no outbox
-// directory at all, exactly like today -- read-write pushes in-box and never
+// The default BOX_FORGE_AND_ISSUE_ACCESS=read-write pushes in-box and never
 // consults an outbox.
 func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 	dir := tempLogDir(t)
@@ -256,16 +240,11 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 	}
 }
 
-// TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly verifies Run provisions the
-// same writable per-issue outbox for CODE_FORGE=forgejo under
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only as it already does for CODE_FORGE=github
-// (TestRun_PopulatesBoxOutboxDir_GithubReadOnly), now that forgejo's
-// backendRow carries OutboxRelayCapable: true (issue #2927) -- forgejo gets
-// the same outbox-relay treatment as github (issue #1918). It builds
-// Config.ForgeDescriptor from the real backend.Forgejo registry
-// row rather than a hand-built stand-in, so the test proves the actual
-// registry row provisions an outbox end-to-end, not just that the generic
-// plumbing honors an arbitrary true.
+// Forgejo's backendRow carries OutboxRelayCapable: true (issue #2927), so it
+// gets github's outbox-relay treatment (issue #1918). The descriptor comes
+// from the real backend.Forgejo registry row rather than a hand-built
+// stand-in, so this proves the actual row provisions an outbox and not just
+// that the generic plumbing honors an arbitrary true.
 func TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -297,14 +276,11 @@ func TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly(t *testing.T) {
 	}
 }
 
-// TestRun_NoOutboxDirForOutboxIncapableReadOnly verifies that a Box
-// dispatched with a backend descriptor carrying OutboxRelayCapable: false
-// gets no outbox directory even under BOX_FORGE_AND_ISSUE_ACCESS=read-only --
-// the outbox-relay dir is gated on the backend's capability, not just the
-// access mode. No backendRow valid as a CODE_FORGE under read-only (github,
-// local, forgejo) leaves both OutboxRelayCapable and HostMediatedRemote
-// false today, so this is a hypothetical-backend-shape case rather than a
-// pin on any specific backend's real behavior.
+// The outbox dir is gated on the backend's capability, not just the access
+// mode. No backendRow valid under read-only (github, local, forgejo) leaves
+// both OutboxRelayCapable and HostMediatedRemote false today, so the
+// descriptor here is a hypothetical backend shape, not a pin on any real
+// backend's behavior.
 func TestRun_NoOutboxDirForOutboxIncapableReadOnly(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -331,11 +307,8 @@ func TestRun_NoOutboxDirForOutboxIncapableReadOnly(t *testing.T) {
 	}
 }
 
-// TestNewFactory_NoDriverSessionCacheDir_NoCacheCreated verifies that a
-// Driver declaring no session-cache dir (Config.DriverSessionCacheDir
-// empty) makes the Factory skip creating a per-issue cache directory
-// entirely -- Box.DriverCacheDir stays empty on every dispatched box, since
-// there is no in-box target to mount it over (issue #448).
+// A Driver declaring no session-cache dir has no in-box target to mount one
+// over, so the Factory skips creating it entirely (issue #448).
 func TestNewFactory_NoDriverSessionCacheDir_NoCacheCreated(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -359,10 +332,8 @@ func TestNewFactory_NoDriverSessionCacheDir_NoCacheCreated(t *testing.T) {
 	}
 }
 
-// TestFix_PopulatesBoxDriverCacheDirWithSameKeyAsRun verifies Fix forwards
-// the same per-issue cache directory Run used for the same issue -- the
-// whole point being that the fix Box mounts back the initial run's session
-// data.
+// The fix Box must mount back the initial run's session data, so Fix has to
+// reuse the exact cache directory Run used for the same issue.
 func TestFix_PopulatesBoxDriverCacheDirWithSameKeyAsRun(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -392,9 +363,8 @@ func TestFix_PopulatesBoxDriverCacheDirWithSameKeyAsRun(t *testing.T) {
 	}
 }
 
-// TestResolveConflict_DoesNotMountDriverCache verifies ResolveConflict's box
-// does not carry a DriverCacheDir -- it never runs the main agent prompt, so
-// there is no session to resume.
+// ResolveConflict's box never runs the main agent prompt, so there is no
+// session to resume and no cache to mount.
 func TestResolveConflict_DoesNotMountDriverCache(t *testing.T) {
 	dir := tempLogDir(t)
 

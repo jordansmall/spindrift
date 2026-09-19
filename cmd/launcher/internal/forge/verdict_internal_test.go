@@ -6,13 +6,10 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// TestVerdictConstantsDeriveFromOutcomeStatuses locks in that the Verdict
-// constants (and the unexported blockedVerdict escape hatch) are declared in
-// terms of the generated outcome.ResearchStatuses vocabulary rather than
-// restating it as independent string literals. The exported half of this
-// invariant is also reachable from forge_test (see
-// outcome_status_parity_test.go); blockedVerdict is unexported, so this file
-// lives in package forge to reach it directly.
+// The Verdict constants must derive from the generated
+// outcome.ResearchStatuses vocabulary, not restate it as independent string
+// literals. forge_test covers the exported half (outcome_status_parity_test.go);
+// this file is in package forge because blockedVerdict is unexported.
 func TestVerdictConstantsDeriveFromOutcomeStatuses(t *testing.T) {
 	if got, want := Recommend, Verdict(outcome.StatusRecommend); got != want {
 		t.Errorf("Recommend = %q, want %q (outcome.StatusRecommend)", got, want)
