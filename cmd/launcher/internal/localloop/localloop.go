@@ -174,6 +174,8 @@ func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps
 	// and SeamCount are derived keeps those correct with no filtering of their
 	// own (issue #3439). Scoped to the collision: a three-level chain's middle
 	// issue resolves into its grandparent's group and must keep gating it.
+	// Consequence: an excluded issue's own stuck landing is unreachable from
+	// verdictFor's lookup below; reconcile reports it instead (issue #3440).
 	for _, parent := range order {
 		g := groups[parent]
 		var kept []forge.Issue
