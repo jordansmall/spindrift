@@ -776,12 +776,12 @@ the container-runtime daemon the bwrap runtime is "daemonless" of.
 The shipped unattended [[Driving loop]]: `apps.daemon`, generated per-Consumer
 by `mkHarness` beside `apps.default`. It holds `MAX_PARALLEL` slots and fills
 each with one single-Box launcher invocation pinned to a fetched revision,
-making it the owner of dispatch concurrency and superseding continuous
-dispatch, which is deprecated in its favour but kept for operators who want no
-daemon and retained as the Console's engine. Distinct from the
-*container-runtime* daemon (podman/docker) that the bwrap runtime is
-"daemonless" of — spindrift's Daemon is runtime-agnostic and drives a bwrap
-harness as readily as an OCI one.
+drawing from both [[Dispatch kind]]s against that one pool. This makes it the
+owner of dispatch concurrency, superseding continuous dispatch — deprecated in
+its favour, but kept for operators who want no daemon and retained as the
+Console's engine. Distinct from the *container-runtime* daemon (podman/docker)
+that the bwrap runtime is "daemonless" of: spindrift's Daemon is
+runtime-agnostic and drives a bwrap harness as readily as an OCI one.
 _Avoid_: service, scheduler, supervisor, dogfood loop.
 
 **Awake window**:
