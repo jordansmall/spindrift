@@ -165,7 +165,12 @@ discipline, since nothing secret is ever evaluable. Extends to each route's
 are still private, and so are runtime inputs rather than flake values.
 Resolved once at launcher
 startup, and unset from the launcher's own environment immediately after, so
-the ambient environment cannot carry it into a Box.
+the ambient environment cannot carry it into a Box. Within that resolution
+step, every `env` source is unset before any `exec` source runs — but an
+earlier `validate`-time peek and doctor's route gate run before the unset
+and lean on the allowlist instead, so on every path an `exec` helper sees
+only a small allowlisted environment, never another route's credential or
+the launcher's own tokens (issue #3151; see ADR 0045).
 _Avoid_: secret, credential (the value itself), token path.
 
 **Registry route**:
