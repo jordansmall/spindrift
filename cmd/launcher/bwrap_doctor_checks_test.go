@@ -487,8 +487,11 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 		checkByName(t, report, name)
 	}
 
-	// doctorCheckSets' doc comment promises this row order: extra, bwrap,
-	// per-route, drift, transport. Presence alone would not pin it.
+	// doctorCheckSets' true row order is extra, bwrap, podman-machine-memory,
+	// per-route, drift, transport. Presence alone would not pin it. This
+	// config's runnerKind is bwrap, so podmanMachineMemoryCheck returns nil
+	// and that row never appears here, leaving only bwrap < per-route <
+	// drift < transport to pin.
 	indexOf := func(name string) int {
 		for i, ch := range report {
 			if ch.Name == name {
