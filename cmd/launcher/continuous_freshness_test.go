@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"spindrift.dev/launcher/internal/waves"
@@ -21,6 +22,8 @@ func TestExitCodeFor(t *testing.T) {
 		{"ErrOpenNoneDispatchable", waves.ErrOpenNoneDispatchable, 3},
 		{"ErrImageStale", waves.ErrImageStale, 4},
 		{"errImageHostTainted", errImageHostTainted, 5},
+		{"ErrSignalledStop", waves.ErrSignalledStop, 7},
+		{"wraps both ErrSignalledStop and ErrImageStale", fmt.Errorf("%w: %w", waves.ErrSignalledStop, waves.ErrImageStale), 7},
 		{"other error", errors.New("boom"), 1},
 	}
 	for _, tc := range cases {
