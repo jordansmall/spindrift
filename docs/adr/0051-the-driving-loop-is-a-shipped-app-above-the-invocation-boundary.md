@@ -96,6 +96,53 @@ known, and the dirty-tree refusal disappears — git objects are read, not the
 worktree, so an operator may keep working in the checkout while the daemon
 runs.
 
+
+## One pool, both kinds
+
+The daemon drives work and research concurrently rather than one kind per run
+as `DOGFOOD_KIND` does. Kind is already a verb — `spindrift dispatch` and
+`spindrift research` are separate subcommands and `applyDispatchKind` swaps the
+label family behind them — so the daemon spawns children of either kind rather
+than being configured into one.
+
+**One shared pool.** `MAX_PARALLEL` caps total concurrent Boxes across both
+kinds. Two pools would make `doctor`'s RAM arithmetic
+(`MEMORY_LIMIT × MAX_PARALLEL`) wrong by exactly the amount that took down the
+VM in #712, and ADR 0022 is explicit that research "gets no lighter path" — it
+runs through the full Box, so it costs what work costs.
+
+**Backoff is per kind.** Each kind carries its own timer, so an empty work queue
+backs work off while research keeps filling slots at full speed. The daemon
+idles only when both kinds have backed off into an empty result. This is what
+makes mixed mode cheap: the daemon never probes a queue it already knows is
+empty, and no new query surface is needed to decide what to run.
+
+**Research capacity is a floor, not a ceiling.** `RESEARCH_SLOTS` guarantees
+research at least that many slots *while research has queued work*; work may
+occupy at most `MAX_PARALLEL − RESEARCH_SLOTS` during that time. When either
+kind has nothing queued the other bursts into the whole pool. The reservation
+binds only while both kinds have work, which is the only moment a policy is
+needed. The knob spans the spectrum rather than being a special case: `0` is
+work-first with research taking leftovers, `MAX_PARALLEL` is research-first.
+
+Research starving is the failure worth guarding against, because research is
+the pipeline stage *ahead* of work: starve it and workers receive exactly the
+thin issues ADR 0022 exists to prevent. A research slot also turns over faster,
+since research settle is one-shot — no fix passes, no session resume — so the
+throughput cost to work is smaller than the slot ratio suggests.
+
+**Discovery skips the other family's in-flight work.** An issue may legitimately
+wear a label from each family at once, so mixed mode could otherwise run a
+researcher and a worker on the same issue simultaneously — the researcher
+writing "context for a worker" while that worker is already running. Each
+kind's discovery therefore excludes issues in progress in the other family.
+
+ADR 0022's invariant is that label families "never interact at claim time," and
+that survives: this is discovery, a different seam, and it is a scheduling
+preference rather than a claim rule. A daemon-side check would not do, since it
+would be blind to work started by a Console session, by CI, or by a human
+running `dispatch` directly — the tracker is the only place that knows.
+
 ## The wait policy
 
 The daemon holds `MAX_PARALLEL` slots and fills each with one single-Box
