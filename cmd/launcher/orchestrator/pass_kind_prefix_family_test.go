@@ -225,7 +225,7 @@ func TestPassKindsLeadWithFamilyPrefix(t *testing.T) {
 
 	deltaState := runstate.RunState{ReviewFindings: "VERDICT: APPROVE\n\n## Non-blocking\n- run.go:1 -- nit"}
 	delta := landdelta.Delta{Known: true, Files: 2, Insertions: 3, Deletions: 1, Paths: []string{"go.mod", "run.go"}}
-	trigger := deltareview.Trigger{Fire: true, Reason: "land delta touches paths beyond the reviewer's findings: go.mod", Beyond: []string{"go.mod"}}
+	trigger := deltareview.Trigger{Fire: true, Reason: "land delta touches lines beyond the reviewer's findings: run.go:42", Beyond: []string{"run.go:42"}}
 	deltaFile, err := seedDeltaReviewPrompt(reviewPromptFile, deltaState, delta, trigger)
 	if err != nil {
 		t.Fatalf("seedDeltaReviewPrompt: %v", err)
