@@ -18,6 +18,9 @@ func Gates(e Env) map[string]bool {
 	g["CHECK_HYGIENE_BAKED"] = e.CheckHygieneSkillBaked
 	g["CODE_COMMENTS_BAKED"] = e.CodeCommentsSkillBaked
 	g["NIX_CHECKS_BAKED"] = e.NixChecksSkillBaked
+	g["PRINCIPLE_FIX_ROOT_CAUSES_BAKED"] = e.PrincipleFixRootCausesSkillBaked
+	g["PRINCIPLE_LAZINESS_PROTOCOL_BAKED"] = e.PrincipleLazinessProtocolSkillBaked
+	g["PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED"] = e.PrincipleRedesignFromFirstPrinciplesSkillBaked
 	// END GENERATED SKILL-BAKED GATES
 
 	// Baking the tdd skill subtracts the inline red/green/refactor fallback

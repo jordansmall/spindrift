@@ -46,6 +46,23 @@
     name = "code-review";
     src = builtins.readFile "${matt-skills}/skills/engineering/code-review/SKILL.md";
   }
+  # Three engineering principles, adapted in `jordan-skills` from the MIT
+  # `pstack` plugin. The adaptation drops upstream's
+  # `disable-model-invocation: true`, which restricts a skill to human `/name`
+  # invocation and keeps it out of subagents -- inert in a Box, which has no
+  # human and reviews in a subagent.
+  {
+    name = "principle-fix-root-causes";
+    src = builtins.readFile "${jordan-skills}/principle-fix-root-causes/SKILL.md";
+  }
+  {
+    name = "principle-laziness-protocol";
+    src = builtins.readFile "${jordan-skills}/principle-laziness-protocol/SKILL.md";
+  }
+  {
+    name = "principle-redesign-from-first-principles";
+    src = builtins.readFile "${jordan-skills}/principle-redesign-from-first-principles/SKILL.md";
+  }
   {
     # Authored in this repo (skills/nix-checks), not a pinned upstream flake
     # input like the rows above, because there is no upstream yet. Issue #3223:

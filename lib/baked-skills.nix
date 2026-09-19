@@ -75,4 +75,26 @@
     field = "NixChecksSkillBaked";
     gate = "NIX_CHECKS_BAKED";
   }
+  # Three pstack-derived principles, dogfood-only like nix-checks above but by
+  # construction rather than choice: harnessSkills bakes a harnessOwned row
+  # from templates/default/skills/<name>/SKILL.md in this repo, so a skill read
+  # from a pinned input cannot be one. Promoting one means vendoring it first.
+  {
+    name = "principle-fix-root-causes";
+    goVar = "principleFixRootCausesSkillBaked";
+    field = "PrincipleFixRootCausesSkillBaked";
+    gate = "PRINCIPLE_FIX_ROOT_CAUSES_BAKED";
+  }
+  {
+    name = "principle-laziness-protocol";
+    goVar = "principleLazinessProtocolSkillBaked";
+    field = "PrincipleLazinessProtocolSkillBaked";
+    gate = "PRINCIPLE_LAZINESS_PROTOCOL_BAKED";
+  }
+  {
+    name = "principle-redesign-from-first-principles";
+    goVar = "principleRedesignFromFirstPrinciplesSkillBaked";
+    field = "PrincipleRedesignFromFirstPrinciplesSkillBaked";
+    gate = "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED";
+  }
 ]
