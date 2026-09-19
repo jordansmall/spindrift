@@ -1,8 +1,6 @@
 #!/usr/bin/env bats
-# Behaviour of the nix-generated `build` command: it realizes the image
-# derivation, then loads it — falling back to an ephemeral Nix container on the
-# runtime when the host has no Linux builder. Driven entirely through fakes
-# (nix + podman), so no real build, container, or store is touched.
+# These tests drive the build command through nix and podman fakes, so no real
+# build, container, or store is touched.
 
 load helper
 
@@ -10,8 +8,6 @@ setup() {
   setup_fakes
   cd "$BATS_TEST_TMPDIR"
 }
-
-# --- host-build path (a host WITH a Linux builder) ---------------------------
 
 @test "build realizes the derivation on the host, then loads the baked path" {
   export FAKE_NIX_BUILD_OK=1
@@ -37,8 +33,6 @@ setup() {
   grep -q "^tag spindrift:latest spindrift:$image_hash" "$PODMAN_LOG"
 }
 
-# --- container-fallback path (a host WITHOUT a Linux builder) -----------------
-
 @test "build falls back to an ephemeral Nix container when the host can't realize it" {
   export FAKE_NIX_BUILD_OK=0
   run "$BUILD_CMD"
@@ -59,8 +53,6 @@ setup() {
   [ "$(grep -c 'spindrift-nix:/nix' "$PODMAN_LOG")" -eq 2 ]
 }
 
-# --- both paths impossible ----------------------------------------------------
-
 @test "build exits non-zero with an actionable message when neither path works" {
   export FAKE_NIX_BUILD_OK=0
   # BUILD_NO_RUNTIME_CMD bakes a runtime that is never on PATH, so the container
@@ -71,8 +63,7 @@ setup() {
   [[ "$output" == *"container runtime"* ]]
 }
 
-# --- digest-pinned builder image (issue #103) --------------------------------
-
+# Regression guard for issue #103.
 @test "the container fallback uses a digest-pinned image reference, not a mutable tag" {
   export FAKE_NIX_BUILD_OK=0
   run "$BUILD_CMD"
@@ -81,8 +72,7 @@ setup() {
   ! grep -q 'nixos/nix:latest' "$PODMAN_LOG"
 }
 
-# --- error surfacing (issue #98) ---------------------------------------------
-
+# Regression guard for issue #98.
 @test "build surfaces the real nix error and does not attempt the container fallback" {
   export FAKE_NIX_BUILD_OK=0
   export FAKE_NIX_BUILD_STDERR="error: attribute 'spindrift' missing"
@@ -101,8 +91,7 @@ setup() {
   [ ! -f ".spindrift-image-path" ]
 }
 
-# --- bwrap build path (issue #54) --------------------------------------------
-
+# These tests cover the bwrap build path added in issue #54.
 @test "bwrap build realizes agent store closures without loading an OCI image" {
   export FAKE_NIX_BUILD_OK=1
   run "$BWRAP_BUILD_CMD"
@@ -115,7 +104,6 @@ setup() {
   export FAKE_NIX_BUILD_OK=1
   run "$BWRAP_BUILD_CMD"
   [ "$status" -eq 0 ]
-  # Two separate nix build calls: one for agent-files, one for agent-env
   [ "$(grep -c '^build' "$NIX_LOG")" -ge 2 ]
 }
 

@@ -1,16 +1,13 @@
-# Branch hygiene and exit-code contract for the dogfood loop.
-#
-# The loop must reset to the base branch before `git pull --ff-only` because a
-# host left on a feature branch (e.g. after a prior merge) has no upstream to
-# fast-forward. Termination is driven by the launcher's exit code rather than a
-# separate gh probe: exit 2 (queue empty) breaks the loop cleanly; any other
-# non-zero exit aborts with an error.
+# Branch hygiene and exit-code contract for the dogfood loop. The loop resets to
+# the base branch before `git pull --ff-only` because a host left on a feature
+# branch has no upstream to fast-forward. The launcher's exit code drives
+# termination, not a separate gh probe: exit 2 (queue empty) breaks the loop
+# cleanly; any other non-zero exit aborts with an error.
 
 load helper
 
-# Replaces the fake nix with one that exits $1 on `nix run .# -- $2` calls
-# (dispatch kind, defaulting to "dispatch") and exits 0 on all other nix
-# calls (build, etc.).
+# Replaces the fake nix with one that exits $1 on `nix run .# -- $2` calls ($2 is
+# the dispatch kind, defaulting to "dispatch") and exits 0 on every other nix call.
 _install_exit_code_nix() {
   local code="$1"
   local kind="${2:-dispatch}"
@@ -31,10 +28,9 @@ EOF
   chmod +x "$FAKE_BIN/nix"
 }
 
-# Replaces the fake nix with one that exits each exit-code arg in order on
-# successive `nix run .# -- $kind` calls (running past the list re-exits the
-# last code); exits 0 on all other nix calls. $kind defaults to "dispatch";
-# pass it as a trailing non-numeric arg to override, e.g.
+# Exits each code arg in order on successive `nix run .# -- $kind` calls, re-exiting
+# the last code once the list runs out, and exits 0 on every other nix call. $kind
+# defaults to "dispatch"; override it with a trailing non-numeric arg, e.g.
 # `_install_sequence_exit_nix 4 2 research`.
 _install_sequence_exit_nix() {
   local args=("$@")
@@ -68,14 +64,9 @@ EOF
   chmod +x "$FAKE_BIN/nix"
 }
 
-# Fakes `uname -s` to report $1, scoped to the calling test: DOGFOOD_RUNTIME
-# tests that must pass regardless of the actual host OS (e.g. a real Linux
-# CI runner vs. a macOS dev host) fake this rather than relying on whichever
-# OS bats happens to run on (#2672 review finding). Reuses the
-# already-rewritten-for-this-environment shebang off the fake nix (same
-# trick _install_exit_code_nix uses) instead of hardcoding
-# "#!/usr/bin/env bash", so this also works under the nix sandboxed build,
-# which has no /usr/bin/env.
+# Fakes `uname -s` to report $1 so DOGFOOD_RUNTIME tests pass whichever OS bats
+# runs on (#2672 review finding). Reuses the fake nix's already-rewritten shebang
+# rather than a hardcoded one, because the nix sandboxed build has no /usr/bin/env.
 _fake_uname() {
   local os="$1"
   local shebang
@@ -101,8 +92,8 @@ setup() {
 
   export WORK="$BATS_TEST_TMPDIR/work"
   git clone -q "$remote" "$WORK"
-  # The nix check injects DOGFOOD_SH (only tests/ is copied into the sandbox);
-  # locally fall back to the repo-root script beside tests/.
+  # The nix check injects DOGFOOD_SH because it copies only tests/ into the
+  # sandbox; locally fall back to the repo-root script beside tests/.
   cp "${DOGFOOD_SH:-$BATS_TEST_DIRNAME/../dogfood.sh}" "$WORK/dogfood.sh"
   printf 'harness.env\n' >"$WORK/.gitignore"
   printf 'REPO_SLUG=owner/repo\n' >"$WORK/harness.env"
@@ -111,7 +102,7 @@ setup() {
   git -C "$WORK" push -q origin HEAD:main
   git -C "$WORK" branch --set-upstream-to=origin/main main
 
-  # Land the host on a feature branch with no upstream — the state that broke a
+  # Land the host on a feature branch with no upstream, the state that broke a
   # bare `git pull --ff-only`.
   git -C "$WORK" checkout -q -b feat/leftover
 
@@ -158,9 +149,8 @@ setup() {
   run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"non-converging (host-tainted)"* ]]
-  # The loop HALTS on exit 5 — it does not rebuild-and-retry the way exit 4
-  # does, so dispatch is invoked exactly once (contrast the exit-4 sibling's
-  # two calls).
+  # The loop halts on exit 5 instead of rebuilding and retrying the way exit 4
+  # does, so it calls dispatch exactly once.
   [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 1 ]
 }
 
@@ -263,9 +253,8 @@ EOF
 }
 
 @test "DOGFOOD_RUNTIME=bwrap targets the dogfood-bwrap flake app" {
-  # Fake Linux regardless of the actual host OS: dogfood.sh:107 rejects
-  # DOGFOOD_RUNTIME=bwrap on a real macOS dev host, which would otherwise
-  # fail this test there (#2672 review finding).
+  # Fake Linux so dogfood.sh does not reject DOGFOOD_RUNTIME=bwrap when this
+  # test runs on a real macOS dev host (#2672 review finding).
   _fake_uname Linux
   run timeout 15 env BASE_BRANCH=main DOGFOOD_RUNTIME=bwrap bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
@@ -277,15 +266,15 @@ EOF
   run env BASE_BRANCH=main DOGFOOD_RUNTIME=bogus bash "$WORK/dogfood.sh"
   [ "$status" -eq 1 ]
   [[ "$output" == *"DOGFOOD_RUNTIME must be 'podman' or 'bwrap', got: bogus"* ]]
-  # Empty NIX_LOG (truncated fresh by setup_fakes) proves the script exited
-  # before its first `nix run` call, which sits well after this check.
+  # setup_fakes truncates NIX_LOG, so an empty log proves the script exited
+  # before its first `nix run` call, which comes well after this check.
   [ ! -s "$NIX_LOG" ]
 }
 
 @test "DOGFOOD_RUNTIME=bwrap fails fast on a faked-Darwin host before any nix run" {
-  # bubblewrap is Linux-only; on macOS DOGFOOD_RUNTIME=bwrap must be rejected
-  # here with a clear message instead of sailing past this preflight and
-  # failing opaquely deep inside the launcher (#2672 review finding).
+  # bubblewrap is Linux-only, so this preflight must reject bwrap on macOS with a
+  # clear message instead of failing opaquely inside the launcher (#2672 review
+  # finding).
   _fake_uname Darwin
 
   run env BASE_BRANCH=main DOGFOOD_RUNTIME=bwrap bash "$WORK/dogfood.sh"
@@ -306,11 +295,9 @@ EOF
 }
 
 @test "dogfood skips the podman memory preflight when DOGFOOD_RUNTIME=bwrap" {
-  # Same RAM/MEMORY_LIMIT shape as the podman-machine-below-limit case above,
-  # which would abort under DOGFOOD_RUNTIME=podman (default): bwrap is
-  # daemonless and has no VM, so this preflight must not gate it (#2672).
-  # Fake Linux regardless of the actual host OS, same reason as the
-  # dogfood-bwrap-app test above.
+  # Same RAM and MEMORY_LIMIT as the case above that aborts under the default
+  # podman runtime: bwrap is daemonless and has no VM, so this preflight must not
+  # gate it (#2672). Fake Linux for the same reason as the bwrap-app test above.
   _fake_uname Linux
   export FAKE_PODMAN_MACHINE_MEMORY_MIB=2048
   run env BASE_BRANCH=main MEMORY_LIMIT=4g DOGFOOD_RUNTIME=bwrap bash "$WORK/dogfood.sh"

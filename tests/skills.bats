@@ -1,10 +1,7 @@
 #!/usr/bin/env bats
-# The skills dir is empty by default; it is only bind-mounted when
-# SPINDRIFT_SKILLS_DIR points at an existing directory. That mount now lands
-# at the fixed staging path /operator-skills rather than directly on the
-# Driver's skills dir; agent/entrypoint.sh merges it (and the image's own
-# baked skills) into the real skills dir at box startup (issue #2489).
-# Driven through the fake podman (OCI) and fake bwrap.
+# The launcher mounts SPINDRIFT_SKILLS_DIR at the fixed staging path
+# /operator-skills, never on the Driver's skills dir; agent/entrypoint.sh
+# merges it with the image's baked skills at box startup (issue #2489).
 
 load helper
 
@@ -60,15 +57,10 @@ setup() {
   [[ "$output" != *"SPINDRIFT_SKILLS_DIR"* ]]
 }
 
-# --- baked skills (issue #119; mount mechanism updated by issue #2489) -------
-# Skills baked into the image at build time reach the box without any
-# launcher-issued mount at all: they land under /agent/skills (bwrap: via the
-# existing top-level /agent ro-bind; OCI: already in the image layer), and
-# agent/entrypoint.sh's own copy step merges /agent/skills into the real
-# Driver skills dir at box startup (see tests/entrypoint-skills.bats). The
-# launcher itself only ever mounts the SPINDRIFT_SKILLS_DIR operator override,
-# at the fixed staging path /operator-skills -- never anything targeting
-# ".claude/skills" directly, baked or not.
+# Baked skills reach the box with no launcher-issued mount: they already sit
+# under /agent/skills (bwrap ro-binds /agent; OCI has them in the image layer)
+# and agent/entrypoint.sh merges them into the Driver skills dir at box startup
+# (issues #119 and #2489; see tests/entrypoint-skills.bats).
 
 @test "baked skills: no launcher-issued .claude/skills mount in bwrap sandbox without SPINDRIFT_SKILLS_DIR" {
   unset SPINDRIFT_SKILLS_DIR
@@ -87,8 +79,6 @@ setup() {
 }
 
 @test "baked skills: no extra mount added for OCI (skills are in image)" {
-  # The OCI image carries baked skills in its filesystem; the launcher adds
-  # no extra volume mount when SPINDRIFT_SKILLS_DIR is unset.
   unset SPINDRIFT_SKILLS_DIR
   run "$SKILLS_RUN_CMD"
   [ "$status" -eq 0 ]
@@ -96,7 +86,6 @@ setup() {
 }
 
 @test "baked skills: SPINDRIFT_SKILLS_DIR still mounts override for OCI" {
-  # Runtime override is respected even when skills are baked into the image.
   local skills="$BATS_TEST_TMPDIR/runtime-override-oci"
   mkdir -p "$skills"
   export SPINDRIFT_SKILLS_DIR="$skills"

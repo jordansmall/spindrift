@@ -1,10 +1,8 @@
 #!/usr/bin/env bats
-# PreToolUse hook (issue #1988): rewrites every Bash tool call so its
-# stdout+stderr tee to a per-command file on disk while the real exit code
-# still propagates, giving PostToolUse (bash-output-summary.sh) a full copy
-# on disk to summarize from -- uniformly, not just on overflow, and with an
-# error-oriented tail rather than Claude Code's own start-only preview.
-# Exercised directly against the script, mirroring reject-background-bash.bats.
+# PreToolUse hook (issue #1988): rewrites every Bash tool call so its output
+# tees to a per-command file while the real exit code still propagates, so
+# PostToolUse (bash-output-summary.sh) always has a full copy to summarize
+# from, not just on overflow.
 
 setup() {
   : "${BASH_OUTPUT_TEE_SCRIPT:?BASH_OUTPUT_TEE_SCRIPT must be set}"

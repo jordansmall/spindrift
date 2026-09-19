@@ -7,8 +7,6 @@ setup() {
   setup_entrypoint_env
 }
 
-# --- cold-run toolchain nudge (issue #343) ------------------------------------
-
 @test "nudge: hint emitted when no prefetch configured and go.sum present" {
   seed_dependency_manifest "go.sum"
   unset PREFETCH
@@ -96,7 +94,7 @@ setup() {
 }
 
 @test "nudge: hint suppressed when no recognized lockfile present" {
-  # Default setup_bare_repo seeds only README.md — no lockfile.
+  # Default setup_bare_repo seeds only README.md, so no lockfile exists.
   unset PREFETCH
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -104,11 +102,10 @@ setup() {
 }
 
 @test "nudge: driver-exec bind-registry failure warns but does not abort the run" {
-  # A non-zero driver-exec exit here (mktemp failure, unwritable output path)
-  # must not take the whole box run down under set -euo pipefail --
-  # this phase is cosmetic-hint-only. Wrap the fake so only the bind-registry
-  # verb fails; every other verb (assemble-prompt, the Driver run itself,
-  # ...) still delegates to the real fake so the rest of the run proceeds.
+  # A non-zero driver-exec exit here must not take the whole box run down
+  # under set -euo pipefail, because this phase only emits a cosmetic hint.
+  # The fake fails the bind-registry verb alone and delegates every other
+  # verb to the real fake, so the rest of the run still proceeds.
   seed_dependency_manifest "go.sum"
   unset PREFETCH
   stub_failing_bind_registry
@@ -120,12 +117,11 @@ setup() {
 }
 
 @test "nudge: malformed bind-registry env output does not crash the run or leak the tempfile" {
-  # A driver-exec bind-registry exit of 0 with a syntactically-broken env
-  # file (unterminated quote) makes `source` itself fail. Under
-  # set -euo pipefail an unguarded `source` failure aborts the whole
-  # entrypoint script before the `rm -f "$_nudge_env_out"` line that
-  # follows it ever runs, leaking the mktemp'd tempfile and taking down a
-  # run that this cosmetic-hint-only phase must never crash.
+  # A bind-registry exit of 0 with an unterminated quote in the env file makes
+  # `source` itself fail. Under set -euo pipefail an unguarded source failure
+  # aborts the entrypoint before the `rm -f "$_nudge_env_out"` that follows,
+  # leaking the tempfile and crashing a run that this hint-only phase must
+  # never crash.
   seed_dependency_manifest "go.sum"
   unset PREFETCH
   nudge_path_log="$BATS_TEST_TMPDIR/nudge_env_path"
@@ -159,9 +155,8 @@ FAKE
 }
 
 @test "nudge: driver-exec bind-registry failure stays silent when prefetch is configured" {
-  # Same failing verb as above, but with PREFETCH set: the old lockfile-chain
-  # code did no work and emitted nothing in this case, so the WARNING must
-  # stay gated on the same PREFETCH check the hint itself uses.
+  # With PREFETCH set the old lockfile-chain code emitted nothing, so the
+  # WARNING must stay gated on the same PREFETCH check the hint itself uses.
   seed_dependency_manifest "go.sum"
   export PREFETCH="true"
   stub_failing_bind_registry

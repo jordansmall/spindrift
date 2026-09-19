@@ -1,13 +1,8 @@
 #!/usr/bin/env bats
-# PreToolUse hook (issue #1609): rejects a Bash tool call carrying
-# run_in_background: true before it executes, since a headless Box run has no
-# harness watching for a later re-invocation (#1542 lost a run this way).
-# #1620 widens the same hook to also parse tool_input.command for a shell-level
-# self-backgrounding escape (trailing/mid-command &, nohup) that the
-# structured run_in_background parameter never sees.
-# Exercised directly against the script -- not through a real claude session,
-# since the bats suite drives the bash layer through fakes only (no real
-# LLM) -- so this is a unit test of the hook's own stdin/stdout contract.
+# PreToolUse hook (issue #1609): denies a Bash call with run_in_background: true,
+# since a headless Box run has no harness watching for a later re-invocation
+# (#1542 lost a run this way). #1620 widens it to parse tool_input.command for a
+# shell-level escape (trailing or mid-command &, nohup) the parameter never sees.
 
 setup() {
   : "${REJECT_BACKGROUND_BASH_SCRIPT:?REJECT_BACKGROUND_BASH_SCRIPT must be set}"

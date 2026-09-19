@@ -1,15 +1,10 @@
 #!/bin/sh
+
 # Stateful stand-in for the gh CLI, used by prforge_contract_test.go's
-# forgetest.RunPRForgeContract harness. STATE_DIR/prs/<num>/{head,base,
-# prstate,draft,checks,contexts.json} record each seeded PR's scripted
-# state; STATE_DIR/branches/<branch> maps a branch back to its PR number for
-# the `pr list` lookups OpenPRForBranch/PRForBranch issue.
-#
-# `pr merge` (without --auto) performs a genuine git merge against REMOTE,
-# same as fake-gh-codeforge.sh, and flips prstate to MERGED on success — the
-# one event PRState's MERGED transition depends on. `pr merge --auto` never
-# touches git at all: real auto-merge only enqueues, it doesn't land
-# anything itself, so this just records the call and exits 0.
+# forgetest.RunPRForgeContract harness. `pr merge` runs a real git merge
+# against REMOTE and flips prstate to MERGED, the one event PRState's MERGED
+# transition depends on. `pr merge --auto` never touches git: real auto-merge
+# only enqueues, so this records the call and exits 0.
 
 pr_num() {
 	printf '%s\n' "${1##*/}"
@@ -138,10 +133,9 @@ api-graphql)
 	esac
 	;;
 api-repos/*/compare/*)
-	# $2 is "repos/<owner>/<repo>/compare/<base>...<head>"; head always ends
-	# in "-<num>" (agent/issue-<num>, url.PathEscape'd), so the trailing
-	# hyphen segment recovers the seeded PR number regardless of compare
-	# direction.
+	# $2 is "repos/<owner>/<repo>/compare/<base>...<head>" and head always ends
+	# in "-<num>" (agent/issue-<num>, url.PathEscape'd), so the trailing hyphen
+	# segment recovers the seeded PR number in either compare direction.
 	basehead="${2##*/compare/}"
 	num="${basehead##*-}"
 	cat "$STATE_DIR/prs/$num/behind_by" 2>/dev/null || echo 0

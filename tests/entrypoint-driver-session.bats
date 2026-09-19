@@ -1,17 +1,14 @@
 #!/usr/bin/env bats
-# Driver session id pin/resume across cold and fix passes (issue #427).
+# Driver session id pin/resume across cold and fix passes (issue #427): the fix
+# Box resumes the session the initial run pinned instead of relearning work it
+# already did. The id is deterministic (REPO_SLUG + ISSUE_NUMBER only), so both
+# sides recompute it without carrying any other state between boxes.
 
 load helper
 
 setup() {
   setup_entrypoint_env
 }
-
-# Driver session pin/resume (issue #427): the fix Box resumes the same
-# Driver session the initial run pinned, so a warm fix pass continues the
-# agent's own conversation instead of relearning the changes it already made.
-# The id is deterministic (REPO_SLUG + ISSUE_NUMBER only) so no state beyond
-# those two env vars is needed to recompute it on either side.
 
 @test "cold run pins a deterministic session id via --session-id" {
   run bash "$ENTRYPOINT"
@@ -35,15 +32,14 @@ setup() {
   pinned_id="${pinned_id#--session-id }"
   [ -n "$pinned_id" ]
 
-  # Simulate the persisted session transcript a writable /home/agent/.claude
-  # mount would carry over from the initial run into the fix box.
+  # Stand in for the session transcript the writable /home/agent/.claude mount
+  # carries from the initial run into the fix box.
   mkdir -p "$HOME/.claude/projects/fake-project"
   touch "$HOME/.claude/projects/fake-project/${pinned_id}.jsonl"
 
-  # The fix box is a fresh container with its own empty clone target -- only
-  # the $HOME/.claude session cache mount carries over. Reusing WORK_DIR here
-  # would have this second run try to clone into the first run's non-empty
-  # checkout, which no real Box ever does.
+  # The fix box is a fresh container with its own empty clone target; only the
+  # $HOME/.claude session cache mount carries over. Reusing WORK_DIR would make
+  # this run clone into the first run's checkout, which no real Box ever does.
   : >"$DRIVER_LOG"
   export FIX_PASS="2"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-fix"
@@ -60,16 +56,14 @@ setup() {
   pinned_id="${pinned_id#--session-id }"
   [ -n "$pinned_id" ]
 
-  # Simulate the persisted session transcript a writable /home/agent/.claude
-  # mount would carry over from the initial (429-held) run into the
-  # re-dispatched box.
+  # Stand in for the session transcript the writable /home/agent/.claude mount
+  # carries from the initial (429-held) run into the re-dispatched box.
   mkdir -p "$HOME/.claude/projects/fake-project"
   touch "$HOME/.claude/projects/fake-project/${pinned_id}.jsonl"
 
   # A re-dispatch after a hold is a fresh container with its own empty clone
-  # target -- only the $HOME/.claude session cache mount carries over. Reusing
-  # WORK_DIR here would have this second run try to clone into the first
-  # run's non-empty checkout, which no real Box ever does.
+  # target; only the $HOME/.claude session cache mount carries over. Reusing
+  # WORK_DIR would make this run clone into the first run's checkout.
   : >"$DRIVER_LOG"
   export RESUME_AFTER_HOLD=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-resume-after-hold"
@@ -77,10 +71,9 @@ setup() {
   [ "$status" -eq 0 ]
   grep -q -- "--resume ${pinned_id}" "$DRIVER_LOG"
 
-  # Still the cold-run issue-prompt.md (not fix-prompt.md): RESUME_AFTER_HOLD
-  # is orthogonal to FIX_PASS and only changes the driver session mode.
-  # "Fresh clone, new branch" is issue-prompt.md-only phrasing; fix-prompt.md
-  # instead says the branch is "already checked out with prior work".
+  # RESUME_AFTER_HOLD only changes the driver session mode, so the prompt stays
+  # issue-prompt.md. "Fresh clone, new branch" appears only there; fix-prompt.md
+  # says the branch is "already checked out with prior work".
   grep -q "Fresh clone, new branch" "$DRIVER_PROMPT_FILE"
 }
 
@@ -91,8 +84,8 @@ setup() {
   first_id="$(grep -oE -- '--session-id [0-9a-f-]+' "$DRIVER_LOG")"
   first_id="${first_id#--session-id }"
 
-  # Each cold run is its own fresh container/clone target; only ISSUE_NUMBER
-  # and REPO_SLUG carry over to make the session id deterministic.
+  # Each cold run gets its own clone target; only ISSUE_NUMBER and REPO_SLUG
+  # carry over, and they alone decide the session id.
   : >"$DRIVER_LOG"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-2"
   run bash "$ENTRYPOINT"

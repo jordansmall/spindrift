@@ -7,7 +7,6 @@ setup() {
   setup_entrypoint_env
 }
 
-# --- re-dispatch idempotency (issue #217) ------------------------------------
 # The in-box push must use --force-with-lease so a retry from a different base
 # replaces the prior run's branch state rather than colliding non-fast-forward.
 
@@ -18,8 +17,8 @@ setup() {
 }
 
 @test "re-dispatched box force-resets a stale remote branch (no open PR)" {
-  # Simulate a prior run that pushed agent/issue-7 with a commit, then died
-  # before opening a PR.
+  # Stand in for a prior run that pushed agent/issue-7 and then died before
+  # opening a PR.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"
@@ -27,17 +26,15 @@ setup() {
   git -C "$prior" add -A
   git -C "$prior" commit -q -m "feat: prior run commit"
   git -C "$prior" push -q origin "agent/issue-7"
-  # No FAKE_GH_PR_LIST_7 → gh pr list returns empty → no open PR
+  # FAKE_GH_PR_LIST_7 stays unset, so the fake gh reports no open PR.
 
-  # A re-dispatch should succeed and start clean from main.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  # Entrypoint logged the force-reset.
   [[ "$output" == *"force-resetting"* ]]
 
-  # The remote branch was force-reset, so a plain push from the clean
-  # work-tree succeeds without a non-fast-forward rejection.
+  # A plain push only succeeds here if the entrypoint force-reset the remote
+  # branch; otherwise git rejects it as non-fast-forward.
   echo "new work" > "$WORK_DIR/new.txt"
   git -C "$WORK_DIR" add -A
   git -C "$WORK_DIR" commit -q -m "feat: new work"
@@ -46,12 +43,10 @@ setup() {
 }
 
 @test "re-dispatched box read-only: never force-pushes the stale-branch reset" {
-  # Same stale-branch-no-open-PR setup as above, but read-only (issue #1979):
-  # the box holds no push-capable token, so even this housekeeping reset must
-  # never force-push the remote directly. The reset branch matches base
-  # exactly (nothing ahead), so there is nothing to relay either -- the
-  # empty-bundle no-op in publish_rebased_branch covers this the same way it
-  # covers a no-op pre-work rebase.
+  # Same stale-branch-no-open-PR setup, but read-only (issue #1979): the box
+  # holds no push-capable token, so even this housekeeping reset must never
+  # force-push the remote. The reset branch matches base exactly, so the
+  # empty-bundle no-op in publish_rebased_branch leaves nothing to relay.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"
@@ -59,7 +54,7 @@ setup() {
   git -C "$prior" add -A
   git -C "$prior" commit -q -m "feat: prior run commit"
   git -C "$prior" push -q origin "agent/issue-7"
-  # No FAKE_GH_PR_LIST_7 → gh pr list returns empty → no open PR
+  # FAKE_GH_PR_LIST_7 stays unset, so the fake gh reports no open PR.
 
   unset BOX_WRITE_ENABLED
   export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
@@ -77,9 +72,9 @@ setup() {
 }
 
 @test "re-dispatched box skips force-reset when an open PR exists on the stale branch" {
-  # Simulate a prior run that pushed commits AND opened a PR, then died before
-  # printing SPINDRIFT_OUTCOME.  The entrypoint must not destroy the branch so
-  # the #122 adoption path can still recover the run.
+  # Stand in for a prior run that pushed commits and opened a PR, then died
+  # before printing SPINDRIFT_OUTCOME. The entrypoint must not destroy the
+  # branch, so the #122 adoption path can still recover the run.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"
@@ -92,10 +87,8 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  # Entrypoint logged that it skipped the force-reset.
   [[ "$output" == *"skipping force-reset"* ]]
 
-  # The stale commit is still on the remote branch (not force-reset).
   stale_sha="$(git -C "$BATS_TEST_TMPDIR/prior" rev-parse HEAD)"
   run git -C "$WORK_DIR" ls-remote origin "refs/heads/agent/issue-7"
   [ "$status" -eq 0 ]

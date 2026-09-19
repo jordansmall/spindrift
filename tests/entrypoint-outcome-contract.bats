@@ -7,11 +7,9 @@ setup() {
   setup_entrypoint_env
 }
 
-# A SPINDRIFT_PROMPT_DIR mount (simulated here by pointing PROMPTS_DIR straight
-# at a host dir, exactly what the mount leaves the entrypoint seeing) whose
-# issue-prompt.md drops the SPINDRIFT_OUTCOME contract must still reach the
-# driver with it appended (issue #420) -- otherwise the agent never emits the
-# outcome line and the launcher never learns the PR.
+# Pointing PROMPTS_DIR at a host dir leaves the entrypoint seeing exactly what a
+# SPINDRIFT_PROMPT_DIR mount does. Without the appended contract (issue #420) the
+# agent never emits the outcome line and the launcher never learns the PR.
 @test "runtime prompt-dir override lacking the outcome contract gets it appended" {
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
@@ -27,8 +25,6 @@ setup() {
   grep -q 'canonical contract for agent/issue-7' "$DRIVER_PROMPT_FILE"
 }
 
-# A mounted prompt that already carries the contract (e.g. copied from a
-# #419-baked prompt) must be passed through unchanged -- no duplication.
 @test "runtime prompt-dir override already containing the outcome contract is unchanged" {
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
@@ -46,11 +42,9 @@ setup() {
   ! grep -q 'should not appear' "$DRIVER_PROMPT_FILE"
 }
 
-# The fix prompt shares the same COMMS, CHECK/COMMIT, and outcome-contract
-# blocks the issue prompt bakes (issue #455 extends #419/#420's slice
-# mechanism to fix-prompt.md): a runtime SPINDRIFT_PROMPT_DIR override whose
-# fix-prompt.md carries only the fix-specific preamble must still reach the
-# driver with all three shared blocks appended, in order.
+# Issue #455 extends #419/#420's slice mechanism to fix-prompt.md: the fix prompt
+# shares the issue prompt's COMMS, CHECK/COMMIT, and outcome-contract blocks, and
+# an override carrying only the fix preamble must get all three, in order.
 @test "runtime prompt-dir override of the fix prompt gets COMMS/CHECK/outcome appended" {
   export FIX_PASS="2"
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
@@ -74,7 +68,6 @@ setup() {
   grep -q 'canonical comms contract' "$DRIVER_PROMPT_FILE"
   grep -q 'canonical check contract' "$DRIVER_PROMPT_FILE"
   grep -q 'canonical outcome contract' "$DRIVER_PROMPT_FILE"
-  # Order: fix stub, then COMMS, then CHECK, then the outcome contract.
   local stub_line comms_line check_line outcome_line
   stub_line="$(grep -n 'fix stub' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)"
   comms_line="$(grep -n '# COMMS' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)"
@@ -85,8 +78,6 @@ setup() {
   [ "$check_line" -lt "$outcome_line" ]
 }
 
-# A mounted fix prompt that already carries all three shared blocks (e.g.
-# copied from a baked prompt) must pass through unchanged -- no duplication.
 @test "runtime prompt-dir override of the fix prompt already containing shared blocks is unchanged" {
   export FIX_PASS="2"
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
@@ -114,9 +105,8 @@ setup() {
   ! grep -q 'should not appear' "$DRIVER_PROMPT_FILE"
 }
 
-# A missing/unreadable OUTCOME_CONTRACT_FILE must fail the entrypoint loudly
-# rather than silently proceeding without the contract -- the exact failure
-# mode #420 exists to prevent.
+# A missing or unreadable OUTCOME_CONTRACT_FILE must fail loudly rather than
+# proceed without the contract, the exact failure mode #420 exists to prevent.
 @test "entrypoint fails loudly when OUTCOME_CONTRACT_FILE is missing" {
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"

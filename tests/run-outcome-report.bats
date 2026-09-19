@@ -7,14 +7,12 @@ setup() {
   setup_run_env
 }
 
-# --- Outcome report (issue #41) --------------------------------------------
-
 @test "outcome report lists every dispatched issue with number pr and status" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=merged note=ok"
   export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 landing=https://github.com/owner/repo/pull/2 status=merged note=ok"
   # verifyMerged host-derives the ref from the branch (#1955), so the merged
-  # arm resolves the PR via `gh pr list --head`, not the Agent's landing=.
+  # arm resolves the PR with `gh pr list --head`, not the Agent's landing=.
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_LIST_2="https://github.com/owner/repo/pull/2"
   export FAKE_GH_PR_STATE_1="MERGED"
@@ -48,12 +46,10 @@ setup() {
 
 @test "malformed outcome line with no PR reports status=missing; subsequent issue is verified independently" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
-  # Issue 1: outcome line present but missing required landing= and status=
-  # tokens, and no open PR — the same no-PR safety net as a missing outcome
-  # line runs here too (issue #1898), so it reports status=missing rather
-  # than a dead-end status=malformed.
+  # Issue 1's outcome line lacks landing= and status=, and it has no open PR,
+  # so the same no-PR safety net as a missing outcome line runs here too
+  # (issue #1898) and reports status=missing, not a dead-end status=malformed.
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 note=missing-required-tokens"
-  # Issue 2: well-formed outcome already merged.
   export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 landing=https://github.com/owner/repo/pull/2 status=merged note=ok"
   export FAKE_GH_PR_LIST_2="https://github.com/owner/repo/pull/2"
   export FAKE_GH_PR_STATE_2="MERGED"
@@ -65,18 +61,14 @@ setup() {
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-# --- No-outcome PR handling (issue #122, inverted off draft-ness by #1654) --
-
 @test "missing outcome line + open non-draft PR → not adopted, reported as blocked" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  # No FAKE_PODMAN_OUTCOME_1 → no SPINDRIFT_OUTCOME in log
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
-  # FAKE_GH_PR_DRAFT_1 not set → defaults to "false" (non-draft)
+  # FAKE_GH_PR_DRAFT_1 stays unset, which the fake reads as "false" (non-draft).
   run "$RUN_CMD"
-  # A no-outcome run is never adopted off draft-ness (issue #1654) — a
-  # non-draft PR is reported blocked exactly like a draft one, same as the
-  # test below. All agents finish → exit 0.
+  # A no-outcome run is never adopted off draft-ness (issue #1654), so a
+  # non-draft PR is reported blocked exactly like the draft one below.
   [ "$status" -eq 0 ]
   ! grep -q 'pr merge' "$GH_LOG"
   [[ "$output" == *"status=blocked"* ]]
@@ -86,7 +78,6 @@ setup() {
 @test "missing outcome line + draft PR → not adopted, reported as blocked" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  # No FAKE_PODMAN_OUTCOME_1 → no SPINDRIFT_OUTCOME in log
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_DRAFT_1="true"
   run "$RUN_CMD"
@@ -99,7 +90,6 @@ setup() {
 @test "missing outcome line + no open PR → status=missing unchanged" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  # No FAKE_PODMAN_OUTCOME_1, no FAKE_GH_PR_LIST_1 → no PR found
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"status=missing"* ]]

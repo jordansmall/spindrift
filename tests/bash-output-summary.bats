@@ -1,11 +1,7 @@
 #!/usr/bin/env bats
-# PostToolUse hook (issue #1988): replaces a Bash tool result with a
-# bounded, error-oriented tail once the log file bash-output-tee.sh (the
-# paired PreToolUse hook) wrote crosses the inline bound -- the full output
-# stays on disk for the agent to grep/read, only exit code + log path + tail
-# enter the model's context. A command whose output stays under the bound
-# is left untouched: no needless round-trip to read a file back.
-# Exercised directly against the script, mirroring reject-background-bash.bats.
+# PostToolUse hook (issue #1988), paired with the PreToolUse hook
+# bash-output-tee.sh that writes the log: replacing a big tool result with a tail
+# keeps the full output on disk to grep instead of filling the model's context.
 
 setup() {
   : "${BASH_OUTPUT_SUMMARY_SCRIPT:?BASH_OUTPUT_SUMMARY_SCRIPT must be set}"

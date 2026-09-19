@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# Read-only Box fails `git push` locally, before any network call, when its
-# hand-off is relay-based; read-write, and a read-only backend whose hand-off
-# IS a real push, install neither guard (#2463).
+# A read-only Box fails `git push` locally, before any network call, when its
+# hand-off is relay-based. A read-write Box, and a read-only Box whose backend
+# hands off with a real push, get no guard (#2463).
 
 load helper
 
@@ -10,34 +10,29 @@ setup() {
 }
 
 @test "read-only Box installs a pre-push guard that blocks git push locally" {
-  unset BOX_WRITE_ENABLED # issue #2463: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -d "$WORK_DIR/.git" ]
 
-  # The git-hook guard installs at BOTH $WORK_DIR (via --extra-repo-dir,
-  # covering a push to any explicit URL or non-origin remote) and the decoy
-  # (via --repo-dir, covering a plain `git push`/origin push) -- issue #2509
-  # Finding 1.
+  # The guard installs at both $WORK_DIR (via --extra-repo-dir, covering a push
+  # to an explicit URL or a non-origin remote) and the decoy (via --repo-dir,
+  # covering a plain `git push`). See issue #2509 Finding 1.
   [ -x "$WORK_DIR/.git/hooks/pre-push" ]
 
-  # pushurl is repointed at a throwaway bare decoy repo, never $WORK_DIR
-  # itself (issue #2509 port regression: a pushurl pointed at $WORK_DIR
-  # makes a same-branch push resolve as "Everything up-to-date" and exit 0
-  # without ever invoking a hook) -- assert the decoy exists, is bare, and
-  # carries the installed pre-receive hook.
+  # pushurl points at a throwaway bare decoy, never $WORK_DIR itself: a pushurl
+  # pointed at $WORK_DIR makes a same-branch push resolve as "Everything
+  # up-to-date" and exit 0 without ever invoking a hook (issue #2509).
   local pushurl
   pushurl="$(git -C "$WORK_DIR" config remote.origin.pushurl)"
   [ -n "$pushurl" ]
   [ "$pushurl" != "$WORK_DIR" ]
   [ -x "$pushurl/hooks/pre-receive" ]
 
-  # The rejection's wording lives in lib/prompt-contract.nix's
-  # forbiddenMarkers registry (issue #2509), rendered verbatim into the
-  # installed hook by driver-exec readonly-guards -- assert the stable
-  # "push" substring the row's own RuntimeMessage always names, plus the
-  # relay-naming text ("outbox") that distinguishes this row from a bare
-  # boilerplate rejection.
+  # The rejection wording comes from lib/prompt-contract.nix's forbiddenMarkers
+  # registry (issue #2509). Assert the stable "push" substring the row's
+  # RuntimeMessage always names, plus "outbox", which distinguishes this row
+  # from a bare boilerplate rejection.
   run git -C "$WORK_DIR" push origin HEAD:some-branch
   [ "$status" -ne 0 ]
   [[ "$output" == *"push"* ]]
@@ -48,7 +43,7 @@ setup() {
 }
 
 @test "read-only Box's guard still blocks git push --no-verify (hook bypass) locally" {
-  unset BOX_WRITE_ENABLED # issue #2463: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -d "$WORK_DIR/.git" ]
@@ -62,27 +57,19 @@ setup() {
 }
 
 @test "read-only Box's guard still blocks git push --no-verify of the branch already checked out" {
-  # Regression coverage for the #2509 port itself: the test above pushes a
-  # brand-new ref name ("some-branch"), which still forces a genuine ref
-  # update -- and so still fires a pre-receive hook -- even under the buggy
-  # pushurl=$WORK_DIR wiring this test guards against. A real dispatch never
-  # does that: publish_rebased_branch/pushWithRetry always push the SAME
-  # branch name phase_branch_recovery already checked out in $WORK_DIR (e.g.
-  # `git push --no-verify -u origin $BRANCH`, or a bare `git push
-  # --no-verify`). If pushurl points back at $WORK_DIR itself, that
-  # destination ref already sits at this exact commit -- git calls it
-  # "Everything up-to-date" and exits 0 without ever invoking pre-receive,
-  # `--no-verify` or not: a silent fake success.
-  unset BOX_WRITE_ENABLED # issue #2463: read-only Box
+  # The test above pushes a new ref name, which forces a real ref update and so
+  # fires pre-receive even under the buggy pushurl=$WORK_DIR wiring. A real
+  # dispatch pushes the same branch phase_branch_recovery checked out, whose
+  # destination ref already sits at this commit: git calls it "Everything
+  # up-to-date" and exits 0 without invoking pre-receive (issue #2509).
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -x "$WORK_DIR/.git/hooks/pre-push" ]
 
-  # BRANCH is computed inside entrypoint.sh's main
-  # (BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}", entrypoint.sh:60), not
-  # exported -- reproduce the same computation here
-  # (tests/entrypoint-opencode-agent-files.bats's setup() pattern) so this
-  # test targets the exact branch phase_branch_recovery leaves checked out.
+  # entrypoint.sh's main computes BRANCH but never exports it, so repeat the
+  # computation here to target the branch phase_branch_recovery leaves checked
+  # out.
   local branch="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
   [ "$(git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD)" = "$branch" ]
 
@@ -95,14 +82,11 @@ setup() {
 }
 
 @test "read-only Box's guard blocks push before any network call reaches the real remote" {
-  # Issue #2463 finding: a pre-push hook alone can't stop this -- git's push
-  # machinery lists the remote's refs (a network round trip) before it ever
-  # runs the pre-push hook, so on a real network transport a hook-only guard
-  # still lets the push attempt reach the forge and 403 there. Point origin
-  # at a reserved, unresolvable host (RFC 2606 .invalid, deliberately not
-  # covered by setup_bare_repo's https://github.com/ insteadOf rewrite) and
-  # assert the guard's own message appears with no network-failure text --
-  # proving the block happens locally, before git ever touches the network.
+  # A pre-push hook alone cannot stop this: git lists the remote's refs over the
+  # network before it runs the hook, so a hook-only guard still reaches the
+  # forge (issue #2463). origin points at an unresolvable RFC 2606 .invalid
+  # host that setup_bare_repo's insteadOf rewrite deliberately misses, so the
+  # guard's message with no network-failure text proves the block is local.
   unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -133,20 +117,12 @@ setup() {
 }
 
 @test "read-only Box with BOX_HOST_MEDIATED_REMOTE set installs the guard even when BOX_OUTBOX_RELAY_CAPABLE is unset" {
-  # Issue #2463 finding: install_readonly_push_hook's gate used to re-derive
-  # "does this Box have an outbox" from CODE_FORGE=="local" instead of
-  # consulting the already-forwarded BOX_HOST_MEDIATED_REMOTE var directly
-  # (the same fact emit_outcome_backstop's needsOutbox-equivalent switch
-  # already keys off, 680+ lines later in this same file). A Box using a
-  # different/future host-mediated backend name (BOX_HOST_MEDIATED_REMOTE=1
-  # forwarded, but CODE_FORGE left at its default "github", not "local") is
-  # exactly the case that separates the old, CODE_FORGE-keyed gate (which
-  # would wrongly skip installing the guard here, since CODE_FORGE !=
-  # "local" and BOX_OUTBOX_RELAY_CAPABLE is unset) from the new,
-  # BOX_HOST_MEDIATED_REMOTE-keyed one (which correctly installs it): this
-  # Box's hand-off is host-mediated, not a real push, so a `git push` must
-  # still be blocked locally.
-  unset BOX_WRITE_ENABLED # issue #2463: read-only Box
+  # install_readonly_push_hook's gate used to re-derive "does this Box have an
+  # outbox" from CODE_FORGE=="local" instead of reading the forwarded
+  # BOX_HOST_MEDIATED_REMOTE directly (issue #2463). A host-mediated Box with
+  # CODE_FORGE left at "github" separates the two gates: its hand-off is not a
+  # real push, so `git push` must still be blocked locally.
+  unset BOX_WRITE_ENABLED
   unset BOX_OUTBOX_RELAY_CAPABLE
   export BOX_HOST_MEDIATED_REMOTE=1
   run bash "$ENTRYPOINT"
@@ -164,14 +140,11 @@ setup() {
 }
 
 @test "read-only Box whose backend is not outbox-relay-capable installs no guard" {
-  # Issue #2463 finding: a backend the registry marks outboxRelayCapable=false
-  # never gets an outbox -- its only hand-off IS a real `git push`
-  # (outcomebackstop's pushWithRetry / publish_rebased_branch). Installing the
-  # guard there would block the only way this Box's work ever lands. No
-  # backend valid as a CODE_FORGE under read-only (github, local, forgejo)
-  # leaves outboxRelayCapable false today (issue #2927 closed forgejo's
-  # asymmetry), so this pins a hypothetical-backend-shape case rather than
-  # any specific backend's real behavior.
+  # A backend the registry marks outboxRelayCapable=false gets no outbox: its
+  # only hand-off is a real `git push`, so installing the guard would block the
+  # only way its work lands (issue #2463). No backend valid as a CODE_FORGE
+  # under read-only leaves the flag false today (issue #2927), so this pins a
+  # backend shape rather than any real backend's behavior.
   unset BOX_WRITE_ENABLED
   unset BOX_OUTBOX_RELAY_CAPABLE
   run bash "$ENTRYPOINT"

@@ -1,22 +1,17 @@
 #!/usr/bin/env bats
-# --agents JSON composition (scout/reviewer/filer).
 
 load helper
 
+# The fake claude records the --agents value to $DRIVER_AGENTS_FILE so these
+# tests can assert structure without grepping a log that also holds prompt prose.
 setup() {
   setup_entrypoint_env
 }
 
-# --agents JSON: produced by nix (builtins.toJSON), composing each subagent
-# independently by its own model knob; forwarded by the entrypoint as-is after
-# prompt injection. The fake claude records the --agents value to
-# $DRIVER_AGENTS_FILE for structural assertions without grepping a log that
-# also contains prompt prose.
 @test "entrypoint omits --agents when AGENTS_JSON_TEMPLATE is not set" {
-  # AGENTS_JSON_TEMPLATE is nix-baked from SCOUT_MODEL/REVIEW_MODEL at
-  # image-build time, not derived by the entrypoint at runtime, so it stays
-  # unset here regardless of set_box_env's SCOUT_MODEL/REVIEW_MODEL values.
-  # The entrypoint must not build JSON itself; with no template, no flag is passed.
+  # Nix bakes AGENTS_JSON_TEMPLATE from SCOUT_MODEL/REVIEW_MODEL at image-build
+  # time, so it stays unset here whatever set_box_env sets those to. The
+  # entrypoint must not build the JSON itself.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -s "$DRIVER_AGENTS_FILE" ]
@@ -58,8 +53,8 @@ setup() {
   jq -e '.reviewer.model == "claude-opus-4-5"' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
-# The filer (issue #393) is opt-in and composed independently, exactly like
-# scout/reviewer (#392) — never bundled with either.
+# The filer (issue #393) is opt-in and composed independently of scout and
+# reviewer (#392), never bundled with either.
 @test "entrypoint passes --agents with only filer when the template carries filer alone" {
   export AGENTS_JSON_TEMPLATE='{"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   export BOX_FILER_ENABLED=1
@@ -71,10 +66,10 @@ setup() {
 }
 
 @test "entrypoint drops reviewer from --agents when the orchestrator is on, even if the template carries it" {
-  # The code-owned review pass (issue #2037) replaces the implementor's own
-  # inline reviewer subagent entirely on this path -- the template still
-  # carries reviewer (baked independently of ORCHESTRATOR_ENABLED), but the
-  # composed --agents JSON forwarded to the Driver must not.
+  # The code-owned review pass (issue #2037) replaces the implementor's inline
+  # reviewer subagent on this path. The template still carries reviewer, since
+  # nix bakes it independently of ORCHESTRATOR_ENABLED, but the --agents JSON
+  # forwarded to the Driver must not.
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
@@ -98,8 +93,8 @@ setup() {
   jq -e '.filer.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
-# The worker (issue #2054) is provisioned by default (WORKER_MODEL defaults to
-# claude-sonnet-5), composed independently exactly like scout/reviewer/filer.
+# The worker (issue #2054) is provisioned by default and composed independently,
+# like scout, reviewer, and filer.
 @test "entrypoint passes --agents with only worker when the template carries worker alone" {
   export AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement-capable worker subagent","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
   export BOX_WORKER_PROVISIONED=1
@@ -111,13 +106,9 @@ setup() {
 }
 
 # A custom Nth agent (issue #264, roster) must get its prompt injected the same
-# generic way as the built-in names -- no per-name branch in the
-# entrypoint. AGENTS_PROMPT_FILES (nix-baked from the roster) maps each agent
-# name to its prompt file under PROMPTS_DIR; here it names a custom
-# "auditor-prompt.md" that lives only in this test's own prompt dir. Copied
-# from the real PROMPTS_DIR (rather than a bare empty dir) so every other
-# fragment/prompt file phase_prompt_assembly reads along the way still
-# resolves -- only the extra auditor-prompt.md is genuinely new.
+# generic way as the built-in names, with no per-name branch in the entrypoint.
+# The test copies the real PROMPTS_DIR rather than using an empty one so every
+# other fragment phase_prompt_assembly reads still resolves.
 @test "entrypoint injects a custom agent's prompt generically via AGENTS_PROMPT_FILES" {
   local prompt_dir="$BATS_TEST_TMPDIR/custom-prompts"
   cp -r "$PROMPTS_DIR" "$prompt_dir"
