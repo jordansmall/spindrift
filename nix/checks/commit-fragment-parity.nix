@@ -1,6 +1,6 @@
 # Drift parity between the commit fallback fragment and the upstream `/commit`
-# skill (issue #3222, following the tdd pattern from #3219). See
-# nix/checks/tdd-fragment-parity.nix for the full rationale comment; this file
+# skill (issue #3222, following the tdd pattern from #3219).
+# nix/checks/tdd-fragment-parity.nix carries the full rationale; this file
 # repeats only what differs.
 { pkgs, fixtures, ... }:
 let
@@ -38,29 +38,22 @@ let
   fallbackDesc = "templates/default/prompts/fragments/commit-unbaked.md";
   remedy = "either re-sync the fallback with the skill, or -- if the skill's discipline genuinely changed -- update this check's clause list to match.";
 
-  # Kept to two clauses, both load-bearing: losing either from the skill would
-  # mean the fallback is teaching a format the skill no longer specifies.
-  # "hard line wraps"/"hard-wrapped" and "50/72" column counts were considered
-  # and dropped -- the skill spells the wrap rule as "hard line wraps" (header)
-  # and separately "hard-wrap at 72 columns" (bullet), and the column bounds
-  # use "≤ 50" (spaced) against the fallback's "≤50" (unspaced), so neither
-  # phrase is genuinely shared vocabulary once normalized; a pin on either
-  # would go red on a copy-edit that changed nothing about the discipline.
+  # Only two clauses are pinned. The skill and the fallback spell the wrap rule
+  # and the column bounds differently ("hard line wraps" against "hard-wrap at
+  # 72 columns", "≤ 50" against "≤50"), so pinning either would go red on a
+  # copy-edit that changed nothing about the discipline.
   sharedClauses = [
     {
       name = "conventional-commits-v1-0-0";
-      # The format and version this skill exists to enforce. The skill states
-      # it in its opening sentence; the fallback restates it verbatim as the
-      # first thing it says. Losing this from either side means the fallback
-      # is no longer pinned to the same spec version the skill teaches.
+      # Losing this from either side means the fallback is no longer pinned to
+      # the same spec version the skill teaches.
       clause = "conventional commits v1.0.0";
     }
     {
       name = "hard-wrap";
-      # The skill's own hyphenated form ("hard-wrap at 72 columns", distinct
-      # from the header's unhyphenated "hard line wraps") is also the
-      # fallback's word for the same rule ("hard-wrapped"). Without it the
-      # fallback would be silent on whether wrapping is enforced at all.
+      # The hyphenated form is the shared vocabulary ("hard-wrap at 72 columns"
+      # in the skill, "hard-wrapped" in the fallback); the header's
+      # unhyphenated "hard line wraps" is not.
       clause = "hard-wrap";
     }
   ];

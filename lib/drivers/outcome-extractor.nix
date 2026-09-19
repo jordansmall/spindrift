@@ -1,13 +1,10 @@
-# Shared pipeline shape behind every Driver's outcomeExtractFnBody /
-# outcomeExtractNearMissFnBody (issue #2977): claude.nix and opencode.nix
-# used to hand-write four byte-for-byte-identical pipelines between them,
-# differing only in the jq selector each Driver's event stream needs. This
-# file is the one place that pipeline shape (and the SPINDRIFT_OUTCOME token
-# itself, sourced from prompt-contract.nix's markerChannels registry -- the
-# "outcome" row -- instead of a second hardcoded literal) is written down.
-#
-# Pure builtins only (no `pkgs.lib`), matching prompt-contract.nix's own
-# style, so this stays evaluable without a locked nixpkgs.
+# Every Driver's outcomeExtractFnBody and outcomeExtractNearMissFnBody share
+# this one pipeline (issue #2977); a Driver supplies only the jq selector its
+# own event stream needs. The SPINDRIFT_OUTCOME token comes from
+# prompt-contract.nix's markerChannels registry, not a second hardcoded
+# literal.
+
+# Pure builtins only, so this stays evaluable without a locked nixpkgs.
 let
   promptContract = import ../prompt-contract.nix;
   outcomeToken =
@@ -15,26 +12,16 @@ let
 in
 {
   # Renders one Driver's outcomeExtractFnBody ("match") or
-  # outcomeExtractNearMissFnBody ("near-miss") shell function body.
-  #
-  #   jqSelector -- the Driver-specific jq filter (e.g. claude's
-  #                 `select(.type == "result") | .result // empty` vs
-  #                 opencode's `select(.type == "text") | .part.text //
-  #                 empty`) picking the Driver's own result/text event out of
-  #                 its stream-json/NDJSON log.
-  #   variant    -- "match": requires both landing= and status= (outcome.Parse's
-  #                 own two required fields) and normalizes a colon delimiter
-  #                 back to the canonical space (issue #2012) before anything
-  #                 downstream sees the line.
-  #               -- "near-miss": requires the leading SPINDRIFT_OUTCOME token
-  #                 but NOT both landing=/status=, and deliberately does NOT
-  #                 normalize the colon delimiter -- the recovery nudge quotes
-  #                 this line back to the agent verbatim, so it must read as
-  #                 the agent actually typed it (issue #1900).
-  #
-  # Both variants strip markdown wrapping (backticks/bold, issue #1611) per
-  # line before the token anchor is tested, so the launcher's grep and
-  # outcome.Parse both see the line bare.
+  # outcomeExtractNearMissFnBody ("near-miss") shell function body. "match"
+  # requires both landing= and status=, the two fields outcome.Parse needs, and
+  # normalizes a colon delimiter back to the canonical space (issue #2012).
+
+  # "near-miss" requires only the token and leaves the colon alone, because the
+  # recovery nudge quotes that line back to the agent verbatim (issue #1900).
+
+  # Both variants strip markdown wrapping per line before testing the token
+  # anchor, so the launcher's grep and outcome.Parse see the line bare
+  # (issue #1611).
   mkOutcomeExtractor =
     { jqSelector, variant }:
     if variant == "match" then

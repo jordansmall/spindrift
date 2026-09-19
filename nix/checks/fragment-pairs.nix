@@ -1,11 +1,8 @@
-# Eval-level pins for lib/fragment-pairs.nix (issue #3219): one assertion
-# per rejection rule its `validate` enforces, plus a same-shape positive case
-# and a pin on what the real lib/fragments.nix registry declares.
-#
-# The registry check below pins `pairsOf` rather than re-running `validate`:
-# lib/fragments.nix ends in `assert (import ./fragment-pairs.nix).validate
-# rows`, so a registry that fails validation throws at import and never
-# reaches an assertMsg here -- a `validate`-shaped check would be vacuous.
+# Eval-level pins for lib/fragment-pairs.nix (issue #3219). The registry check
+# below pins `pairsOf` rather than re-running `validate`: lib/fragments.nix ends
+# in `assert (import ./fragment-pairs.nix).validate rows`, so a registry that
+# fails validation throws at import and never reaches an assertMsg here, which
+# would make a `validate`-shaped check vacuous.
 { pkgs, ... }:
 let
   fragmentPairs = import ../../lib/fragment-pairs.nix;
@@ -23,39 +20,32 @@ let
       ;
   };
 
-  # The shape the real registry declares, reduced to two rows: an on-member
-  # and the off-member naming it. Shared by the two well-formed checks so
-  # they cannot drift into pinning different shapes.
+  # The two well-formed checks share these rows so they cannot drift into
+  # pinning different shapes.
   scoutRows = [
     (row "SCOUT_PROVISIONED" "scout-delegate.md" "SCOUT_DELEGATE_STEP")
     (rowInverse "SCOUT_ABSENT" "scout-absent.md" "SCOUT_ABSENT_STEP" "SCOUT_PROVISIONED")
   ];
 
-  # The four ways a declared `inverseOf` can be malformed, each reduced to
-  # its own minimal `rows` and the message `validate` must throw. Shares one
-  # `rejectionCase` builder below instead of re-spelling the same
-  # let/tryEval/assertMsg/runCommand shape four times (same idiom as
-  # `clauseCheck` + `sharedClauses` in nix/checks/tdd-fragment-parity.nix).
+  # These four cases cover every way a declared `inverseOf` can be malformed.
   rejectionCases = [
     {
-      # A row naming itself is not a pair at all: one gate cannot be its own
-      # inverse, so both "members" render together whenever that gate is on.
+      # A gate cannot be its own inverse: both members would render together
+      # whenever that gate is on.
       name = "fragment-pairs-self-reference-throws";
       rows = [ (rowInverse "A" "a.md" "A_STEP" "A") ];
       message = "validate must throw when a row declares inverseOf itself";
     }
     {
-      # A typo'd or since-renamed on-gate leaves the off-member alone in the
-      # registry: nothing renders when the knob is on, so the prompt silently
-      # loses a section instead of failing the build.
+      # A typo'd or since-renamed on-gate leaves the off-member alone: nothing
+      # renders when the knob is on, so the prompt silently loses a section.
       name = "fragment-pairs-dangling-on-gate-throws";
       rows = [ (rowInverse "OFF" "off.md" "OFF_STEP" "MISSING") ];
       message = "validate must throw when the referenced on-gate is not the gate of any row";
     }
     {
-      # Chaining inverses (OFF is the inverse of ON, which is itself the
-      # inverse of X) means the pair's "on" side is no longer one boolean
-      # knob two gates are computed from, which is the whole basis for
+      # Chaining inverses means the pair's on side is no longer the single
+      # boolean knob both gates derive from, which is the basis for
       # exactly-one-on.
       name = "fragment-pairs-inverse-of-inverse-chain-throws";
       rows = [
@@ -66,9 +56,8 @@ let
       message = "validate must throw when the referenced on-gate itself carries inverseOf";
     }
     {
-      # One off-gate claimed by two different on-gates cannot be the inverse
-      # of both: whichever on-gate is true, the off-member paired with the
-      # *other* one renders next to it.
+      # An off-gate cannot be the inverse of two on-gates: whichever on-gate is
+      # true, the off-member paired with the other one renders next to it.
       name = "fragment-pairs-off-gate-claimed-by-two-on-gates-throws";
       rows = [
         (row "ON1" "on1.md" "ON1_STEP")
@@ -91,9 +80,8 @@ let
   };
 in
 {
-  # The positive case: a correct declaration must not throw, or every
-  # `rejectionCases` entry would pass for the wrong reason (a `validate` that
-  # threw unconditionally would satisfy all of them).
+  # Without a positive case, a `validate` that threw unconditionally would
+  # satisfy every `rejectionCases` entry.
   fragment-pairs-well-formed-pair-validates =
     let
       out = fragmentPairs.validate scoutRows;
@@ -101,10 +89,9 @@ in
     assert assertMsg (out == true) "validate must return true for a well-formed exactly-one-on pair";
     pkgs.runCommand "fragment-pairs-well-formed-pair-validates" { } "touch $out";
 
-  # `pairsOf` is the reusable half of the module -- it is what turns the
-  # per-row `inverseOf` string into the `{ on; off; }` list downstream
-  # consumers (and `validate`'s own grouping) work from, so its output shape
-  # is pinned independently of whether validation passes.
+  # Downstream consumers and `validate`'s own grouping both work from the
+  # `{ on; off; }` list `pairsOf` derives, so pin its output shape independently
+  # of whether validation passes.
   fragment-pairs-pairs-of-derives-declared-pair =
     let
       out = fragmentPairs.pairsOf scoutRows;
@@ -121,11 +108,10 @@ in
 }
 // builtins.listToAttrs (map rejectionCase rejectionCases)
 // {
-  # Pins what the real registry declares, so dropping an `inverseOf` from a
-  # row (or adding one without meaning to) fails here rather than quietly
-  # making the eval-time assert in lib/fragments.nix vacuous again.
-  # `pairsOf` preserves registry order, so this list is in lib/fragments.nix's
-  # own row order, not alphabetical.
+  # Dropping an `inverseOf` from a row, or adding one without meaning to, fails
+  # here rather than quietly making the eval-time assert in lib/fragments.nix
+  # vacuous again. `pairsOf` preserves registry order, so this list is in
+  # lib/fragments.nix's own row order, not alphabetical.
   fragment-pairs-real-registry-declares-declared-pairs =
     let
       out = fragmentPairs.pairsOf (import ../../lib/fragments.nix);

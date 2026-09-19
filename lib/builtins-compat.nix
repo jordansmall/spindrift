@@ -1,19 +1,10 @@
-# Pure-builtins primitives shared across the "Pure builtins only" lib
-# files (issue #2535): the regex/suffix/shell-escaping/list helpers each
-# used to reimplement independently. This is the bottom of that
-# dependency graph -- other pure-builtins lib files import from here
-# instead of duplicating these bodies.
-#
-# Pure builtins only (no `pkgs.lib`, no imports of other lib/*.nix files):
-# keeps this file evaluable and unit-testable with a bare `nix eval`,
-# without needing a locked nixpkgs (mirrors lib/renderers.nix, issue #402).
+# Pure-builtins primitives shared by the "Pure builtins only" lib files
+# (issue #2535). Pure builtins only (no `pkgs.lib`, no imports of other
+# lib/*.nix files) so a bare `nix eval` can evaluate and unit-test this file
+# without a locked nixpkgs (mirrors lib/renderers.nix, issue #402).
 rec {
-  # Escapes a literal string's regex metacharacters so it can be used as a
-  # builtins.split/builtins.match pattern without them being read as regex --
-  # used by marker-splitting call sites (e.g. lib/prompt-inject.nix's own
-  # splitOnce/injectSection, lib/documented-fact-checker.nix's
-  # splitMarkedBlock) that split on a literal marker and must guard against
-  # it being read as regex.
+  # Marker-splitting callers pass a literal string to builtins.split or
+  # builtins.match, so this escapes its regex metacharacters first.
   escapeRegex =
     builtins.replaceStrings
       [
@@ -64,9 +55,7 @@ rec {
     else
       content;
 
-  # Matches `lib.escapeShellArg` byte for byte without depending on pkgs.lib:
-  # a string of only shell-safe characters passes through unquoted; anything
-  # else gets single-quote-wrapped, with embedded `'` escaped as `'\''`.
+  # Matches `lib.escapeShellArg` byte for byte without depending on pkgs.lib.
   escapeShellArg =
     arg:
     let

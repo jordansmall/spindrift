@@ -20,35 +20,31 @@
         "x86_64-linux"
       ];
 
-      # Pull in spindrift's declarative option surface. Everything below under
-      # `perSystem.spindrift` tunes the harness; unset options keep spindrift's
-      # own defaults.
+      # Unset options under `perSystem.spindrift` keep spindrift's own defaults.
       imports = [ spindrift.flakeModules.default ];
 
       perSystem =
         { config, pkgs, ... }:
         {
           spindrift = {
-            # ---- Toolchain baked into the agent's image -----------------------
-            # A function of the (Linux) pkgs — the engine is language agnostic, so
-            # this is the one line to change for your stack. Straight from nixpkgs
-            # here; add `overlays`/an extra input only if your stack needs one
-            # (e.g. rust-overlay for pinned Rust channels).
+            # `p` is the image's Linux nixpkgs, not your host's. The engine is
+            # language agnostic, so this is the one line to change for your
+            # stack. Add `overlays` or an extra input only if your stack needs
+            # one (e.g. rust-overlay for pinned Rust channels).
             infra.image.packages = p: [ p.go ];
 
             # Warm any dependency caches after the clone (runs in the work tree).
             infra.image.prefetch = "go mod download || true";
 
-            # ---- Agent behaviour ---------------------------------------------
             # The prompt is baked into the image; changing it requires an image
             # rebuild (spindrift build). Set SPINDRIFT_PROMPT_DIR at runtime to
             # point at a local directory for zero-rebuild iteration.
             agents.prompt = builtins.readFile ./prompts/issue-prompt.md;
 
-            # ---- Non-secret run defaults (optional) --------------------------
-            # Grouped by domain (ADR 0037); a matching env var still wins at
-            # runtime. Secrets and the target (REPO_SLUG, GH_TOKEN, auth) are
-            # runtime env — see harness.env.example. Full reference: docs/flake-options.md
+            # Non-secret run defaults, grouped by domain (ADR 0037); a matching
+            # env var still wins at runtime. Secrets and the target (REPO_SLUG,
+            # GH_TOKEN, auth) are runtime env, see harness.env.example.
+            # Full reference: docs/flake-options.md
             # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT
             # agents = {
             #   format = {
@@ -247,10 +243,9 @@
             # END GENERATED SETTINGS EXAMPLE
           };
 
-          # devShell-first: `nix develop` (or `direnv allow` with .envrc) puts
-          # the spindrift CLI on PATH so you can run `spindrift dispatch` directly.
-          # Copy harness.env.example → harness.env and fill in REPO_SLUG / GH_TOKEN
-          # before the first dispatch.
+          # `nix develop` (or `direnv allow` with .envrc) puts the spindrift CLI
+          # on PATH. Copy harness.env.example to harness.env and fill in
+          # REPO_SLUG and GH_TOKEN before the first dispatch.
           devShells.default = pkgs.mkShell {
             packages = [ config.packages.spindrift ];
           };

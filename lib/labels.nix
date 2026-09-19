@@ -1,46 +1,17 @@
-# The label registry (issue #2528): the one root every label family the
-# Harness writes hangs off of -- work-tier (operator-configurable via
-# lib/env-schema.nix), research-tier (ADR 0022, fixed names), the
-# researchVerdicts sourced from lib/research-verdicts.nix's defaultVerdicts,
-# priority-tier (ADR 0040), the ambiguous-spec label, the local-only
-# recoverable marker, the reviewFinding provenance label the Filer creates
-# directly (never through doctor), the researchFinding provenance label
-# (ADR 0041, doctor DOES probe/offer to create this one), the findingType
-# closed bug/enhancement/chore vocabulary (issue #2594 / ADR 0041, rendered
-# into its own dedicated Go map, never folded into TriageLabelMeta), and the
-# trigger-only vocabulary. Rendered into
-# cmd/launcher/internal/doctor/labelmeta_gen.go by lib/renderers.nix's
-# renderLabelRegistryGo, guarded against drift by
-# nix/checks/schema-drift.nix's label-registry-gen check, written by
-# `nix run .#regen`. Before this registry, doctor.go hand-typed the whole
-# TriageLabelMeta map as a Go literal -- a name/color/description could drift
-# from the schema default (work tier) or from research-verdicts.nix's verdict
-# label (research-verdict tier) with nothing to catch it.
-#
-# A plain attrset (no `{ lib }:` wrapper), mirroring lib/research-verdicts.nix
-# and lib/env-schema.nix, so it stays importable with zero arguments.
+# The label registry (issue #2528): every label family the Harness writes.
+# lib/renderers.nix's renderLabelRegistryGo renders it into
+# cmd/launcher/internal/doctor/labelmeta_gen.go via `nix run .#regen`, and
+# nix/checks/schema-drift.nix's label-registry-gen check catches drift. A plain
+# attrset with no `{ lib }:` wrapper, so it imports with zero arguments.
 let
   schema = import ./env-schema.nix;
   verdicts = import ./research-verdicts.nix;
 
-  # Verdict-terminal colors, keyed by verdict token -- paired below against
-  # research-verdicts.nix's defaultVerdicts so the label *name* is never
-  # retyped here (issue #2528).
-  #
-  # Deliberately NOT also sourcing `description` from defaultVerdicts: that
-  # file's descriptions are prompt-facing prose explaining verdict semantics
-  # to the research agent (long, second-person-adjacent, e.g. "false
-  # positive, not worth doing, or a duplicate. Name the duplicate issue by
-  # number..."), while a GitHub label description is a short, third-person
-  # summary for a human skimming the repo's Labels page (e.g. "False
-  # positive, not worth it, or a duplicate — close it"). These are two
-  # different audiences with independently-worded text today
-  # (docs/reference.md's `gh label create` snippets carry the short form);
-  # collapsing them onto one string would either bloat the GitHub label UI
-  # with prompt prose or blunt the prompt's guidance to a label-sized
-  # summary. Only the *label name* -- the one fact that must never drift
-  # between "which label does verdict X map to" in the prompt and in
-  # doctor -- is shared.
+  # Colors keyed by verdict token, paired below against research-verdicts.nix's
+  # defaultVerdicts so the label name is never retyped here (issue #2528). Only
+  # the name is shared: that file's descriptions are prompt prose aimed at the
+  # research agent, while a GitHub label description is a short summary for a
+  # human reading the repo's Labels page.
   verdictColors = {
     recommend = "2cbe4e";
     reject = "e11d21";
@@ -51,11 +22,9 @@ let
     reject = "False positive, not worth it, or a duplicate — close it";
     unclear = "Needs a human answer — answer, then re-apply agent-research";
   };
-  # role names for verdict-terminal rows, keyed by verdict token -- a small
-  # hardcoded map is simpler than a generic PascalCase helper for a set of
-  # three tokens that isn't expected to grow arbitrarily (a fourth verdict
-  # token showing up here without a matching role throws below, same as an
-  # unknown backend field in lib/backends/default.nix).
+  # Go role names keyed by verdict token. A fourth verdict token with no role
+  # here throws below, same as an unknown backend field in
+  # lib/backends/default.nix.
   verdictRoles = {
     recommend = "ResearchVerdictRecommend";
     reject = "ResearchVerdictReject";
@@ -63,11 +32,11 @@ let
   };
 in
 {
-  # Work-tier: operator-configurable names (schema knobs flow through so a
-  # renamed LABEL/IN_PROGRESS_LABEL/FAILED_LABEL/COMPLETE_LABEL still gets
-  # correct metadata) -- role is the Go identifier suffix the generated
-  # per-role Meta<Role> vars use, so doctor.go can resolve a work-tier
-  # label's metadata by role even after a rename.
+  # Work-tier names are operator-configurable, so the schema knobs flow through
+  # and a renamed LABEL/IN_PROGRESS_LABEL/FAILED_LABEL/COMPLETE_LABEL still gets
+  # correct metadata. role is the Go identifier suffix of the generated
+  # Meta<Role> var, so doctor.go resolves a label's metadata by role even after
+  # a rename.
   work = [
     {
       role = "Dispatchable";
@@ -118,10 +87,9 @@ in
     }
   ];
 
-  # Verdict-terminal rows: name sourced from research-verdicts.nix's
-  # defaultVerdicts (never retyped here); color/description/role sourced
-  # from the small maps above, keyed by the same verdict token (see the
-  # verdictColors comment for why description isn't also shared).
+  # name comes from research-verdicts.nix's defaultVerdicts, never retyped here;
+  # color, description and role come from the maps above, keyed by the same
+  # verdict token.
   researchVerdicts = map (v: {
     role = verdictRoles.${v.verdict};
     name = v.label;
@@ -129,6 +97,7 @@ in
     description = verdictDescriptions.${v.verdict};
   }) verdicts.defaultVerdicts;
 
+  # Fixed names (ADR 0040), never operator-configurable.
   priority = [
     {
       role = "PriorityCritical";
@@ -150,11 +119,8 @@ in
     }
   ];
 
-  # Same "needs a human answer" semantic family as agent-research-unclear,
-  # but a distinct shade (e0cffc vs. d4c5f9) so the two never collide in the
-  # GitHub label UI (TestTriageLabelMeta_ColorsAreDistinct) -- the choice of
-  # exact hex isn't load-bearing beyond staying visually adjacent and
-  # distinct.
+  # A distinct shade from agent-research-unclear's d4c5f9 so the two never
+  # collide in the GitHub label UI (TestTriageLabelMeta_ColorsAreDistinct).
   ambiguous = [
     {
       role = "Ambiguous";
@@ -164,20 +130,11 @@ in
     }
   ];
 
-  # Research-finding provenance: the research-dispatch counterpart to
-  # reviewFinding below (issue #2591, ADR 0041) -- the label a research Box's
-  # Filer will apply to every issue it files from a research finding, once
-  # that Filer fragment exists (ADR 0041 is itself still future-tense here;
-  # only doctor's advisory probe/create side ships in this diff). Unlike
-  # reviewFinding, this one IS rendered into TriageLabelMeta: doctor probes
-  # and, in interactive mode, offers to create it alongside the rest of the
-  # research family (ADR 0041's "doctor's advisory research label set gains
-  # agent-research-finding"), staying advisory (never fails the check) same
-  # as the rest of that family. Needs its own fresh color, distinct from
-  # reviewFinding's d4c5f9 (which collides with agent-research-unclear --
-  # harmless there only because reviewFinding is excluded from the map), to
-  # avoid tripping TestTriageLabelMeta_ColorsAreDistinct now that this row
-  # does land in the map.
+  # Research-finding provenance (issue #2591, ADR 0041): the label a research
+  # Box's Filer applies to every issue it files. Unlike reviewFinding, this one
+  # does render into TriageLabelMeta, so doctor probes and offers to create it,
+  # still advisory. Its color must stay distinct from reviewFinding's d4c5f9,
+  # or TestTriageLabelMeta_ColorsAreDistinct trips.
   researchFinding = [
     {
       role = "ResearchFinding";
@@ -187,14 +144,11 @@ in
     }
   ];
 
-  # Recoverable: a local-only frontmatter marker, NEVER a real created
-  # GitHub/Forgejo label -- forge.DispatchLabels.AllLabels()
-  # (cmd/launcher/internal/forge/dispatch.go) deliberately excludes it, with
-  # its own doc comment explaining why. Carried here for completeness of
-  # "every label family" (issue #2528), but the Go renderer must NOT emit it
-  # into TriageLabelMeta or any doctor-visible create surface: doctor never
-  # creates it and no docs/reference.md `gh label create` snippet exists for
-  # it.
+  # A local-only frontmatter marker, never a real created GitHub/Forgejo label:
+  # forge.DispatchLabels.AllLabels() (cmd/launcher/internal/forge/dispatch.go)
+  # excludes it, and the Go renderer must not emit it into TriageLabelMeta or
+  # any doctor-visible create path. It is here only so the registry covers every
+  # label family (issue #2528).
   recoverable = [
     {
       role = "Recoverable";
@@ -204,24 +158,11 @@ in
     }
   ];
 
-  # Review-finding provenance: the label the Filer applies to every issue it
-  # files from a non-blocking review finding (issue #393, ADR 0041). Written
-  # by the provenanceLabel argument cmd/launcher/internal/settle/gate.go's
-  # work-path settle passes to fileIssueIntents (issue #2590 parameterized
-  # that call; the Launcher's own non-agent-trusted literal for
-  # SPINDRIFT_ISSUE_INTENT filing, never the payload's own labels) and
-  # created directly by the Filer prompt
-  # (templates/default/prompts/fragments/filer-label-direct.md /
-  # filer-label-direct-forgejo.md) via a bare `gh label create`/REST call --
-  # never through doctor.Run(), so (like `recoverable` above) it must NOT be
-  # rendered into TriageLabelMeta: doctor never probes or offers to create
-  # it, and folding it into that map would collide its color
-  # (d4c5f9, matching what the prompt fragments already hardcode) with
-  # agent-research-unclear's and trip
-  # TestTriageLabelMeta_ColorsAreDistinct. Carried here so the registry
-  # covers every label family the Harness writes (issue #2528 AC1), and so a
-  # rename of this literal in either fragment or in gate.go without a
-  # matching registry update is something a future check can catch.
+  # Review-finding provenance (issue #393, ADR 0041): the Filer creates this
+  # label from its prompt fragments, never through doctor.Run(), so the renderer
+  # must not emit it into TriageLabelMeta, where its d4c5f9 would collide with
+  # agent-research-unclear's and trip TestTriageLabelMeta_ColorsAreDistinct. It
+  # is here only for registry coverage (issue #2528 AC1).
   reviewFinding = [
     {
       role = "ReviewFinding";
@@ -231,26 +172,11 @@ in
     }
   ];
 
-  # Finding-type vocabulary: the closed bug/enhancement/chore type-token
-  # vocabulary issue #2594 / ADR 0041 introduces on a filed issue-intent's
-  # optional `type` field. cmd/launcher/internal/settle/issue_intent.go's
-  # ensureTypeLabel looks up a filed intent's `type` against the generated Go
-  # map this family renders to (`FindingTypeLabels`, NOT TriageLabelMeta —
-  # see below), and best-effort `CreateLabel`s the mapped label at
-  # issue-filing time: never through doctor.Run(), and never through a
-  # Filer-prompt bash `gh label create` like reviewFinding above. Unlike
-  # reviewFinding, this one DOES need a Go-visible map, because
-  # ensureTypeLabel resolves it at runtime rather than a human running a
-  # documented snippet — but it must render into its OWN dedicated map, never
-  # folded into TriageLabelMeta, whose keys are real dispatch/provenance
-  # label names like "ready-for-agent": folding this closed 3-entry enum in
-  # would let `TriageLabelMeta["ready-for-agent"]` resolve as though
-  # "ready-for-agent" were a valid finding type, defeating the whole point of
-  # keeping the vocabularies separate (issue #1949's
-  # do-not-trust-the-agent-target invariant — the Box names a *type*, never a
-  # label). Colors are fresh and distinct from every other family here
-  # (TestTriageLabelMeta_ColorsAreDistinct only guards TriageLabelMeta today,
-  # but staying distinct keeps this family safe if it's ever folded in).
+  # The closed bug/enhancement/chore type vocabulary for a filed issue-intent's
+  # `type` field (issue #2594, ADR 0041). settle/issue_intent.go's
+  # ensureTypeLabel resolves a type at runtime, so this family needs its own Go
+  # map, FindingTypeLabels: folded into TriageLabelMeta, a lookup of
+  # "ready-for-agent" would resolve as a valid finding type (issue #1949).
   findingType = [
     {
       role = "FindingTypeBug";
@@ -272,10 +198,10 @@ in
     }
   ];
 
-  # Trigger-only vocabulary: fires a workflow dispatch/recover run; written
-  # by the workflows (self-clearing on claim), never created or colored by
-  # doctor. nix/checks/dispatch-labels.nix's requiredLabels sources this list
-  # directly instead of a locally hardcoded duplicate.
+  # Fires a workflow dispatch/recover run: the workflows write it and clear it
+  # on claim, and doctor never creates or colors it.
+  # nix/checks/dispatch-labels.nix's requiredLabels sources this list rather
+  # than duplicating it.
   triggerOnly = [
     "agent-trigger"
     "agent-recover"

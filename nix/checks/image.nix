@@ -1,7 +1,6 @@
-# Linux-gated image-layer inspection: assertions that realize the OCI image
-# and inspect its layers/config, so they are omitted from `nix flake check`
-# on darwin (see the optionalAttrs pkgs.stdenv.isLinux wrapping this module's
-# import in nix/checks/default.nix).
+# These checks realize the OCI image and inspect its layers, so
+# nix/checks/default.nix wraps this import in optionalAttrs
+# pkgs.stdenv.isLinux and darwin's `nix flake check` skips them.
 { pkgs, fixtures, ... }:
 let
   inherit (fixtures)
@@ -28,29 +27,25 @@ let
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   fragmentRows = import ../../lib/fragments.nix;
   fragmentBasenames = map (row: pkgs.lib.removeSuffix ".md" row.fragment) fragmentRows;
-  # Single source of truth for the literal asserted below (issue #2433):
-  # read reviewModel's default straight from the schema instead of
-  # restating it by hand, so a future bump only edits lib/env-schema.nix.
-  # Deliberate carve-out from readSchemaDefaults (issue #2506 AC5): this
-  # pin needs the raw schema, not the helper under test elsewhere.
+  # Read reviewModel's default from the schema so a bump only edits
+  # lib/env-schema.nix (issue #2433). Deliberate carve-out from
+  # readSchemaDefaults (issue #2506 AC5): this pin needs the raw schema, not
+  # the helper that is itself under test elsewhere.
   reviewModelSchemaDefault = (import ../../lib/env-schema.nix).reviewModel.default;
-  # Single hand-typed anti-vacuity root (issue #2514) for the expected-default-
-  # model literals asserted below -- see lib/default-model-fixture.nix's own
-  # header comment for why it stays hand-typed rather than schema-derived.
+  # Hand-typed anti-vacuity root (issue #2514) for the default-model literals
+  # asserted below. lib/default-model-fixture.nix's own header says why it
+  # stays hand-typed rather than schema-derived.
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
-  # Single source of truth for the per-agent effort literals asserted below
-  # (issue #2506): read them from lib/roster-schema-defaults.nix instead of
-  # restating them by hand. Deliberately does NOT extend to the model
-  # literals nearby (issue #2435 AC2) -- see that fixture's own comments.
+  # The per-agent effort literals come from lib/roster-schema-defaults.nix
+  # rather than being restated here (issue #2506). This deliberately does not
+  # extend to the model literals nearby (issue #2435 AC2); see that fixture.
   rosterDefaults =
     (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
 in
 {
-  # The baked entrypoint must carry a store-path shebang, not the
-  # source's `#!/usr/bin/env bash` — the Box has no /usr/bin/env. Guards
-  # against baking the raw source instead of the writeShellApplication
-  # output. Realizes the agent-files layer, so it is gated to a Linux
-  # builder and omitted from `nix flake check` on darwin.
+  # The baked entrypoint must carry a store-path shebang, not the source's
+  # `#!/usr/bin/env bash`, because the Box has no /usr/bin/env. Catches
+  # baking the raw source instead of the writeShellApplication output.
   entrypoint-shebang = pkgs.runCommand "entrypoint-shebang" { } ''
     shebang=$(head -1 ${nonRustHarness.internals.agentFiles}/agent/entrypoint.sh)
     case "$shebang" in
@@ -61,10 +56,10 @@ in
     touch $out
   '';
 
-  # AGENTS_JSON_TEMPLATE baked into the entrypoint by nix (ADR 0007): each
+  # AGENTS_JSON_TEMPLATE is baked into the entrypoint by nix (ADR 0007). Each
   # subagent is composed independently by its own model knob (issue #392), so
-  # the template carries whichever of scout/reviewer have a model configured,
-  # and is the empty string only when neither does.
+  # the template carries whichever of scout/reviewer has a model configured,
+  # and is empty only when neither does.
   agents-json-baked = pkgs.runCommand "agents-json-baked" { } ''
     # Shared shape for the dogfood/bats per-agent entry checks below: extract
     # the named agent's JSON object out of an AGENTS_JSON_TEMPLATE line,
@@ -222,15 +217,10 @@ in
   '';
 
   # opencode has no --agents JSON flag; it discovers subagents from
-  # HOME-relative agents/*.md files instead (issue #262 slice 5, AC4). The
-  # image-baking half of that contract: opencodeHarness's agentFiles layer
-  # must carry scout.md/reviewer.md/worker.md (each model-gated model set)
-  # with the frontmatter's mode/model fields baked in, and must NOT carry
-  # filer.md at all (filerModel left empty), mirroring agents-json-baked's
-  # per-agent omission proof above but for the on-disk file mechanism.
-  # Realizes the agent-files layer, so it is Linux-gated like the other image
-  # checks -- but only agentFiles, not the OCI image itself, so it stays
-  # light (no dockerTools.buildLayeredImage).
+  # HOME-relative agents/*.md files instead (issue #262 slice 5, AC4), so the
+  # agentFiles layer must carry scout.md/reviewer.md/worker.md with baked
+  # mode/model frontmatter and must omit filer.md when filerModel is empty.
+  # This realizes only agentFiles, not the image, so it stays cheap.
   opencode-agent-files = pkgs.runCommand "opencode-agent-files" { } ''
     scout=${opencodeHarness.internals.agentFiles}/home/agent/.config/opencode/agents/scout.md
     [ -f "$scout" ] || {
@@ -296,16 +286,11 @@ in
     touch $out
   '';
 
-  # Regression check for issue #2843: opencode driver dispatch failed
-  # "permission denied" because home/agent's files, though chowned to uid
-  # 1000 by fakeRootCommands, kept the read-only mode bits `cp` preserved
-  # from the Nix store. Realizes the real built opencodeHarness.image (not
-  # just the opencode-agent-files derivation above, which only inspects
-  # agentFiles in isolation) and inspects the image's top (customisation)
-  # layer directly, resolving through the Nix symlink-forest indirection
-  # (contents merges agentFiles' tree in as symlinks back into its own
-  # store output) to find wherever scout.md's real bytes actually live, so
-  # the assertion holds regardless of which layer physically carries them.
+  # Regression check for issue #2843: opencode dispatch failed "permission
+  # denied" because home/agent's files, though chowned to uid 1000 by
+  # fakeRootCommands, kept the read-only mode bits `cp` preserved from the
+  # store. It resolves through the symlinks contents builds, so the assertion
+  # holds whichever layer physically carries scout.md's bytes.
   opencode-agent-files-writable-in-image =
     let
       bakedPath = "home/agent/.config/opencode/agents/scout.md";
@@ -350,9 +335,8 @@ in
     '';
 
   # Issue #262 AC1: `driver = "opencode"` builds a distinct, driver-named
-  # image. Proven eval-only off buildLayeredImage's `.imageName` passthru (no
-  # image realization needed): the default claude Driver keeps the historical
-  # `spindrift` name, opencode gets `spindrift-opencode`.
+  # image. Read off buildLayeredImage's `.imageName` passthru, so it needs no
+  # image realization.
   drivers-image-name-scoped-by-driver =
     assert pkgs.lib.assertMsg (nonRustHarness.image.imageName == "spindrift")
       "the claude Driver image must keep the historical name spindrift, got: ${nonRustHarness.image.imageName}";
@@ -361,9 +345,7 @@ in
     pkgs.runCommand "drivers-image-name-scoped-by-driver" { } "touch $out";
 
   # The Box must run unprivileged: Claude Code refuses
-  # --dangerously-skip-permissions under root. Assert the image config
-  # runs as the non-root `agent` user. Realizes the image, so it is
-  # Linux-gated like the shebang check.
+  # --dangerously-skip-permissions under root.
   box-runs-as-non-root =
     pkgs.runCommand "box-runs-as-non-root" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -379,9 +361,8 @@ in
       '';
 
   # The rendered prompt must be baked into the agent-files layer at
-  # /agent/prompts, so the Box is self-contained and needs no host
-  # /nix/store mount (which a macOS podman VM cannot provide). Realizes
-  # the agent-files layer, so it is Linux-gated like the shebang check.
+  # /agent/prompts so the Box needs no host /nix/store mount, which a macOS
+  # podman VM cannot provide.
   prompt-baked-into-image = pkgs.runCommand "prompt-baked-into-image" { } ''
     grep -q 'CONFIGURED-PROMPT-MARKER' \
       ${promptHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/issue-prompt.md
@@ -403,11 +384,10 @@ in
     touch $out
   '';
 
-  # The canonical SPINDRIFT_OUTCOME contract must be baked at /agent, a
-  # sibling of /agent/prompts, so a SPINDRIFT_PROMPT_DIR mount (which shadows
-  # only /agent/prompts) never hides it from the entrypoint at run time
-  # (issue #420) -- and it must be byte-identical to the single source #419
-  # already exports, so the build-time and run-time injections cannot drift.
+  # The SPINDRIFT_OUTCOME contract is baked at /agent, a sibling of
+  # /agent/prompts, so a SPINDRIFT_PROMPT_DIR mount shadowing /agent/prompts
+  # never hides it at run time (issue #420). It must be byte-identical to the
+  # source #419 exports, so build-time and run-time injection cannot drift.
   outcome-contract-baked-into-image = pkgs.runCommand "outcome-contract-baked-into-image" { } ''
     diff ${batsHarness.internals.outcomeContractFile} \
       ${batsHarness.internals.agentFiles}${agentPaths.OUTCOME_CONTRACT_FILE}
@@ -415,9 +395,8 @@ in
   '';
 
   # The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with
-  # issue-prompt.md (issue #455) are baked at /agent the same way, for the
-  # same reason: byte-identical to the single source, so build-time and
-  # run-time injection cannot drift.
+  # issue-prompt.md (issue #455) are baked at /agent for the same reason:
+  # byte-identical to the source, so the two injections cannot drift.
   comms-contract-baked-into-image = pkgs.runCommand "comms-contract-baked-into-image" { } ''
     diff ${batsHarness.internals.commsContractFile} \
       ${batsHarness.internals.agentFiles}${agentPaths.COMMS_CONTRACT_FILE}
@@ -430,14 +409,11 @@ in
     touch $out
   '';
 
-  # The conditional prompt fragments (issue #463) must be baked under
-  # /agent/prompts/fragments -- inside the overridable prompt surface, unlike
-  # the contracts above -- so a SPINDRIFT_PROMPT_DIR override that wants a
-  # knob-gated step present must supply its own fragment, exactly like it
-  # already must supply filer-prompt.md. fragmentBasenames is derived from
-  # lib/fragments.nix rather than hardcoded (issue #957), so a new registry
-  # row can't silently drop out of image coverage (same fix as #956's bats
-  # mirror of this test).
+  # The conditional prompt fragments (issue #463) bake inside the overridable
+  # prompt directory, unlike the contracts above, so a SPINDRIFT_PROMPT_DIR
+  # override must supply its own fragment. fragmentBasenames comes from
+  # lib/fragments.nix rather than a hardcoded list, so a new row cannot drop
+  # out of coverage (issue #957, and issue #956 for the bats mirror).
   fragments-baked-into-image = pkgs.runCommand "fragments-baked-into-image" { } ''
     for f in ${pkgs.lib.concatStringsSep " " fragmentBasenames}; do
       diff ${../../templates/default/prompts/fragments}/"$f".md \
@@ -446,25 +422,11 @@ in
     touch $out
   '';
 
-  # Issue #2531: the 8 baked /agent/* path literals (lib/agent-paths.nix) are
-  # rendered into the entrypoint preamble (lib/preambles.nix's
-  # renderAgentPathsPreamble) from the exact same nix binding agentFiles' cp
-  # destinations use (lib/image.nix) -- this check proves both sides actually
-  # agree in the real built image: the baked entrypoint.sh must carry each
-  # line the real renderer emits, and something must actually exist at that
-  # path in the built agentFiles tree.
-  #
-  # Honesty note (review fix-pass): this check's own "diverges" arm can never
-  # actually fire against a real build. `agentPaths` above and the real baked
-  # preamble both derive from the identical `import ../../lib/agent-paths.nix`
-  # binding, so a rename here updates both the expected `pattern` below and
-  # the real preamble text together, automatically -- there is no longer a
-  # hand-copied duplicate anywhere for the two to drift apart from. That's
-  # AC1's single-source win, not a gap in this check. It does NOT mean the
-  # `grep -qF ... || exit 1` assertion shape below is untested: see the
-  # sibling check `agent-paths-preamble-detects-divergence`, which builds its
-  # candidate text through the same renderer and demonstrates that this
-  # assertion shape genuinely rejects a real mismatch.
+  # Issue #2531: the entrypoint preamble (lib/preambles.nix) and agentFiles'
+  # cp destinations (lib/image.nix) render from the same agent-paths binding,
+  # so this proves the real built image agrees with it. Its "diverges" arm
+  # cannot fire from a rename, since both sides move together;
+  # agent-paths-preamble-detects-divergence proves the grep shape instead.
   agent-paths-preamble-baked-into-image =
     pkgs.runCommand "agent-paths-preamble-baked-into-image" { }
       ''
@@ -474,10 +436,8 @@ in
           pkgs.lib.mapAttrsToList (
             var: path:
             let
-              # The real renderer's own output for this one entry (not a
-              # hand-re-derived VAR=${VAR:-path} shape) -- called on a
-              # singleton attrset so the check exercises
-              # renderAgentPathsPreamble's actual escapeShellArg treatment
+              # Called on a singleton attrset so the check exercises
+              # renderAgentPathsPreamble's own escapeShellArg treatment
               # instead of restating it by hand.
               pattern = pkgs.lib.removeSuffix "\n" (preambles.renderAgentPathsPreamble { ${var} = path; });
             in
@@ -496,19 +456,11 @@ in
         touch $out
       '';
 
-  # Issue #2531 (review fix-pass, AC2): demonstrates that the
-  # `grep -qF <expected line> <file> || exit 1` assertion shape used above
-  # genuinely distinguishes a real mismatch, since the check above can't
-  # exercise that itself -- see its comment. Renders two candidate lines
-  # through the real renderAgentPathsPreamble -- one for the real
-  # PROMPTS_DIR binding, one for a deliberately wrong path -- then asserts
-  # that the real-binding line does not appear in a synthetic entrypoint
-  # built from the wrong-path line. Both candidates go through the same
-  # renderer (not a hand-re-derived VAR=${VAR:-path} shape), so this also
-  # pins that grep -F treats the renderer's output as a literal, not a glob
-  # or regex. If the real-binding line matched anyway, that would mean the
-  # assertion shape itself is unsound (e.g. wired backwards), not merely
-  # that a rename can't be caught.
+  # Issue #2531 (review fix-pass, AC2): proves the `grep -qF <line> <file> ||
+  # exit 1` shape used above really rejects a mismatch, which that check
+  # cannot show itself. Both candidate lines go through the real
+  # renderAgentPathsPreamble, so this also pins that grep -F treats the
+  # renderer's output as a literal rather than a glob or a regex.
   agent-paths-preamble-detects-divergence =
     let
       var = "PROMPTS_DIR";
@@ -529,42 +481,18 @@ in
       touch $out
     '';
 
-  # Issue #2531 (review fix-pass): the four Driver-identity vars (DRIVER_NAME,
-  # DRIVER_BIN, DRIVER_FLAGS_COMMON, DRIVER_SKILLS_DIR) are baked into the
-  # entrypoint preamble by lib/drivers/default.nix's renderPreamble, prepended
-  # to agent/entrypoint.sh (as driverPreamble) alongside agentPathsPreamble in
-  # the same lib/image.nix `text` concatenation. The agent-paths check above
-  # only proves the agent-paths half of that concatenation survived -- it
-  # greps a disjoint set of lines, so it says nothing about whether
-  # driverPreamble itself made it in (see agent/entrypoint.sh's comment on
-  # this pair). This check greps the same baked entrypoint.sh directly for
-  # renderPreamble's own DRIVER_* output lines (not hand-typed var names/
-  # values), asserted against the concrete "claude" Driver entry batsHarness
-  # actually selects (lib/mkHarness.nix's `driver ? "claude"` default). A
-  # build that ever drops driverPreamble from lib/image.nix's entrypoint
-  # `text` concatenation -- while leaving agentPathsPreamble intact -- now
-  # fails here instead of silently shipping a Box that dies on an unbound
-  # DRIVER_* variable at runtime.
-  #
-  # Honesty note (review fix-pass): like agent-paths-preamble-baked-into-image
-  # above, this check's own value-mismatch ("diverges") arm can't be exercised
-  # by a rename either -- `driverPreambleLines` here is built from the
-  # identical `driverEntry` binding renderPreamble itself reads, so both
-  # sides move together by construction. See
-  # agent-paths-preamble-detects-divergence above for a synthetic
-  # demonstration that the shared `grep -qF ... || exit 1` assertion shape
-  # genuinely catches a real mismatch -- the same mechanism this check
-  # reuses, so it isn't duplicated here. What this check newly exercises,
-  # and that sibling check does not, is the omission failure mode above:
-  # driverPreamble getting dropped whole from lib/image.nix's `text`
-  # concatenation.
+  # Issue #2531 (review fix-pass): driverPreamble and agentPathsPreamble are
+  # separate halves of lib/image.nix's entrypoint `text`, and the agent-paths
+  # check greps a disjoint set of lines, so only this check catches
+  # driverPreamble being dropped whole, which would ship a Box that dies on
+  # an unbound DRIVER_* variable at run time.
   driver-preamble-baked-into-image =
     let
       driverEntry = driverRegistry.entries.claude;
-      # The real renderer's own DRIVER_* lines (not hand-typed var names or
-      # hand-applied escapeShellArg) -- filtered out of the full rendered
-      # text, which also carries envCommon exports and function bodies not
-      # covered by this check.
+      # Filtered out of the full rendered text, which also carries envCommon
+      # exports and function bodies this check does not cover. These lines
+      # come from the same driverEntry renderPreamble reads, so only an
+      # omission, never a value mismatch, can fail here.
       driverPreambleLines = builtins.filter (pkgs.lib.hasPrefix "DRIVER_") (
         pkgs.lib.splitString "\n" (driverRegistry.renderPreamble driverEntry)
       );
@@ -582,24 +510,11 @@ in
       touch $out
     '';
 
-  # Originally an idempotency check (issue #420) pinned to the entrypoint
-  # sourcing its marker from the same registry row lib/mkHarness.nix looked
-  # up from lib/prompt-contract.nix (issue #2246 slice 1). Since issue
-  # #2354's flip, shared-block injection no longer lives in
-  # agent/entrypoint.sh's `_inject_shared_block` (deleted, along with the
-  # rest of the inline gate/fragment/injection precompute) -- it lives in
-  # cmd/launcher/internal/promptassembly/assemble.go's `injectSharedBlock`,
-  # called with each contract file's Env field directly (no id lookup at
-  # all; Go derives the marker from the block's own first line rather than
-  # resolving an id against a registry). So this check now touches no
-  # registry data at all: it's a static grep pin confirming the Go verb's
-  # shared-block-injection call site still references the right
-  # contract-file field, instead of the (now-removed) bash call site.
-  # Covers the outcome, COMMS, and CHECK/COMMIT markers together (issue
-  # #455) -- the Go call site passes all three contract files in one call,
-  # so one grep covers all three. CODE COMMENTS dropped out of this call
-  # site (issue #3221): it's now the ${CODE_COMMENTS_STEP} anchor every
-  # prompt renders inline, not a contract file injected here.
+  # Issue #2354 moved shared-block injection out of agent/entrypoint.sh into
+  # promptassembly/assemble.go, so this is a static grep pin on that Go call
+  # site's contract-file fields. One grep covers the outcome, COMMS and
+  # CHECK/COMMIT markers because the call passes all three together (issue
+  # #455). CODE COMMENTS left this call site for an anchor (issue #3221).
   outcome-comms-check-contract-marker-parity =
     pkgs.runCommand "outcome-comms-check-contract-marker-parity" { }
       ''
@@ -607,9 +522,9 @@ in
         touch $out
       '';
 
-  # Same drift guard, for the research-verdict marker (issue #640's
-  # "research-verdict" row) -- previously uncovered by any parity check
-  # (issue #2246 slice 1 coverage gap fix).
+  # The same drift guard for the research-verdict marker (issue #640's
+  # "research-verdict" row), which no parity check covered until issue #2246
+  # slice 1.
   research-outcome-contract-marker-parity =
     pkgs.runCommand "research-outcome-contract-marker-parity" { }
       ''
@@ -617,21 +532,18 @@ in
         touch $out
       '';
 
-  # Skills configured at build time must land in the agent-files layer at the
-  # fixed /agent/skills path (issue #2489), alongside the harness-owned
-  # skills, so the Box is self-contained; agent/entrypoint.sh copies from
-  # there into the Driver's actual runtime skills dir at box startup.
-  # Realizes the agent-files layer; Linux-gated like the other image checks.
+  # Skills configured at build time must land at the fixed /agent/skills path
+  # (issue #2489) alongside the harness-owned skills; agent/entrypoint.sh
+  # copies from there into the Driver's runtime skills dir at box startup.
   skills-baked-into-image = pkgs.runCommand "skills-baked-into-image" { } ''
     grep -q 'BAKED-SKILL-MARKER' \
       ${skillsHarness.internals.agentFiles}/agent/skills/baked-skill/SKILL.md
     touch $out
   '';
 
-  # The harness-owned auto-format skill (issue #2489) must bake into every
-  # image at a fixed /agent/skills path unconditionally -- independent of
-  # whatever the Consumer's own `skills` list contains. Built against
-  # noSkillsHarness, which configures zero consumer skills, to prove this.
+  # The harness-owned auto-format skill (issue #2489) bakes into every image
+  # regardless of the Consumer's own `skills` list, so this builds against
+  # noSkillsHarness, which configures none.
   auto-format-skill-baked-into-image = pkgs.runCommand "auto-format-skill-baked-into-image" { } ''
     skill=${noSkillsHarness.internals.agentFiles}/agent/skills/auto-format/SKILL.md
     [ -s "$skill" ]
@@ -639,10 +551,9 @@ in
     touch $out
   '';
 
-  # The harness-owned auto-lint skill (issue #2490) must bake into every
-  # image at a fixed /agent/skills path unconditionally -- independent of
-  # whatever the Consumer's own `skills` list contains. Built against
-  # noSkillsHarness, which configures zero consumer skills, to prove this.
+  # The harness-owned auto-lint skill (issue #2490) bakes into every image
+  # regardless of the Consumer's own `skills` list, so this builds against
+  # noSkillsHarness, which configures none.
   auto-lint-skill-baked-into-image = pkgs.runCommand "auto-lint-skill-baked-into-image" { } ''
     skill=${noSkillsHarness.internals.agentFiles}/agent/skills/auto-lint/SKILL.md
     [ -s "$skill" ]
@@ -650,10 +561,9 @@ in
     touch $out
   '';
 
-  # The harness-owned check-hygiene skill (issue #3220) must bake into every
-  # image at a fixed /agent/skills path unconditionally -- independent of
-  # whatever the Consumer's own `skills` list contains. Built against
-  # noSkillsHarness, which configures zero consumer skills, to prove this.
+  # The harness-owned check-hygiene skill (issue #3220) bakes into every
+  # image regardless of the Consumer's own `skills` list, so this builds
+  # against noSkillsHarness, which configures none.
   check-hygiene-skill-baked-into-image = pkgs.runCommand "check-hygiene-skill-baked-into-image" { } ''
     skill=${noSkillsHarness.internals.agentFiles}/agent/skills/check-hygiene/SKILL.md
     [ -s "$skill" ]
@@ -661,10 +571,9 @@ in
     touch $out
   '';
 
-  # The harness-owned code-comments skill (issue #3221) must bake into every
-  # image at a fixed /agent/skills path unconditionally -- independent of
-  # whatever the Consumer's own `skills` list contains. Built against
-  # noSkillsHarness, which configures zero consumer skills, to prove this.
+  # The harness-owned code-comments skill (issue #3221) bakes into every
+  # image regardless of the Consumer's own `skills` list, so this builds
+  # against noSkillsHarness, which configures none.
   code-comments-skill-baked-into-image = pkgs.runCommand "code-comments-skill-baked-into-image" { } ''
     skill=${noSkillsHarness.internals.agentFiles}/agent/skills/code-comments/SKILL.md
     [ -s "$skill" ]
@@ -672,12 +581,10 @@ in
     touch $out
   '';
 
-  # The Box's agent home ships no settings today (issue #1609); the
-  # PreToolUse hook rejecting backgrounded Bash calls must be baked in as
-  # both the hook script and the settings.json that registers it, so a real
-  # Box actually enforces the restriction and not just the flagsCommon layer
+  # The PreToolUse hook rejecting backgrounded Bash calls needs both the hook
+  # script and the settings.json that registers it (issue #1609), so a real
+  # Box enforces the restriction and not just the flagsCommon layer
   # (drivers-claude-blocks-loop-background-affordances in drivers.nix).
-  # Realizes the agent-files layer; Linux-gated like the other image checks.
   reject-background-bash-hook-baked-into-image =
     pkgs.runCommand "reject-background-bash-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -699,13 +606,11 @@ in
         touch $out
       '';
 
-  # The Driver cannot Read/Bash its own way to a credential file even under
-  # --dangerously-skip-permissions (issue #1909, spec #1907): a second
-  # PreToolUse hook, credential-deny.sh, must be baked in alongside
-  # reject-background-bash.sh and registered for both the Read and Bash
-  # matchers (a Bash call can shell-cat a credential path the same way a
-  # Read call can open it directly). Realizes the agent-files layer;
-  # Linux-gated like the other image checks.
+  # The Driver must not reach a credential file even under
+  # --dangerously-skip-permissions (issue #1909, spec #1907), so
+  # credential-deny.sh is registered for both the Read and Bash matchers: a
+  # Bash call can shell-cat a credential path the same way a Read call can
+  # open it.
   credential-deny-hook-baked-into-image =
     pkgs.runCommand "credential-deny-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -726,13 +631,10 @@ in
         touch $out
       '';
 
-  # The Driver cannot end up with ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN
-  # inherited into a spawned Bash subprocess's environment even under
-  # --dangerously-skip-permissions (issue #1927, spec #1907): a third
-  # PreToolUse hook, env-credential-scrub.sh, must be baked in alongside
-  # reject-background-bash.sh and credential-deny.sh and registered for the
-  # Bash matcher. Realizes the agent-files layer; Linux-gated like the other
-  # image checks.
+  # ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN must not be inherited into
+  # a spawned Bash subprocess's environment even under
+  # --dangerously-skip-permissions (issue #1927, spec #1907), so
+  # env-credential-scrub.sh is registered for the Bash matcher.
   env-credential-scrub-hook-baked-into-image =
     pkgs.runCommand "env-credential-scrub-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -751,12 +653,10 @@ in
         touch $out
       '';
 
-  # The Bash command-output interceptor (issue #1988) must be baked in as a
-  # pair: bash-output-tee.sh (PreToolUse, Bash matcher) tees every Bash
-  # call's output to a per-command log file; bash-output-summary.sh
-  # (PostToolUse, Bash matcher) replaces the tool result with a bounded tail
-  # once that log crosses the inline bound. Realizes the agent-files layer;
-  # Linux-gated like the other image checks.
+  # The Bash command-output interceptor (issue #1988) is a pair:
+  # bash-output-tee.sh tees each Bash call's output to a per-command log, and
+  # bash-output-summary.sh replaces the tool result with a bounded tail once
+  # that log crosses the inline bound.
   bash-output-tee-hook-baked-into-image =
     pkgs.runCommand "bash-output-tee-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -795,7 +695,6 @@ in
 
   # The nix.conf and store DB must be present in the image so
   # `nix flake check` reuses the baked closure instead of re-substituting.
-  # Realizes the default image; Linux-gated like the other image checks.
   nix-conf-in-image = pkgs.runCommand "nix-conf-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
     # Extract the image ONCE (like box-runs-as-non-root), then read
     # only the top "customisation" layer where extraCommands writes
@@ -828,16 +727,11 @@ in
     touch $out
   '';
 
-  # The driver-cache mountpoint (the Driver's declared session-state dir,
-  # ADR 0009 -- /home/agent/.claude/projects for claude) must be baked into
-  # the image owned by uid 1000, so podman reuses the existing directory
-  # instead of fabricating root-owned parent dirs when the volume is mounted
-  # (issue #447). The expected path is derived from
-  # nonRustHarness.internals.driverEntry rather than a literal, so this check tracks
-  # whichever Driver the image is built with (issue #448).
-  # fakeRootCommands' chown -R 1000:1000 home/agent records the ownership in
-  # the top customisation layer (Layers[-1]), the same layer that
-  # nix-var-owned-by-agent and nix-conf-in-image inspect.
+  # The driver-cache mountpoint (the Driver's session-state dir, ADR 0009)
+  # must be baked owned by uid 1000 so podman reuses it instead of
+  # fabricating root-owned parent dirs at mount time (issue #447). The path
+  # comes from driverEntry (issue #448), and only the top layer carries that
+  # ownership, because fakeRootCommands' chown runs there.
   projects-mountpoint-baked =
     let
       relPath = nonRustHarness.internals.driverEntry.sessionCacheDirRelative;
@@ -863,8 +757,8 @@ in
 
   # nix/var must be owned by uid 1000 so the non-root agent can lock the
   # SQLite store DB inside the unprivileged container (issue #356).
-  # fakeRootCommands records ownership in the tar headers; --numeric-owner
-  # surfaces the raw uid so the check does not depend on /etc/passwd names.
+  # --numeric-owner prints the raw uid, so the check does not depend on
+  # /etc/passwd names.
   nix-var-owned-by-agent =
     pkgs.runCommand "nix-var-owned-by-agent" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -882,10 +776,9 @@ in
 
   # NIX_STORE_WRITABLE is baked into the image Env by mkHarness's
   # nixStoreWritable knob (ADR 0018, issue #469) so the entrypoint's warning
-  # is driven by the image, not a runtime-only setting. Both sides of the
-  # knob are asserted here; each harness's image is still extracted only
-  # once (see box-runs-as-non-root on why repeat compressed-image reads are
-  # expensive).
+  # comes from the image, not a runtime-only setting. Each harness's image is
+  # extracted only once: repeat compressed-image reads exhaust the runner's
+  # disk burst credits and stall CI for minutes.
   nix-store-writable-env-marker =
     pkgs.runCommand "nix-store-writable-env-marker" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -905,8 +798,8 @@ in
         touch $out
       '';
 
-  # BASH_MAX_OUTPUT_LENGTH / MAX_MCP_OUTPUT_TOKENS -- see "Claude Code output
-  # caps" in docs/reference.md for the values and rationale (issue #1987).
+  # See "Claude Code output caps" in docs/reference.md for these values and
+  # why they are set (issue #1987).
   output-cap-env-marker =
     pkgs.runCommand "output-cap-env-marker" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -923,11 +816,10 @@ in
         touch $out
       '';
 
-  # /nix/store itself (not its existing contents) must become agent-writable
-  # -- non-recursively, so baked paths stay root-owned -- only when
-  # nixStoreWritable is opted in; the default image must never show uid 1000
-  # ownership on it (absent from the top layer entirely, or present at its
-  # pre-existing owner -- either reads as "not chowned to the agent").
+  # /nix/store itself becomes agent-writable only when nixStoreWritable is
+  # opted in, and non-recursively so baked paths stay root-owned. In the
+  # default image the directory may be absent from the top layer or present
+  # at its original owner; either reads as "not chowned to the agent".
   nix-store-writable-chown =
     pkgs.runCommand "nix-store-writable-chown" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
@@ -953,10 +845,8 @@ in
         touch $out
       '';
 
-  # fj (forgejo-cli) is baked into the image only for a forgejo-backend
-  # Consumer (issue #1963), never for a github-backend one, so a
-  # github-backend image never carries an unused CLI. Realizes both
-  # harnesses' agentEnv, so it's Linux-gated like the other image checks.
+  # fj (forgejo-cli) bakes in only for a forgejo-backend Consumer
+  # (issue #1963), so a github-backend image never carries an unused CLI.
   forgejo-cli-baked-only-for-forgejo-backend =
     pkgs.runCommand "forgejo-cli-baked-only-for-forgejo-backend" { }
       ''
@@ -971,11 +861,10 @@ in
         touch $out
       '';
 
-  # extraClosures derivations must be physically present in the image
-  # contents -- contents=[...]++extraClosures pulls the closure into the
-  # image's store layers the same way agentEnv/agentFiles do. Listing (not
-  # extracting) each already-extracted layer once is cheap; only the initial
-  # compressed-image read is expensive (see box-runs-as-non-root).
+  # extraClosures derivations must be physically present in the image:
+  # contents = [...] ++ extraClosures pulls the closure into the store layers
+  # the same way agentEnv and agentFiles do. Listing each already-extracted
+  # layer is cheap; only the initial compressed-image read is expensive.
   extra-closure-in-image-contents =
     pkgs.runCommand "extra-closure-in-image-contents" { nativeBuildInputs = [ pkgs.jq ]; }
       ''

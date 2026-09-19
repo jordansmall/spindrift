@@ -1,6 +1,5 @@
-# Eval-level checks for lib/roster.nix's normalizeRoster (issue #2152 slice
-# A): pins name-validation, duplicate-name rejection, and the promptFile
-# default-injection contract before any Driver ever consumes a roster.
+# Eval-level checks for lib/roster.nix's normalizeRoster (issue #2152 slice A):
+# name validation, duplicate-name rejection, and promptFile default injection.
 {
   pkgs,
   fixtures,
@@ -10,10 +9,8 @@ let
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
   inherit (pkgs.lib) assertMsg mapAttrs hasInfix toLower;
-  # Shared by the roster-default-roster-by-name-* checks below (issue
-  # #2560): pulls a named entry out of a roster, same shape as
-  # equivalence.nix's modelOf but returning the whole entry since callers
-  # here read both .model and .effort off it.
+  # Issue #2560: like equivalence.nix's modelOf, but returns the whole entry
+  # since callers here read both .model and .effort.
   entryFor = name: roster: builtins.head (builtins.filter (e: e.name == name) roster);
   axisModel = args: (entryFor "review-axis" (rosterLib.defaultRoster args)).model;
   envSchema = import ../../lib/env-schema.nix;
@@ -21,11 +18,9 @@ let
     (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
 in
 {
-  # Issue #2571 review fix (Finding B): normalizeRosterResult never throws --
-  # it returns a structured { ok; value; violation; entryName; message; }
-  # result, so this asserts directly on .ok/.violation/.entryName (which
-  # entry, which problem) rather than only "did eval abort" via tryEval
-  # (builtins.tryEval can't recover the thrown message text).
+  # Issue #2571 review fix (Finding B): normalizeRosterResult returns a
+  # structured result instead of throwing, so these assert directly on
+  # .ok/.violation/.entryName. builtins.tryEval cannot recover a thrown message.
   roster-normalize-rejects-invalid-name =
     let
       result = rosterLib.normalizeRosterResult [
@@ -45,21 +40,18 @@ in
       "normalizeRosterResult must report violation == \"invalid-name\", got: ${builtins.toJSON result.violation}";
     assert assertMsg (result.entryName == "Bad_Name")
       "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
-    # Issue #2571 blocking review finding: pin message content, not just
-    # .ok/.violation/.entryName -- normalizeRoster (the throwing wrapper)
-    # throws this exact .message unmodified, so this is the only way to pin
-    # that the production throw path actually names the entry and the
-    # problem (AC1), since builtins.tryEval can't recover a thrown message.
+    # Issue #2571 blocking review finding: normalizeRoster throws this exact
+    # .message unmodified, so pinning the message here is the only way to pin
+    # that the throwing path names the entry and the problem (AC1).
     assert assertMsg (hasInfix "Bad_Name" result.message)
       "normalizeRosterResult's message must name the offending entry \"Bad_Name\", got: ${builtins.toJSON result.message}";
     assert assertMsg (hasInfix "invalid name" result.message)
       "normalizeRosterResult's message must describe the problem (\"invalid name\"), got: ${builtins.toJSON result.message}";
     pkgs.runCommand "roster-normalize-rejects-invalid-name" { } "touch $out";
 
-  # Issue #2571 non-blocking review finding (AC1 gap): the checks above only
-  # prove normalizeRosterResult's structured output, never that the throwing
-  # wrapper production code (lib/mkHarness.nix) actually calls --
-  # normalizeRoster -- really throws for this violation class.
+  # Issue #2571 non-blocking review finding (AC1 gap): the checks above pin only
+  # normalizeRosterResult's structured output, never that normalizeRoster, the
+  # throwing wrapper lib/mkHarness.nix calls, really throws for this class.
   roster-normalize-throws-on-invalid-name =
     let
       result = builtins.tryEval (
@@ -82,10 +74,8 @@ in
     pkgs.runCommand "roster-normalize-throws-on-invalid-name" { } "touch $out";
 
   # Issue #2571 round-3 review finding: builtins.match throws its own opaque
-  # type error if e.name isn't a string at all (e.g. a bare number) -- must
-  # fail with a clean, named "invalid-name" violation (same tag as the
-  # format check, just a different reason) instead of aborting eval
-  # mid-match with a message that names neither the entry nor the problem.
+  # type error when e.name is not a string, so a non-string name must still
+  # fail with the named "invalid-name" violation instead of aborting eval.
   roster-normalize-rejects-non-string-name =
     let
       result = rosterLib.normalizeRosterResult [
@@ -157,11 +147,9 @@ in
       "normalizeRosterResult's message must describe the problem (\"missing a name\"), got: ${builtins.toJSON result.message}";
     pkgs.runCommand "roster-normalize-rejects-missing-name" { } "touch $out";
 
-  # Issue #2571 non-blocking review finding: normalizeRosterResult's
-  # documented failure shape is exactly { ok; value; violation; entryName;
-  # message; } (its doc comment above the function) -- the failure branch
-  # must construct this explicitly, not return the internal fold
-  # accumulator (which also carries seen/out) verbatim.
+  # Issue #2571 non-blocking review finding: the failure branch must build the
+  # documented { ok; value; violation; entryName; message; } shape explicitly,
+  # not return the internal fold accumulator, which also carries seen/out.
   roster-normalize-result-failure-shape-has-no-internal-keys =
     let
       result = rosterLib.normalizeRosterResult [
@@ -291,9 +279,8 @@ in
     pkgs.runCommand "roster-normalize-throws-on-duplicate-name" { } "touch $out";
 
   # Issue #2571 slice 1: an entry's keys must be a subset of the documented
-  # roster entry shape (docs/reference.md's "Subagent roster" section) --
-  # any stray/unknown key (e.g. a typo) must throw rather than silently
-  # passing through to the Drivers.
+  # roster entry shape (docs/reference.md, "Subagent roster"). A stray key
+  # must throw rather than pass through to the Drivers.
   roster-normalize-rejects-unknown-key =
     let
       result = rosterLib.normalizeRosterResult [
@@ -346,9 +333,8 @@ in
       "normalizeRoster must throw on an entry with an unknown key";
     pkgs.runCommand "roster-normalize-throws-on-unknown-key" { } "touch $out";
 
-  # Issue #2571 slice 1: every entry must literally carry a `model` key, even
-  # when its value is the empty-string opt-out sentinel (#392) -- omitting
-  # the key entirely (typo/oversight) must throw.
+  # Issue #2571 slice 1: every entry must carry a `model` key, even when its
+  # value is the empty-string opt-out sentinel (#392). Omitting the key throws.
   roster-normalize-rejects-missing-model =
     let
       result = rosterLib.normalizeRosterResult [
@@ -396,11 +382,10 @@ in
     assert assertMsg (!result.success) "normalizeRoster must throw on an entry that omits model";
     pkgs.runCommand "roster-normalize-throws-on-missing-model" { } "touch $out";
 
-  # Issue #2571 round-3 review finding: model = null (or any other non-string
-  # value) currently passes normalizeRosterResult straight through and gets
-  # baked into the --agents JSON as "model": null. Reuses the "missing-model"
-  # tag (both mean "there's no usable model value") rather than adding a
-  # distinct tag.
+  # Issue #2571 round-3 review finding: a non-string model would otherwise pass
+  # straight through and get baked into the --agents JSON as "model": null.
+  # normalizeRosterResult reuses the "missing-model" tag, since both cases mean
+  # there is no usable model.
   roster-normalize-rejects-non-string-model =
     let
       result = rosterLib.normalizeRosterResult [
@@ -448,13 +433,10 @@ in
     assert assertMsg (!result.success) "normalizeRoster must throw on an entry whose model isn't a string";
     pkgs.runCommand "roster-normalize-throws-on-non-string-model" { } "touch $out";
 
-  # Issue #2571 slice 1: model = "" is a well-established, permanent explicit
-  # opt-out sentinel (#392) -- normalizeRoster must accept it (not throw).
-  # Issue #2571 review fix (Finding A): normalizeRoster no longer drops such
-  # an entry from the returned list -- model = "" is an ordinary, valid
-  # value that passes through completely unfiltered (the #392
-  # opt-out-from-the-built-image behavior moves to an explicit step in
-  # lib/mkHarness.nix in a later slice, not silently inside this funnel).
+  # Issue #2571 slice 1: model = "" is the permanent explicit opt-out sentinel
+  # (#392), so normalizeRoster must accept it. Review fix (Finding A): it must
+  # also keep the entry in the returned list. The opt-out drop itself belongs
+  # to an explicit step in lib/mkHarness.nix, not silently inside this funnel.
   roster-normalize-accepts-explicit-empty-model =
     let
       result = builtins.tryEval (
@@ -481,10 +463,9 @@ in
       "normalizeRoster must preserve model == \"\" on the retained entry, got: ${builtins.toJSON (builtins.elemAt result.value 0).model}";
     pkgs.runCommand "roster-normalize-accepts-explicit-empty-model" { } "touch $out";
 
-  # Issue #2571 review fix (Finding A): a duplicate name must still be
-  # rejected even when the first occurrence has model == "" -- duplicate
-  # detection runs before model is even inspected, so this is unaffected by
-  # the removal of the empty-model drop (there's no drop left to reference).
+  # Issue #2571 review fix (Finding A): a duplicate name must still be rejected
+  # when the first occurrence has model == "". Duplicate detection runs before
+  # model is inspected, so removing the empty-model drop does not affect it.
   roster-normalize-duplicate-name-detected-with-empty-model =
     let
       result = rosterLib.normalizeRosterResult [
@@ -532,23 +513,17 @@ in
     assert assertMsg (result.entryName == "nonesuch")
       "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     # Issue #2571 blocking review finding: pin message content for the
-    # "missing-promptfile" violation class too -- see
-    # roster-normalize-rejects-invalid-name above for rationale.
+    # "missing-promptfile" class too. See roster-normalize-rejects-invalid-name.
     assert assertMsg (hasInfix "nonesuch" result.message)
       "normalizeRosterResult's message must name the offending entry \"nonesuch\", got: ${builtins.toJSON result.message}";
     assert assertMsg (hasInfix "does not exist" result.message)
       "normalizeRosterResult's message must describe the problem (\"does not exist\"), got: ${builtins.toJSON result.message}";
     pkgs.runCommand "roster-normalize-rejects-nonexistent-promptfile" { } "touch $out";
 
-  # Issue #2571 round-3 review finding (flagged non-blocking in review rounds
-  # 1, 2, and 3, never fixed until now): builtins.pathExists alone blesses
-  # non-files -- promptFile = ".", "..", "fragments" (a real subdirectory
-  # under templates/default/prompts), and a path-traversal escape all
-  # resolve to something that pathExists reports as existing even though
-  # none of them is a usable prompt file. All four must be rejected under
-  # the same "missing-promptfile" tag as a genuinely nonexistent file --
-  # "the effective promptFile doesn't resolve to a usable prompt file"
-  # covers path-traversal, directory, and missing uniformly.
+  # Issue #2571 round-3 review finding: builtins.pathExists alone accepts
+  # non-files, so ".", "..", the real "fragments" subdirectory, and a
+  # path-traversal escape all look like they exist. All four must be rejected
+  # under the same "missing-promptfile" tag as a genuinely absent file.
   roster-normalize-rejects-unusable-promptfile =
     let
       rejects =
@@ -568,8 +543,8 @@ in
         result.ok == false
         && result.violation == "missing-promptfile"
         # Issue #2571 blocking review finding: pin message content for the
-        # "missing-promptfile" violation class too -- see
-        # roster-normalize-rejects-invalid-name above for rationale.
+        # "missing-promptfile" class too. See
+        # roster-normalize-rejects-invalid-name.
         && hasInfix "nonesuch" result.message
         && hasInfix "does not exist" result.message;
       cases = [
@@ -584,11 +559,9 @@ in
       "normalizeRosterResult must reject every unusable promptFile (directory, '.', '..', or a path-traversal escape) with violation == \"missing-promptfile\" and a message naming the entry and problem, but accepted or under-reported: ${builtins.toJSON failures}";
     pkgs.runCommand "roster-normalize-rejects-unusable-promptfile" { } "touch $out";
 
-  # Issue #2571 blocking review finding: a promptFile that isn't a string at
-  # all (e.g. null -- the same sentinel defaultRoster uses for `prompt`,
-  # so a plausible Consumer spelling mistake confusing promptFile with
-  # prompt) must fail with a clean, named violation rather than aborting
-  # eval mid-interpolation with an opaque "cannot coerce null to a string".
+  # Issue #2571 blocking review finding: a non-string promptFile (null is the
+  # sentinel defaultRoster uses for `prompt`, an easy mix-up) must fail with a
+  # named violation, not an opaque "cannot coerce null to a string".
   roster-normalize-rejects-non-string-promptfile =
     let
       result = rosterLib.normalizeRosterResult [
@@ -641,11 +614,9 @@ in
     pkgs.runCommand "roster-normalize-throws-on-invalid-promptfile-type" { } "touch $out";
 
   # Issue #2571 tied non-blocking finding (issue #2555 user story 23):
-  # promptFile = "" resolves to templates/default/prompts/ itself (the
-  # directory exists), so builtins.pathExists alone would wrongly bless it as
-  # "found". Must be rejected the same as any other non-usable promptFile
-  # value, closing the sibling hole to prompt = "" (see hasInlinePrompt
-  # below, which already requires non-empty).
+  # promptFile = "" resolves to templates/default/prompts/ itself, which
+  # exists, so builtins.pathExists alone would wrongly accept it. It must be
+  # rejected like any other unusable promptFile, the sibling of prompt = "".
   roster-normalize-rejects-empty-string-promptfile =
     let
       result = rosterLib.normalizeRosterResult [
@@ -667,11 +638,9 @@ in
       "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     pkgs.runCommand "roster-normalize-rejects-empty-string-promptfile" { } "touch $out";
 
-  # Issue #2571 round-3 review finding: prompt = 5 (or any non-null,
-  # non-string value) currently passes normalizeRosterResult silently and
-  # only fails later inside writeText deep in the Driver pipeline, far from
-  # the entry that caused it -- must fail with a clean, named
-  # "invalid-prompt-type" violation instead.
+  # Issue #2571 round-3 review finding: a non-null, non-string prompt would
+  # otherwise fail later inside writeText, deep in the Driver pipeline and far
+  # from the entry that caused it. It must fail as "invalid-prompt-type" here.
   roster-normalize-rejects-non-string-prompt =
     let
       result = rosterLib.normalizeRosterResult [
@@ -721,11 +690,9 @@ in
       "normalizeRoster must throw on an entry whose prompt isn't a string or null";
     pkgs.runCommand "roster-normalize-throws-on-non-string-prompt" { } "touch $out";
 
-  # Issue #2571 review fix (cheap non-blocking finding): an empty inline
-  # `prompt = ""` must not satisfy the promptFile-existence escape hatch --
-  # it's not a usable prompt, the same "agent runs with no usable prompt"
-  # failure mode issue #2555 user story 23 is about. Must fall through to
-  # requiring a real promptFile the same as omitting `prompt` entirely.
+  # Issue #2571 review fix: an empty inline `prompt = ""` must not satisfy the
+  # promptFile-existence escape hatch (issue #2555 user story 23). It falls
+  # through to requiring a real promptFile, like omitting `prompt` entirely.
   roster-normalize-rejects-empty-inline-prompt =
     let
       result = rosterLib.normalizeRosterResult [
@@ -746,21 +713,17 @@ in
     assert assertMsg (result.entryName == "nonesuch")
       "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     # Issue #2571 blocking review finding: pin message content for the
-    # "missing-promptfile" violation class too -- see
-    # roster-normalize-rejects-invalid-name above for rationale.
+    # "missing-promptfile" class too. See roster-normalize-rejects-invalid-name.
     assert assertMsg (hasInfix "nonesuch" result.message)
       "normalizeRosterResult's message must name the offending entry \"nonesuch\", got: ${builtins.toJSON result.message}";
     assert assertMsg (hasInfix "does not exist" result.message)
       "normalizeRosterResult's message must describe the problem (\"does not exist\"), got: ${builtins.toJSON result.message}";
     pkgs.runCommand "roster-normalize-rejects-empty-inline-prompt" { } "touch $out";
 
-  # Issue #2571 review fix (Finding C): "reviewer" is the one canonical
-  # agent name whose injected promptFile default deliberately doesn't
-  # follow the "<name>-prompt.md" convention -- its on-disk template is
-  # templates/default/prompts/review-prompt.md. An entry named "reviewer"
-  # omitting both promptFile and prompt must not throw, and must resolve to
-  # review-prompt.md specifically (not the naive reviewer-prompt.md, which
-  # doesn't exist on disk).
+  # Issue #2571 review fix (Finding C): "reviewer" is the one agent name whose
+  # injected promptFile default does not follow the "<name>-prompt.md"
+  # convention. Its template is templates/default/prompts/review-prompt.md;
+  # reviewer-prompt.md does not exist on disk.
   roster-normalize-injects-reviewer-promptfile-override =
     let
       result = builtins.tryEval (
@@ -784,9 +747,8 @@ in
       "normalizeRoster must inject promptFile == \"review-prompt.md\" for the reviewer name (not reviewer-prompt.md), got: ${builtins.toJSON (builtins.elemAt result.value 0).promptFile}";
     pkgs.runCommand "roster-normalize-injects-reviewer-promptfile-override" { } "touch $out";
 
-  # Issue #2571 slice 2: the other half of the same contract -- an entry
-  # with a nonexistent promptFile but a non-null inline `prompt` must not
-  # throw.
+  # Issue #2571 slice 2: the other half of the same contract. An entry with a
+  # nonexistent promptFile but a non-null inline `prompt` must not throw.
   roster-normalize-accepts-inline-prompt-without-promptfile-file =
     let
       result = builtins.tryEval (
@@ -872,11 +834,10 @@ in
     ) "normalizeRoster [] must return [], got: ${builtins.toJSON result.value}";
     pkgs.runCommand "roster-normalize-allows-empty" { } "touch $out";
 
-  # Issue #2506: readSchemaDefaults' `strict` flag must actually discriminate
-  # -- `strict = true` throws on an entry missing `.default` (the contract
-  # the roster's four schemaDefaults callers depend on). Without this
-  # fixture, a reader that ignored `strict` and always fell back to `or ""`
-  # would still pass every other check in the repo.
+  # Issue #2506: `strict = true` must throw on an entry missing `.default`, the
+  # contract the roster's four schemaDefaults callers depend on. Without this
+  # check, a reader that ignored `strict` and always fell back to `or ""` would
+  # still pass every other check in the repo.
   roster-schema-defaults-strict-throws-on-missing-default =
     let
       helper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
@@ -892,10 +853,9 @@ in
     ) "readSchemaDefaults { strict = true; } must throw on an entry missing .default";
     pkgs.runCommand "roster-schema-defaults-strict-throws-on-missing-default" { } "touch $out";
 
-  # Issue #2506: the other half of the same contract -- `strict = false`
-  # must fall back to `""` on an entry missing `.default` instead of
-  # throwing, the tolerance mkHarness's flakeOption sweep depends on since
-  # most flakeOption-flagged schema entries carry no model concept at all.
+  # Issue #2506: the other half of the contract. `strict = false` falls back to
+  # `""` instead of throwing, the tolerance mkHarness's flakeOption sweep needs
+  # since most flakeOption-flagged schema entries carry no model concept.
   roster-schema-defaults-tolerant-falls-back-on-missing-default =
     let
       helper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
@@ -912,9 +872,8 @@ in
       "readSchemaDefaults { strict = false; } must fall back to \"\" on an entry missing .default, got: ${builtins.toJSON result.value.missing}";
     pkgs.runCommand "roster-schema-defaults-tolerant-falls-back-on-missing-default" { } "touch $out";
 
-  # Issue #2386: defaultRoster ships a fixed default `effort` per agent,
-  # looked up per name from rosterDefaults (issue #2506) rather than a
-  # literal on each entry.
+  # Issue #2386: defaultRoster's fixed default `effort` per agent comes from
+  # rosterDefaults (issue #2506), not a literal on each entry.
   roster-default-roster-ships-effort-defaults =
     let
       roster = rosterLib.defaultRoster {
@@ -950,9 +909,9 @@ in
         };
       };
       byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
-      # Deliberate carve-out (issue #2506 AC5): reads the schema directly
-      # rather than through readSchemaDefaults, so this pin can't go
-      # vacuous by comparing the helper under test against itself.
+      # Deliberate carve-out (issue #2506 AC5): reads the schema directly, not
+      # through readSchemaDefaults, so this pin can't compare the helper under
+      # test against itself.
       schema = import ../../lib/env-schema.nix;
     in
     assert assertMsg ((byName "filer").model == defaultModelFixture.dogfoodPins.filer)
@@ -984,7 +943,7 @@ in
     pkgs.runCommand "roster-default-roster-rejects-unknown-model-name" { } "touch $out";
 
   # Issue #2426: when both the legacy per-agent knob and models name the same
-  # agent, models wins -- the higher-precedence source, per lib/roster.nix's
+  # agent, models wins, the higher-precedence source per lib/roster.nix's
   # modelFor.
   roster-default-roster-models-overrides-legacy =
     let
@@ -1000,10 +959,9 @@ in
       "defaultRoster models.filer must win over a same-named legacy filerModel, got: ${builtins.toJSON (byName "filer").model}";
     pkgs.runCommand "roster-default-roster-models-overrides-legacy" { } "touch $out";
 
-  # Issue #2434: an explicitly supplied legacy positional argument still
-  # wins over the schema default -- the sentinel-`null` default on
-  # scoutModel/reviewModel/filerModel/workerModel only defers to the schema
-  # when the caller truly supplied nothing, never when it supplied a value.
+  # Issue #2434: an explicitly supplied legacy positional argument wins over
+  # the schema default. The sentinel-`null` default on those knobs defers to
+  # the schema only when the caller supplied nothing at all.
   roster-default-roster-legacy-wins-over-schema-default =
     let
       roster = rosterLib.defaultRoster { scoutModel = "explicit-legacy"; };
@@ -1014,10 +972,9 @@ in
     pkgs.runCommand "roster-default-roster-legacy-wins-over-schema-default" { } "touch $out";
 
   # Issue #2434 (was #392): an explicit empty string on a legacy positional
-  # knob is itself a supplied value, not "not supplied" -- it must keep
-  # opting the entry out, the same rung mkHarness.nix's deprecated
-  # settings.*Model resolution relies on, even though the name is now
-  # eligible to inherit a non-empty schema default.
+  # knob is a supplied value, not "not supplied", so it keeps opting the entry
+  # out even though the name may now inherit a non-empty schema default.
+  # mkHarness.nix's deprecated settings.*Model resolution relies on that rung.
   roster-default-roster-legacy-explicit-empty-opts-out =
     let
       roster = rosterLib.defaultRoster { scoutModel = ""; };
@@ -1043,17 +1000,15 @@ in
       "defaultRoster must let an explicit models.scout = \"\" opt-out win over the schema default, got: ${builtins.toJSON (byName "scout").model}";
     pkgs.runCommand "roster-default-roster-explicit-empty-opts-out" { } "touch $out";
 
-  # Issue #2434: an agent unmentioned in `models` and with no legacy
-  # positional argument supplied inherits its model from
-  # lib/env-schema.nix's default -- the same default mkHarness's no-roster
-  # fallback resolves through `mergedDefaults`.
+  # Issue #2434: an agent unmentioned in `models` and with no legacy positional
+  # argument inherits its model from lib/env-schema.nix's default, the same one
+  # mkHarness's no-roster fallback resolves through `mergedDefaults`.
   roster-default-roster-inherits-schema-default =
     let
       roster = rosterLib.defaultRoster { };
       byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
       # Deliberate carve-out (issue #2506 AC5), same rationale as
-      # roster-default-roster-models-by-name above: reads the schema
-      # directly instead of through readSchemaDefaults.
+      # roster-default-roster-models-by-name: a direct schema read.
       schema = import ../../lib/env-schema.nix;
       expected = {
         scout = schema.scoutModel.default;
@@ -1129,8 +1084,8 @@ in
     pkgs.runCommand "roster-default-roster-models-overrides-by-name" { } "touch $out";
 
   # Issue #2560: byName.<name>.model wins over a same-named legacy positional
-  # knob (e.g. filerModel) -- byName sits between models and the legacy
-  # knobs in the precedence chain.
+  # knob (e.g. filerModel). byName sits between models and the legacy knobs in
+  # the precedence chain.
   roster-default-roster-by-name-overrides-legacy =
     let
       roster = rosterLib.defaultRoster {
@@ -1168,8 +1123,8 @@ in
     ) "defaultRoster must throw when byName names an agent absent from the roster";
     pkgs.runCommand "roster-default-roster-rejects-unknown-by-name-key" { } "touch $out";
 
-  # Issue #2560: byName is a closed attrset -- only `model` and `effort` are
-  # accepted per agent. mode/tools/prompt etc. must throw, since those stay
+  # Issue #2560: byName is a closed attrset: only `model` and `effort` are
+  # accepted per agent. mode/tools/prompt must throw, since those stay
   # roster-only.
   roster-default-roster-rejects-unknown-by-name-field =
     let
@@ -1209,12 +1164,9 @@ in
     pkgs.runCommand "roster-default-roster-by-name-explicit-empty-opts-out" { } "touch $out";
 
   # Issue #2560 (non-blocking review finding): unlike model = "", effort = ""
-  # is not a documented opt-out -- it's accepted and silently overrides
-  # defaultRoster's own per-agent default effort with an empty string
-  # (docs/reference.md's "Subagent roster" section). Pins that it's accepted
-  # (doesn't throw) and that it produces exactly "", not the schema default,
-  # so a future change can't silently make it fall back to the default
-  # instead.
+  # is not a documented opt-out. It is accepted and overrides defaultRoster's
+  # per-agent default effort with an empty string, so this pins that it stays
+  # "" and never falls back to the default.
   roster-default-roster-by-name-explicit-empty-effort-overrides-default =
     let
       roster = rosterLib.defaultRoster {
@@ -1230,14 +1182,10 @@ in
     pkgs.runCommand "roster-default-roster-by-name-explicit-empty-effort-overrides-default" { }
       "touch $out";
 
-  # Issue #2560 (non-blocking review finding): defaultRoster's unknown-field
-  # scan calls builtins.attrNames on each byName.<name> value. On the raw
-  # rosterLib/mkHarness call path (unlike the flakeModule path, which is
-  # type-guarded by a types.submodule option), nothing stops a caller from
-  # passing a non-attrset there, e.g. byName.filer = "oops". Pins that this
-  # throws (rather than propagating whatever error builtins.attrNames itself
-  # produces) so a future refactor can't silently make this path stop
-  # throwing entirely.
+  # Issue #2560 (non-blocking review finding): the unknown-field scan calls
+  # builtins.attrNames on each byName.<name> value, and the raw rosterLib call
+  # path has no types.submodule guard like the flakeModule path, so a caller
+  # can pass byName.filer = "oops". That must throw, and keep throwing.
   roster-default-roster-by-name-non-attrset-value-throws =
     let
       result = builtins.tryEval (
@@ -1253,9 +1201,8 @@ in
       "defaultRoster must throw when byName.<name> is not an attribute set (e.g. byName.filer = \"oops\")";
     pkgs.runCommand "roster-default-roster-by-name-non-attrset-value-throws" { } "touch $out";
 
-  # Issue #2571 review fix: rosterLib.dropOptedOut drops only the entry
-  # whose model is the explicit "" opt-out sentinel (#392), leaving any
-  # other entry (regardless of model value) untouched.
+  # Issue #2571 review fix: dropOptedOut drops only entries whose model is the
+  # explicit "" opt-out sentinel (#392), leaving every other entry untouched.
   roster-drop-opted-out-drops-only-empty-model =
     let
       normalized = rosterLib.normalizeRoster [
@@ -1284,8 +1231,8 @@ in
       "dropOptedOut must retain the entry with a non-empty model, got: ${builtins.toJSON result}";
     pkgs.runCommand "roster-drop-opted-out-drops-only-empty-model" { } "touch $out";
 
-  # Issue #2571 review fix: the identity case -- dropOptedOut on a roster
-  # with no opted-out entries returns it unchanged.
+  # Issue #2571 review fix: the identity case. dropOptedOut returns a roster
+  # with no opted-out entries unchanged.
   roster-drop-opted-out-identity-when-none-opted-out =
     let
       normalized = rosterLib.normalizeRoster [
@@ -1312,14 +1259,10 @@ in
       "dropOptedOut must return the roster unchanged when no entry is opted out, got: ${builtins.toJSON result}";
     pkgs.runCommand "roster-drop-opted-out-identity-when-none-opted-out" { } "touch $out";
 
-  # Issue #2571 review fix: dropOptedOut is exported directly on the
-  # versioned rosterLib surface (flake.nix), so a Consumer can call it
-  # standalone on a hand-built roster that skipped normalizeRoster. An
-  # entry missing `model` must fail with a guard naming the entry (rather
-  # than Nix's bare, unhelpful "attribute 'model' missing") -- but
-  # builtins.tryEval can only prove *that* eval aborted, never recover the
-  # thrown message text (same caveat as the normalizeRoster throw checks
-  # above), so this only pins the throw itself.
+  # Issue #2571 review fix: flake.nix exports dropOptedOut directly, so a
+  # Consumer can call it on a hand-built roster that skipped normalizeRoster.
+  # An entry missing `model` must hit a guard that names the entry. tryEval
+  # proves only that eval aborted, so this pins the throw, not the message.
   roster-drop-opted-out-rejects-missing-model =
     let
       result = builtins.tryEval (
@@ -1335,13 +1278,10 @@ in
       "dropOptedOut must throw a guard error on an entry missing model, not silently succeed";
     pkgs.runCommand "roster-drop-opted-out-rejects-missing-model" { } "touch $out";
 
-  # Issue #2437: lib/roster-schema-defaults.nix is the single source of
-  # truth for defaultRoster's roster-name -> schema-key model defaults.
-  # Pin its schemaDefaults output directly against lib/env-schema.nix's
-  # four current defaults so the two can never silently drift. `expected`
-  # below mirrors roster-default-roster-inherits-schema-default's mapping
-  # on purpose: that check pins defaultRoster's output, this one pins the
-  # helper's output one level down.
+  # Issue #2437: lib/roster-schema-defaults.nix is the single source of truth
+  # for defaultRoster's roster-name to schema-key model defaults, pinned here
+  # against lib/env-schema.nix so the two cannot drift. `expected` mirrors
+  # roster-default-roster-inherits-schema-default, which pins one level up.
   roster-schema-defaults-helper-matches-env-schema =
     let
       helper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
@@ -1363,10 +1303,9 @@ in
       "lib/roster-schema-defaults.nix schemaDefaults must match, for every rosterModelKeys entry, the default of the lib/env-schema.nix key that entry reads (review-axis reads reviewModel's), mismatched: ${builtins.toJSON mismatches}";
     pkgs.runCommand "roster-schema-defaults-helper-matches-env-schema" { } "touch $out";
 
-  # Issue #3447: defaultRoster's fifth entry, review-axis -- the agent type
-  # the /code-review skill's two-axis fan-out spawns as -- ships with the
-  # reviewer's own schema default model and a fixed "high" effort (ADR
-  # 0049), same shape as the four legacy entries above.
+  # Issue #3447: defaultRoster's fifth entry, review-axis, is the agent the
+  # /code-review skill's two-axis fan-out spawns. It ships the reviewer's own
+  # schema default model and a fixed "high" effort (ADR 0049).
   roster-default-roster-ships-review-axis-entry =
     let
       roster = rosterLib.defaultRoster { };
@@ -1384,10 +1323,9 @@ in
       "defaultRoster's review-axis entry must set promptFile = \"review-axis-prompt.md\", got: ${builtins.toJSON entry.promptFile}";
     pkgs.runCommand "roster-default-roster-ships-review-axis-entry" { } "touch $out";
 
-  # Issue #3447: byName."review-axis" overrides that entry's model and
-  # effort independently -- the acceptance criterion that changing the
-  # review-axis agent's model in configuration changes the model the axis
-  # subagents run on, without disturbing the reviewer's own entry.
+  # Issue #3447: byName."review-axis" overrides that entry's model and effort
+  # independently, so changing it in configuration changes the model the axis
+  # subagents run on without disturbing the reviewer's own entry.
   roster-default-roster-by-name-review-axis-overrides-model-and-effort =
     let
       roster = rosterLib.defaultRoster {
@@ -1410,10 +1348,9 @@ in
     pkgs.runCommand "roster-default-roster-by-name-review-axis-overrides-model-and-effort" { }
       "touch $out";
 
-  # Issue #3447: models."review-axis" is the higher-precedence shorthand,
-  # same as models.<name> for the four legacy entries -- and an unmentioned
-  # unknown name must still throw after review-axis joins the known-name
-  # set.
+  # Issue #3447: models."review-axis" is the higher-precedence shorthand, same
+  # as models.<name> for the four legacy entries, and an unknown name must
+  # still throw after review-axis joins the known-name set.
   roster-default-roster-models-review-axis =
     let
       roster = rosterLib.defaultRoster {
@@ -1439,9 +1376,9 @@ in
       "defaultRoster must still throw when models names an agent absent from the roster, even after review-axis joins the known-name set";
     pkgs.runCommand "roster-default-roster-models-review-axis" { } "touch $out";
 
-  # Issue #3447: review-axis must track reviewModel's own opt-out across
-  # every reviewer surface (models.reviewer, byName.reviewer.model, the
-  # positional knob), not just the deprecated positional one.
+  # Issue #3447: review-axis must track reviewModel's opt-out through
+  # models.reviewer and byName.reviewer.model too, not just the deprecated
+  # positional knob.
   roster-default-roster-review-axis-follows-reviewer-opt-out =
     let
       surfaces = {
@@ -1455,9 +1392,9 @@ in
       "defaultRoster's review-axis entry must inherit the reviewer's \"\" opt-out through every reviewer surface, leaked: ${builtins.toJSON leaked}";
     pkgs.runCommand "roster-default-roster-review-axis-follows-reviewer-opt-out" { } "touch $out";
 
-  # Issue #3447: review-axis tracks reviewModel's supplied value, not just
-  # its schema default -- a Consumer pinning REVIEW_MODEL also repins the
-  # fan-out agent, without needing a separate models."review-axis" entry.
+  # Issue #3447: review-axis tracks reviewModel's supplied value, not just its
+  # schema default, so a Consumer pinning REVIEW_MODEL also repins the fan-out
+  # agent without a separate models."review-axis" entry.
   roster-default-roster-review-axis-follows-reviewer-pinned-model =
     let
       surfaces = {
@@ -1480,10 +1417,9 @@ in
     pkgs.runCommand "roster-default-roster-review-axis-follows-reviewer-pinned-model" { }
       "touch $out";
 
-  # Issue #3447: models."review-axis" is an independent override that still
-  # wins ahead of the inherited reviewModel opt-out, in both directions --
-  # the fan-out can be kept alive on its own model while the reviewer opts
-  # out, or vice versa (reviewer stays opted out per its own entry).
+  # Issue #3447: models."review-axis" is an independent override that wins
+  # ahead of the inherited reviewModel opt-out, so the fan-out can stay alive
+  # on its own model while the reviewer opts out, and the reverse.
   roster-default-roster-review-axis-models-override-wins-over-inherited-opt-out =
     let
       roster = rosterLib.defaultRoster {
@@ -1502,9 +1438,8 @@ in
     pkgs.runCommand "roster-default-roster-review-axis-models-override-wins-over-inherited-opt-out"
       { } "touch $out";
 
-  # Issue #3419: a scoped implement worker has no use for WebFetch (it works
-  # from a delegation excerpt, not open web research), and an available tool
-  # is a replayed schema plus an invitation to spend a turn.
+  # Issue #3419: a scoped implement worker works from a delegation excerpt, not
+  # open web research, and every available tool costs a replayed schema.
   roster-default-roster-worker-has-no-webfetch =
     let
       roster = rosterLib.defaultRoster { };
@@ -1525,10 +1460,9 @@ in
     ) "defaultRoster's worker entry must keep the implement-capable tool set, got: ${builtins.toJSON workerTools}";
     pkgs.runCommand "roster-default-roster-worker-has-no-webfetch" { } "touch $out";
 
-  # Issue #3422: ADR 0049 documents a provider-neutral capability
-  # profile per defaultRoster entry -- without this check, adding a fifth
-  # roster entry would leave the ADR's profile set silently stale (no
-  # profile, no failure) instead of surfacing the gap.
+  # Issue #3422: ADR 0049 documents a provider-neutral capability profile per
+  # defaultRoster entry. Without this check, adding a roster entry would leave
+  # the ADR's profile set stale with no failure.
   roster-default-roster-names-have-capability-profiles =
     let
       # Lowercased so the match is case- and punctuation-tolerant: the ADR
@@ -1543,11 +1477,10 @@ in
       "docs/adr/0049-role-capability-profiles-are-provider-neutral.md must carry a **<Role>** capability-profile lead-in for every defaultRoster entry name, missing: ${builtins.toJSON missing}";
     pkgs.runCommand "roster-default-roster-names-have-capability-profiles" { } "touch $out";
 
-  # Issue #3447: an explicit `roster` that carries `reviewer` but no
-  # `review-axis` must not silently fall back to the Driver's ungoverned
-  # default -- mkHarness fires an eval-time lib.warnIf, surfaced as pure
-  # data on `internals.rosterWarnings` so this check can assert on it
-  # without capturing stderr.
+  # Issue #3447: an explicit `roster` carrying `reviewer` but no `review-axis`
+  # must not silently fall back to the Driver's ungoverned default. mkHarness
+  # fires an eval-time lib.warnIf and records it as data on
+  # `internals.rosterWarnings`, so this check need not capture stderr.
   roster-explicit-roster-without-review-axis-warns =
     let
       warnings = fixtures.legacyFourEntryRosterHarness.internals.rosterWarnings;
@@ -1558,9 +1491,8 @@ in
       "the explicit-roster warning must name \"review-axis\", got: ${builtins.toJSON warnings}";
     pkgs.runCommand "roster-explicit-roster-without-review-axis-warns" { } "touch $out";
 
-  # Issue #3447: the defaultRoster path already ships review-axis, so it
-  # must stay silent -- otherwise every Consumer on the default path eats a
-  # spurious warning.
+  # Issue #3447: the defaultRoster path already ships review-axis, so it must
+  # stay silent or every Consumer on the default path eats a spurious warning.
   roster-default-roster-does-not-warn =
     let
       warnings = fixtures.minimalDirect.internals.rosterWarnings;
@@ -1570,8 +1502,7 @@ in
     pkgs.runCommand "roster-default-roster-does-not-warn" { } "touch $out";
 
   # Issue #3447: the #392 reviewer opt-out (models.reviewer = "") drops
-  # review-axis along with the reviewer on purpose -- the ungoverned
-  # fallback is what the Consumer asked for, so warning there would be
+  # review-axis along with the reviewer on purpose, so a warning there would be
   # noise with no fix to point at.
   roster-reviewer-opt-out-does-not-warn =
     let

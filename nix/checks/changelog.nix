@@ -1,13 +1,9 @@
-# The release-please changelog contract: .release-please-config.json must
-# declare an explicit changelog-sections map, and every rendered heading must
-# be documented in VERSIONING.md.
 { pkgs, ... }:
 {
-  # The changelog contract: .release-please-config.json must declare an
-  # explicit changelog-sections map (never rely on release-please's
-  # implicit defaults, which hide `security` and every non-feat/fix type
-  # spindrift uses), and every rendered heading must be documented in
-  # VERSIONING.md. Pure eval — reads both files, no builder needed.
+  # release-please's implicit defaults hide `security` and every non-feat/fix
+  # type spindrift uses, so .release-please-config.json must declare an
+  # explicit changelog-sections map and VERSIONING.md must document every
+  # rendered heading.
   release-please-changelog =
     let
       inherit (pkgs.lib)
@@ -20,8 +16,7 @@
         toLower
         trim
         ;
-      # Source of truth for the section map. Order here is the order the
-      # headings render in CHANGELOG.md. Nothing is hidden (see VERSIONING.md).
+      # Order here is the order the headings render in CHANGELOG.md.
       sections = [
         {
           type = "feat";
@@ -78,17 +73,15 @@
       ];
       cfg = builtins.fromJSON (builtins.readFile ../../.release-please-config.json);
       versioningDoc = builtins.readFile ../../VERSIONING.md;
-      # CHANGELOG.md is checked line-by-line rather than with hasInfix's
-      # `.*pattern.*` regex match (lib/strings.nix): std::regex backtracking
-      # over a 100+KB file segfaults, whereas VERSIONING.md is small enough
-      # for the regex path to stay safe. This is a perf/size limit, not a
-      # metacharacter-escaping problem: hasInfix already escapes its pattern
-      # via escapeRegex before building the match.
+      # CHANGELOG.md is checked line by line because hasInfix's `.*pattern.*`
+      # regex backtracks over a 100+KB file and segfaults; VERSIONING.md is
+      # small enough for the regex path. This is a size limit, not an escaping
+      # problem, because hasInfix already escapes its pattern.
       changelogLines = splitString "\n" (builtins.readFile ../../CHANGELOG.md);
       missingFromDoc = builtins.filter (s: !hasInfix s.section versioningDoc) sections;
-      # Collapses runs of internal spaces/tabs to a single space so
-      # "##  [Unreleased]" and "##\t[Unreleased]" compare equal to the
-      # canonical heading below (trim alone only strips the ends).
+      # Collapses internal runs of spaces and tabs so "##  [Unreleased]" and
+      # "##\t[Unreleased]" compare equal to the canonical heading; trim alone
+      # only strips the ends.
       collapseWs =
         s: concatStringsSep " " (builtins.filter builtins.isString (builtins.split "[ \t]+" s));
       isUnreleasedHeading = line: toLower (collapseWs (trim line)) == "## [unreleased]";
@@ -101,12 +94,10 @@
       "VERSIONING.md is missing changelog headings: ${
         concatMapStringsSep ", " (s: s.section) missingFromDoc
       }";
-    # Self-test (issue #666, extended #897): pins isUnreleasedHeading's
-    # normalization — case, surrounding whitespace, and internal whitespace
-    # runs — before trusting it against the real file below. Deliberately
-    # excludes section-level (###) headings: per CHANGELOG.md's convention
-    # (see VERSIONING.md#what-lands-in-the-changelog), ## is always a release
-    # heading and ### is always a section heading, never a release.
+    # Self-test (issue #666, extended #897) pins isUnreleasedHeading's
+    # normalization before the real file below relies on it. ### never matches:
+    # per CHANGELOG.md's convention (see VERSIONING.md#what-lands-in-the-changelog)
+    # ## is always a release heading and ### is always a section heading.
     assert assertMsg (isUnreleasedHeading "## [Unreleased] ")
       "isUnreleasedHeading must match a heading with trailing whitespace";
     assert assertMsg (isUnreleasedHeading "## [unreleased]")

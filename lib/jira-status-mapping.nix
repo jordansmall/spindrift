@@ -1,15 +1,11 @@
 # Eval-level parse of the JIRA_STATUS_MAPPING knob (lib/env-schema.nix's
-# jiraStatusMapping, issue #2539): a JSON string mapping the four canonical
-# Dispatch states to native Jira status names. The Go launcher parses the
-# same knob at runtime (cmd/launcher/internal/forge/jira/jira.go's
-# ParseStatusMapping) to drive TransitionState; this file must never diverge
-# from that runtime counterpart's accepted keys or error wording.
-#
-# Pure builtins only (no `pkgs.lib`): keeps this file evaluable and unit-
-# testable with a bare `nix eval`, without a locked nixpkgs (mirrors
-# lib/prompt-inject.nix, lib/renderers.nix, and lib/research-verdicts.nix).
+# jiraStatusMapping, issue #2539). cmd/launcher/internal/forge/jira/jira.go's
+# ParseStatusMapping parses the same knob at runtime, so the accepted keys and
+# error wording here must not diverge from it. Pure builtins only, no pkgs.lib,
+# so a bare `nix eval` tests this file without a locked nixpkgs.
 let
-  # Mirrors jira.go's statusMappingKeys map keys exactly (lowerCamelCase).
+  # These must match the keys of jira.go's statusMappingKeys map exactly,
+  # in lowerCamelCase.
   validKeys = [
     "dispatchable"
     "inProgress"
@@ -17,10 +13,8 @@ let
     "failed"
   ];
 
-  # Validates a parsed JIRA_STATUS_MAPPING object against the same rule the
-  # Go launcher enforces at runtime (jira.go's ParseStatusMapping): every key
-  # must be one of validKeys. Throws on the first unknown key found (mirrors
-  # ParseStatusMapping's error wording); returns `parsed` unchanged otherwise.
+  # This mirrors jira.go's ParseStatusMapping, which throws on the first
+  # unknown key with the same error wording.
   validate =
     parsed:
     let
@@ -33,11 +27,9 @@ let
       throw ''JIRA_STATUS_MAPPING: unknown key "${builtins.head unknown}" (want one of ${builtins.concatStringsSep ", " validKeys})'';
 in
 {
-  # Parses the raw JIRA_STATUS_MAPPING knob string. The empty string (the
-  # schema default) yields an empty mapping, mirroring ParseStatusMapping's
-  # no-op on an empty string; any other value is parsed as JSON and its keys
-  # validated, with a malformed value failing the build loudly (mirrors the
-  # launcher's startup validation).
+  # The empty string is the schema default and yields an empty mapping, as
+  # ParseStatusMapping does. A malformed value fails the build loudly, the way
+  # the launcher fails at startup.
   parse =
     s:
     if s == "" then
@@ -46,10 +38,9 @@ in
       let
         value = builtins.fromJSON s;
       in
-      # json.Unmarshal of "null" into Go's map[string]string leaves it nil
-      # with no error, so ParseStatusMapping("null") returns an empty
-      # mapping; mirror that before validate's attrNames would otherwise
-      # abort on null.
+      # json.Unmarshal of "null" into Go's map[string]string leaves it nil with
+      # no error, so ParseStatusMapping("null") returns an empty mapping. Catch
+      # null here, before validate's attrNames aborts on it.
       if value == null then
         { }
       else if !(builtins.isAttrs value) then

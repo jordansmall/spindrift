@@ -1,11 +1,8 @@
-# The opencode Driver: pure data only (ADR 0009, issue #624) -- the registry
-# (./default.nix) validates this entry's shape and renders it into the data
-# lib/mkHarness.nix bakes into the image: the opencode package, the
-# entrypoint's DRIVER_* preamble, and the --agents JSON (here always ""; see
-# agentsJsonTemplate below). The bats harness sources
-# mkHarness.internals.driverPreambleFile (the registry's rendered preamble,
-# byte-identical to what the image bakes in) before exec-ing the entrypoint,
-# so the suite exercises the exact same bytes (issue #433).
+# The opencode Driver: pure data only (ADR 0009, issue #624). ./default.nix
+# validates this entry's shape and renders it into what lib/mkHarness.nix bakes
+# into the image. The bats harness sources the registry's rendered preamble,
+# byte-identical to the baked one, before exec-ing the entrypoint, so the suite
+# exercises the same bytes (issue #433).
 { lib }:
 let
   outcomeExtractor = import ./outcome-extractor.nix;
@@ -14,89 +11,56 @@ in
 {
   name = "opencode";
 
-  # In-box package providing the `opencode` binary.
   package = pkgs: pkgs.opencode;
 
-  # Binary name agent/entrypoint.sh invokes.
   bin = "opencode";
 
-  # Flags common to every opencode invocation in agent/entrypoint.sh: the
-  # `run` subcommand, JSON output, and auto-approve. opencode's own argv
-  # shape -- a positional prompt, `-m provider/model`, and no `--agents`
-  # equivalent -- is assembled around these flags by driver-exec in a later
-  # slice; this attr covers only what's common across every invocation.
+  # Only the flags shared by every invocation. driver-exec assembles the rest
+  # of opencode's argv (positional prompt, -m, no --agents) around them.
   flagsCommon = "run --format json --auto";
 
-  # Directory opencode scans for skill files, relative to $HOME. opencode
-  # reads .claude/skills/ directly (ADR 0009) -- no opencode-specific skills
-  # directory (e.g. .config/opencode/skills) exists or is wired.
+  # opencode reads .claude/skills/ directly (ADR 0009); no opencode-specific
+  # skills directory exists or is wired.
   skillsDirRelative = ".claude/skills";
 
-  # HOME-relative dir agentFilesTemplate (below) bakes each subagent's
-  # agents/<name>.md file into. Optional (like sessionCacheDirRelative
-  # below), not part of default.nix's requiredAttrs, since a Driver whose
-  # subagents don't ride on-disk files (claude) has nothing to rewrite here.
-  # agent/entrypoint.sh's file-rewrite loop (issue #2153) reads the rendered
-  # DRIVER_AGENT_FILES_DIR (lib/drivers/default.nix's renderPreamble) to
-  # find and rewrite each baked agent file's body at runtime -- this value
-  # must stay in lockstep with the path agentFilesTemplate bakes into, or
-  # the loop would look in the wrong place and silently no-op.
+  # agent/entrypoint.sh's file-rewrite loop (issue #2153) rewrites each baked
+  # agent file's body at runtime through this path, so it must stay in lockstep
+  # with the path agentFilesTemplate below bakes into or the loop silently
+  # no-ops. Optional, not in default.nix's requiredAttrs: a Driver whose
+  # subagents are not on-disk files (claude) has nothing to rewrite.
   agentFilesDirRelative = ".config/opencode/agents";
 
-  # sessionCacheDirRelative is deliberately omitted: opencode wires no
-  # resumable session state, so the launcher creates no per-issue cache and
-  # the runner adapters add no mount for it (see lib/drivers/default.nix's
-  # requiredAttrs comment and lib/preambles.nix's renderDriverMountPreamble).
+  # sessionCacheDirRelative is deliberately omitted: opencode wires no resumable
+  # session state, so the launcher creates no per-issue cache and the runner
+  # adapters add no mount for it.
 
-  # envCommon is deliberately omitted: opencode has no env vars to export
-  # into the child process environment (contrast claude.nix's envCommon).
+  # envCommon is deliberately omitted: opencode has no env vars to export into
+  # the child process environment.
 
-  # Shell function body extracting the SPINDRIFT_OUTCOME line from opencode's
-  # `run --format json` NDJSON stream. Unlike claude's stream-json, opencode's
-  # stream has no single terminal `result` envelope -- instead every
-  # `type:"text"` event carries incremental `.part.text`, so every such
-  # event's text is scanned for the outcome line (jqSelector above). The
-  # pipeline shape (markdown-strip, colon/space delimiter normalization,
-  # required-field greps) is shared with every other Driver's "match" body --
-  # see outcome-extractor.nix's mkOutcomeExtractor doc comment for the full
-  # rationale -- so both Drivers produce the same launcher-side outcome line
-  # shape from whichever event stream they emit. That match is verified, not
-  # just asserted: tests/driver-registry-outcome-extraction.bats
-  # (nix/checks/bats.nix's driver-registry-outcome-extraction check) runs this
-  # exact rendered body against
-  # cmd/launcher/internal/driver/opencode/testdata/outcome-fixture.jsonl, and
-  # tests/entrypoint-outcome-{contract,recovery,backstop}.bats exercise it
-  # end-to-end via tests/fakes/opencode (nix/checks/bats.nix's
-  # bats-outcome-opencode check, issue #2261).
+  # opencode's stream has no single terminal `result` envelope, unlike claude's
+  # stream-json, so every `type:"text"` event's incremental `.part.text` is
+  # scanned for the outcome line. The rest of the pipeline is shared with every
+  # Driver's "match" body so both produce the same launcher-side line shape; see
+  # outcome-extractor.nix's mkOutcomeExtractor for the rationale (issue #2261).
   outcomeExtractFnBody = outcomeExtractor.mkOutcomeExtractor {
     inherit jqSelector;
     variant = "match";
   };
 
-  # Shell function body extracting a *near-miss* SPINDRIFT_OUTCOME line from
-  # opencode's NDJSON text events (issue #1900). The complement of
-  # outcomeExtractFnBody above over the same opencode-shaped event stream --
-  # see outcome-extractor.nix's mkOutcomeExtractor doc comment for why this
-  # variant doesn't normalize the colon delimiter and doesn't require both
-  # landing=/status=. Verified the same way too: the
-  # driver-registry-outcome-extraction and bats-outcome-opencode checks named
-  # on outcomeExtractFnBody above exercise this near-miss body against the
-  # same opencode-shaped fixtures (issue #2261).
+  # The complement of outcomeExtractFnBody above over the same event stream
+  # (issue #1900): see outcome-extractor.nix's mkOutcomeExtractor for why this
+  # variant leaves the colon delimiter alone and does not require both landing=
+  # and status=.
   outcomeExtractNearMissFnBody = outcomeExtractor.mkOutcomeExtractor {
     inherit jqSelector;
     variant = "near-miss";
   };
 
-  # Shell function body extracting opencode's NDJSON text-event text,
-  # unwrapped and markdown-stripped, with NO grep/landing/status
-  # classification and NO `tail -1` filtering on top -- the shared prefix
-  # outcomeExtractFnBody and outcomeExtractNearMissFnBody above both further
-  # classify. Factored out here so the driver-exec marker-gate verb (issue
-  # #2978) can scan the Driver's raw unwrapped text itself via
-  # outcome.LastFieldedOutcomeLine/outcome.LastNearMissOutcomeLine
-  # (cmd/launcher/internal/outcome/outcome.go) instead of trusting a
-  # bash-side classification for the SPINDRIFT_OUTCOME nudge decision;
-  # called as `_driver_extract_result_text "$stream_log"`.
+  # The shared prefix of the two bodies above, with no classification and no
+  # `tail -1` on top. The driver-exec marker gate (issue #2978) scans this raw
+  # text in Go (cmd/launcher/internal/outcome/outcome.go) instead of trusting a
+  # bash-side classification for the SPINDRIFT_OUTCOME nudge decision. Called as
+  # `_driver_extract_result_text "$stream_log"`.
   resultTextExtractFnBody = ''
     # The backtick below is a literal char in a single-quoted sed script, not
     # an unexpanded command substitution.
@@ -105,53 +69,22 @@ in
       | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
   '';
 
-  # Shell function body computing opencode-specific session pin/resume flags.
-  # opencode wires no session resume (contrast claude.nix's deterministic
-  # --session-id/--resume pinning), so this is a defined no-op body -- the
-  # registry's _driver_session_flags function is always present, it just does
-  # nothing for this Driver.
   sessionFlagsFnBody = ''
     # opencode wires no session resume; this is a defined no-op so the
     # registry's _driver_session_flags function body is always present.
     :
   '';
 
-  # opencode composes subagents from on-disk agents/*.md files
-  # (agentFilesTemplate below), not a CLI flag like claude's --agents JSON, so
-  # this template correctly declines that mechanism: it accepts the same
-  # roster arg as claude.nix's template (issue #264, for a uniform call site
-  # in mkHarness.nix) but always returns "", meaning no --agents-equivalent
-  # flag is ever rendered.
+  # opencode composes subagents from the on-disk files agentFilesTemplate below
+  # bakes, not a CLI flag, so this always returns "". It keeps claude.nix's
+  # roster argument (issue #264) only to give mkHarness.nix one call site.
   agentsJsonTemplate = { roster }: "";
 
-  # opencode has no --agents JSON flag; it discovers subagents by scanning
-  # HOME-relative markdown files under .config/opencode/agents/, each with a
-  # YAML frontmatter block (description/mode/model) plus a body that seeds
-  # the subagent's system prompt. Takes the same first-class roster (issue
-  # #264, lib/roster.nix) as claude.nix's agentsJsonTemplate: each roster
-  # entry becomes one file, so an arbitrary N-agent roster -- including a
-  # custom agent beyond the historical scout/reviewer/filer/worker set --
-  # renders the same way. An entry with an empty model is dropped upstream,
-  # before this template ever runs, by rosterLib.dropOptedOut -- applied by
-  # lib/mkHarness.nix right after normalizeRoster succeeds (normalizeRoster
-  # itself never filters) -- rather than baking a modelless stub here -- so
-  # every entry this template sees is guaranteed to carry a non-empty model. The
-  # model is passed VERBATIM (never string-processed) --
-  # the operator supplies the full provider-prefixed model id, matching
-  # driver-exec's unprefixed `-m <model>` invocation -- but every frontmatter
-  # scalar, including mode/model, is JSON-encoded (issue #2152 slice C): JSON
-  # is a valid YAML scalar and a YAML parser strips the quotes, so the model
-  # still reaches driver-exec verbatim, just quoted, and a value carrying a
-  # newline/colon/quote can no longer inject a second YAML key into the
-  # frontmatter block (contrast the body line below, which stays raw since
-  # it's the system-prompt seed, not a frontmatter scalar). A roster entry may
-  # also set an optional `effort` field (issue #2242 slice 2, same knob as
-  # claude.nix's agentsJsonTemplate); opencode has no --agents JSON schema to
-  # carry it in, so it's rendered as a `reasoningEffort` frontmatter scalar
-  # instead -- opencode reads provider-native passthrough keys directly on the
-  # agent, hence the different key name -- JSON-encoded the same way as
-  # model/mode, and omitted entirely when effort is unset/empty so output
-  # stays byte-stable for a roster that doesn't use it.
+  # opencode discovers subagents by scanning these files, and an entry's effort
+  # becomes opencode's reasoningEffort key (issue #2242). rosterLib.dropOptedOut
+  # drops empty-model entries upstream, so e.model needs no fallback and reaches
+  # driver-exec verbatim. Every frontmatter scalar is JSON-encoded (issue #2152
+  # slice C) so a newline or colon cannot inject a second YAML key.
   agentFilesTemplate =
     { roster }:
     lib.listToAttrs (
@@ -170,11 +103,9 @@ in
       }) roster
     );
 
-  # opencode's CLI argv shape (ADR 0009, issue #2534): the prompt is a bare
-  # positional argument (no flag), and opencode has no --agents equivalent --
-  # agentsFlag is deliberately omitted, the nullable slot's "absent" case.
-  # Reproduces the exact behavior of the args.go opencode branch this issue
-  # replaces.
+  # opencode's CLI argv shape (ADR 0009, issue #2534). It has no --agents
+  # equivalent, so agentsFlag is deliberately omitted: the nullable slot's
+  # absent case.
   argvShape = {
     promptStyle = "positional";
     modelFlag = "-m";

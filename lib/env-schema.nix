@@ -1,88 +1,12 @@
-# Registry of every runtime env knob the harness exposes.  One entry per knob;
-# generators in mkHarness.nix and flakeModule.nix derive ALL per-knob output from
-# this single source — adding an entry here propagates to preambles, flakeModule
-# options, the entrypoint defaults block, BOX_ENV_VARS, and harness.env.example
-# without further edits.
-#
-# Fields (all optional except env, doc, and group on non-secret knobs):
-#   env          string  env-var name (SCREAMING_SNAKE_CASE)
-#   group        string  one of the six domains (agents, git, issues, forge,
-#                        dispatch, infra); IS the domain segment of the knob's
-#                        flake path — the first segment of `perSystem.spindrift.*`
-#                        (lib/nixpath.nix); required on every non-secret knob and
-#                        must still match a heading in lib/renderers.nix's
-#                        groupOrder
-#   nixSubPath   string  optional, flakeOption knobs only: the intra-domain
-#                        remainder of the knob's flake path — the nesting or
-#                        renamed leaf a flat `group` can't express (e.g.
-#                        `label` -> `labels.dispatch` under domain `issues`).
-#                        When omitted, the leaf defaults to the knob's own
-#                        schema key. The full path is derived by
-#                        lib/nixpath.nix as `${group}.${nixSubPath or key}`
-#                        (ADR 0037 Pass 2, issue #2188 — collapses the former
-#                        standalone nixPath parallel taxonomy)
-#   alias        string  optional short-form CLI flag alias (kebab-case, no dashes);
-#                        when set, --<alias> is a second way to set the same knob
-#   flag         string  optional canonical CLI flag name (kebab-case, no dashes);
-#                        when set, --<flag> is the knob's flag and its env-derived
-#                        name (toKebab env) becomes a deprecated alias (ADR 0037
-#                        Pass 2). When absent, the flag is toKebab(env).
-#   default      any     baked-in default; absent means runtime-required or empty
-#   placeholder  string  friendly value shown in harness.env.example for required
-#                        non-secret vars (e.g. REPO_SLUG=owner/repo); also the
-#                        fake value the bats set_box_env fixture exports for a
-#                        boxEnv knob with no default (tests/box_env_gen.bash)
-#   required     bool    runtime-required (no sensible default; validate() aborts)
-#   secret       bool    never a flakeOption; shown as an empty placeholder in example
-#   choices      list    nonSecret knobs only (nix/checks/schema-drift.nix's
-#                        schema-choices rejects it on a secret knob): non-empty
-#                        list of strings driving shell completion; a knob's
-#                        default (if any) must be a member of it. Secret knobs
-#                        get only a --*-file path flag, never a value-taking
-#                        one, so lib/renderers.nix's completion renderers never
-#                        look at choices on a secret knob — declaring it there
-#                        would pass no validation surface and render nowhere.
-#   doc          string  one-line description rendered into harness.env.example
-#   flakeOption  bool    consumer-tunable via the flakeModule declarative surface
-#   boxEnv       bool    forwarded from the launcher host into the Box container
-#   boxEnvOnly   bool    boxEnv knob the Go launcher never reads directly (forwarded
-#                        to the Box only); excluded from launcher-env-coverage's
-#                        main.go presence requirement
-#   intKind      string  one of "positive" / "nonneg"; declares which int parser
-#                        a config member takes: "positive" for atoiSchema (zero
-#                        or negative falls back to default -- use where zero
-#                        would break something, e.g. semaphore capacity),
-#                        "nonneg" for atoiNonnegSchema (zero is a valid value --
-#                        use for timeouts/poll intervals/counts where 0 means
-#                        "disabled"/"uncapped"). Required on every int-typed
-#                        host-config member (not secret, not boxEnvOnly) that
-#                        loadConfig() reads via atoiSchema/atoiNonnegSchema;
-#                        must not appear on non-int members. Enforced by the
-#                        schema-drift check (nix/checks/schema-drift.nix)
-#   hostConfig   bool    overrides the derived host-config membership rule
-#                        (member iff not secret and not boxEnvOnly) for knobs
-#                        where that derivation gives the wrong answer
-#   hostDerived  bool    marks a field that is generated but whose loader is
-#                        hand-written (not a plain getenvSchema/atoiSchema
-#                        call); implies host-config membership
-#   emptyDisables bool   string-typed knobs only: an explicit KEY= empty
-#                        override is itself a meaningful value (not "use the
-#                        default") for this knob's runtime env lookup;
-#                        loaderLine in lib/renderers.nix routes it through
-#                        getenvSchemaPreserveEmpty instead of getenvSchema
-#   legacySettingsExempt bool  flakeOption knobs only: true when this knob
-#                        postdates the ADR 0037 Pass 2 freeze and therefore
-#                        never had an old `settings.<section>` alias; exempts
-#                        it from nix/checks/schema-drift.nix's
-#                        legacy-settings-section coverage assert (issue #2522
-#                        -- freeze details and the cross-check rationale live
-#                        on lib/legacy-settings-section.nix and
-#                        lib/pre-freeze-flake-options.nix, not repeated here)
+# Registry of every runtime env knob. Generators in lib/mkHarness.nix and
+# lib/flakeModule.nix derive all per-knob output from these entries, so one new
+# entry reaches the preambles, flake options, entrypoint defaults, BOX_ENV_VARS,
+# and harness.env.example with no further edit. Field semantics live with their
+# consumers: lib/renderers.nix, lib/nixpath.nix, nix/checks/schema-drift.nix.
 let
   backends = import ./backends/default.nix;
 in
 {
-  # ── Consumer-tunable (flakeOption = true) ──────────────────────────────────
   label = {
     env = "LABEL";
     group = "issues";
@@ -102,11 +26,9 @@ in
     choices = map (r: r.name) (builtins.filter (r: r.validAsTracker or false) backends);
     flakeOption = true;
     nixSubPath = "tracker";
-    # Forwarded into the Box (issue #1429): the issue prompt's PR-body
-    # reference step (lib/fragments.nix PR_BODY_CLOSES/PR_BODY_LOCAL_REF/
-    # PR_BODY_LOCAL_NOREF gates) needs to know the tracker in-box to pick the
-    # right case; still read directly by the launcher too (main.go), so no
-    # boxEnvOnly here.
+    # Forwarded into the Box (issue #1429): lib/fragments.nix's PR-body
+    # reference gates pick their case from the tracker. The launcher reads it
+    # directly too, so no boxEnvOnly.
     boxEnv = true;
   };
   localIssuesDir = {
@@ -354,10 +276,9 @@ in
     env = "BWRAP_UNSHARE_NET";
     group = "infra";
     default = false;
-    # Presence-style bool flag (issue #2145): `--bwrap-unshare-net` (bare) or
-    # `--bwrap-unshare-net=<value>` set it; the space-separated value form is
-    # not accepted. The boolean `default` also makes it a `types.bool` flake
-    # option; `kind` opts its CLI flag into presence parsing.
+    # `kind` opts this flag into presence parsing (issue #2145): it takes
+    # `--bwrap-unshare-net` bare or `--bwrap-unshare-net=<value>`, but never a
+    # space-separated value.
     kind = "bool";
     doc = "when non-empty, forces bwrap's network-namespace isolation on (pasta-backed since issue #2666, no longer DNS-breaking); redundant with the new isolate-by-default posture unless paired with NETWORK_MODE=host, which nix eval already rejects -- see network.mode";
     flakeOption = true;
@@ -367,16 +288,10 @@ in
   memoryLimit = {
     env = "MEMORY_LIMIT";
     group = "infra";
-    # #712: a single `nix build .#checks-inbox` peaks near 3.7 GiB RSS
-    # (agent-issue-640 dmesg); 4g left ~300MiB headroom and got cgroup
-    # OOM-killed. 5g gives real headroom above the observed peak.
-    #
-    # #2379: this cap only matters where podman runs inside a fixed-RAM VM
-    # (macOS/Windows) — on native Linux the container shares host RAM
-    # directly, so a per-container cap is a self-imposed constraint with no
-    # upside there. That's why spindrift's own dogfood config
-    # (nix/dogfood-defaults.nix) leaves it unset on native Linux; this "5g"
-    # default remains unchanged for every other Consumer.
+    # #712: one `nix build .#checks-inbox` peaks near 3.7 GiB RSS, so a 4g cap
+    # got OOM-killed; 5g leaves real headroom. #2379: the cap only matters where
+    # podman runs inside a fixed-RAM VM (macOS/Windows), which is why
+    # nix/dogfood-defaults.nix leaves it unset on native Linux.
     default = "5g";
     doc = "max memory per agent Box: hard --memory cap under OCI; under bwrap, a per-Box cgroup v2 memory.max when the host delegates a writable cgroup subtree, else best-effort (warns and proceeds uncapped -- ADR 0042); empty string disables the limit";
     flakeOption = true;
@@ -465,7 +380,6 @@ in
     nixSubPath = "research.verdicts";
     boxEnv = false;
   };
-  # ── Required runtime inputs ────────────────────────────────────────────────
   repoSlug = {
     env = "REPO_SLUG";
     group = "forge";
@@ -603,22 +517,12 @@ in
     ];
     flakeOption = true;
     nixSubPath = "boxAccess";
-    # Forwarded into the Box, but the Box's prompt fragments no longer branch
-    # on this raw value (issue #1951): dispatch.buildBoxEnv resolves the
-    # write-enabled-vs-not decision once, host-side, from this value and
-    # forwards a single explicit positive signal, BOX_WRITE_ENABLED, only
-    # when writes are permitted. The github issue-blocked-comment and
-    # research-verdict prompt fragments (issue #1917), and the github push
-    # prompt fragment (issue #1918), gate on BOX_WRITE_ENABLED's presence
-    # instead, so an unset, typo'd, or forwarding-glitched value can never
-    # fall open into the write-capable path. This knob is still read
-    # directly by the launcher too (main.go's
-    # newCodeForge/checkReadOnlyCapabilityGate), so no boxEnvOnly here --
-    # mirrors ISSUE_TRACKER's own boxEnv forwarding for its PR-body
-    # ticket-reference gate.
+    # Forwarded into the Box, but the prompt fragments gate on the derived
+    # BOX_WRITE_ENABLED signal rather than this raw value (issue #1951), so an
+    # unset or garbled value can never fall open into the write-capable path.
+    # The launcher reads this knob directly too, so no boxEnvOnly.
     boxEnv = true;
   };
-  # ── Operator-tunable knobs (flakeOption = true; also tune via harness.env) ─
   maxFixAttempts = {
     env = "MAX_FIX_ATTEMPTS";
     group = "dispatch";
@@ -637,9 +541,9 @@ in
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "retry.maxRebase";
-    # Forwarded into the Box so the driver-exec outcome-backstop verb reads
-    # this bound for its own best-effort push retry from launcher-delivered
-    # plumbing rather than a hand-copied default (issue #2157).
+    # Forwarded into the Box so the driver-exec outcome-backstop verb takes its
+    # push-retry bound from launcher-delivered plumbing rather than a
+    # hand-copied default (issue #2157).
     boxEnv = true;
   };
   maxBudgetTokens = {
@@ -650,30 +554,23 @@ in
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "budget.tokens";
-    # Forwarded into the Box (issue #2694): the in-Box orchestrator's own
-    # review loop now also caps its cumulative token spend against this
-    # bound (entrypoint.sh forwards it as --max-budget-tokens), the same
-    # dial selfHealGate already gates its host-side fix-pass dispatch with.
+    # Forwarded into the Box (issue #2694): the in-Box orchestrator's review
+    # loop caps its cumulative token spend against this same bound.
     boxEnv = true;
   };
   maxBudgetUSD = {
-    # default is a float, not the bare int 0 (unlike every other numeric knob
-    # here): lib/flakeModule.nix's mkKnobOption infers a knob's Consumer-
-    # facing option type from builtins.isInt (entry.default), so an int
-    # default would type settings.selfHealing.maxBudgetUSD as types.int —
-    # rejecting the very fractional caps ($4.44, $17.66) this knob exists
-    # for. Falling through to types.str instead means a Consumer flake sets
-    # it quoted, e.g. maxBudgetUSD = "4.44";.
+    # The default is a float, not the bare int 0: lib/flakeModule.nix infers the
+    # Consumer-facing option type from builtins.isInt, and types.int would
+    # reject the fractional caps this knob exists for. Falling through to
+    # types.str instead means a Consumer flake sets it quoted, e.g. "4.44".
     env = "MAX_BUDGET_USD";
     group = "dispatch";
     default = 0.0;
     doc = "cumulative cost in USD across every attempt dispatched so far -- the initial run, every fix pass, and any retried attempt within each (issue #2575) -- before selfHealGate stops dispatching further fix passes (issue #2001) and, forwarded into the Box, before the orchestrator's own review loop commits to a terminal land pass instead of a further BLOCK-triggered review round (issue #2694); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44";
     flakeOption = true;
     nixSubPath = "budget.usd";
-    # Forwarded into the Box (issue #2694): the in-Box orchestrator's own
-    # review loop now also caps its cumulative USD spend against this bound
-    # (entrypoint.sh forwards it as --max-budget-usd), the same dial
-    # selfHealGate already gates its host-side fix-pass dispatch with.
+    # Forwarded into the Box (issue #2694): the in-Box orchestrator's review
+    # loop caps its cumulative USD spend against this same bound.
     boxEnv = true;
   };
   preflightStaleBase = {

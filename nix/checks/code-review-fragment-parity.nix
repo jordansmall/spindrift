@@ -1,7 +1,7 @@
 # Drift parity between the code-review fallback fragment and the upstream
-# `/code-review` skill (issue #3222, following the tdd pattern from #3219).
-# See nix/checks/tdd-fragment-parity.nix for the full rationale comment; this
-# file repeats only what differs.
+# `/code-review` skill (issue #3222, same pattern as #3219). See
+# nix/checks/tdd-fragment-parity.nix for the full rationale; this file
+# repeats only what differs.
 { pkgs, fixtures, ... }:
 let
   inherit (pkgs.lib)
@@ -31,10 +31,9 @@ let
     toLower (concatStringsSep " " words);
 
   skillText = normalize (skillRowByName "code-review").src;
-  # Issue #3226 moved the four hunt dimensions out of the gated fallback
-  # fragment and into review-prompt.md as unconditional inline text (they
-  # must render whether or not the skill is baked), so the drift target
-  # follows the prose to where it now lives.
+  # Issue #3226 moved the four hunt dimensions into review-prompt.md as
+  # unconditional inline text, since they must render whether or not the
+  # skill is baked. The drift target follows the prose there.
   fallbackText = normalize (builtins.readFile ../../templates/default/prompts/review-prompt.md);
   anchorText = builtins.readFile ../../templates/default/prompts/fragments/code-review-baked.md;
 
@@ -42,31 +41,24 @@ let
   fallbackDesc = "templates/default/prompts/review-prompt.md";
   remedy = "either re-sync the fallback with the skill, or -- if the skill's discipline genuinely changed -- update this check's clause list to match.";
 
-  # Kept to two clauses. The skill's Standards/Spec two-axis model and
-  # review-prompt.md's four hunt dimensions (SPEC/CORRECTNESS/SECURITY/
-  # STANDARDS & SMELLS) are genuinely different shapes -- spindrift's
-  # CORRECTNESS and SECURITY dimensions have no counterpart in the skill at
-  # all, by design (the skill only aggregates two sub-agent reports;
-  # spindrift's single reviewer hunts more ground inline) -- so most of
-  # review-prompt.md's prose has no shared vocabulary to pin against. These
-  # two survive because they name the same finding class in both texts, not
-  # just a shared topic word.
+  # Only two clauses. The skill's Standards/Spec two-axis model and
+  # review-prompt.md's four hunt dimensions are different shapes by design:
+  # CORRECTNESS and SECURITY have no counterpart in the skill, so most of
+  # review-prompt.md's prose shares no vocabulary to pin against. These two
+  # name the same finding class in both texts, not just a shared topic word.
   sharedClauses = [
     {
       name = "scope-creep";
-      # The Spec axis's own term for unrequested behaviour: the skill's Spec
-      # sub-agent brief and the fallback's SPEC dimension both use this exact
-      # phrase for the same finding. Losing it from either side means SPEC
-      # would stop flagging unrequested changes as its own named category.
+      # Both texts use this exact phrase for the same finding. Losing it
+      # from either side means SPEC stops flagging unrequested changes as
+      # its own named category.
       clause = "scope creep";
     }
     {
       name = "code-smells";
-      # The skill's Fowler smell baseline and the fallback's STANDARDS &
-      # SMELLS dimension both name the discipline "code smells" verbatim.
-      # Losing it from either side would mean the Standards axis stops
-      # hunting smells as a distinct thing from documented-standard
-      # violations.
+      # Both texts name the discipline "code smells" verbatim. Losing it
+      # from either side means the Standards axis stops hunting smells as
+      # distinct from documented-standard violations.
       clause = "code smells";
     }
   ];
@@ -98,25 +90,16 @@ let
     builtins.split "\n" anchorText
   );
 
-  # Issue #3447: the upstream `/code-review` skill's own fan-out step
-  # defaults both axis subagents to `general-purpose`, an unrostered,
-  # ungoverned agent type -- spindrift's only lever over that default is
-  # this baked anchor line. The anchor can't name the roster entry
-  # literally, though: a Consumer roster that omits it (or the #392
-  # `model = ""` opt-out) provisions no such agent, so the name is
-  # substituted in-box from the run's own provisioned agents. So pin the
-  # whole seam instead, still by extraction rather than by asserting a
-  # literal appears somewhere on the line (which would keep passing even if
-  # the line drifted back to also naming `general-purpose`): the anchor's
-  # spawn clause must name the placeholder, the registry row must declare
-  # that substitution variable, and the Go resolver's own constant must name
-  # a roster entry.
+  # Issue #3447: the skill's fan-out step defaults both axis subagents to
+  # `general-purpose`, which defaultRoster does not govern, and this baked
+  # anchor is the only override. It cannot name a roster entry literally: a
+  # Consumer roster may omit that entry, or opt out of it with `model = ""`
+  # (#392), so the anchor names a placeholder the box substitutes.
   anchorLine = if anchorLines == [ ] then "" else builtins.head anchorLines;
   # Anchored on the "spawning ... as agent type `x`" phrase, not on "agent
-  # type" alone: a bare match reads the last such clause on the line, so a
-  # negated sentence appended after the override ("never agent type
-  # `general-purpose`") would fail the check and "do not use agent type
-  # `review-axis`" alone would pass it.
+  # type" alone: a bare match reads the last such clause on the line, so an
+  # appended negation ("never agent type `general-purpose`") would fail the
+  # check and "do not use agent type `review-axis`" alone would pass it.
   anchorAgentTypeMatch = builtins.match ".*spawning[^`]*as agent type `([^`]+)`.*" anchorLine;
   anchorAgentType = if anchorAgentTypeMatch == null then null else builtins.head anchorAgentTypeMatch;
   substVar = "REVIEW_FANOUT_AGENT";
@@ -144,10 +127,9 @@ builtins.listToAttrs (map clauseCheck sharedClauses)
       "templates/default/prompts/fragments/code-review-baked.md no longer names the `/code-review` skill -- the baked arm's entire job is to point at the baked skill, so with the name gone the prompt says nothing about review discipline at all.";
     pkgs.runCommand "code-review-fragment-parity-baked-anchor-omits-step-prose" { } "touch $out";
 
-  # Issue #3447: the upstream skill's `general-purpose` fan-out default is
-  # unrostered and ungoverned -- this pins the substitution seam that carries
-  # the override end to end, so a future edit that drops or misspells any
-  # link in it can't silently regress to that default.
+  # Issue #3447: pins the substitution seam end to end, so an edit that
+  # drops or misspells any link in it cannot silently regress to the skill's
+  # ungoverned `general-purpose` default.
   code-review-fragment-parity-baked-anchor-agent-type-is-rostered =
     assert assertMsg (anchorAgentType != null)
       "templates/default/prompts/fragments/code-review-baked.md names no agent type (expected a `spawning ... as agent type \\`<name>\\`` clause) -- without an explicit override the /code-review skill's fan-out silently falls back to its own `general-purpose` default, which defaultRoster does not govern.";

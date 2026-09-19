@@ -1,59 +1,34 @@
-# Box image assembly (issue #514): the harness plumbing package set, the
-# agent environment, the agent files, the passwd/group files, and the
-# layered OCI image build itself — including the nix-in-box store DB
+# Box image assembly (issue #514), including the nix-in-box store DB
 # registration, the writable-store self-test wiring (ADR 0018), and the
-# fakeroot chowns. Pulled out of lib/mkHarness.nix as a pure code move: the
-# image derivation must be byte-identical before and after, so every value
-# below is either copied verbatim or threaded in as a parameter from
-# mkHarness's existing computation — nothing here is re-derived or
-# reformatted. The context-discarded store-path trick that lets darwin build
-# launchers without a Linux builder stays on the mkHarness side, applied to
-# this module's outputs.
-#
-# The parameters below are grouped into six attrsets — the package-set
-# pair, the driver entry, the resolved agents, the contract files, the
-# prompt tree, and the knob subset the image consumes — instead of one
-# loose parameter per value; `pkgs` and `lib` stay top-level as module
-# plumbing, not Consumer/mkHarness state. mkHarness threads the same
-# already-computed values in through the groups below, and the body
-# references each value through its group (e.g. `driver.driverEntry`,
-# `agents.agentsJsonTemplate`) rather than destructuring the groups back to
-# bare names.
+# fakeroot chowns. This came out of lib/mkHarness.nix as a pure code move, so
+# the image derivation must stay byte-identical: every value below is copied
+# verbatim or threaded in as a parameter, never re-derived here.
 {
   pkgs,
   lib,
-  # The Consumer's package set: project-specific tools baked into the image
-  # on top of the harness plumbing (`packages`), and extra derivations whose
-  # closures are baked into the image contents and, when nixInBox is on,
-  # registered in the store DB alongside the runtime closure (`extraClosures`,
-  # issue #469). Both are functions of the (Linux) pkgs, so a darwin-host
-  # Consumer's packages/closures stay correct.
+  # Project tools baked on top of the harness plumbing (`packages`), plus extra
+  # derivations whose closures are baked into the image and, when nixInBox is
+  # on, registered in the store DB (`extraClosures`, issue #469). Both are
+  # functions of the (Linux) pkgs, so a darwin-host Consumer's packages and
+  # closures stay correct.
   packageSet,
-  # The selected Driver's in-box half (ADR 0009): the driver entry
-  # (invocation binary/flags, skill wiring, outcome extraction), the in-box
-  # Driver runner (#626), the in-box orchestrator (#1996), the Driver's
-  # entrypoint.sh preamble, and its on-disk subagent files (AC4).
+  # The selected Driver's in-box half (ADR 0009): the driver entry, the in-box
+  # Driver runner (#626), the in-box orchestrator (#1996), the entrypoint.sh
+  # preamble, and the on-disk subagent files (AC4).
   driver,
-  # The resolved agent roster: --agents JSON (ADR 0009), the per-agent
-  # prompt-file map (issue #264), custom roster entries with their own
-  # inline prompt (issue #264), and the skills baked at
-  # /home/agent/.claude/skills (issue #597).
+  # The resolved agent roster: --agents JSON (ADR 0009), the per-agent prompt
+  # files and custom roster entries (issue #264), and the baked skills
+  # (issue #597).
   agents,
-  # The contract files sliced from issue-prompt.md / research-prompt.md by
-  # mkHarness (issues #419, #455, #640) and their injectors, plus the
-  # fragment/prompt-contract/forbidden-markers registries baked as JSON for
-  # the Go `driver-exec` verbs (issues #2354, #2356, #2464). Also carries
-  # lib/agent-paths.nix's attrset (`agentPaths`, the single source of truth
-  # for the 8 baked /agent/* path literals driving agentFiles' cp
-  # destinations below) and its rendered fallback-defaults preamble
-  # (`agentPathsPreamble`, lib/preambles.nix's renderAgentPathsPreamble,
-  # issue #2531) — both are contract/registry-file-location data, the same
-  # family as the rest of this group.
+  # The contract files sliced from issue-prompt.md / research-prompt.md
+  # (issues #419, #455, #640) and their injectors, plus the fragment,
+  # prompt-contract and forbidden-markers registries baked as JSON for the Go
+  # `driver-exec` verbs (issues #2354, #2356, #2464). Also lib/agent-paths.nix's
+  # attrset, the single source for the baked /agent/* paths (issue #2531).
   contracts,
-  # The prompt tree: the Consumer's agent prompt template and the subagent
-  # system prompts, the research prompts (ADR 0022, issues #640, #2202), the
-  # conditional fragments source dir (issue #463), and the fragment
-  # registry's entrypoint.sh preamble (issue #622).
+  # The prompt tree: the agent prompt template and subagent system prompts, the
+  # research prompts (ADR 0022, issues #640, #2202), the conditional fragments
+  # source dir (issue #463), and the fragment registry's preamble (issue #622).
   prompts,
   # The knob subset the image consumes: nix-in-box / writable-store wiring
   # (ADR 0018), the forgejo-backend selector (issue #1963), the prefetch
@@ -62,13 +37,11 @@
   knobs,
 }:
 let
-  # The baked-skill name list (issue #2532), single-sourced for harnessSkills
-  # below so a skill's name is never hand-typed a second time here.
+  # Single-sourced so a baked skill's name is never hand-typed here (#2532).
   bakedSkills = import ./baked-skills.nix;
-  # Whether ISSUE_TRACKER or CODE_FORGE selects the forgejo backend; bakes fj
-  # (forgejo-cli) into the image when true, absent otherwise (issue #1963).
-  # Defaults to false since a caller may omit it; a derived value, not a
-  # plain group field, so it stays a bare local binding.
+  # Bakes fj (forgejo-cli) into the image when ISSUE_TRACKER or CODE_FORGE
+  # selects the forgejo backend (issue #1963). Defaults to false because a
+  # caller may omit the knob.
   forgejoBackend = knobs.forgejoBackend or false;
 
   # Drop a leading `#!...` line so a complete, standalone-runnable script can be
@@ -83,9 +56,6 @@ let
     else
       text;
 
-  # Plumbing every agent needs regardless of language: a shell, the VCS + GitHub
-  # CLIs, the selected Driver's binary, CA certs, and the unix tools the
-  # entrypoint relies on.
   harnessPackages =
     (with pkgs; [
       bashInteractive
@@ -103,11 +73,11 @@ let
       driver.driverExecBin # in-box Driver runner (#626)
       driver.orchestratorBin # in-box orchestrator (#1996)
     ])
-    # The nix CLI is included by default so `nix flake check` / `nix develop`
-    # work inside the box. Omitted only when the Consumer opts into the lean image.
+    # The nix CLI so `nix flake check` / `nix develop` work inside the box.
+    # Omitted only when the Consumer opts into the lean image.
     ++ lib.optional knobs.nixInBox pkgs.nix
-    # fj (forgejo-cli): baked only for a forgejo-backend Consumer (issue
-    # #1963), so a github-backend image never gains an unused CLI.
+    # Baked only for a forgejo-backend Consumer (issue #1963), so a
+    # github-backend image never gains an unused CLI.
     ++ lib.optional forgejoBackend pkgs.forgejo-cli;
 
   agentEnv = pkgs.buildEnv {
@@ -122,11 +92,10 @@ let
     ];
   };
 
-  # The in-container entrypoint, via writeShellApplication so shellcheck runs at
-  # build time and its tools are pinned. Built for Linux. The source stays a
-  # complete, standalone script (the bats harness prepends driverPreambleFile
-  # before exec-ing it) so its shebang is stripped before it becomes this
-  # derivation's body.
+  # writeShellApplication so shellcheck runs at build time and the tools stay
+  # pinned. The source stays a complete, standalone script (the bats harness
+  # prepends driverPreambleFile before exec-ing it), so its shebang is stripped
+  # before it becomes this derivation's body.
   entrypoint = pkgs.writeShellApplication {
     name = "entrypoint";
     runtimeInputs =
@@ -140,13 +109,11 @@ let
         driver.driverExecBin # in-box Driver runner (#626)
         driver.orchestratorBin # in-box orchestrator (#1996)
       ])
-      # fj (forgejo-cli): resolved on PATH for the entrypoint's fj credential
-      # setup only when the Consumer's backend is forgejo (issue #1963).
+      # On PATH for the entrypoint's fj credential setup only when the
+      # Consumer's backend is forgejo (issue #1963).
       ++ lib.optional forgejoBackend pkgs.forgejo-cli;
-    # Prepend the schema-derived defaults block so the entrypoint carries the
-    # baked values without hardcoding them in the source script.
-    # AGENTS_JSON_TEMPLATE is baked as a fixed value (not a :-default) because it
-    # is derived from the configured models, not a standalone knob.
+    # AGENTS_JSON_TEMPLATE is baked as a fixed value, not a :-default, because
+    # it comes from the configured models rather than a standalone knob.
     text =
       "export AGENTS_JSON_TEMPLATE="
       + lib.escapeShellArg agents.agentsJsonTemplate
@@ -161,52 +128,31 @@ let
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
 
-  # Registers the PreToolUse hook (issue #1609, layer 2) that rejects a Bash
-  # call with run_in_background: true: --disallowedTools (lib/drivers/claude.nix)
-  # strips ScheduleWakeup/Cron*/RemoteTrigger/Monitor from the Driver's tool
-  # surface, but run_in_background is a parameter of the Bash tool, not a
-  # tool name, so it cannot be stripped the same way. Rendered via
-  # builtins.toJSON, not a hand-built string, so the settings.json is always
-  # valid JSON (ADR 0007 tier-1 -- same reasoning as agentsJsonTemplate).
-  # Home-wide rather than gated behind a Driver attribute: only the claude
-  # Driver exists today and this is Claude Code's own hook mechanism, but the
-  # restriction applies to every pass sharing this $HOME (main run,
-  # conflict-resolve, fix), not to any one Driver invocation's flags.
-  # Registers the second PreToolUse hook (issue #1909, spec #1907):
-  # credential-deny.sh rejects a Read/Bash call targeting a known credential
-  # path (~/.claude/.credentials.json, **/.env, ~/.config/gh/hosts.yml). Two
-  # matcher entries, not one -- Claude Code's PreToolUse matcher is per-tool,
-  # so Read and Bash each need their own entry even though both point at the
-  # same script. Merged into one PreToolUse array below, alongside the
-  # reject-background-bash entry, since the image ships a single
-  # ~/.claude/settings.json.
-  #
-  # Registers the third PreToolUse hook (issue #1927, spec #1907):
-  # env-credential-scrub.sh rewrites every Bash call (via
-  # hookSpecificOutput.updatedInput) to `unset` ANTHROPIC_API_KEY and
-  # CLAUDE_CODE_OAUTH_TOKEN before it runs, and denies outright any Bash call
-  # that references a /proc/<pid>/environ path at all. Re-introduces the
-  # protection #1926 reverted -- CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 -- via a
-  # Box-controlled rewrite instead of Claude Code's own subprocess-scrub
-  # feature, which forces the Driver's permission mode to `default` and
-  # wraps every Bash subprocess in a nested bwrap sandbox that can't mount
-  # /proc inside the Box's own bwrap sandbox (reproduced directly -- see
-  # agent/env-credential-scrub.sh's header). Only a Bash matcher entry, not
-  # Read, since the threat is a spawned subprocess's environment and Read
-  # never spawns one.
-  #
-  # Registers the fourth PreToolUse hook and the first PostToolUse hook
-  # (issue #1988): bash-output-tee.sh rewrites every Bash call, via the same
-  # updatedInput mechanism as env-credential-scrub.sh, to tee its combined
-  # stdout+stderr to a per-command log file while the real exit code still
-  # propagates; bash-output-summary.sh (PostToolUse, Bash matcher) then
-  # replaces the tool result with exit code + log path + a bounded,
-  # error-oriented tail once that log file crosses the inline bound, via
-  # hookSpecificOutput.updatedToolOutput. Together they subsume the earlier
-  # "run-check wrapper"/"truncating post-hook" ideas into one uniform
-  # interceptor: full output always lands on disk, only a bounded tail ever
-  # enters the model's context, uniformly for every Bash call -- not just
-  # the overflow case BASH_MAX_OUTPUT_LENGTH (issue #1987) already covers.
+  # reject-background-bash.sh (issue #1609): --disallowedTools strips whole
+  # tools, but run_in_background is a parameter of the Bash tool, not a tool
+  # name, so only a PreToolUse hook can reject it. Home-wide rather than gated
+  # behind a Driver attribute, because the restriction applies to every pass
+  # sharing this $HOME, not to one Driver invocation's flags.
+
+  # credential-deny.sh (issue #1909, spec #1907) rejects a Read or Bash call
+  # targeting a known credential path. Read and Bash each need their own matcher
+  # entry pointing at the same script, because the PreToolUse matcher is
+  # per-tool.
+
+  # env-credential-scrub.sh (issue #1927, spec #1907) unsets ANTHROPIC_API_KEY
+  # and CLAUDE_CODE_OAUTH_TOKEN for every Bash call and denies any reference to
+  # /proc/<pid>/environ. Claude Code's own CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+  # cannot do this job: it forces the Driver's permission mode to `default` and
+  # nests a bwrap sandbox that cannot mount /proc inside the Box's own (#1926).
+
+  # bash-output-tee.sh and bash-output-summary.sh (issue #1988) tee every Bash
+  # call's combined output to a log file and replace the tool result with a
+  # bounded tail, so full output lands on disk and only the tail enters the
+  # model's context. This covers every call, not just the overflow case
+  # BASH_MAX_OUTPUT_LENGTH already handles (issue #1987).
+
+  # Rendered with builtins.toJSON rather than a hand-built string so the
+  # settings.json is always valid JSON (ADR 0007 tier-1).
   boxSettings = builtins.toJSON {
     hooks = {
       PreToolUse = [
@@ -270,18 +216,16 @@ let
     };
   };
 
-  # Baked into the image at /agent — there is no working tree to bind-mount from
-  # once spindrift is a store path. The prompt is baked in alongside the
-  # entrypoint (not a host-path mount) so the Box is self-contained: a macOS
-  # podman machine cannot bind-mount the host /nix/store into its Linux VM.
-  # SPINDRIFT_PROMPT_DIR still mounts an override dir for zero-rebuild iteration
-  # (the Go launcher mounts it in cmd/launcher/internal/runner).
-  # Harness-owned skills (issues #2489, #2490): baked into every image
-  # unconditionally, independent of the Consumer's own `skills` list, so
-  # a Box always has something at /auto-format and /auto-lint to invoke
-  # regardless of consumer skills config. Derived from lib/baked-skills.nix's
-  # `harnessOwned` rows (issue #2532) rather than hand-typed, so a skill's
-  # name is single-sourced there instead of duplicated here.
+  # Everything under /agent is baked into the image rather than bind-mounted:
+  # there is no working tree once spindrift is a store path, and a macOS podman
+  # machine cannot bind-mount the host /nix/store into its Linux VM.
+  # SPINDRIFT_PROMPT_DIR still mounts an override dir for zero-rebuild
+  # iteration.
+
+  # Harness-owned skills (issues #2489, #2490) are baked unconditionally,
+  # independent of the Consumer's own `skills` list, so a Box always has
+  # /auto-format and /auto-lint to invoke. The names come from
+  # lib/baked-skills.nix (issue #2532) instead of being hand-typed here.
   harnessSkills = builtins.map (s: {
     inherit (s) name;
     src = builtins.readFile (../templates/default/skills + "/${s.name}/SKILL.md");
@@ -350,21 +294,11 @@ let
       mkdir -p $out/agent/skills
       ${lib.concatMapStrings (
         f:
-        # Claude Code discovers a skill only as a directory holding a SKILL.md
-        # (~/.claude/skills/<name>/SKILL.md); a flat <name>.md file is ignored,
-        # so every entry is baked under its own <name>/ directory. A
-        # { name; src; } content entry names the skill via `name` and is
-        # re-realized with THIS pkgs (the image's own Linux instantiation,
-        # mirroring the prompts above) rather than copied as a pre-built
-        # derivation, so the skill never carries a consumer host's system into
-        # the image's derivation graph (#597); a path/derivation entry is a
-        # skill directory copied verbatim under its own basename. Baked to
-        # the fixed /agent/skills path (a sibling of /agent/prompts), not
-        # under the Driver's declared skills dir, so harnessSkills (always
-        # present) and any Consumer-configured skills land together
-        # regardless of Driver; agent/entrypoint.sh's phase_prompt_assembly
-        # copies from here into the Driver's actual runtime skills dir at
-        # box startup.
+        # Claude Code discovers a skill only as a directory holding SKILL.md, so
+        # each entry is baked under its own <name>/ directory below the fixed
+        # /agent/skills, which entrypoint.sh copies into the Driver's runtime
+        # skills dir at startup. A { name; src; } entry is re-realized with THIS
+        # pkgs, so no consumer host's system reaches the derivation graph (#597).
         if builtins.isAttrs f && !(lib.isDerivation f) then
           ''
             mkdir -p $out/agent/skills/${f.name}
@@ -385,9 +319,9 @@ let
   '';
 
   # A non-root `agent` user (uid/gid 1000). Claude Code refuses
-  # --dangerously-skip-permissions under root/sudo, and the Box relies on that
-  # flag; since the container itself IS the isolation boundary, running as an
-  # unprivileged in-container user costs nothing and satisfies the check.
+  # --dangerously-skip-permissions under root or sudo, and the Box relies on
+  # that flag. The container itself is the isolation boundary, so running as an
+  # unprivileged in-container user costs nothing.
   passwdFile = pkgs.writeText "passwd" ''
     root:x:0:0:root:/root:/bin/bash
     agent:x:1000:1000:agent:/home/agent:/bin/bash
@@ -397,8 +331,8 @@ let
     agent:x:1000:
   '';
 
-  # Single-sourced so the OCI image and the bwrap runner both consume the
-  # identical file -- never write it twice.
+  # Single-sourced so the OCI image and the bwrap runner consume the identical
+  # file. Never write it twice.
   nixConfigFile = pkgs.writeText "nix.conf" ''
     experimental-features = nix-command flakes
     sandbox = false
@@ -409,12 +343,12 @@ let
     cores = 4
   '';
 
-  # bwrap-only hardening artifact (issue #2670), unrelated to nix-in-box --
-  # always computed, never gated on knobs.nixInBox.
+  # bwrap-only hardening (issue #2670), unrelated to nix-in-box. Always
+  # computed, never gated on knobs.nixInBox.
   syscallFilter = import ./seccomp.nix { inherit pkgs; };
 
-  # Evaluated once so the image's contents, closure registration, and Env
-  # marker below all see the identical set of extra derivations.
+  # Evaluated once so the image's contents, closure registration, and Env marker
+  # below all see the identical set of extra derivations.
   extraClosurePaths = packageSet.extraClosures pkgs;
 
   image = pkgs.dockerTools.buildLayeredImage {
@@ -462,9 +396,9 @@ let
       }/registration
     '';
     # chown must be recorded in the image layer, so it runs under fakeroot after
-    # the tree is staged. HOME and the clone dir must be writable by the agent.
-    # nix/var is also chowned so uid 1000 can lock the SQLite store DB and
-    # write gcroots/profiles when nix commands run inside the container.
+    # the tree is staged. HOME and the clone dir must be writable by the agent,
+    # and nix/var too, so uid 1000 can lock the SQLite store DB and write
+    # gcroots/profiles when nix commands run inside the container.
     fakeRootCommands = ''
       chown -R 1000:1000 home/agent work
       # agentFiles cp's its tree in from the read-only Nix store, so the
@@ -494,9 +428,9 @@ let
         "PKG_CONFIG_PATH=/lib/pkgconfig"
         "PREFETCH=${knobs.prefetch}"
         "NIX_STORE_WRITABLE=${lib.boolToString knobs.nixStoreWritable}"
-        # Lower Claude Code's own output-cap knobs so its built-in
-        # file-spillover engages early -- see "Claude Code output caps" in
-        # docs/reference.md for the values and rationale (issue #1987).
+        # Lower Claude Code's own output caps so its built-in file spillover
+        # engages early (issue #1987). See "Claude Code output caps" in
+        # docs/reference.md for the rationale.
         "BASH_MAX_OUTPUT_LENGTH=8192"
         "MAX_MCP_OUTPUT_TOKENS=2000"
       ];
