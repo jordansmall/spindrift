@@ -41,7 +41,11 @@ let
   # Only two clauses are pinned. The skill and the fallback spell the wrap rule
   # and the column bounds differently ("hard line wraps" against "hard-wrap at
   # 72 columns", "≤ 50" against "≤50"), so pinning either would go red on a
-  # copy-edit that changed nothing about the discipline.
+  # copy-edit that changed nothing about the discipline. The fallback side's
+  # own column bounds are pinned separately, against its own wording rather
+  # than the skill's, by commit-unbaked-fragment-two-tier-subject-limit in
+  # nix/checks/prompts.nix (issue #3478); #3486 tracks pinning them here,
+  # against the skill.
   sharedClauses = [
     {
       name = "conventional-commits-v1-0-0";
