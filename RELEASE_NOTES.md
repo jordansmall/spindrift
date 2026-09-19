@@ -9,6 +9,50 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.18.1 — 2026-09-19
+
+The Box stops fetching its own issue. The host reads the body, the comments,
+and the linked issues, then hands the whole thing over as text. Credential
+helpers get an allowlist, and prompt assembly becomes something you can
+inspect.
+
+No breaking changes.
+
+- **The issue arrives with the Box instead of being fetched inside it.** An
+  agent used to go and get its own issue: a tracker round trip from inside the
+  sandbox, plus a read-only `/issues` folder mounted in for the local tracker.
+  The launcher now reads the body and comments host-side and appends them to
+  each prompt as injected text, and the prompts no longer tell the agent to go
+  fetch anything. That text reaches the Box through the environment rather than
+  the runner's command line, so a long issue can't overflow the argument limit
+  and issue text doesn't show up in a process listing. The `/issues` mount is
+  retired. If you maintain your own prompt templates and they point at
+  `/issues`, that path is gone.
+- **Linked issues come along for the ride.** For a local issue, the launcher
+  walks the blocked-by and parent chain and renders it into that same injected
+  text, under a size budget, so an agent working a ticket can see the spec
+  above it without going to look.
+- **Registry credential helpers run on an allowlist, with the environment
+  cleared first.** An exec credential helper runs only if it is on the
+  allowlist, and environment credentials are unset before an exec route runs,
+  so a helper can't quietly inherit a token that was never meant for it.
+- **A refused socket mount now reads as "this host can't", not as a failure.**
+  On a Docker-on-VM setup where the socket directory is shared with the VM, the
+  transport probe was having the mount itself rejected and reading that as a
+  real error instead of as "unix sockets aren't available here". It falls back
+  to TCP now. Registry discovery also disambiguates names to a fixpoint rather
+  than in a single pass.
+- **You can see what went into a prompt.** Prompts render as attributed
+  segments, and each pass emits a composition report saying what it included
+  and where each piece came from. That is the thing you want when a prompt is
+  too long, or when something you expected to be in it isn't.
+- **Cheaper turns, and less comment noise in the diff.** The orchestrator
+  appends a pass's seeded block instead of prepending it, which keeps the
+  cached prefix stable across passes. Agents also write fewer throwaway code
+  comments: the code-comments policy is inlined into the prompt rather than
+  fetched through a skill invocation, and prose review findings now fold into
+  the surrounding text instead of stacking up.
+
 ## 0.18.0 — 2026-09-07
 
 Per-ecosystem registry declarations collapse into one grammar, npm
