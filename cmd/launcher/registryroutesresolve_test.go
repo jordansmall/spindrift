@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1186,6 +1187,154 @@ credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 		if r.Credential != wantCred {
 			t.Errorf("route %q Credential = %q, want %q", r.MatchHost, r.Credential, wantCred)
 		}
+	}
+}
+
+// assertRouteCredentials checks routes against want (keyed by MatchHost),
+// failing on a route count mismatch, an unexpected MatchHost, a Credential
+// that doesn't match, or a want key that no returned route matched.
+func assertRouteCredentials(t *testing.T, routes []registryproxy.Route, want map[string]string) {
+	t.Helper()
+	if len(routes) != len(want) {
+		t.Fatalf("got %d routes, want %d", len(routes), len(want))
+	}
+	seen := make(map[string]bool, len(routes))
+	for _, r := range routes {
+		wantCred, ok := want[r.MatchHost]
+		if !ok {
+			t.Errorf("got unexpected route %q", r.MatchHost)
+			continue
+		}
+		seen[r.MatchHost] = true
+		if r.Credential != wantCred {
+			t.Errorf("route %q Credential = %q, want %q", r.MatchHost, r.Credential, wantCred)
+		}
+	}
+	for host := range want {
+		if !seen[host] {
+			t.Errorf("want route %q, got none", host)
+		}
+	}
+}
+
+// execEchoOrAbsentArgv is the TOML `exec` array for a credential helper that
+// echoes envVar's value if set (including set-but-empty) in the child, or
+// ABSENT if unset -- shared by the two tests below that route a named env
+// var through a real child process to probe execCredentialEnv's allowlist.
+// It tests `${VAR+set}` rather than `[ -z "$VAR" ]` because the latter
+// can't distinguish unset from set-but-empty, the exact distinction
+// execCredentialEnv's os.LookupEnv is built on.
+func execEchoOrAbsentArgv(envVar string) string {
+	return fmt.Sprintf(`["/bin/sh", "-c", "if [ -z \"${%s+set}\" ]; then echo ABSENT; else echo \"$%s\"; fi"]`, envVar, envVar)
+}
+
+// Issue #3151 regression test: an exec route listed BEFORE an env route in
+// the routes file must never see the env route's credential var, whatever
+// the file order. This uses a non-allowlisted name, so it exercises the
+// real child-process boundary (execCredentialEnv's fixed allowlist) rather
+// than resolveRegistryRoutesFromFile's own pass ordering; see
+// TestResolveRegistryRoutesFromFile_OrderOfSourcesDoesNotAffectResult below
+// for a check that pins the pass ordering itself.
+func TestResolveRegistryRoutesFromFile_ExecBeforeEnv_ExecNeverSeesEnvRouteCredential(t *testing.T) {
+	t.Setenv("SPINDRIFT_TEST_ROUTES_ORDER_ENV_CRED", "should-not-leak")
+
+	path := writeRoutesFile(t, fmt.Sprintf(`
+[[routes]]
+match-host = "exec.example.com"
+credential = { exec = %s }
+
+[[routes]]
+match-host = "env.example.com"
+credential = { env = "SPINDRIFT_TEST_ROUTES_ORDER_ENV_CRED" }
+`, execEchoOrAbsentArgv("SPINDRIFT_TEST_ROUTES_ORDER_ENV_CRED")))
+
+	routes, err := resolveRegistryRoutesFromFile(path)
+	if err != nil {
+		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
+	}
+	assertRouteCredentials(t, routes, map[string]string{
+		"exec.example.com": "ABSENT",
+		"env.example.com":  "should-not-leak",
+	})
+}
+
+// This pins the two-pass ordering at resolveRegistryRoutesFromFile's own
+// seam, independent of execCredentialEnv's allowlist: the env source here
+// (SSH_AUTH_SOCK) is itself one of the names the allowlist forwards to an
+// exec child, so the exec route can only see it if the env route's Resolve
+// (and its Unsetenv) ran first -- a non-allowlisted name would pass on both
+// orders for the wrong reason (the allowlist blocks it either way) and never
+// actually exercise this function's own pass ordering. A single-pass,
+// file-order resolver would run the exec route before unsetting the env var
+// on the exec-then-env order and leak it; the two-pass resolver unsets every
+// env source in pass 1, before any exec source runs in pass 2, so the exec
+// route never observes it in either file order.
+func TestResolveRegistryRoutesFromFile_OrderOfSourcesDoesNotAffectResult(t *testing.T) {
+	argv := execEchoOrAbsentArgv("SSH_AUTH_SOCK")
+	envThenExec := fmt.Sprintf(`
+[[routes]]
+match-host = "env.example.com"
+credential = { env = "SSH_AUTH_SOCK" }
+
+[[routes]]
+match-host = "exec.example.com"
+credential = { exec = %s }
+`, argv)
+	execThenEnv := fmt.Sprintf(`
+[[routes]]
+match-host = "exec.example.com"
+credential = { exec = %s }
+
+[[routes]]
+match-host = "env.example.com"
+credential = { env = "SSH_AUTH_SOCK" }
+`, argv)
+	for name, doc := range map[string]string{"env-then-exec": envThenExec, "exec-then-env": execThenEnv} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("SSH_AUTH_SOCK", "permute-secret")
+			path := writeRoutesFile(t, doc)
+
+			routes, err := resolveRegistryRoutesFromFile(path)
+			if err != nil {
+				t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
+			}
+			assertRouteCredentials(t, routes, map[string]string{
+				"exec.example.com": "ABSENT",
+				"env.example.com":  "permute-secret",
+			})
+			if v, ok := os.LookupEnv("SSH_AUTH_SOCK"); ok {
+				t.Errorf("os.LookupEnv(SSH_AUTH_SOCK) after resolveRegistryRoutesFromFile() = %q, want unset", v)
+			}
+		})
+	}
+}
+
+// Pins the error-ordering consequence recorded in
+// resolveRegistryRoutesFromFile's doc comment: when both an exec route and
+// an env route would fail to resolve, the env route's failure surfaces
+// first, because pass 1 (env sources) runs to completion before pass 2
+// (everything else) starts -- independent of which route sits first in the
+// file.
+func TestResolveRegistryRoutesFromFile_BothFail_EnvErrorSurfacesFirst(t *testing.T) {
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "exec.example.com"
+credential = { exec = ["/bin/sh", "-c", "exit 1"] }
+
+[[routes]]
+match-host = "env.example.com"
+credential = { env = "SPINDRIFT_TEST_ROUTES_BOTH_FAIL_ENV_DOES_NOT_EXIST" }
+`)
+
+	routes, err := resolveRegistryRoutesFromFile(path)
+	if err == nil {
+		t.Fatal("resolveRegistryRoutesFromFile() = nil error, want an error: both routes fail to resolve")
+	}
+	if routes != nil {
+		t.Fatalf("resolveRegistryRoutesFromFile() routes = %+v, want nil", routes)
+	}
+	if !strings.Contains(err.Error(), `resolving credential for route "env.example.com"`) {
+		t.Errorf(`resolveRegistryRoutesFromFile() error = %q, want it to name "env.example.com" (pass 1), not "exec.example.com"`, err.Error())
 	}
 }
 

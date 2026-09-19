@@ -180,6 +180,19 @@ func declaredPathAloneLabel(route registryproxy.Route) string {
 // route's credential exactly once: resolving an env-var source is destructive
 // (os.Unsetenv on success), so a second resolve would find nothing. A failure
 // names the offending route's match-host.
+//
+// Resolving parsed's credentials runs in two passes, both in file order
+// (issue #3151): pass 1 resolves (and so unsets) every route whose
+// credential consumes a process env var (credresolver.ResolveUnsetsEnv),
+// before pass 2 resolves everything else, including exec sources. A single
+// file-order pass would let an exec route listed before an env route run
+// while that env var was still set, so which secrets a credential helper can
+// observe would depend on where its route happened to sit in the routes
+// file. Pass 1 removes that dependency: every env var this file names is
+// gone from the process environment before any exec helper runs, whatever
+// order the routes appear in. One consequence: when both an env-sourced and
+// a non-env route would fail to resolve, the env route's failure always
+// surfaces first, because pass 1 runs to completion before pass 2 starts.
 func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, error) {
 	data, err := os.ReadFile(routesFile)
 	if err != nil {
@@ -189,23 +202,42 @@ func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, er
 	if err != nil {
 		return nil, err
 	}
-	routes := make([]registryproxy.Route, 0, len(parsed))
-	for _, r := range parsed {
-		cred, err := credresolver.New(r.Credential).Resolve()
-		if err != nil {
-			return nil, fmt.Errorf("resolving credential for route %q: %w", r.MatchHost, err)
-		}
-		routes = append(routes, registryproxy.Route{
+
+	routes := make([]registryproxy.Route, len(parsed))
+	for i, r := range parsed {
+		routes[i] = registryproxy.Route{
 			MatchHost:      r.MatchHost,
 			AuthScheme:     r.AuthScheme,
-			Credential:     cred,
 			Ecosystems:     r.Ecosystems,
 			UpstreamOrigin: r.UpstreamOrigin,
 			Allow:          r.Allow,
 			// resolveHostRootedUpstreams fills Upstream and EnforcedPaths;
 			// it needs the whole route slice and a Target-repo checkout,
 			// which this function does not depend on.
-		})
+		}
+	}
+
+	// resolvePass resolves every route whose credresolver.ResolveUnsetsEnv
+	// matches unsetsEnv, skipping the rest; the two calls below are what
+	// give parsed its two file-order passes (see the doc comment above).
+	resolvePass := func(unsetsEnv bool) error {
+		for i, r := range parsed {
+			if credresolver.ResolveUnsetsEnv(r.Credential) != unsetsEnv {
+				continue
+			}
+			cred, err := credresolver.New(r.Credential).Resolve()
+			if err != nil {
+				return fmt.Errorf("resolving credential for route %q: %w", r.MatchHost, err)
+			}
+			routes[i].Credential = cred
+		}
+		return nil
+	}
+	if err := resolvePass(true); err != nil {
+		return nil, err
+	}
+	if err := resolvePass(false); err != nil {
+		return nil, err
 	}
 	return routes, nil
 }
