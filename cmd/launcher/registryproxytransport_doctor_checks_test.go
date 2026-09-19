@@ -150,12 +150,13 @@ func TestRegistryProxyTransportCheck_ZeroEndpointWrapsErrDegraded(t *testing.T) 
 	}
 }
 
-// doctorReportChecks appends the row unconditionally, unlike the per-route and
-// drift rows: the row carries its own not-configured arm, so `spindrift doctor`
-// always shows one transport line (issue #3114). The classify-side exclusion
-// lives in TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRows
+// doctorCheckSets' report half appends the row unconditionally, unlike the
+// per-route and drift rows: the row carries its own not-configured arm, so
+// `spindrift doctor` always shows one transport line (issue #3114). The
+// classify-side exclusion lives in
+// TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRows
 // (bwrap_doctor_checks_test.go), so this test does not duplicate it.
-func TestDoctorReportChecks_WiresRegistryProxyTransportCheck(t *testing.T) {
+func TestDoctorCheckSets_WiresRegistryProxyTransportCheck(t *testing.T) {
 	fake := runner.NewFake()
 	withRegistryProxyTransportFake(t, fake)
 
@@ -163,13 +164,15 @@ func TestDoctorReportChecks_WiresRegistryProxyTransportCheck(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_CHECKS_WIRES_TRANSPORT" }
+credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_WIRES_TRANSPORT" }
 `)
-	checkByName(t, doctorReportChecks(c), registryProxyTransportCheckName)
+	_, checks := doctorCheckSets(c)
+	checkByName(t, checks, registryProxyTransportCheckName)
 
 	c = minimalValidConfig()
 	c.registryProxyRoutesFile = ""
-	unconfigured := checkByName(t, doctorReportChecks(c), registryProxyTransportCheckName)
+	_, checks = doctorCheckSets(c)
+	unconfigured := checkByName(t, checks, registryProxyTransportCheckName)
 	if _, err := unconfigured.Probe(); err != nil {
 		t.Fatalf("Probe() error = %v, want nil", err)
 	}

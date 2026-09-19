@@ -312,23 +312,23 @@ func TestDoctorExtraChecks_StripsRuntimeRowOnly(t *testing.T) {
 
 // Issue #2671 AC: the bwrap capability rows are reported only when the
 // configured runtime is bwrap.
-func TestDoctorReportChecks_BwrapRowsGatedOnRunnerKind(t *testing.T) {
+func TestDoctorCheckSets_BwrapRowsGatedOnRunnerKind(t *testing.T) {
 	bwrapRowNames := []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
 
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
-	report := doctorReportChecks(c)
+	_, report := doctorCheckSets(c)
 	for _, name := range bwrapRowNames {
 		checkByName(t, report, name)
 	}
 
 	c = minimalValidConfig()
 	c.runnerKind = "oci"
-	report = doctorReportChecks(c)
+	_, report = doctorCheckSets(c)
 	for _, ch := range report {
 		for _, name := range bwrapRowNames {
 			if ch.Name == name {
-				t.Errorf("doctorReportChecks output contains %q for non-bwrap runnerKind %q", name, c.runnerKind)
+				t.Errorf("doctorCheckSets(c) report contains %q for non-bwrap runnerKind %q", name, c.runnerKind)
 			}
 		}
 	}

@@ -296,7 +296,8 @@ func TestDoctorGateRegistryReport_FailingGate_ErrorPropagatesAndPriorGatesReport
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var buf bytes.Buffer
-	err := runDoctor(f, f, c, &buf, strings.NewReader(""), false, doctorReportChecks(c))
+	_, report := doctorCheckSets(c)
+	err := runDoctor(f, f, c, &buf, strings.NewReader(""), false, report)
 
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("runDoctor() error = %v, want %v", err, wantErr)
@@ -337,7 +338,8 @@ func TestDoctorGateRegistryReport_CollectAll_ReportsEveryFailingNonNetworkGate(t
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var buf bytes.Buffer
-	_ = runDoctor(f, f, c, &buf, strings.NewReader(""), false, doctorReportChecks(c))
+	_, report := doctorCheckSets(c)
+	_ = runDoctor(f, f, c, &buf, strings.NewReader(""), false, report)
 
 	if !strings.Contains(buf.String(), "MISSING: first: "+firstErr.Error()) {
 		t.Errorf("runDoctor() output = %q, want it to report the first failing gate's MISSING line", buf.String())
@@ -362,7 +364,8 @@ func TestRunDoctor_ReadWrite_PrintsExplicitTokenGateNoOpLine(t *testing.T) {
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var buf bytes.Buffer
-	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false, doctorReportChecks(c)); err != nil {
+	_, report := doctorCheckSets(c)
+	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -393,7 +396,8 @@ func TestRunDoctor_ReadOnly_OmitsReadWriteNoOpLine(t *testing.T) {
 	t.Setenv("BOX_GH_TOKEN", "")
 
 	var buf bytes.Buffer
-	_ = runDoctor(f, f, c, &buf, strings.NewReader(""), false, doctorReportChecks(c))
+	_, report := doctorCheckSets(c)
+	_ = runDoctor(f, f, c, &buf, strings.NewReader(""), false, report)
 
 	if strings.Contains(buf.String(), "BOX_FORGE_AND_ISSUE_ACCESS=read-write") {
 		t.Errorf("runDoctor() output = %q, want no read-write no-op line under read-only", buf.String())
@@ -414,7 +418,8 @@ func TestRunDoctor_InvalidBoxForgeAndIssueAccess_OmitsReadWriteNoOpLine(t *testi
 	c.boxForgeAndIssueAccess = "banana"
 
 	var buf bytes.Buffer
-	_ = runDoctor(f, f, c, &buf, strings.NewReader(""), false, doctorReportChecks(c))
+	_, report := doctorCheckSets(c)
+	_ = runDoctor(f, f, c, &buf, strings.NewReader(""), false, report)
 
 	if strings.Contains(buf.String(), "BOX_FORGE_AND_ISSUE_ACCESS=read-write") {
 		t.Errorf("runDoctor() output = %q, want no read-write no-op line for an invalid boxForgeAndIssueAccess value", buf.String())
