@@ -126,6 +126,29 @@ let
       fragment = "nix-checks-default.md";
       var = "NIX_CHECKS_STEP";
     }
+    # Anchors for the three pstack-derived principle skills, each at the
+    # decision point it governs: the skill preamble already names every baked
+    # skill, so an anchor's only job is timing. Dogfood-only gates, no off arm.
+    # PRINCIPLE_FIX_ROOT_CAUSES_STEP renders twice -- fix-prompt.md's FIX step
+    # and issue-prompt.md's CHECK -- guarding the cheapest way to turn CI
+    # green: a nil check or loosened assertion that buries the bug.
+    {
+      gate = "PRINCIPLE_FIX_ROOT_CAUSES_BAKED";
+      fragment = "principle-fix-root-causes-default.md";
+      var = "PRINCIPLE_FIX_ROOT_CAUSES_STEP";
+    }
+    # The other two anchor IMPLEMENT only, never fix-prompt.md, which already
+    # says to make the smallest change and not to refactor or redesign.
+    {
+      gate = "PRINCIPLE_LAZINESS_PROTOCOL_BAKED";
+      fragment = "principle-laziness-protocol-default.md";
+      var = "PRINCIPLE_LAZINESS_PROTOCOL_STEP";
+    }
+    {
+      gate = "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED";
+      fragment = "principle-redesign-from-first-principles-default.md";
+      var = "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP";
+    }
     # The REVIEW section (issue #2037, ADR 0035): off, the implementor spawns
     # a fresh `reviewer` subagent inline and loops until no blocking findings
     # remain. On, the orchestrator drives that review as its own pass, so this

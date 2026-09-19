@@ -50,7 +50,7 @@ required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
 
 ${SCOUT_DELEGATE_STEP}${SCOUT_ABSENT_STEP}# IMPLEMENT
 
-${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}${CODE_COMMENTS_STEP}# CHECK
+${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}${CODE_COMMENTS_STEP}${PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP}${PRINCIPLE_LAZINESS_PROTOCOL_STEP}# CHECK
 
 Before each commit, run the repo's own checks green. Use what the project
 defines (package scripts, Makefile, CI config).
@@ -68,7 +68,7 @@ while it is still pending: the turn ends before the gate finishes, so no
 work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
 (`status=ready` or `status=blocked`) has been printed.
 
-${CHECK_HYGIENE_STEP}${NIX_CHECKS_STEP}${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT
+${CHECK_HYGIENE_STEP}${NIX_CHECKS_STEP}${PRINCIPLE_FIX_ROOT_CAUSES_STEP}${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT
 
 ${COMMIT_BAKED_STEP}${COMMIT_UNBAKED_STEP}Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone.
