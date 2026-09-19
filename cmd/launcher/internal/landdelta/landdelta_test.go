@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -84,7 +85,13 @@ func TestCompute_AddedCommitDelta(t *testing.T) {
 
 	got := Compute(dir, anchor, "")
 
-	want := Delta{Known: true, Files: 2, Insertions: 2, Deletions: 0, Paths: []string{"base.txt", "new.txt"}}
+	want := Delta{
+		Known: true, Files: 2, Insertions: 2, Deletions: 0, Paths: []string{"base.txt", "new.txt"},
+		Ranges: map[string][]Range{
+			"base.txt": {{Start: 1, Count: 0}},
+			"new.txt":  {{Start: 0, Count: 0}},
+		},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Compute() = %+v, want %+v", got, want)
 	}
@@ -136,12 +143,19 @@ func TestCompute_RebaseOntoMovedBaseWithLandCommit(t *testing.T) {
 	// The rebase replays the same F1 content (base.txt) on both the reviewed
 	// and landed sides, so it nets to zero. Only the extra land commit
 	// (land.txt) counts, and the base movement (other.txt) must not appear.
-	want := Delta{Known: true, Files: 1, Insertions: 1, Deletions: 0, Paths: []string{"land.txt"}}
+	want := Delta{
+		Known: true, Files: 1, Insertions: 1, Deletions: 0, Paths: []string{"land.txt"},
+		Ranges: map[string][]Range{"land.txt": {{Start: 0, Count: 0}}},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Compute() = %+v, want %+v", got, want)
 	}
 	if len(got.Paths) != got.Files {
 		t.Fatalf("len(Paths) = %d, want Files = %d", len(got.Paths), got.Files)
+	}
+	wantSummary := "post-approval land delta: 1 files changed, 1 insertions(+), 0 deletions(-)"
+	if got.Summary() != wantSummary {
+		t.Fatalf("Summary() = %q, want %q", got.Summary(), wantSummary)
 	}
 }
 
@@ -169,6 +183,9 @@ func TestCompute_MissingAnchor(t *testing.T) {
 	}
 	if got.Paths != nil {
 		t.Fatalf("Paths = %v, want nil", got.Paths)
+	}
+	if got.Ranges != nil {
+		t.Fatalf("Ranges = %v, want nil", got.Ranges)
 	}
 	wantSummary := "post-approval land delta: unknown (no reviewed-commit anchor)"
 	if got.Summary() != wantSummary {
@@ -254,7 +271,7 @@ func TestDeltaSummary(t *testing.T) {
 	}
 }
 
-func TestParseOldSideRanges(t *testing.T) {
+func TestParsePreImageRanges(t *testing.T) {
 	cases := []struct {
 		name string
 		diff string
@@ -409,12 +426,27 @@ func TestParseOldSideRanges(t *testing.T) {
 			diff: "",
 			want: nil,
 		},
+		{
+			// core.quotePath (on by default) renders a non-ASCII path
+			// quoted with backslash-escaped octal, a shape neither
+			// oldPathHeaderRe nor newPathHeaderRe matches, so the path
+			// never gets ranges (issue #3503) — a documented, safe
+			// degradation rather than a bug.
+			name: "quoted non-ASCII path yields no ranges",
+			diff: "diff --git \"a/\\303\\251.txt\" \"b/\\303\\251.txt\"\n" +
+				"--- \"a/\\303\\251.txt\"\n" +
+				"+++ \"b/\\303\\251.txt\"\n" +
+				"@@ -1,1 +1,1 @@\n" +
+				"-old\n" +
+				"+new\n",
+			want: nil,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := parseOldSideRanges(c.diff)
+			got := parsePreImageRanges(c.diff)
 			if !reflect.DeepEqual(got, c.want) {
-				t.Fatalf("parseOldSideRanges() = %+v, want %+v", got, c.want)
+				t.Fatalf("parsePreImageRanges() = %+v, want %+v", got, c.want)
 			}
 		})
 	}
@@ -442,4 +474,234 @@ func TestDeltaRangesJSONTag(t *testing.T) {
 	if strings.Contains(string(b), `"ranges"`) {
 		t.Fatalf("json = %s, want no ranges key", b)
 	}
+}
+
+// TestCompute_Ranges pins Delta.Ranges (issue #3503) across both Compute
+// paths: direct-diff and rebase-invariant. Each subtest builds its own
+// disposable repo since the setups differ (single-line change, rebase,
+// insertion, deletion, multi-hunk).
+func TestCompute_Ranges(t *testing.T) {
+	// The direct-diff path twice over one fixture: once in a pristine repo,
+	// once in one whose ambient config rewrites the diff preImageRanges
+	// parses. Unpinned, each of diff.noprefix, diff.srcPrefix/diff.dstPrefix,
+	// color.ui and diff.external empties the ranges on its own, so the two
+	// runs share a `want` rather than drifting apart by hand.
+	for _, c := range []struct {
+		name string
+		// config holds repo-local `git config <key> <value>` pairs.
+		config [][2]string
+	}{
+		{name: "direct diff"},
+		{name: "direct diff under hostile ambient diff config", config: [][2]string{
+			{"diff.noprefix", "true"},
+			{"diff.mnemonicPrefix", "true"},
+			{"diff.srcPrefix", "SRC/"},
+			{"diff.dstPrefix", "DST/"},
+			{"color.ui", "always"},
+			{"diff.external", "echo external-diff"},
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := newRepo(t)
+			for _, kv := range c.config {
+				runGitT(t, dir, "config", kv[0], kv[1])
+			}
+			anchor := runGitT(t, dir, "rev-parse", "HEAD")
+
+			writeFileT(t, dir, "base.txt", "line1changed\n")
+			runGitT(t, dir, "add", "base.txt")
+			runGitT(t, dir, "commit", "-m", "land: change line1")
+
+			got := Compute(dir, anchor, "")
+
+			want := map[string][]Range{"base.txt": {{Start: 1, Count: 1}}}
+			if !reflect.DeepEqual(got.Ranges, want) {
+				t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
+			}
+		})
+	}
+
+	t.Run("rebased branch", func(t *testing.T) {
+		dir, anchor := rebasedRepo(t, true)
+
+		got := Compute(dir, anchor, "main")
+
+		if got.Ranges == nil {
+			t.Fatal("Ranges = nil, want non-nil")
+		}
+		if _, ok := got.Ranges["land.txt"]; !ok {
+			t.Fatalf("Ranges = %+v, want a \"land.txt\" key", got.Ranges)
+		}
+		// other.txt only changed because main (the base) moved during
+		// review; the land pass itself never touched it, so it must not
+		// appear in Ranges (AC3).
+		if _, ok := got.Ranges["other.txt"]; ok {
+			t.Fatalf("Ranges = %+v, want no \"other.txt\" key (base-movement-only path)", got.Ranges)
+		}
+	})
+
+	t.Run("mixed provenance", func(t *testing.T) {
+		// shared.txt is edited by all three of: the anchor commit (line 3),
+		// the base's own movement (line 35), and the land commit (line 20).
+		// anchor..HEAD's hunks for shared.txt therefore mix the land pass's
+		// own edit with the base's, which cannot be told apart in anchor
+		// coordinates — shared.txt must still count as a touched path, but
+		// it must never get a Ranges entry.
+		base := make([]string, 40)
+		for i := range base {
+			base[i] = "line" + strconv.Itoa(i+1)
+		}
+		dir := newRepo(t)
+		writeFileT(t, dir, "shared.txt", strings.Join(base, "\n")+"\n")
+		runGitT(t, dir, "add", "shared.txt")
+		runGitT(t, dir, "commit", "-m", "add shared.txt")
+
+		runGitT(t, dir, "checkout", "-b", "feature")
+		featureLines := append([]string(nil), base...)
+		featureLines[2] = "line3mod"
+		writeFileT(t, dir, "shared.txt", strings.Join(featureLines, "\n")+"\n")
+		runGitT(t, dir, "add", "shared.txt")
+		runGitT(t, dir, "commit", "-m", "feature: change line3")
+		anchor := runGitT(t, dir, "rev-parse", "HEAD")
+
+		runGitT(t, dir, "checkout", "main")
+		mainLines := append([]string(nil), base...)
+		mainLines[34] = "line35mod"
+		writeFileT(t, dir, "shared.txt", strings.Join(mainLines, "\n")+"\n")
+		runGitT(t, dir, "add", "shared.txt")
+		runGitT(t, dir, "commit", "-m", "main: change line35")
+
+		runGitT(t, dir, "checkout", "feature")
+		runGitT(t, dir, "rebase", "main")
+
+		landLines := append([]string(nil), base...)
+		landLines[2] = "line3mod"
+		landLines[34] = "line35mod"
+		landLines[19] = "line20mod"
+		writeFileT(t, dir, "shared.txt", strings.Join(landLines, "\n")+"\n")
+		runGitT(t, dir, "add", "shared.txt")
+		runGitT(t, dir, "commit", "-m", "land: change line20")
+
+		got := Compute(dir, anchor, "main")
+
+		found := false
+		for _, p := range got.Paths {
+			if p == "shared.txt" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("Paths = %v, want \"shared.txt\"", got.Paths)
+		}
+		if _, ok := got.Ranges["shared.txt"]; ok {
+			t.Fatalf("Ranges = %+v, want no \"shared.txt\" key (mixed provenance)", got.Ranges)
+		}
+	})
+
+	t.Run("header mimicry hazard end-to-end", func(t *testing.T) {
+		// Drives the same header-mimicry hazard as TestParsePreImageRanges'
+		// "hunk content mimics new-path header" case through real git, to
+		// pin the assumption about git's actual -U0 output rather than
+		// just the parser's unit table.
+		var lines []string
+		for i := 1; i <= 10; i++ {
+			lines = append(lines, "line"+strconv.Itoa(i))
+		}
+		dir := newRepo(t)
+		writeFileT(t, dir, "notes.md", strings.Join(lines, "\n")+"\n")
+		runGitT(t, dir, "add", "notes.md")
+		runGitT(t, dir, "commit", "-m", "add notes.md")
+		anchor := runGitT(t, dir, "rev-parse", "HEAD")
+
+		// Insert a line whose literal text is "++ b/evil.go" — git's diff
+		// output renders the added line as "+++ b/evil.go", a new-path
+		// header's exact shape — plus a second, distant changed region.
+		landed := append([]string{}, lines[0:2]...)
+		landed = append(landed, "++ b/evil.go")
+		landed = append(landed, lines[2:]...)
+		landed[9] = "line9mod"
+		writeFileT(t, dir, "notes.md", strings.Join(landed, "\n")+"\n")
+		runGitT(t, dir, "add", "notes.md")
+		runGitT(t, dir, "commit", "-m", "land: add evil-mimicking line and modify line9")
+
+		got := Compute(dir, anchor, "")
+
+		want := map[string][]Range{"notes.md": {{Start: 2, Count: 0}, {Start: 9, Count: 1}}}
+		if !reflect.DeepEqual(got.Ranges, want) {
+			t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
+		}
+	})
+
+	t.Run("pure insertion", func(t *testing.T) {
+		dir := newRepo(t)
+		anchor := runGitT(t, dir, "rev-parse", "HEAD")
+
+		writeFileT(t, dir, "base.txt", "line1\nline2\n")
+		runGitT(t, dir, "add", "base.txt")
+		runGitT(t, dir, "commit", "-m", "land: append line2")
+
+		got := Compute(dir, anchor, "")
+
+		want := map[string][]Range{"base.txt": {{Start: 1, Count: 0}}}
+		if !reflect.DeepEqual(got.Ranges, want) {
+			t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
+		}
+	})
+
+	t.Run("pure deletion", func(t *testing.T) {
+		dir := newRepo(t)
+		writeFileT(t, dir, "base.txt", "line1\nline2\nline3\nline4\n")
+		runGitT(t, dir, "add", "base.txt")
+		runGitT(t, dir, "commit", "-m", "expand")
+		anchor := runGitT(t, dir, "rev-parse", "HEAD")
+
+		writeFileT(t, dir, "base.txt", "line1\nline4\n")
+		runGitT(t, dir, "add", "base.txt")
+		runGitT(t, dir, "commit", "-m", "land: delete line2 and line3")
+
+		got := Compute(dir, anchor, "")
+
+		want := map[string][]Range{"base.txt": {{Start: 2, Count: 2}}}
+		if !reflect.DeepEqual(got.Ranges, want) {
+			t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
+		}
+	})
+
+	t.Run("multi-hunk file", func(t *testing.T) {
+		dir := newRepo(t)
+		var lines []string
+		for i := 1; i <= 10; i++ {
+			lines = append(lines, "line"+strconv.Itoa(i))
+		}
+		writeFileT(t, dir, "base.txt", strings.Join(lines, "\n")+"\n")
+		runGitT(t, dir, "add", "base.txt")
+		runGitT(t, dir, "commit", "-m", "expand")
+		anchor := runGitT(t, dir, "rev-parse", "HEAD")
+
+		lines[1] = "line2mod"
+		lines[8] = "line9mod"
+		writeFileT(t, dir, "base.txt", strings.Join(lines, "\n")+"\n")
+		runGitT(t, dir, "add", "base.txt")
+		runGitT(t, dir, "commit", "-m", "land: change two distant lines")
+
+		got := Compute(dir, anchor, "")
+
+		want := map[string][]Range{"base.txt": {{Start: 2, Count: 1}, {Start: 9, Count: 1}}}
+		if !reflect.DeepEqual(got.Ranges, want) {
+			t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
+		}
+	})
+
+	t.Run("unknown delta", func(t *testing.T) {
+		dir := newRepo(t)
+
+		got := Compute(dir, "", "")
+
+		if got.Known {
+			t.Fatalf("Known = true, want false")
+		}
+		if got.Ranges != nil {
+			t.Fatalf("Ranges = %+v, want nil", got.Ranges)
+		}
+	})
 }
