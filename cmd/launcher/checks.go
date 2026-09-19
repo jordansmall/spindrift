@@ -44,7 +44,7 @@ const registryProxyRoutesCheckName = "registry-proxy-routes"
 // registryProxyRoutesCheck builds the registry-proxy-routes row. It stays in
 // cmd/launcher because it reads main-only state (loadRegistryRoutes,
 // retiredRegistryProxyKnobsFromEnv) Quickstart has no equivalent of. Pass
-// peekCredentials false where registryRouteChecks already emits a per-route
+// peekCredentials false where doctorCheckSets already emits a per-route
 // credential row, so an exec credential's prompt cannot fire twice (#3144).
 func registryProxyRoutesCheck(c config, peekCredentials bool) doctor.Check {
 	return doctor.Check{

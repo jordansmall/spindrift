@@ -80,27 +80,22 @@ func bwrapCapabilityChecks(c config) []doctor.Check {
 	}
 }
 
-// doctorReportChecks returns the report half of doctorCheckSets(c). Each
-// standalone call builds its own set, so the peek-once-per-credential
-// guarantee (issue #3144) holds only at the readContext.validation() call
-// site, which builds exactly one set and runs both halves over it.
-func doctorReportChecks(c config) []doctor.Check {
-	_, report := doctorCheckSets(c)
-	return report
-}
-
 // doctorCheckSets builds the classify and report halves (issue #3144).
-// memoizeCheckProbes shares one *sync.Once per row, so a credential Peeks
-// at most once across both. classify omits the bwrap, drift, and transport
+// memoizeCheckProbes shares one *sync.Once per row, so a credential Peeks at
+// most once across the one set this call builds -- run-wide that holds only
+// at readContext.validation(), the single call site building one set and
+// running both halves over it. classify omits the bwrap, drift, and transport
 // rows, which must never make validateConfig exit 2 (issue #2671, ADR 0045,
 // issue #3114); the per-route rows stay, so a bad credential still exits 2.
 func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	extra := doctorExtraChecks(c)
 	var perRoute, drift []doctor.Check
+	// A config that declares no routes gets no route rows at all, not an
+	// empty-routes report (issue #3145).
 	if c.registryProxyRoutesFile != "" {
 		extra = replaceCheckByName(extra, registryProxyRoutesCheckName, registryProxyRoutesCheck(c, false))
 		// One parse feeds both row families. A read or parse failure
-		// yields nil for both, same as either helper's own gate would.
+		// yields nil for both, leaving the failure to registryProxyRoutesCheck.
 		if routes, err := loadRegistryRoutes(c.registryProxyRoutesFile); err == nil {
 			perRoute = routeChecksFor(routes)
 			drift = registryRouteDriftCheckForRoutes(c, routes)
