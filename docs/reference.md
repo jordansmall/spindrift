@@ -2046,6 +2046,31 @@ one-line section of the PR body settle opens or adopts — "known", zero, and
 "unknown" all render there, and a manifest with no land entry (an older Box)
 appends nothing.
 
+The delta also records, per changed path, the changed-line ranges the land
+pass touched (issue #3503): each Range is a pre-image hunk from the
+anchor-to-HEAD diff, deliberately kept in the reviewed anchor's own
+coordinates — the same review pass that set the anchor also recorded
+the findings whose `path:line` citations already live in that space,
+so a pre-image range is directly comparable to a finding's line while a
+new-side range would not be. `count == 0` marks a pure insertion, landed
+immediately after old line `start`, distinguishing an insertion from a
+modification. A path whose pre-image hunks cannot be determined is simply
+absent from the ranges — a binary file, say; a mode-only change, which
+numstat counts as `0 0 <path>` while the `-U0` diff renders only the mode
+lines and no hunk at all; on a rebased branch, a path the moved base also
+changed, whose anchor-to-HEAD hunks mix the land pass's edits with the
+base's and cannot be told apart in the anchor's coordinates; a renamed
+path, which numstat reports as a composite key (`d/{old.txt => new.txt}`
+when the two paths share a directory, `old.txt => new.txt` when they do
+not) that no diff header's own path can match — and which, at 100%
+similarity, yields no hunks either way; or a path git renders quoted
+(`core.quotePath`, e.g. non-ASCII), a shape the header regexes don't
+match. Such a path still counts in
+`files`, `insertions`, `deletions` and `paths`, which the rebase-invariant
+numstat comparison answers outright. The ranges are absent entirely from
+an unknown delta, the same degradation the rest of the delta already
+takes.
+
 Once the terminal land pass reaches its own `status=ready` outcome — after
 its own markers above are emitted, before the host applies the landing —
 the orchestrator runs one more bounded gate (issue #3246): does anything
