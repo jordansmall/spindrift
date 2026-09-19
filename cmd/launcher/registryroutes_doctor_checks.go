@@ -9,32 +9,16 @@ import (
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
-// loadRegistryRoutes reads and parses file so registryRouteChecks,
-// registryRouteDriftCheck, and registryProxyRoutesCheck word a read failure the
-// same way. A Parse failure passes through unwrapped: registryroutes.Parse's
-// own "registryroutes: ..." message already names what is wrong.
+// loadRegistryRoutes reads and parses file so doctorCheckSets and
+// registryProxyRoutesCheck word a read failure the same way. A Parse
+// failure passes through unwrapped: registryroutes.Parse's own
+// "registryroutes: ..." message already names what is wrong.
 func loadRegistryRoutes(file string) ([]registryroutes.Route, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("reading REGISTRY_PROXY_ROUTES_FILE %q: %w", file, err)
 	}
 	return registryroutes.Parse(data)
-}
-
-// registryRouteChecks returns a credential row and an upstream-origin row per
-// route declared in c.registryProxyRoutesFile (ADR 0045, issue #3144), each
-// named after that route's own match host. It returns nil when the file is
-// unset (issue #3145) or fails to read or parse, because the
-// registry-proxy-routes row in checks.go already reports that same failure.
-func registryRouteChecks(c config) []doctor.Check {
-	if c.registryProxyRoutesFile == "" {
-		return nil
-	}
-	routes, err := loadRegistryRoutes(c.registryProxyRoutesFile)
-	if err != nil {
-		return nil
-	}
-	return routeChecksFor(routes)
 }
 
 // routeChecksFor takes an already-parsed route slice so a test can pass a route
@@ -49,8 +33,8 @@ func routeChecksFor(routes []registryroutes.Route) []doctor.Check {
 }
 
 // routeCredentialCheck reports whether route's credential resolves. It is the
-// only credential peek in the doctor report: doctorReportChecks passes
-// registryProxyRoutesCheck(c, false) whenever these per-route rows are present.
+// only credential peek in the doctor report: doctorCheckSets passes
+// registryProxyRoutesCheck(c, false) whenever a routes file is configured.
 func routeCredentialCheck(route registryroutes.Route) doctor.Check {
 	return doctor.Check{
 		Name:   fmt.Sprintf("registry-route-credential[%s]", route.MatchHost),

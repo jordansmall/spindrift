@@ -111,22 +111,6 @@ func gitCheckoutRoot(dir string) string {
 	}
 }
 
-// registryRouteDriftCheck returns one doctor.Check row reporting a host the
-// repo declares that no route in c.registryProxyRoutesFile covers (ADR 0045).
-// It returns nil when the routes file is unset, unreadable, or unparsable,
-// deferring that failure to the registry-proxy-routes row. The source it reads
-// and a second gate that can skip it depend on c.codeForge.
-func registryRouteDriftCheck(c config) []doctor.Check {
-	if c.registryProxyRoutesFile == "" {
-		return nil
-	}
-	routes, err := loadRegistryRoutes(c.registryProxyRoutesFile)
-	if err != nil {
-		return nil
-	}
-	return registryRouteDriftCheckForRoutes(c, routes)
-}
-
 // registryRouteDriftCheckForRoutes keys the row's source on
 // backendByName(c.codeForge).HostMediatedRemote, not a codeForge == "local"
 // compare a future host-mediated backend would break. A host-mediated forge
