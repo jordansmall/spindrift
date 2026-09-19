@@ -68,6 +68,10 @@ func (d Delta) Summary() string {
 // by the rev-parse --verify in Compute, which also fails open.
 var anchorRe = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 
+// rangesFailedReason is the shared unknown() reason for both Compute call
+// sites below that fail computing pre-image ranges.
+const rangesFailedReason = "git diff for the reviewed-anchor line ranges failed"
+
 // Compute determines the tree delta between anchor (HEAD when the reviewer
 // APPROVEd) and dir's current HEAD, rebase-invariantly (issue #3244).
 // baseBranch is the base branch name, possibly empty; Compute resolves it
@@ -87,7 +91,11 @@ func Compute(dir, anchor, baseBranch string) Delta {
 		if err != nil {
 			return unknown("git diff between the reviewed anchor and HEAD failed")
 		}
-		return Delta{Known: true, Files: files, Insertions: ins, Deletions: del, Paths: paths}
+		ranges, err := preImageRanges(dir, anchor, paths)
+		if err != nil {
+			return unknown(rangesFailedReason)
+		}
+		return Delta{Known: true, Files: files, Insertions: ins, Deletions: del, Paths: paths, Ranges: ranges}
 	}
 
 	// anchor is not an ancestor of HEAD, so the branch was rebased. Compare
@@ -113,7 +121,22 @@ func Compute(dir, anchor, baseBranch string) Delta {
 		return unknown("git diff for the landed branch's own patch failed")
 	}
 	files, ins, del, paths := diffNumstatMaps(parseNumstat(reviewedOut), parseNumstat(landedOut))
-	return Delta{Known: true, Files: files, Insertions: ins, Deletions: del, Paths: paths}
+
+	// anchor..HEAD composes the land pass's own edits with the base
+	// movement oldBase->newBase. A path the base also touched has hunks of
+	// mixed provenance in that diff that cannot be separated in anchor
+	// coordinates, so it is dropped from ranges (never from paths/counts
+	// above, which are already rebase-invariant by construction).
+	baseMovedOut, err := runGit(dir, "diff", "--numstat", oldBase, newBase)
+	if err != nil {
+		return unknown("git diff between the old and new base failed")
+	}
+	rangePaths := excludePaths(paths, parseNumstat(baseMovedOut))
+	ranges, err := preImageRanges(dir, anchor, rangePaths)
+	if err != nil {
+		return unknown(rangesFailedReason)
+	}
+	return Delta{Known: true, Files: files, Insertions: ins, Deletions: del, Paths: paths, Ranges: ranges}
 }
 
 func unknown(reason string) Delta {
@@ -249,6 +272,19 @@ func diffNumstatMaps(reviewed, landed map[string]numstatEntry) (files, ins, del 
 	return files, ins, del, touched
 }
 
+// excludePaths returns the paths from paths that are not keys of moved, in
+// paths' own order, which diffNumstatMaps already sorted (issue #3246).
+func excludePaths(paths []string, moved map[string]numstatEntry) []string {
+	var kept []string
+	for _, p := range paths {
+		if _, ok := moved[p]; ok {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return kept
+}
+
 func abs(n int) int {
 	if n < 0 {
 		return -n
@@ -264,23 +300,19 @@ var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+`)
 
 // oldPathHeaderRe matches a `--- a/<path>` line, the pre-image path, and
 // newPathHeaderRe the `+++ b/<path>` post-image one. Hunk content takes
-// those shapes too, so parseOldSideRanges only consults them outside a hunk.
+// those shapes too, so parsePreImageRanges consults them only before a
+// file's first hunk.
 var oldPathHeaderRe = regexp.MustCompile(`^--- a/(.+)$`)
 var newPathHeaderRe = regexp.MustCompile(`^\+\+\+ b/(.+)$`)
 
-// parseOldSideRanges parses `git diff -U0 <from> <to>` output (unified=0, so
-// every hunk header is already the minimal changed region) into per-path
-// old-side ranges, in the order git emits them. It tracks path from the
-// `+++ b/<path>` header, falling back to the preceding `--- a/<path>` line
-// when the post-image is `+++ /dev/null` (a deleted file), so a deletion
-// still gets its old-side ranges attributed to a path.
-//
-// Path headers are only trusted before the file's first hunk: a land pass
-// that adds the line `++ b/evil.go` renders it as `+++ b/evil.go`, a
-// header's shape exactly. Only a column-zero `diff --git ` line is an
-// unambiguous per-file boundary — every content line carries a `+`/`-`
-// prefix — so the scan keys off that. It never errors.
-func parseOldSideRanges(out string) map[string][]Range {
+// parsePreImageRanges parses `git diff -U0` output into per-path pre-image
+// ranges. A path header is trusted only before the file's first hunk: hunk
+// content takes the same `--- a/`/`+++ b/` shape, so a land pass's own added
+// line could otherwise spoof one, and nothing short of a column-zero
+// `diff --git ` line reopens that window. A deleted file has no `+++ b/`
+// header, so `+++ /dev/null` falls back to the pre-image path, recording the
+// deletion's ranges under the path the anchor knew it by. It never errors.
+func parsePreImageRanges(out string) map[string][]Range {
 	var ranges map[string][]Range
 	var oldPath, path string
 	inHunk := false
@@ -329,4 +361,52 @@ func parseOldSideRanges(out string) map[string][]Range {
 		ranges[path] = append(ranges[path], Range{Start: start, Count: count})
 	}
 	return ranges
+}
+
+// preImageRanges returns the pre-image line ranges of paths, read from the
+// anchor..HEAD diff. Callers pre-narrow paths to the set they want ranges
+// for; this filters to that set and selects nothing itself, and returns nil
+// when nothing survives the filter so omitempty keeps `ranges` out of a zero
+// delta's JSON. It diffs unrestricted and filters to paths in Go rather than
+// handing paths to git as a pathspec: a path containing a glob metacharacter
+// could otherwise be silently dropped or over-matched.
+func preImageRanges(dir, anchor string, paths []string) (map[string][]Range, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	// Pin the diff's rendering to the shape parsePreImageRanges reads, so no
+	// ambient repo config silently empties every path's ranges (issue
+	// #3503): diff.noprefix drops the `a/`/`b/` prefixes, diff.srcPrefix and
+	// diff.dstPrefix replace them, color.ui=always wraps each header in
+	// escape codes, and diff.external (or GIT_EXTERNAL_DIFF) replaces the
+	// diff text outright. diff.mnemonicPrefix substitutes its own prefixes
+	// only when a side is the index or the worktree — never on this
+	// commit-to-commit diff — but is pinned with the rest so the parser
+	// survives a change to what gets diffed.
+	out, err := runGit(dir,
+		"-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false",
+		"-c", "diff.srcPrefix=a/", "-c", "diff.dstPrefix=b/",
+		"diff", "--no-ext-diff", "--no-color", "-U0", anchor, "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	all := parsePreImageRanges(out)
+	if len(all) == 0 {
+		return nil, nil
+	}
+	keep := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		keep[p] = struct{}{}
+	}
+	var filtered map[string][]Range
+	for p, r := range all {
+		if _, ok := keep[p]; !ok {
+			continue
+		}
+		if filtered == nil {
+			filtered = map[string][]Range{}
+		}
+		filtered[p] = r
+	}
+	return filtered, nil
 }

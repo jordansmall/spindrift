@@ -215,3 +215,23 @@ func TestDecide(t *testing.T) {
 		})
 	}
 }
+
+// TestDecide_RangesDoesNotAffectGate pins issue #3503's AC5: Decide's gate
+// reads only delta.Paths, so populating the new Ranges field must never
+// change the fire/skip decision or reason.
+func TestDecide_RangesDoesNotAffectGate(t *testing.T) {
+	findings := "## Blocking\n- run.go:1 — bug\n"
+	withoutRanges := landdelta.Delta{Known: true, Files: 2, Paths: []string{"other.go", "run.go"}}
+	withRanges := withoutRanges
+	withRanges.Ranges = map[string][]landdelta.Range{
+		"other.go": {{Start: 3, Count: 2}},
+		"run.go":   {{Start: 1, Count: 1}},
+	}
+
+	gotWithout := Decide(withoutRanges, findings, "")
+	gotWith := Decide(withRanges, findings, "")
+
+	if !reflect.DeepEqual(gotWith, gotWithout) {
+		t.Fatalf("Decide() with Ranges = %+v, without Ranges = %+v, want equal", gotWith, gotWithout)
+	}
+}
