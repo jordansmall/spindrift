@@ -1,12 +1,8 @@
 #!/usr/bin/env bats
 # PreToolUse hook (issue #1909, spec #1907): rejects a Read/Bash tool call
-# targeting a known credential path before it executes, so the Driver cannot
-# read its own secrets into context even under --dangerously-skip-permissions
-# (the hook mechanism is independent of the permission system, mirroring
-# reject-background-bash.sh, issue #1609).
-# Exercised directly against the script -- not through a real claude session,
-# since the bats suite drives the bash layer through fakes only (no real
-# LLM) -- so this is a unit test of the hook's own stdin/stdout contract.
+# targeting a known credential path, so the Driver cannot read its own secrets
+# even under --dangerously-skip-permissions. The hook runs outside the
+# permission system, the same way reject-background-bash.sh does (issue #1609).
 
 setup() {
   : "${CREDENTIAL_DENY_HOOK_SCRIPT:?CREDENTIAL_DENY_HOOK_SCRIPT must be set}"

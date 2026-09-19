@@ -1,8 +1,6 @@
 #!/usr/bin/env bats
-# ab-orchestrator.bats — dry-run argv assertions for the worker A/B harness
-# (issue #2057 slice 1): the harness now varies --worker-model between arms
-# while holding --orchestrator-enabled fixed, instead of varying
-# --orchestrator-enabled itself.
+# The harness varies --worker-model between arms and holds
+# --orchestrator-enabled fixed for both (issue #2057 slice 1).
 
 @test "dry-run: off arm omits worker model, on arm sets it, both share orchestrator value" {
   run env -i \
@@ -15,11 +13,10 @@
     AB_OUTDIR="$BATS_TEST_TMPDIR/ab-out" \
     bash "${AB_ORCHESTRATOR_SH:-$BATS_TEST_DIRNAME/../ab-orchestrator.sh}" 123
   [ "$status" -eq 0 ]
-  # off arm: --worker-model empty
   echo "$output" | grep -- "--worker-model ''"
-  # on arm: --worker-model set to AB_WORKER_ON (defaults to AB_MODEL)
+  # The on arm uses AB_WORKER_ON, which defaults to AB_MODEL.
   echo "$output" | grep -- "--worker-model claude-sonnet-5"
-  # orchestrator value identical (empty) on both arms — never "--orchestrator-enabled 1"
+  # Both arms must carry the same orchestrator value, here the empty one.
   ! echo "$output" | grep -- "--orchestrator-enabled 1"
 }
 
@@ -36,10 +33,10 @@ JSON
   run env AB_PRICES='{"claude-sonnet-5":[3,15,0.3,3.75],"claude-haiku":[1,5,0.1,1]}' \
     bash "$script" --breakdown "$log"
   [ "$status" -eq 0 ]
-  # implementor on sonnet-5: fresh_input=100+50=150, output=50+20=70, cr=10, cw=5
-  #   cost = (150*3 + 70*15 + 10*0.3 + 5*3.75)/1e6 = (450+1050+3+18.75)/1e6 = 0.00152175 -> 0.001522
+  # The implementor rows merge both sonnet-5 turns, so the expected cost is
+  # (150*3 + 70*15 + 10*0.3 + 5*3.75)/1e6 = 0.00152175, rounded to 0.001522.
   echo "$output" | grep -P '^implementor\tclaude-sonnet-5\t10\t5\t150\t70\t0.001522$'
-  # scout on haiku: cr=0 cw=0 in=200 out=80 cost=(200*1+80*5)/1e6=(200+400)/1e6=0.0006 -> 0.000600
+  # The scout price comes from the "claude-haiku" prefix entry: (200*1 + 80*5)/1e6 = 0.000600.
   echo "$output" | grep -P '^scout\tclaude-haiku-4-5-20251001\t0\t0\t200\t80\t0.000600$'
 }
 

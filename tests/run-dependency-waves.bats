@@ -1,13 +1,11 @@
 #!/usr/bin/env bats
-# Dependency-wave ordering (issue #39): blocker detection, cycles, deadlock, wave dispatch order.
+# Dependency-wave ordering (issue #39).
 
 load helper
 
 setup() {
   setup_run_env
 }
-
-# --- Dependency-wave ordering (issue #39) ----------------------------------
 
 @test "run dispatches an issue whose external blocker has a merged PR" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
@@ -61,7 +59,6 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="depends on #1"
-  # Blocker #1 is CLOSED but never received the complete label.
   export FAKE_GH_ISSUE_STATE_1="CLOSED"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
@@ -73,7 +70,8 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="depends on #1"
-  # Blocker #1 is OPEN (default) with no complete label — permanently unready.
+  # Blocker #1 is deliberately left unset: the fake then reports it OPEN and
+  # unlabeled.
   run "$RUN_CMD"
   [ "$status" -eq 3 ]
   [[ "$output" == *"remain blocked or deferred"* ]]
@@ -85,32 +83,29 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tBlocker\n2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="depends on #1"
-  # Issue 1 box writes a ready outcome; the launcher gates it (CI SUCCESS →
-  # merge → agent-complete). No FAKE_PODMAN_AUTO_COMPLETE shortcut.
+  # The launcher, not a FAKE_PODMAN_AUTO_COMPLETE shortcut, must carry the ready
+  # outcome through CI success and merge to agent-complete.
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ok"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   export GH_STATE="$GH_LOG.state"
-  # PRForBranch needs this to find the PR URL; gh pr merge then writes MERGED
-  # to GH_STATE, which PRState reads to satisfy blockerReady on the next
-  # invocation.
+  # PRForBranch needs this to find the PR URL. gh pr merge then writes MERGED to
+  # GH_STATE, which PRState reads to satisfy blockerReady on the next invocation.
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
-  # Pre-seed issue #1 as ready-for-agent so reconcileStranded does not adopt
-  # its PR before dispatch. Without this, the fake matches any label query for
-  # issues with no recorded state, and FAKE_GH_PR_LIST_1 causes reconcile to
-  # adopt+merge #1, removing it from the ready queue before it is dispatched.
+  # The fake matches any label query for an issue with no recorded state, so
+  # without this seed reconcileStranded adopts and merges #1 via
+  # FAKE_GH_PR_LIST_1 and drops it from the ready queue before dispatch.
   printf '1\tready-for-agent\n' > "$GH_LOG.state"
 
-  # First invocation: only the unblocked blocker dispatches in this wave; the
-  # dependent stays held on the label rather than looping an in-process
-  # second wave from the same (now-stale) image (ADR 0019 / issue #477).
+  # The dependent stays held on the label rather than looping an in-process
+  # second wave from the same, now stale, image (ADR 0019, issue #477).
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
   ! grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
   [[ "$output" == *"1 issue(s) remain for a later invocation"* ]]
 
-  # #1 reached agent-complete during settle; a fresh invocation (which
-  # re-evaluates the flake image in production) now dispatches the dependent.
+  # #1 reached agent-complete during settle, so a fresh invocation, which
+  # re-evaluates the flake image in production, now dispatches the dependent.
   : >"$PODMAN_LOG"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]

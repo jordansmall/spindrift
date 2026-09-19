@@ -1,63 +1,13 @@
 #!/usr/bin/env bash
-# Dogfood loop: spindrift building spindrift.
-#
-# The box's behaviour — entrypoint, toolchain, and prompt — is baked into the
-# OCI image (DOGFOOD_RUNTIME=podman, default) or the bwrap-realized closures
-# (DOGFOOD_RUNTIME=bwrap, #2672) at `nix run $NIX_APP -- build` time (the
-# merge gate itself lives in the launcher). When an agent merges a fix to the
-# base branch, later issues stay blind to it until the box is rebuilt from an
-# updated tree. This loop closes both staleness sources:
-#
-#   1. `git checkout $BASE_BRANCH && git pull --ff-only`
-#                              — reset to the base branch and pull the just-merged
-#                                change into the local tree, which is what
-#                                `nix run $NIX_APP -- build` reads from ($PWD).
-#   2. `nix run $NIX_APP -- build` — re-bake the box from that updated tree.
-#
-# Each invocation runs CONTINUOUS_DISPATCH's slot-refill loop (#527): as each
-# Box finishes, the launcher re-discovers the queue and refills the freed slot
-# immediately, gated by the image-freshness probe, instead of draining one
-# bounded batch and returning. Concurrency is bounded by MAX_PARALLEL (default
-# 3); MAX_JOBS defaults to MAX_PARALLEL. An operator can override MAX_JOBS
-# explicitly to run a larger or unbounded slot pool, or unset
-# CONTINUOUS_DISPATCH to fall back to the older one-wave-and-exit shape.
-# The freshness probe, not this loop, decides when a rebuild is due: it fires
-# only once a merge actually changed the image hash, not on every iteration.
-# When it does, the launcher exits 4 and this loop pulls, rebuilds, and
-# re-invokes so later refills launch on the fresh image.
-#
-# Termination is driven by the launcher's exit code — no separate gh probe:
-#   exit 0 — dispatched work; loop continues after rebuilding from updated tree.
-#   exit 2 — queue empty (no open issues with the dispatch label); loop exits.
-#   exit 3 — open issues exist but none are dispatchable. The freshness probe
-#             now tracks the loaded host launcher too (its store hash against
-#             the flake's launcher-currency attr), alongside the image, so
-#             most host-side-only launcher fixes (e.g. to the blocker parser)
-#             already trip exit 4 on their own. Exit 3 still pulls anyway as a
-#             backstop for whatever isn't covered by either freshness
-#             dimension (e.g. a dispatchability change that's just a label
-#             flip on the tracker, not a code change at all): if the pull
-#             advances HEAD, rebuild and retry once, the same as exit 4; if
-#             HEAD doesn't move, the block is genuine and the loop stops for
-#             human triage (typically a failed blocker needing re-label).
-#   exit 4 — CONTINUOUS_DISPATCH mode: the freshness probe found the loaded
-#             host launcher stale relative to the flake's launcher-currency
-#             attr (alone, or alongside a stale image); in-flight Boxes
-#             finished, no new ones launched. Loop pulls, rebuilds, and
-#             re-invokes, like exit 0. Under DOGFOOD_RUNTIME=bwrap, an
-#             image-only-stale verdict no longer reaches this exit at all:
-#             the launcher hot-swaps the realized closure in place and keeps
-#             refilling instead of draining (ADR 0043, #2682) — a process
-#             cannot swap itself, so a launcher-stale verdict is the one case
-#             that still has to drain and exit. DOGFOOD_RUNTIME=podman is
-#             unaffected: it never swaps, so an image-only-stale verdict
-#             still reaches exit 4 there exactly as before.
+# Dogfood loop: spindrift building spindrift. The box's behaviour is baked at
+# `nix run $NIX_APP -- build` time from $PWD, so a merged fix stays invisible
+# until this loop checks out $BASE_BRANCH, pulls, and rebuilds. Launcher exit 4
+# asks for that (under bwrap a stale image hot-swaps in place, ADR 0043, #2682).
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# REPO_SLUG (and GH_TOKEN) come from harness.env, the gitignored env file
-# sourced into the harness. BASE_BRANCH defaults to main if not set there.
+# REPO_SLUG and GH_TOKEN come from harness.env, a gitignored env file.
 if [ -f harness.env ]; then
   set -a
   # shellcheck disable=SC1091
@@ -73,16 +23,13 @@ case "$MAX_PARALLEL" in
     ;;
 esac
 MAX_JOBS="${MAX_JOBS:-$MAX_PARALLEL}"
-# env-schema.nix continuousDispatch.default is off (empty); dogfood overrides
-# it to on so the loop drives slot-refill dispatch instead of one wave and
-# exit (#528). `-` (not `:-`) preserves an operator setting CONTINUOUS_DISPATCH=
-# (empty) in harness.env to opt back out.
+# env-schema.nix defaults continuousDispatch off; dogfood turns it on so the
+# launcher refills each freed slot instead of draining one wave (#527, #528).
+# `-` not `:-` so an operator can set CONTINUOUS_DISPATCH= in harness.env to opt out.
 CONTINUOUS_DISPATCH="${CONTINUOUS_DISPATCH-1}"
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo in harness.env}"
-# Selects which Dispatch kind (ADR 0022) the loop drives: "dispatch" (default,
-# work) or "research". Both share the launcher's exit-code contract (2 empty
-# queue, 3 none dispatchable, 4 stale image), so the loop logic below needs no
-# other change to drive research instead.
+# Both Dispatch kinds share the launcher's exit-code contract, so the loop below
+# needs no other change to drive research instead of work (ADR 0022).
 DOGFOOD_KIND="${DOGFOOD_KIND:-dispatch}"
 case "$DOGFOOD_KIND" in
   dispatch | research) ;;
@@ -92,10 +39,7 @@ case "$DOGFOOD_KIND" in
     ;;
 esac
 
-# Selects which flake app the loop drives: "podman" (default, apps.default) or
-# "bwrap" (apps.dogfood-bwrap, #2672). NIX_APP is resolved once here so every
-# `nix run` call site below shares one source of truth instead of each
-# hardcoding a target string.
+# NIX_APP is resolved once here so every `nix run` below shares one target (#2672).
 DOGFOOD_RUNTIME="${DOGFOOD_RUNTIME:-podman}"
 case "$DOGFOOD_RUNTIME" in
   podman) NIX_APP=".#" ;;
@@ -106,11 +50,8 @@ case "$DOGFOOD_RUNTIME" in
     ;;
 esac
 
-# bwrap is Linux-only (bubblewrap has no macOS build) -- reject it here with
-# a clear message instead of sailing past this preflight and only failing
-# deep inside the launcher with an opaque error (#2672 review finding).
-# podman needs no such gate: it already runs on macOS via podman machine,
-# which is what check_podman_machine_memory below exists to guard.
+# bwrap is Linux-only (bubblewrap has no macOS build). Rejecting it here gives a
+# clear message instead of an opaque failure deep inside the launcher (#2672).
 if [ "$DOGFOOD_RUNTIME" = "bwrap" ] && [ "$(uname -s)" != "Linux" ]; then
   echo "!! DOGFOOD_RUNTIME=bwrap requires Linux (bubblewrap is not available on macOS)." >&2
   exit 1
@@ -121,9 +62,8 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
-# Converts a --memory value (e.g. "4g", "512m") to MiB for comparison against
-# `podman machine inspect`'s Resources.Memory (already MiB). No suffix is
-# treated as bytes, matching podman/docker's own --memory parsing.
+# Converts a --memory value to MiB, to compare against `podman machine inspect`'s
+# Resources.Memory. No suffix means bytes, matching podman's own --memory parsing.
 _memory_limit_to_mib() {
   local limit="$1"
   case "$limit" in
@@ -134,20 +74,14 @@ _memory_limit_to_mib() {
   esac
 }
 
-# Preflight (#580, parallelism-aware per #712): on macOS/Windows, podman runs
-# containers inside a VM ("podman machine") with its own fixed RAM,
-# independent of the per-container --memory cap (MEMORY_LIMIT). When the
-# machine has less RAM than MAX_PARALLEL containers each want, the VM's own
-# Linux OOM-killer fires before any single container's cgroup cap ever bites
-# — it silently killed an in-box `nix build` under agent-issue-565
-# (EXIT:137, #565) and, at higher concurrency, took down the whole VM under
-# agent-issue-640 (#712: global_oom, no in-box 137, no clean result). Skips
-# cleanly when there's no active machine (native Linux, or a non-podman
-# runtime): `podman machine inspect` then errors or prints nothing.
+# Preflight (#580, parallelism-aware per #712): on macOS/Windows podman runs
+# containers in a VM with fixed RAM, so when MAX_PARALLEL containers want more
+# than the machine has, the VM's OOM-killer fires before any single container's
+# --memory cap bites (#565 killed an in-box `nix build`; #712 took down the whole
+# VM). With no active machine, `podman machine inspect` errors or prints nothing.
 check_podman_machine_memory() {
-  # `-` (not `:-`): MEMORY_LIMIT="" is a deliberate opt-out (env-schema.nix
-  # memoryLimit.default's doc: "empty string disables the limit"), distinct
-  # from unset. Same reasoning as CONTINUOUS_DISPATCH above.
+  # `-` not `:-`: MEMORY_LIMIT= is a deliberate opt-out (env-schema.nix
+  # memoryLimit.default disables the limit on an empty string), distinct from unset.
   local limit="${MEMORY_LIMIT-5g}"
   [ -z "$limit" ] && return 0
   command -v podman >/dev/null 2>&1 || return 0
@@ -163,8 +97,7 @@ check_podman_machine_memory() {
   local limit_mib
   limit_mib="$(_memory_limit_to_mib "$limit")"
 
-  # VM_OVERHEAD_MIB covers the podman machine's own OS/daemon footprint,
-  # which competes with the containers for the same fixed VM RAM.
+  # The machine's own OS and daemon compete with the containers for that VM RAM.
   local -r VM_OVERHEAD_MIB=512
   local required_mib=$(( limit_mib * MAX_PARALLEL + VM_OVERHEAD_MIB ))
 
@@ -175,22 +108,16 @@ check_podman_machine_memory() {
     exit 1
   fi
 }
-# Podman-specific (VM RAM under a podman machine); bwrap is daemonless and
-# has no VM, so this preflight cannot apply and must not gate DOGFOOD_RUNTIME=bwrap.
+# bwrap is daemonless and has no VM, so this preflight cannot apply to it.
 if [ "$DOGFOOD_RUNTIME" = "podman" ]; then
   check_podman_machine_memory
 fi
 
-# Graceful stop: signal this PID with USR1 or TERM (the devShell `dogfood-stop`
-# alias does this) to exit after the current wave instead of aborting it. Bash
-# defers a trapped signal until the in-flight `nix run` returns, so the wave
-# always finishes cleanly; the loop then breaks at the next boundary. Ctrl-C
-# (SIGINT to the whole process group) stays the hard-abort escape hatch — a
-# backgrounded `nix build` started via NixRealizer deliberately survives it,
-# orphaned, instead of aborting (see "Background realize process isolation"
-# in docs/reference.md for why).
-# Written after the dirty-tree check above: .spindrift/dogfood.pid is
-# untracked, and writing it first would trip that very check.
+# Signal this PID with USR1 or TERM (the devShell `dogfood-stop` alias) to exit
+# after the current wave: bash defers the trap until the in-flight `nix run`
+# returns. Ctrl-C stays the hard abort, though a backgrounded `nix build` from
+# NixRealizer deliberately survives it (docs/reference.md). The pid file is
+# untracked, so it is written after the dirty-tree check it would otherwise trip.
 stop_requested=0
 trap 'stop_requested=1; echo "==> dogfood: stop requested — will exit after the current wave"' USR1 TERM
 mkdir -p .spindrift
@@ -200,9 +127,8 @@ trap 'rm -f .spindrift/dogfood.pid' EXIT
 iteration=0
 
 echo "==> dogfood: git checkout $BASE_BRANCH && git pull --ff-only"
-# An agent's PR merges on $BASE_BRANCH, and the build reads $PWD — so reset to
-# the base branch first. A host left on a feature branch (a merged PR's branch,
-# a leftover checkout) has no upstream to fast-forward and would break the pull.
+# The build reads $PWD, so reset to the base branch first. A host left on a
+# feature branch has no upstream to fast-forward and the pull would fail.
 git checkout "$BASE_BRANCH"
 git pull --ff-only
 
@@ -225,6 +151,9 @@ while :; do
       break
     fi
 
+    # Pull anyway, as a backstop for staleness the freshness probe cannot see,
+    # such as a label flip on the tracker. If HEAD does not move, the block is
+    # genuine and needs human triage, typically a failed blocker to re-label.
     head_before="$(git rev-parse HEAD)"
     echo "==> dogfood: git checkout $BASE_BRANCH && git pull --ff-only"
     git checkout "$BASE_BRANCH"

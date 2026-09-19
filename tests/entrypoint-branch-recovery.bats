@@ -7,14 +7,12 @@ setup() {
   setup_entrypoint_env
 }
 
-# --- pre-work rebase (issue #215) -------------------------------------------
-# Before the agent starts, the box must rebase the working branch onto the
-# latest origin/BASE_BRANCH so the agent works against current main rather
-# than the state of origin at clone time.
+# The box rebases the working branch onto the latest origin/BASE_BRANCH before
+# the agent starts, so the agent works against current main rather than the
+# state of origin at clone time (issue #215).
 
 @test "entrypoint rebases prior work onto latest origin/BASE_BRANCH before agent starts" {
-  # Simulate a prior run: agent/issue-7 was pushed with a commit, then main
-  # advanced with a non-conflicting change while the branch was in flight.
+  # A prior run pushed agent/issue-7, then main advanced without conflicting.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"
@@ -23,8 +21,6 @@ setup() {
   git -C "$prior" commit -q -m "feat: prior run work"
   git -C "$prior" push -q origin "agent/issue-7"
 
-  # Advance main with a non-conflicting commit (simulates a refactor landing
-  # on main while the branch was in flight).
   local advance="$BATS_TEST_TMPDIR/advance"
   git clone -q "https://github.com/owner/repo.git" "$advance"
   echo "main advance" > "$advance/main_advance.txt"
@@ -38,8 +34,8 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  # After the pre-work rebase the working branch must be on top of the latest
-  # main: it should have both the prior branch work and the main advance.
+  # A branch rebased on top of the latest main has both the prior branch work
+  # and the main advance.
   [ -f "$WORK_DIR/branch.txt" ]
   [ -f "$WORK_DIR/main_advance.txt" ]
 
@@ -53,10 +49,10 @@ setup() {
 }
 
 @test "entrypoint bundles rebased branch to outbox instead of force-pushing when read-only" {
-  # Same prior-work/main-advance setup as the read-write case above, but with
-  # BOX_WRITE_ENABLED unset (issue #1979): the box holds no push-capable
-  # token, so publishing the rebased branch must relay via the outbox bundle
-  # instead of a direct force-push that would 403.
+  # Same setup as the read-write case above, but with BOX_WRITE_ENABLED unset
+  # (issue #1979): the box holds no push-capable token, so publishing the
+  # rebased branch must relay via the outbox bundle instead of a direct
+  # force-push that would 403.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"
@@ -82,24 +78,21 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  # The remote branch must be untouched -- no direct push in read-only mode.
+  # The remote branch must be untouched: no direct push in read-only mode.
   local after_sha
   after_sha="$(git --git-dir="$REMOTE_ROOT/owner/repo.git" rev-parse "refs/heads/agent/issue-7")"
   [ "$before_sha" = "$after_sha" ]
 
-  # The rebased tree must instead be relayed via the outbox bundle.
   [ -f "$OUTBOX_DIR/seam.bundle" ]
   run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
   [ "$status" -eq 0 ]
 }
 
 @test "entrypoint bundling a rebase with no commits ahead of base is a no-op, not a failure" {
-  # The adopted branch has no work of its own yet (its tip already equals
-  # origin/main) -- the rebase is a no-op fast-forward, so the outbox range
-  # origin/BASE_BRANCH..BRANCH is empty. `git bundle create` refuses to write
-  # an empty bundle and exits non-zero; the read-write push path already
-  # tolerates this (a force-with-lease push of an unchanged ref no-ops), so
-  # the read-only bundle path must tolerate it the same way rather than
+  # The adopted branch tip already equals origin/main, so the rebase is a no-op
+  # and the outbox range origin/BASE_BRANCH..BRANCH is empty. `git bundle
+  # create` refuses to write an empty bundle and exits non-zero. The read-write
+  # push path tolerates that, so the read-only bundle path must too rather than
   # failing the whole box over nothing to relay (issue #1979).
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
@@ -123,8 +116,8 @@ setup() {
 }
 
 @test "entrypoint fails fast when pre-work rebase conflicts with latest main" {
-  # Simulate a prior run that modified README.md on the branch, then main
-  # landed a conflicting change to the same file.
+  # A prior run modified README.md on the branch, then main landed a
+  # conflicting change to the same file.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"
@@ -148,13 +141,10 @@ setup() {
   [[ "$output" == *"pre-work rebase"* ]]
 }
 
-# --- pre-work rebase conflict resolution (issue #216) -------------------------
-# When a pre-work rebase conflict occurs, an agent is spawned to resolve it.
-# Only genuinely unresolvable conflicts fail the box.
+# A pre-work rebase conflict spawns an agent to resolve it. Only genuinely
+# unresolvable conflicts fail the box (issue #216).
 
 setup_rebase_conflict() {
-  # Helper: push a conflicting README.md change from a prior run, then advance
-  # main with a different conflicting change, and open a fake PR.
   local prior advance
   prior="$BATS_TEST_TMPDIR/prior"
   advance="$BATS_TEST_TMPDIR/advance"
@@ -182,26 +172,22 @@ setup_rebase_conflict() {
 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # Working dir must exist (clone succeeded and rebase completed).
   [ -d "$WORK_DIR/.git" ]
-  # The main agent prompt must have been passed to claude.
   grep -q "Implement GitHub issue #7" "$DRIVER_PROMPT_FILE"
   # FAKE_DRIVER_RESOLVE_CONFLICT stays exported for the whole run, so the main
-  # agent invocation sees it too, with no rebase left in progress -- it must
-  # fall through to a real outcome (issue #1607's resume-once recovery would
-  # otherwise kick in on the silent no-op this used to be).
+  # agent invocation sees it too with no rebase left in progress. It must fall
+  # through to a real outcome, or issue #1607's resume-once recovery kicks in
+  # on a silent no-op.
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=.*status=ready' <<<"$output"
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
 }
 
-# Blocking review finding A (issue #2975 slice 3): _write_env_handoff used to
-# feed MAX_BUDGET_TOKENS/MAX_BUDGET_USD to `jq --argjson`, which requires
-# valid JSON -- a malformed value made that jq call itself fail, and under
-# entrypoint.sh's `set -euo pipefail` that killed the whole box run before
-# phase_conflict_resolve's rebase-fixup pass ever finished. driver-exec
-# env-handoff instead parses these leniently (degrading a malformed value to
-# 0), so the same malformed input must no longer take the run down.
+# _write_env_handoff used to feed MAX_BUDGET_TOKENS/MAX_BUDGET_USD to `jq
+# --argjson`, which requires valid JSON, so a malformed value failed that jq
+# call and `set -euo pipefail` killed the whole box before
+# phase_conflict_resolve's rebase-fixup pass finished. driver-exec env-handoff
+# parses these leniently now, degrading a malformed value to 0 (issue #2975).
 @test "pre-work rebase conflict: malformed MAX_BUDGET_TOKENS does not crash the pre-Handoff pass" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
@@ -213,22 +199,18 @@ setup_rebase_conflict() {
 
 @test "pre-work rebase conflict: unresolvable conflict exits non-zero" {
   setup_rebase_conflict
-  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
+  # No FAKE_DRIVER_RESOLVE_CONFLICT, so the stub leaves the rebase unfinished.
 
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"pre-work rebase"* ]]
 }
 
-# The unresolvable-conflict test above is the one place in this suite where
-# only a single driver invocation ever happens (the run exits before ever
-# reaching the main agent), so $DRIVER_PROMPT_FILE unambiguously holds
-# conflict-resolve-prompt.md's own rendered content -- every other test here
-# reaches phase_prompt_assembly too, whose own driver invocation overwrites
-# the same fixed-path capture file. Pins phase_conflict_resolve's own
-# CAVEMAN_STEP/SKILL_PREAMBLE precompute (issue #2706): unlike
-# phase_prompt_assembly, this prompt renders through the bash-only `_subst`
-# path, so nothing else populates these two vars for this call site.
+# An unresolvable-conflict run exits before the main agent, so it is the one
+# case here where $DRIVER_PROMPT_FILE holds conflict-resolve-prompt.md: every
+# other test also reaches phase_prompt_assembly, whose driver invocation
+# overwrites the same capture file. This prompt renders through the bash-only
+# `_subst` path, so nothing else sets CAVEMAN_STEP/SKILL_PREAMBLE (issue #2706).
 @test "pre-work rebase conflict: unresolvable conflict prompt carries caveman directive when baked" {
   setup_rebase_conflict
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
@@ -240,7 +222,7 @@ description: Ultra-compressed communication mode.
 ---
 Respond terse like smart caveman.
 SKILL
-  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
+  # No FAKE_DRIVER_RESOLVE_CONFLICT, so the stub leaves the rebase unfinished.
 
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
@@ -252,7 +234,7 @@ SKILL
 @test "pre-work rebase conflict: unresolvable conflict prompt has no caveman directive or literal tokens by default" {
   setup_rebase_conflict
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
-  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
+  # No FAKE_DRIVER_RESOLVE_CONFLICT, so the stub leaves the rebase unfinished.
 
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
@@ -266,10 +248,10 @@ SKILL
   run grep -q '\${SKILL_PREAMBLE}' "$DRIVER_PROMPT_FILE"
   [ "$status" -ne 0 ]
 
-  # CODE_COMMENTS_STEP (issue #3221) now follows the same CODE_COMMENTS_BAKED
-  # skill-probe gate as CAVEMAN_STEP/SKILL_PREAMBLE above -- no code-comments
-  # skill staged under HARNESS_SKILLS_DIR means the anchor renders empty,
-  # not a dangling literal token.
+  # CODE_COMMENTS_STEP follows the same skill-probe gate as
+  # CAVEMAN_STEP/SKILL_PREAMBLE above, so with no code-comments skill staged
+  # under HARNESS_SKILLS_DIR the anchor renders empty rather than leaving a
+  # dangling literal token (issue #3221).
   run grep -q "invoke the \`/code-comments\` skill" "$DRIVER_PROMPT_FILE"
   [ "$status" -ne 0 ]
 
@@ -277,11 +259,10 @@ SKILL
   [ "$status" -ne 0 ]
 }
 
-# Mirrors the CAVEMAN_STEP "carries ... when baked" test above: CODE_COMMENTS_STEP
-# (issue #3221) is gated on the same DRIVER_SKILLS_DIR/code-comments/SKILL.md
-# probe, computed by hand here since this prompt renders through the
-# bash-only `_subst` path rather than phase_prompt_assembly's driver-exec
-# verb.
+# CODE_COMMENTS_STEP is gated on the same probe CAVEMAN_STEP uses, for
+# DRIVER_SKILLS_DIR/code-comments/SKILL.md, computed by hand here because this
+# prompt renders through the bash-only `_subst` path rather than
+# phase_prompt_assembly's driver-exec verb (issue #3221).
 @test "pre-work rebase conflict: unresolvable conflict prompt carries code-comments anchor when baked" {
   setup_rebase_conflict
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
@@ -293,7 +274,7 @@ description: Comment discipline.
 ---
 A comment earns its place only by carrying something the code cannot state itself.
 SKILL
-  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
+  # No FAKE_DRIVER_RESOLVE_CONFLICT, so the stub leaves the rebase unfinished.
 
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
@@ -303,14 +284,11 @@ SKILL
   [ "$status" -ne 0 ]
 }
 
-# CODE_COMMENTS_STEP's precompute (agent/entrypoint.sh, phase_conflict_resolve)
-# now guards its `_subst` read on the same DRIVER_SKILLS_DIR/code-comments/
-# SKILL.md probe CAVEMAN_STEP/SKILL_PREAMBLE use, so a PROMPTS_DIR override
-# missing fragments/code-comments-default.md only aborts the run when the
-# code-comments skill is actually staged -- the guard is what makes that
-# combination reachable at all, mirroring the "entrypoint does not require
-# filer-prompt.md" test's copy-then-remove PROMPTS_DIR override pattern
-# (tests/entrypoint-prompt-fragments.bats).
+# phase_conflict_resolve guards CODE_COMMENTS_STEP's `_subst` read on the same
+# DRIVER_SKILLS_DIR/code-comments/SKILL.md probe, so a PROMPTS_DIR override
+# missing fragments/code-comments-default.md aborts the run only when the skill
+# is staged. The copy-then-remove PROMPTS_DIR pattern below mirrors
+# tests/entrypoint-prompt-fragments.bats.
 @test "pre-work rebase conflict: PROMPTS_DIR override missing fragments/code-comments-default.md aborts the run when the skill is baked" {
   setup_rebase_conflict
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
@@ -327,7 +305,7 @@ SKILL
   chmod -R u+w "$prompt_dir"
   rm "$prompt_dir/fragments/code-comments-default.md"
   export PROMPTS_DIR="$prompt_dir"
-  # No FAKE_DRIVER_RESOLVE_CONFLICT — irrelevant here: the missing fragment
+  # FAKE_DRIVER_RESOLVE_CONFLICT is irrelevant here: the missing fragment
   # aborts phase_conflict_resolve before the driver is ever invoked.
 
   run bash "$ENTRYPOINT"
@@ -342,23 +320,15 @@ SKILL
 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # Main agent must NOT have been invoked — the issue prompt should be absent.
+  # An absent issue prompt proves the main agent was never invoked.
   ! grep -q "Implement GitHub issue #7" "$DRIVER_PROMPT_FILE"
 }
 
-# Complements the two "carries caveman directive"/"has no caveman directive"
-# tests above: those pin what CAVEMAN_STEP/SKILL_PREAMBLE render into the
-# conflict-resolve prompt text, but not whether the skill that text tells the
-# agent to invoke is actually resolvable when that agent runs. Claude Code
-# discovers a skill only from DRIVER_SKILLS_DIR ($HOME/.claude/skills in this
-# harness, mirrors tests/entrypoint-skills.bats), which phase_prompt_assembly
-# populates -- but phase_conflict_resolve now runs (and, on either of its two
-# early-exit paths, may finish the whole box) before phase_prompt_assembly
-# ever does (issue #2354 slice 3). The fake driver logs "skill discovered:
-# <name>" only when it actually finds the skill under DRIVER_SKILLS_DIR at
-# its own invocation time, so this proves the population happened in time
-# for the conflict-resolve agent specifically, not merely that the prompt
-# text mentions the skill (issue #2706).
+# The caveman-directive tests above pin what the conflict-resolve prompt says,
+# not whether the agent can resolve the skill it names. Claude Code finds a
+# skill only under DRIVER_SKILLS_DIR, which phase_prompt_assembly populates,
+# yet phase_conflict_resolve runs first and may finish the box (issue #2354).
+# The fake driver logs "skill discovered" only on a real find (issue #2706).
 @test "pre-work rebase conflict: DRIVER_SKILLS_DIR is populated before the conflict-resolve agent runs" {
   setup_rebase_conflict
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
@@ -370,19 +340,17 @@ description: Ultra-compressed communication mode.
 ---
 Respond terse like smart caveman.
 SKILL
-  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase, so
-  # the conflict-resolve agent is the only driver invocation this run makes.
+  # No FAKE_DRIVER_RESOLVE_CONFLICT, so the stub leaves the rebase unfinished
+  # and the conflict-resolve agent is this run's only driver invocation.
 
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
   grep -q "skill discovered: caveman" "$DRIVER_LOG"
 }
 
-# Same proof as the test above, for the CONFLICT_RESOLVE_PR_URL resolve-only
-# dispatch mode: phase_prompt_assembly never runs at all for this dispatch
-# (phase_conflict_resolve's own `exit 0` ends the box first), so this is the
-# one path where DRIVER_SKILLS_DIR population must not depend on
-# phase_prompt_assembly running afterward -- it never gets the chance to.
+# Same proof for the CONFLICT_RESOLVE_PR_URL resolve-only dispatch, where
+# phase_conflict_resolve's own `exit 0` ends the box and phase_prompt_assembly
+# never runs, so DRIVER_SKILLS_DIR population cannot depend on it.
 @test "CONFLICT_RESOLVE_PR_URL: DRIVER_SKILLS_DIR is populated before the conflict-resolve agent runs" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
@@ -402,15 +370,11 @@ SKILL
   grep -q "skill discovered: caveman" "$DRIVER_LOG"
 }
 
-# Pins the hoist (issue #2354 slice 3): phase_conflict_resolve's call site
-# now runs in main() BEFORE phase_prompt_assembly, so the CONFLICT_RESOLVE_PR_URL
-# early exit fires before driver-exec assemble-prompt is ever invoked at all --
-# not merely before its output is used. Pointing PROMPTASSEMBLY_REGISTRY_FILE
-# at a nonexistent path makes any assemble-prompt call fail loudly (the verb
-# requires --registry to exist, and entrypoint.sh's bare call has no error
-# handling of its own, so a nonzero exit there would propagate straight
-# through `set -euo pipefail` and abort the whole run non-zero). A green
-# `status -eq 0` here is only possible if the verb is never called.
+# phase_conflict_resolve runs before phase_prompt_assembly in main(), so the
+# CONFLICT_RESOLVE_PR_URL early exit fires before driver-exec assemble-prompt
+# is invoked at all, not merely before its output is used (issue #2354). A
+# nonexistent PROMPTASSEMBLY_REGISTRY_FILE fails any assemble-prompt call under
+# `set -euo pipefail`, so a green run here proves the verb is never called.
 @test "CONFLICT_RESOLVE_PR_URL: exits before phase_prompt_assembly ever invokes driver-exec assemble-prompt" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
@@ -422,11 +386,10 @@ SKILL
 }
 
 @test "CONFLICT_RESOLVE_PR_URL read-only: bundles resolved branch to outbox instead of force-pushing" {
-  # This box never reaches phase_prework_rebase's own publish step (a
-  # conflict was hit) and exits without running the main agent afterward
-  # (line 396-401), so this publish is the only chance to land the resolved
-  # branch at all -- it must relay via the outbox the same way the read-only
-  # pre-work-rebase case does (issue #1979).
+  # A conflict stops this box before phase_prework_rebase's own publish step,
+  # and it exits without running the main agent, so this publish is the only
+  # chance to land the resolved branch. It must relay via the outbox the same
+  # way the read-only pre-work-rebase case does (issue #1979).
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
   export CONFLICT_RESOLVE_PR_URL="https://github.com/owner/repo/pull/7"
@@ -448,17 +411,15 @@ SKILL
   [ "$status" -eq 0 ]
 }
 
-# --- pre-work rebase conflict on a generated file (issue #403) ---------------
 # A conflicted file that declares itself generated ("DO NOT EDIT" / "Code
-# generated by X from Y") must be resolved by merging in its source of truth
-# and regenerating the artifact, never by hand-merging its own conflict
-# markers. The fake `claude` stub's FAKE_DRIVER_RESOLVE_CONFLICT mode encodes
-# this: generated files are regenerated from a merged source; ordinary files
-# still fall back to accepting the incoming (theirs) side.
+# generated by X from Y") must be resolved by merging its source of truth and
+# regenerating the artifact, never by hand-merging its own conflict markers
+# (issue #403). The stub's FAKE_DRIVER_RESOLVE_CONFLICT mode regenerates such
+# files and still accepts the incoming (theirs) side for ordinary ones.
 
 seed_generated_file_fixture() {
-  # Push a regen.sh + baseline source.txt/generated.txt pair to main so both
-  # diverging branches inherit the same generation contract.
+  # Both diverging branches must inherit the same generation contract, so the
+  # regen.sh and source.txt/generated.txt baseline lands on main first.
   local seed="$BATS_TEST_TMPDIR/seed-generated"
   git clone -q "https://github.com/owner/repo.git" "$seed"
   cat >"$seed/regen.sh" <<'SCRIPT'
@@ -476,8 +437,8 @@ SCRIPT
 }
 
 setup_rebase_conflict_generated() {
-  # Helper: diverge source.txt (and its regenerated artifact) on both the
-  # agent branch and main so rebasing conflicts in both files.
+  # source.txt and its regenerated artifact diverge on both the agent branch
+  # and main, so the rebase conflicts in both files.
   seed_generated_file_fixture
 
   local prior advance
@@ -510,17 +471,15 @@ setup_rebase_conflict_generated() {
   [ "$status" -eq 0 ]
   [ -d "$WORK_DIR/.git" ]
 
-  # No conflict markers left in either file.
   ! grep -q '^<<<<<<<' "$WORK_DIR/source.txt"
   ! grep -q '^<<<<<<<' "$WORK_DIR/generated.txt"
 
-  # The source of truth carries both sides' intent — a real merge, not a
-  # one-sided pick.
+  # Both sides' text present means a real merge, not a one-sided pick.
   grep -q 'branch source' "$WORK_DIR/source.txt"
   grep -q 'main source' "$WORK_DIR/source.txt"
 
-  # The generated artifact matches regenerating fresh from the resolved
-  # source — proof it was regenerated, not hand-merged in place.
+  # A fresh regeneration from the resolved source that changes nothing proves
+  # the artifact was regenerated, not hand-merged in place.
   local before after
   before="$(cat "$WORK_DIR/generated.txt")"
   ( cd "$WORK_DIR" && bash regen.sh )

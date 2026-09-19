@@ -1,7 +1,6 @@
 #!/usr/bin/env bats
-# Settle-time lockfile Forwarder-URL scan (issue #3199): after the driver
-# runs, warn about any git-tracked ecosystem lockfile that still names the
-# run's Forwarder URL, so a stale pin doesn't ship silently in the PR.
+# Issue #3199: after the driver runs, warn about any git-tracked lockfile that
+# still names the run's Forwarder URL, so a stale pin doesn't ship in the PR.
 
 load helper
 
@@ -11,15 +10,13 @@ setup() {
   setup_entrypoint_env
 }
 
-# Exports a REGISTRY_PROXY_MANIFEST that Parse accepts (issue #3199's scan
-# only calls registrymanifest.Parse to decide the proxy was on for this
-# dispatch, never resolveRegistryProxyGate -- see runBindRegistryLockfileScan's
-# own doc comment -- so the endpoint need not actually be reachable).
+# The scan (issue #3199) only calls registrymanifest.Parse to decide the proxy
+# was on for this dispatch, never resolveRegistryProxyGate, so this endpoint
+# need not be reachable.
 _export_registry_proxy_manifest() {
   export REGISTRY_PROXY_MANIFEST="{\"endpoint\":\"unix://${BATS_TEST_TMPDIR}/registry-proxy.sock\",\"routes\":[]}"
 }
 
-# Pushes a Cargo.lock naming the Forwarder URL to the remote's main branch.
 _seed_stale_cargo_lock() {
   local seed="$BATS_TEST_TMPDIR/seed-cargo-lock"
   git clone -q "https://github.com/owner/repo.git" "$seed"

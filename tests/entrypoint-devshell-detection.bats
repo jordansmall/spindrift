@@ -1,5 +1,4 @@
 #!/usr/bin/env bats
-# devShell detection probe.
 
 load helper
 
@@ -18,7 +17,7 @@ setup() {
 
 @test "entrypoint logs fallback when flake.nix has no devShell" {
   seed_flake_repo
-  # FAKE_NIX_DEV_SHELL_OK defaults to 0 — nix develop will fail
+  # FAKE_NIX_DEV_SHELL_OK defaults to 0, so nix develop fails.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "flake.nix"
@@ -36,7 +35,7 @@ setup() {
 }
 
 @test "entrypoint skips devShell probe when repo has no flake.nix" {
-  # standard setup_bare_repo has no flake.nix
+  # setup_bare_repo leaves no flake.nix, so this test skips seed_flake_repo.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! echo "$output" | grep -q "devShell"

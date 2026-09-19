@@ -1,20 +1,14 @@
 #!/usr/bin/env bash
-# Host-side viewer: reads Claude Code stream-json (NDJSON) from stdin and renders
-# each event as human-readable terminal output. Silently skips unknown event
-# types and non-JSON lines, and never aborts on malformed input.
-#
-# Deliberately NOT in the entrypoint's live pipe: .spindrift/logs/issue-<n>.log
-# must stay byte-exact raw stream-json because the launcher's outcome.Classify
-# scans it for transient-failure markers (see #123). Run this on the host over
-# the saved log:
+# Reads Claude Code stream-json (NDJSON) from stdin and renders it on the host:
 #   format-transcript.sh < .spindrift/logs/issue-<n>.log
+# Keep it out of the entrypoint's live pipe: outcome.Classify scans that log for
+# transient-failure markers (#123), so it must stay byte-exact raw stream-json.
 set -euo pipefail
 
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
 RESET=$'\033[0m'
 
-# Print at most N characters of string S, appending … if truncated.
 _trunc() {
   local s="$1" n="${2:-120}"
   if [ "${#s}" -le "$n" ]; then
@@ -24,7 +18,6 @@ _trunc() {
   fi
 }
 
-# Render one assistant content block (text or tool_use).
 _render_content_block() {
   local block="$1"
   local ctype=""
@@ -47,7 +40,6 @@ _render_content_block() {
   esac
 }
 
-# Render one NDJSON event line; unknown types are silently ignored.
 _render_event() {
   local line="$1"
   [ -n "$line" ] || return 0
@@ -56,7 +48,7 @@ _render_event() {
   [ -n "$type" ] || return 0
   case "$type" in
     system)
-      ;;  # session-init noise — skip
+      ;;  # Session-init noise.
     assistant)
       local nblocks=0
       nblocks="$(printf '%s' "$line" | jq -r '(.message.content | length)' 2>/dev/null)" || return 0

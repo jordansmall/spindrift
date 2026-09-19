@@ -7,8 +7,6 @@ setup() {
   setup_run_env
 }
 
-# --- Outcome verification (issue #51) ----------------------------------------
-
 @test "outcome report flags as failed when PR is not MERGED on GitHub" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
@@ -46,9 +44,8 @@ setup() {
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"status=verified-merged"* ]]
-  # The claim itself now unconditionally strips stale agent-failed (#1985),
-  # so it legitimately appears as a --remove-label; only an --add-label
-  # would mean this run actually escalated to failed.
+  # The claim unconditionally strips stale agent-failed (#1985), so only an
+  # --add-label means this run escalated to failed.
   ! grep -q -- '--add-label agent-failed' "$GH_LOG"
 }
 

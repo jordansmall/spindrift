@@ -1,8 +1,7 @@
 #!/usr/bin/env bats
 # On-disk opencode subagent agent-file rewrite (issue #2153): the file-rewrite
 # twin of entrypoint-agents-json.bats's --agents JSON injection loop, for a
-# Driver (opencode) whose subagents ride on-disk markdown files instead of a
-# JSON flag.
+# Driver whose subagents live in on-disk markdown files instead of a JSON flag.
 
 load helper
 
@@ -12,29 +11,20 @@ setup() {
   : "${PROMPTASSEMBLY_REGISTRY_FILE:?PROMPTASSEMBLY_REGISTRY_FILE must be set (lib/fragments.nix rendered to JSON, nix/checks/promptassembly.nix)}"
   : "${PROMPT_CONTRACT_REGISTRY_FILE:?PROMPT_CONTRACT_REGISTRY_FILE must be set (lib/prompt-contract.nix validateMarkers rendered to JSON, nix/checks/promptassembly.nix)}"
 
-  # BRANCH is computed inside entrypoint.sh's main (BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}",
-  # entrypoint.sh:55), not exported by set_box_env/setup_entrypoint_env --
-  # reproduce the same computation here, exported so the Go side's
-  # EnvFromEnviron() reads the same BRANCH the bash side derives at runtime
-  # (tests/prompt-assembly-parity.bats's setup()).
+  # entrypoint.sh's main computes BRANCH itself and never exports it, so repeat
+  # the computation here for the Go side's EnvFromEnviron().
   export BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 
-  # Point the harness/operator skills dirs at guaranteed-empty paths before the
-  # SKILLS_FOUND scan runs (tests/prompt-assembly-parity.bats's setup() does
-  # the same, issue #2059): left unset they default to /agent/skills and
-  # /operator-skills, and a Box (e.g. a dogfood self-test box) with its own
-  # skills baked at /agent/skills silently widens the bash side's scanned
-  # roster past the four skills baked below, so the byte-parity tests here --
-  # which hand the Go side a fixed --skills-found "caveman, code-review,
-  # commit, tdd" -- diff against a bash side that discovered extra skills.
+  # Point the skills dirs at empty paths before the SKILLS_FOUND scan (issue
+  # #2059). Left unset they default to /agent/skills and /operator-skills, and
+  # a Box with its own baked skills widens the bash side's roster past the four
+  # baked below, so the byte-parity tests diff a fixed --skills-found against a
+  # bash side that discovered extra skills.
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
   export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
 
-  # Bake all four skills (tests/prompt-assembly-parity.bats's setup()
-  # pattern): the covered cell requires every per-skill gate on and a
-  # non-empty SKILLS_FOUND (assemble.go's checkCoveredCell), for both the
-  # orchestrator-off and orchestrator-on cells this file's Go-side byte-parity
-  # tests exercise below.
+  # The covered cell requires every per-skill gate on and a non-empty
+  # SKILLS_FOUND (assemble.go's checkCoveredCell), so bake all four.
   mkdir -p "$HOME/.claude/skills/caveman"
   cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
 ---
@@ -72,27 +62,21 @@ Two-axis review: Standards + Spec.
 SKILL
 }
 
-# Extracts the body of a baked opencode agent file: every line after the
-# second "---" frontmatter delimiter.
 agent_file_body() {
   awk '/^---$/ { c++; next } c >= 2 { print }' "$1"
 }
 
-# Extracts the frontmatter of a baked opencode agent file: every line up to
-# and including the second "---" frontmatter delimiter.
 agent_file_frontmatter() {
   awk '{ print } /^---$/ { if (++c == 2) exit }' "$1"
 }
 
-# Counts frontmatter fence lines ("---") in a baked opencode agent file --
-# used to assert the rewrite preserves the two-fence shape (one open, one
-# close) rather than e.g. leaving a stray third fence behind.
+# Callers assert the rewrite kept the two-fence shape rather than leaving a
+# stray third fence behind.
 agent_file_fence_count() {
   grep -c '^---$' "$1"
 }
 
-# Writes a baked opencode agent file fixture with real frontmatter shape and a
-# placeholder body distinguishable from any real rendered prompt.
+# The placeholder body must stay distinguishable from any real rendered prompt.
 write_agent_file() {
   local path="$1" desc="$2"
   cat >"$path" <<EOF
@@ -105,27 +89,11 @@ placeholder body for $desc
 EOF
 }
 
-# assemble_go_agent_files: invokes the real driver-exec assemble-prompt verb
-# with the fixed flag set the covered cell needs (mirrors
-# tests/prompt-assembly-parity.bats's assemble_go(), simplified for this
-# file's job -- proving the ON-DISK agent-file rewrite is byte-identical, not
-# the prompt/agents-JSON parity that file already covers). --prompt-output/
-# --agents-json-output/--handoff-output all land on throwaway paths under
-# $BATS_TEST_TMPDIR (the CLI still requires all four output flags, but
-# nothing here diffs the prompt/agents-JSON bytes against the bash side).
-# $1 is the on-disk agent-files dir this invocation rewrites in place
-# (--driver-agent-files-dir); --agents-prompt-files "$AGENTS_PROMPT_FILES"
-# feeds the same roster-keyed rewrite loop the bash side reads. Every skill
-# is baked (setup() above), matching the covered cell's skills-fully-baked
-# rule. Any remaining args a caller passes are appended after the fixed flag
-# set. Fields promptassembly.EnvFromEnviron() reads straight from the process
-# environment (ISSUE_TRACKER, CODE_FORGE, BOX_WRITE_ENABLED, ISSUE_NUMBER,
-# ISSUE_TITLE, BRANCH, BASE_BRANCH, IN_PROGRESS_LABEL, COMPLETE_LABEL,
-# RUN_NONCE, ORCHESTRATOR_ENABLED, ...) are not passed as flags here --
-# set_box_env/setup_entrypoint_env and this file's own setup() (plus any
-# per-test export, e.g. ORCHESTRATOR_ENABLED below) already export them, and
-# `run` inherits this shell's exported environment into the subprocess
-# (issue #2979).
+# Rewrites the agent files in dir $1 with the real driver-exec verb. The tests
+# diff only that dir, so the prompt, agents-JSON and handoff outputs land on
+# throwaway paths just to satisfy the CLI's four required output flags.
+# EnvFromEnviron() reads the rest from the process environment, which `run`
+# inherits into the subprocess (issue #2979).
 assemble_go_agent_files() {
   local dir="$1"
   shift
@@ -170,11 +138,9 @@ assemble_go_agent_files() {
   [ "$(agent_file_frontmatter "$dir/scout.md")" = "$frontmatter_before" ]
 }
 
-# Byte-parity twin of the test just above (issue #2353): the SAME fixture
-# rewritten independently by both the bash entrypoint and the Go
-# `driver-exec assemble-prompt` verb must land on byte-identical output, not
-# just "changed from the placeholder" like the bash-only test above already
-# checks.
+# Byte-parity twin of the test above (issue #2353): one fixture rewritten
+# independently by the bash entrypoint and the Go verb must land on identical
+# bytes, not just "changed from the placeholder".
 @test "bash and Go rewrite a single baked opencode agent file byte-identically" {
   local dir_bash="$BATS_TEST_TMPDIR/agent-files-bash"
   local dir_go="$BATS_TEST_TMPDIR/agent-files-go"
@@ -211,16 +177,11 @@ assemble_go_agent_files() {
   [[ "$worker_body" == *"Stay inside the slice you were handed"* ]]
 }
 
-# A custom Nth agent (issue #264, roster) must get its baked file rewritten
-# the same generic way as the built-in names -- no per-name branch in the
-# entrypoint. AGENTS_PROMPT_FILES (nix-baked from the roster) maps each agent
-# name to its prompt file under PROMPTS_DIR; here it names a custom
-# "auditor-prompt.md" that lives only in this test's own prompt dir. Copied
-# from the real PROMPTS_DIR (rather than a bare empty dir) so every other
-# fragment/prompt file phase_prompt_assembly reads along the way still
-# resolves -- only the extra auditor-prompt.md is genuinely new. Its content
-# references ISSUE_NUMBER, so this test also verifies runtime substitution
-# actually ran (setup_entrypoint_env sets ISSUE_NUMBER=7).
+# A custom Nth agent (issue #264, roster) must get its baked file rewritten the
+# same generic way as the built-in names, with no per-name branch in the
+# entrypoint. This copies the real PROMPTS_DIR rather than starting from an
+# empty dir so every other file phase_prompt_assembly reads still resolves. The
+# auditor prompt names ISSUE_NUMBER, so this also proves substitution ran.
 @test "entrypoint rewrites a custom Nth agent's baked file generically via AGENTS_PROMPT_FILES" {
   local prompt_dir="$BATS_TEST_TMPDIR/custom-prompts"
   cp -r "$PROMPTS_DIR" "$prompt_dir"
@@ -263,13 +224,11 @@ assemble_go_agent_files() {
   [[ "$scout_body" == *"Return only the brief's path"* ]]
 }
 
-# Byte-parity twin of the reviewer-drop test just above plus the
-# --review-model forwarding test below (issue #2353): both bash and Go must
-# drop reviewer.md, rewrite the remaining roster file byte-identically, and
-# recover the SAME review model -- bash from the Handoff descriptor's
-# .ReviewModel it hands the orchestrator via --handoff-file (issue #2975; the
-# path is recovered from $ORCHESTRATOR_LOG's recorded argv), Go from its own
-# handoff JSON's .ReviewModel.
+# Byte-parity twin of the reviewer-drop test above and the --review-model test
+# below (issue #2353). Bash reports its review model through the Handoff
+# descriptor it hands the orchestrator via --handoff-file (issue #2975), whose
+# path this recovers from the argv $ORCHESTRATOR_LOG recorded; Go writes its
+# own handoff JSON.
 @test "bash and Go drop reviewer.md and recover the same --review-model when the orchestrator is on" {
   local dir_bash="$BATS_TEST_TMPDIR/agent-files-bash"
   local dir_go="$BATS_TEST_TMPDIR/agent-files-go"
@@ -298,13 +257,10 @@ assemble_go_agent_files() {
   jq -e '.ReviewModel == "opus"' "$BATS_TEST_TMPDIR/go-handoff.json"
 }
 
-# Issue #2278: file-based twin of entrypoint-orchestrator-handoff.bats's
-# "orchestrator path forwards --review-model from the reviewer's configured
-# model" (issue #2277, JSON path). Here the reviewer's configured model rides
-# the baked reviewer.md's `model:` frontmatter scalar instead of
-# AGENTS_JSON_TEMPLATE's .reviewer.model, but it must reach the orchestrator's
-# --review-model flag the same way, extracted before the reviewer.md removal
-# just above drops it.
+# Issue #2278: file-based twin of the JSON path's --review-model forwarding
+# (issue #2277). The configured model rides reviewer.md's `model:` frontmatter
+# scalar instead of AGENTS_JSON_TEMPLATE's .reviewer.model, and must be
+# extracted before the reviewer.md removal above drops it.
 @test "entrypoint forwards --review-model from the reviewer's baked opencode agent file when the orchestrator is on" {
   local dir="$BATS_TEST_TMPDIR/agent-files"
   mkdir -p "$dir"
@@ -321,11 +277,9 @@ assemble_go_agent_files() {
   [ "$(jq -r .ReviewModel "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "opus" ]
 }
 
-# Mirrors entrypoint-orchestrator-handoff.bats's "orchestrator path omits
-# --review-model when no reviewer model is configured": on the opencode
-# file-based path, no reviewer.md at all (the #392 empty-model-drops-the-file
-# semantics) means no configured model to extract -- entrypoint.sh must omit
-# --review-model entirely rather than pass it empty.
+# No reviewer.md at all (issue #392's empty-model-drops-the-file rule) means no
+# configured model to extract, so entrypoint.sh must omit --review-model
+# entirely rather than pass it empty.
 @test "entrypoint omits --review-model when no reviewer baked opencode agent file exists" {
   local dir="$BATS_TEST_TMPDIR/agent-files"
   mkdir -p "$dir"
@@ -343,8 +297,6 @@ assemble_go_agent_files() {
 }
 
 @test "entrypoint rewrites the reviewer's baked opencode agent file when the orchestrator is off" {
-  # Parity with the JSON loop's off-row: with the orchestrator off, reviewer
-  # is not dropped -- its baked file is rewritten like any other roster entry.
   local dir="$BATS_TEST_TMPDIR/agent-files"
   mkdir -p "$dir"
   write_agent_file "$dir/reviewer.md" "reviewer"
@@ -360,9 +312,7 @@ assemble_go_agent_files() {
   [ "$reviewer_body" != "placeholder body for reviewer" ]
 }
 
-# Byte-parity twin of the test just above (issue #2353): with the
-# orchestrator off, neither side drops reviewer.md -- both must rewrite its
-# body byte-identically, like any other roster entry.
+# Byte-parity twin of the test above (issue #2353).
 @test "bash and Go rewrite the reviewer's baked opencode agent file byte-identically when the orchestrator is off" {
   local dir_bash="$BATS_TEST_TMPDIR/agent-files-bash"
   local dir_go="$BATS_TEST_TMPDIR/agent-files-go"
@@ -385,9 +335,8 @@ assemble_go_agent_files() {
 @test "entrypoint skips a roster agent with no baked opencode agent file without error" {
   local dir="$BATS_TEST_TMPDIR/agent-files"
   mkdir -p "$dir"
-  # Only scout has a baked file -- reviewer/filer/worker (also in
-  # AGENTS_PROMPT_FILES via setup_entrypoint_env) do not, mirroring the
-  # opencode-side empty-model case where no file gets baked at all.
+  # Reviewer, filer and worker are in AGENTS_PROMPT_FILES but have no baked
+  # file, mirroring the opencode empty-model case where nothing gets baked.
   write_agent_file "$dir/scout.md" "scout"
   export DRIVER_AGENT_FILES_DIR="$dir"
 
@@ -417,14 +366,10 @@ assemble_go_agent_files() {
 }
 
 # Cross-Driver parity (issue #2153, AC3): the same roster must yield the same
-# effective subagent prompt content under either Driver. Both mechanisms
-# derive scout's prompt from the identical _subst "$PROMPTS_DIR/scout-prompt.md"
-# call (entrypoint.sh's --agents JSON injection loop and its
-# DRIVER_AGENT_FILES_DIR-gated file-rewrite twin, agent/entrypoint.sh:784+),
-# so claude's $DRIVER_AGENTS_FILE .scout.prompt and opencode's rewritten
-# scout.md body must match byte-for-byte, modulo the single trailing newline
-# the file body carries (printf '%s\n%s\n' ...) that the JSON string strips
-# (command substitution trims trailing newlines).
+# subagent prompt under either Driver. Claude's .scout.prompt and opencode's
+# rewritten scout.md body must match byte-for-byte, except for the single
+# trailing newline the file body carries and the JSON string does not, because
+# command substitution trims it.
 @test "the same roster yields the same effective scout prompt under claude and opencode" {
   export AGENTS_JSON_TEMPLATE='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
@@ -434,12 +379,9 @@ assemble_go_agent_files() {
   claude_prompt="$(jq -r '.scout.prompt' "$DRIVER_AGENTS_FILE")"
   [ -n "$claude_prompt" ]
 
-  # Fresh state for the opencode-side run: no --agents JSON flag (opencode
-  # composes subagents from on-disk files, not this flag), a distinct
-  # WORK_DIR (the first run's checkout is non-empty, same reasoning as
-  # entrypoint-driver-session.bats's independent-cold-runs test), and a baked
-  # scout.md this run's DRIVER_AGENT_FILES_DIR-gated rewrite loop rewrites in
-  # place.
+  # Fresh state for the opencode-side run: no --agents JSON flag, since opencode
+  # composes subagents from on-disk files, and a distinct WORK_DIR, because the
+  # first run left a non-empty checkout behind.
   unset AGENTS_JSON_TEMPLATE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-opencode"
   local dir="$BATS_TEST_TMPDIR/agent-files-parity"
@@ -453,31 +395,25 @@ assemble_go_agent_files() {
   local opencode_body
   opencode_body="$(agent_file_body "$dir/scout.md")"
   [ -n "$opencode_body" ]
-  # Trim exactly one trailing newline from the file body so it compares
-  # equal to the JSON string, which command substitution already stripped of
-  # its own trailing newline.
+  # Trim one trailing newline so the body compares equal to the JSON string,
+  # which command substitution already stripped.
   opencode_body="${opencode_body%$'\n'}"
 
   [ "$opencode_body" = "$claude_prompt" ]
 }
 
-# Cross-half integration case (issue #2262): renders agent files through the
-# REAL baked agentFilesTemplate (lib/drivers/opencode.nix:132-152) instead of
-# write_agent_file's hand-written fixture, and derives DRIVER_AGENT_FILES_DIR
-# from the REAL rendered preamble (lib/drivers/default.nix's renderPreamble)
-# instead of retyping the relative path -- so if agentFilesTemplate's
-# on-disk path (opencode.nix:139) ever drifts from agentFilesDirRelative
-# (opencode.nix:40), the two Nix-rendered artifacts land at different
-# relative paths and this test fails instead of staying silently pinned.
+# Cross-half integration case (issue #2262). Deriving DRIVER_AGENT_FILES_DIR
+# from the real rendered preamble instead of retyping the relative path means
+# a drift between agentFilesTemplate's on-disk path and agentFilesDirRelative
+# fails this test instead of leaving it silently pinned.
 @test "entrypoint rewrites the real baked opencode agent-files template output, preserving frontmatter and the two-fence shape" {
   eval "$(grep '^DRIVER_AGENT_FILES_DIR=' "$OPENCODE_DRIVER_PREAMBLE_FILE")"
   local relative="${DRIVER_AGENT_FILES_DIR#/home/agent/}"
   local dir="$BATS_TEST_TMPDIR/agent-files-real/$relative"
   mkdir -p "$dir"
   cp "$OPENCODE_AGENT_FILES/home/agent/$relative/"*.md "$dir/"
-  # The store path is read-only; the entrypoint rewrites these files in
-  # place, so give the copies write permission (the store's own bits don't
-  # carry over usefully here since cp preserves them).
+  # cp preserves the store's read-only bits, and the entrypoint rewrites these
+  # files in place.
   chmod u+w "$dir"/*.md
 
   local scout="$dir/scout.md"

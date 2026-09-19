@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# dispatch --no-build (issue #276): skip/require the build step, positional issue arg.
+# Covers dispatch --no-build (issue #276): it skips the build and requires a prebuilt image.
 
 load helper
 
@@ -7,15 +7,12 @@ setup() {
   setup_run_env
 }
 
-# --- dispatch --no-build (issue #276) ----------------------------------------
-
 @test "dispatch --no-build fails fast with a clear message when image is absent" {
   export FAKE_PODMAN_IMAGE_PRESENT=0
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   run "$SPINDRIFT_CMD" dispatch --no-build
   [ "$status" -ne 0 ]
   [[ "$output" == *"spindrift build"* ]]
-  # Must not attempt nix build or container launch
   ! grep -q 'build' "$NIX_LOG"
   ! grep -q '^run ' "$PODMAN_LOG"
 }
@@ -25,10 +22,8 @@ setup() {
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   run "$SPINDRIFT_CMD" dispatch --no-build
   [ "$status" -eq 0 ]
-  # No build was triggered
   ! grep -q 'build' "$NIX_LOG"
   ! grep -q "load -i" "$PODMAN_LOG"
-  # Issue was dispatched
   grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
 }
 

@@ -1,19 +1,16 @@
 #!/bin/sh
-# Stateful stand-in for the gh CLI, used by contract_test.go's
-# forgetest.RunTrackerContract harness. Reads and writes a
-# STATE_DIR/issues/<num>/ tree instead of returning a single scripted
-# response, so successive gh invocations across a contract run see each
-# other's effects.
+# Stateful stand-in for the gh CLI that forgetest.RunTrackerContract runs.
+# Invocations share a STATE_DIR/issues/<num>/ tree rather than each returning a
+# scripted response, so every call sees the previous calls' writes.
 DIR="$STATE_DIR/issues"
 
 json_escape() {
 	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' '
 }
 
-# ordered_nums lists issue directory names ascending. Names are always
-# plain digits (test-controlled), so ls's word-splitting risk (SC2012)
-# doesn't apply here.
 ordered_nums() {
+	# Issue directory names are always plain digits, because the test creates
+	# them, so ls's word-splitting risk does not apply.
 	# shellcheck disable=SC2012
 	ls "$DIR" 2>/dev/null | sort -n
 }

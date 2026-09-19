@@ -1,64 +1,34 @@
 #!/usr/bin/env bats
-# Build-time/runtime parity check (issue #2320, parent #2244; widened to
-# every validateMarkers row, including severity=="warn" ones, by issue
-# #2356): drives the ACTUAL runtime validator (agent/entrypoint.sh's
-# phase_prompt_assembly, which since issue #2356 forwards to the real Go
-# `driver-exec assemble-prompt` verb's promptassembly.Validate, the
-# successor to the old bash _validate_prompt_contract) against the same 20
-# fixtures lib/prompt-contract.nix's `parityFixtures` already resolved --
-# for severity=="reject" rows, via the real `buildTimeRejectVerdicts`
-# function; for severity=="warn" rows, by construction, since a warn row's
-# runtime validator never blocks regardless of gate/markerPresent -- proof
-# the runtime validator's exit code agrees with `parityFold(verdict)` for
-# every (validateMarkers row) x (gate) x (markerPresent) combination, not
-# just that Nix's own pinning of the fold (nix/checks/prompt-contract-
-# parity.nix, slice 1) is self-consistent.
-#
-# A single @test loops over all 20 fixture rows read from
-# PROMPT_CONTRACT_PARITY_FIXTURE (a JSON file nix/checks/bats.nix renders
-# from lib/prompt-contract.nix's parityFixtures) rather than one @test per
-# row: bats has no built-in data-driven-@test-generation this repo already
-# uses elsewhere (tests/entrypoint-prompt-validator.bats's own "data-driven"
-# case patches a single field and asserts a single outcome, it doesn't loop
-# over a fixture list), so a hand-rolled per-@test-per-row split would mean
-# hardcoding the 20 (id, gate, markerPresent) combinations a second time in
-# bash -- exactly the duplication this slice exists to avoid. The loop
-# accumulates every failing fixture's id/gate/markerPresent/verdict before
-# failing once at the end, so a broken row is still individually legible in
-# --print-output-on-failure output instead of bats stopping at the first
-# failure and hiding the rest.
-#
-# Deliberately does NOT re-derive parityFold in bash: each fixture's
-# `verdict` field is already lib/prompt-contract.nix's own precomputed
-# result (buildTimeRejectVerdicts for reject rows, "advise" by construction
-# for warn rows), so this test only reads the fold's *result* ("reject" ->
-# must block, anything else -> must not block) off each row, never
-# reimplementing the fold logic as a second copy that could silently drift
-# from the Nix source of truth.
+
+# Build-time/runtime parity check (issue #2320, parent #2244; widened to warn
+# rows by issue #2356): drives the real runtime validator (entrypoint.sh's
+# phase_prompt_assembly, now the Go `driver-exec assemble-prompt` verb) against
+# the same fixtures lib/prompt-contract.nix's parityFixtures already resolved,
+# so each row's runtime exit code is checked, not just Nix's pinning of the fold.
+
+# One @test loops over every row: bats cannot generate tests from data, and a
+# per-row split would hardcode the (id, gate, markerPresent) combinations a
+# second time in bash. The loop records every failing row and fails once at the
+# end so one broken row does not hide the others. Each row's `verdict` is Nix's
+# precomputed fold result, so bash never holds a second copy of the fold logic.
 
 load helper
 
 setup() {
   setup_entrypoint_env
   : "${PROMPT_CONTRACT_PARITY_FIXTURE:?PROMPT_CONTRACT_PARITY_FIXTURE must be set (JSON fixture file rendered from lib/prompt-contract.nix parityFixtures)}"
-  # Route driver-exec/orchestrator's heartbeat write into this test's own
-  # tmpdir instead of the shared /tmp/heartbeat.log default (issue #2320):
-  # this suite invokes the real entrypoint.sh -> driver-exec path 8 times
-  # per run, directly on the nix build host, where a concurrently-building
-  # derivation running as a different sandbox user can already own that
-  # shared path and turn every one of this suite's fixtures into a spurious
-  # EACCES-driven "block".
+  # Keep the heartbeat write out of the shared /tmp/heartbeat.log default
+  # (issue #2320): on the nix build host a concurrently building derivation's
+  # sandbox user can already own that path, turning every fixture here into a
+  # spurious EACCES block.
   export HEARTBEAT_LOG="$BATS_TEST_TMPDIR/heartbeat.log"
 }
 
-# Same stub shape as tests/entrypoint-prompt-validator.bats's own
-# _stub_prompt_dir (not `load`-shared since bats' `load helper` only loads
-# one file per suite and this stub is a handful of lines) -- review-
-# prompt.md carries a VERDICT: line by default so a fixture iteration that
-# doesn't target the reviewer-verdict row never incidentally trips it.
-# worker-prompt.md (issue #2059, #2058) is read unconditionally alongside
-# review-prompt.md by the same gate, so it needs a stub too or Assemble
-# hard-fails on every fixture this path exercises.
+# Duplicates tests/entrypoint-prompt-validator.bats's _stub_prompt_dir rather
+# than sharing it, since bats loads one helper file per suite. review-prompt.md
+# carries a VERDICT: line by default so an iteration that does not target the
+# reviewer-verdict row never trips it, and the same gate also reads
+# worker-prompt.md (issue #2059, #2058), so without a stub Assemble hard-fails.
 _parity_stub_prompt_dir() {
   local dir="$1"
   mkdir -p "$dir"
@@ -92,9 +62,8 @@ _parity_stub_prompt_dir() {
     prompt_dir="$BATS_TEST_TMPDIR/prompts-$i"
     _parity_stub_prompt_dir "$prompt_dir"
     export PROMPTS_DIR="$prompt_dir"
-    # WORK_DIR is fixed by setup_entrypoint_env; each entrypoint invocation
-    # clones into it, so a stale clone from a prior iteration must be
-    # cleared first or the second-and-later `git clone` fails outright.
+    # Each entrypoint invocation clones into WORK_DIR, so a stale clone from a
+    # prior iteration would make the next `git clone` fail.
     export WORK_DIR="$BATS_TEST_TMPDIR/work-$i"
 
     case "$id" in
@@ -154,16 +123,10 @@ _parity_stub_prompt_dir() {
           unset BOX_REVIEW_LOOP_INLINE
           unset BOX_WRITE_ENABLED
         else
-          # FILER_FILE_RELAY (cmd/launcher/internal/promptassembly/
-          # gates_tracker.go) now requires BOX_FILER_ENABLED (forwarded
-          # directly from the roster's "filer" key, issue #2533) AND
-          # !BOX_WRITE_ENABLED AND BOX_REVIEW_LOOP_ORCHESTRATOR all at once --
-          # toggle only BOX_WRITE_ENABLED off->on here (matching this suite's
-          # existing one-knob-per-row style) so the gate goes false while
-          # AGENTS_JSON_TEMPLATE/BOX_FILER_ENABLED/ORCHESTRATOR_ENABLED/
-          # BOX_REVIEW_LOOP_ORCHESTRATOR stay set, keeping .filer.prompt
-          # populated so markerPresent is still meaningfully exercised even
-          # though the gate itself is off.
+          # FILER_FILE_RELAY requires BOX_FILER_ENABLED (issue #2533),
+          # !BOX_WRITE_ENABLED and BOX_REVIEW_LOOP_ORCHESTRATOR at once, so
+          # turning on BOX_WRITE_ENABLED alone closes the gate while
+          # .filer.prompt stays populated and markerPresent still matters.
           export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
           export BOX_FILER_ENABLED=1
           export ORCHESTRATOR_ENABLED=1
@@ -173,18 +136,11 @@ _parity_stub_prompt_dir() {
         fi
         ;;
       research-issue-intent)
-        # FILER_FILE_RELAY's research special case (ADR 0041 / issue #2593)
-        # fires whenever DISPATCH_KIND=research and BOX_FILER_ENABLED, with
-        # no orchestrator condition and regardless of BOX_WRITE_ENABLED --
-        # and, per issue #2593's validate.go fix, that same
-        # kind=="research" && FILER_FILE_RELAY condition now also activates
-        # the verdict-comment-relay reject row (When=readOnlyResearch),
-        # which scans this same research-prompt.md for SPINDRIFT_COMMENT.
-        # Append it here whenever gate=true so that unrelated row never
-        # spuriously fires against this row's own markerPresent scenario;
-        # when gate=false, DISPATCH_KIND is unset below so kind reverts to
-        # "work" and verdict-comment-relay's own kind=="research" condition
-        # is never active regardless, so no marker is needed there.
+        # FILER_FILE_RELAY's research case (ADR 0041, issue #2593) fires on
+        # DISPATCH_KIND=research plus BOX_FILER_ENABLED, and that same condition
+        # also activates the verdict-comment-relay reject row, which scans this
+        # research-prompt.md for SPINDRIFT_COMMENT. Append that marker whenever
+        # gate=true so the unrelated row never fires against this row.
         comment_marker=""
         if [ "$gate" = true ]; then
           comment_marker=$'\n\nPost your verdict with SPINDRIFT_COMMENT here'

@@ -1,5 +1,4 @@
 #!/usr/bin/env bats
-# Container argv: entrypoint/prompt mount, empty-queue exit, hardening flags, resource limits, REPO_SLUG guard.
 
 load helper
 

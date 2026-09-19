@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # Self-contained research (ADR 0022, issue #2202): SELF_CONTAINED=1 selects the
-# no-repo research sub-mode -- no clone, no explore, distinct baked prompt.
+# no-repo research sub-mode: it clones nothing, explores nothing, and uses a
+# distinct baked prompt.
 
 load helper
 
@@ -43,10 +44,8 @@ setup() {
   export ISSUE_TRACKER="local"
   export BOX_TRACKER_AXIS_READ=LOCAL
   unset BOX_TRACKER_AXIS_WRITE
-  # entrypoint.sh no longer derives no_repo's local-tracker half from
-  # ISSUE_TRACKER itself (issue #2527) -- it reads the launcher-forwarded
-  # BOX_IN_BOX_UNREACHABLE_TRACKER signal, so this fixture supplies it
-  # directly.
+  # entrypoint.sh reads this launcher-forwarded signal rather than deriving
+  # no_repo's local-tracker half from ISSUE_TRACKER (issue #2527).
   export BOX_IN_BOX_UNREACHABLE_TRACKER=1
   unset REPO_SLUG
   unset GH_TOKEN
@@ -65,8 +64,6 @@ setup() {
   grep -q "REPO_SLUG" <<<"$output"
 }
 
-# --- regression: research without SELF_CONTAINED is unaffected --------------
-
 @test "DISPATCH_KIND=research without SELF_CONTAINED still drives research-prompt.md and clones" {
   export DISPATCH_KIND="research"
   run bash "$ENTRYPOINT"
@@ -76,8 +73,7 @@ setup() {
   [ -d "$WORK_DIR/.git" ]
 }
 
-# --- RESEARCH_STATUS_ENUM renders in the OUTCOME grammar line (issue #2504) -
-
+# The status list comes from RESEARCH_STATUS_ENUM in the registry (issue #2504).
 @test "SELF_CONTAINED=1's OUTCOME grammar line renders the registry status enum" {
   export DISPATCH_KIND="research"
   export SELF_CONTAINED="1"

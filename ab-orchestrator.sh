@@ -1,78 +1,34 @@
 #!/usr/bin/env bash
-# ab-orchestrator.sh — paired A/B experiment for the worker/coordinator split
-# (issue #2057; formerly the in-box-orchestrator harness from issue #1627).
-#
-# For each issue you name, dispatches the SAME issue twice against a pinned
-# image — once with the worker OFF (a single implementor does the whole task)
-# and once ON (a coordinator provisions a worker) — then collects cost,
-# tokens, pass/verdict/decision counts, terminal outcome, and the produced
-# branch diff so you can compare the two arms and judge quality blind.
-#
-# It runs the FULL implement/review loop each arm but opens no PR and merges
-# nothing (CODE_FORGE=git + MERGE_MODE=manual): each arm just pushes its branch
-# to the throwaway remote you point it at. The only thing that differs between
-# the two runs of an issue is --worker-model (empty on OFF, $AB_WORKER_ON on
-# ON) — --orchestrator-enabled is held fixed at $AB_ORCH on both arms, and
-# everything else (image, model, base commit, caps) is held fixed too, so
-# difference is attributable to the worker knob, not to drift. Arm order is
-# randomised per issue for cache hygiene.
-#
-# WHAT THIS DOES NOT DO
-#   - It does not judge quality for you. It stages the two diffs per issue under
-#     an un-labelled judging/ bundle (variant-1/variant-2 + a separate KEY.tsv)
-#     so a human or an LLM judge can score them blind against the issue's
-#     acceptance criteria. Blind scoring is the whole point — don't peek at KEY.
-#   - It does not decide anything. Pre-register your decision rule first, e.g.
-#     "orchestrator earns more slices only if, on the context-heavy tail, it is
-#     >= quality at <= cost AND its no-outcome rate is no worse."
-#   - It does not pin the source commit for you. Run it from a checkout parked
-#     at the commit you want to measure and do NOT pull between runs; the image
-#     is built once up front and reused (--no-build) so both arms share it.
-#
-# SAFETY
-#   Each run dispatches a real Box (real spend) and pushes a branch to
-#   $AB_REMOTE. With ISSUE_TRACKER=github it ALSO mutates the tracker issue:
-#   label swap (-> complete/failed) and a "## Run usage" comment, on every run.
-#   So point AB_REMOTE and AB_REPO_SLUG at a THROWAWAY MIRROR repo, or set
-#   ISSUE_TRACKER=local. The script refuses to start until you confirm.
-#
-# USAGE
-#   ab-orchestrator.sh <issue> [<issue> ...]
-#   AB_ISSUES="42 57" ab-orchestrator.sh
-#
-# REQUIRED ENV
-#   AB_REMOTE       git remote URL branches are pushed to (CODE_FORGE_REMOTE_URL).
-#                   MUST be a throwaway/mirror, not your primary origin.
-#   AB_REPO_SLUG    owner/name the launcher reads issues from (REPO_SLUG).
-#
-# OPTIONAL ENV (defaults in parentheses)
-#   AB_BASE         base branch/commit both arms branch from     (main)
-#   AB_MODEL        implementor model                            (claude-sonnet-5)
-#   AB_PREFIX_OFF   branch prefix for the OFF arm                (ab-off/issue-)
-#   AB_PREFIX_ON    branch prefix for the ON arm                 (ab-on/issue-)
-#   AB_OUTDIR       results directory              (./ab-results/<timestamp>)
-#   AB_ENV_FILE     file to `source` for launcher secrets first  (harness.env if present)
-#   AB_NO_BUILD     reuse the one up-front build via --no-build  (1)
-#   AB_WORKER_ON    worker model for the ON arm (--worker-model) (AB_MODEL)
-#   AB_ORCH         --orchestrator-enabled value, held fixed on   (empty)
-#                   BOTH arms (this experiment varies the worker
-#                   knob, not the orchestrator knob)
-#   AB_CONFIRM      set to 1 to skip the interactive confirmation (unset)
-#   AB_DRY_RUN      print the launcher commands, don't dispatch   (unset)
-#
-# Secrets (GH_TOKEN[_CMD], CLAUDE_CODE_OAUTH_TOKEN[_CMD] or ANTHROPIC_API_KEY,
-# GIT_USER_NAME, GIT_USER_EMAIL) are resolved by the launcher from the
-# environment exactly as `dogfood.sh` expects — source your harness.env (or set
-# AB_ENV_FILE) so they are present.
+
+# Paired A/B experiment for the worker/coordinator split (issue #2057).
+# Dispatches the same issue twice against one pinned image, varying only
+# --worker-model (empty on OFF, $AB_WORKER_ON on ON). --orchestrator-enabled
+# stays at $AB_ORCH on both arms, so a difference is attributable to the worker
+# knob rather than to drift. Arm order is randomised per issue.
+
+# Each arm runs the full implement/review loop but opens no PR and merges
+# nothing (CODE_FORGE=git + MERGE_MODE=manual); it only pushes its branch. The
+# script stages the two diffs under judging/ as variant-1 and variant-2 with a
+# separate KEY.tsv, so score them blind before reading KEY.
+
+# SAFETY: every run dispatches a real Box (real spend), pushes a branch to
+# $AB_REMOTE, and under ISSUE_TRACKER=github also swaps the issue's labels and
+# posts a "## Run usage" comment. Point AB_REMOTE and AB_REPO_SLUG at a
+# throwaway mirror repo, or set ISSUE_TRACKER=local.
+
+# Run this from a checkout parked at the commit you want to measure and do not
+# pull between runs: the image is built once up front and reused (--no-build).
+
+# The launcher resolves its secrets (GH_TOKEN[_CMD], CLAUDE_CODE_OAUTH_TOKEN[_CMD]
+# or ANTHROPIC_API_KEY, GIT_USER_NAME, GIT_USER_EMAIL) from the environment, so
+# source your harness.env or point AB_ENV_FILE at it.
 
 set -euo pipefail
 
-# ---------------------------------------------------------------- helpers ----
 info() { printf '==> %s\n' "$*" >&2; }
 warn() { printf '!! %s\n' "$*" >&2; }
 die()  { printf '!! %s\n' "$*" >&2; exit 1; }
 
-# ------------------------------------------------------------------ config ----
 AB_BASE="${AB_BASE:-main}"
 AB_MODEL="${AB_MODEL:-claude-sonnet-5}"
 AB_PREFIX_OFF="${AB_PREFIX_OFF:-ab-off/issue-}"
@@ -82,11 +38,11 @@ AB_OUTDIR="${AB_OUTDIR:-./ab-results/$(date +%Y%m%d-%H%M%S)}"
 AB_WORKER_ON="${AB_WORKER_ON:-$AB_MODEL}"
 AB_ORCH="${AB_ORCH:-}"
 
-# ---------------------------------------------------------- metric parsers ----
-# Sum every "type":"result" event (orchestrator ON emits one per pass; the
-# launcher's own comment keeps only the last, so summing is the honest total).
-# jq -Rn + fromjson? tolerates the log's bare non-JSON lines (==>, SPINDRIFT_*).
-parse_usage() { # $1=log  -> "cost in out cread ccreate turns ms"
+# Sum every "type":"result" event: orchestrator ON emits one per pass and the
+# launcher's own comment keeps only the last, so summing is the honest total.
+# fromjson? tolerates the log's bare non-JSON lines (==>, SPINDRIFT_*). Prints
+# one row: cost, input, output, cache read, cache create, turns, duration ms.
+parse_usage() {
   jq -Rnr '
     [inputs | fromjson?] | map(select(.type=="result")) as $r
     | [ ($r|map(.total_cost_usd // 0)|add // 0),
@@ -104,24 +60,19 @@ parse_passes()  { jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" an
 parse_verdicts(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="verdict")|.spindrift_op.verdict)|join(",")' "$1" 2>/dev/null | tr -d '"' || echo ""; }
 parse_decision(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="decision")|"\(.spindrift_op.decision):\(.spindrift_op.reason)")|last // ""' "$1" 2>/dev/null | tr -d '"' || echo ""; }
 
-# ---------------------------------------------------------------- pricing ----
-# Default per-MTok USD pricing table: public Claude list prices per MTok, as
-# of 2026-07; override via AB_PRICES. Keys are model-name PREFIXES matched
-# against a message's "model" field (longest matching prefix wins); each
-# value is [input, output, cache_read, cache_write] $/MTok. A model with no
-# matching prefix costs 0 (its tokens are still reported).
+# Public Claude list prices per MTok as of 2026-07; override via AB_PRICES.
+# Keys are model-name prefixes matched against a message's "model" field
+# (longest match wins); each value is [input, output, cache_read, cache_write]
+# in $/MTok. A model with no matching prefix costs 0, but its tokens are still
+# reported.
 AB_DEFAULT_PRICES='{"claude-sonnet-5":[3,15,0.3,3.75],"claude-opus":[15,75,1.5,18.75],"claude-haiku":[0.8,4,0.08,1]}'
 
-# --------------------------------------------------------------- breakdown ----
-# Per-role/per-model token + effective-cost TSV from a stream-json Box log
-# (issue #2057 slice 2). Mirrors the two-pass role-resolution algorithm in
-# cmd/launcher/internal/driver/claude/usage.go (breakdownByRoleFile): pass 1
-# maps each implementor-issued Task tool_use id -> its subagent_type; pass 2
-# attributes every assistant message's tokens to implementor (no
-# parent_tool_use_id) or the role recorded for its parent Task id (default
-# "subagent" for an unrecognized parent). Unlike the Go version, this also
-# buckets by model, since pricing varies by model.
-cmd_breakdown() { # $1=logfile -> TSV: role  model  cache_read  cache_write  fresh_input  output  cost_usd
+# Per-role/model token and effective-cost TSV from a stream-json Box log (issue
+# #2057), mirroring breakdownByRoleFile in the launcher's claude/usage.go: pass
+# 1 maps each implementor-issued Task tool_use id to its subagent_type, pass 2
+# attributes each assistant message to implementor (no parent_tool_use_id) or
+# its parent's role. It also buckets by model, since pricing varies by model.
+cmd_breakdown() {
   local log="$1"
   local prices_json="${AB_PRICES:-$AB_DEFAULT_PRICES}"
   jq -Rnr --argjson prices "$prices_json" '
@@ -190,12 +141,10 @@ cmd_breakdown() { # $1=logfile -> TSV: role  model  cache_read  cache_write  fre
   ' "$log"
 }
 
-# ----------------------------------------------------------------- compare ----
 # Side-by-side per-role/model breakdown diff between two --breakdown TSVs
-# (issue #2057 acceptance criteria 1 & 2): a markdown table with both arms'
-# rows for every (role,model) key seen, plus a per-model and total
-# effective-$ delta (ON - OFF).
-cmd_compare() { # $1=off.tsv $2=on.tsv
+# (issue #2057): a markdown table with both arms' rows for every (role, model)
+# key seen, plus a per-model and total effective-$ delta (ON - OFF).
+cmd_compare() {
   local off="$1" on="$2"
   [ -f "$off" ] || off=/dev/null
   [ -f "$on" ] || on=/dev/null
@@ -254,22 +203,20 @@ cmd_compare() { # $1=off.tsv $2=on.tsv
   ' "$off" "$on"
 }
 
-# Terminal outcome: bare "SPINDRIFT_OUTCOME ... status=X" line, else no-outcome.
-parse_outcome() { # $1=log -> ready|blocked|failed|none
+parse_outcome() { # Prints ready, blocked, failed, or none.
   local line
   line="$(grep -a '^SPINDRIFT_OUTCOME ' "$1" 2>/dev/null | tail -1 || true)"
   if [ -z "$line" ]; then echo none; return; fi
   sed -n 's/.*status=\([^ ]*\).*/\1/p' <<<"$line" | head -1
 }
 
-# --------------------------------------------------------------- run an arm ----
-run_arm() { # $1=issue $2=arm $3=orch $4=branch_prefix $5=worker_model
+run_arm() {
   local issue="$1" arm="$2" orch="$3" prefix="$4"
   local wm="$5"
   local armdir="$AB_OUTDIR/$issue/$arm"
   mkdir -p "$armdir"
   local host_log=".spindrift/logs/issue-${issue}.log"
-  # Clear any prior host log so we capture only this arm's stream.
+  # Clear any prior host log so this arm captures only its own stream.
   rm -f "$host_log"
 
   local -a nb=(); [ "$AB_NO_BUILD" = "1" ] && nb=(--no-build)
@@ -277,11 +224,9 @@ run_arm() { # $1=issue $2=arm $3=orch $4=branch_prefix $5=worker_model
   info "issue #$issue [$arm] worker-model='${wm}' orchestrator-enabled='${orch}' prefix='$prefix'"
   # Pass every knob as a --flag, not an env var: flags are set via os.Setenv
   # before the launcher's ambient-knob check, so they beat whatever harness.env
-  # exported (which is how a read-only harness.env or a stray REPO_SLUG would
-  # otherwise leak in). --box-forge-and-issue-access read-write is forced for
-  # the same reason: a read-only harness.env is incompatible with CODE_FORGE=git.
-  # --orchestrator-enabled is held fixed at $AB_ORCH on both arms; the knob
-  # under test is --worker-model, empty on the OFF (single-implementor) arm.
+  # exported, which is how a stray REPO_SLUG would otherwise leak in.
+  # --box-forge-and-issue-access read-write is forced for the same reason, since
+  # a read-only harness.env is incompatible with CODE_FORGE=git.
   local -a cmd=(
     nix run ".#" -- dispatch "${nb[@]}" --yes
     --repo-slug "$AB_REPO_SLUG"
@@ -308,12 +253,11 @@ run_arm() { # $1=issue $2=arm $3=orch $4=branch_prefix $5=worker_model
 
   # Capture the host log before the next arm's run rotates it away.
   [ -f "$host_log" ] && cp "$host_log" "$armdir/box.log"
-  # Also grab fix-pass logs if any.
+  # Fix-pass logs, if any.
   for fx in .spindrift/logs/issue-"${issue}"-*.log; do
     [ -e "$fx" ] && cp "$fx" "$armdir/"
   done
 
-  # Fetch the pushed branch + base and stage the diff (best-effort).
   local branch="${prefix}${issue}"
   if git fetch -q "$AB_REMOTE" "+${branch}:refs/ab/${arm}-${issue}" "+${AB_BASE}:refs/ab/base-${issue}" 2>/dev/null; then
     git diff "refs/ab/base-${issue}...refs/ab/${arm}-${issue}" >"$armdir/diff.patch" 2>/dev/null || true
@@ -322,7 +266,6 @@ run_arm() { # $1=issue $2=arm $3=orch $4=branch_prefix $5=worker_model
     : >"$armdir/diff.patch"
   fi
 
-  # Parse metrics from the captured log.
   local log="$armdir/box.log" outcome usage passes verdicts decision
   [ -f "$log" ] || log=/dev/null
   outcome="$(parse_outcome "$log")"
@@ -333,18 +276,14 @@ run_arm() { # $1=issue $2=arm $3=orch $4=branch_prefix $5=worker_model
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$issue" "$arm" "$outcome" "$usage" "$passes" "$verdicts" "$decision" >>"$summary_tsv"
 
-  # Per-role/model token + effective-cost breakdown for this arm (issue #2057);
   # summary.md diffs the two arms' breakdown.tsv side by side via --compare.
   cmd_breakdown "$log" >"$armdir/breakdown.tsv" 2>/dev/null || : >"$armdir/breakdown.tsv"
 }
 
-# ------------------------------------------------------------------- main ----
 main() {
-  # Subcommand dispatch (issue #2057): --breakdown runs before the
-  # nix/git tool-check and issue-collection/required-env checks below, so it
-  # works in a sandbox with only jq present and needs none of the A/B
-  # dispatch env (AB_REMOTE/AB_REPO_SLUG/...). Future subcommands (e.g.
-  # --compare over an existing AB_OUTDIR) hook in here the same way.
+  # These subcommands (issue #2057) run before the tool and required-env checks
+  # below, so they work in a sandbox with only jq present and need none of the
+  # A/B dispatch env.
   case "${1:-}" in
     --breakdown) shift; cmd_breakdown "$@"; return $? ;;
     --compare) shift; cmd_compare "$@"; return $? ;;
@@ -357,7 +296,6 @@ main() {
     [ -e flake.nix ] || die "run this from the repo root (flake.nix not found in $PWD)"
   fi
 
-  # Collect issue numbers from args or AB_ISSUES.
   local -a issues=("$@")
   local n
   if [ "${#issues[@]}" -eq 0 ] && [ -n "${AB_ISSUES:-}" ]; then
@@ -369,7 +307,6 @@ main() {
     [[ "$n" =~ ^[0-9]+$ ]] || die "issue '$n' is not a number"
   done
 
-  # Source launcher secrets/env if asked (or a repo-local harness.env by default).
   local ab_env_file="${AB_ENV_FILE:-harness.env}"
   if [ -n "${AB_ENV_FILE:-}" ] || [ -f "$ab_env_file" ]; then
     [ -f "$ab_env_file" ] || die "AB_ENV_FILE '$ab_env_file' not found"
@@ -381,9 +318,9 @@ main() {
   : "${AB_REMOTE:?set AB_REMOTE to a THROWAWAY remote URL (CODE_FORGE_REMOTE_URL)}"
   : "${AB_REPO_SLUG:?set AB_REPO_SLUG to owner/name the launcher reads issues from}"
 
-  # The tracker slug must name the same repo the branches are pushed to, or the
-  # A/B reads/mutates one repo (the tracker) while pushing work to another — the
-  # subtle way you end up A/B-ing against the real repo. Compare and refuse.
+  # The tracker slug must name the same repo the branches are pushed to.
+  # Otherwise the experiment reads and mutates one repo while pushing work to
+  # another, which is the subtle way you end up A/B-ing against the real repo.
   local remote_slug
   remote_slug="$(sed -E 's#^(git@github\.com:|https?://github\.com/)##; s#\.git$##' <<<"$AB_REMOTE")"
   if [ "$remote_slug" != "$AB_REPO_SLUG" ] && [ -z "${AB_ALLOW_SLUG_MISMATCH:-}" ]; then
@@ -392,7 +329,6 @@ main() {
 
   local tracker="${ISSUE_TRACKER:-github}"
 
-  # --------------------------------------------------------- confirmation gate ----
   cat >&2 <<EOF
 
   A/B experiment — worker OFF vs ON
@@ -425,7 +361,6 @@ EOF
   local summary_tsv="$AB_OUTDIR/metrics.tsv"
   printf 'issue\tarm\toutcome\tcost_usd\tin_tok\tout_tok\tcache_read\tcache_create\tturns\tduration_ms\tpasses\tverdicts\tdecision\n' >"$summary_tsv"
 
-  # ------------------------------------------------------- build once, then run ----
   if [ "$AB_NO_BUILD" = "1" ] && [ -z "${AB_DRY_RUN:-}" ]; then
     info "building the image once so both arms share it (pins the experiment)"
     nix run ".#" -- build >"$AB_OUTDIR/logs/build.log" 2>&1 \
@@ -434,7 +369,7 @@ EOF
 
   local issue jdir v1 v2
   for issue in "${issues[@]}"; do
-    # Randomise arm order per issue (cache/warmth hygiene).
+    # Randomise arm order per issue for cache hygiene.
     if [ $((RANDOM % 2)) -eq 0 ]; then
       run_arm "$issue" off "$AB_ORCH" "$AB_PREFIX_OFF" ""
       run_arm "$issue" on  "$AB_ORCH" "$AB_PREFIX_ON"  "$AB_WORKER_ON"
@@ -443,14 +378,14 @@ EOF
       run_arm "$issue" off "$AB_ORCH" "$AB_PREFIX_OFF" ""
     fi
 
-    # Blind judging bundle: neutral variant names + a separate un-blinding key.
+    # Blind judging bundle: neutral variant names and a separate un-blinding key.
     jdir="$AB_OUTDIR/judging/$issue"
     mkdir -p "$jdir"
     if [ $((RANDOM % 2)) -eq 0 ]; then v1=off; v2=on; else v1=on; v2=off; fi
     cp "$AB_OUTDIR/$issue/$v1/diff.patch" "$jdir/variant-1.patch" 2>/dev/null || true
     cp "$AB_OUTDIR/$issue/$v2/diff.patch" "$jdir/variant-2.patch" 2>/dev/null || true
     printf '%s\tvariant-1\t%s\n%s\tvariant-2\t%s\n' "$issue" "$v1" "$issue" "$v2" >>"$AB_OUTDIR/judging/KEY.tsv"
-    # Stage the acceptance criteria for the judge, if gh is available.
+    # Stage the issue text so the judge has acceptance criteria to score against.
     if command -v gh >/dev/null; then
       gh issue view "$issue" --repo "$AB_REPO_SLUG" --json title,body \
         --jq '"# #\(.number // "'"$issue"'") \(.title)\n\n\(.body)"' \
@@ -458,7 +393,6 @@ EOF
     fi
   done
 
-  # ----------------------------------------------------------------- summary ----
   {
     echo "# Worker A/B — OFF vs ON"
     echo

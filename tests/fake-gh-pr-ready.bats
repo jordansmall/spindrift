@@ -1,12 +1,8 @@
 #!/usr/bin/env bats
-# tests/fakes/gh's `pr ready` arm (issue #2423): models the launcher's
-# MarkReady (cmd/launcher/internal/forge/github/exec_pr.go) shelling out to
-# `gh pr ready <prURL>` to flip a draft PR to ready. Exercised directly
-# against the fake -- no isolated fake-only bats convention exists yet
-# (checked: no tests/fake-gh*.bats or similar precedent), so this is a
-# minimal standalone unit test of the fake's own stdin/stdout/GH_LOG/GH_STATE
-# contract, mirroring tests/credential-deny.bats's direct-script-invocation
-# style rather than the run/entrypoint harness in tests/helper.bash.
+# Covers the `pr ready` arm of tests/fakes/gh (issue #2423), which models the
+# launcher's MarkReady (cmd/launcher/internal/forge/github/exec_pr.go). These
+# tests invoke the fake directly rather than through tests/helper.bash, because
+# the contract under test is the fake's own GH_LOG/GH_STATE behaviour.
 
 setup() {
   GH_BIN="${FAKES_DIR:-$BATS_TEST_DIRNAME/fakes}/gh"

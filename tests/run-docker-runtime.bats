@@ -1,5 +1,4 @@
 #!/usr/bin/env bats
-# runtime=docker: fake invocation, build/load, and outcome reporting.
 
 load helper
 

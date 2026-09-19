@@ -1,6 +1,5 @@
 #!/usr/bin/env bats
-# Tests for agent/format-transcript.sh: reads stream-json NDJSON from stdin
-# and renders each event as human-readable output.
+# Tests agent/format-transcript.sh, which reads stream-json NDJSON on stdin.
 
 load helper
 
@@ -67,7 +66,6 @@ setup() {
   run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
     <<< "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\",\"input\":{\"command\":\"${long_cmd}\"}}]}}"
   [ "$status" -eq 0 ]
-  # Output line with glyph must be shorter than the original 200-char input
   line_with_glyph="$(printf '%s\n' "$output" | grep '⏺')"
   [ "${#line_with_glyph}" -lt 200 ]
   [[ "$line_with_glyph" == *"…"* ]]
@@ -101,7 +99,6 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"working on it"* ]]
   [[ "$output" == *"─── "* ]]
-  # System event must NOT add visible text
   [[ "$output" != *"system"* ]]
   [[ "$output" != *"init"* ]]
 }
