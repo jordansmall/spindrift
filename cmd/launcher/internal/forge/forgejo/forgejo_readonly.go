@@ -11,25 +11,19 @@ import (
 	"spindrift.dev/launcher/internal/forge/rest"
 )
 
-// readOnlyCodeForge wraps *forgejoCodeForge with forge.BundleRelay and
-// forge.DraftPRCreator, so the interfaces it satisfies -- and thus settle's
-// generic BundleRelay type-assertion (ready.go) -- depend on which
-// constructor built it, not on a runtime mode check inside a single shared
-// method set. NewForgejoCodeForge (BOX_FORGE_AND_ISSUE_ACCESS=read-write, the
-// Box pushes in-box) must never satisfy forge.BundleRelay or
-// forge.DraftPRCreator, or settle's generic relay-before-merge would try to
-// relay a bundle that was never written and block every read-write forgejo
-// land.
+// readOnlyCodeForge adds forge.BundleRelay and forge.DraftPRCreator to
+// *forgejoCodeForge, so settle's generic type assertion (ready.go) keys off
+// which constructor built the adapter rather than a runtime mode check.
+// NewForgejoCodeForge (read-write, the Box pushes in-box) must never satisfy
+// them, or settle would relay a bundle nobody wrote and block every land.
 type readOnlyCodeForge struct {
 	*forgejoCodeForge
 }
 
-// NewReadOnlyForgejoCodeForge returns the Forgejo adapter used under
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only: identical to NewForgejoCodeForge
-// (same REST/git plumbing, same PRForge surface via embedding) plus
-// RelayBundle and CreateDraftPR, the host-mediated hand-off for a Box that
-// cannot push or open a PR directly (mirroring github's
-// NewReadOnlyCodeForge, issue #1918/#1919).
+// NewReadOnlyForgejoCodeForge returns the Forgejo adapter for
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only: NewForgejoCodeForge plus RelayBundle
+// and CreateDraftPR, the host-mediated hand-off for a Box that cannot push or
+// open a PR itself (issues #1918, #1919).
 func NewReadOnlyForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker) forge.CodeForge {
 	cf := NewForgejoCodeForge(cfg, tracker).(*forgejoCodeForge)
 	return &readOnlyCodeForge{forgejoCodeForge: cf}
@@ -43,21 +37,14 @@ func NewReadOnlyForgejoCodeForgeForTest(cfg ForgejoCodeForgeConfig, tracker forg
 }
 
 // RelayBundle imports ref from outboxDir/seambundle.FileName into a fresh
-// clone of the target repo and force-pushes it to origin with the launcher's
-// own token-authenticated remote -- the forgejo counterpart of github's
-// RelayBundle (github/relay.go). A missing or malformed bundle is returned
-// as an error, never a silent no-op, so a broken hand-off blocks the seam
-// instead of landing nothing. The two failure modes are distinguished: an
-// absent bundle file returns forge.ErrBundleNotFound, the benign "Box wrote
-// nothing" case, while a bundle that is present but unreadable or fails
-// `git bundle verify` returns a generic error, since that's a genuine relay
-// failure the caller should not treat as a no-op.
+// clone of the target repo and force-pushes it to origin. An absent bundle
+// returns forge.ErrBundleNotFound, the benign "Box wrote nothing" case.
+// A present bundle that is unreadable or fails verification returns a generic
+// error, so a broken hand-off blocks the seam instead of landing nothing.
 func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	return bundlerelay.Relay("forgejo", outboxDir, ref, func(dir string) error {
-		// c.remote carries the token as userinfo; CombinedOutput is deliberately
-		// discarded from the returned error (unlike the git-in-dir calls inside
-		// bundlerelay.Relay) since git's own clone diagnostics can echo the
-		// tokened URL back verbatim on failure.
+		// c.remote carries the token as userinfo, so the clone's CombinedOutput
+		// stays out of the error: git's diagnostics echo the tokened URL back.
 		if _, err := exec.Command("git", "clone", "--no-single-branch", c.remote, dir).CombinedOutput(); err != nil {
 			return fmt.Errorf("forgejo: relay bundle: git clone %s: %w", forge.RedactURLCredentials(c.remote), err)
 		}
@@ -67,16 +54,13 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 
 // CommitSubjects returns the one-line commit subjects the bundle at
 // outboxDir/seambundle.FileName carries for ref, relative to base, oldest
-// first -- settle's read-only PR-intent-fallback hook (issue #2447), reusing
-// the same token-authenticated clone closure (and its credential-redaction-
-// on-error handling) RelayBundle uses. Unlike RelayBundle it never checks
-// anything out or pushes, so it cannot mutate the remote -- a read path only.
+// first, for settle's read-only PR-intent fallback (issue #2447). Unlike
+// RelayBundle it never checks anything out or pushes, so it cannot mutate the
+// remote.
 func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
 	return bundlerelay.CommitSubjects("forgejo", outboxDir, base, ref, func(dir string) error {
-		// c.remote carries the token as userinfo; CombinedOutput is deliberately
-		// discarded from the returned error (unlike the git-in-dir calls inside
-		// bundlerelay.CommitSubjects) since git's own clone diagnostics can echo
-		// the tokened URL back verbatim on failure.
+		// c.remote carries the token as userinfo, so the clone's CombinedOutput
+		// stays out of the error: git's diagnostics echo the tokened URL back.
 		if _, err := exec.Command("git", "clone", "--no-single-branch", c.remote, dir).CombinedOutput(); err != nil {
 			return fmt.Errorf("forgejo: relay bundle: git clone %s: %w", forge.RedactURLCredentials(c.remote), err)
 		}
@@ -84,39 +68,11 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 	})
 }
 
-// CreateDraftPR opens a draft PR from head onto base via Forgejo's REST pull
-// create endpoint -- the host-side counterpart to a Box's own in-box PR
-// creation under read-write, only reachable here because
-// NewReadOnlyForgejoCodeForge wraps *forgejoCodeForge with it:
-// NewForgejoCodeForge must never satisfy forge.DraftPRCreator, the same
-// isolation RelayBundle has, or a read-write forgejo land would call an
-// unneeded, possibly-conflicting host-side create. Forgejo encodes draft
-// state as a title prefix rather than a first-class create-time field
-// (forgejoWIPPrefix), the same convention MarkReady/MarkDraft read and
-// write; MarkReady strips it before merge.
-//
-// Idempotent against a retried call for the same head (issue #2407 slice
-// 2, mirroring github's CreateDraftPR, relay.go): a create that races or
-// repeats an earlier host-mediated create for the same branch fails with
-// 409 Conflict -- Forgejo's "a pull request for this head already exists"
-// signal on this endpoint. That status is shared, via forgejoStatusMap,
-// with the merge endpoint's own "not mergeable" refusal (errMergeRefused),
-// so this checks the create call's own rest.StatusError rather than
-// errors.Is against errMergeRefused, which would also match a 405 and would
-// conflate two endpoints' unrelated meanings for the same status. On a
-// precise 409, this resolves the branch's own open PR via OpenPRForBranch
-// and returns that PR's URL with no error -- adoption, not failure.
-// OpenPRForBranch is draft-inclusive (issue #2408), so it resolves the PR a
-// retried call collides with on 409 even though that PR is always a draft
-// itself (CreateDraftPR always creates one, per the forgejoWIPPrefix title
-// above). If OpenPRForBranch can't resolve an open PR for that head (e.g.
-// only a closed/merged PR exists, or the lookup itself errors), the
-// original create error is returned unmasked -- adoption is only ever
-// additive, never a way to swallow a genuine failure. Any other (non-409)
-// failure is returned exactly as before. The adoption path returns
-// created=false, distinct from the fresh-create success below, so a caller
-// like settle's reconstructed-PR path (issue #2447) can tell it must not
-// treat this PR's title/body as the ones just supplied.
+// CreateDraftPR opens a draft PR from head onto base. Forgejo has no
+// create-time draft field and encodes the state as a title prefix
+// (forgejoWIPPrefix), which MarkReady strips before merge. A retried create
+// for the same head adopts that branch's open PR and reports created=false,
+// so a caller (issues #2407, #2447) knows the title and body are not its own.
 func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	reqBody := map[string]any{
 		"title": forgejoWIPPrefix + " " + title,
@@ -130,6 +86,10 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 		return payload.HTMLURL, true, nil
 	}
 	createErr := fmt.Errorf("forgejo: create draft PR: %w", err)
+	// A 409 means a PR for this head already exists. forgejoStatusMap maps that
+	// status onto errMergeRefused too, so match the create call's own
+	// StatusError rather than errors.Is, which would also match a 405.
+	// OpenPRForBranch is draft-inclusive (issue #2408), and this PR is a draft.
 	var statusErr rest.StatusError
 	if errors.As(err, &statusErr) && statusErr.Status == http.StatusConflict {
 		if pr, ok, openErr := c.OpenPRForBranch(head); openErr == nil && ok {

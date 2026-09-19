@@ -2,10 +2,8 @@ package ecosystem
 
 import "strings"
 
-// nameYarn is yarnRow's Name -- npmFamilyVars (npm.go) compares against
-// this const instead of yarnRow.Name directly, to avoid a package
-// initialization cycle (see nameGo's doc comment in go.go for the general
-// shape of the cycle this sidesteps).
+// nameYarn is yarnRow's Name. npmFamilyVars (npm.go) compares against this
+// const rather than yarnRow.Name to avoid a package initialization cycle.
 const nameYarn = "yarn"
 
 // yarnRow is the yarn ecosystem's Table entry. It carries a BindingEnvVar
@@ -20,13 +18,10 @@ var yarnRow = Row{
 	ConfigParser:     parseYarnRegistryConfig,
 }
 
-// parseYarnRegistryConfig is yarnRow's ConfigParser: it scans content (a
-// .yarnrc.yml) line-by-line for "npmRegistryServer: <url>" keys -- both the
-// top-level default and any nested under npmScopes. A line-based scan of
-// this one known key, ignoring indentation/nesting structure entirely,
-// covers the shapes yarn berry actually emits without pulling in a YAML
-// library for a single key -- adding one would be an ADR 0048 promotion
-// trigger (see package doc), not a prohibition.
+// parseYarnRegistryConfig ignores .yarnrc.yml indentation and nesting, taking
+// every "npmRegistryServer: <url>" line, top-level default or under npmScopes.
+// That covers the shapes yarn berry emits without a YAML library for one key;
+// adding one is an ADR 0048 promotion trigger, not a prohibition.
 func parseYarnRegistryConfig(content string) ([]Declaration, bool, error) {
 	seenURL := make(map[string]bool)
 	var out []Declaration
@@ -34,9 +29,6 @@ func parseYarnRegistryConfig(content string) ([]Declaration, bool, error) {
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
-			// A full-line comment (yarn berry's .yarnrc.yml has no other
-			// comment syntax) -- must not be mistaken for a declaration,
-			// same as parseNpmRegistryConfig's "#"/";" line filter.
 			continue
 		}
 		key, value, ok := splitYAMLKeyValue(trimmed)
@@ -57,6 +49,6 @@ func parseYarnRegistryConfig(content string) ([]Declaration, bool, error) {
 	}
 
 	// sawDeclaration means npmRegistryServer was set but every value was
-	// unusable -- distinct from a file that never sets the key at all.
+	// unusable, distinct from a file that never sets the key at all.
 	return out, sawDeclaration, nil
 }

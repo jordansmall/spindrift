@@ -8,9 +8,8 @@ import (
 	"spindrift.dev/launcher/internal/logscan"
 )
 
-// textEvent is the minimal NDJSON envelope RenderTranscript needs: a
-// type:"text" event's part.text carries the agent's assistant prose,
-// including its SPINDRIFT_OUTCOME and VERDICT: lines.
+// textEvent is the minimal NDJSON envelope RenderTranscript needs: part.text
+// carries the agent's prose, including its SPINDRIFT_OUTCOME and VERDICT: lines.
 type textEvent struct {
 	Type string `json:"type"`
 	Part struct {
@@ -18,16 +17,11 @@ type textEvent struct {
 	} `json:"part"`
 }
 
-// RenderTranscript scans the box log at logPath — one JSON object per line,
-// per the opencode CLI's `--format json` output — and returns each
-// type:"text" event's part.text, joined by "\n" in log order. Internal
-// newlines within a single event's text are preserved verbatim, since the
-// orchestrator's scanPassLog/scanReviewLog scan this rendering (via
-// outcome.ParseAnywhere and a "VERDICT:" substring search) for the agent's
-// own outcome/verdict prose, which must survive unmodified.
-//
-// Returns ("", nil) when logPath does not exist, matching the claude
-// Driver's RenderTranscript not-found contract.
+// RenderTranscript returns each type:"text" event's part.text from the box log
+// at logPath (one JSON object per line, per opencode's `--format json`), joined
+// by "\n" in log order. It keeps each event's text verbatim, because the
+// orchestrator scans this rendering for the agent's own outcome and verdict
+// lines. Returns ("", nil) when logPath does not exist, as the claude Driver does.
 func RenderTranscript(logPath string) (string, error) {
 	var texts []string
 	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {

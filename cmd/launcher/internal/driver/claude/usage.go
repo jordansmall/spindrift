@@ -29,70 +29,29 @@ type usageData struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
-// timestampedEvent decodes the top-level "type" and "timestamp" fields
-// carried by real claude-code stream-json lines (assistant/user events,
-// timestamp RFC3339 with milliseconds, e.g. "2026-08-11T19:01:33.187Z"),
-// used by sumInLog to derive wall-clock span across every session in a
-// log. Unmarshaling only reads top-level keys, so a "timestamp" string
-// nested inside non-driver content (e.g. a tool_result dump) is never
-// captured here regardless of Type; Type is required non-empty only to
-// skip a line that happens to carry a top-level "timestamp" without an
-// identifiable event type.
+// timestampedEvent decodes the top-level "type" and "timestamp" fields of a
+// claude-code stream-json line. The decoder reads only top-level keys, so it
+// never picks up a "timestamp" nested inside tool_result content. Type must be
+// non-empty to skip a line carrying a top-level timestamp but no event type.
 type timestampedEvent struct {
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
 }
 
-// eventSpan carries the earliest/latest top-level event timestamp seen
-// across a sumInLog scan, and whether any usable timestamp was seen at
-// all -- the raw span data sumInLog derives its own DurationMs floor from,
-// also returned to ExtractUsage so a caller can derive a wall-time span
-// across MULTIPLE logs the same way sumInLog derives one across multiple
-// sessions within a single log (see usage.Report's EarliestEventMs,
-// LatestEventMs, HasEventSpan).
+// eventSpan is the earliest and latest top-level event timestamp seen in a
+// sumInLog scan. sumInLog derives its DurationMs floor from it, and
+// ExtractUsage returns it so a caller can derive a span across multiple logs
+// the same way (usage.Report.EarliestEventMs, LatestEventMs, HasEventSpan).
 type eventSpan struct {
 	earliest, latest time.Time
 	have             bool
 }
 
-// sumInLog scans the file at path and returns a usage.Usage aggregated
-// across every "type":"result" event in the log, together with the
-// eventSpan of top-level event timestamps seen along the way. Lines larger
-// than the 4 MiB scan buffer are skipped rather than aborting the scan.
-//
-// Orchestrator mode invokes the claude-code driver repeatedly, so a single
-// Box log can hold several distinct sessions, each emitting exactly one
-// result event — summing every result event in the log therefore sums
-// every session, with no session-boundary detection required. InputTokens,
-// OutputTokens, CacheReadInputTokens, CacheCreationInputTokens,
-// TotalCostUSD, DurationApiMs, and NumTurns are all additive this way.
-//
-// DurationMs (wall time) is NOT additive when a log holds more than one
-// session: sessions can run sequentially with idle gaps between them
-// (waiting on review, orchestrator handoff, ...) or concurrently (issue
-// #2058), and result events' own duration_ms is neither additive nor
-// gap-aware — concurrent sessions would overstate wall time if each
-// session's own duration_ms were summed, and sequential sessions with idle
-// gaps would understate it. For that multi-session case, it is instead
-// derived from the span between the earliest and latest top-level
-// "timestamp" field seen across the log's assistant/user lines — in real
-// claude-code stream-json, system/init and result lines don't carry a
-// top-level timestamp, so in practice only assistant/user events
-// contribute — floored to the longest individual session's own
-// duration_ms. The floor matters three ways: a log whose timestamped
-// lines all land on the same instant would otherwise report a span of 0;
-// a log that carries no timestamped lines at all would otherwise report
-// the same zero span; and a span narrower than some session's own
-// duration_ms (the assistant/user timestamps bracketing a session don't
-// capture its full wall time — startup, network, render) would otherwise
-// report a wall time shorter than a session that provably ran that long.
-// A single-session log (at most one result event) always reports that
-// session's own duration_ms directly, timestamps or not — never the
-// span — matching output from before this aggregation change.
-//
-// Returns (usage.Usage{}, eventSpan{}, false, nil) when no result event is
-// present or the file does not exist. Returns (usage.Usage{}, eventSpan{},
-// false, err) on I/O errors other than file-not-found or oversized lines.
+// sumInLog sums every "type":"result" event in the log at path (orchestrator
+// mode runs the driver repeatedly, one result event per session) and returns
+// the eventSpan of top-level timestamps seen. A missing file or an absent
+// result event reports found=false, not an error. Every field is additive
+// except DurationMs, which the multi-session branch below derives instead.
 func sumInLog(path string) (usage.Usage, eventSpan, bool, error) {
 	var sum usage.Usage
 	resultCount := 0
@@ -143,6 +102,11 @@ func sumInLog(path string) (usage.Usage, eventSpan, bool, error) {
 		return usage.Usage{}, eventSpan{}, false, nil
 	}
 
+	// Wall time is not additive across sessions: they can overlap (issue #2058)
+	// or idle between runs, so the span between top-level timestamps is the
+	// better estimate. The floor covers a log with no timestamps, one whose
+	// timestamps share an instant, and a span narrower than a session that
+	// provably ran longer. One session always reports its own duration_ms.
 	if resultCount > 1 {
 		var spanMs int64
 		if haveTimestamp && latest.After(earliest) {
@@ -159,10 +123,8 @@ func sumInLog(path string) (usage.Usage, eventSpan, bool, error) {
 	return sum, span, true, nil
 }
 
-// assistantEvent decodes line as a claude-code stream-json assistant message
-// event, returning the parsed Event and true only when line is an assistant
-// event carrying a non-nil Message. It is the shared decode preamble of
-// breakdownByModelFile's usage pass.
+// assistantEvent decodes line as a claude-code assistant event, returning true
+// only when it is one and carries a non-nil Message.
 func assistantEvent(line string) (Event, bool) {
 	if !strings.Contains(line, `"type":"assistant"`) {
 		return Event{}, false
@@ -177,33 +139,11 @@ func assistantEvent(line string) (Event, bool) {
 	return ev, true
 }
 
-// breakdownByModelFile scans the file at path and returns per-model-family
-// token breakdowns, split into the five billable categories, by parsing
-// assistant message events.
-//
-// Per-message usage in claude-code stream-json is PER-CALL: each assistant
-// event is one API response, so its input_tokens is already that call's
-// uncached input, and its cache_read/cache_creation figures are that call's
-// own cache tokens — none of it is cumulative across a turn or a run.
-// Aggregation is therefore a SUM across every DISTINCT message.id, across
-// every turn and every subagent, keyed by ModelFamily(message.model) — not a
-// sum over every event. A multi-content-block assistant message is
-// re-emitted by claude-code once per content block, each line carrying the
-// SAME message.id and byte-identical usage; summing every such line would
-// double- or triple-count that one call's usage. The first occurrence of a
-// non-empty message.id wins and every later line sharing that id is
-// skipped; a line with an empty or missing id (older stream-json, or any
-// shape that doesn't carry the field) is always counted, since there is
-// nothing to dedup it against. This is deliberately not a read of the
-// result event's own "usage" header: that header is a non-cumulative
-// snapshot of only its own call and does not reconcile against a sum over
-// the transcript. The per-call vs cumulative determination is settled by
-// evidence — the Messages API per-request usage contract and the real #2078
-// dispatch figures — in TestBreakdownByModel_Fixture; the ~9x #2078
-// discrepancy is the header snapshot vs the transcript sum, not a summing
-// bug.
-//
-// Returns (nil, nil) when the file does not exist.
+// breakdownByModelFile returns per-model token breakdowns from the log at path,
+// and (nil, nil) when the file is missing. Each assistant event carries that one
+// call's usage, so the sum runs over DISTINCT message.id: claude-code re-emits a
+// multi-block message once per block with identical usage. It ignores the result
+// event's own usage header, which covers one call only (the ~9x gap in #2078).
 func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 	buckets := make(map[string]*usage.ModelUsage)
 	ensure := func(model string) *usage.ModelUsage {
@@ -239,12 +179,9 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 			b.CacheWrite5mTokens += cc.Ephemeral5mInputTokens
 			b.CacheWrite1hTokens += cc.Ephemeral1hInputTokens
 		} else if v := ev.Message.Usage.CacheCreationInputTokens; v > 0 {
-			// Pre-TTL-split stream-json log: the nested cache_creation
-			// object is absent, but the flat cache_creation_input_tokens
-			// total is populated. Attribute it to the 5-minute bucket,
-			// since the Messages API's cache_control default TTL is 5m
-			// (ephemeral 1h caching is opt-in), so an un-split total is
-			// overwhelmingly likely to be all-5m rather than all-1h.
+			// Pre-TTL-split log: only the flat total is populated. The
+			// Messages API's cache_control default TTL is 5m and 1h is
+			// opt-in, so an un-split total is almost certainly all-5m.
 			b.CacheWrite5mTokens += v
 		}
 	})
@@ -252,11 +189,9 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 		return nil, err
 	}
 
-	// Deterministic order: opus, haiku, sonnet families first (when
-	// present), then any remaining families (including "unknown"), each
-	// bucket keyed and labeled by its exact model id — not the collapsed
-	// family name. ModelFamily is used here for ordering only; within a
-	// family, rows sort by raw id for stability.
+	// Deterministic order: opus, haiku, sonnet, then the rest (including
+	// "unknown"). Rows stay keyed by exact model id, not the family name, so
+	// ModelFamily orders only; within a family, rows sort by raw id.
 	familyRank := func(id string) int {
 		switch ModelFamily(id) {
 		case "opus":
@@ -286,36 +221,15 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 	return result, nil
 }
 
-// breakdownByModel indirects to breakdownByModelFile so tests can simulate a
-// breakdownByModelFile I/O error without a real filesystem race between it
-// and the sumInLog scan.
+// breakdownByModel indirects to breakdownByModelFile so tests can simulate an
+// I/O error without racing the sumInLog scan on the real filesystem.
 var breakdownByModel = breakdownByModelFile
 
-// breakdownByAgentFile scans the file at path and returns per-agent token
-// breakdowns — the main loop (usage.MainLoopAgent) separate from each spawned
-// subagent, keyed by subagent_type — by parsing assistant message events.
-//
-// Same per-call, dedup-by-message.id aggregation rule as
-// breakdownByModelFile (see its doc comment for the evidence this is a SUM
-// over DISTINCT message.id, not cumulative and not a naive per-line sum);
-// the only difference is the bucket key (agent, not model family) and that
-// cache creation is summed from the flat CacheCreationInputTokens field
-// rather than split by TTL, since a per-agent breakdown has no use for the
-// 5m/1h split breakdownByModelFile carries.
-//
-// OutputTokens is the one column this function does NOT sum: every row it
-// returns carries 0, and ExtractUsage patches the MainLoopAgent row from the
-// result event afterward -- see usage.Report.OutputIsMainLoopOnly for why.
-//
-// A single forward pass suffices to attribute every message correctly: a
-// spawn's Task/Agent tool-use block always precedes any message from that
-// spawned subagent in the stream, so recording taskRole from the first
-// occurrence of each message id (before checking dedup) captures every
-// spawn before it is needed. Skipping CollectTaskRoles on a later duplicate
-// line loses nothing, since claude-code re-emits a message's full content
-// array (including any spawn block) identically on every re-emit.
-//
-// Returns (nil, nil) when the file does not exist.
+// breakdownByAgentFile returns per-agent token breakdowns from the log at path,
+// the main loop separate from each subagent, and (nil, nil) when the file is
+// missing. It dedups by message.id like breakdownByModelFile. Every row's
+// OutputTokens stays 0 for ExtractUsage to patch. One forward pass suffices: a
+// spawn's tool-use block always precedes that subagent's own messages.
 func breakdownByAgentFile(path string) ([]usage.AgentUsage, error) {
 	buckets := make(map[string]*usage.AgentUsage)
 	ensure := func(agent string) *usage.AgentUsage {
@@ -343,16 +257,15 @@ func breakdownByAgentFile(path string) ([]usage.AgentUsage, error) {
 		}
 		agent := ResolveRole(ev, taskRole, "")
 		if ev.ParentToolUseID == "" {
-			// ResolveRole's own default for a top-level message is
-			// ImplementorRole (issue #2092) -- correct for role
-			// attribution, but this breakdown wants the neutral
-			// usage.MainLoopAgent label instead (see its doc comment).
+			// ResolveRole defaults a top-level message to ImplementorRole
+			// (issue #2092); this breakdown wants the neutral
+			// usage.MainLoopAgent label instead.
 			agent = usage.MainLoopAgent
 		}
 		b := ensure(agent)
 		b.APICalls++
 		b.UncachedInputTokens += ev.Message.Usage.InputTokens
-		// No OutputTokens sum -- see this function's own doc comment.
+		// No OutputTokens sum; ExtractUsage patches the main-loop row instead.
 		b.CacheReadInputTokens += ev.Message.Usage.CacheReadInputTokens
 		b.CacheCreationInputTokens += ev.Message.Usage.CacheCreationInputTokens
 	})
@@ -364,10 +277,8 @@ func breakdownByAgentFile(path string) ([]usage.AgentUsage, error) {
 	for agent := range buckets {
 		agents = append(agents, agent)
 	}
-	// Deterministic order: usage.MainLoopAgent first (when present), then
-	// subagents sorted by descending TotalTokens -- the issue's own goal is
-	// that "a single expensive worker is identifiable", so the costliest
-	// agent sorts to the top -- ties broken by ascending Agent name.
+	// Deterministic order: usage.MainLoopAgent first, then subagents by
+	// descending TotalTokens so the costliest is identifiable, ties by name.
 	sort.Slice(agents, func(i, j int) bool {
 		ai, aj := agents[i], agents[j]
 		if ai == usage.MainLoopAgent {
@@ -389,13 +300,12 @@ func breakdownByAgentFile(path string) ([]usage.AgentUsage, error) {
 	return result, nil
 }
 
-// breakdownByAgent indirects to breakdownByAgentFile so tests can simulate a
-// breakdownByAgentFile I/O error the same way breakdownByModel does.
+// breakdownByAgent indirects to breakdownByAgentFile so tests can simulate an
+// I/O error.
 var breakdownByAgent = breakdownByAgentFile
 
-// ExtractUsage scans logPath for its result event(s) and, separately, its
-// per-model breakdown, returning both in one usage.Report — the claude
-// Driver's implementation of the Driver interface's ExtractUsage method.
+// ExtractUsage returns the totals, per-model and per-agent breakdowns of
+// logPath as one usage.Report.
 func ExtractUsage(logPath string) (usage.Report, error) {
 	u, span, found, err := sumInLog(logPath)
 	if err != nil {
@@ -405,29 +315,24 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		return usage.Report{}, nil
 	}
 	// A breakdownByModel I/O error degrades the per-model section, not the
-	// aggregate totals already parsed above — see issue #674.
+	// aggregate totals already parsed above (issue #674).
 	models, err := breakdownByModel(logPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
-	// Same degrade-not-fail contract as breakdownByModel above: a
-	// breakdownByAgent I/O error loses only the per-agent section.
+	// Same degrade-not-fail contract: a breakdownByAgent I/O error loses only
+	// the per-agent section.
 	agents, err := breakdownByAgent(logPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by agent failed for %s: %v\n", logPath, err)
 		agents = nil
 	}
-	// The result event is the only ground truth for output tokens -- see
-	// usage.Report.OutputIsMainLoopOnly, set below. Usually there is a
-	// MainLoopAgent row to patch, but logscan.SkipOversized drops any line
-	// over 4 MiB outright, so a run whose main-loop lines were all
-	// oversized reaches here with subagent rows only (they bucket under
-	// driverkit.DefaultRole, their spawn block having gone with the dropped
-	// line). Synthesize the row there rather than drop real ground truth;
-	// prepending keeps the main-loop-first ordering. A nil agents slice (no
-	// assistant messages at all) stays nil: a pass with no per-agent data
-	// should not grow a per-agent tail.
+	// The result event is the only ground truth for output tokens (see
+	// usage.Report.OutputIsMainLoopOnly below). logscan.SkipOversized drops
+	// lines over 4 MiB, so a run whose main-loop lines were all oversized
+	// arrives with subagent rows only; synthesize the row there, prepended to
+	// keep main-loop first. A nil agents slice stays nil, with no row added.
 	patched := false
 	for i := range agents {
 		if agents[i].Agent == usage.MainLoopAgent {

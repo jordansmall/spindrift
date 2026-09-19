@@ -1,9 +1,7 @@
-// Package rest is the generic, error-only native-HTTP substrate shared by
-// forge adapters that speak plain JSON-over-HTTP REST (forgejo today; a
-// future jira or other backend tomorrow). It factors out the marshal,
-// build-request, auth, execute, status-check, decode sequence every such
-// adapter otherwise reimplements, and replaces raw-status branching at the
-// call site with sentinel errors an adapter configures once via StatusMap.
+// Package rest is the shared JSON-over-HTTP client for forge adapters that
+// speak plain REST (forgejo today). It turns a non-2xx status into a sentinel
+// error an adapter configures once via StatusMap, so no call site branches on
+// raw status codes.
 package rest
 
 import (
@@ -18,27 +16,21 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// Default retry knobs applied by New: a bounded linear backoff (behind the
-// injectable Clock seam) and a fixed attempt ceiling for transient (429/5xx)
-// responses. defaultMaxAttempts is referenced directly by client_test.go
-// instead of a magic number.
+// Retry knobs New applies to transient (429/5xx) responses.
 const (
 	defaultBackoffUnit = 200 * time.Millisecond
 	defaultBackoffCap  = 2 * time.Second
 	defaultMaxAttempts = 3
 )
 
-// AuthStrategy mutates an outgoing request to add whatever authentication
-// scheme a backend requires, letting each backend supply its own (forgejo's
-// "token <T>", a future jira's "Bearer <T>" or HTTP Basic) without Client
-// itself knowing the details.
+// AuthStrategy adds a backend's own authentication scheme to an outgoing
+// request, so Client never knows the details.
 type AuthStrategy interface {
 	Apply(req *http.Request)
 }
 
-// TokenAuth is an AuthStrategy that sets the Authorization header to
-// "Scheme Token", e.g. TokenAuth{Scheme: "token", Token: "abc"} produces
-// "Authorization: token abc" (Forgejo's scheme).
+// TokenAuth is an AuthStrategy that sets "Authorization: <Scheme> <Token>",
+// e.g. "Authorization: token abc" for Forgejo.
 type TokenAuth struct {
 	Scheme string
 	Token  string
@@ -49,24 +41,15 @@ func (a TokenAuth) Apply(req *http.Request) {
 	req.Header.Set("Authorization", a.Scheme+" "+a.Token)
 }
 
-// StatusMap is a per-backend HTTP-status-code -> sentinel-error table,
-// supplied at Client construction. Do consults it when a request fails with
-// a non-2xx status, so callers get a stable sentinel (errors.Is-checkable)
-// for statuses the backend has mapped, instead of branching on raw status
-// codes at each call site.
+// StatusMap maps one backend's HTTP status codes to sentinel errors, so a
+// caller checks a failure with errors.Is rather than a raw status code.
 type StatusMap map[int]error
 
-// StatusError carries the raw HTTP status code of a non-2xx response. Do
-// chains one into every error it returns for a failed request (both a
-// status mapped by StatusMap and an unmapped one) via %w, alongside any
-// mapped sentinel. A single status code can carry different meanings across
-// different endpoints of the same backend (e.g. Forgejo's 409 means "not
-// mergeable" on the merge endpoint but "already exists" on the pulls-create
-// endpoint) -- StatusMap's sentinel is necessarily shared across every call
-// through a Client, so a caller that needs to disambiguate by endpoint
-// recovers the exact wire status with errors.As(err, &StatusError{})
-// instead of parsing it back out of the error string or overloading the
-// shared sentinel.
+// StatusError carries the raw HTTP status of a non-2xx response, chained by
+// Do into every failed-request error via %w. One status can mean different
+// things on different endpoints of the same backend (Forgejo's 409 is "not
+// mergeable" on merge but "already exists" on pulls-create) while StatusMap's
+// sentinel is shared Client-wide, so a caller disambiguates with errors.As.
 type StatusError struct {
 	Status int
 }
@@ -76,20 +59,16 @@ func (e StatusError) Error() string {
 	return fmt.Sprintf("status %d", e.Status)
 }
 
-// DecodeError marks a failure to decode a 2xx response body as the expected
-// JSON shape, distinct from a network-level failure (the request never got a
-// response) or a non-2xx-status failure (StatusError). Do chains one into
-// the decode-failure error it returns via %w, letting a caller recover it
-// with errors.As(err, &DecodeError{}) instead of matching the error message.
+// DecodeError marks a 2xx body that did not decode as the expected JSON,
+// distinct from a network failure or a non-2xx status (StatusError). Do
+// chains one in via %w so a caller recovers it with errors.As.
 type DecodeError struct {
 	Err error
 }
 
-// Error delegates to the wrapped decode error, so DecodeError is transparent
-// in an error message: adding it around an existing error does not change
-// what Error() renders. A zero-value DecodeError (e.g. the target of
-// errors.As(err, &DecodeError{}) before As populates it) has a nil Err;
-// Error reports a static placeholder instead of dereferencing it.
+// Error delegates to the wrapped error, so wrapping changes no message. A
+// zero-value DecodeError, such as an errors.As target before As fills it, has
+// a nil Err and reports a placeholder rather than dereferencing it.
 func (e DecodeError) Error() string {
 	if e.Err == nil {
 		return "decode error"
@@ -97,15 +76,13 @@ func (e DecodeError) Error() string {
 	return e.Err.Error()
 }
 
-// Unwrap exposes the wrapped decode error, so errors.Is/errors.As continue
-// to see through DecodeError to the original error (e.g. a
-// *json.SyntaxError).
+// Unwrap exposes the wrapped error, so errors.Is and errors.As see through
+// DecodeError to the original (e.g. a *json.SyntaxError).
 func (e DecodeError) Unwrap() error {
 	return e.Err
 }
 
-// Client is a generic REST client for a single forge backend. Construct one
-// with New; issue requests with Do.
+// Client is a generic REST client for a single forge backend.
 type Client struct {
 	baseURL     string
 	auth        AuthStrategy
@@ -116,11 +93,9 @@ type Client struct {
 	maxAttempts int
 }
 
-// New returns a Client for baseURL (a trailing "/" is trimmed), using auth
-// to authenticate each request (nil means no auth is applied), backend as
-// the error-message prefix identifying which adapter issued the request,
-// statuses as the per-status-code sentinel-error table, and hc as the
-// underlying HTTP client (nil uses http.DefaultClient).
+// New returns a Client for baseURL, trimming a trailing "/". A nil auth
+// applies no authentication and a nil hc uses http.DefaultClient; backend
+// prefixes every error message.
 func New(baseURL string, auth AuthStrategy, backend string, statuses StatusMap, hc *http.Client) *Client {
 	if hc == nil {
 		hc = http.DefaultClient
@@ -136,27 +111,21 @@ func New(baseURL string, auth AuthStrategy, backend string, statuses StatusMap, 
 	}
 }
 
-// isTransientStatus reports whether status is a transient failure worth
-// retrying: 429 (Too Many Requests) or any 5xx server error.
 func isTransientStatus(status int) bool {
 	return status == http.StatusTooManyRequests || (status >= 500 && status < 600)
 }
 
-// HTTPClientForTest returns the underlying *http.Client Do issues requests
-// through -- test-only, letting callers outside this package (e.g. an
-// adapter's own tests) assert construction defaults, such as a bounded
-// Timeout, without driving a real slow request through Do.
+// HTTPClientForTest returns the underlying *http.Client, so an adapter's own
+// tests can assert construction defaults such as Timeout without driving a
+// real request. Test-only.
 func (c *Client) HTTPClientForTest() *http.Client {
 	return c.hc
 }
 
-// Do issues an HTTP request with the given method and path (relative to the
-// Client's base URL), marshaling body as the JSON request body (nil for
-// none) and decoding a JSON response into out (nil to discard the body). A
-// non-2xx response status is translated to an error: a status present in
-// the Client's StatusMap wraps the mapped sentinel via %w; a status absent
-// from the map returns a generic error naming the backend, method, path,
-// and raw status code. Do returns nil on success.
+// Do issues method against path relative to the base URL, marshaling body as
+// the JSON request body (nil for none) and decoding the response into out
+// (nil discards it). A non-2xx status returns an error wrapping StatusMap's
+// sentinel when the map has one, and a generic status error otherwise.
 func (c *Client) Do(method, path string, body, out any) error {
 	var b []byte
 	if body != nil {
@@ -217,11 +186,8 @@ func (c *Client) Do(method, path string, body, out any) error {
 	return fmt.Errorf("%s: %s %s: maxAttempts must be >= 1 (got %d)", c.backend, method, path, c.maxAttempts)
 }
 
-// Paginate repeatedly invokes fetch for page 1, 2, 3, ... until fetch
-// reports the walk is done, so a caller performs one Do call per page and
-// decides its own last-page signal (array length, startAt/total, a
-// next-page header, whatever its backend uses) without writing the loop
-// itself. Paginate returns the first error fetch returns, if any.
+// Paginate calls fetch for page 1, 2, 3, ... until fetch reports done, so each
+// backend keeps its own last-page signal. It returns fetch's first error.
 func (c *Client) Paginate(fetch func(page int) (done bool, err error)) error {
 	for page := 1; ; page++ {
 		done, err := fetch(page)

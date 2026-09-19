@@ -1,18 +1,14 @@
 package forge
 
-// issueFilerTracker adapts a Fake to expose IssueTracker plus
-// HostPostedIssueFiler, the same isolation githubReadOnlyForge's own
-// DraftPRCreator staging uses — github and forgejo satisfy the interface
-// directly on their own IssueTracker (issue #2028, issue #1964), but the
-// Fake stays gated behind AsIssueFiler() so a bare *Fake used as an
-// IssueTracker elsewhere never silently starts satisfying it too.
+// issueFilerTracker adds HostPostedIssueFiler to a Fake (issue #2028, issue
+// #1964). It stays gated behind AsIssueFiler so a bare *Fake used as an
+// IssueTracker elsewhere never silently satisfies HostPostedIssueFiler too.
 type issueFilerTracker struct {
 	IssueTracker
 	f *Fake
 }
 
-// AsIssueFiler returns f wrapped so it satisfies IssueTracker and
-// HostPostedIssueFiler.
+// AsIssueFiler returns f wrapped so it satisfies IssueTracker and HostPostedIssueFiler.
 func (f *Fake) AsIssueFiler() IssueTracker { return issueFilerTracker{IssueTracker: f, f: f} }
 
 func (i issueFilerTracker) PostIssue(title, body string, labels []string) (string, error) {
@@ -21,35 +17,23 @@ func (i issueFilerTracker) PostIssue(title, body string, labels []string) (strin
 
 var _ HostPostedIssueFiler = issueFilerTracker{}
 
-// noLandingIssueTracker adapts a Fake to expose only the core IssueTracker
-// surface, hiding both its RecordLanding and CloseIssue methods so a type
-// assertion against either reports absence — the IssueTracker analogue of
-// pushOnlyForge, matching a github/jira adapter's shape (ADR 0029): neither
-// implements the optional local-only write surfaces.
+// noLandingIssueTracker hides a Fake's RecordLanding and CloseIssue so a
+// type assertion against either reports absence, matching the github and
+// jira adapters, which implement neither (ADR 0029).
 type noLandingIssueTracker struct{ IssueTracker }
 
 // IsGithubTracker implements the optional GithubTracker marker (issue
-// #2341) so noLandingIssueTracker keeps standing in for "github-shaped"
-// across the ~40 settle tests already built on AsNoLandingRecorder() —
-// those tests expect a Closes #N reference to be injected, the github-only
-// behavior GithubTracker now gates. *Fake itself has no such method (only
-// the real github execClient does), so it must be added here explicitly
-// rather than promoted through the embedded IssueTracker.
+// #2341) so this shape still reads as github-shaped to the settle tests
+// built on AsNoLandingRecorder, which expect an injected Closes #N
+// reference. *Fake has no such method to promote.
 func (noLandingIssueTracker) IsGithubTracker() bool { return true }
 
-// AsNoLandingRecorder returns f wrapped so it satisfies IssueTracker and
-// GithubTracker (the github adapter's shape) but neither LandingRecorder
-// nor IssueCloser.
+// AsNoLandingRecorder returns f in the github adapter's shape: GithubTracker, but no LandingRecorder or IssueCloser.
 func (f *Fake) AsNoLandingRecorder() IssueTracker { return noLandingIssueTracker{f} }
 
-// localShapedIssueTracker adapts a Fake to expose IssueTracker plus the
-// local-only write surfaces (LandingRecorder, IssueCloser) but hides
-// MergeCloser — the real local adapter's shape (issue #1892): local
-// implements the reconcile-owned closed: axis (IssueCloser) but never
-// settle's merge-driven backstop (MergeCloser, implemented by github and
-// forgejo), even when paired with a PRForge-implementing Code Forge
-// (ISSUE_TRACKER=local + CODE_FORGE=github is a valid independent
-// combination, main.go's newIssueTracker/newCodeForge).
+// localShapedIssueTracker matches the real local adapter (issue #1892):
+// IssueCloser but never MergeCloser, even when paired with a PRForge Code
+// Forge, since ISSUE_TRACKER=local + CODE_FORGE=github is a valid pairing.
 type localShapedIssueTracker struct {
 	IssueTracker
 	f *Fake
@@ -59,9 +43,8 @@ func (l localShapedIssueTracker) RecordLanding(num, landing string) error {
 	return l.f.RecordLanding(num, landing)
 }
 
-// RecordLandingPass promotes the same optional surface RecordLanding does
-// (issue #2983) — the real local adapter implements both on the one
-// *LocalTracker, so this shape must too.
+// RecordLandingPass promotes the same optional method RecordLanding does
+// (issue #2983): the real local adapter implements both on one *LocalTracker.
 func (l localShapedIssueTracker) RecordLandingPass(num string, pass int, kind string) error {
 	return l.f.RecordLandingPass(num, pass, kind)
 }
@@ -70,26 +53,15 @@ func (l localShapedIssueTracker) CloseIssue(num string) error {
 	return l.f.CloseIssue(num)
 }
 
-// AsLocalShaped returns f wrapped so it satisfies IssueTracker,
-// LandingRecorder, LandingPassRecorder, and IssueCloser — the local
-// adapter's shape — but not MergeCloser, which only github and forgejo
-// implement.
+// AsLocalShaped returns f in the local adapter's shape: LandingRecorder, LandingPassRecorder, and IssueCloser, but no MergeCloser.
 func (f *Fake) AsLocalShaped() IssueTracker {
 	return localShapedIssueTracker{IssueTracker: f, f: f}
 }
 
-// localIssueFilerTracker adapts a Fake to expose IssueTracker plus both
-// LandingRecorder and IssueCloser (localShapedIssueTracker's local-only
-// write surfaces) together with HostPostedIssueFiler (issueFilerTracker's
-// host-mediated filing surface) — the real local adapter's actual combined
-// shape (local.go: RecordLanding and PostIssue are both implemented on the
-// same *localTracker). Neither AsLocalShaped nor AsIssueFiler alone can
-// stand in for it: AsLocalShaped promotes RecordLanding/CloseIssue but never
+// localIssueFilerTracker is the real local adapter's actual combined shape
+// (issue #2592). Neither existing double covers it: AsLocalShaped never
 // gained PostIssue, and AsIssueFiler embeds the IssueTracker interface value
-// rather than *Fake, so it doesn't promote RecordLanding/CloseIssue at all.
-// That left no Fake shape able to exercise ResearchSettle's local branch
-// (r.landing != nil) together with issue filing via
-// fileIssueIntentsDetailed (issue #2592) — this double closes that gap.
+// rather than *Fake, so it promotes neither RecordLanding nor CloseIssue.
 type localIssueFilerTracker struct {
 	IssueTracker
 	f *Fake
@@ -99,9 +71,8 @@ func (l localIssueFilerTracker) RecordLanding(num, landing string) error {
 	return l.f.RecordLanding(num, landing)
 }
 
-// RecordLandingPass promotes the same optional surface RecordLanding does
-// (issue #2983) — the real local adapter implements both on the one
-// *LocalTracker, so this shape must too.
+// RecordLandingPass promotes the same optional method RecordLanding does
+// (issue #2983): the real local adapter implements both on one *LocalTracker.
 func (l localIssueFilerTracker) RecordLandingPass(num string, pass int, kind string) error {
 	return l.f.RecordLandingPass(num, pass, kind)
 }
@@ -114,10 +85,7 @@ func (l localIssueFilerTracker) PostIssue(title, body string, labels []string) (
 	return l.f.postIssue(title, body, labels)
 }
 
-// AsLocalIssueFiler returns f wrapped so it satisfies IssueTracker,
-// LandingRecorder, LandingPassRecorder, IssueCloser, and
-// HostPostedIssueFiler — the real local adapter's combined shape (issue
-// #2592) — but not MergeCloser, which only github and forgejo implement.
+// AsLocalIssueFiler returns f in the local adapter's combined shape, AsLocalShaped plus HostPostedIssueFiler (issue #2592).
 func (f *Fake) AsLocalIssueFiler() IssueTracker {
 	return localIssueFilerTracker{IssueTracker: f, f: f}
 }
@@ -127,15 +95,10 @@ var _ LandingRecorder = localIssueFilerTracker{}
 var _ LandingPassRecorder = localIssueFilerTracker{}
 var _ IssueCloser = localIssueFilerTracker{}
 
-// forgejoShapedIssueTracker adapts a Fake to expose IssueTracker plus
-// MergeCloser — one surface the real forgejo adapter implements (see
-// forgejo.go) — but hides LandingRecorder and IssueCloser (embedding the
-// IssueTracker interface value, not *Fake directly, the same trick
-// noLandingIssueTracker uses, since RecordLanding/CloseIssue are methods on
-// *Fake but not part of the IssueTracker interface) and does NOT implement
-// GithubTracker — forgejo issue numbers are foreign to GitHub's
-// Closes-keyword namespace (issue #2341), the exact gap this double closes
-// for ensureClosesReference's test coverage.
+// forgejoShapedIssueTracker adds MergeCloser while hiding RecordLanding and
+// CloseIssue by embedding the IssueTracker interface value rather than
+// *Fake. It omits GithubTracker because forgejo issue numbers are foreign to
+// GitHub's Closes-keyword namespace (issue #2341).
 type forgejoShapedIssueTracker struct {
 	IssueTracker
 	f *Fake
@@ -145,19 +108,13 @@ func (fs forgejoShapedIssueTracker) CloseMergedIssue(num string) error {
 	return fs.f.CloseMergedIssue(num)
 }
 
-// AsForgejoShaped returns f wrapped so it satisfies IssueTracker and
-// MergeCloser — the real forgejo adapter's shape — but not LandingRecorder,
-// IssueCloser, or GithubTracker.
+// AsForgejoShaped returns f in the forgejo adapter's shape: MergeCloser, but no LandingRecorder, IssueCloser, or GithubTracker.
 func (f *Fake) AsForgejoShaped() IssueTracker {
 	return forgejoShapedIssueTracker{IssueTracker: f, f: f}
 }
 
-// seamListedIssueTracker adapts a Fake to expose IssueTracker plus
-// AllIssues — the local adapter's SeamLister surface (ADR 0033), the one
-// grouping seam local.LocalTracker implements. Kept as its own wrapper
-// rather than folded into localShapedIssueTracker above so that shape's
-// existing callers (built around LandingRecorder/IssueCloser) don't pick up
-// SeamLister as an unrelated side effect.
+// seamListedIssueTracker adds the local adapter's SeamLister (ADR 0033),
+// kept separate so localShapedIssueTracker's callers do not gain it too.
 type seamListedIssueTracker struct {
 	IssueTracker
 	f *Fake
@@ -165,36 +122,28 @@ type seamListedIssueTracker struct {
 
 func (s seamListedIssueTracker) AllIssues() ([]Issue, error) { return s.f.allIssues() }
 
-// AsSeamListed returns f wrapped so it satisfies IssueTracker and
-// SeamLister — the local adapter's grouping surface — but not
-// LandingRecorder or IssueCloser.
+// AsSeamListed returns f in the local adapter's grouping shape: IssueTracker plus SeamLister.
 func (f *Fake) AsSeamListed() IssueTracker {
 	return seamListedIssueTracker{IssueTracker: f, f: f}
 }
 
 var _ SeamLister = seamListedIssueTracker{}
 
-// fullyPaginatedIssueTracker adapts a Fake to expose IssueTracker plus
-// WalksAllPages, always true — the forgejo and jira adapters' shape: both
-// wrap their list calls in a page-walking loop, so a bare *Fake (which,
-// like github's gh-exec adapter, stays single-page) can't stand in for
-// either without this wrapper.
+// fullyPaginatedIssueTracker matches the forgejo and jira adapters, which
+// wrap their list calls in a page-walking loop. A bare *Fake stays single-page.
 type fullyPaginatedIssueTracker struct{ IssueTracker }
 
 func (fullyPaginatedIssueTracker) WalksAllPages() bool { return true }
 
-// AsFullyPaginated returns f wrapped so it satisfies IssueTracker and
-// FullyPaginated — the forgejo/jira adapters' shape.
+// AsFullyPaginated returns f in the forgejo and jira adapters' shape: IssueTracker plus FullyPaginated.
 func (f *Fake) AsFullyPaginated() IssueTracker {
 	return fullyPaginatedIssueTracker{IssueTracker: f}
 }
 
 var _ FullyPaginated = fullyPaginatedIssueTracker{}
 
-// pushOnlyForge adapts a Fake to expose only the core CodeForge surface,
-// hiding its PRForge methods so a type assertion against it reports absence
-// — the git adapter's shape, for tests that need to exercise push-only-forge
-// behavior without a removed PushOnly() flag.
+// pushOnlyForge hides a Fake's PRForge methods so a type assertion against
+// PRForge reports absence, giving tests the git adapter's push-only shape.
 type pushOnlyForge struct{ f *Fake }
 
 // AsPushOnly returns f wrapped so it satisfies CodeForge but not PRForge.
@@ -208,13 +157,11 @@ func (p pushOnlyForge) BranchExists(branch string) (bool, error) { return p.f.Br
 
 var _ CodeForge = pushOnlyForge{}
 
-// localForge adapts a Fake to expose the push-only CodeForge surface plus
-// the BundleRelay and LandingRef hooks CODE_FORGE=local's adapter implements
-// (ADR 0033) — the Fake analogue of local.localCodeForge's real wrapper.
+// localForge adds the BundleRelay and LandingRef methods CODE_FORGE=local's
+// adapter implements (ADR 0033) to the push-only shape.
 type localForge struct{ pushOnlyForge }
 
-// AsLocal returns f wrapped so it satisfies CodeForge, BundleRelay, and
-// LandingRef, but not PRForge — the local adapter's shape.
+// AsLocal returns f in the local adapter's shape: CodeForge, BundleRelay, and LandingRef, but not PRForge.
 func (f *Fake) AsLocal() CodeForge { return localForge{pushOnlyForge{f}} }
 
 func (l localForge) RelayBundle(outboxDir, ref string) error { return l.f.relayBundle(outboxDir, ref) }
@@ -229,16 +176,12 @@ func (l localForge) LandingContained(landing Landing, scope SeedScope) (bool, er
 var _ CodeForge = localForge{}
 var _ BundleRelay = localForge{}
 
-// githubReadOnlyForge adapts a Fake to the github read-only adapter's shape
-// (issue #1919): the full CodeForge+PRForge surface *Fake already exposes
-// directly (unlike localForge/pushOnlyForge, nothing here needs hiding) plus
-// BundleRelay and DraftPRCreator — mirroring github.readOnlyCodeForge, which
-// wraps execClient (already PRForge-shaped) with the same two host-mediated
-// hooks.
+// githubReadOnlyForge matches github.readOnlyCodeForge (issue #1919): the
+// CodeForge and PRForge methods *Fake already exposes, plus BundleRelay and
+// DraftPRCreator. Unlike localForge and pushOnlyForge, nothing needs hiding.
 type githubReadOnlyForge struct{ *Fake }
 
-// AsGithubReadOnly returns f wrapped so it satisfies CodeForge, PRForge,
-// BundleRelay, and DraftPRCreator — the github read-only adapter's shape.
+// AsGithubReadOnly returns f in the github read-only adapter's shape: CodeForge, PRForge, BundleRelay, and DraftPRCreator.
 func (f *Fake) AsGithubReadOnly() CodeForge { return githubReadOnlyForge{f} }
 
 func (g githubReadOnlyForge) RelayBundle(outboxDir, ref string) error {

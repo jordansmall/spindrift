@@ -15,16 +15,10 @@ import (
 )
 
 // registryRouteDriftRepoDirFn resolves the git checkout root enclosing the
-// launcher's own working directory, or "" when none is found. This is
-// *candidate* checkout resolution only -- the cwd checkout is not
-// automatically the Target repo, so registryRouteDriftCheck pairs this with
-// checkoutIsTargetRepo to confirm the candidate's identity before reading
-// anything from it. Gating on a real git checkout matters because
-// registrydiscover.Extract returns (nil, nil, nil) for a directory with no
-// config files, indistinguishable from a checkout that genuinely declares no
-// registries -- only a real checkout makes "no drift" meaningful. A seam var
-// so a test can point the check at a t.TempDir() fixture instead of this
-// process's own working directory.
+// launcher's working directory, or "" when none is found. Callers must confirm
+// the candidate with checkoutIsTargetRepo; requiring a real checkout matters
+// because registrydiscover.Extract returns (nil, nil, nil) both for a
+// config-less directory and for a checkout that declares no registries.
 var registryRouteDriftRepoDirFn = func() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -34,10 +28,8 @@ var registryRouteDriftRepoDirFn = func() (string, error) {
 }
 
 // registryRouteDriftOriginRemoteFn returns root's "origin" remote URL, or ""
-// when there is no origin remote or git itself is unavailable. A seam var so
-// a test can stub git's absence/output without requiring a real git binary
-// on PATH; quickstart/main.go's GitRemoteURL runs the identical command for
-// the same reason.
+// when there is no origin remote or git is unavailable. A seam var so a test
+// can stub git without a real git binary on PATH.
 var registryRouteDriftOriginRemoteFn = func(root string) string {
 	out, err := exec.Command("git", "-C", root, "remote", "get-url", "origin").Output()
 	if err != nil {
@@ -46,16 +38,11 @@ var registryRouteDriftOriginRemoteFn = func(root string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// checkoutIsTargetRepo positively identifies whether root is a checkout of
-// the Target repo configured by c, by matching root's origin remote against
-// c's Code Forge identity. This is the guard that makes the drift row safe
-// to run at all: absent it, a cwd checkout that happens to be the Consumer
-// flake (a distinct role from the Target repo per CONTEXT.md, even when they
-// are the same repo) would have its own drift silently reported as the
-// Target repo's -- a false "no drift" (or a false finding) whenever the two
-// roles differ. codeForge values other than "git"/"github"/"forgejo" (e.g.
-// "local") never match: there is no remote-based Target identity to check
-// against.
+// checkoutIsTargetRepo reports whether root is a checkout of the Target repo
+// configured by c, by matching root's origin remote against c's Code Forge
+// identity. Without this guard the check would report a cwd checkout that is
+// really the Consumer flake as the Target repo's drift. codeForge values other
+// than git, github, or forgejo have no remote identity and never match.
 func checkoutIsTargetRepo(root string, c config) bool {
 	remote := registryRouteDriftOriginRemoteFn(root)
 	if remote == "" {
@@ -69,11 +56,9 @@ func checkoutIsTargetRepo(root string, c config) bool {
 		if normalizeGitRemoteURL(remote) == normalizeGitRemoteURL(c.codeForgeRemoteURL) {
 			return true
 		}
-		// Raw compare misses equivalent spellings of the same host+repo
-		// (e.g. scp-like "git@host:owner/repo.git" vs "ssh://git@host/owner/repo.git").
-		// Fall back to comparing parsed host+slug, but only when both sides
-		// actually parse -- a plain path or other form ParseHostSlug can't
-		// handle must not spuriously match on two empty results.
+		// A raw compare misses equivalent spellings (scp-like vs ssh://), so
+		// fall back to host+slug, but only when both sides parse: a form
+		// ParseHostSlug cannot handle must not match on two empty results.
 		remoteHost, remoteSlug := gitremote.ParseHostSlug(remote)
 		wantHost, wantSlug := gitremote.ParseHostSlug(c.codeForgeRemoteURL)
 		return remoteHost != "" && remoteSlug != "" &&
@@ -83,8 +68,7 @@ func checkoutIsTargetRepo(root string, c config) bool {
 			return false
 		}
 		host, slug := gitremote.ParseHostSlug(remote)
-		// GH_HOST-configured GitHub Enterprise hosts never match here --
-		// skipped, not wrong.
+		// GH_HOST-configured GitHub Enterprise hosts never match: skipped, not wrong.
 		return host == "github.com" && strings.EqualFold(slug, c.repoSlug)
 	case "forgejo":
 		if c.repoSlug == "" || c.forgejoBaseURL == "" {
@@ -101,9 +85,8 @@ func checkoutIsTargetRepo(root string, c config) bool {
 	}
 }
 
-// normalizeGitRemoteURL trims whitespace and one trailing ".git"/"/" so
-// equivalent codeForge=git remote spellings (with or without the ".git"
-// suffix or a trailing slash) compare equal.
+// normalizeGitRemoteURL trims whitespace and one trailing ".git" or "/" so
+// equivalent codeForge=git remote spellings compare equal.
 func normalizeGitRemoteURL(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimSuffix(s, "/")
@@ -111,12 +94,10 @@ func normalizeGitRemoteURL(s string) string {
 	return s
 }
 
-// gitCheckoutRoot walks up from dir looking for a ".git" entry (os.Stat
-// succeeding is enough -- a plain checkout has a ".git" directory, a
-// worktree has a ".git" file pointing at the parent checkout's worktree
-// metadata, and either marks dir as inside a checkout), returning the
-// containing directory as the checkout root. Returns "" if the walk reaches
-// the filesystem root without finding one.
+// gitCheckoutRoot walks up from dir to the directory holding a ".git" entry,
+// or "" if the walk reaches the filesystem root. A successful os.Stat is
+// enough: a plain checkout has a ".git" directory and a worktree has a ".git"
+// file, and either one marks dir as inside a checkout.
 func gitCheckoutRoot(dir string) string {
 	for {
 		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
@@ -130,17 +111,11 @@ func gitCheckoutRoot(dir string) string {
 	}
 }
 
-// registryRouteDriftCheck returns a single doctor.Check row reporting
-// registry-routes drift (ADR 0045: "doctor re-runs discovery in check mode
-// and reports drift -- the repo names host X; no route covers it"): a
-// declared host (registrydiscover.Extract's own host enumeration) that no
-// route in c.registryProxyRoutesFile covers.
-//
-// Gated the same way registryRouteChecks (slice 1) is: nil when the routes
-// file is unset, unreadable, or unparsable -- deferring to the existing
-// registry-proxy-routes row for that failure. Beyond that, the source the
-// row reads from -- and the second gate that can also skip it -- depends on
-// c.codeForge; see registryRouteDriftCheckForRoutes.
+// registryRouteDriftCheck returns one doctor.Check row reporting a host the
+// repo declares that no route in c.registryProxyRoutesFile covers (ADR 0045).
+// It returns nil when the routes file is unset, unreadable, or unparsable,
+// deferring that failure to the registry-proxy-routes row. The source it reads
+// and a second gate that can skip it depend on c.codeForge.
 func registryRouteDriftCheck(c config) []doctor.Check {
 	if c.registryProxyRoutesFile == "" {
 		return nil
@@ -152,30 +127,11 @@ func registryRouteDriftCheck(c config) []doctor.Check {
 	return registryRouteDriftCheckForRoutes(c, routes)
 }
 
-// registryRouteDriftCheckForRoutes picks the drift row's source the same
-// way deriveHostRootedPathSets (registryroutesresolve.go) does: keyed on
-// backendByName(c.codeForge)'s HostMediatedRemote, never a raw
-// c.codeForge == "local" string compare that a future host-mediated backend
-// would silently miss.
-//
-// A host-mediated forge reads c.codeForgeAccumulationRepoDir's c.baseBranch
-// ref instead of a cwd checkout: the Accumulation repo is bare, so
-// checkoutIsTargetRepo's remote-based identity check has no working tree to
-// run against, and that ref is the same snapshot the launch itself derives
-// host-rooted routes from.
-//
-// Every other forge reads the cwd checkout, and skips the row unless
-// registryRouteDriftRepoDirFn resolves a root checkoutIsTargetRepo can
-// positively identify as the Target repo. Outside the dogfood/same-repo
-// setup that cwd checkout is the Consumer flake (CONTEXT.md), whose own
-// config may say nothing about the Target repo's actual registries, so
-// reading it would report a false "no drift" rather than a meaningful
-// answer.
-//
-// Split out from registryRouteDriftCheck so doctorCheckSets
-// (bwrap_doctor_checks.go) can hand it the one routes slice it already
-// parsed for registryRouteChecks' per-route rows, instead of this package
-// parsing the routes file a second time per doctor run.
+// registryRouteDriftCheckForRoutes keys the row's source on
+// backendByName(c.codeForge).HostMediatedRemote, not a codeForge == "local"
+// compare a future host-mediated backend would break. A host-mediated forge
+// reads the bare Accumulation repo at c.baseBranch, the same snapshot the
+// launch itself derives host-rooted routes from.
 func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route) []doctor.Check {
 	row, _ := backendByName(c.codeForge)
 	if row.HostMediatedRemote {
@@ -190,16 +146,10 @@ func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route) [
 }
 
 // registryRouteDriftCheckForRef builds the drift row for a host-mediated
-// forge's Accumulation repo, or nil when ref can't be resolved -- the same
-// nil-row skip registryRouteDriftCheckForRoutes' cwd-checkout path produces
-// for a missing checkout. Only registrydiscover.ResolveRef runs eagerly
-// here, and it materializes nothing, so a doctor.RunChecksFailFast run that
-// never reaches this row's Probe (e.g. an earlier Required check blocking
-// first) has no snapshot dir left behind to leak. The Probe itself
-// materializes the ref lazily via UncoveredHostsFromGitRef, which cleans up
-// its own snapshot dir before returning either way -- at the cost of
-// re-running the same rev-parse ResolveRef just ran, which is cheaper than
-// holding a snapshot dir open across a Probe that may never run.
+// forge's Accumulation repo, or nil when ref cannot be resolved. Only
+// ResolveRef runs eagerly, and it materializes nothing, so a fail-fast run
+// that never reaches the Probe leaks no snapshot dir. The Probe materializes
+// the ref itself and cleans up, at the cost of a repeated rev-parse.
 func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.Route) []doctor.Check {
 	if err := registrydiscover.ResolveRef(repoDir, ref); err != nil {
 		return nil
@@ -210,25 +160,20 @@ func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.
 	return []doctor.Check{check}
 }
 
-// registryRouteDriftCheckName is the registry-route-drift row's Name,
-// factored into a const so the row's Name field and its SuccessMsg closure
-// can't drift apart on a future rename (issue #2853).
+// registryRouteDriftCheckName keeps the row's Name and its SuccessMsg closure
+// from drifting apart on a rename (issue #2853).
 const registryRouteDriftCheckName = "registry-route-drift"
 
-// registryRouteDriftCheckFor builds the drift row for an already-resolved
-// cwd checkout dir and already-parsed routes. Split out so a test can hand
-// it a fixture dir directly, bypassing registryRouteDriftRepoDirFn's real
-// checkout resolution.
+// registryRouteDriftCheckFor builds the drift row for an already-resolved cwd
+// checkout, so a test can hand it a fixture dir directly.
 func registryRouteDriftCheckFor(dir string, routes []registryroutes.Route) doctor.Check {
 	return registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
 		return registrydiscover.UncoveredHosts(dir, covered)
 	})
 }
 
-// registryRouteDriftRow builds the drift row shared by both sources --
-// registryRouteDriftCheckFor's cwd checkout and registryRouteDriftCheckForRef's
-// Accumulation repo ref -- differing only in how the Probe learns the
-// uncovered hosts, which probeUncovered supplies.
+// registryRouteDriftRow builds the drift row shared by both sources, which
+// differ only in the probeUncovered they supply.
 func registryRouteDriftRow(routes []registryroutes.Route, probeUncovered func(covered []string) ([]string, error)) doctor.Check {
 	covered := make([]string, len(routes))
 	for i, r := range routes {

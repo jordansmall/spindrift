@@ -17,42 +17,29 @@ type FixCall struct {
 type Fake struct {
 	mu sync.Mutex
 
-	// RunCalls counts how many times Run was called.
 	RunCalls int
 
-	// RunResult is returned by every Run call (when RunResults is nil).
 	RunResult Result
 
-	// RunResults, if non-nil, provides per-call results: RunResults[i] is
-	// returned for the i-th Run call. The last element is reused when the
-	// sequence is exhausted. Takes precedence over RunResult.
+	// RunResults[i] answers the i-th Run call, reusing the last element once
+	// the sequence is exhausted. A non-nil RunResults overrides RunResult.
 	RunResults []Result
 
-	// FixCalls records all Fix invocations in order.
 	FixCalls []FixCall
 
-	// FixResult is returned by every Fix call (when FixResults is nil).
 	FixResult Result
 
-	// FixResults, if non-nil, provides per-call results, indexed like
-	// RunResults.
+	// FixResults is indexed like RunResults.
 	FixResults []Result
 
-	// ResolveConflictCalls records the pr argument of every ResolveConflict
-	// call in order.
 	ResolveConflictCalls []string
 
-	// ResolveConflictErr, if non-nil, is returned by every ResolveConflict
-	// call.
 	ResolveConflictErr error
 
-	// UsageReportBody is returned by UsageReport.
 	UsageReportBody string
 
-	// CumulativeUsageResult is returned by CumulativeUsage.
 	CumulativeUsageResult usage.Usage
 
-	// CloseCalls counts how many times Close was called.
 	CloseCalls int
 }
 

@@ -9,9 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// failureDetailContext is one node of a statusCheckRollup's contexts union —
-// either a CheckRun (GitHub Actions and most third-party checks) or a
-// StatusContext (the legacy commit-status API).
+// failureDetailContext is one node of a statusCheckRollup contexts union: a
+// CheckRun (GitHub Actions and most third-party checks) or a StatusContext
+// (the legacy commit-status API).
 type failureDetailContext struct {
 	TypeName    string `json:"__typename"`
 	Name        string `json:"name"`        // CheckRun
@@ -22,8 +22,7 @@ type failureDetailContext struct {
 	Description string `json:"description"` // StatusContext
 }
 
-// failingCheckRunConclusions are the CheckRun.conclusion values that
-// represent a genuine failure, as opposed to SUCCESS, NEUTRAL, or SKIPPED.
+// failingCheckRunConclusions excludes SUCCESS, NEUTRAL, and SKIPPED.
 var failingCheckRunConclusions = map[string]bool{
 	"FAILURE":         true,
 	"TIMED_OUT":       true,
@@ -32,19 +31,17 @@ var failingCheckRunConclusions = map[string]bool{
 	"STARTUP_FAILURE": true,
 }
 
-// failingStatusContextStates are the legacy StatusContext.state values that
-// represent a genuine failure.
+// failingStatusContextStates are the legacy states that count as a failure.
 var failingStatusContextStates = map[string]bool{
 	"FAILURE": true,
 	"ERROR":   true,
 }
 
-// FailureDetail queries the PR's head-commit statusCheckRollup via GraphQL —
-// the same fine-grained-PAT-safe query CheckState uses, unlike `gh pr checks`
-// (REST check-runs, 403s under a fine-grained PAT) — and renders the failing
-// checks' names plus their reported summary into a bounded excerpt. Returns
-// "" when no checks are currently failing. The fetch is best-effort: callers
-// should treat a non-nil error as "detail unavailable" and proceed without it.
+// FailureDetail renders the PR's failing checks into a bounded excerpt, or ""
+// when none are failing. It reads the head commit's statusCheckRollup over
+// GraphQL because `gh pr checks` uses the REST check-runs endpoint, which 403s
+// under a fine-grained PAT. The fetch is best-effort: a non-nil error means
+// the detail is unavailable, and callers should proceed without it.
 func (e *execClient) FailureDetail(url string) (string, error) {
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
@@ -70,11 +67,6 @@ func (e *execClient) FailureDetail(url string) (string, error) {
 	return renderFailureDetail(contexts), nil
 }
 
-// renderFailureDetail formats the failing contexts into a bounded, human-
-// readable excerpt: one "name: conclusion" header per failing check plus its
-// summary, truncated to forge.MaxFailureDetailBytes. It normalizes the
-// failing contexts into forge.FailureDetailEntry values and defers the
-// actual rendering to the shared forge.RenderFailureDetail.
 func renderFailureDetail(contexts []failureDetailContext) string {
 	var entries []forge.FailureDetailEntry
 	for _, ctx := range contexts {

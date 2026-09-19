@@ -7,41 +7,35 @@ import (
 	"time"
 )
 
-// defaultProbeTimeout bounds HTTPProbe's GET -- discovery must not hang the
-// CLI on an unreachable or slow registry; a probe result defaults to
-// "bearer" either way (see HTTPProbe), so a short bound costs nothing.
+// defaultProbeTimeout keeps an unreachable or slow registry from hanging the
+// CLI. A failed probe falls back to "bearer", so a short bound costs nothing.
 const defaultProbeTimeout = 10 * time.Second
 
-// DefaultProbeClient returns the client the CLI uses for HTTPProbe: a short,
-// bounded timeout so an unreachable registry falls back to "bearer" quickly
-// instead of hanging discovery.
+// DefaultProbeClient returns the client the CLI uses for HTTPProbe.
 func DefaultProbeClient() *http.Client {
 	return &http.Client{Timeout: defaultProbeTimeout}
 }
 
-// HTTPProbe is the production Probe (see Discover): it issues a GET to the
-// upstream base URL and reads the auth scheme from the registry's
-// WWW-Authenticate answer, defaulting to "bearer" when the registry is
-// unreachable, answers without the header, or names a scheme discovery does
+// HTTPProbe is the production Probe: it reads the auth scheme from the
+// registry's WWW-Authenticate response header. It returns "bearer" when the
+// registry is unreachable, omits the header, or names a scheme discovery does
 // not model.
 func HTTPProbe(client *http.Client, upstreamBaseURL string) string {
 	resp, err := client.Get(upstreamBaseURL)
 	if err != nil {
 		return "bearer"
 	}
-	// Drain (bounded) before Close so the underlying connection is eligible
-	// for reuse by http.Transport's connection pool -- an unread body forces
-	// the transport to close the connection instead.
+	// Drain before Close so http.Transport can pool the connection; an unread
+	// body forces the transport to close it instead.
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 	defer resp.Body.Close()
 
 	return probeAuthScheme(resp.Header.Get("WWW-Authenticate"))
 }
 
-// probeAuthScheme reads the leading scheme token off a WWW-Authenticate
-// header value (case-insensitive), never its params -- discovery only
-// proposes AuthScheme, an operator-reviewed guess (normalizeAuthScheme
-// re-validates it), so there is no reason to parse realm/scope/etc here.
+// probeAuthScheme reads only the leading scheme token, never its params.
+// Discovery proposes an AuthScheme that an operator reviews and
+// normalizeAuthScheme re-validates, so realm and scope have no use here.
 func probeAuthScheme(wwwAuthenticate string) string {
 	scheme, _, _ := strings.Cut(strings.TrimSpace(wwwAuthenticate), " ")
 	switch strings.ToLower(scheme) {

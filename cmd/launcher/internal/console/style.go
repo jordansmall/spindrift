@@ -9,9 +9,8 @@ import (
 	"github.com/muesli/termenv"
 )
 
-// Role names a semantic element the Console styles by meaning — never by a
-// hardcoded hex value — so the terminal (and Stylix, transitively) supplies
-// the actual color (ADR 0031).
+// Role names a semantic element the Console styles by meaning, never by a
+// hardcoded hex value, so the terminal supplies the actual color (ADR 0031).
 type Role int
 
 const (
@@ -24,10 +23,9 @@ const (
 	RoleDim
 )
 
-// ansiSlot maps a Role to one of the 16 standard ANSI palette slots. This is
-// the palette-resolver seam ADR 0031 reserves for a future explicit base16
-// override: swapping this function's body to consult a base16 hex table
-// needs no call-site change, since callers only ever ask for a Role's style.
+// ansiSlot maps a Role to one of the 16 standard ANSI palette slots. ADR 0031
+// reserves it as the palette-resolver seam: callers only ever ask for a Role's
+// style, so a base16 hex table can replace this body without touching them.
 func ansiSlot(r Role) int {
 	switch r {
 	case RoleRunning:
@@ -49,12 +47,9 @@ func ansiSlot(r Role) int {
 	}
 }
 
-// colorProfile reports the ANSI color profile the header should render
-// against: Ascii (plain text) when NO_COLOR is set or the terminal is a
-// known non-color terminal (TERM unset or "dumb"), ANSI otherwise. It is
-// computed from the environment directly rather than through termenv's own
-// isatty-gated detection, so it degrades correctly under NO_COLOR and dumb
-// terminals alike without requiring a real TTY.
+// colorProfile reads the environment directly rather than using termenv's
+// isatty-gated detection, so it degrades to Ascii under NO_COLOR and dumb
+// terminals without requiring a real TTY.
 func colorProfile() termenv.Profile {
 	if os.Getenv("NO_COLOR") != "" {
 		return termenv.Ascii
@@ -65,75 +60,58 @@ func colorProfile() termenv.Profile {
 	return termenv.ANSI
 }
 
-// Plain-Unicode glyphs (no nerd-fonts) tagging the header's alert lines by
-// kind, paired with role coloring (ADR 0031): glyphWarning marks a condition
-// that needs attention (stale image, a failure), glyphRebuilding marks work
-// in progress, and glyphNotice marks an informational notice.
+// Glyphs tagging the header's alert lines by kind, paired with role coloring
+// (ADR 0031). Plain Unicode only: the terminal may have no nerd font.
 const (
 	glyphWarning    = "⚠"
 	glyphRebuilding = "↻"
 	glyphNotice     = "ℹ"
 )
 
-// researchMarker tags a research-kind pick's row in the work Sections
-// (renderWorkSection) — the visible distinction issue #1710 asks for between
-// a research pick and a work pick, which carries no marker at all. Left
-// unstyled, like the rest of a row's extras (held-by badge, reason,
-// heartbeat): renderWorkSection measures and clips extras as one plain
-// string (the same clip-before-style discipline renderSectionTabs documents)
-// before any styling would apply, so a Role-styled marker mixed into it
-// would have its ANSI escape bytes miscounted as display columns on a color
-// terminal.
+// researchMarker distinguishes a research pick's row from a work pick's, which
+// carries no marker (issue #1710). It stays unstyled like the rest of a row's
+// extras: renderWorkSection measures and clips them as one plain string, so a
+// Role-styled marker's ANSI escape bytes would count as display columns.
 const researchMarker = "[research]"
 
 // renderers caches one lipgloss.Renderer per termenv.Profile, so a header
-// with several styled segments (the status line alone styles five) doesn't
-// allocate and re-detect a renderer per segment per frame. Keyed by profile
-// rather than built once: colorProfile() can change value across a test run
-// (t.Setenv) and, in principle, across a NO_COLOR toggle mid-process, so a
-// single cached instance would go stale where a small per-profile cache
-// does not. The writer passed to NewRenderer is never used for output —
-// SetColorProfile forces the profile from the environment, not from probing
-// an actual terminal — so io.Discard documents that plainly.
+// doesn't re-detect a renderer per styled segment per frame. Keyed by profile
+// rather than built once because colorProfile() changes value when a test sets
+// NO_COLOR or TERM (t.Setenv), which would leave a single instance stale.
 var renderers sync.Map // termenv.Profile -> *lipgloss.Renderer
 
 func rendererFor(p termenv.Profile) *lipgloss.Renderer {
 	if r, ok := renderers.Load(p); ok {
 		return r.(*lipgloss.Renderer)
 	}
+	// SetColorProfile pins the profile, so lipgloss never probes a terminal and
+	// the renderer never writes to this writer.
 	r := lipgloss.NewRenderer(io.Discard)
 	r.SetColorProfile(p)
 	actual, _ := renderers.LoadOrStore(p, r)
 	return actual.(*lipgloss.Renderer)
 }
 
-// roleStyle returns the lipgloss style for a semantic Role, resolved against
-// the current color profile so it renders styled by role on a color-capable
-// terminal and degrades to plain text under NO_COLOR or a non-color
-// terminal (ADR 0031).
+// roleStyle resolves a Role against the current color profile, degrading to
+// plain text under NO_COLOR or a non-color terminal (ADR 0031).
 func roleStyle(r Role) lipgloss.Style {
 	return rendererFor(colorProfile()).NewStyle().Foreground(lipgloss.ANSIColor(ansiSlot(r)))
 }
 
-// styleFunc is the seam a header renderer styles a role-tagged substring
-// through, so the same rendering logic (renderHeaderWith) can run against
-// either a real terminal renderer (styledText) or a pure counter that must
-// never touch colorProfile/rendererFor (plainText, issue #3019) — one
-// implementation instead of a plain/styled twin that could drift apart.
+// styleFunc lets renderHeaderWith run against either a real terminal renderer
+// (styledText) or a pure counter that must never touch colorProfile or
+// rendererFor (plainText, issue #3019), so a plain and a styled renderer
+// cannot drift apart.
 type styleFunc func(Role, string) string
 
-// styledText is the styleFunc equivalent of today's roleStyle(r).Render(s)
-// call sites.
 func styledText(r Role, s string) string {
 	return roleStyle(r).Render(s)
 }
 
-// plainText is styleFunc's identity implementation: it calls neither
-// roleStyle, colorProfile, nor rendererFor, so a renderer driven through it
-// is provably pure (issue #3019). ANSI escapes are zero-width to the wrap
-// algorithms both the styled and plain header text pass through, so the two
-// outputs wrap to the same number of lines even though only one carries
-// color.
+// plainText calls neither roleStyle, colorProfile, nor rendererFor, so a
+// renderer driven through it is pure (issue #3019). The wrap algorithms treat
+// ANSI escapes as zero-width, so plain and styled text wrap to the same number
+// of lines.
 func plainText(_ Role, s string) string {
 	return s
 }

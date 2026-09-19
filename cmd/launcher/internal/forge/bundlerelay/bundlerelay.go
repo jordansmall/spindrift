@@ -1,14 +1,8 @@
-// Package bundlerelay is the shared host-mediated bundle-relay helper
-// backing both github's and forgejo's read-only RelayBundle (issue #2212):
-// import a Box's code-out bundle into a fresh clone of the target repo and
-// force-push it to origin, for a Box that cannot push directly
-// (BOX_FORGE_AND_ISSUE_ACCESS=read-only). The two backends differ only in
-// how they clone the target repo -- github uses `gh repo clone` with its own
-// gh-cli credential, forgejo uses `git clone` against a token-bearing remote
-// URL with credential redaction on failure -- so that one step is the sole
-// parameter left to the caller; everything else (ref validation, bundle
-// presence/validity checks, fetch, checkout, force-push) is identical and
-// lives here once.
+// Package bundlerelay imports a Box's code-out bundle into a fresh clone of
+// the target repo and force-pushes it to origin, for a Box that cannot push
+// directly (BOX_FORGE_AND_ISSUE_ACCESS=read-only, issue #2212). Cloning is
+// the one step the caller supplies, because github and forgejo authenticate
+// differently; every other step is identical and lives here.
 package bundlerelay
 
 import (
@@ -27,28 +21,15 @@ import (
 )
 
 // RelayForcePushTimeout bounds Relay's trailing force-push so a remote that
-// accepts the connection and then hangs server-side must not block the
-// caller forever.
+// accepts the connection and then hangs server-side cannot block the caller
+// forever.
 const RelayForcePushTimeout = 5 * time.Minute
 
 // Relay imports ref from outboxDir/seambundle.FileName into a fresh clone of
-// the target repo and force-pushes it to origin -- the shared body behind
-// both github's and forgejo's RelayBundle (issue #2212). clone is the one
-// step Relay does not own: it must populate dir with a working clone of the
-// target repo, authenticated however that backend authenticates (gh-cli for
-// github, a token-bearing remote URL for forgejo), and return its own
-// fully-formatted error on failure -- Relay returns that error verbatim,
-// never re-wrapping it, since the closure is already in the best position to
-// describe its own failure (e.g. forgejo redacts a tokened URL from its
-// clone diagnostics before this ever gets called).
-//
-// A missing or malformed bundle is returned as an error, never a silent
-// no-op, so a broken hand-off blocks the seam instead of landing nothing.
-// The two failure modes are distinguished (issue #2096): an absent bundle
-// file returns forge.ErrBundleNotFound, the benign "Box wrote nothing" case,
-// while a bundle that is present but unreadable or fails `git bundle verify`
-// returns a generic error, since that's a genuine relay failure the caller
-// should not treat as a no-op.
+// the target repo and force-pushes it to origin (issue #2212). A missing or
+// malformed bundle is an error, never a silent no-op: an absent bundle file
+// returns forge.ErrBundleNotFound, the benign "Box wrote nothing" case, and an
+// unreadable or unverifiable one returns a generic error (issue #2096).
 func Relay(backend, outboxDir, ref string, clone func(dir string) error) error {
 	dir, gitIn, cleanup, err := prepareBundleFetch(backend, outboxDir, ref, clone)
 	if err != nil {
@@ -61,36 +42,16 @@ func Relay(backend, outboxDir, ref string, clone func(dir string) error) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), RelayForcePushTimeout)
 	defer cancel()
-	// Unlike Rebase's already-tracked head branch, ref came from a bundle
-	// fetch (refs/heads/ref created fresh in this clone), so it has no
-	// upstream for a bare force-with-lease to target -- an explicit
-	// destination is required, first push or retried force-update alike.
+	// ref came from a bundle fetch, so refs/heads/ref is fresh in this clone
+	// and has no upstream for a bare force-with-lease to target. The
+	// destination must be explicit, first push or retried force-update alike.
 	return gitplumbing.GitForcePush(ctx, dir, "-u", "origin", ref)
 }
 
-// CommitSubjects returns the one-line commit subjects that ref carries
-// relative to base, according to the bundle at outboxDir/seambundle.FileName,
-// oldest first -- settle's read-only PR-intent-fallback hook (issue #2447):
-// when a read-only Box's status=ready outcome carries no usable PR-intent
-// line, settle still has the relayed branch's own commits to reconstruct a
-// title/body from host-side, rather than blocking the hand-off outright.
-//
-// It shares Relay's own preamble (ref/bundle validation, a temp clone via
-// clone, bundle verify, bundle fetch into refs/heads/ref) via
-// prepareBundleFetch, including the same forge.ErrBundleNotFound-vs-generic-
-// error split for an absent-vs-malformed bundle. Where Relay then checks ref
-// out and force-pushes it to origin, CommitSubjects instead runs `git log`
-// against the clone and returns its subjects -- it never checks anything out
-// and never pushes, so unlike Relay it cannot mutate origin; this is a read
-// path only.
-//
-// clone must still populate dir with a full clone of the target repo, not an
-// empty scratch dir, exactly as Relay requires: a bundle created as
-// `base..branch` records base as a prerequisite commit its own history must
-// satisfy before `git bundle verify`/`fetch` will accept it -- proven
-// empirically, fetching such a bundle into a repo that lacks base's own
-// history fails with "Repository lacks these prerequisite commits", even
-// though the bundle's payload only contains commits after base.
+// CommitSubjects returns the one-line commit subjects ref carries relative to
+// base, oldest first, from the bundle at outboxDir/seambundle.FileName. It
+// backs settle's read-only PR-intent fallback (issue #2447) and reports an
+// absent bundle as forge.ErrBundleNotFound, as Relay does.
 func CommitSubjects(backend, outboxDir, base, ref string, clone func(dir string) error) ([]string, error) {
 	_, gitIn, cleanup, err := prepareBundleFetch(backend, outboxDir, ref, clone)
 	if err != nil {
@@ -98,25 +59,19 @@ func CommitSubjects(backend, outboxDir, base, ref string, clone func(dir string)
 	}
 	defer cleanup()
 
-	// A --no-single-branch clone (every real clone closure) only checks out a
-	// local branch for the clone's own default branch (wherever its HEAD
-	// points); every other branch -- including base, whenever a Target's
-	// BASE_BRANCH config differs from its default branch -- exists only as
-	// the remote-tracking origin/base, never a local branch of the same
-	// name. Prefer origin/base when it resolves; fall back to the bare base
-	// name for a clone that isn't a full --no-single-branch clone, or that
-	// genuinely already has base as a local branch.
+	// A --no-single-branch clone creates a local branch only for the clone's
+	// own default branch, so base exists only as the remote-tracking
+	// origin/base whenever a Target's BASE_BRANCH differs from it. Fall back to
+	// the bare name for a clone that already has base as a local branch.
 	baseRef := base
 	if _, err := gitIn("rev-parse", "--verify", "origin/"+base).CombinedOutput(); err == nil {
 		baseRef = "origin/" + base
 	}
 
-	// .Output(), not .CombinedOutput(): the returned bytes are parsed
-	// line-by-line as data (commit subjects) below, so stdout must never be
-	// conflated with stderr the way .CombinedOutput() would -- any ambient
-	// warning/hint git prints on stderr would otherwise silently become a
-	// bogus fake subject, which becomes the reconstructed PR's title
-	// (settle's reconstructPRText) whenever it sorts first.
+	// .Output(), not .CombinedOutput(): these bytes are parsed line-by-line as
+	// commit subjects, so any warning git prints on stderr would become a bogus
+	// subject and, whenever it sorts first, the reconstructed PR's title
+	// (settle's reconstructPRText).
 	out, err := gitIn("log", "--format=%s", "--reverse", baseRef+".."+ref).Output()
 	if err != nil {
 		var stderr []byte
@@ -136,29 +91,22 @@ func CommitSubjects(backend, outboxDir, base, ref string, clone func(dir string)
 	return subjects, nil
 }
 
-// prepareBundleFetch is the shared preamble behind both Relay and
-// CommitSubjects: validate ref, confirm the bundle at
-// outboxDir/seambundle.FileName exists, create a scratch clone of the target
-// repo via clone, verify the bundle against that clone, and fetch ref from it
-// into refs/heads/ref. It returns the scratch clone's dir, a gitIn helper
-// (`git -C dir ...`) for the caller's own follow-up command (checkout+push
-// for Relay, log for CommitSubjects), and a cleanup func the caller must
-// defer to remove the scratch clone. On any error it has already cleaned up
-// after itself, so callers only need to defer cleanup once err is nil.
+// prepareBundleFetch is the shared preamble behind Relay and CommitSubjects:
+// validate ref, confirm the bundle at outboxDir/seambundle.FileName exists,
+// clone the target repo into a scratch dir, verify the bundle against that
+// clone, and fetch ref into refs/heads/ref. On any error it has already
+// cleaned up, so callers defer the returned cleanup only once err is nil.
 func prepareBundleFetch(backend, outboxDir, ref string, clone func(dir string) error) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
-	// Defense in depth: callers derive ref from cf.AgentBranch(num) host-side
-	// and never forward untrusted input here, so ref is launcher-controlled by
-	// the time it reaches this function. It still interpolates directly into a
-	// refspec (and, for CommitSubjects, a `git log` revision range), so guard
-	// it the same way regardless of that guarantee holding upstream.
+	// Defense in depth: callers derive ref from cf.AgentBranch(num) host-side,
+	// but it still interpolates into a refspec and, for CommitSubjects, a `git
+	// log` revision range, so guard it regardless of that holding upstream.
 	if ref == "" || strings.HasPrefix(ref, "-") {
 		return "", nil, nil, fmt.Errorf("%s: relay bundle: invalid ref %q", backend, ref)
 	}
 	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
 	if _, err := os.Stat(bundlePath); err != nil {
-		// An absent outbox directory collapses into this same case: a missing
-		// dir also yields os.IsNotExist, and "no dir" means "nothing to relay"
-		// just as "no bundle file" does -- both are the benign empty-range case.
+		// An absent outbox directory also yields os.IsNotExist, and "no dir"
+		// means "nothing to relay" just as "no bundle file" does.
 		if os.IsNotExist(err) {
 			return "", nil, nil, fmt.Errorf("%s: relay bundle: %w: %s", backend, forge.ErrBundleNotFound, bundlePath)
 		}
@@ -170,6 +118,10 @@ func prepareBundleFetch(backend, outboxDir, ref string, clone func(dir string) e
 	}
 	cleanup = func() { os.RemoveAll(dir) }
 
+	// clone must populate dir with a full, authenticated clone of the target
+	// repo, not an empty scratch dir, and must return its own fully-formatted
+	// error: callers return it verbatim, because forgejo redacts its token from
+	// clone diagnostics first.
 	if err := clone(dir); err != nil {
 		cleanup()
 		return "", nil, nil, err
@@ -178,18 +130,17 @@ func prepareBundleFetch(backend, outboxDir, ref string, clone func(dir string) e
 	gitIn = func(args ...string) *exec.Cmd {
 		return exec.Command("git", append([]string{"-C", dir}, args...)...)
 	}
-	// Verified against dir, not the ambient cwd: the bundle's prerequisite
-	// commit(s) -- everything on the base side of the Box's base..branch
-	// range -- must be reachable from *some* repo for `git bundle verify` to
-	// succeed, and dir (the clone the closure just made from origin) is the
-	// one this function has in hand.
+	// Verified against dir, not the ambient cwd: `git bundle verify` needs the
+	// bundle's prerequisite commits reachable from some repo, and dir is the
+	// clone the closure just made. A `base..branch` bundle lists base as a
+	// prerequisite, so a clone lacking base's history fails with "Repository
+	// lacks these prerequisite commits" though the payload holds only new work.
 	if out, err := gitIn("bundle", "verify", bundlePath).CombinedOutput(); err != nil {
 		cleanup()
 		return "", nil, nil, fmt.Errorf("%s: malformed bundle %s: %w: %s", backend, bundlePath, err, out)
 	}
-	// The forced refspec lets a retried fix-pass's rebuilt bundle overwrite
-	// the branch this clone may already know about from the closure's own
-	// initial clone/fetch.
+	// The forced refspec lets a retried fix-pass's rebuilt bundle overwrite the
+	// branch this clone may already know from the closure's own initial clone.
 	if out, err := gitIn("fetch", bundlePath, "+"+ref+":refs/heads/"+ref).CombinedOutput(); err != nil {
 		cleanup()
 		return "", nil, nil, fmt.Errorf("%s: relay bundle: git fetch bundle: %w: %s", backend, err, out)

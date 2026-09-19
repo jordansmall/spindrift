@@ -5,19 +5,13 @@ import (
 	"strings"
 )
 
-// http5xxPattern matches an "HTTP 5xx" status marker as it appears in gh CLI
-// error text (e.g. "HTTP 502: Bad Gateway").
+// http5xxPattern matches gh CLI error text such as "HTTP 502: Bad Gateway".
 var http5xxPattern = regexp.MustCompile(`HTTP 5\d\d`)
 
-// isTransientForgeError reports whether err looks like a transient forge API
-// hiccup (a 5xx response or a network-level blip) rather than a genuine
-// failure. Callers use this to retry PR resolution instead of failing
-// recover immediately on a blip (issue #2323). A nil error is never
-// transient.
-//
-// Detection is English-substring matching against gh's current error
-// wording, so a gh CLI rewording or a non-English locale can defeat it —
-// accepted as a known limitation rather than a hard dependency to remove.
+// isTransientForgeError reports whether err is a 5xx response or a network
+// blip, so recover retries PR resolution instead of failing (issue #2323).
+// It matches English substrings of gh's current wording, so a gh rewording
+// or a non-English locale defeats it.
 func isTransientForgeError(err error) bool {
 	if err == nil {
 		return false

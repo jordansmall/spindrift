@@ -1,6 +1,5 @@
-// Package gitplumbing holds the plumbing helpers shared by the git and
-// github forge adapters: git stderr classification, force-push handling, and
-// the generic stderr-marker scan those classifiers are built on.
+// Package gitplumbing holds the helpers shared by the git and github forge
+// adapters: git stderr classification and force-push handling.
 package gitplumbing
 
 import (
@@ -14,10 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// MatchesAnyMarker returns true when stderr contains any of markers,
-// case-insensitively. stderr is lowercased once and reused across the whole
-// scan; markers must already be lowercase, and none may be empty — an empty
-// marker matches every stderr.
+// MatchesAnyMarker reports whether stderr contains any of markers,
+// case-insensitively. markers must already be lowercase, and none may be
+// empty: an empty marker matches every stderr.
 func MatchesAnyMarker(stderr string, markers []string) bool {
 	s := strings.ToLower(stderr)
 	for _, m := range markers {
@@ -28,21 +26,17 @@ func MatchesAnyMarker(stderr string, markers []string) bool {
 	return false
 }
 
-// mergeConflictMarkers are the substrings IsMergeConflict looks for in gh's
-// stderr.
 var mergeConflictMarkers = []string{
 	"merge conflict",
 	"not mergeable",
 }
 
-// IsMergeConflict returns true when gh's stderr indicates a merge-conflict
-// failure rather than a permissions error, network failure, or other cause.
+// IsMergeConflict reports whether gh's stderr indicates a merge conflict
+// rather than a permissions error, network failure, or other cause.
 func IsMergeConflict(stderr string) bool {
 	return MatchesAnyMarker(stderr, mergeConflictMarkers)
 }
 
-// mergeTransientMarkers are the substrings IsMergeTransient looks for in
-// gh's stderr.
 var mergeTransientMarkers = []string{
 	"502",
 	"503",
@@ -58,45 +52,23 @@ var mergeTransientMarkers = []string{
 	"context deadline exceeded",
 }
 
-// IsMergeTransient returns true when gh's stderr indicates a transient
-// transport/server failure — an HTTP 5xx from the forge, a network timeout,
-// or similar — as opposed to a genuine merge rejection (conflict, blocked by
-// checks, branch protection). The "timeout"/"eof" markers are broad enough
-// to appear in unrelated stderr; callers must check IsMergeConflict first so
-// a genuine conflict is never misclassified as transient.
+// IsMergeTransient reports whether gh's stderr indicates a transient
+// transport or server failure rather than a genuine merge rejection. The
+// "timeout" and "eof" markers are broad enough to appear in unrelated stderr,
+// so callers must check IsMergeConflict first.
 func IsMergeTransient(stderr string) bool {
 	return MatchesAnyMarker(stderr, mergeTransientMarkers)
 }
 
-// GitForcePush force-with-lease-pushes the current branch of the repo
-// checked out at dir, capturing git's stderr into the returned error so
-// callers can tell a stale lease apart from an auth or network fault. A
-// failure without a genuine ref-rejection marker in stderr is wrapped in
-// forge.ErrTransientPushFailure so callers know it's safe to retry. Shared by
-// the git and github adapters, both of which force-push a rebased branch.
-// ctx bounds the push subprocess — a remote that accepts the connection and
-// then hangs server-side (e.g. a stuck pre-receive hook) would otherwise
-// block the caller forever, since git itself applies no timeout of its own.
-// A context deadline is reported as a distinct timeout error rather than run
-// through wrapForcePushError's stale-lease/transient classification, which
-// needs git's own stderr markers to work from.
-//
-// extraArgs is appended after --force-with-lease, e.g. "-u", "origin", ref —
-// needed by github's RelayBundle (issue #1918), whose local branch comes
-// from a bundle fetch rather than a checkout of an existing remote branch
-// and so has no upstream for a bare `push --force-with-lease` to target.
-// Every other caller (Rebase, the git adapter's own force-push) pushes an
-// already-tracked current branch and passes none.
-//
-// stderr is captured to a temp file rather than an in-memory io.Writer:
-// pushing to a local (non-network) remote forks git-receive-pack, which
-// forks the pre-receive hook, both inheriting the write end of the stderr
-// fd. Cmd.Run with an io.Writer Stderr copies through a pipe in a goroutine
-// that Wait blocks on until it sees EOF — EOF the killed direct child alone
-// can't produce while a hung grandchild (the hook) still holds the pipe
-// open. A plain *os.File has no such copy goroutine, so cmd.Run still
-// returns as soon as the context deadline kills the direct child.
+// GitForcePush force-with-lease-pushes the current branch checked out at dir,
+// appending extraArgs after --force-with-lease (e.g. "-u", "origin", ref for a
+// branch with no upstream, issue #1918). A failure with no ref-rejection marker
+// in stderr wraps forge.ErrTransientPushFailure, so callers know a retry is
+// safe. ctx bounds the subprocess because git applies no timeout of its own.
 func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
+	// stderr goes to a file, not an io.Writer: Cmd.Run's copy goroutine waits
+	// for EOF on the pipe, which a hung grandchild (git-receive-pack's
+	// pre-receive hook) holds open after the context kills git itself.
 	stderrFile, err := os.CreateTemp("", "spindrift-force-push-stderr-*")
 	if err != nil {
 		return fmt.Errorf("git push --force-with-lease: create stderr temp file: %w", err)
@@ -108,6 +80,8 @@ func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Stderr = stderrFile
 	if err := cmd.Run(); err != nil {
+		// A deadline kill leaves none of git's own rejection markers in stderr,
+		// so the timeout is reported rather than run through wrapForcePushError.
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("git push --force-with-lease: timed out: %w", ctx.Err())
 		}
@@ -117,13 +91,10 @@ func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
 	return nil
 }
 
-// wrapForcePushError builds GitForcePush's returned error from the push
-// subprocess's failure and raw stderr. Stale-lease classification runs on
-// the raw stderr (isStalePushRejection needs git's exact rejection markers),
-// but the stderr embedded in the error message is redacted first — a
-// credential-bearing CODE_FORGE_REMOTE_URL can appear in git's own
-// diagnostics, and this error flows unmodified into a public GitHub issue
-// comment (settle.mergeImmediate).
+// wrapForcePushError classifies the failure on raw stderr (isStalePushRejection
+// needs git's exact markers) but redacts the stderr it embeds in the message: a
+// credential-bearing CODE_FORGE_REMOTE_URL can appear in git's diagnostics, and
+// this error reaches a public GitHub issue comment (settle.mergeImmediate).
 func wrapForcePushError(err error, stderr string) error {
 	s := strings.TrimSpace(stderr)
 	suffix := ""
@@ -136,8 +107,6 @@ func wrapForcePushError(err error, stderr string) error {
 	return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, forge.ErrTransientPushFailure)
 }
 
-// stalePushRejectionMarkers are the substrings isStalePushRejection looks
-// for in git's stderr.
 var stalePushRejectionMarkers = []string{
 	"stale info",
 	"non-fast-forward",
@@ -145,9 +114,9 @@ var stalePushRejectionMarkers = []string{
 	"[rejected]",
 }
 
-// isStalePushRejection returns true when git's stderr indicates a genuine
-// ref rejection — the branch moved since the last fetch and the rebase is
-// out of date — as opposed to a transient infra or network fault.
+// isStalePushRejection reports whether git's stderr indicates a genuine ref
+// rejection (the branch moved since the last fetch, so the rebase is out of
+// date) rather than a transient infra or network fault.
 func isStalePushRejection(stderr string) bool {
 	return MatchesAnyMarker(stderr, stalePushRejectionMarkers)
 }

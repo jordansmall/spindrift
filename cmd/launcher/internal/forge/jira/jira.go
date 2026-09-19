@@ -1,6 +1,6 @@
-// Package jira is the Jira REST adapter. It satisfies the parent forge
-// package's IssueTracker interface only — per ADR 0013, code still lands via
-// the github Code Forge.
+// Package jira is the Jira REST adapter. It satisfies only the parent forge
+// package's IssueTracker interface; code still lands via the github Code Forge
+// (ADR 0013).
 package jira
 
 import (
@@ -25,30 +25,25 @@ type JiraConfig struct {
 	Token      string
 
 	// StatusMapping maps canonical DispatchState values to native Jira status
-	// names. TransitionState performs the matching workflow transition; when a
-	// state is unmapped, or the mapped transition is not available on the
-	// issue's current workflow, TransitionState falls back to Labels.
+	// names. TransitionState falls back to Labels when a state is unmapped or
+	// the mapped transition is unavailable on the issue's workflow.
 	StatusMapping map[forge.DispatchState]string
 	// Labels are the fallback labels applied when a transition is unmapped or
 	// blocked by the project's workflow.
 	Labels forge.DispatchLabels
-	// VerdictLabels configures CompleteVerdict (the research dispatch kind's
-	// Complete transition), applied via the same label-fallback path as
-	// Labels — jira-native status mapping for research verdicts is deferred
-	// (ADR 0022) until a Jira user exists.
+	// VerdictLabels configures CompleteVerdict, applied via the same
+	// label-fallback path as Labels; native status mapping for research
+	// verdicts is deferred (ADR 0022).
 	VerdictLabels forge.VerdictLabels
-	// IncludeComments, when true, appends the issue's comment thread to the
-	// Body returned by Issue. Opt-in to keep the prompt-injection surface tight
-	// by default.
+	// IncludeComments appends the issue's comment thread to the Body returned
+	// by Issue. Opt-in to keep the prompt-injection risk small by default.
 	IncludeComments bool
 
-	// HTTPClient overrides the HTTP client used for Jira REST calls; nil uses
-	// http.DefaultClient. Tests inject a client pointed at a fake server.
+	// HTTPClient overrides the client used for Jira REST calls; nil uses
+	// http.DefaultClient.
 	HTTPClient *http.Client
 }
 
-// statusMappingKeys maps the JSON keys accepted by ParseStatusMapping to
-// their canonical DispatchState.
 var statusMappingKeys = map[string]forge.DispatchState{
 	"dispatchable": forge.Dispatchable,
 	"inProgress":   forge.InProgress,
@@ -56,11 +51,9 @@ var statusMappingKeys = map[string]forge.DispatchState{
 	"failed":       forge.Failed,
 }
 
-// ParseStatusMapping parses the JIRA_STATUS_MAPPING config knob: a JSON
-// object with keys "dispatchable", "inProgress", "complete", "failed" mapping
-// to native Jira status names. An empty string yields an empty mapping (every
-// state falls back to its label). An unknown key is a config error, so a
-// typo fails fast at startup rather than silently dropping the mapping.
+// ParseStatusMapping parses the JIRA_STATUS_MAPPING knob, a JSON object mapping
+// statusMappingKeys to native Jira status names. An unknown key is an error so a
+// typo fails fast at startup instead of silently dropping the mapping.
 func ParseStatusMapping(s string) (map[forge.DispatchState]string, error) {
 	out := map[forge.DispatchState]string{}
 	if s == "" {
@@ -80,9 +73,8 @@ func ParseStatusMapping(s string) (map[forge.DispatchState]string, error) {
 	return out, nil
 }
 
-// ValidateJiraEnv checks the JIRA_* config knobs required when
-// ISSUE_TRACKER=jira, guarding the same fields JiraConfig carries. Returns a
-// descriptive error for the first unmet requirement.
+// ValidateJiraEnv checks the JIRA_* knobs required when ISSUE_TRACKER=jira,
+// returning an error for the first unmet requirement.
 func ValidateJiraEnv(baseURL, projectKey, token, statusMapping string) error {
 	if baseURL == "" {
 		return fmt.Errorf("set JIRA_BASE_URL (Jira site base URL) when ISSUE_TRACKER=jira")
@@ -99,7 +91,6 @@ func ValidateJiraEnv(baseURL, projectKey, token, statusMapping string) error {
 	return nil
 }
 
-// jiraClient is the Jira REST adapter. It satisfies IssueTracker only.
 type jiraClient struct {
 	cfg  JiraConfig
 	rest *rest.Client
@@ -116,17 +107,13 @@ func NewJiraClient(cfg JiraConfig) forge.IssueTracker {
 }
 
 // jiraAuthStrategy implements rest.AuthStrategy: HTTP Basic (base64
-// "email:token") for Jira Cloud when Email is set, or Bearer token for
-// Server/Data Center PATs when Email is empty. The email/token pair is
-// captured once at NewJiraClient construction time; Apply still
-// base64-encodes the header value per request.
+// "email:token") for Jira Cloud when email is set, Bearer token for
+// Server/Data Center PATs when it is empty.
 type jiraAuthStrategy struct {
 	email string
 	token string
 }
 
-// Apply sets the Authorization header per jiraAuthStrategy's email/token:
-// Basic email:token (base64) when email is set, else Bearer token.
 func (a jiraAuthStrategy) Apply(req *http.Request) {
 	if a.email != "" {
 		raw := a.email + ":" + a.token
@@ -136,13 +123,9 @@ func (a jiraAuthStrategy) Apply(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+a.token)
 }
 
-// jiraStatusMap is the HTTP-status -> sentinel-error table for *rest.Client
-// instances this package builds against the Jira REST API: 401/403 ->
-// forge.ErrAuthFailure, and the generic per-resource 404 ->
-// forge.ErrNotFound that per-issue call sites (Issue, TransitionState, ...)
-// rely on. forge.ErrRepoNotFound remains Probe-specific (see
-// forge.ErrRepoNotFound's doc comment) and is applied at Probe's own call
-// site, not via this shared table.
+// jiraStatusMap is the HTTP-status to sentinel-error table for this package's
+// rest.Client. forge.ErrRepoNotFound stays Probe-specific, applied at Probe's
+// own call site rather than here.
 func jiraStatusMap() rest.StatusMap {
 	return rest.StatusMap{
 		http.StatusUnauthorized: forge.ErrAuthFailure,
@@ -151,8 +134,7 @@ func jiraStatusMap() rest.StatusMap {
 	}
 }
 
-// jiraIssuePayload is the subset of the Jira issue REST representation this
-// adapter reads.
+// jiraIssuePayload is the subset of Jira's issue representation this adapter reads.
 type jiraIssuePayload struct {
 	Key    string `json:"key"`
 	Fields struct {
@@ -180,17 +162,15 @@ type jiraIssuePayload struct {
 	} `json:"fields"`
 }
 
-// jiraBlockedByLink is the inward relationship text Jira's built-in "Blocks"
-// link type uses to mean "this issue is blocked by the linked issue".
+// jiraBlockedByLink is the inward relationship text of Jira's built-in "Blocks" link type.
 const jiraBlockedByLink = "is blocked by"
 
-// jiraBlocksLink is the same "Blocks" link type's outward relationship
-// text, read from an outwardIssue entry to mean "this issue blocks the
-// linked issue" — DepsOf's reverse direction (issue #1744).
+// jiraBlocksLink is the same link type's outward text, DepsOf's reverse
+// direction (issue #1744).
 const jiraBlocksLink = "blocks"
 
-// DepsOf returns the canonical dependencies for issue num, resolved from
-// native Jira issue links (not prose parsing) — always DepSourceNative.
+// DepsOf returns issue num's dependencies from native Jira issue links rather
+// than prose parsing, so always DepSourceNative.
 func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
 	var payload jiraIssuePayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
@@ -207,9 +187,8 @@ func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(deps, forge.DepSourceNative), nil
 }
 
-// BlocksOf returns the canonical issues num blocks — DepsOf's reverse
-// direction, read from the same issuelinks payload's outward "blocks"
-// entries rather than the inward "is blocked by" ones (issue #1744).
+// BlocksOf returns the issues num blocks, read from the same issuelinks
+// payload's outward "blocks" entries (issue #1744).
 func (j *jiraClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	var payload jiraIssuePayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
@@ -226,9 +205,8 @@ func (j *jiraClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(deps, forge.DepSourceNative), nil
 }
 
-// issueState maps Jira's statusCategory to the canonical IssueState: "done"
-// is Jira's terminal category (regardless of the workflow's custom terminal
-// status name, e.g. "Done", "Won't Fix", "Resolved").
+// issueState maps Jira's statusCategory to the canonical IssueState: "done" is
+// Jira's terminal category whatever the workflow names its terminal status.
 func issueState(p jiraIssuePayload) forge.IssueState {
 	if p.Fields.Status.StatusCategory.Key == "done" {
 		return forge.IssueClosed
@@ -246,8 +224,8 @@ type jiraCommentsPayload struct {
 	} `json:"comments"`
 }
 
-// Issue returns the Jira issue's summary, description, status, and labels.
-// When IncludeComments is set, the comment thread is appended to Body.
+// Issue returns the Jira issue's summary, description, status, and labels, and
+// appends the comment thread to Body when IncludeComments is set.
 func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	var payload jiraIssuePayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
@@ -274,13 +252,10 @@ func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	}, nil
 }
 
-// Comments implements the optional forge.CommentLister surface, returning
-// issue num's comments oldest-first -- Jira's comment endpoint emits them in
-// creation order, matching what forge.IssueText assumes when it windows to
-// the last 10. This is a separate surface from the IncludeComments config
-// knob: IncludeComments (see Issue, above) predates this surface and appends
-// a plain-text rendering of the same thread to Body when set, so the two
-// outputs overlap by design when both are in play.
+// Comments implements forge.CommentLister, returning issue num's comments
+// oldest-first. Jira's comment endpoint emits them in creation order, which is
+// what forge.IssueText assumes when it windows to the last 10. Its output
+// overlaps the IncludeComments knob by design when both are enabled.
 func (j *jiraClient) Comments(num string) ([]forge.Comment, error) {
 	var payload jiraCommentsPayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &payload); err != nil {
@@ -299,9 +274,8 @@ func (j *jiraClient) Comments(num string) ([]forge.Comment, error) {
 
 var _ forge.CommentLister = (*jiraClient)(nil)
 
-// TouchesOf returns the declared touch-set parsed from issue num's
-// description — the shared body-grammar default (forge.ParseTouchPaths);
-// Jira has no native touch-set concept to prefer over it.
+// TouchesOf parses the declared touch-set from issue num's description with
+// the shared body grammar; Jira has no native touch-set to prefer over it.
 func (j *jiraClient) TouchesOf(num string) ([]string, error) {
 	iss, err := j.Issue(num)
 	if err != nil {
@@ -310,7 +284,6 @@ func (j *jiraClient) TouchesOf(num string) ([]string, error) {
 	return forge.ParseTouchPaths(iss.Body), nil
 }
 
-// Comment posts a comment on the Jira issue.
 func (j *jiraClient) Comment(num, body string) error {
 	return j.rest.Do(http.MethodPost, "/rest/api/2/issue/"+num+"/comment",
 		map[string]string{"body": body}, nil)
@@ -325,18 +298,15 @@ type jiraTransitionsPayload struct {
 	} `json:"transitions"`
 }
 
-// errTransitionUnavailable marks the case TransitionState should fall back to
-// a label for: the mapped status has no matching transition on the issue's
-// current workflow. Any other error from transitionByStatus is an infra
-// failure (network, auth, 5xx) and must propagate, not be swallowed into a
-// silent fallback.
+// errTransitionUnavailable marks the one case TransitionState falls back to a
+// label for: the mapped status has no matching transition on the issue's
+// current workflow. Any other error is an infra failure and must propagate
+// rather than be swallowed into a silent fallback.
 var errTransitionUnavailable = fmt.Errorf("jira: no available transition")
 
-// transitionByStatus performs the workflow transition on issue num that leads
-// to targetStatus. It returns errTransitionUnavailable if no such transition
-// is available on the issue's current workflow (the unmapped/blocked case
-// TransitionState falls back to a label for, per ADR 0013); any other
-// non-nil error is an infra failure that must propagate.
+// transitionByStatus performs the workflow transition on issue num leading to
+// targetStatus, returning errTransitionUnavailable when the issue's current
+// workflow offers no such transition (ADR 0013).
 func (j *jiraClient) transitionByStatus(num, targetStatus string) error {
 	var payload jiraTransitionsPayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/transitions", nil, &payload); err != nil {
@@ -373,20 +343,18 @@ func (j *jiraClient) swapLabel(num, add, remove string) error {
 		map[string]any{"update": map[string]any{"labels": ops}}, nil)
 }
 
-// TransitionState moves issue num from state from to state to. It performs
-// the Jira workflow transition matching StatusMapping[to]; when to is
-// unmapped or the matching transition is not available on the issue's
-// current workflow, it falls back to swapping the DispatchLabels for from/to
-// (per ADR 0013) so the lifecycle always makes progress.
+// TransitionState moves issue num from state from to state to via the Jira
+// workflow transition matching StatusMapping[to]. When to is unmapped or that
+// transition is unavailable, it swaps the DispatchLabels for from/to instead
+// (ADR 0013) so the lifecycle always makes progress.
 func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) error {
 	if target, ok := j.cfg.StatusMapping[to]; ok && target != "" {
 		err := j.transitionByStatus(num, target)
 		if err == nil {
-			// ListIssues matches a state by status OR its fallback label, so
-			// an issue discovered via the from label (a prior fallback, or
-			// an operator-applied label) must not still carry it after a
-			// successful native-status transition — best-effort; a cleanup
-			// failure must not undo the transition that already succeeded.
+			// ListIssues matches a state by status OR its fallback label, so a
+			// stale from label must not survive a successful native transition.
+			// Best-effort: a cleanup failure must not undo the transition that
+			// already succeeded.
 			_ = j.swapLabel(num, "", j.cfg.Labels.Label(from))
 			return nil
 		}
@@ -401,16 +369,11 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 	return j.swapLabel(num, toLabel, j.cfg.Labels.Label(from))
 }
 
-// CompleteVerdict swaps num's InProgress fallback label for verdict's
-// terminal label, riding the same label-fallback mechanism TransitionState
-// falls back to (ADR 0022: jira has no native status mapping for research
-// verdicts yet).
-//
-// Before swapping, it asserts num currently carries the InProgress fallback
-// label — mirroring the github adapter's #701 double-dispatch guard — and
-// errors without issuing the swap when it's absent. This is check-then-edit,
-// not atomic compare-and-swap, the same narrowed-but-not-closed TOCTOU
-// window exec.go's CompleteVerdict documents.
+// CompleteVerdict swaps num's InProgress fallback label for verdict's terminal
+// label; Jira has no native status mapping for research verdicts yet (ADR
+// 0022). It first asserts the InProgress label is present as a double-dispatch
+// guard (#701), a check-then-edit with the same TOCTOU window exec.go's
+// CompleteVerdict documents.
 func (j *jiraClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	add := j.cfg.VerdictLabels.Label(verdict)
 	if add == "" {
@@ -438,11 +401,10 @@ type jiraSearchPayload struct {
 	Total      int                `json:"total"`
 }
 
-// ListIssues returns open issues in dispatch state state, in canonical order
-// (created-time ascending). Issues are matched by the mapped Jira status for
-// state when one is configured; the fallback label for state is always
-// included in the query too, so issues that fell back to a label (because
-// the mapped transition was unmapped or blocked) are still found.
+// ListIssues returns open issues in dispatch state state, created-time
+// ascending. The query matches the mapped Jira status when one is configured
+// and always ORs in the fallback label, so issues that fell back to a label
+// are still found.
 func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	clauses := []string{fmt.Sprintf("project = %q", j.cfg.ProjectKey)}
 	var stateClauses []string
@@ -455,9 +417,8 @@ func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	if len(stateClauses) > 0 {
 		clauses = append(clauses, "("+strings.Join(stateClauses, " OR ")+")")
 	}
-	// Mirrors the github adapter's --state open: a resolved/closed issue must
-	// never be returned as dispatchable, even if it still carries a stale
-	// dispatch label from an earlier fallback transition.
+	// A resolved issue must never come back as dispatchable, even when it still
+	// carries a stale dispatch label from an earlier fallback transition.
 	clauses = append(clauses, "statusCategory != Done")
 	jql := strings.Join(clauses, " AND ") + " order by created asc"
 
@@ -468,10 +429,8 @@ func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	return issuesFromIssues(issues), nil
 }
 
-// ListOpenIssues returns every open issue scoped to the project, in
-// canonical order (created-time ascending), regardless of dispatch state —
-// unlike ListIssues, it carries no status/label clause, so untriaged issues
-// (no dispatch status or label yet) are included too.
+// ListOpenIssues returns every open issue in the project, created-time
+// ascending, with no status or label clause, so untriaged issues are included.
 func (j *jiraClient) ListOpenIssues() ([]forge.Issue, error) {
 	jql := fmt.Sprintf("project = %q AND statusCategory != Done order by created asc", j.cfg.ProjectKey)
 
@@ -482,8 +441,6 @@ func (j *jiraClient) ListOpenIssues() ([]forge.Issue, error) {
 	return issuesFromIssues(issues), nil
 }
 
-// issuesFromIssues converts raw Jira issue payloads into the launcher's
-// canonical forge.Issue shape, shared by ListIssues and ListOpenIssues.
 func issuesFromIssues(payload []jiraIssuePayload) []forge.Issue {
 	issues := make([]forge.Issue, len(payload))
 	for i, p := range payload {
@@ -498,15 +455,10 @@ func issuesFromIssues(payload []jiraIssuePayload) []forge.Issue {
 	return issues
 }
 
-// doSearch issues a Jira JQL search request via GET /rest/api/2/search,
-// walking every result page via j.rest.Paginate so a backlog larger than a
-// single ResultPageLimit page is never silently truncated: each page
-// requests startAt=(page-1)*ResultPageLimit and maxResults=ResultPageLimit,
-// and a page is the last one once startAt+len(issues) reaches the search's
-// reported total. Jira's JQL already orders results server-side (callers
-// append "order by created asc"), and pages are appended in fetch order, so
-// oldest-first ordering is preserved across the walk without a client-side
-// sort.
+// doSearch runs a JQL search, walking every result page so a backlog larger
+// than one ResultPageLimit page is never silently truncated. JQL orders
+// results server-side, so appending pages in fetch order preserves
+// oldest-first without a client-side sort.
 func (j *jiraClient) doSearch(jql string) ([]jiraIssuePayload, error) {
 	var all []jiraIssuePayload
 	err := j.rest.Paginate(func(page int) (bool, error) {
@@ -533,11 +485,9 @@ type jiraLabelsPayload struct {
 	Values []string `json:"values"`
 }
 
-// WalksAllPages implements forge.FullyPaginated: doSearch (behind both
-// ListIssues and ListOpenIssues) walks every page of a Jira JQL search via
-// forge.WalkPages, so its results are never truncated at
-// forge.ResultPageLimit — a caller like issueInState's page-limit fail-safe
-// can trust a full-looking result as complete.
+// WalksAllPages implements forge.FullyPaginated: doSearch walks every page, so
+// results are never truncated at forge.ResultPageLimit and a caller's
+// page-limit fail-safe can trust a full-looking result as complete.
 func (j *jiraClient) WalksAllPages() bool {
 	return true
 }
@@ -552,8 +502,7 @@ func (j *jiraClient) ListLabels() ([]string, error) {
 }
 
 // CreateLabel is a no-op: Jira labels are free text with no registration
-// endpoint — a label is created implicitly the first time it is applied to
-// an issue (see swapLabel/TransitionState's fallback path).
+// endpoint, created implicitly the first time they are applied to an issue.
 func (j *jiraClient) CreateLabel(name, description, color string) error {
 	return nil
 }

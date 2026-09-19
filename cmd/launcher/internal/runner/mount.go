@@ -7,31 +7,21 @@ import (
 	"spindrift.dev/launcher/internal/agentpaths"
 )
 
-// operatorSkillsDir is the fixed in-box path SPINDRIFT_SKILLS_DIR mounts
-// onto (issue #2489) — NOT the Driver's actual skills dir (DRIVER_SKILLS_DIR)
-// directly, since a mount placed there would replace its whole contents and
-// erase the harness-owned skill(s) baked alongside it. agent/entrypoint.sh's
-// phase_prompt_assembly copies both this staging path and the baked skills
-// into the real DRIVER_SKILLS_DIR at box startup instead, which merges
-// rather than replaces.
+// operatorSkillsDir is the staging path SPINDRIFT_SKILLS_DIR mounts onto
+// (issue #2489). Mounting over the Driver's own DRIVER_SKILLS_DIR would erase
+// the harness-owned skills baked there, so agent/entrypoint.sh instead copies
+// both paths into DRIVER_SKILLS_DIR at box startup, which merges.
 const operatorSkillsDir = "/operator-skills"
 
-// RegistryProxySocketTarget is the fixed in-box path the registry proxy's
-// unix domain socket mounts onto (ADR 0044, issue #2849). Not
-// configurable — the Forwarder component expects the socket at this
-// well-known path, so it's an implementation-internal contract, not a
-// user-facing knob. Exported (issue #3141) so dispatch/box.go's own
-// REGISTRY_PROXY_MANIFEST minting can name this same in-box path in the
-// manifest's unix endpoint, rather than the host-side socket path
-// RegistryProxyLocation.Endpoint carries for the mount source -- the two are
-// deliberately different values sharing this one constant as their target.
+// RegistryProxySocketTarget is the in-box path the registry proxy's unix
+// socket mounts onto (ADR 0044, issue #2849); the Forwarder expects it there,
+// so it is not configurable. Exported (issue #3141) so dispatch/box.go can
+// name this in-box path in REGISTRY_PROXY_MANIFEST, not the host-side source.
 const RegistryProxySocketTarget = "/registry-proxy.sock"
 
-// MountSpec describes a single host-to-box mount: what to mount, where, and
-// under what read-only policy. The decision of whether a mount applies —
-// gate, existence guard, operator message — is computed once by
-// buildMountSpecs, independent of runtime backend; each adapter only
-// renders a MountSpec into its own flag syntax.
+// MountSpec describes one host-to-box mount. Whether a mount applies is
+// decided once by buildMountSpecs, independent of runtime backend; each
+// adapter only renders a MountSpec into its own flag syntax.
 type MountSpec struct {
 	Source   string // host path
 	Target   string // in-box path
@@ -42,34 +32,28 @@ type MountSpec struct {
 }
 
 // MountParams is the subset of Config and Driver-declared paths (ADR 0009)
-// that buildMountSpecs needs. Both adapters carry one straight through from
-// Config, unmodified.
+// that buildMountSpecs needs.
 type MountParams struct {
 	PromptDir             string
 	SkillsDir             string
 	DriverSessionCacheDir string
 
-	// HostMediatedRemote reports whether this run's CODE_FORGE has no
-	// writable remote to push to in-box at all (ADR 0033: CODE_FORGE=local)
-	// -- gates the read-only Accumulation-repo mount at /repo, and
-	// (alongside OutboxRelayCapable) the writable /outbox mount.
+	// HostMediatedRemote reports whether this run's CODE_FORGE has no writable
+	// remote to push to in-box (ADR 0033: CODE_FORGE=local). It gates the
+	// read-only /repo mount and, with OutboxRelayCapable, the /outbox mount.
 	HostMediatedRemote bool
 	// AccumulationRepoDir is the host path to the bare Accumulation repo
-	// (.spindrift/accum.git by default, issue #1726) mounted read-only at
-	// /repo under HostMediatedRemote.
+	// (issue #1726), mounted read-only at /repo under HostMediatedRemote.
 	AccumulationRepoDir string
-	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets
-	// the outbox-relay treatment under BoxForgeAndIssueAccess=="read-only"
-	// (issue #1918) -- combined with BoxForgeAndIssueAccess to gate the
-	// /outbox mount alongside HostMediatedRemote.
+	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets the
+	// outbox-relay treatment under BoxForgeAndIssueAccess=="read-only"
+	// (issue #1918).
 	OutboxRelayCapable bool
-	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value
-	// ("read-write" or "read-only") -- see OutboxRelayCapable's doc comment.
+	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value,
+	// "read-write" or "read-only".
 	BoxForgeAndIssueAccess string
 }
 
-// candidateMount reports whether source should be mounted at target: both
-// must be set and source must be a directory that exists.
 func candidateMount(source, target string, readOnly bool) (MountSpec, bool) {
 	if source == "" || target == "" {
 		return MountSpec{}, false
@@ -81,11 +65,9 @@ func candidateMount(source, target string, readOnly bool) (MountSpec, bool) {
 	return MountSpec{Source: source, Target: target, ReadOnly: readOnly}, true
 }
 
-// candidateSocketMount reports whether source should be mounted at target as
-// a unix domain socket: both must be set and source must be an
-// already-existing socket file, not a directory or regular file. Unlike
-// candidateMount, the returned spec is always writable/connectable — a proxy
-// socket mount only ever makes sense read-write, never read-only.
+// candidateSocketMount requires an already-existing socket at source, not a
+// directory or regular file, and always returns a writable spec: connecting
+// to a unix socket needs write access.
 func candidateSocketMount(source, target string) (MountSpec, bool) {
 	if source == "" || target == "" {
 		return MountSpec{}, false
@@ -97,8 +79,6 @@ func candidateSocketMount(source, target string) (MountSpec, bool) {
 	return MountSpec{Source: source, Target: target, ReadOnly: false}, true
 }
 
-// buildMountSpecs computes the list of host-to-box mounts that apply for p
-// and box, independent of runtime backend.
 func buildMountSpecs(p MountParams, box Box) []MountSpec {
 	var specs []MountSpec
 

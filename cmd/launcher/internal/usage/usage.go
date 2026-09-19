@@ -1,13 +1,11 @@
 // Package usage holds Driver-agnostic usage-report types and formatting.
-// Parsing a Box log into a Report is each Driver's own job, behind the
-// Driver interface's ExtractUsage method (ADR 0009) — this package never
-// reads a log itself.
+// Each Driver parses a Box log into a Report behind its ExtractUsage method
+// (ADR 0009); this package never reads a log itself.
 package usage
 
 import "fmt"
 
-// FormatDuration converts a millisecond count to a human-readable string.
-// Outputs "Xh Ym Zs", "Xm Ys", or "Xs" depending on magnitude.
+// FormatDuration renders a millisecond count as "Xh Ym Zs", "Xm Ys", or "Xs".
 func FormatDuration(ms int64) string {
 	s := ms / 1000
 	h := s / 3600
@@ -34,25 +32,20 @@ type Usage struct {
 	NumTurns                 int     `json:"num_turns"`
 }
 
-// TotalTokens sums Usage's four billable token categories -- the single
-// source of this sum, shared by every budget-cap comparison that needs a
-// caller-summed token count (settle's own budgetExceeded, and the
-// orchestrator's pass-machine budget cap, issue #2694) instead of each
-// repeating the same four-field addition.
+// TotalTokens sums Usage's four billable token categories. Budget-cap
+// comparisons share this sum rather than repeat the addition (issue #2694).
 func (u Usage) TotalTokens() int {
 	return u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
 }
 
-// UnknownModel is the Model value used when a driver's log carried no model
-// field.
+// UnknownModel is the Model value for a log that carried no model field.
 const UnknownModel = "unknown"
 
 // ModelUsage holds token usage aggregated across every turn and subagent for
-// one model, split into the five billable categories. Tokens only, never
-// dollars — counts are exact from the API, whereas any cost figure needs
-// pricing spindrift does not own (issue #2085).
+// one model. Tokens only, never dollars: the API's counts are exact, whereas
+// a cost figure needs pricing spindrift does not own (issue #2085).
 type ModelUsage struct {
-	Model                string // exact model id, e.g. "claude-opus-4-8"; UnknownModel if the log carried no model field
+	Model                string // exact model id, e.g. "claude-opus-4-8"; UnknownModel if the log carried none
 	UncachedInputTokens  int
 	OutputTokens         int
 	CacheReadInputTokens int
@@ -61,92 +54,55 @@ type ModelUsage struct {
 }
 
 // MainLoopAgent is the Agent label SummedByAgent uses for messages with no
-// parent_tool_use_id — the pass's own top-level loop, as opposed to a spawned
-// subagent. It is deliberately not driverkit.ImplementorRole: a review pass's
-// main loop is the reviewer, not the implementor, so a role-neutral label is
-// the honest one at this layer. The pass's own role (implement/review/fix/
-// land) is carried separately by the orchestrator's spindrift_op, not by
-// this per-agent breakdown.
+// parent_tool_use_id. It is deliberately not driverkit.ImplementorRole: a
+// review pass's main loop is the reviewer, so only a role-neutral label is
+// accurate here. The orchestrator's spindrift_op carries the pass's role.
 const MainLoopAgent = "main"
 
-// AgentUsage holds token usage aggregated across every turn for one agent —
-// the main loop (MainLoopAgent) or one spawned subagent, keyed by its
-// subagent_type — split into the four billable token categories, plus a
-// count of the distinct API calls (deduplicated messages) that produced
-// them.
+// AgentUsage holds token usage aggregated across every turn for one agent,
+// either the main loop (MainLoopAgent) or one spawned subagent keyed by its
+// subagent_type.
 type AgentUsage struct {
 	Agent               string // MainLoopAgent, or a subagent_type (e.g. "scout"); driverkit.DefaultRole ("subagent") when a Task carried none
 	APICalls            int    // count of distinct (deduplicated) messages attributed to this agent
 	UncachedInputTokens int
-	// OutputTokens does not follow its sibling fields' per-message-sum
-	// rule when the report sets Report.OutputIsMainLoopOnly -- see that
-	// field for the whole rationale.
+	// OutputTokens breaks its sibling fields' per-message-sum rule when
+	// the report sets Report.OutputIsMainLoopOnly; see that field.
 	OutputTokens             int
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
 }
 
-// TotalTokens sums AgentUsage's four billable token fields. APICalls is a
-// call count, not a token count, so it is deliberately excluded.
+// TotalTokens sums AgentUsage's four billable token fields, excluding
+// APICalls, which counts calls rather than tokens.
 func (a AgentUsage) TotalTokens() int {
 	return a.UncachedInputTokens + a.OutputTokens + a.CacheReadInputTokens + a.CacheCreationInputTokens
 }
 
 // Report combines a Box run's aggregate usage totals with its per-model and
-// per-agent breakdowns, as extracted by a Driver's ExtractUsage from one pass
-// over a Box log. Found is false when the log contains no result event (or
-// does not exist), in which case Totals is zero-valued.
-//
-// Totals and SummedByModel/SummedByAgent obey different aggregation rules
-// and deliberately do not reconcile numerically — that is a documented fact,
-// not a bug:
-//
-//   - Totals is the run's totals summed across every session in the log:
-//     every result event for claude, a plain sum over step_finish events for
-//     opencode. It is not a per-message sum.
-//   - SummedByModel is the per-call sums keyed by model, deduplicated by
-//     message id — a different rule from Totals.
-//   - SummedByAgent is the per-call sums keyed by agent (the main loop vs
-//     each spawned subagent), deduplicated by message id the same way as
-//     SummedByModel — so a single expensive worker is identifiable
-//     separately from the main loop that spawned it. OutputTokens is the
-//     exception when OutputIsMainLoopOnly is set — see that field.
+// per-agent breakdowns. Found is false when the log has no result event or
+// does not exist, and Totals is then zero-valued. Totals sums whole sessions,
+// whereas SummedByModel and SummedByAgent sum per call and deduplicate by
+// message id, so they deliberately do not reconcile numerically.
 type Report struct {
 	Totals        Usage
 	Found         bool
 	SummedByModel []ModelUsage
 	SummedByAgent []AgentUsage
 
-	// OutputIsMainLoopOnly is the canonical statement of the issue #3213
-	// output-token semantics; every other site that touches those
-	// semantics points here rather than restating them.
-	//
-	// When true, this report's SummedByAgent OutputTokens column is NOT a
-	// per-message sum like its four sibling columns. claude-code's
-	// per-message output_tokens is a message_start placeholder, ~100x too
-	// low (#3183 dogfood-run evidence), so the pass's result event is the
-	// only ground truth -- and it covers the main loop alone, since a
-	// spawned subagent gets no result event of its own on the stream. So
-	// the MainLoopAgent row carries the result event's figure, every
-	// subagent row carries 0 (its TotalTokens excludes output by design,
-	// not omission), and any total summed across the rows is therefore the
-	// main loop's output only, not the whole pass's.
-	//
-	// When false the column is an ordinary whole-pass sum, and a reader
-	// must not attach the main-loop caveat to it.
+	// OutputIsMainLoopOnly marks SummedByAgent's OutputTokens column as the
+	// main loop's alone (issue #3213): claude-code's per-message
+	// output_tokens is a message_start placeholder around 100x too low
+	// (#3183), and only the main loop gets a result event, so its row
+	// carries that figure and every subagent row carries 0.
 	OutputIsMainLoopOnly bool
 
 	// EarliestEventMs and LatestEventMs are the earliest and latest
-	// top-level event timestamps seen in the log, in unix milliseconds --
-	// only meaningful when HasEventSpan is true. A driver populates these
-	// from whatever per-event timestamp field its own log format carries,
-	// letting a caller derive a wall-time span across MULTIPLE logs the
-	// same way a driver already derives one across multiple sessions
-	// within one log.
+	// top-level event timestamps in the log, in unix milliseconds, and are
+	// meaningful only when HasEventSpan is true. A caller derives a
+	// wall-time span across several logs from them.
 	EarliestEventMs, LatestEventMs int64
-	// HasEventSpan is true when the log carried at least one usable event
-	// timestamp -- false for a log with no timestamped lines at all (e.g.
-	// too short, or a format that never emits one), in which case
-	// EarliestEventMs/LatestEventMs are zero and meaningless.
+	// HasEventSpan is false when the log carried no usable event timestamp
+	// at all, in which case EarliestEventMs and LatestEventMs are zero.
 	HasEventSpan bool
 }

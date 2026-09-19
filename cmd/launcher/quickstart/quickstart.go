@@ -1,8 +1,6 @@
-// Command quickstart is the pre-CLI Quickstart wizard (ADR 0027): `nix run
-// github:jordansmall/spindrift#quickstart`. It runs before the `spindrift`
-// binary exists — `runtime`/`driver` are flake.nix options it authors, not
-// launcher env knobs — so it lives as its own binary under the launcher
-// module rather than a `spindrift` subcommand.
+// Command quickstart is the pre-CLI Quickstart wizard (ADR 0027). It runs
+// before the `spindrift` binary exists and authors flake.nix options rather
+// than launcher env knobs, so it is its own binary, not a subcommand.
 package main
 
 import (
@@ -29,49 +27,39 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// Environment abstracts host detection (available container runtimes, git
-// identity, ambient tokens, repoSlug guess) so runQuickstart is testable
-// without touching the real host. Detection itself lands in a later ticket
-// (ADR 0027); this seam exists now so runQuickstart's signature does not
-// change when it does.
+// Environment abstracts host detection so runQuickstart is testable without
+// touching the real host.
 type Environment interface {
 	LookPath(file string) (string, error)
 	LookupEnv(key string) (string, bool)
 
-	// Getenv returns the value of the named environment variable, or "" if
-	// unset — used to detect an ambient GH_TOKEN so quickstart can reuse it
-	// without prompting.
 	Getenv(key string) string
 
 	// TokenScopes reads the X-OAuth-Scopes header GitHub returns for a
-	// classic or OAuth token (ghp_/gho_ prefix). Fine-grained PATs
-	// (github_pat_) have no equivalent introspection endpoint, so this is
-	// only ever called for the classic/OAuth audit branch.
+	// ghp_/gho_ token. Fine-grained PATs have no such endpoint, so only the
+	// classic audit branch calls this.
 	TokenScopes(token string) ([]string, error)
 
-	// GHAuthToken returns the host gh CLI's own authenticated token (`gh
-	// auth token`) — the fallback offered to an operator who declines to
-	// paste a fine-grained PAT.
+	// GHAuthToken returns the host gh CLI's own token, the fallback for an
+	// operator who declines to paste a fine-grained PAT.
 	GHAuthToken() (string, error)
 
 	GitConfig(key string) string
 	GitRemoteRepoSlug() string
 
-	// GitRemoteURL returns the raw "origin" remote URL (git remote get-url
-	// origin), or "" when there is no origin remote. Callers parse it with
-	// gitremote.ParseHostSlug to detect a Forgejo/Codeberg host; the
-	// github-only GitRemoteRepoSlug still seeds the repo-slug default.
+	// GitRemoteURL returns the raw "origin" remote URL, or "" when there is
+	// no origin. Callers parse it with gitremote.ParseHostSlug to detect a
+	// Forgejo host; the github-only GitRemoteRepoSlug seeds the slug default.
 	GitRemoteURL() string
 
-	// InsideGitWorkTree reports whether dir sits inside a git work tree, so
-	// the finish line can warn the operator to `git add` the newly written
-	// scaffold files — an untracked flake.nix is invisible to `nix
-	// develop`/direnv, silently breaking the dev shell (issue #2567).
+	// InsideGitWorkTree reports whether dir sits inside a git work tree. An
+	// untracked flake.nix is invisible to `nix develop`/direnv, so the
+	// wizard warns the operator to `git add` the scaffold (issue #2567).
 	InsideGitWorkTree(dir string) bool
 }
 
-// validateRepoSlug rejects anything but a single-slash "owner/name" shape —
-// the form the generated flake.nix's forge.repoSlug expects.
+// validateRepoSlug rejects anything but the single-slash "owner/name" shape
+// the generated flake.nix's forge.repoSlug expects.
 func validateRepoSlug(slug string) error {
 	parts := strings.Split(slug, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.ContainsAny(slug, " \t\n\r") {
@@ -80,7 +68,6 @@ func validateRepoSlug(slug string) error {
 	return nil
 }
 
-// validateRuntimeChoice rejects any value outside runner.ValidValues.
 func validateRuntimeChoice(runtime string) error {
 	for _, v := range runner.ValidValues {
 		if runtime == v {
@@ -90,11 +77,9 @@ func validateRuntimeChoice(runtime string) error {
 	return fmt.Errorf("expected one of %s, got %q", strings.Join(runner.ValidValues, ", "), runtime)
 }
 
-// quickstartBackendNames returns the operator-facing code-forge backend
-// names the wizard accepts when the git remote host is neither github.com
-// nor codeberg.org, derived from backend.QuickstartEligible() so a new
-// backend registered in the shared registry automatically appears here with
-// no quickstart-side edit.
+// quickstartBackendNames returns the backend names the wizard accepts when
+// the git remote host is neither github.com nor codeberg.org. It reads the
+// shared registry so a newly registered backend appears here unedited.
 func quickstartBackendNames() []string {
 	descriptors := backend.QuickstartEligible()
 	names := make([]string, len(descriptors))
@@ -104,7 +89,6 @@ func quickstartBackendNames() []string {
 	return names
 }
 
-// validateBackendChoice rejects any value outside quickstartBackendNames().
 func validateBackendChoice(b string) error {
 	names := quickstartBackendNames()
 	for _, v := range names {
@@ -115,56 +99,42 @@ func validateBackendChoice(b string) error {
 	return fmt.Errorf("expected one of %s, got %q", strings.Join(names, ", "), b)
 }
 
-// CommandRunner abstracts the two subprocesses Quickstart shells out to
-// (`claude setup-token`, `nix develop --command spindrift build`), so
-// runQuickstart is testable without a real shell-out.
+// CommandRunner abstracts the two subprocesses Quickstart shells out to,
+// `claude setup-token` and `nix develop --command spindrift build`.
 type CommandRunner interface {
 	Run(name string, args ...string) error
 }
 
 // defaultBranchPrefix matches the launcher's own BRANCH_PREFIX default
-// (flagtable_gen.go) — Quickstart doesn't prompt for it.
+// (flagtable_gen.go); Quickstart doesn't prompt for it.
 const defaultBranchPrefix = "agent/issue-"
 
 // defaultBaseBranch and defaultMergePolicy match the launcher's own
-// BASE_BRANCH/MERGE_MODE schema defaults (flagtable_gen.go) — Quickstart's
-// generated flake.nix doesn't set either, so the scaffolded repo runs under
-// exactly these defaults, and the post-write doctor.Run call below must
-// probe against the same values rather than the Config zero value.
+// BASE_BRANCH/MERGE_MODE defaults. The generated flake.nix sets neither, so
+// doctor.Run below must probe these rather than the Config zero value.
 const (
 	defaultBaseBranch  = "main"
 	defaultMergePolicy = "manual"
 )
 
-// codebergBaseURL is the Forgejo adapter's default base URL — a
-// forgejoBaseURL of exactly this value is the adapter default and must not
-// be emitted as an explicit issues.forgejo.baseURL line in the generated
-// flake.
+// codebergBaseURL is the Forgejo adapter's default, so a forgejoBaseURL of
+// exactly this value must not be emitted as an explicit
+// issues.forgejo.baseURL line in the generated flake.
 const codebergBaseURL = "https://codeberg.org"
 
-// quickstartRerunCmd is the command the wizard's own error hints point the
-// operator at rerunning to re-answer a prompt — quoted once here so a reword
-// of the command doesn't require hunting down every error message that
-// mentions it.
+// quickstartRerunCmd is quoted once so rewording the command the error hints
+// name doesn't mean hunting down every message that mentions it.
 const quickstartRerunCmd = "nix run github:jordansmall/spindrift#quickstart"
 
-// gitAddReminder is printed both immediately after the scaffold files are
-// written and again at the finish line of a successful run (issue #2567):
-// inside a git work tree, `nix develop`/`nix build` resolve `.` via
-// `git+file://` and silently exclude untracked files, so an operator who
-// only saw the early print — which can scroll off-screen during the
-// multi-minute doctor/build steps in between — still sees the reminder one
-// more time right before the wizard hands off to `spindrift dispatch`.
+// gitAddReminder is printed twice (issue #2567): inside a git work tree `nix
+// develop` resolves `.` via `git+file://` and silently excludes untracked
+// files, and the early print scrolls off during the doctor and build steps.
 const gitAddReminder = "\nRun `git add flake.nix .gitignore .envrc` — an untracked flake.nix is invisible to `nix develop`/direnv."
 
-// defaultDispatchLabels are the four operator-visible triage labels
-// Quickstart's generated flake relies on implicitly (the launcher's own
-// LABEL/IN_PROGRESS_LABEL/FAILED_LABEL/COMPLETE_LABEL defaults) — the wizard
-// never prompts for custom label names — plus the fixed, non-configurable
-// Ambiguous label (#2275), which matters for the trackers this struct feeds
-// (github.NewExecClient / local.NewLocalTracker) even though it's not one of
-// the four the wizard prompts for or doctor.Config validates via this
-// struct.
+// defaultDispatchLabels are the launcher's own label defaults, which the
+// generated flake relies on implicitly because the wizard never prompts for
+// custom names, plus the fixed Ambiguous label (#2275) the trackers need even
+// though doctor.Config never checks it.
 var defaultDispatchLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -173,43 +143,33 @@ var defaultDispatchLabels = forge.DispatchLabels{
 	Ambiguous:    "agent-ambiguous-spec",
 }
 
-// spindriftBuildArgs is the subprocess the finish line shells out to build
-// the Consumer's first image (ADR 0027) — shared with tests so the command
-// can't drift out of sync between the call site and its assertions.
+// spindriftBuildArgs builds the Consumer's first image (ADR 0027). Shared
+// with tests so the command can't drift from its assertions.
 var spindriftBuildArgs = []string{"nix", "develop", "--command", "spindrift", "build"}
 
 // spindriftDoctorArgs is the command text the doctor post-write rerun points
-// at — never shelled out to directly (doctor runs in-process), only ever
-// displayed — shared with tests so the command can't drift out of sync
-// between the call site and its assertions.
+// at. Doctor runs in-process, so this is only ever displayed, never executed.
 var spindriftDoctorArgs = "nix develop --command spindrift doctor"
 
-// postWriteStep names one post-write validation/build step and the exact
-// command to rerun it directly (issue #2563) — bundling name+rerun together
-// so a call site can't accidentally pair one step's message with another
-// step's rerun command.
+// postWriteStep pairs one post-write step's name with its rerun command
+// (issue #2563), so a call site can't mix one step's message with another's.
 type postWriteStep struct {
 	name  string
 	rerun string
 	next  *postWriteStep // optional: the step that remains after this one succeeds
 }
 
-// buildPostWriteStep is the direct rerun path a post-write build failure
-// points the operator at (issue #2563). Nothing remains after a successful
-// build, so `next` is left nil.
+// buildPostWriteStep is the rerun path a post-write build failure points at
+// (issue #2563). Nothing remains after a successful build, so next is nil.
 var buildPostWriteStep = postWriteStep{
 	name:  "spindrift build",
 	rerun: strings.Join(spindriftBuildArgs, " "),
 }
 
-// doctorPostWriteStep is the direct rerun path a post-write doctor failure
-// points the operator at (issue #2563): flake.nix/harness.env are already on
-// disk at that point, but the `spindrift` binary only exists inside the
-// devShell the generated flake provides, so the rerun goes through `nix
-// develop` rather than a bare `spindrift doctor`. Doctor passing still
-// leaves the build step unrun, so `next` points at an independent copy of
-// buildPostWriteStep's fields rather than aliasing the mutable package-level
-// var itself.
+// doctorPostWriteStep is the rerun path a post-write doctor failure points at
+// (issue #2563). The `spindrift` binary only exists inside the generated
+// flake's devShell, so the rerun goes through `nix develop`. next copies
+// buildPostWriteStep's fields rather than aliasing that package-level var.
 var doctorPostWriteStep = postWriteStep{
 	name:  "spindrift doctor",
 	rerun: spindriftDoctorArgs,
@@ -219,15 +179,11 @@ var doctorPostWriteStep = postWriteStep{
 	},
 }
 
-// postWriteFailure wraps a doctor or build failure that happens after the
-// scaffold files are already on disk (issue #2563): it names the files so
-// the operator knows nothing needs re-writing — hand-editing one directly
-// (e.g. a bad token already persisted to harness.env) is a valid fix — and
-// gives the exact command to rerun just the failed step, plus what remains
-// after it passes if anything does. Never --force (which only guards the
-// pre-write clobber check) and never the wizard itself. Owns 100% of the
-// user-facing prose itself — postWriteStep only carries data (name, rerun
-// command, and which step is next), never pre-rendered sentence fragments.
+// postWriteFailure wraps a doctor or build failure that happens once the
+// scaffold files are on disk (issue #2563). It names those files so the
+// operator knows nothing needs re-writing, and points at the failed step's
+// own rerun command, never --force (which guards only the pre-write clobber
+// check) and never the wizard itself.
 func postWriteFailure(step postWriteStep, written []string, insideGitWorkTree bool, err error) error {
 	msg := fmt.Sprintf("%s failed after writing %s — fix the underlying issue (hand-edit the written files directly if that's the problem)",
 		step.name, strings.Join(written, ", "))
@@ -241,20 +197,15 @@ func postWriteFailure(step postWriteStep, written []string, insideGitWorkTree bo
 	return fmt.Errorf("%s (cause: %w)", msg, err)
 }
 
-// ForgeBuilder constructs the real IssueTracker/CodeForge from the wizard's
-// collected repoSlug, Issue Tracker settings, and the single backend token
-// the wizard collected (whichever one is relevant to the chosen backend —
-// only one is ever active per call), so the finish line's doctor validation
-// (ADR 0027) runs in-process against the real forge — no `spindrift doctor`
-// subprocess, since the `spindrift` binary doesn't exist yet at Quickstart's
-// pre-CLI stage. Injected so tests substitute a forge.Fake instead of
-// shelling out to gh/Jira for real.
+// ForgeBuilder constructs the real IssueTracker and CodeForge so the finish
+// line's doctor validation runs in-process: the `spindrift` binary doesn't
+// exist yet at this pre-CLI stage (ADR 0027). Injected so tests substitute a
+// forge.Fake instead of shelling out to gh or Jira.
 type ForgeBuilder func(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge)
 
-// tokenAcquireContext bundles everything a TokenAcquirer needs — different
-// backends validate their token completely differently (GitHub: local
-// prefix/scope audit; Forgejo: live Probe call against a constructed
-// IssueTracker), so this can't collapse to a single field lookup.
+// tokenAcquireContext bundles everything a TokenAcquirer needs. GitHub audits
+// a token's prefix and scopes locally while Forgejo needs a live Probe
+// against a constructed IssueTracker, so this can't collapse to one field.
 type tokenAcquireContext struct {
 	env          Environment
 	w            io.Writer
@@ -267,18 +218,13 @@ type tokenAcquireContext struct {
 }
 
 // TokenAcquirer prompts for (or reuses an ambient) bearer token for one
-// registered backend, validating it however that backend requires, before
-// quickstart embeds it in flake.nix/harness.env. Registered per backend name
-// in tokenAcquirers below — mirrors the ForgeBuilder seam — so a new
-// QuickstartEligible backend needs its own acquirer wired in there, but
-// requires zero changes to runQuickstart itself.
+// backend and validates it however that backend requires.
 type TokenAcquirer func(ctx tokenAcquireContext) (string, error)
 
-// tokenAcquirers dispatches token acquisition by backend name. A new
-// QuickstartEligible backend registers its own entry here (and in
-// backend.Registry) — runQuickstart itself never branches on backend name to
-// acquire a token. Package-global and unsynchronized — fine here since
-// quickstart is a single-threaded CLI that never mutates it after init.
+// tokenAcquirers dispatches token acquisition by backend name, so a new
+// backend registers an entry here rather than adding a branch to
+// runQuickstart. Unsynchronized, which holds only because quickstart is a
+// single-threaded CLI that never mutates it after init.
 var tokenAcquirers = map[string]TokenAcquirer{
 	"github": func(ctx tokenAcquireContext) (string, error) {
 		token, err := acquireGHToken(ctx.env, ctx.w, ctx.promptMasked, ctx.desc.TokenEnvVar)
@@ -295,25 +241,15 @@ var tokenAcquirers = map[string]TokenAcquirer{
 	},
 }
 
-// forgejoProbeTimeout bounds the HTTP client the forgejo IssueTracker uses
-// for the interactive token-validation ping (acquireForgejoToken's Probe
-// call), so an unreachable or hung Forgejo host can't block the wizard
-// forever. Mirrors defaultForgejoHTTPTimeout in the sibling Forgejo
-// IssueTracker/CodeForge adapters.
+// forgejoProbeTimeout keeps a hung Forgejo host from blocking the wizard
+// forever. Mirrors defaultForgejoHTTPTimeout in the sibling Forgejo adapters.
 const forgejoProbeTimeout = 30 * time.Second
 
-// buildForge is the production ForgeBuilder. The Code Forge is github by
-// default (ADR 0027: Quickstart never prompts for it) except for the
-// forgejo case, which builds both the IssueTracker and CodeForge seams
-// from the Forgejo REST adapters so doctor validates against a Forgejo
-// instance instead. The Issue Tracker switches on tracker.issueTracker,
-// which the wizard always sets to "github" (issue #1559) — the
-// jira/local/forgejo cases exist for buildForge's own tests. token is the
-// single backend credential relevant to tracker.issueTracker (empty for
-// "github"/"local", where the credential either lives ambient in the process
-// environment or isn't needed at all): github.NewExecClient shells out to
-// the gh CLI, which reads GH_TOKEN from the process environment —
-// runQuickstart exports the collected token before calling this.
+// buildForge is the production ForgeBuilder. The Code Forge is github (ADR
+// 0027: Quickstart never prompts for it) except in the forgejo case, which
+// builds both seams from the Forgejo adapters so doctor validates against
+// that instance. token is empty for github and local, where the credential is
+// ambient in the process environment or not needed at all.
 func buildForge(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge) {
 	cf := github.NewExecClient(repoSlug, defaultDispatchLabels, defaultBranchPrefix)
 	switch tracker.issueTracker {
@@ -347,26 +283,21 @@ func buildForge(repoSlug string, tracker trackerSettings, token string) (forge.I
 	}
 }
 
-// backupSuffixDigits is the zero-padded width of the numbered .bak.NNNNNN
-// suffix quickstart uses when a backup name is already taken (issue #2563) —
-// wide enough that lexical sort order (`ls`) still matches numeric order
-// past any realistic number of forced reruns.
+// backupSuffixDigits is the zero-padded width of the .bak.NNNNNN suffix used
+// when a backup name is taken (issue #2563), wide enough that lexical sort
+// order still matches numeric order past any realistic number of reruns.
 const backupSuffixDigits = 6
 
-// backupRecord is one entry in the backup loop's undo log: the target's
-// clobbered-relative name, its original path, and the .bak path it was
-// renamed to, so a later failure in the same call can reverse it.
+// backupRecord is one entry in the backup loop's undo log, so a later failure
+// in the same call can reverse the rename.
 type backupRecord struct {
 	name, path, bakPath string
 }
 
-// rollbackAndFail rolls back every successful rename in backedUp and turns
-// it, plus the triggering error, into the returned error. A rollback
-// failure (e.g. the directory became unwritable mid-loop) is never
-// discarded: it's folded into the message, naming exactly which files are
-// still sitting under their .bak path plus the manual `mv` to restore each
-// one, instead of telling the operator the directory is clean when it
-// isn't.
+// rollbackAndFail reverses every successful rename in backedUp. A rollback
+// that itself fails is never discarded: the message names which files are
+// still under their .bak path and the `mv` to restore each one, rather than
+// claiming the directory is clean when it isn't.
 func rollbackAndFail(backedUp []backupRecord, restore func(bakPath, path string) error, name string, err error) error {
 	backupErr := fmt.Errorf("back up %s: %w", name, err)
 	var failedRestores []string
@@ -382,12 +313,9 @@ func rollbackAndFail(backedUp []backupRecord, restore func(bakPath, path string)
 	return backupErr
 }
 
-// runQuickstart drives the wizard end-to-end: it takes injected I/O, a
-// target directory to write the scaffold into, and the Environment/
-// CommandRunner/ForgeBuilder seams (mirrors runDoctor's testability).
-// Interactive-only for v1: a non-TTY stdin (interactive == false) is a fatal
-// error directing scripted setups to write flake.nix/harness.env directly
-// instead.
+// runQuickstart drives the wizard end-to-end over injected I/O and seams.
+// Interactive-only for v1: a non-TTY stdin is a fatal error that directs
+// scripted setups to write flake.nix and harness.env directly.
 func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
 	if !interactive {
 		return fmt.Errorf("quickstart requires an interactive terminal — for scripted setups, write flake.nix and harness.env directly (see docs/flake-options.md)")
@@ -427,10 +355,9 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		return v
 	}
 	prompt := func(label string) string { return promptDefault(label, "") }
-	// promptValidated re-prompts on an invalid answer. If stdin runs out
-	// (ok == false) while the value is still invalid, there is no more
-	// input to retry with, so it errors out instead of spinning forever
-	// re-reading the same exhausted scanner.
+	// promptValidated re-prompts on an invalid answer. Once stdin runs out
+	// (ok == false) there is no more input to retry with, so it errors out
+	// instead of spinning forever on the exhausted scanner.
 	promptValidated := func(label, def string, validate func(string) error) (string, error) {
 		for {
 			v, ok := readLine(label, def)
@@ -490,11 +417,9 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 
-	// Quickstart derives backendName from the git remote host (a codeberg.org
-	// remote or an explicit backend answer above) rather than prompting for
-	// it directly; no Jira/local sub-prompts either way. The Jira/local
-	// adapters and runtime ISSUE_TRACKER validation stay in place for an
-	// operator who hand-edits the generated flake.
+	// backendName comes from the git remote host, never a direct prompt, and
+	// there are no Jira or local sub-prompts. Those adapters stay in place
+	// for an operator who hand-edits the generated flake.
 	tracker := trackerSettings{issueTracker: backendName, forgejoBaseURL: forgejoBaseURL}
 
 	desc, ok := backend.ByName(backendName)
@@ -551,21 +476,11 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		anthropicAPIKey:  anthropicAPIKey,
 	}
 
-	// Backup happens only now, right before the scaffold is actually
-	// (re)written — every prompt/validation/abort point above (repo slug,
-	// runtime choice + PATH confirmation, token acquisition, ...) has already
-	// succeeded, so an operator who aborts an earlier prompt never sees an
-	// existing file renamed away with nothing written to replace it.
-	//
-	// backedUp tracks the (original path, bakPath) pairs whose rename has
-	// already succeeded in this call. If a later file in clobbered fails to
-	// back up, every rename recorded here gets reversed (in reverse order)
-	// before the error is returned, so the directory ends up exactly as it
-	// was before this loop started rather than left half-migrated. A "backed
-	// up: X -> Y" transcript line is only ever true once the whole loop has
-	// succeeded, so it's emitted from a second pass over backedUp after the
-	// loop exits clean rather than inline per iteration — otherwise a later
-	// failure's rollback would silently falsify a line already printed.
+	// Backup runs only here, after every prompt and abort point above has
+	// succeeded, so an operator who aborts earlier never loses a file to a
+	// rename with nothing written to replace it. A failed rename reverses
+	// everything in backedUp, so the transcript lines come from a second pass
+	// after the loop: printing inline would falsify a line a rollback undoes.
 	var backedUp []backupRecord
 	for _, name := range clobbered {
 		path := filepath.Join(dir, name)
@@ -600,21 +515,14 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		written = append(written, f.path)
 	}
 
-	// The gh CLI (used by the github Code Forge, and by the github Issue
-	// Tracker branch) reads auth from GH_TOKEN in the process environment.
-	// Keyed off the acquired token's own descriptor rather than a
-	// backend-name branch: only export GH_TOKEN when the acquired credential
-	// IS a GH_TOKEN, so a third backend's credential is never exported under
-	// GitHub's well-known env var name.
+	// The gh CLI reads auth from GH_TOKEN in the process environment. Keyed
+	// off the descriptor rather than the backend name so a third backend's
+	// credential is never exported under GitHub's env var name.
 	if desc.TokenEnvVar == "GH_TOKEN" {
 		if err := os.Setenv("GH_TOKEN", token); err != nil {
 			return fmt.Errorf("set GH_TOKEN: %w", err)
 		}
 	}
-	// Computed once, right after the scaffold files are on disk, and reused
-	// by the early transcript print immediately below, the finish-line
-	// print, and postWriteFailure's message. See gitAddReminder's own doc
-	// comment above for why.
 	insideGitWorkTree := env.InsideGitWorkTree(dir)
 	if insideGitWorkTree {
 		fmt.Fprintln(w, gitAddReminder)
@@ -622,10 +530,8 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 
 	it, cf := forgeBuilder(repoSlug, tracker, a.token)
 	tokenHint, slugHint := doctorHints(tracker.issueTracker)
-	// doctor.Config.Runtime (below) already reports runtime validity as its
-	// own advisory line, so the row set handed here as extraChecks must be
-	// runtime-stripped or the runtime row would report twice for this one
-	// invocation (doctor.RuntimeCheck's own doc comment).
+	// doctor.Config.Runtime below already reports runtime validity, so the
+	// extraChecks rows must be runtime-stripped or the row reports twice.
 	launcherRows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, backendName), quickstartCheckDeps(a)))
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    tracker.issueTracker,
@@ -659,11 +565,9 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	return nil
 }
 
-// acquireGHToken reuses an ambient GH_TOKEN without prompting; otherwise it
-// guides the operator toward minting a fine-grained single-repo PAT, with a
-// `gh auth token` fallback for an operator in a hurry (labeled with a
-// broad-scope warning, since the gh CLI's own OAuth token is typically
-// repo-wide).
+// acquireGHToken reuses an ambient GH_TOKEN without prompting, otherwise it
+// guides the operator toward a fine-grained single-repo PAT. The `gh auth
+// token` fallback warns, because that token is typically repo-wide.
 func acquireGHToken(env Environment, w io.Writer, promptMasked func(string) string, tokenEnvVar string) (string, error) {
 	if token := env.Getenv(tokenEnvVar); token != "" {
 		return token, nil
@@ -685,13 +589,10 @@ func acquireGHToken(env Environment, w io.Writer, promptMasked func(string) stri
 	return token, nil
 }
 
-// acquireForgejoToken prompts for a Forgejo personal access token and
-// validates it with a live API ping (Probe) rather than a prefix audit —
-// Forgejo PATs have no sniffable prefix the way GitHub's do (ghp_/gho_/
-// github_pat_), so there is nothing to inspect locally. The wizard prompts
-// exactly once and has no retry loop, so any failure here aborts the whole
-// run; remediation on every failure path is to rerun the wizard and
-// re-answer the prompt, not to set an env var (this path never reads one).
+// acquireForgejoToken validates the pasted token with a live Probe rather
+// than a prefix audit: Forgejo PATs have no sniffable prefix the way GitHub's
+// do. There is no retry loop, so every failure path here aborts the run and
+// tells the operator to rerun the wizard.
 func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBuilder ForgeBuilder, repoSlug, baseURL string) (string, error) {
 	token := promptMasked("Forgejo token (paste a Forgejo personal access token)")
 	if token == "" {
@@ -719,29 +620,24 @@ func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBui
 	return token, nil
 }
 
-// forgejoConnectivityError builds the shared-skeleton error acquireForgejoToken
-// returns for each of its three post-Probe failure branches (an unmapped
-// StatusError, a DecodeError, and the generic unreachable-or-wrong-slug
-// fallback) -- cause names what went wrong and remedy names the operator
-// action, so the three branches differ only in those two clauses instead of
-// each restating the ~200-character skeleton around them.
+// forgejoConnectivityError builds the shared error skeleton for
+// acquireForgejoToken's three post-Probe failure branches, which differ only
+// in the cause and remedy clauses.
 func forgejoConnectivityError(baseURL, repoSlug, cause, remedy string, err error) error {
 	return fmt.Errorf("Forgejo connectivity check to %s (repo slug %q) failed — %s; %s, then rerun `%s`: %w", baseURL, repoSlug, cause, remedy, quickstartRerunCmd, err)
 }
 
-// requiredGHPermissions are the four permissions a token must carry on the
-// single target repo — printed for a fine-grained PAT (github_pat_ prefix),
-// which GitHub exposes no endpoint to introspect (ADR 0027).
+// requiredGHPermissions are the permissions a token must carry on the single
+// target repo. GitHub exposes no endpoint to introspect a fine-grained PAT,
+// so quickstart prints these for the operator to check (ADR 0027).
 const requiredGHPermissions = `  Issues: Read and write
   Contents: Read and write
   Pull requests: Read and write
   Metadata: Read
 `
 
-// auditGHToken checks a GitHub token for least privilege, asymmetrically by
-// token prefix: a fine-grained PAT (github_pat_) cannot be introspected, so
-// its required permissions are printed for the operator to double-check and
-// it is accepted without a gate.
+// auditGHToken checks a GitHub token for least privilege, branching on its
+// prefix. A fine-grained PAT cannot be introspected, so it passes ungated.
 func auditGHToken(token string, env Environment, w io.Writer, prompt func(string) string) error {
 	if strings.HasPrefix(token, "github_pat_") {
 		fmt.Fprintln(w, "fine-grained PAT detected — GitHub exposes no endpoint to introspect it.")
@@ -767,24 +663,19 @@ func auditGHToken(token string, env Environment, w io.Writer, prompt func(string
 		}
 		return nil
 	}
-	// Any other prefix (e.g. ghs_ app-installation tokens) is neither a
-	// fine-grained PAT nor a classic/OAuth token, so there is nothing to
-	// audit — accept as-is.
+	// Any other prefix (ghs_ app-installation tokens, for one) is neither a
+	// fine-grained PAT nor a classic token, so there is nothing to audit.
 	return nil
 }
 
-// broadGHScopes are classic/OAuth scopes that grant access wider than the
-// single-repo least privilege quickstart wants: repo-wide (not just the one
-// target repo) or org level. Any admin:* scope is caught separately by the
-// prefix check in excessGHScopes.
+// broadGHScopes are classic scopes wider than the single-repo least privilege
+// quickstart wants. excessGHScopes catches admin:* separately, by prefix.
 var broadGHScopes = map[string]bool{
 	"repo":      true,
 	"write:org": true,
 	"read:org":  true,
 }
 
-// excessGHScopes returns the scopes from a classic/OAuth token's grant that
-// exceed what quickstart needs, in the caller's order.
 func excessGHScopes(scopes []string) []string {
 	var excess []string
 	for _, s := range scopes {
@@ -795,11 +686,9 @@ func excessGHScopes(scopes []string) []string {
 	return excess
 }
 
-// quickstartGitignore protects the secrets-only harness.env file quickstart
-// writes, plus the usual nix build/log noise. It is a strict superset of
-// templates/default/.gitignore: it carries every non-comment line the template does,
-// plus flake.nix.bak*/harness.env.bak* entries for the backup-file churn a
-// `--force` rerun leaves behind — churn a hand-authored template never sees.
+// quickstartGitignore must stay a strict superset of
+// templates/default/.gitignore, plus the flake.nix.bak*/harness.env.bak*
+// entries for backup churn a `--force` rerun leaves behind.
 const quickstartGitignore = `# nix build output
 result
 result-*
@@ -828,10 +717,8 @@ flake.nix.bak*
 
 const quickstartEnvrc = "use flake\n"
 
-// doctorHints resolves doctor.Config's TokenHint/SlugHint for the wizard's
-// own doctor.Run call, via backend.ByName. An unregistered issueTracker name
-// (or a registered one with no hints, e.g. "github") returns empty values,
-// meaning "use doctor.Run's github-shaped default".
+// doctorHints resolves doctor.Config's TokenHint and SlugHint. Empty values
+// mean "use doctor.Run's github-shaped default".
 func doctorHints(issueTracker string) (tokenHint, slugHint string) {
 	row, ok := backend.ByName(issueTracker)
 	if !ok {
@@ -841,27 +728,21 @@ func doctorHints(issueTracker string) (tokenHint, slugHint string) {
 }
 
 // trackerSettings holds the fields buildForge needs to construct an Issue
-// Tracker adapter (ADR 0013): github needs none beyond repoSlug, jira adds
-// its base URL/project key/optional email, local adds an issues directory.
-// The wizard only ever populates issueTracker: "github" (issue #1559) — the
-// jira/local fields exist for buildForge's own adapter-construction tests
-// (forge_test.go), not any wizard-driven path.
+// Tracker adapter (ADR 0013). The wizard sets issueTracker to only "github"
+// or "forgejo" (issue #1559); the jira and local fields exist for tests.
 type trackerSettings struct {
 	issueTracker   string
 	jiraBaseURL    string
 	jiraProjectKey string
 	jiraEmail      string
 	localIssuesDir string
-	// forgejoBaseURL is the Forgejo/Gitea instance base URL; empty falls
-	// back to the adapter's default (codeberg.org). Only consulted when
-	// issueTracker == "forgejo".
+	// forgejoBaseURL is read only when issueTracker is "forgejo"; empty falls
+	// back to the adapter's own codeberg.org default.
 	forgejoBaseURL string
 }
 
-// answers holds every operator decision the prompt/detect phase gathers —
-// one field per decision, detected defaults already folded in — so render
-// can turn it into the generated scaffold without touching Environment,
-// stdin, or any other I/O seam.
+// answers holds every operator decision, detected defaults folded in, so
+// render can produce the scaffold without touching any I/O seam.
 type answers struct {
 	repoSlug         string
 	runtime          string
@@ -873,19 +754,15 @@ type answers struct {
 	anthropicAPIKey  string
 }
 
-// scaffoldFile is one generated scaffold file: its path relative to the
-// target directory, its content, and the mode runQuickstart should write it
-// with.
 type scaffoldFile struct {
 	path    string
 	content string
 	mode    os.FileMode
 }
 
-// render turns answers into the full generated scaffold — flake.nix,
-// harness.env, .gitignore, .envrc — with no I/O of its own: every operator
-// string crosses the Nix-escaping seam (nixEscape, via renderFlakeNix)
-// inside this call, before runQuickstart writes the result to disk.
+// render turns answers into the whole scaffold with no I/O of its own. Every
+// operator string crosses the nixEscape seam inside this call, before
+// runQuickstart writes to disk.
 func render(a answers) []scaffoldFile {
 	return []scaffoldFile{
 		{path: "flake.nix", content: renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.tracker), mode: 0o644},
@@ -896,19 +773,15 @@ func render(a answers) []scaffoldFile {
 }
 
 // renderFlakeNix generates a minimal Consumer flake.nix carrying only the
-// options the wizard collected, with a comment pointing at the full
-// reference (docs/flake-options.md) for everything else (ADR 0027). No
-// prompts/ directory is scaffolded — the harness defaults every prompt.
+// options the wizard collected (ADR 0027). No prompts/ directory is
+// scaffolded, because the harness defaults every prompt.
 func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker trackerSettings) string {
 	trackerLine := fmt.Sprintf("            %s = \"%s\";\n", pathIssueTracker, nixEscape(tracker.issueTracker))
 
 	settingsLines := trackerLine
 	if tracker.issueTracker == "forgejo" {
-		// forgejo drives both axes: ISSUE_TRACKER=forgejo (the tracker line
-		// above) and CODE_FORGE=forgejo, so the generated flake lands code on
-		// the same instance doctor validated. Emitted in the current
-		// domain-tree spelling (forge.backend / issues.forgejo.baseURL), the
-		// same one templates/default/flake.nix documents.
+		// forgejo drives both axes, ISSUE_TRACKER and CODE_FORGE, so the
+		// generated flake lands code on the same instance doctor validated.
 		settingsLines += fmt.Sprintf("            %s = \"forgejo\";\n", pathCodeForge)
 		if tracker.forgejoBaseURL != "" && tracker.forgejoBaseURL != codebergBaseURL {
 			settingsLines += fmt.Sprintf("            %s = \"%s\";\n", pathForgejoBaseURL, nixEscape(tracker.forgejoBaseURL))
@@ -964,10 +837,8 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker
 		settingsLines)
 }
 
-// nixEscape escapes a string for embedding in a Nix double-quoted string
-// literal: backslash and the quote terminate the literal, and "${" opens
-// interpolation — each needs a backslash. Go's %q is not a substitute: it
-// escapes the quote but not "${", so an operator-supplied value like
+// nixEscape escapes a string for a Nix double-quoted literal. Go's %q is not
+// a substitute: it escapes the quote but not "${", so an operator-supplied
 // "${evil}" would splice live Nix interpolation into the generated flake.
 func nixEscape(s string) string {
 	r := strings.NewReplacer(
@@ -978,20 +849,10 @@ func nixEscape(s string) string {
 	return r.Replace(s)
 }
 
-// renderHarnessEnv writes only the secrets the wizard actually collected:
-// the code-forge credential — under the registered backend's TokenEnvVar
-// (e.g. FORGEJO_TOKEN for forgejo, GH_TOKEN for github), falling back to
-// GH_TOKEN for an unregistered/tokenless issueTracker — and whichever Claude
-// credential the operator chose (OAuth token or API key, never both).
-//
-// The output opens with a short file-level preamble, then each secret line
-// is preceded by a comment documenting the <NAME>_CMD vault-indirection
-// convention — see lib/renderers.nix's renderHarnessEnvExample, the source
-// of truth this wording mirrors (templates/default/harness.env.example is
-// itself rendered from it). The wizard still writes the plaintext value the
-// operator typed for simplicity; the comments merely document that a
-// <NAME>_CMD entry (or the SECRET_CMD fallback), if the operator adds one
-// later, wins over it.
+// renderHarnessEnv writes only the secrets the wizard collected: the
+// code-forge credential under the backend's TokenEnvVar, and whichever Claude
+// credential the operator chose, never both. The generated comments mirror
+// lib/renderers.nix's renderHarnessEnvExample, the source of that wording.
 func renderHarnessEnv(issueTracker, token, claudeOAuthToken, anthropicAPIKey string) string {
 	out := harnessEnvPreamble
 	out += harnessEnvSecretLine(harnessEnvTokenEnvVar(issueTracker), token)
@@ -1004,11 +865,9 @@ func renderHarnessEnv(issueTracker, token, claudeOAuthToken, anthropicAPIKey str
 }
 
 // harnessEnvTokenEnvVar returns the env var name the wizard writes the
-// backend credential under, falling back to GH_TOKEN for an
-// unregistered/tokenless issueTracker. It is the one source of truth for that
-// name: renderHarnessEnv writes the knob and quickstartCheckConfig mirrors it,
-// and a second copy would let the scaffold and the doctor row it reports drift
-// apart.
+// backend credential under, falling back to GH_TOKEN. Keep it the only source
+// of that name: renderHarnessEnv and quickstartCheckConfig both read it, and
+// a second copy would let the scaffold and the doctor row drift apart.
 func harnessEnvTokenEnvVar(issueTracker string) string {
 	if desc, ok := backend.ByName(issueTracker); ok && desc.TokenEnvVar != "" {
 		return desc.TokenEnvVar
@@ -1016,18 +875,10 @@ func harnessEnvTokenEnvVar(issueTracker string) string {
 	return "GH_TOKEN"
 }
 
-// harnessEnvPreamble is renderHarnessEnv's file-level framing, prepended
-// ahead of the per-secret lines. It condenses
-// templates/default/harness.env.example's preamble (itself rendered from
-// lib/renderers.nix's renderHarnessEnvExample) for a generated,
-// single-run harness.env rather than the general-purpose template: vault
-// indirection via <NAME>_CMD is preferred over a plaintext value, so
-// harness.env then holds fetch recipes, not live credentials, and
-// SECRET_CMD sets a single templated fetch command — {name} substituting
-// the secret's kebab-case env name — but per the resolution precedence
-// (docs/reference.md), both a secret's own <NAME>_CMD and the plaintext
-// value the wizard already wrote below outrank this fallback, so it only
-// takes effect once the operator removes that value (or adds <NAME>_CMD).
+// harnessEnvPreamble condenses templates/default/harness.env.example's
+// preamble. Per the resolution precedence (docs/reference.md), both a
+// secret's own <NAME>_CMD and the plaintext value below outrank SECRET_CMD,
+// so that fallback applies only once the operator removes the plaintext.
 const harnessEnvPreamble = "" +
 	"# Preferred: source each secret below from a vault via its <NAME>_CMD\n" +
 	"# form rather than the plaintext value — harness.env then holds\n" +
@@ -1037,10 +888,9 @@ const harnessEnvPreamble = "" +
 	"# <NAME>_CMD, but note the plaintext value below still wins over it\n" +
 	"# too, so remove that value (or add <NAME>_CMD) for SECRET_CMD to apply.\n\n"
 
-// harnessEnvSecretLine renders one secret's harness.env stanza: a comment
-// block documenting the <NAME>_CMD command-form indirection (matching
-// templates/default/harness.env.example), followed by the bare NAME=value
-// line the wizard collected.
+// harnessEnvSecretLine renders one secret's stanza: the <NAME>_CMD
+// indirection comment matching templates/default/harness.env.example, then
+// the bare NAME=value line.
 func harnessEnvSecretLine(name, value string) string {
 	return fmt.Sprintf(
 		"# Preferred: fetch this from a vault instead of the plaintext value below —\n"+
@@ -1052,12 +902,9 @@ func harnessEnvSecretLine(name, value string) string {
 	)
 }
 
-// toKebab derives the "spindrift-<kebab-name>" vault key convention's
-// kebab-case suffix from an env var name: lowercased with underscores
-// replaced by hyphens (e.g. GH_TOKEN -> gh-token, CLAUDE_CODE_OAUTH_TOKEN ->
-// claude-code-oauth-token). Named to match its sibling copies of this exact
-// transform: cmd/launcher's flags.go toKebab (Go) and lib/renderers.nix's
-// toKebab (Nix) — a deliberate cross-language naming lineage.
+// toKebab derives the "spindrift-<kebab-name>" vault key suffix from an env
+// var name, so GH_TOKEN becomes gh-token. Two other copies of this transform
+// share the name: flags.go's toKebab and lib/renderers.nix's toKebab.
 func toKebab(name string) string {
 	return strings.ReplaceAll(strings.ToLower(name), "_", "-")
 }

@@ -11,20 +11,11 @@ import (
 	"spindrift.dev/launcher/internal/reconcile"
 )
 
-// runReconcile drives the reconcile.Run seam and reports the outcome to w,
-// then — on a clean sweep — surfaceAfterDispatch's auto-surface check (ADR
-// 0033, issue #1730): closing a ticket's last seam this very sweep is
-// exactly the moment that can newly complete it, so the check belongs here,
-// not only at callers that already know a ticket just finished. reconcile
-// itself is a concern only for an in-box-unreachable tracker (ADR 0029,
-// InBoxUnreachableTracker): for any other c.issueTracker it is a clear
-// no-op, not an error that looks like a crash.
-//
-// caps is threaded straight through to reconcile.Run (issue #2946) — every
-// caller here already has one resolved (readContext/launchContext), so
-// runReconcile never resolves its own. Its TrackerDescriptor also decides
-// the guard below, rather than a second backendByName(c.issueTracker) read
-// of the same fact (issue #3064).
+// runReconcile drives reconcile.Run, reports the outcome to w, and on a clean
+// sweep runs surfaceAfterDispatch: closing a ticket's last seam is the moment
+// that can newly complete the ticket (ADR 0033, issue #1730). Only an
+// in-box-unreachable tracker reconciles anything (ADR 0029), so the guard
+// below reads caps.TrackerDescriptor and is a no-op (issues #2946, #3064).
 func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
 	if !caps.TrackerDescriptor.InBoxUnreachableTracker {
 		fmt.Fprintf(w, "reconcile is an in-box-unreachable-tracker concern (ISSUE_TRACKER=%q) — nothing to do.\n", c.issueTracker)
@@ -62,14 +53,9 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 	return surfaceAfterDispatch(c, lw, caps, pwd, w, res.Stuck)
 }
 
-// reconcileAfterDispatch auto-invokes the reconcile sweep at the end of a
-// dispatch run when the tracker is local (ADR 0029), so the common loop
-// (dispatch -> immediate-merge -> issue auto-closes) needs no extra command.
-// Unlike runReconcile's explicit refusal message on the standalone
-// `spindrift reconcile` verb, this is a silent no-op for any other tracker —
-// a routine github/jira dispatch run has nothing to report here. caps is
-// threaded through as in runReconcile, and the guard above reads
-// caps.TrackerDescriptor.
+// reconcileAfterDispatch runs the sweep at the end of a dispatch run (ADR
+// 0029). Unlike the standalone `spindrift reconcile` verb, it stays silent for
+// any other tracker, since a routine github/jira run has nothing to report.
 func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
 	if !caps.TrackerDescriptor.InBoxUnreachableTracker {
 		return nil
@@ -77,22 +63,11 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 	return runReconcile(c, it, cf, lp, caps, pwd, w)
 }
 
-// surfaceAfterDispatch surfaces every completed broad ticket's Integration
-// branch into pwd as a local branch, once every one of its seam issues is
-// closed — CODE_FORGE=local's auto-surface exit (ADR 0033, issue #1730),
-// delegated to localloop.Wire's Surface (issue #1806) so this and the
-// composed loop test drive the identical sweep. stuck threads through
-// reconcile.Run's own Result.Stuck (issue #1811) so Surface's held verdicts
-// can name a ticket's stuck landing without redoing the ancestry check
-// itself. A no-op for any codeForge other than "local";
-// localloop.Wired.Surface itself covers the tracker-has-no-SeamLister no-op
-// (every tracker but local). Takes lw rather than minting its own Wired
-// (issue #1833): runReconcile's own lw is already in scope on every call
-// path (cmdReconcile and reconcileAfterDispatch alike), so a second,
-// independently-memoizing Wired only risked resolving a stuck issue's parent
-// twice for no benefit. caps is as in runReconcile, threaded straight
-// through to lw.Surface (issue #2946); its ForgeDescriptor decides the guard
-// below (issue #3064).
+// surfaceAfterDispatch surfaces a completed broad ticket's Integration branch
+// into pwd once all its seam issues are closed (ADR 0033, issues #1730, #1806).
+// stuck carries reconcile.Run's Result.Stuck so Surface names a stuck landing
+// without redoing the ancestry check (issue #1811). It takes the caller's lw
+// because minting a second Wired resolves the same parents twice (issue #1833).
 func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities, pwd string, w io.Writer, stuck map[string]string) error {
 	if !caps.ForgeDescriptor.HostMediatedRemote {
 		return nil
@@ -100,16 +75,12 @@ func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities
 	return lw.Surface(pwd, w, stuck, caps)
 }
 
-// cmdReconcile is the `reconcile` subcommand: the local-tracker bookkeeping
-// sweep (ADR 0029). Like cmdDoctor, it needs only the IssueTracker/CodeForge
-// seams plus a bare runner for the LivenessProbe's container check — no
-// EnsureReady/IsReady gate, dispatch factory, or settle wiring — so it builds
-// its wiring via newReadContext (issue #2941), including the LivenessProbe's
-// conditional runner, rather than going through bootstrap.
+// cmdReconcile is the `reconcile` subcommand, the local-tracker bookkeeping
+// sweep (ADR 0029). It needs no EnsureReady gate, dispatch factory, or settle
+// wiring, so it builds its seams through newReadContext rather than bootstrap
+// (issue #2941).
 func cmdReconcile() int {
-	// "" (not dispatchKindWork): reconcile never dispatches, so it carries
-	// no dispatch kind at all, matching its config before kind threading
-	// (issue #2944) existed.
+	// reconcile never dispatches, so it carries no dispatch kind (issue #2944).
 	rc := newReadContext("", false)
 
 	pwd, err := os.Getwd()

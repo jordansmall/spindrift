@@ -9,26 +9,19 @@ import (
 	"strings"
 )
 
-// inputDocument is the Go mirror of the nix-rendered Launcher input document
-// (ADR 0020): settings holds resolved knob values (schema default < flake
-// settings), keyed by env var name; artifacts holds the nix-computed
-// plumbing values (image refs, agent files, driver name, ...) that
-// goRunPreamble/goBuildPreamble used to export as env before this issue.
-// Hand-written, not nix-generated (ADR 0020 said otherwise until issue
-// #813 corrected it): two generic maps here mirror the existing schemaFlags
-// table pattern (the former separate schemaDefaults table was consolidated
-// away in issue #670) rather than a per-knob struct.
-// nix/checks/equivalence.nix's mkharness-defaults check is the drift gate —
-// it hand-picks specific keys to assert by grep, not every flakeOption knob.
+// inputDocument mirrors the nix-rendered Launcher input document (ADR 0020):
+// Settings holds resolved knob values keyed by env var name, Artifacts the
+// nix-computed plumbing (image refs, agent files, driver name). It is
+// hand-written, not nix-generated (issue #813), and the mkharness-defaults
+// drift gate in nix/checks/equivalence.nix greps hand-picked keys only.
 type inputDocument struct {
 	Settings  map[string]string `json:"settings"`
 	Artifacts map[string]string `json:"artifacts"`
 }
 
-// loadedDoc is populated once by loadInputDocument, before loadConfig() runs,
-// from the --input flag's document path. Left nil for a direct binary
-// invocation with no --input flag (tests, manual debugging), in which case
-// every lookup falls through to os.Getenv/schemaFlags as before this issue.
+// loadedDoc is populated once by loadInputDocument, before loadConfig runs. It
+// stays nil when the binary runs without --input (tests, manual debugging), and
+// every lookup then falls through to os.Getenv or schemaFlags.
 var loadedDoc *inputDocument
 
 // loadInputDocument reads and parses the Launcher input document at path.
@@ -44,12 +37,9 @@ func loadInputDocument(path string) (*inputDocument, error) {
 	return &doc, nil
 }
 
-// getenvArtifact reads key from the environment (an escape hatch for manual
-// override and tests that predate --input), falling back to the loaded input
-// document's artifacts section, then def. Artifacts are nix-computed
-// plumbing (image refs, agent files, driver name, ...), never operator
-// knobs, so unlike getenvSchema an ambient artifact env var draws no
-// deprecation warning.
+// getenvArtifact reads key from the environment, then the loaded document's
+// artifacts section, then def. Artifacts are nix-computed plumbing, never
+// operator knobs, so an ambient artifact env var draws no deprecation warning.
 func getenvArtifact(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -62,21 +52,11 @@ func getenvArtifact(key, def string) string {
 	return def
 }
 
-// docArtifact reads key strictly from the loaded input document's Artifacts
-// section, returning "" when loadedDoc is nil or key is absent -- never
-// consulting os.Getenv. Unlike getenvArtifact's ambient-env-first escape
-// hatch (deliberate for genuine plumbing artifacts an operator may need to
-// override), the keys this backs (the four capability signals
-// HOST_MEDIATED_REMOTE/OUTBOX_RELAY_CAPABLE/IN_BOX_UNREACHABLE_TRACKER/
-// FULLY_LOCAL, the four tracker/forge signals TRACKER_AXIS_READ/WRITE/
-// FILER/FORGE_BACKEND, and the four agent-presence signals FILER_ENABLED/
-// WORKER_PROVISIONED/REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR) are all
-// nix-resolved policy, not operator knobs: a stray ambient env var must
-// never override what nix actually baked into the document (issue #2527
-// review). Called only from each matching-document trust branch --
-// resolveCapabilitySignals, resolveTrackerAndForgeSignals, and
-// resolveAgentPresenceSignals (issue #2533 review) -- never directly from
-// dispatchConfig, so an unguarded read can't reappear there.
+// docArtifact reads key strictly from the loaded document's Artifacts, never
+// from os.Getenv. The keys it backs are nix-resolved policy signals
+// (capability, tracker/forge, agent presence), so a stray ambient env var must
+// never override what nix baked into the document (issue #2527). Its only
+// callers are the matching-document trust branches, not dispatchConfig (#2533).
 func docArtifact(key string) string {
 	if loadedDoc == nil {
 		return ""
@@ -86,10 +66,9 @@ func docArtifact(key string) string {
 
 // gitConfigLookup resolves a host git config key (e.g. "user.name"), the
 // fallback for GIT_USER_NAME/GIT_USER_EMAIL when neither the document, a
-// flag, nor env supplies one. Previously a bash line in the generated
-// wrapper (`GIT_USER_NAME="${GIT_USER_NAME:-$(git config ...)}"`); moved
-// in-process so the wrapper exports no knob env at all (ADR 0020). A
-// package var so tests can substitute a fake instead of shelling out.
+// flag, nor env supplies one. It runs in-process so the generated wrapper
+// exports no knob env at all (ADR 0020), and it is a package var so tests can
+// substitute a fake instead of shelling out.
 var gitConfigLookup = func(key string) string {
 	out, err := exec.Command("git", "config", "--get", key).Output()
 	if err != nil {
@@ -98,15 +77,11 @@ var gitConfigLookup = func(key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name (dispatch.Config
-// ResolveEnv): ambient env first (an explicit flag also lands here via
-// parseFlags's os.Setenv), then the loaded document's settings or artifacts
-// section, then the knob's schema default. A boxEnv knob the operator never
-// sets anywhere (the common case for e.g. MODEL) still reaches the Box with
-// its document-resolved value instead of an empty string (ADR 0020: the
-// wrapper no longer pre-populates env with baked defaults). Secret names
-// (GH_TOKEN, etc.) have no document/schema entry, so this reduces to plain
-// os.Getenv for them, unchanged from before #625.
+// resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name: ambient env
+// first (parseFlags lands an explicit flag there via os.Setenv), then the
+// document's settings or artifacts, then the schema default, because the
+// wrapper no longer pre-populates env with baked defaults (ADR 0020).
+// Secrets such as GH_TOKEN have no entry, so this reduces to os.Getenv (#625).
 func resolveBoxEnvVar(name string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
@@ -122,13 +97,10 @@ func resolveBoxEnvVar(name string) string {
 	return schemaDefault(name)
 }
 
-// warnAmbientKnobEnv prints one deprecation warning per non-secret schema
-// knob found in the environment, naming the variable, its value, and its
-// flag/settings equivalent (ADR 0020 staging: warn this release, error the
-// next). Must run before parseFlags mutates the environment via os.Setenv,
-// so a flag-set value is never mistaken for an ambient one — an operator
-// passing both --base-branch and an ambient BASE_BRANCH still gets warned
-// about the ambient variable, even though the flag wins the resolved value.
+// warnAmbientKnobEnv prints one deprecation warning per non-secret schema knob
+// found in the environment (ADR 0020 staging: warn this release, error the
+// next). It must run before parseFlags mutates the environment via os.Setenv,
+// or a flag-set value looks like an ambient one.
 func warnAmbientKnobEnv(w io.Writer) {
 	for _, e := range schemaFlags {
 		v := os.Getenv(e.env)

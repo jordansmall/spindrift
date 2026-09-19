@@ -10,17 +10,13 @@ import (
 	"spindrift.dev/launcher/internal/passmanifest"
 )
 
-// TextSource records where Open's returned PR title/body actually came from.
+// TextSource records where Open's returned PR title/body came from.
 type TextSource int
 
 const (
-	// TextSourceUnknown is TextSource's zero value: it's what Open's
-	// error-path returns carry, since none of the three real sources below
-	// ever resolved (reconstructPRText's own failure is one of the inputs
-	// that can lead Open there). Keeping it distinct from TextSourceIntent
-	// (rather than letting the zero value alias it) avoids an error return
-	// being misread as "text came from the box's own PR-intent line", which
-	// never happened on an error path.
+	// TextSourceUnknown is the zero value every Open error return carries.
+	// It stays distinct from TextSourceIntent so an error is never misread
+	// as text the box's own PR-intent line supplied.
 	TextSourceUnknown TextSource = iota
 	TextSourceIntent
 	TextSourceReconstructed
@@ -37,26 +33,19 @@ const (
 	FallbackDefault
 )
 
-// ErrNoPRIntent is Open's sentinel for FallbackNone (and FallbackReconstruct
-// when reconstruction also fails) -- callers use errors.Is to distinguish
-// this from a genuine relay/create failure. Its text is also the operator-
-// facing message blockHandoff posts verbatim (via %v), so it carries no
-// "settle:" package prefix that would otherwise stutter into that comment.
+// ErrNoPRIntent is Open's sentinel for FallbackNone, and for
+// FallbackReconstruct when reconstruction also fails. blockHandoff posts its
+// text verbatim to an operator, so it carries no "settle:" package prefix.
 var ErrNoPRIntent = errors.New("no usable PR-intent line found in the box's log")
 
-// errRelayBundle wraps Open's RelayBundle-failure return, letting callers
-// distinguish it from a draft-PR-create failure via errors.Is instead of
-// matching mediation.go's own error-message text.
+// errRelayBundle lets callers tell Open's RelayBundle failure from a
+// draft-PR-create failure with errors.Is instead of matching message text.
 var errRelayBundle = errors.New("relay bundle failed")
 
-// errCreateDraftPR wraps Open's CreateDraftPR-failure return, the
-// CreateDraftPR analog to errRelayBundle above.
+// errCreateDraftPR is the CreateDraftPR analog of errRelayBundle.
 var errCreateDraftPR = errors.New("draft PR create failed")
 
-// Mediation coordinates the host-mediated relay-then-create-PR hand-off
-// shared by settle's four call sites (pr_intent.go, adopt_relayed.go): relay
-// a Box's finished branch out of the outbox, resolve a PR title/body, ensure
-// a "Closes #N" reference, and create-or-adopt a draft PR.
+// Mediation coordinates the host-mediated relay-then-create-PR hand-off.
 type Mediation struct {
 	it         forge.IssueTracker
 	outboxDir  func(num string) string
@@ -67,40 +56,30 @@ type Mediation struct {
 	bcs forge.BundleCommitSubjects
 }
 
-// mediationFor resolves num's own Code Forge (s.cfForNum) and builds the
-// branch and Mediation every host-mediated hand-off call site
-// (hostMediateDraftPR, relayBlockedWork, adoptRelayedBranch) shares, instead
-// of each repeating the same NewMediation construction inline.
+// mediationFor resolves num's own Code Forge and builds the branch and
+// Mediation every host-mediated hand-off call site shares.
 func (s *Settle) mediationFor(num string) (branch string, m *Mediation) {
 	cf := s.cfForNum(num)
-	// cf is resolved fresh per num (ADR 0033's per-issue/per-parent wiring
-	// under CODE_FORGE=local), so its BundleRelay/DraftPRCreator/
-	// BundleCommitSubjects receiver state must be re-resolved here rather
-	// than reused from s.cfg.Capabilities -- that field was resolved once
-	// by the read tier (newReadContext) against whichever cf New was
-	// originally constructed with, and would otherwise carry the wrong
-	// per-issue state for every num other than that one. Only the
-	// descriptors (config-time, never per-issue) are safe to reuse from
-	// s.cfg.Capabilities.
+	// s.cfForNum resolves cf fresh per num (ADR 0033's per-issue wiring under
+	// CODE_FORGE=local), so the receiver state must come from cf, not from
+	// s.cfg.Capabilities: the read tier resolved that once against whichever cf
+	// New was built with, so it holds the wrong per-issue state for every other
+	// num. Only the descriptors are config-time and safe to reuse.
 	caps := forge.ResolveCapabilities(cf, s.it, s.cfg.Capabilities.ForgeDescriptor, s.cfg.Capabilities.TrackerDescriptor)
 	return cf.AgentBranch(num), NewMediation(caps, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
 }
 
-// NewMediation builds a Mediation reading caps' BundleRelay, DraftPRCreator,
-// and BundleCommitSubjects fields (issue #2945) instead of asserting them
-// from cf itself.
+// NewMediation builds a Mediation from caps' relay and PR-creating fields
+// (issue #2945) rather than asserting them from cf itself.
 func NewMediation(caps forge.Capabilities, it forge.IssueTracker, outboxDir func(num string) string, baseBranch string) *Mediation {
 	m := &Mediation{it: it, outboxDir: outboxDir, baseBranch: baseBranch}
 	m.br, m.dpc, m.bcs = caps.BundleRelay, caps.DraftPRCreator, caps.BundleCommitSubjects
 	return m
 }
 
-// Open relays num's finished branch out of the outbox and opens (or adopts)
-// a draft PR on it, resolving title/body from result's PR-intent line, or —
-// per fallback — a reconstructed-from-commits or issue-derived default when
-// that line is missing or malformed. Returns the resolved PR URL, whether a
-// fresh PR was created (as opposed to an existing one adopted), and which
-// source the returned title/body actually came from.
+// Open relays num's finished branch out of the outbox and opens or adopts a
+// draft PR on it, taking title/body from result's PR-intent line or, per
+// fallback, from the branch's commits or an issue-derived default.
 func (m *Mediation) Open(num, branch string, result dispatch.Result, fallback Fallback) (url string, created bool, source TextSource, err error) {
 	if m.br == nil {
 		return "", false, TextSourceUnknown, errors.New("settle: Code Forge does not implement forge.BundleRelay")
@@ -135,10 +114,8 @@ func (m *Mediation) Open(num, branch string, result dispatch.Result, fallback Fa
 		}
 	}
 	body = ensureClosesReference(body, num, m.it)
-	// One append site regardless of which branch above resolved title/body
-	// (issue #3244): the intent, reconstructed, and default sources all pass
-	// through here, so none of them can end up silently missing the delta
-	// line a later source happens to carry.
+	// One append site for all three text sources (issue #3244), so none of
+	// them can silently lose the delta line.
 	body = appendLandDeltaSummary(body, result.Passes)
 
 	url, created, err = m.dpc.CreateDraftPR(title, body, m.baseBranch, branch)
@@ -148,10 +125,9 @@ func (m *Mediation) Open(num, branch string, result dispatch.Result, fallback Fa
 	return url, created, source, nil
 }
 
-// appendLandDeltaSummary appends passes' land-delta one-liner (issue #3244)
-// as a trailing section of body, or returns body unchanged when passes
-// carries no land entry -- a manifest from a Box built before this field
-// existed must produce a byte-identical PR body to before.
+// appendLandDeltaSummary appends passes' land-delta one-liner (issue #3244) to
+// body. A manifest from a Box built before that field existed carries no land
+// entry and must still produce a byte-identical PR body.
 func appendLandDeltaSummary(body string, passes []passmanifest.Entry) string {
 	line := landDeltaLine(passes)
 	if line == "" {
@@ -163,11 +139,10 @@ func appendLandDeltaSummary(body string, passes []passmanifest.Entry) string {
 	return body + "\n\n" + line
 }
 
-// landDeltaLine returns the sanitized land-delta summary line for passes'
-// land entry, or "" when none carries one. It picks the LAST entry with a
-// non-nil LandDelta rather than assuming a single land entry or a fixed
-// position -- the manifest is Box-authored advisory evidence (issue #2983),
-// so ordering/uniqueness assumptions about it would be misplaced.
+// landDeltaLine returns the sanitized land-delta line for passes' land entry,
+// or "" when none carries one. It picks the last entry with a non-nil
+// LandDelta because the manifest is Box-authored advisory evidence (issue
+// #2983), so neither a single land entry nor a fixed position is guaranteed.
 func landDeltaLine(passes []passmanifest.Entry) string {
 	idx := -1
 	for i := range passes {
@@ -182,22 +157,17 @@ func landDeltaLine(passes []passmanifest.Entry) string {
 }
 
 // sanitizeLandDeltaLine defends against a manifest.json a Box wrote by hand
-// rather than through the orchestrator's own landdelta.Compute (issue
-// #3244): Delta.Reason then carries arbitrary Box-authored text, not one of
-// Compute's fixed strings. Collapsing embedded newlines stops a crafted
-// Reason from forging extra PR-body sections below this line, and
-// defuseClosingKeywords (already used on the reconstructed-body path for
-// the same reason) stops it from smuggling in a GitHub closing-keyword
-// reference that would auto-close an unrelated issue on merge.
+// rather than through landdelta.Compute (issue #3244), where Delta.Reason
+// carries arbitrary Box-authored text. Collapsing newlines stops a crafted
+// Reason from forging extra PR-body sections, and defuseClosingKeywords stops
+// it from smuggling in a reference that auto-closes an unrelated issue.
 func sanitizeLandDeltaLine(s string) string {
 	s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
 	return defuseClosingKeywords(s)
 }
 
-// reconstructPRText builds a title/body for num's already-relayed branch
-// from its own commits via m.bcs, when no usable PR-intent line survived —
-// see hostMediateDraftPR's doc comment (pr_intent.go) for the full
-// reasoning.
+// reconstructPRText builds a title/body for num's already-relayed branch from
+// its own commits, when no usable PR-intent line survived.
 func (m *Mediation) reconstructPRText(num, branch string) (title, body string, err error) {
 	if m.bcs == nil {
 		return "", "", errors.New("settle: Code Forge does not implement forge.BundleCommitSubjects")
@@ -217,22 +187,14 @@ func (m *Mediation) reconstructPRText(num, branch string) (title, body string, e
 		b.WriteString(defuseClosingKeywords(subject))
 		b.WriteString("\n")
 	}
-	// subjects[0] (the title) is returned raw, not run through
-	// defuseClosingKeywords: GitHub's closing-keyword auto-close scanner only
-	// ever scans a PR's body, never its title, so defusing the title would
-	// only visibly mangle it with no corresponding safety benefit — see
-	// defuseClosingKeywords's own doc comment (pr_intent.go) for the
-	// body-side hazard this guards against.
+	// The title goes back raw: GitHub's closing-keyword scanner reads only a
+	// PR's body, so defusing the title would mangle it for no safety gain.
 	return subjects[0], strings.TrimRight(b.String(), "\n"), nil
 }
 
-// defaultAdoptPRText builds the fallback title/body Open uses under
-// FallbackDefault when the box's log carried no usable PR-intent line: the
-// title prefers the underlying issue's own title (falling back to a generic
-// "Adopt agent work for #N" when the issue lookup fails or its title is
-// blank), and the body explains that this PR was auto-adopted host-side
-// because the box self-reported success but its outcome line was missing or
-// degraded to the synthetic backstop (ADR 0036/0039).
+// defaultAdoptPRText builds the title/body Open uses under FallbackDefault.
+// The title prefers the issue's own title, falling back to a generic one when
+// the lookup fails or the title is blank.
 func (m *Mediation) defaultAdoptPRText(num string) (title, body string) {
 	title = fmt.Sprintf("Adopt agent work for #%s", num)
 	if iss, err := m.it.Issue(num); err == nil && strings.TrimSpace(iss.Title) != "" {

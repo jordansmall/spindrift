@@ -6,21 +6,10 @@ import (
 	"path/filepath"
 )
 
-// MigrateLegacyLogDir moves the contents of a legacy top-level <pwd>/logs
-// directory into the new HostLogDirFor(pwd) (<pwd>/.spindrift/logs), a
-// one-time relocation for issue #2138.
-//
-// If legacy does not exist, or exists but is not a directory, MigrateLegacyLogDir
-// is a no-op and returns nil. An empty legacy dir is simply removed without
-// creating dest. Otherwise it creates dest (MkdirAll) and, for
-// each direct entry of legacy -- including the stray .claude subdirectory
-// that can appear under a legacy logs/ dir, treated here as an ordinary
-// entry -- renames it to dest/<name> only if dest/<name> does not already
-// exist. An entry whose name already exists at the destination is left in
-// place under legacy rather than clobbered. Once every entry has been
-// processed, MigrateLegacyLogDir attempts to remove the now-empty legacy
-// dir; if any entries were left behind by a collision, legacy is non-empty
-// and the removal error is ignored.
+// MigrateLegacyLogDir moves the contents of <pwd>/logs into HostLogDirFor(pwd),
+// a one-time relocation for issue #2138. An entry whose name already exists at
+// the destination is left under legacy rather than clobbered, so legacy can
+// still exist after a successful migration.
 func MigrateLegacyLogDir(pwd string) error {
 	legacy := filepath.Join(pwd, "logs")
 	dest := HostLogDirFor(pwd)
@@ -41,8 +30,7 @@ func MigrateLegacyLogDir(pwd string) error {
 		return err
 	}
 	if len(entries) == 0 {
-		// Nothing to relocate -- drop the empty legacy dir without
-		// creating an empty dest.
+		// Drop the empty legacy dir without creating an empty dest.
 		_ = os.Remove(legacy)
 		return nil
 	}
@@ -54,8 +42,7 @@ func MigrateLegacyLogDir(pwd string) error {
 	for _, entry := range entries {
 		destPath := filepath.Join(dest, entry.Name())
 		if _, err := os.Stat(destPath); err == nil {
-			// Destination already has an entry with this name -- don't
-			// clobber; leave the legacy copy in place.
+			// Leave the legacy copy in place rather than clobber it.
 			continue
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -65,8 +52,7 @@ func MigrateLegacyLogDir(pwd string) error {
 		}
 	}
 
-	// Best-effort cleanup: ignore the error, which just means entries were
-	// left behind by a collision above.
+	// An error here just means a collision above left entries behind.
 	_ = os.Remove(legacy)
 	return nil
 }

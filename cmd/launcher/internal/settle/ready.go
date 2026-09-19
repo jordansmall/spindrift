@@ -11,67 +11,38 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// This file holds the ready path end to end — gate, guard, merge, re-wait —
-// so a reader can follow the common green path (selfHeal → gateToGreen →
-// mergeGuardHit → applyMergeMode → mergeImmediate) top-to-bottom in one
-// place instead of jumping between files.
-
-// errAbandoned is mergeImmediate's signal that a Terminate (ADR 0024, issue
-// #649) landed mid-retry: distinct from a genuine merge failure so the
-// caller skips the merge-blocked print/comment instead of reporting one on
-// an issue Terminate already reclaimed.
+// errAbandoned marks a Terminate (ADR 0024, issue #649) that landed mid-retry,
+// so the caller skips the merge-blocked print and comment on an issue Terminate
+// already reclaimed.
 var errAbandoned = errors.New("settle: abandoned by terminate")
 
-// errLandingNeverGreen marks a force-pushed head (rebase or conflict-resolve)
-// that never reached green — a conflict-resolve dispatch failure, or a
-// post-force-push re-wait that ends red or times out. Distinct from a merge
-// failure on an already-green PR: there, a green PR genuinely exists and the
-// issue stays agent-complete (ADR 0012). Here there is no green PR at the
-// current head, so selfHeal demotes to agent-failed instead (issue #758).
+// errLandingNeverGreen marks a force-pushed head that never reached green. A
+// merge failure on an already-green PR leaves the issue agent-complete (ADR
+// 0012); here no green PR exists at the current head, so selfHeal demotes to
+// agent-failed instead (issue #758).
 var errLandingNeverGreen = errors.New("settle: force-pushed head never went green")
 
 // selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
-// MaxFixAttempts times. On green it applies the merge mode, then swaps
-// agent-complete once the landing path settles (issue #757) — merged,
-// auto-merge enqueued, manual hand-off, merge-blocked-with-note, or a merge
-// guard downgrade all count as settled. Until then (rebase-retry,
-// conflict-resolve, post-force-push-wait) the issue stays agent-in-progress.
-// A merge failure on a still-green PR (unmet approval, guard, unresolvable
-// pre-rebase conflict) leaves the issue agent-complete, never demoted; but a
-// force-pushed head that never re-confirms green (a failed conflict-resolve
-// dispatch, or a red/timed-out post-force-push re-wait) demotes to
-// agent-failed instead — there is no green PR left at that head (issue #758).
-//
-// Returns landingFailed when CI never reached green (genuine red exhausted,
-// a gate timeout, or a force-pushed head that never went green — the issue
-// is swapped to failedLabel). Otherwise CI reached green: landingMerged when
-// immediate mode completed an actual merge, landingManual for every other
-// green outcome (manual/auto mode, a guard hit, or a merge failure on a
-// still-green PR — the issue stays at agent-complete with a merge-blocked
-// note).
-//
-// d dispatches fix passes and, when a rebase conflict arises, an
-// agent-assisted conflict resolution -- both subject to dispatch's own
-// in-session transient retry (issue #441).
+// MaxFixAttempts times, then applies the merge mode. It swaps agent-complete
+// only once the landing path settles (issue #757). A merge failure on a
+// still-green PR stays agent-complete (ADR 0012), but a force-pushed head that
+// never re-confirms green demotes to agent-failed instead (issue #758).
 func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr string) (landingResult, string) {
 	return s.selfHealGate(d, num, gen, pr, false)
 }
 
 // selfHealAdopted is selfHeal's counterpart for a PR discovered independently
-// of this process's own push (SettleAdopted's resume/recovery path — a Box
-// exited with no outcome line). Unlike selfHeal, it cannot assume the PR's
-// current head SHA is one this process just pushed, so its first CI gate
-// poll requires evidence this run's checks registered before trusting a
-// SUCCESS rollup, within a bounded window (issue #1652, #2475) — see
-// gateToGreen.
+// of this process's own push (SettleAdopted's resume path). It cannot assume
+// the head SHA is one this process just pushed, so its first gate poll requires
+// evidence this run's checks registered before trusting a SUCCESS rollup,
+// within a bounded window (issues #1652, #2475).
 func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, pr string) (landingResult, string) {
 	return s.selfHealGate(d, num, gen, pr, true)
 }
 
-// selfHealGate is selfHeal and selfHealAdopted's shared implementation;
-// requireRegistration guards only the loop's first attempt — a fix-pass
-// retry always follows a push d.Fix just made in this process, so it is
-// never ambiguous the way the initial adopted poll can be.
+// selfHealGate is selfHeal and selfHealAdopted's shared implementation.
+// requireRegistration guards only the loop's first attempt, because a fix-pass
+// retry always follows a push d.Fix just made in this process.
 func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr string, requireRegistration bool) (landingResult, string) {
 	if s.pr == nil {
 		return s.landPushOnly(num, gen, pr), ""
@@ -82,18 +53,11 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 		case gateAbandoned:
 			return landingAbandoned, ""
 		case gateGreen:
-			// The launcher owns the draft->ready flip at green, ahead of the
-			// merge itself (issue #1651) — the Driver itself never flips a PR
-			// ready anymore (#1653), and a no-outcome run is never adopted as
-			// ready off draft-ness either (#1654), completing the inversion
-			// of the old draft-until-ready invariant (#1614/#1625). MarkReady
-			// is idempotent, so this runs unconditionally — including on a
-			// merge-guard hit or check error below, so a PR downgraded to
-			// manual hand-off is still visible and mergeable by a human,
-			// rather than stranded as a draft. A failure only reaches the
-			// console log below (never a public issue comment), so it never
-			// blocks the merge, matching EnqueueAutoMerge's own best-effort
-			// precedent further down.
+			// The launcher, never the Driver, owns the draft to ready flip at
+			// green, inverting the old draft-until-ready invariant (issues
+			// #1651, #1653, #1654, #1614, #1625). MarkReady is idempotent, so
+			// it runs before the guard and merge-mode checks below: a PR
+			// downgraded to manual must not stay stranded as a draft.
 			if err := s.pr.MarkReady(pr); err != nil {
 				fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, err)
 			}
@@ -125,9 +89,6 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual, ""
 			}
-			// The landing path has settled — merged, auto-merge enqueued, or
-			// manual hand-off. Only now does agent-complete claim the agent
-			// has nothing left to do.
 			s.transitionState(num, forge.InProgress, forge.Complete)
 			if s.cfg.MergeMode == "immediate" {
 				return landingMerged, ""
@@ -147,13 +108,10 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.transitionState(num, forge.InProgress, forge.Failed)
 				return landingFailed, fmt.Sprintf("ci-red: still red after exhausting %d fix pass(es)", s.cfg.MaxFixAttempts)
 			}
-			// Before launching another fix pass, check cumulative spend
-			// against the budget caps (issue #2001) — a sibling governor to
-			// the attempt-count cap just above, distinct so a runaway
-			// token/cost run stops even while MaxFixAttempts would still
-			// allow more passes. Skipped entirely when both knobs are unset
-			// so the no-cap path never pays CumulativeUsage's disk-stat-and-
-			// parse cost over every pass log.
+			// The budget caps (issue #2001) stop a runaway token or cost run
+			// even while MaxFixAttempts would still allow more passes. Both
+			// knobs unset skips the check, so the no-cap path never pays
+			// CumulativeUsage's disk stat and parse over every pass log.
 			if s.cfg.MaxBudgetTokens > 0 || s.cfg.MaxBudgetUSD > 0 {
 				if exceeded, reason := budgetExceeded(s.cfg, d.CumulativeUsage()); exceeded {
 					fmt.Printf("    #%s  landing=%s  status=budget-exhausted  !! %s\n", num, pr, reason)
@@ -163,17 +121,15 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				}
 			}
 			fmt.Printf("    #%s  landing=%s  fix-pass=%d/%d\n", num, pr, attempt+1, s.cfg.MaxFixAttempts)
-			// Best-effort: a failure to fetch the CI failure detail must
-			// never block the fix pass — fall back to an empty summary.
+			// Best-effort: a failure to fetch the CI failure detail must never
+			// block the fix pass, so the summary falls back to empty.
 			detail, detailErr := s.pr.FailureDetail(pr)
 			if detailErr != nil {
 				fmt.Printf("    #%s  landing=%s  status=failure-detail-unavailable  !! %v\n", num, pr, detailErr)
 				detail = ""
 			}
-			// Best-effort: a failure to fetch the pre-fix head SHA must never
-			// block the fix pass — headErr suppresses the no-op check below
-			// rather than aborting the pass outright, matching detailErr's
-			// own fallback above.
+			// Best-effort: headErr suppresses the no-op check below rather than
+			// aborting the fix pass outright.
 			headBefore, headErr := s.pr.HeadCommitSHA(pr)
 			if headErr != nil {
 				fmt.Printf("    #%s  landing=%s  status=head-sha-unavailable  !! %v\n", num, pr, headErr)
@@ -185,31 +141,21 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.transitionState(num, forge.InProgress, forge.Failed)
 				return landingFailed, fmt.Sprintf("fix-failed: fix pass %d exited non-zero", attempt+1)
 			}
-			// A read-only Box holds no push-capable token (issue #1979): its
-			// fix agent bundled its work to the outbox instead of pushing
-			// directly, so s.pr.HeadCommitSHA below never reflects real work
-			// until this relay lands it. Must run before the no-op check
-			// just below — a read-only Box never pushes directly whether or
-			// not the fix pass did real work, so checking head SHAs first
-			// would misread every read-only fix pass as a no-op and abort on
-			// the very first attempt. Best-effort: a failure here (a crashed
-			// box that left no bundle, say) is logged and the no-op check
-			// below runs against whatever head is actually current, rather
-			// than being treated as a distinct terminal condition.
+			// A read-only Box holds no push-capable token (issue #1979): its fix
+			// agent bundled its work to the outbox, so HeadCommitSHA reflects no
+			// work until this relay lands it. It must run before the no-op check
+			// below, which would otherwise misread every read-only fix pass as a
+			// no-op. Best-effort: a failure here only logs.
 			if err := s.relayBoxBundle(num); err != nil {
 				fmt.Printf("    #%s  landing=%s  status=fix-relay-failed  !! %v\n", num, pr, err)
 			}
-			// A fix pass that exits zero but never pushes a new commit
-			// leaves CI's rollup exactly as it was — the next gateToGreen
-			// poll would read the identical terminal FAILURE and mistake it
-			// for a fresh genuine red (issue #1980). Caught here instead,
-			// while the pre-fix SHA is still in hand.
+			// A fix pass that exits zero but pushes no new commit leaves CI's
+			// rollup unchanged, so the next gateToGreen poll would read the
+			// identical terminal FAILURE as a fresh genuine red (issue #1980).
 			if headErr == nil {
 				if headAfter, err := s.pr.HeadCommitSHA(pr); err == nil && headAfter == headBefore {
-					// Confirm before concluding no-op: the forge's API can
-					// briefly still serve the pre-push snapshot right after a
-					// genuine push (replication lag), mirroring gateToGreen's
-					// own confirm-poll pattern for a SUCCESS rollup above.
+					// Confirm before concluding no-op: the forge's API can still
+					// serve the pre-push snapshot right after a genuine push.
 					s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 					confirmed, confirmErr := s.pr.HeadCommitSHA(pr)
 					if confirmErr == nil && confirmed == headBefore {
@@ -224,13 +170,10 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 	}
 }
 
-// landPushOnly is the push-only-forge counterpart to the gateToGreen+
-// applyMergeMode pair: there is no PR or CI to watch (the Box already pushed
-// branch to the remote), so the issue is marked Complete immediately and
-// MERGE_MODE is applied straight against the push-only forge's Merge/Rebase.
-// A merge failure leaves the issue Complete with a merge-blocked note,
-// matching the github adapter's post-green contract (ADR 0012) — it is never
-// demoted to Failed.
+// landPushOnly lands a push-only forge, where there is no PR or CI to watch, so
+// the issue goes Complete immediately and MERGE_MODE applies straight against
+// the forge's Merge and Rebase. A merge failure leaves the issue Complete with
+// a merge-blocked note, never demoted to Failed (ADR 0012).
 func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResult {
 	s.transitionState(num, forge.InProgress, forge.Complete)
 	if err := s.applyMergeMode(num, gen, branch, nil); err != nil {
@@ -239,12 +182,10 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 		return landingManual
 	}
 	if s.cfg.MergeMode == "immediate" {
-		// CODE_FORGE=local's landing: needs the resolved Integration ref +
-		// commit sha (ADR 0029/0033), richer than the raw branch name
-		// recordLanding already wrote when the outcome line was parsed — so
-		// overwrite it now that Merge has actually landed. Best-effort: a
-		// resolution failure here is surprising (the merge just succeeded)
-		// but must never turn an actual successful land into a failure.
+		// CODE_FORGE=local needs the resolved Integration ref and commit sha
+		// (ADR 0029/0033), not the raw branch name recordLanding wrote from the
+		// outcome line, so overwrite it now that Merge has landed. Best-effort:
+		// a resolution failure must never turn a successful land into a failure.
 		if lr, ok := s.cfForNum(num).(forge.LandingRef); ok {
 			if landing, err := lr.LandingRef(); err == nil {
 				s.recordLanding(num, landing)
@@ -257,42 +198,11 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 	return landingManual
 }
 
-// gateToGreen polls CheckState on the PR's head commit until the state
-// reaches confirmed SUCCESS, a terminal failure, or MergePollTimeout seconds
-// elapse. It performs no label swap itself — the caller (selfHeal) owns
-// agent-complete, swapping it only once the landing path settles (issue
-// #757), since gateToGreen also re-runs mid-landing (rewaitAfterForcePush)
-// where a swap would be premature.
-//
-// requireRegistration guards against trusting a rollup this run never
-// watched register (issue #1652): an unchanged head SHA can carry a
-// terminal SUCCESS inherited from an earlier attempt, so when set, a
-// first-poll SUCCESS is not accepted until a non-terminal state
-// (PENDING/EXPECTED/NONE) has been observed first — proof this run's own
-// checks are alive on the head commit. That protection holds for a bounded
-// registrationWindow at the start of the watch (issue #2475): a non-terminal
-// state observed within the window still resets the guard exactly as
-// before, but if the rollup reads SUCCESS for the whole window and no
-// non-terminal state ever appears — the ordinary shape of a PR whose CI
-// settled green well before this run started watching — the window elapsing
-// is itself accepted as proof CI already finished, rather than withheld
-// forever. A caller that just performed the push itself (the normal ready
-// path, and any post-force-push rewait) has no such ambiguity and passes
-// false, preserving the original trust-on-first-poll behavior.
-//
-// Returns:
-//   - gateGreen     — CI confirmed green. reason is "".
-//   - gateRedRetry  — CI red (FAILURE or ERROR); caller decides whether to
-//     dispatch a fix box. reason is "".
-//   - gateTerminal  — non-retriable outcome (timeout, API error). Caller
-//     must swap to failedLabel. reason is a classified, prefixed string —
-//     "ci-check-error: ..." (gateTerminalReason), "ci-timeout: CI-watch
-//     deadline reached..." (gateTerminalReason, the ordinary timeout), or
-//     "ci-timeout: registration guard never cleared..."
-//     (gateTerminalReasonRegistration, issue #2476) when the deadline was
-//     reached with requireRegistration set and no genuine non-terminal poll
-//     ever observed.
-//   - gateAbandoned — reason is "".
+// gateToGreen polls CheckState until confirmed SUCCESS, terminal failure, or
+// MergePollTimeout, swapping no labels: it re-runs mid-landing, so the caller
+// owns agent-complete (issue #757). requireRegistration refuses a first-poll
+// SUCCESS inherited from an earlier attempt until a non-terminal state proves
+// this run's checks are alive (#1652), bounded by registrationWindow (#2475).
 func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) (watchObservation, string) {
 	deadline := s.cfg.MergePollTimeout
 	w := watch{
@@ -315,28 +225,25 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 		panic(fmt.Sprintf("settle: unhandled gateResult %v", obs.outcome))
 	}
 
-	// gateTerminal: format the operator-facing reason, logging the
-	// check-state-error status line poll() itself no longer has the I/O to
-	// print.
+	// poll() does no I/O of its own, so this block prints the check-state-error
+	// status line as well as formatting the operator-facing reason.
 	if obs.err != nil {
 		fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, obs.err)
 		return obs, gateTerminalReason(obs.err, deadline)
 	}
 	if requireRegistration && !obs.sawNonTerminal {
-		// The deadline was reached with the requireRegistration guard still
-		// unsatisfied by any genuine evidence — only the registrationWindow's
-		// own elapsed-fallback (if it fired at all) ever set registered.
-		// Name that flavour explicitly rather than folding it into the
-		// generic ci-timeout reason (issue #2476).
+		// The deadline passed with no genuine evidence for the
+		// requireRegistration guard, only registrationWindow's elapsed
+		// fallback, so name that reason separately from the generic
+		// ci-timeout (issue #2476).
 		return obs, gateTerminalReasonRegistration(deadline)
 	}
 	return obs, gateTerminalReason(nil, deadline)
 }
 
-// mergeGuardHit checks a green PR's changed files against MergeGuardPaths,
-// returning the subset that hit a guarded glob. A nil, nil result means the
-// guard is disabled (empty patterns) or found no match; a non-nil error means
-// the changed-file list could not be read at all.
+// mergeGuardHit returns the PR's changed files that hit a MergeGuardPaths glob.
+// A nil, nil result means the guard is disabled or matched nothing; an error
+// means the changed-file list could not be read at all.
 func (s *Settle) mergeGuardHit(pr string) ([]string, error) {
 	if strings.TrimSpace(s.cfg.MergeGuardPaths) == "" {
 		return nil, nil
@@ -349,12 +256,9 @@ func (s *Settle) mergeGuardHit(pr string) ([]string, error) {
 }
 
 // applyMergeMode performs the mode-specific action after CI reaches green.
-// agent-complete is already set; a merge failure is returned as an error but
-// does not revert the label.
-//
-// d, when non-nil, resolves rebase conflicts (via d.ResolveConflict) that
-// arise while mergeImmediate retries. When nil, a rebase conflict is
-// immediately non-retriable.
+// agent-complete is already set, and a returned merge failure does not revert
+// it. A nil d makes a rebase conflict immediately non-retriable, since nothing
+// can dispatch a conflict resolution.
 func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	switch s.cfg.MergeMode {
 	case "immediate":
@@ -364,13 +268,10 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 			return fmt.Errorf("MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")
 		}
 		if err := s.pr.EnqueueAutoMerge(pr); err != nil {
-			// Audited (issue #1233, extending #831): err traces through
-			// execClient.EnqueueAutoMerge (github/exec_pr.go), which runs
-			// `gh pr merge --auto --rebase --delete-branch` via
-			// exec.Command(...).Run() with no stdout/stderr capture. So err
-			// is only ever *exec.ExitError, a start failure, or the wrapped
-			// message embedding prURL (already public) — never gh's stderr
-			// text. Safe to surface verbatim in the issue comment below.
+			// Audited (issues #1233, #831): execClient.EnqueueAutoMerge captures
+			// no stdout or stderr, so err is only ever an *exec.ExitError, a
+			// start failure, or a message embedding the already-public prURL,
+			// never gh's stderr. Safe to surface verbatim in the comment below.
 			fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
 			s.it.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
 			return nil
@@ -378,11 +279,9 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 		fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueued\n", num, pr)
 		return nil
 	case "manual":
-		// CODE_FORGE=local requires MERGE_MODE=immediate (validated at
-		// launcher startup, issue #1725), so a local seam's forge.BundleRelay
-		// hook can never reach manual mode here — every operator-visible
-		// combination for a Code Forge with no PR support already relays via
-		// mergeImmediate.
+		// CODE_FORGE=local requires MERGE_MODE=immediate (validated at launcher
+		// startup, issue #1725), so a forge.BundleRelay hook never reaches
+		// manual mode here.
 		fmt.Printf("    #%s  landing=%s  status=agent-complete  merge-mode=%s\n", num, pr, s.cfg.MergeMode)
 		return nil
 	default:
@@ -390,22 +289,11 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 	}
 }
 
-// mergeImmediate attempts to merge the green PR with rebase retry on conflict.
-// It embodies the existing rebase-retry and agent conflict-resolve behaviors.
-//
-// A successful conflict-resolve already rebased and force-pushed the branch,
-// so the next Merge conflict is retried directly (after a brief settle wait
-// for the forge's mergeability snapshot to catch up) instead of invoking
-// Rebase a second time.
-//
-// A Rebase force-push failure that forge.ErrTransientPushFailure wraps (an
-// infra or network fault, not a genuine stale-lease rejection) is retried up
-// to MaxRebaseAttempts times before it's treated as terminal.
-//
-// The termination check ahead of preflightStaleBase (issue #943) is
-// deliberately duplicated by the loop's own first-iteration check below
-// rather than relied on alone: preflightStaleBase itself force-pushes, so a
-// terminated issue must never reach it, not just never reach Merge.
+// mergeImmediate merges the green PR, rebasing on conflict. A successful
+// conflict-resolve already rebased and force-pushed, so the next conflict is
+// retried directly after a settle wait rather than rebased a second time. The
+// termination check ahead of preflightStaleBase duplicates the loop's own first
+// iteration deliberately, because preflightStaleBase force-pushes (issue #943).
 func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	rebaseAttempts := 0
 	pushRetries := 0
@@ -415,39 +303,19 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	if s.terminated(num, gen) {
 		return errAbandoned
 	}
-	// preflightStaleBase gets its own attempt budget rather than sharing
-	// rebaseAttempts/pushRetries with the reactive conflict-retry loop
-	// below: a stale-base rebase and a conflict-triggered rebase are
-	// independent concerns, and charging one against the other's budget
-	// would let a stale-base retry exhaust the conflict path's allowance
-	// before a real conflict ever arises (or vice versa).
+	// preflightStaleBase keeps its own retry budget: sharing rebaseAttempts with
+	// the conflict loop below would let one path exhaust the other's allowance.
 	if err := s.preflightStaleBase(num, gen, pr, d); err != nil {
 		return err
 	}
-	// cf is resolved once for this call and reused throughout: num's own
-	// parent-keyed instance (CODE_FORGE=local, issue #1734) when
-	// Config.CodeForgeForIssue is set, otherwise New's cf unchanged.
+	// cf is num's own parent-keyed instance when Config.CodeForgeForIssue is set
+	// (CODE_FORGE=local, issue #1734), otherwise New's cf unchanged.
 	cf := s.cfForNum(num)
-	// CODE_FORGE=local's Merge assumes ref already exists as a branch on the
-	// backing repo, exactly like git/github — but the Box's read-only repo
-	// mount means it never pushed there directly. Relay the Box's code-out
-	// bundle in first, once, so the loop below's Merge(pr) attempts find the
-	// ref (ADR 0033). A relay failure (missing/malformed bundle) is returned
-	// directly: there is nothing to retry, unlike a merge conflict below.
-	// Only the push-only path (s.pr == nil, e.g. CODE_FORGE=local) relays
-	// here: pr is a ref/branch name in that case, the same value RelayBundle
-	// expects. A PR-shaped read-only forge (github, issue #1919) is already
-	// relayed by hostMediateDraftPR before its draft PR (and this pr URL)
-	// ever exists — relaying again here with pr (a URL, not a ref) would be
-	// both redundant and wrong.
-	//
-	// pr is overwritten with cf.AgentBranch(num) here rather than trusted as
-	// passed in (issue #1949): this branch only runs for a Code Forge that
-	// host-mediates the landing (CODE_FORGE=local today, the only adapter
-	// both BundleRelay-implementing and push-only), so pr traces back to the
-	// outcome line's own landing= field, Agent-controlled input. Deriving it
-	// host-side, once, before either RelayBundle or the Merge loop below sees
-	// it, pins both to the one ref this hand-off is meant to use.
+	// Merge needs the ref to exist as a branch, but the read-only Box bundled it
+	// instead of pushing, so relay it in first (ADR 0033); a relay failure has no
+	// retry. Only the push-only path relays here, since hostMediateDraftPR already
+	// relayed a PR-shaped read-only forge (#1919). pr is re-derived from
+	// cf.AgentBranch, never trusted from the Agent-controlled outcome line (#1949).
 	if br, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
 		if s.cfg.OutboxDir == nil {
 			return fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay — every CODE_FORGE=local construction site must supply an OutboxDir resolver")
@@ -489,21 +357,18 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			return err
 		}
 		if skipRebase {
-			// The stale-mergeability-snapshot retry: the conflict-resolve
-			// dispatch already ran and restored ready above, so this
-			// ErrMergeConflict is the same already-resolved conflict, not a
-			// new one -- must not re-demote (issue #1863) or the following
-			// Merge retry would be attempted against a draft PR.
+			// The conflict-resolve dispatch already ran and restored ready, so
+			// this ErrMergeConflict is the same resolved conflict read from a
+			// stale mergeability snapshot. Re-demoting would leave the Merge
+			// retry below attempting a draft PR (issue #1863).
 			skipRebase = false
 			fmt.Printf("    #%s  landing=%s  status=merge-retry-settle\n", num, pr)
 			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
 		}
-		// A genuine conflict: demote to draft (issue #1863) as a visible
-		// signal the PR isn't currently mergeable, ahead of the
-		// rebase/conflict-resolve cycle below. Best-effort and unconditional
-		// like MarkReady's own precedent; nil-guarded since landPushOnly
-		// reaches mergeImmediate too, with s.pr unset.
+		// A genuine conflict: demote to draft (issue #1863) as a visible signal
+		// the PR is not currently mergeable. Best-effort; nil-guarded because
+		// landPushOnly reaches mergeImmediate with s.pr unset.
 		if s.pr != nil {
 			if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
 				fmt.Printf("    #%s  landing=%s  status=mark-draft-failed  !! %v\n", num, pr, mdErr)
@@ -543,9 +408,8 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			}
 			continue
 		}
-		// Rebase succeeded: the force-push reset the PR's required checks, so
-		// the next merge attempt must wait for the new head to go green
-		// rather than retrying against checks the push itself just reset.
+		// The rebase force-push reset the PR's required checks, so the next merge
+		// attempt must wait for the new head to go green.
 		if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
 			return rwErr
 		}
@@ -553,52 +417,18 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 }
 
 // rebasePushBackoff builds the linear backoff both rebase-push retry loops
-// share: Unit scaled by attempt plus the fixed Policy.Jitter nudge, slept
-// on s.clock (issue #2095). Centralizing it keeps the two call sites from
-// drifting apart.
+// share, so the two call sites cannot drift apart (issue #2095).
 func (s *Settle) rebasePushBackoff() retry.LinearBackoff {
 	b := s.cfg.Policy.Backoff(s.clock)
 	b.Jitter = s.cfg.Policy.Jitter
 	return b
 }
 
-// preflightStaleBase proactively rebases pr when the forge reports its
-// branch is behind its base (NeedsUpdate — issue #936) — even though the PR
-// shows no textual conflict and CI is already green on its current head. A
-// green PR can still be stale: main may have advanced past a just-merged
-// sibling whose changes the PR's tested tree never saw.
-//
-// It is opt-in via PreflightStaleBase (ADR 0028): off by default, a
-// green-but-behind PR merges as-is, and this returns immediately without even
-// querying NeedsUpdate — no wasted compare-API round-trip and no extra
-// rebase+CI cycle on the near-constant "behind main because a sibling landed
-// first" case. Turn it on to restore ADR 0026's behavior where a stale base
-// is treated as a conflict requiring rebase-and-re-green before merge.
-//
-// When enabled it reuses the same
-// Rebase/rewaitAfterForcePush path the reactive conflict-retry loop below
-// uses, but with its own single-attempt-plus-push-retry budget — not the
-// loop's rebaseAttempts/pushRetries counters — since a stale-base rebase and
-// a conflict-triggered rebase are independent concerns; sharing a budget
-// would let one exhaust the other's allowance before it ever gets to run.
-//
-// A NeedsUpdate query error is logged and swallowed rather than returned:
-// staleness is merely unknown, and the caller's normal Merge attempt will
-// surface the same underlying problem (a genuine conflict, blocked checks,
-// or a clean merge if the staleness turns out to be harmless) through its
-// own, already-tested error handling.
-//
-// A Rebase failure — including one that persists past its push-retry
-// budget — is different: staleness is confirmed and the corrective action
-// itself failed. A genuine ErrMergeConflict falls through to the same
-// ResolveConflict dispatch the reactive conflict-retry loop below uses
-// (issue #1319) when a Dispatcher is in scope; any other Rebase error, or a
-// conflict with no Dispatcher available, is returned as a hard,
-// merge-blocking error (issue #940) rather than falling through to Merge on
-// a base known to be stale and never re-validated. rewaitAfterForcePush's
-// own contract (a rebase that force-pushes but never re-confirms green) is
-// likewise a hard failure, for the same reason: staleness confirmed, fix
-// attempted, fix unconfirmed.
+// preflightStaleBase rebases pr when the forge reports its branch is behind the
+// base (issue #936): a green PR can still be stale, never having tested a sibling
+// that landed first. Opt-in via PreflightStaleBase (ADR 0028). A NeedsUpdate
+// error is swallowed, since the caller's Merge surfaces the same problem, but a
+// Rebase failure is hard (issue #940): staleness is confirmed, the fix failed.
 func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	if s.pr == nil || !s.cfg.PreflightStaleBase {
 		return nil
@@ -623,12 +453,10 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 	if rbErr != nil {
 		isConflict := errors.Is(rbErr, forge.ErrMergeConflict)
 		if isConflict && s.pr != nil {
-			// A genuine conflict: demote to draft (issue #1863), same as the
-			// reactive conflict-retry loop above -- regardless of whether a
-			// Dispatcher is available to attempt resolution. s.pr is already
-			// guaranteed non-nil by this function early return above; checked
-			// again here so this call stays locally correct even if that
-			// guard ever moves.
+			// A genuine conflict: demote to draft (issue #1863) whether or not a
+			// Dispatcher can resolve it. The early return above already
+			// guarantees s.pr is non-nil; the check repeats so this stays
+			// correct if that guard ever moves.
 			if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
 				fmt.Printf("    #%s  landing=%s  status=mark-draft-failed  !! %v\n", num, pr, mdErr)
 			}
@@ -637,11 +465,10 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 			if crErr := s.resolveConflict(num, pr, d); crErr != nil {
 				return crErr
 			}
-			// No skipRebase equivalent needed here (contrast the reactive
-			// loop's post-resolve skipRebase=true): the caller's loop hasn't
-			// started yet, so mergeImmediate's first Merge attempt runs
-			// fresh once rewaitAfterForcePush confirms the resolved head is
-			// green, rather than re-entering a rebase it already did.
+			// The ResolveConflict dispatch above is shared with the reactive loop
+			// (issue #1319), but no skipRebase is needed here: the caller's loop
+			// has not started, so its first Merge runs fresh once
+			// rewaitAfterForcePush confirms the resolved head is green.
 			return s.rewaitAfterForcePush(num, gen, pr)
 		}
 		fmt.Printf("    #%s  landing=%s  status=stale-base-rebase-failed  !! %v\n", num, pr, rbErr)
@@ -650,43 +477,32 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 	return s.rewaitAfterForcePush(num, gen, pr)
 }
 
-// resolveConflict dispatches a Box to resolve a genuine ErrMergeConflict
-// hit by a force-pushing rebase, shared by preflightStaleBase and
-// mergeImmediate's reactive conflict-retry loop above.
+// resolveConflict dispatches a Box to resolve a genuine ErrMergeConflict hit by
+// a force-pushing rebase.
 func (s *Settle) resolveConflict(num, pr string, d dispatch.Dispatcher) error {
 	fmt.Printf("    #%s  landing=%s  status=conflict-resolve\n", num, pr)
 	if crErr := d.ResolveConflict(pr); crErr != nil {
-		// Audited (issue #831): crErr traces through
-		// dispatch.Dispatch.ResolveConflict -> runOnce (dispatch/box.go) ->
-		// runner.Runner.Run. Both the OCI and bwrap adapters wire the
-		// Box's stdout/stderr to the log file, not to the returned error,
-		// so crErr is only ever *exec.ExitError or a start failure (missing
-		// binary, mkdtemp/file error) — never Box-internal output. Safe to
-		// surface verbatim in the issue comment posted from this error at
-		// ready.go's selfHeal.
+		// Audited (issue #831): the OCI and bwrap adapters both wire the Box's
+		// stdout and stderr to the log file, not to the returned error, so crErr
+		// is only ever an *exec.ExitError or a start failure, never Box-internal
+		// output. Safe to surface verbatim in selfHeal's issue comment.
 		fmt.Printf("    #%s  landing=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
 		return fmt.Errorf("%w: conflict-resolve dispatch failed: %v", errLandingNeverGreen, crErr)
 	}
-	// A read-only Box holds no push-capable token (issue #1979): its
-	// entrypoint bundled the resolved branch to the outbox instead of
-	// force-pushing it directly, and — unlike the reactive loop's own
-	// rebase force-push — nothing else ever relays this bundle in, so
-	// without this the caller's rewaitAfterForcePush below would poll CI on
-	// the still-conflicted pre-resolve head forever.
+	// A read-only Box holds no push-capable token (issue #1979): it bundled the
+	// resolved branch to the outbox, and nothing else relays that bundle in, so
+	// without this the caller's rewaitAfterForcePush would poll CI on the
+	// still-conflicted pre-resolve head forever.
 	if err := s.relayBoxBundle(num); err != nil {
 		return fmt.Errorf("%w: relay after conflict-resolve failed: %v", errLandingNeverGreen, err)
 	}
 	return nil
 }
 
-// relayBoxBundle relays num's outbox bundle in via the resolved Code Forge's
-// optional forge.BundleRelay hook (issue #1919), for any caller whose Box
-// may have bundled instead of pushed directly: resolveConflict above, and
-// selfHealGate's fix-pass retry loop. A read-write Code Forge never
-// implements forge.BundleRelay, so this is a no-op there — its Box already
-// pushed directly during its own run, matching the same gate
-// mergeImmediate's own pre-Merge-loop relay and
-// hostMediateDraftPR/relayBlockedWork (pr_intent.go) already use.
+// relayBoxBundle relays num's outbox bundle in via the Code Forge's optional
+// forge.BundleRelay hook (issue #1919), for callers whose Box may have bundled
+// instead of pushing. A read-write Code Forge never implements BundleRelay, so
+// this is a no-op there: its Box already pushed during its own run.
 func (s *Settle) relayBoxBundle(num string) error {
 	cf := s.cfForNum(num)
 	br, ok := cf.(forge.BundleRelay)
@@ -699,21 +515,11 @@ func (s *Settle) relayBoxBundle(num string) error {
 	return br.RelayBundle(s.cfg.OutboxDir(num), cf.AgentBranch(num))
 }
 
-// rewaitAfterForcePush blocks for CI to reach green on the PR's current head
-// after a gate-driven force-push (rebase or conflict-resolve) reset its
-// required checks. It reuses gateToGreen's timeout/poll bounds, so a wait
-// that ends in genuine CI failure or a timeout returns an error distinct from
-// forge.ErrMergeConflict — the caller's conflict-retry path is never
-// re-entered for it.
-//
-// A no-op for a push-only forge (s.pr == nil, git and local alike): there is
-// no CI to wait for, so the force-push having succeeded is itself enough —
-// mirroring preflightStaleBase's own s.pr == nil guard. Without this, the
-// reactive conflict-retry loop's rebase-succeeded branch would call
-// gateToGreen unconditionally and crash on s.pr.CheckState (issue found in
-// review of #1698): a merge conflict followed by a clean rebase, landing
-// on the retry, is a routine occurrence for CODE_FORGE=local specifically,
-// where concurrent seams commonly land onto the same Integration branch.
+// rewaitAfterForcePush waits for CI to reach green on the PR's current head
+// after a force-push reset its required checks. Its error is distinct from
+// forge.ErrMergeConflict, so the caller's conflict-retry path is never
+// re-entered for it. A push-only forge has no CI to wait for, so this is a
+// no-op there rather than a crash on s.pr.CheckState (found reviewing #1698).
 func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 	if s.pr == nil {
 		return nil
@@ -721,11 +527,9 @@ func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
 	obs, gReason := s.gateToGreen(num, gen, pr, false)
 	if obs.outcome == gateGreen {
-		// Restore ready (issue #1863): most rewaits here follow a conflict
-		// demote above; the stale-base clean-rebase path never demoted, but
-		// MarkReady is idempotent, so calling it unconditionally on green is
-		// simpler than threading a was-it-ever-demoted flag through. Best-
-		// effort, matching MarkDraft's own precedent above.
+		// Restore ready (issue #1863). MarkReady is idempotent, so calling it
+		// unconditionally beats threading a was-it-ever-demoted flag through
+		// for the stale-base path that never demoted. Best-effort.
 		if mrErr := s.pr.MarkReady(pr); mrErr != nil {
 			fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, mrErr)
 		}
@@ -734,12 +538,9 @@ func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 }
 
 // rewaitGateResultErr maps a gateToGreen outcome to rewaitAfterForcePush's
-// return value, naming gateTerminal and gateRedRetry explicitly rather than
-// folding them into a catch-all default — so a future gateResult variant
-// must be handled here too, loudly (panic), instead of silently landing on
-// "never green" (issue #1175). reason, when non-empty (always the case for
-// gateTerminal, never for gateRedRetry), is folded into the wrapped message
-// for a little extra color on the terminal sub-case.
+// return value. gateTerminal and gateRedRetry are named explicitly rather than
+// folded into a catch-all default, so a future gateResult variant panics here
+// instead of silently landing on "never green" (issue #1175).
 func rewaitGateResultErr(g gateResult, reason, pr string) error {
 	switch g {
 	case gateGreen:

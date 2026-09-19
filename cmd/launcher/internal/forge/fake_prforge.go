@@ -4,48 +4,43 @@ import "fmt"
 
 var _ PRForge = (*PRForgeFake)(nil)
 
-// PRForgeFake is the PR-forge-capability slice of Fake, holding every field
-// the PRForge surface reads or writes. It embeds *core — see core's doc
-// comment for the admission rule — so its methods can reach mu/prStates/
-// LandingCallLog/etc. directly, the same shared core instance Fake,
-// IssueTrackerFake, and CodeForgeFake also embed.
+// PRForgeFake is the PR-forge slice of Fake. Its embedded *core is the same
+// instance Fake, IssueTrackerFake, and CodeForgeFake embed, so state written
+// through one capability is visible from the others.
 type PRForgeFake struct {
-	// *core is the shared substrate promoted through to PRForgeFake — see
-	// core's doc comment for the admission rule.
 	*core
 
-	prs             map[string]PR             // URL → PR
-	branchPRs       map[string]string         // branch → PR URL
-	mergeableStates map[string]MergeableState // URL → scripted Mergeable result
-	needsUpdate     map[string]bool           // URL → scripted NeedsUpdate result
+	prs             map[string]PR
+	branchPRs       map[string]string // keyed by branch name, valued by PR URL
+	mergeableStates map[string]MergeableState
+	needsUpdate     map[string]bool
 	checkQ          map[string][]RollupState
-	checkErrQ       map[string][]error  // per-call error queue; nil entry = consult checkQ
-	prFiles         map[string][]string // URL → scripted ListPRFiles result
-	headSHAQ        map[string][]string // URL → scripted HeadCommitSHA queue
-	headSHACounter  int                 // used to synthesize a fresh SHA once headSHAQ[url] is exhausted
+	checkErrQ       map[string][]error // a nil entry falls through to checkQ
+	prFiles         map[string][]string
+	headSHAQ        map[string][]string
+	headSHACounter  int // HeadCommitSHA counts it up to synthesize a SHA once headSHAQ[url] is exhausted
 
 	// HeadCommitSHAErr, if non-nil, is returned by every HeadCommitSHA call.
 	HeadCommitSHAErr error
 
-	failureDetail map[string]string // URL → scripted FailureDetail result
+	failureDetail map[string]string
 	// FailureDetailErr, if non-nil, is returned by every FailureDetail call.
 	FailureDetailErr error
 
-	// PRStateErr, if non-nil, is returned by every PRState call (simulating a
-	// push-only Code Forge, where PR state has no meaning).
+	// PRStateErr, if non-nil, is returned by every PRState call. It models a
+	// push-only Code Forge, where PR state has no meaning.
 	PRStateErr error
 
 	// PRFilesErr, if non-nil, is returned by every ListPRFiles call.
 	PRFilesErr error
 
-	// OpenPRForBranchErr, if non-nil, is returned by every OpenPRForBranch
-	// call (simulating a transient forge lookup failure, distinct from "no
-	// open PR yet") after OpenPRForBranchErrs is drained.
+	// OpenPRForBranchErr, if non-nil, is returned by every OpenPRForBranch call
+	// once OpenPRForBranchErrs is drained. It models a transient lookup
+	// failure, which is distinct from "no open PR yet".
 	OpenPRForBranchErr error
 
-	// OpenPRForBranchErrs is a per-call queue drained before
-	// OpenPRForBranchErr is checked. A nil entry means "fall through to the
-	// normal branch->PR lookup"; a non-nil entry is returned as the error.
+	// OpenPRForBranchErrs is a per-call queue drained before OpenPRForBranchErr
+	// is checked. A nil entry falls through to the normal branch lookup.
 	OpenPRForBranchErrs []error
 
 	// NeedsUpdateErr, if non-nil, is returned by every NeedsUpdate call.
@@ -96,8 +91,8 @@ func (pf *PRForgeFake) SetMergeableState(url string, state MergeableState) {
 	pf.mergeableStates[url] = state
 }
 
-// Mergeable returns the scripted MergeableState for url, or MergeableUnknown
-// when nothing was scripted.
+// Mergeable returns the scripted state for url, or MergeableUnknown when
+// nothing was scripted.
 func (pf *PRForgeFake) Mergeable(url string) (MergeableState, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -114,8 +109,8 @@ func (pf *PRForgeFake) SetNeedsUpdate(url string, stale bool) {
 	pf.needsUpdate[url] = stale
 }
 
-// NeedsUpdate returns the scripted staleness for url (false when nothing was
-// scripted), or NeedsUpdateErr if set.
+// NeedsUpdate returns the scripted staleness for url, false when nothing was
+// scripted.
 func (pf *PRForgeFake) NeedsUpdate(url string) (bool, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -125,24 +120,22 @@ func (pf *PRForgeFake) NeedsUpdate(url string) (bool, error) {
 	return pf.needsUpdate[url], nil
 }
 
-// SetCheckStates scripts the sequence of RollupState values returned by
-// successive CheckState calls for the given PR URL.
+// SetCheckStates scripts the states successive CheckState calls return for url.
 func (pf *PRForgeFake) SetCheckStates(url string, states []RollupState) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	pf.checkQ[url] = append([]RollupState(nil), states...)
 }
 
-// SetCheckStateErrors scripts a per-call error queue for CheckState. Each
-// entry is consumed in order before the state queue is consulted. A nil entry
-// means "no error for this call — fall through to the state queue."
+// SetCheckStateErrors scripts a per-call error queue for CheckState, consumed
+// in order before the state queue. A nil entry falls through to that queue.
 func (pf *PRForgeFake) SetCheckStateErrors(url string, errs []error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	pf.checkErrQ[url] = append([]error(nil), errs...)
 }
 
-// SetPRFiles scripts the ListPRFiles result for the given PR URL.
+// SetPRFiles scripts the ListPRFiles result for url.
 func (pf *PRForgeFake) SetPRFiles(url string, files []string) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -209,10 +202,9 @@ func (pf *PRForgeFake) PRState(url string) (PRState, error) {
 	return s, nil
 }
 
-// CheckState pops the next scripted entry for url. The error queue is
-// consulted first: a non-nil entry returns StateNone plus that error; a nil
-// entry falls through to the state queue. When both queues are exhausted it
-// returns StateNone (simulating a PR with no checks registered).
+// CheckState pops the next scripted entry for url, consulting the error queue
+// first. With both queues exhausted it returns StateNone, the same answer a PR
+// with no checks registered gives.
 func (pf *PRForgeFake) CheckState(url string) (RollupState, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -222,7 +214,6 @@ func (pf *PRForgeFake) CheckState(url string) (RollupState, error) {
 		if entry != nil {
 			return StateNone, entry
 		}
-		// nil entry: fall through to state queue
 	}
 	q := pf.checkQ[url]
 	if len(q) == 0 {
@@ -233,20 +224,18 @@ func (pf *PRForgeFake) CheckState(url string) (RollupState, error) {
 	return s, nil
 }
 
-// SetHeadCommitSHAs scripts the sequence of head-commit SHAs returned by
-// successive HeadCommitSHA calls for the given PR URL. Once the queue is
-// exhausted (including when nothing was ever scripted), each call returns a
-// fresh, always-distinct value — modeling the common case where a push
-// genuinely advanced the head — so only a test that explicitly repeats a SHA
-// models a no-op fix pass that left the head unchanged.
+// SetHeadCommitSHAs scripts the SHAs successive HeadCommitSHA calls return for
+// url. Once the queue is exhausted, including when nothing was ever scripted,
+// each call returns a distinct value, so only a test that repeats a SHA models
+// a fix pass that left the head unchanged.
 func (pf *PRForgeFake) SetHeadCommitSHAs(url string, shas []string) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	pf.headSHAQ[url] = append([]string(nil), shas...)
 }
 
-// HeadCommitSHA pops the next scripted entry for url, or synthesizes a fresh,
-// always-distinct value once the queue is exhausted.
+// HeadCommitSHA pops the next scripted entry for url, or synthesizes a distinct
+// value once the queue is exhausted.
 func (pf *PRForgeFake) HeadCommitSHA(url string) (string, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -262,7 +251,7 @@ func (pf *PRForgeFake) HeadCommitSHA(url string) (string, error) {
 	return fmt.Sprintf("fake-sha-%d", pf.headSHACounter), nil
 }
 
-// SetFailureDetail scripts the FailureDetail result for the given PR URL.
+// SetFailureDetail scripts the FailureDetail result for url.
 func (pf *PRForgeFake) SetFailureDetail(url, detail string) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -270,8 +259,8 @@ func (pf *PRForgeFake) SetFailureDetail(url, detail string) {
 }
 
 // FailureDetail returns the scripted detail for url, or "" when nothing was
-// scripted — mirroring the best-effort contract of the real adapter, where a
-// PR with no failing checks yields no detail rather than an error.
+// scripted. The real adapter is best-effort the same way: a PR with no failing
+// checks yields no detail rather than an error.
 func (pf *PRForgeFake) FailureDetail(url string) (string, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -298,9 +287,9 @@ func (pf *PRForgeFake) EnqueueAutoMerge(prURL string) error {
 	return pf.EnqueueAutoMergeErr
 }
 
-// MarkReady records the call to MarkReadyCalls, observable in tests via
-// that log rather than a stored draft-flag flip (the Fake, like the real
-// adapters, no longer tracks draft state on the stored PR).
+// MarkReady records the call to MarkReadyCalls. Neither the Fake nor the real
+// adapters track draft state on the stored PR, so that log is what tests assert
+// on.
 func (pf *PRForgeFake) MarkReady(prURL string) error {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -309,7 +298,7 @@ func (pf *PRForgeFake) MarkReady(prURL string) error {
 	return pf.MarkReadyErr
 }
 
-// MarkDraft records the call to MarkDraftCalls — the inverse of MarkReady.
+// MarkDraft records the call to MarkDraftCalls, the inverse of MarkReady.
 func (pf *PRForgeFake) MarkDraft(prURL string) error {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()

@@ -10,15 +10,13 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// forgejoPullRef is the head/base ref shape embedded in a
-// forgejoPullPayload.
 type forgejoPullRef struct {
 	Ref string `json:"ref"`
 	Sha string `json:"sha"`
 }
 
-// forgejoPullPayload is the subset of the Forgejo pull-request REST
-// representation this adapter reads.
+// forgejoPullPayload is the subset of Forgejo's pull-request REST shape this
+// adapter reads.
 type forgejoPullPayload struct {
 	Number    int            `json:"number"`
 	HTMLURL   string         `json:"html_url"`
@@ -31,9 +29,8 @@ type forgejoPullPayload struct {
 	Base      forgejoPullRef `json:"base"`
 }
 
-// parsePRIndex extracts the pull index from a Forgejo PR html_url — its
-// last path segment, e.g. ".../pulls/206" -> "206". It rejects an empty or
-// non-numeric trailing segment.
+// parsePRIndex extracts the pull index from the last path segment of a
+// Forgejo PR html_url, rejecting an empty or non-numeric segment.
 func parsePRIndex(prURL string) (string, error) {
 	trimmed := strings.TrimRight(prURL, "/")
 	idx := strings.LastIndex(trimmed, "/")
@@ -50,24 +47,17 @@ func parsePRIndex(prURL string) (string, error) {
 	return seg, nil
 }
 
-// forgejoWIPPrefix is the title prefix Forgejo's WIP-title draft convention
-// uses; MarkDraft (the write side) keys off this one constant, mirroring
-// CreateDraftPR's existing convention (forgejo_readonly.go), so a PR this
-// adapter flips to draft is always written with this canonical prefix.
+// forgejoWIPPrefix is the only WIP-title prefix the write side produces, so
+// every PR this adapter flips to draft carries this canonical spelling.
 const forgejoWIPPrefix = "WIP:"
 
-// forgejoWIPPrefixes lists every WIP-title draft marker isDraftTitle and
-// stripWIPPrefix (the read side) recognize, matching Forgejo's real default
-// `setting.Repository.PullRequest.WorkInProgressPrefixes` config ("WIP:" and
-// "[WIP]:", both case-insensitive) — a Forgejo instance may format a draft
-// PR's title with either convention, so the read side must recognize both
-// even though the write side only ever produces forgejoWIPPrefix.
+// forgejoWIPPrefixes are the markers the read side accepts, matching Forgejo's
+// default setting.Repository.PullRequest.WorkInProgressPrefixes. An instance
+// may write a draft title with either convention, so both must be recognized.
 var forgejoWIPPrefixes = []string{forgejoWIPPrefix, "[WIP]:"}
 
-// isDraftTitle reports whether title carries one of Forgejo's WIP-prefix
-// draft markers (see forgejoWIPPrefixes), case-insensitively — Forgejo
-// encodes draft state as a title prefix rather than a first-class field
-// alone.
+// isDraftTitle reports whether title carries a WIP-prefix draft marker,
+// case-insensitively. Forgejo can encode draft state in the title alone.
 func isDraftTitle(title string) bool {
 	upper := strings.ToUpper(strings.TrimSpace(title))
 	for _, prefix := range forgejoWIPPrefixes {
@@ -78,9 +68,8 @@ func isDraftTitle(title string) bool {
 	return false
 }
 
-// stripWIPPrefix removes a leading, case-insensitive WIP-title draft marker
-// (see forgejoWIPPrefixes; plus any following spaces) from title. Titles
-// without any recognized prefix are returned unchanged.
+// stripWIPPrefix removes a leading, case-insensitive WIP marker and the spaces
+// after it, returning an unrecognized title unchanged.
 func stripWIPPrefix(title string) string {
 	trimmed := strings.TrimSpace(title)
 	upper := strings.ToUpper(trimmed)
@@ -92,16 +81,15 @@ func stripWIPPrefix(title string) string {
 	return title
 }
 
-// isDraftPull reports whether p represents a draft pull, ORing its draft
-// field with the WIP-title convention (isDraftTitle) — Forgejo instances
-// may signal draft state through either.
+// isDraftPull reports whether p is a draft, by the draft field or the WIP
+// title, since Forgejo instances signal draft state through either.
 func isDraftPull(p forgejoPullPayload) bool {
 	return p.Draft || isDraftTitle(p.Title)
 }
 
-// getPull fetches the single pull request identified by prURL from the
-// configured repo (the adapter is single-repo: owner/repo is never parsed
-// out of prURL itself, only the trailing index is).
+// getPull fetches the pull identified by prURL from the configured repo. The
+// adapter is single-repo: only the trailing index is parsed out of prURL, never
+// owner/repo.
 func (f *forgejoCodeForge) getPull(prURL string) (forgejoPullPayload, error) {
 	index, err := parsePRIndex(prURL)
 	if err != nil {
@@ -114,10 +102,9 @@ func (f *forgejoCodeForge) getPull(prURL string) (forgejoPullPayload, error) {
 	return payload, nil
 }
 
-// PRState returns the canonical state of the pull at prURL: merged pulls
-// report forge.PRMerged regardless of their raw state string (Forgejo
-// reports a merged pull as state=closed, merged=true), otherwise a closed
-// pull reports forge.PRClosed and anything else forge.PROpen.
+// PRState returns the canonical state of the pull at prURL. The merged field
+// wins over the state string, because Forgejo reports a merged pull as
+// state=closed, merged=true.
 func (f *forgejoCodeForge) PRState(prURL string) (forge.PRState, error) {
 	p, err := f.getPull(prURL)
 	if err != nil {
@@ -142,9 +129,8 @@ func (f *forgejoCodeForge) HeadCommitSHA(prURL string) (string, error) {
 	return p.Head.Sha, nil
 }
 
-// Mergeable returns the pull's content-mergeability state, translating
-// Forgejo's boolean mergeable field into the canonical two-value
-// forge.MergeableState (Forgejo has no third "unknown" state to report).
+// Mergeable returns the pull's content-mergeability state. Forgejo's mergeable
+// field is a boolean, so this never reports forge.MergeableUnknown on success.
 func (f *forgejoCodeForge) Mergeable(prURL string) (forge.MergeableState, error) {
 	p, err := f.getPull(prURL)
 	if err != nil {
@@ -156,10 +142,9 @@ func (f *forgejoCodeForge) Mergeable(prURL string) (forge.MergeableState, error)
 	return forge.MergeableConflicting, nil
 }
 
-// listPulls walks every page of the pulls listing in the given state ("open"
-// or "all") from the configured repo via f.rest.Paginate (issue #2265),
-// merging every page's pulls, rather than fetching a single page bounded by
-// forge.ResultPageLimit.
+// listPulls walks every page of the pulls listing in the given state ("open" or
+// "all"), rather than fetching one page bounded by forge.ResultPageLimit
+// (issue #2265).
 func (f *forgejoCodeForge) listPulls(state string) ([]forgejoPullPayload, error) {
 	var pulls []forgejoPullPayload
 	err := f.rest.Paginate(func(page int) (bool, error) {
@@ -181,13 +166,10 @@ func (f *forgejoCodeForge) listPulls(state string) ([]forgejoPullPayload, error)
 	return pulls, nil
 }
 
-// OpenPRForBranch returns the open pull whose head matches branch, if any,
-// draft or not (issue #2408): a stranded draft is exactly as adoptable as a
-// ready one, since SettleAdopted already flips draft->ready at green via an
-// idempotent MarkReady call. Draft status (from either the pull's draft
-// field or its WIP-title convention, isDraftPull) is not reported through
-// the returned forge.PR — adoption stays draft-blind; isDraftPull is still
-// used internally by MarkReady/MarkDraft's idempotency guards.
+// OpenPRForBranch returns the open pull whose head matches branch, draft or not
+// (issue #2408). A stranded draft is as adoptable as a ready one, since
+// SettleAdopted calls the idempotent MarkReady at green. The returned forge.PR
+// deliberately omits draft status, keeping adoption draft-blind.
 func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	pulls, err := f.listPulls("open")
 	if err != nil {
@@ -202,8 +184,8 @@ func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error
 	return forge.PR{}, false, nil
 }
 
-// PRForBranch returns the URL of any pull (any state, any draft status)
-// whose head matches branch, if any.
+// PRForBranch returns the URL of any pull, in any state, whose head matches
+// branch.
 func (f *forgejoCodeForge) PRForBranch(branch string) (string, bool, error) {
 	pulls, err := f.listPulls("all")
 	if err != nil {
@@ -217,16 +199,13 @@ func (f *forgejoCodeForge) PRForBranch(branch string) (string, bool, error) {
 	return "", false, nil
 }
 
-// forgejoCombinedStatus is the shape Forgejo's combined commit-status
-// endpoint (/commits/{sha}/status) returns: an already-aggregated state
-// across every status posted against the commit, plus how many contributed.
+// forgejoCombinedStatus is what /commits/{sha}/status returns: a state already
+// aggregated across every status on the commit, plus how many contributed.
 type forgejoCombinedStatus struct {
 	State      string `json:"state"`
 	TotalCount int    `json:"total_count"`
 }
 
-// forgejoRollupStates maps Forgejo's combined-status state string to the
-// canonical forge.RollupState.
 var forgejoRollupStates = map[string]forge.RollupState{
 	"success": forge.StateSuccess,
 	"pending": forge.StatePending,
@@ -234,13 +213,10 @@ var forgejoRollupStates = map[string]forge.RollupState{
 	"error":   forge.StateError,
 }
 
-// CheckState returns the aggregate CI status of the PR's head commit, read
-// from Forgejo's combined commit-status endpoint — which, like GitHub's
-// GraphQL statusCheckRollup CheckState trusts, already computes the
-// aggregate across every status posted against the commit, so this does not
-// recompute it from the individual statuses itself. Returns forge.StateNone
-// when no statuses are registered on the commit (an empty state string or a
-// zero total_count).
+// CheckState returns the aggregate CI status of the PR's head commit. The
+// combined endpoint already aggregates, so this does not recompute from the
+// individual statuses. An empty state or a zero total_count means no statuses
+// are registered, reported as forge.StateNone.
 func (f *forgejoCodeForge) CheckState(prURL string) (forge.RollupState, error) {
 	p, err := f.getPull(prURL)
 	if err != nil {
@@ -259,31 +235,23 @@ func (f *forgejoCodeForge) CheckState(prURL string) (forge.RollupState, error) {
 	return forge.StateNone, nil
 }
 
-// forgejoStatus is one entry of Forgejo's commit-status list
-// (/commits/{sha}/statuses): a single reported status, distinct from the
-// combined/aggregate shape forgejoCombinedStatus reads.
+// forgejoStatus is one entry of /commits/{sha}/statuses, a single reported
+// status rather than the aggregate forgejoCombinedStatus holds.
 type forgejoStatus struct {
 	Context     string `json:"context"`
 	State       string `json:"state"`
 	Description string `json:"description"`
 }
 
-// forgejoFailingStatusStates are the forgejoStatus.State values that
-// represent a genuine failure, as opposed to success or pending.
 var forgejoFailingStatusStates = map[string]bool{
 	"failure": true,
 	"error":   true,
 }
 
-// FailureDetail renders the PR head commit's failing statuses into a
-// bounded, human-readable excerpt: one "context: STATE" header per failing
-// status (state upper-cased) plus its description. It normalizes the
-// failing statuses into forge.FailureDetailEntry values and defers the
-// actual rendering, including the forge.MaxFailureDetailBytes truncation,
-// to the shared forge.RenderFailureDetail. Returns "" when nothing is
-// currently failing. The fetch is best-effort in intent — callers should
-// treat a non-nil error as "detail unavailable" — but a genuine HTTP
-// failure is still surfaced as an error rather than silently swallowed.
+// FailureDetail renders the head commit's failing statuses into a bounded
+// excerpt, returning "" when nothing is failing. forge.RenderFailureDetail owns
+// the formatting and the forge.MaxFailureDetailBytes truncation. Callers should
+// treat a non-nil error as "detail unavailable".
 func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 	p, err := f.getPull(prURL)
 	if err != nil {
@@ -307,14 +275,12 @@ func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 	return forge.RenderFailureDetail(entries), nil
 }
 
-// forgejoPRFile is the shape Forgejo's pulls/{index}/files endpoint returns
-// for each changed file.
 type forgejoPRFile struct {
 	Filename string `json:"filename"`
 }
 
-// ListPRFiles returns every path changed by the PR (added, modified, and
-// deleted alike). A deleted file is still reported under its old path.
+// ListPRFiles returns every path the PR changes. A deleted file is reported
+// under its old path.
 func (f *forgejoCodeForge) ListPRFiles(prURL string) ([]string, error) {
 	index, err := parsePRIndex(prURL)
 	if err != nil {
@@ -333,28 +299,22 @@ func (f *forgejoCodeForge) ListPRFiles(prURL string) ([]string, error) {
 	return files, nil
 }
 
-// forgejoCompare is the subset of Forgejo's compare-API response NeedsUpdate
-// reads: total_commits is the number of commits on the compare's head side
-// that its base side does not contain.
+// forgejoCompare reads one compare-API field: total_commits counts the commits
+// on the compare's head side that its base side does not contain.
 type forgejoCompare struct {
 	TotalCommits int `json:"total_commits"`
 }
 
-// NeedsUpdate reports whether the PR's base branch has commits its head
-// branch has not yet incorporated. Forgejo's compare API
-// (/compare/{base}...{head}) returns only the commits reachable from head
-// but not base — its own "ahead" set, with no behind_by counterpart like
-// GitHub's compare. To count the reverse — commits the base branch has that
-// the PR's head is missing — the two refs are swapped, so the head side of
-// the compare is the PR's base branch: total_commits then counts exactly the
-// commits the PR is behind by. Ref names are path-escaped since this
-// project's own agent branches (agent/issue-N) contain a slash.
+// NeedsUpdate reports whether the PR's base branch has commits its head branch
+// is missing. Forgejo's compare API counts only what its own head side adds and
+// has no behind_by like GitHub's, so the PR's head goes on the compare's base
+// side ({head}...{base}) and total_commits is what the PR is behind by. Ref
+// names are path-escaped because agent branches (agent/issue-N) contain a slash.
 func (f *forgejoCodeForge) NeedsUpdate(prURL string) (bool, error) {
 	p, err := f.getPull(prURL)
 	if err != nil {
 		return false, err
 	}
-	// {head}...{base}: commits on base not reachable from the PR's head.
 	headBase := url.PathEscape(p.Head.Ref) + "..." + url.PathEscape(p.Base.Ref)
 	var cmp forgejoCompare
 	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/compare/"+headBase, nil, &cmp); err != nil {
@@ -363,8 +323,6 @@ func (f *forgejoCodeForge) NeedsUpdate(prURL string) (bool, error) {
 	return cmp.TotalCommits > 0, nil
 }
 
-// forgejoAutoMergeStylesPayload is the subset of the Forgejo repository
-// object CanAutoMerge reads: the three merge styles a repo can permit.
 type forgejoAutoMergeStylesPayload struct {
 	AllowMergeCommits bool `json:"allow_merge_commits"`
 	AllowRebase       bool `json:"allow_rebase"`
@@ -372,10 +330,8 @@ type forgejoAutoMergeStylesPayload struct {
 }
 
 // CanAutoMerge reports whether the repo permits at least one merge style.
-// Forgejo has no single "auto-merge allowed" repo flag the way GitHub's
-// autoMergeAllowed does; its native scheduled/merge-when-checks-succeed
-// merge is available whenever the repo permits any merge style at all, so
-// that (rather than a dedicated flag) is the signal read here.
+// Forgejo has no autoMergeAllowed flag like GitHub's; its scheduled merge works
+// whenever any merge style is permitted, so that is the signal read here.
 func (f *forgejoCodeForge) CanAutoMerge() (bool, error) {
 	var repo forgejoAutoMergeStylesPayload
 	if err := f.rest.Do(http.MethodGet, f.repoPath(), nil, &repo); err != nil {
@@ -384,11 +340,9 @@ func (f *forgejoCodeForge) CanAutoMerge() (bool, error) {
 	return repo.AllowMergeCommits || repo.AllowRebase || repo.AllowSquashMerge, nil
 }
 
-// EnqueueAutoMerge enqueues Forgejo's native merge-when-checks-succeed
-// (scheduled merge) for the PR: POSTing to the pull's merge endpoint with
-// merge_when_checks_succeed=true queues the merge rather than performing it
-// immediately, mirroring GitHub's native auto-merge semantics. Requests
-// f.mergeMethod's style (forgejoMergeDo), the same knob Merge itself uses.
+// EnqueueAutoMerge queues Forgejo's scheduled merge for the PR.
+// merge_when_checks_succeed=true makes the merge endpoint queue rather than
+// merge immediately. The style comes from f.mergeMethod, as in Merge.
 func (f *forgejoCodeForge) EnqueueAutoMerge(prURL string) error {
 	index, err := parsePRIndex(prURL)
 	if err != nil {
@@ -397,15 +351,10 @@ func (f *forgejoCodeForge) EnqueueAutoMerge(prURL string) error {
 	return f.postMerge(index, map[string]any{"merge_when_checks_succeed": true})
 }
 
-// MarkReady flips the PR out of draft by PATCHing its title with the
-// WIP-prefix stripped. Idempotent: a PR that is already not a draft is a
-// no-op that issues no request, mirroring the github adapter's
-// `gh pr ready` idempotency without relying on Forgejo returning a
-// particular status for a redundant call. Gates on isDraftPull rather than
-// isDraftTitle alone: a pull's draft field can be true while its title
-// carries a WIP-title convention isDraftTitle doesn't (yet) recognize, and
-// OpenPRForBranch already adopts any draft PR by that broader signal — this
-// keeps MarkReady able to act on everything OpenPRForBranch can adopt.
+// MarkReady flips the PR out of draft by PATCHing its title with the WIP prefix
+// stripped. A PR that is already not a draft is a no-op issuing no request. The
+// gate is isDraftPull, not isDraftTitle, so MarkReady can act on every draft
+// OpenPRForBranch adopts, including one signaled by the draft field alone.
 func (f *forgejoCodeForge) MarkReady(prURL string) error {
 	p, err := f.getPull(prURL)
 	if err != nil {
@@ -422,13 +371,10 @@ func (f *forgejoCodeForge) MarkReady(prURL string) error {
 	return f.rest.Do(http.MethodPatch, f.repoPath()+"/pulls/"+index, body, nil)
 }
 
-// MarkDraft flips the PR back to draft by PATCHing its title with a leading
-// WIP prefix — the inverse of MarkReady. Idempotent the same way: a PR
-// that's already draft is a no-op that issues no request. Gates on
-// isDraftPull rather than isDraftTitle alone, mirroring MarkReady: a pull's
-// draft field can be true while its title carries no WIP-title convention
-// at all, and gating on the title-only check would redundantly PATCH such a
-// pull back to draft.
+// MarkDraft flips the PR back to draft by PATCHing a WIP prefix onto its title.
+// A PR that is already draft is a no-op issuing no request. The gate is
+// isDraftPull, not isDraftTitle, because a pull whose draft field is true but
+// whose title has no WIP prefix would otherwise be PATCHed redundantly.
 func (f *forgejoCodeForge) MarkDraft(prURL string) error {
 	p, err := f.getPull(prURL)
 	if err != nil {

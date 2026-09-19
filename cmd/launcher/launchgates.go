@@ -8,59 +8,40 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 )
 
-// launchGate is one entry in the ordered gate registry (issue #2942):
-// gatedContext (enforcement) and doctor (reporting) both walk the same
-// gateRegistry slice through walkGateRegistry, so "enforce order equals
-// report order" holds by construction rather than by two hand-maintained
-// lists staying in sync.
+// launchGate is one entry in the ordered gate registry (issue #2942).
+// Enforcement (gatedContext) and reporting (doctor) both walk gateRegistry
+// through walkGateRegistry, so enforce order equals report order by
+// construction.
 type launchGate struct {
 	Name string
-	// Applicable reports whether g is relevant to c at all. nil means
-	// always applicable (the capability/network-mode gates, which have no
-	// backend selection). The two token gates set this to their own full
-	// self-noop condition — boxForgeAndIssueAccess=="read-only" AND
-	// codeForge/issueTracker backend match, mirroring both of
-	// checkReadOnlyTokenGate's/checkReadOnlyForgejoTokenGate's own early
-	// returns — so an inapplicable gate (an inactive backend, or a
-	// read-write deployment where the gate's own Check would silently no-op
-	// and return nil) is skipped entirely: no Check call, no report line,
-	// rather than printing a false "ok" for a check that never ran against
-	// anything real.
+	// Applicable reports whether g is relevant to c at all; nil means always.
+	// An inapplicable gate is skipped entirely, with no Check call and no
+	// report line, so doctor never prints "ok" for a check that never ran.
+	// The token gates reuse their own self-noop condition here.
 	Applicable func(c config) bool
-	// Network marks a gate whose Check makes a live network call (the two
-	// token gates' introspection). walkGateRegistry's collectAll mode stops
-	// at the first Network gate's failure instead of continuing past it,
-	// since a later probe is moot once an earlier one has already failed,
-	// while still enumerating every failing non-network gate first.
+	// Network marks a gate whose Check makes a live network call. Once one
+	// fails, walkGateRegistry stops even in collectAll mode, since a later
+	// probe is moot.
 	Network bool
 	Check   func(c config, w io.Writer) error
 }
 
-// tokenGateApplicable reports whether c's codeForge or issueTracker resolves
-// to a backend sharing desc's TokenEnvVar. It reads each resolved backend's
-// TokenEnvVar (backendByName) rather than comparing codeForge/issueTracker
-// to desc's literal Name -- a lookup miss yields a zero-value Descriptor
-// with TokenEnvVar=="", which never matches, so an unregistered name is
-// inapplicable the same as a genuinely non-matching one. Both gateRegistry's
-// Applicable closures and checkReadOnlyTokenGate's/
-// checkReadOnlyForgejoTokenGate's own self-noop checks call this same
-// helper, so the two can never disagree about which backend the gate
-// governs. This "unregistered name never matches" guarantee holds only
-// because every current caller passes a desc whose TokenEnvVar is non-empty
-// (backend.GitHub/Forgejo); calling this with a token-less desc (e.g.
-// backend.Local or backend.Git, TokenEnvVar=="") would make a lookup miss
-// spuriously match via empty=="" too.
+// tokenGateApplicable reports whether c's codeForge or issueTracker resolves to
+// a backend sharing desc's TokenEnvVar. Matching on TokenEnvVar rather than
+// desc.Name makes an unregistered name miss, but only while every caller passes
+// a desc with a non-empty TokenEnvVar; a token-less desc (backend.Local,
+// backend.Git) would match every lookup miss, since both sides are empty.
 func tokenGateApplicable(c config, desc backend.Descriptor) bool {
 	forgeRow, _ := backendByName(c.codeForge)
 	trackerRow, _ := backendByName(c.issueTracker)
 	return forgeRow.TokenEnvVar == desc.TokenEnvVar || trackerRow.TokenEnvVar == desc.TokenEnvVar
 }
 
-// gateRegistry is the ordered set of launch gates common to both the gated
-// tier's enforcement path and doctor's reporting path. The two bwrap gates
-// (checkBwrapPastaGate, checkBwrapOverlayGate) are deliberately excluded —
-// doctor already reports them separately, with richer dynamic-Tier/remedy
-// semantics, via bwrapCapabilityChecks in bwrap_doctor_checks.go.
+// gateRegistry is the ordered set of launch gates shared by the gated tier's
+// enforcement path and doctor's reporting path. The two bwrap gates are
+// excluded on purpose: doctor reports them separately, with richer dynamic
+// Tier and remedy semantics, via bwrapCapabilityChecks in
+// bwrap_doctor_checks.go.
 var gateRegistry = []launchGate{
 	{Name: "read-only-capability", Check: func(c config, _ io.Writer) error {
 		return checkReadOnlyCapabilityGate(c)
@@ -99,10 +80,9 @@ var gateRegistry = []launchGate{
 }
 
 // splitGateRegistryByNetwork partitions registry into its non-network and
-// network gates, preserving registry order within each — deriving the split
-// from each gate's own Network field rather than a hardcoded index, so
-// inserting or reordering a gate in gateRegistry can never silently break
-// this split.
+// network gates, preserving registry order within each. The split reads each
+// gate's own Network field rather than a hardcoded index, so inserting or
+// reordering a gate cannot silently break it.
 func splitGateRegistryByNetwork(registry []launchGate) (nonNetwork, network []launchGate) {
 	for _, g := range registry {
 		if g.Network {
@@ -114,26 +94,11 @@ func splitGateRegistryByNetwork(registry []launchGate) (nonNetwork, network []la
 	return nonNetwork, network
 }
 
-// walkGateRegistry runs registry's gates against c in order. checkW is
-// handed to each gate's own Check closure, so a gate's own operator-facing
-// output (e.g. the token gate's WARNING) keeps reaching the caller's real
-// writer even when reportW is discarded. reportW receives only this
-// function's own "ok: <name>" / "MISSING: <name>: <err>" report lines —
-// kept separate so enforcement callers (gatedContext) can suppress the
-// generic report noise entirely without also suppressing a gate's own
-// messages (issue #2942 AC5).
-//
-// A gate whose Applicable(c) is false is skipped entirely: no Check call,
-// no report line, matching the pre-#2942 doctor behavior of never
-// mentioning an inactive backend's gate.
-//
-// collectAll controls how a failure is handled. When false, the first
-// failure stops the walk immediately, matching the pre-#2942 enforcement
-// contract. When true, a failing non-Network gate is recorded but the walk
-// continues — so `spindrift doctor` enumerates every simultaneously-broken
-// non-network gate rather than stopping at the first — while a failing
-// Network gate still stops the walk immediately, since a later gate's live
-// network probe is moot once an earlier one has already failed.
+// walkGateRegistry runs registry's gates against c in order. checkW goes to
+// each gate's own Check, so a gate's operator-facing output still reaches the
+// caller's real writer even when reportW is discarded for the generic ok and
+// MISSING lines (issue #2942 AC5). collectAll lets doctor enumerate every
+// broken non-network gate instead of stopping at the first.
 func walkGateRegistry(registry []launchGate, c config, checkW, reportW io.Writer, collectAll bool) error {
 	var errs []error
 	for _, g := range registry {
@@ -154,12 +119,10 @@ func walkGateRegistry(registry []launchGate, c config, checkW, reportW io.Writer
 }
 
 // walkSplitGateRegistry runs registry's non-Network gates then its Network
-// gates, via splitGateRegistryByNetwork — the same split newGatedContext
-// uses to interleave the bwrap gates (gatedcontext.go) — so a caller that
-// reports on registry's full membership (doctor.go) can never diverge from
-// enforcement's order, even after a future edit to registry, since both now
-// derive their order from the same split rather than one reading registry's
-// raw declaration order and the other reading the split.
+// gates. It takes that order from splitGateRegistryByNetwork, the same split
+// newGatedContext uses to interleave the bwrap gates (gatedcontext.go), so
+// doctor's report order cannot diverge from enforcement's after a later edit
+// to registry.
 func walkSplitGateRegistry(registry []launchGate, c config, checkW, reportW io.Writer, collectAll bool) error {
 	nonNetwork, network := splitGateRegistryByNetwork(registry)
 	errNonNetwork := walkGateRegistry(nonNetwork, c, checkW, reportW, collectAll)

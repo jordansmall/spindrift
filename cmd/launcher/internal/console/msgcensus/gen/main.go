@@ -1,8 +1,6 @@
-// Command gen regenerates msg_census_gen.go in the console package by
-// AST-walking every non-test Go file in the package directory for every
-// type carrying the isConsoleMsg marker method. Invoke it via `go generate
-// ./cmd/launcher/internal/console` (the //go:generate directive lives in
-// msg.go) rather than running it directly.
+// Command gen regenerates msg_census_gen.go in the console package from the
+// types carrying the isConsoleMsg marker method. Run it as `go generate
+// ./cmd/launcher/internal/console`; the //go:generate directive is in msg.go.
 package main
 
 import (
@@ -26,8 +24,7 @@ package console
 var msgCensus = []string{
 `
 
-// writeFile is os.WriteFile by default; tests override it to capture the
-// generated output without touching disk.
+// Tests override writeFile to capture the generated output without touching disk.
 var writeFile = os.WriteFile
 
 func main() {
@@ -56,25 +53,18 @@ func run() error {
 	return nil
 }
 
-// resolveConsoleDir locates the console package directory by inspecting this
-// file's own location at runtime.
 func resolveConsoleDir() (string, error) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
-		// Defensive branch: runtime.Caller(0) never fails in practice, so
-		// this is effectively untestable.
+		// runtime.Caller(0) never fails in practice, so this branch is untestable.
 		return "", fmt.Errorf("could not determine caller file location")
 	}
 
-	// thisFile is .../internal/console/msgcensus/gen/main.go; the console
-	// package directory is two levels up.
+	// thisFile is .../internal/console/msgcensus/gen/main.go, so three Dir calls
+	// strip main.go, gen, and msgcensus to reach the console directory.
 	return filepath.Dir(filepath.Dir(filepath.Dir(thisFile))), nil
 }
 
-// generate builds the formatted contents of msg_census_gen.go for the
-// package directory dir: it collects every Msg-implementing type name via
-// msgcensus.Collect, renders them into the generated-file header, and runs
-// the result through gofmt.
 func generate(dir string) ([]byte, error) {
 	names, err := msgcensus.Collect(dir)
 	if err != nil {

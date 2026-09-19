@@ -1,8 +1,7 @@
-// Package dispatch is the per-issue execution module (issue #441): every Box
-// launched for one issue — initial run, fix passes, conflict-resolve — plus
-// its results and its driver-cache entry, from claim to verdict. No caller
-// outside this package constructs a runner.Box, opens an issue log file for
-// writing, or classifies a Driver exit directly.
+// Package dispatch owns every Box launched for one issue, from claim to
+// verdict (issue #441). No caller outside this package constructs a
+// runner.Box, opens an issue log file for writing, or classifies a Driver
+// exit.
 package dispatch
 
 import (
@@ -24,72 +23,54 @@ type Config struct {
 	// every Box (schema boxEnv=true entries).
 	BoxEnvVars string
 
-	// ResolveEnv resolves one BoxEnvVars name to its forwarded value for the
-	// issue being dispatched (num). Defaults to a num-ignoring os.Getenv
-	// when nil (every pre-#625 caller and test). main.go wires this to the
-	// same document/flag/env chain loadConfig() uses (getenvSchema), so a
-	// boxEnv knob's document-baked value still reaches the Box even when
-	// the operator sets it nowhere (ADR 0020: the wrapper exports no
-	// per-var env any more). num lets CODE_FORGE=local resolve BASE_BRANCH
-	// per seam (issue #1734): each dispatched issue may key its own
-	// Integration branch off a different parent.
+	// ResolveEnv resolves one BoxEnvVars name for the issue being dispatched
+	// (num), defaulting to a num-ignoring os.Getenv when nil. main.go wires
+	// it to loadConfig()'s document/flag/env chain, so a document-baked value
+	// reaches the Box even when the operator sets it nowhere (ADR 0020). num
+	// lets each issue resolve its own BASE_BRANCH under local (issue #1734).
 	ResolveEnv func(num, name string) string
 
-	// Policy is retry.Policy's transient-retry tuning, built once by
-	// retryPolicy and carried into this Config (issue #2928).
+	// Policy is the transient-retry tuning, built once by retryPolicy
+	// (issue #2928).
 	Policy retry.Policy
 
 	// DriverSessionCacheDir is the selected Driver's declared in-box
 	// session-cache mount target (ADR 0009). Empty when the Driver declares
-	// none, in which case the Factory creates no per-issue cache directory
-	// at all -- there is nowhere in-box to mount it (issue #448).
+	// none, and then the Factory creates no per-issue cache directory at
+	// all, because there is nowhere in-box to mount it (issue #448).
 	DriverSessionCacheDir string
 
 	// RegistryProxyRoutes is the resolved registry-proxy route table (ADR
-	// 0044/0045, issue #3139), replacing the earlier
-	// RegistryProxyUpstreamURL/RegistryProxyCredential scalar pair. Each
-	// Route's Credential is the resolved value itself -- never a reference
-	// like a file path or env var name, those are resolved once at launcher
-	// startup before this Config is built. An empty slice means the
-	// registry-proxy feature is off entirely, in which case runOnce starts
-	// no proxy and mounts no socket into the Box, matching the scalar
-	// pair's own on/off gate.
+	// 0044/0045, issue #3139). Each Route's Credential is the resolved value
+	// itself, never a file path or env var name: the launcher resolves those
+	// at startup, before it builds this Config. An empty slice turns the
+	// feature off, and runOnce then starts no proxy and mounts no socket.
 	RegistryProxyRoutes []registryproxy.Route
 
-	// Kind is the dispatch kind ("work" or "research", ADR 0022) forwarded
-	// into every Box as DISPATCH_KIND, so the entrypoint can select its
-	// prompt and skip clone-branch/PR/CI phases for research. Empty defaults
-	// to "work" in buildBoxEnv, matching every pre-existing (kind-unaware)
-	// construction site.
+	// Kind is the dispatch kind ("work" or "research", ADR 0022) forwarded as
+	// DISPATCH_KIND, so the entrypoint selects its prompt and skips the
+	// clone-branch/PR/CI phases for research. Empty defaults to "work".
 	Kind string
 
-	// SelfContained forwards the research kind's no-repo sub-mode (issue #2202)
-	// into the Box as SELF_CONTAINED=1, so the entrypoint skips clone_repo and
-	// all repo exploration and selects the self-contained research prompt.
-	// Meaningful only when Kind == "research"; false (the default) for every
-	// pre-#2202 construction site leaves the env var unset.
+	// SelfContained forwards the research kind's no-repo sub-mode as
+	// SELF_CONTAINED=1 (issue #2202), so the entrypoint skips clone_repo and
+	// repo exploration. Meaningful only when Kind == "research".
 	SelfContained bool
 
-	// ForgeDescriptor/TrackerDescriptor are the two backend-registry rows
-	// resolved for this run's CODE_FORGE/ISSUE_TRACKER pairing, read off the
-	// one forge.Capabilities value ResolveCapabilities produced (issue
-	// #2945). Config carries just these two plain-data rows, not that whole
-	// value (issue #2947, narrowed by #3063): dispatch has no business
-	// holding its write-capable interface handles.
+	// ForgeDescriptor/TrackerDescriptor are the backend-registry rows for this
+	// run's CODE_FORGE/ISSUE_TRACKER pairing, read off the forge.Capabilities
+	// value ResolveCapabilities produced (issue #2945). Config carries only
+	// these plain-data rows, never that whole value, because dispatch must
+	// not hold its write-capable handles (issue #2947, narrowed by #3063).
 	ForgeDescriptor   backend.Descriptor
 	TrackerDescriptor backend.Descriptor
 
-	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value
-	// ("read-write" or "read-only"), consulted by needsOutbox/buildBoxEnv
-	// below alongside ForgeDescriptor's HostMediatedRemote and
-	// OutboxRelayCapable fields.
+	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value,
+	// "read-write" or "read-only".
 	BoxForgeAndIssueAccess string
 
-	// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/ForgeBackend/
-	// FilerEnabled/WorkerProvisioned/ScoutProvisioned/ReviewLoopInline/
-	// ReviewLoopOrchestrator are each the nix-resolved static prompt-gate
-	// value (issue #2533; ScoutProvisioned added by #3157), forwarded into
-	// the Box unmodified.
+	// These are nix-resolved static prompt-gate values (issue #2533;
+	// ScoutProvisioned added by #3157), forwarded into the Box unmodified.
 	TrackerAxisRead        string
 	TrackerAxisWrite       string
 	TrackerAxisFiler       string
@@ -101,71 +82,40 @@ type Config struct {
 	ReviewLoopOrchestrator bool
 
 	// ReviewModelOverride/ReviewEffortOverride carry an operator's explicit
-	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (ambient env or flag, issue
-	// #3171) into the Box as BOX_REVIEW_MODEL_OVERRIDE/
-	// BOX_REVIEW_EFFORT_OVERRIDE, where the orchestrator's code-owned review
-	// pass binds them over the baked roster reviewer entry. Empty means the
-	// operator set nothing at dispatch time, and buildBoxEnv forwards no var
-	// at all — deliberately NOT the resolveBoxEnvVar document/schema-default
-	// chain the generic BoxEnvVars forwarding uses, since a forwarded baked
-	// default would override the roster on every dispatch.
+	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (issue #3171), which the review
+	// pass binds over the baked roster entry. Empty forwards no var, skipping
+	// the document/schema default chain BoxEnvVars uses: a baked default would
+	// override the roster on every dispatch.
 	ReviewModelOverride  string
 	ReviewEffortOverride string
 
-	// OpenPRForIssue reports whether an open PR already exists for the
-	// issue's agent branch. Consulted before a zero-exit, no-outcome box is
-	// held-and-retried on a transient classification (issue #565), so a box
-	// whose work already landed a PR is never re-run -- the same guard
-	// settle's status=missing path applies. Always set by the sole
-	// production constructor (dispatchConfig); a push-only Code Forge with
-	// no PR lookup is handled inside that closure (ResolveOpenPR resolves
-	// to Found: false there), not by leaving this field nil -- callers may
-	// rely on it being non-nil.
+	// OpenPRForIssue reports whether an open PR already exists for the issue's
+	// agent branch, so a box whose work already landed a PR is never held and
+	// retried on a transient classification (issue #565). Callers may rely on
+	// it being non-nil: a push-only Code Forge resolves to false inside
+	// dispatchConfig's closure rather than leaving it nil.
 	OpenPRForIssue func(number string) (bool, error)
 
-	// IssueTextFor resolves the subject issue's body (plus, when the
-	// tracker supports it, its recent comments) into the text buildBoxEnv
-	// forwards into the Box as ISSUE_TEXT (issue #3445), via
-	// forge.IssueText against whichever IssueTracker backend the run is
-	// dispatching against -- github, forgejo, local, and jira all go
-	// through this one closure. A nil closure (no production caller leaves
-	// it nil; only pre-#3445 tests) means ISSUE_TEXT is simply absent from
-	// the Box env. An error is different: buildBoxEnv returns it, which
+	// IssueTextFor resolves the subject issue's body, plus its recent
+	// comments when the tracker supports them, into the ISSUE_TEXT the Box
+	// receives (issue #3445). Every tracker backend goes through this one
+	// closure. A nil closure leaves ISSUE_TEXT absent; an error instead
 	// fails the dispatch (see buildBoxEnv's doc).
 	IssueTextFor func(number string) (string, error)
 
-	// HeartbeatOut is the human-facing sink every Box's heartbeat writer
-	// echoes to, alongside its unconditional pass-log file capture, and the
-	// sink each dispatch-start announce line ("-> #NN: title" and its
-	// fix-pass/conflict-resolve variants, box.go's humanOut) writes to as
-	// well (issue #1829). Nil defaults to os.Stdout in box.go (every
-	// pre-#1583 caller and test). The console entry point sets this to
-	// io.Discard via Factory.SetHeartbeatOut -- Bubble Tea owns the terminal
-	// in alt-screen/raw mode there, and a bare-\n heartbeat line or a raw
-	// announce line both stairstep down the screen instead of returning to
-	// column 0, while the sidebar activity feed and queue view already
-	// reflect the same information from the pass log and dispatch state.
+	// HeartbeatOut is the human-facing sink for every Box's heartbeat writer
+	// and each dispatch-start announce line (issue #1829). Nil defaults to
+	// os.Stdout in box.go. The console entry point sets io.Discard: Bubble Tea
+	// owns the terminal in alt-screen raw mode, where a bare-\n heartbeat line
+	// stairsteps down the screen instead of returning to column 0.
 	HeartbeatOut io.Writer
 }
 
-// buildBoxEnv assembles the env map forwarded into a Box. It combines the
-// schema boxEnv=true vars (read from the ambient env by name) with per-issue
-// vars. nonce is the dispatching Dispatch's per-run nonce (issue #1937,
-// empty in tests that don't need it), forwarded as RUN_NONCE so
-// control-signal prompt fragments can reference it.
-//
-// A Config.IssueTextFor error is returned rather than warned-and-dropped
-// (issue #3445): the *-prompt.md family unconditionally tells the Box its
-// body is in the injected ISSUE_TEXT section and not to fetch it from the
-// tracker, so a Box launched without it would work from the title alone
-// with no recourse. This error fires before any box runs, so logPath is
-// still empty when dispatchWithRetry classifies it (issue #3119's
-// logIsEmpty check) -- Terminal with no transient marker, err surfaced on
-// Result.Err, no retry: the subject issue fails the dispatch outright
-// (agent-failed). A *linked* issue's lookup failure is the opposite case
-// and never reaches this path at all: forge.IssueText degrades it to a
-// listed "unresolved" entry inside the text this func still returns
-// successfully.
+// buildBoxEnv assembles the Box env from the schema boxEnv=true vars, the
+// per-issue vars, and nonce as RUN_NONCE (issue #1937). An IssueTextFor error
+// fails the dispatch rather than being dropped (issue #3445): the prompt
+// templates promise the Box an injected ISSUE_TEXT section. It fires before any
+// box runs, so the empty-log check surfaces it on Result.Err (issue #3119).
 func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string, nonce string) (map[string]string, error) {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
@@ -201,23 +151,15 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 		env["CI_FAILURE_SUMMARY"] = ciFailureSummary
 	}
 	env["RUN_NONCE"] = nonce
-	// The write-enabled-vs-not decision, resolved once here and forwarded as
-	// a single explicit positive signal (issue #1951): present only when
-	// cfg.BoxForgeAndIssueAccess is exactly "read-write", absent under
-	// read-only or any other/malformed value, so an unset, typo'd, or
-	// forwarding-glitched value inside the Box can never fall open into the
-	// write-capable prompt path the way branching on
-	// BOX_FORGE_AND_ISSUE_ACCESS with a `:-read-write` fallback did. A
-	// `!= "read-only"` test would put the fallback right back here, just
-	// moved host-side.
+	// Exact match, never != "read-only" (issue #1951): an unset, typo'd, or
+	// forwarding-glitched value must not fall open into the write-capable
+	// prompt path.
 	if cfg.BoxForgeAndIssueAccess == "read-write" {
 		env["BOX_WRITE_ENABLED"] = "1"
 	}
-	// HostMediatedRemote/OutboxRelayCapable forward the same two backend-
-	// registry capability facts needsOutbox already consults (issue #2267),
-	// so the in-box `driver-exec outcome-backstop` verb can key its no-
-	// outcome backstop decision off explicit signals instead of re-deriving
-	// them from a raw CODE_FORGE name comparison the way it did before.
+	// Forwarded so the in-box `driver-exec outcome-backstop` verb keys its
+	// decision off explicit signals rather than a raw CODE_FORGE name
+	// comparison (issue #2267).
 	forgeHostMediatedRemote := cfg.ForgeDescriptor.HostMediatedRemote
 	trackerInBoxUnreachable := cfg.TrackerDescriptor.InBoxUnreachableTracker
 	if forgeHostMediatedRemote {
@@ -226,27 +168,19 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	if cfg.ForgeDescriptor.OutboxRelayCapable {
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
 	}
-	// FullyLocal: both seams of this run are local (ADR 0033: CODE_FORGE=local
-	// and ISSUE_TRACKER=local together). cmd/launcher/main.go's
-	// resolveCapabilitySignals reaches this exact same "fully local"
-	// conclusion independently, as hostMediatedRemote && inBoxUnreachableTracker,
-	// for its own different callers (the FULLY_LOCAL doc artifact / prompt-gate
-	// signal) -- the two computations are the same boolean over the same two
-	// backend-registry fields and must stay in agreement; a change to one
-	// without the other would silently desync BOX_FULLY_LOCAL from
-	// FULLY_LOCAL.
+	// Both seams of this run are local (ADR 0033). main.go's
+	// resolveCapabilitySignals computes the same boolean over the same two
+	// fields for the FULLY_LOCAL prompt gate, so changing one without the
+	// other silently desyncs BOX_FULLY_LOCAL from FULLY_LOCAL.
 	if forgeHostMediatedRemote && trackerInBoxUnreachable {
 		env["BOX_FULLY_LOCAL"] = "1"
 	}
 	if trackerInBoxUnreachable {
 		env["BOX_IN_BOX_UNREACHABLE_TRACKER"] = "1"
 	}
-	// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/ForgeBackend are
-	// nix-resolved static prompt-gate values (issue #2533), forwarded
-	// unmodified whenever non-empty. TrackerAxisWrite is legitimately empty
-	// for a local (read-only) tracker, so this uniform empty-string guard
-	// leaves BOX_TRACKER_AXIS_WRITE correctly absent in that case, same
-	// effect as "absent" everywhere else.
+	// TrackerAxisWrite is legitimately empty for a local (read-only)
+	// tracker, so the uniform empty-string guard correctly leaves
+	// BOX_TRACKER_AXIS_WRITE absent there (issue #2533).
 	if cfg.TrackerAxisRead != "" {
 		env["BOX_TRACKER_AXIS_READ"] = cfg.TrackerAxisRead
 	}
@@ -259,15 +193,11 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	if cfg.ForgeBackend != "" {
 		env["BOX_FORGE_BACKEND"] = cfg.ForgeBackend
 	}
-	// The registry proxy's upstream host, per route, now travels inside
-	// REGISTRY_PROXY_MANIFEST (ADR 0045, runOnce/box.go) instead of the
-	// single REGISTRY_PROXY_UPSTREAM_HOST scalar this replaced -- that
-	// scalar only ever carried routes[0], so a multi-route table's later
-	// entries had no in-Box channel at all until the manifest.
-	// FilerEnabled/WorkerProvisioned/ReviewLoopInline/ReviewLoopOrchestrator
-	// are nix-resolved static prompt-gate values (issue #2533), forwarded as
-	// a single explicit positive signal matching BOX_FULLY_LOCAL's shape:
-	// present only as "1" when true, absent (not "0") when false.
+	// Per-route registry-proxy upstream hosts travel in
+	// REGISTRY_PROXY_MANIFEST (ADR 0045, runOnce/box.go), not here.
+	//
+	// These prompt gates forward as a positive signal only: "1" when true,
+	// absent rather than "0" when false (issue #2533).
 	if cfg.FilerEnabled {
 		env["BOX_FILER_ENABLED"] = "1"
 	}
@@ -283,9 +213,8 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	if cfg.ReviewLoopOrchestrator {
 		env["BOX_REVIEW_LOOP_ORCHESTRATOR"] = "1"
 	}
-	// Explicit dispatch-time review-pass overrides (issue #3171): absent
-	// entirely when empty, so the Box can treat presence as "the operator
-	// said so at dispatch time" — see the Config field docs.
+	// Absent entirely when empty, so the Box reads presence as "the operator
+	// said so at dispatch time" (issue #3171).
 	if cfg.ReviewModelOverride != "" {
 		env["BOX_REVIEW_MODEL_OVERRIDE"] = cfg.ReviewModelOverride
 	}

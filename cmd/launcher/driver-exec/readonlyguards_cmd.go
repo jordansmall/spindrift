@@ -9,15 +9,12 @@ import (
 	"spindrift.dev/launcher/internal/readonlyguards"
 )
 
-// isReadonlyGuardsInvocation reports whether args (os.Args[1:]) selects the
-// readonly-guards subcommand: a distinct verb, not a top-level flag (issue
-// #2509), mirroring isAssemblePromptInvocation/isOutcomeBackstopInvocation.
+// isReadonlyGuardsInvocation reports whether args selects the readonly-guards
+// subcommand, a distinct verb rather than a top-level flag (issue #2509).
 func isReadonlyGuardsInvocation(args []string) bool {
 	return len(args) > 0 && args[0] == "readonly-guards"
 }
 
-// readonlyGuardsFlags holds the parsed (or default, pre-Parse) values of
-// every readonly-guards flag, keyed by the flag.FlagSet that owns them.
 type readonlyGuardsFlags struct {
 	forbiddenMarkersRegistryPath *string
 	repoDir                      *string
@@ -26,11 +23,9 @@ type readonlyGuardsFlags struct {
 	skipGitHook                  *bool
 }
 
-// newReadonlyGuardsFlagSet builds the readonly-guards subcommand's
-// flag.FlagSet and registers every flag, without parsing it against any
-// args. Split out from runReadonlyGuards so a test can inspect a flag's
-// default value without ever invoking readonlyguards.Install or touching a
-// real file on disk, mirroring newOutcomeBackstopFlagSet.
+// newReadonlyGuardsFlagSet registers the readonly-guards flags without parsing
+// them, so a test can inspect a flag default without invoking
+// readonlyguards.Install or touching a real file on disk.
 func newReadonlyGuardsFlagSet() (*flag.FlagSet, *readonlyGuardsFlags) {
 	fs := flag.NewFlagSet("readonly-guards", flag.ContinueOnError)
 	flags := &readonlyGuardsFlags{
@@ -43,12 +38,9 @@ func newReadonlyGuardsFlagSet() (*flag.FlagSet, *readonlyGuardsFlags) {
 	return fs, flags
 }
 
-// runReadonlyGuards is the `readonly-guards` subcommand's thin CLI wrapper
-// (ADR 0007's thin-exec-glue tier, issue #2509): it parses args, loads the
-// forbiddenMarkers registry via promptassembly.LoadForbiddenMarkersFile --
-// the same loader assemble-prompt already uses -- and delegates to
-// readonlyguards.Install, the Go successor to agent/entrypoint.sh's
-// install_readonly_push_hook and install_readonly_gh_shim. Returns the
+// runReadonlyGuards is the readonly-guards subcommand's thin CLI wrapper (ADR
+// 0007's thin-exec-glue tier, issue #2509), replacing entrypoint.sh's
+// install_readonly_push_hook and install_readonly_gh_shim. It returns the
 // process exit code.
 func runReadonlyGuards(args []string, stdout io.Writer) int {
 	fs, flags := newReadonlyGuardsFlagSet()

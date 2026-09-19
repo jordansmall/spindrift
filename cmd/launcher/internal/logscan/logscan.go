@@ -1,7 +1,6 @@
-// Package logscan is the single shared line-by-line log scanner for the
-// launcher. Every caller that scans a Box log for markers or events goes
-// through ForEachLine so the 4 MiB buffer and oversized-line handling live
-// in exactly one place instead of being copy-pasted per caller.
+// Package logscan scans Box logs line by line for the launcher. Every caller
+// goes through ForEachLine so the 4 MiB buffer and the oversized-line handling
+// live in one place.
 package logscan
 
 import (
@@ -11,28 +10,23 @@ import (
 	"os"
 )
 
-// Policy controls what ForEachLine does with a line longer than its 4 MiB
-// scan buffer.
+// Policy controls what ForEachLine does with a line longer than bufSize.
 type Policy int
 
 const (
-	// SkipOversized discards an oversized line entirely: fn is not called
-	// for any part of it.
+	// SkipOversized discards an oversized line: fn sees no part of it.
 	SkipOversized Policy = iota
-	// ChunkOversized invokes fn once per buffer-sized chunk of an oversized
-	// line, so a marker inside a large blob (e.g. JSON) is still seen, at
-	// the cost of possibly splitting a match across a chunk boundary.
+	// ChunkOversized invokes fn once per buffer-sized chunk, so a marker inside
+	// a large blob is still seen, at the cost of missing a match that straddles
+	// a chunk boundary.
 	ChunkOversized
 )
 
-// bufSize is the scan buffer shared by every logscan caller.
 const bufSize = 4 * 1024 * 1024
 
-// ForEachLine opens path and invokes fn once per line, per policy for any
-// line exceeding bufSize (see Policy — under ChunkOversized a match can be
-// missed if it straddles a chunk boundary). Returns the os.Open error
-// unchanged (check with errors.Is(err, os.ErrNotExist) for a missing file)
-// or any other read error from the underlying file.
+// ForEachLine opens path and invokes fn once per line, applying policy to any
+// line longer than bufSize. It returns the os.Open error unchanged, so a caller
+// can test it with errors.Is(err, os.ErrNotExist).
 func ForEachLine(path string, policy Policy, fn func(line string)) error {
 	f, err := os.Open(path)
 	if err != nil {

@@ -5,15 +5,11 @@ import (
 	"unicode/utf8"
 )
 
-// SanitizeControlSequences strips C0/C1 control characters and ANSI
-// CSI/OSC escape sequences from s, preserving "\n" and "\t" — untrusted
-// model and tool output reaches the rendered transcript pane verbatim
-// (#721), and Bubble Tea does not filter arbitrary control sequences
-// before writing to the operator's terminal, so a Dispatch log echoing
-// crafted escapes could otherwise move the cursor, clear the screen, or
-// rewrite the terminal title. The raw transcript path is intentionally
-// left unsanitized (#721 AC2) for byte-exact forensic inspection; see
-// README's raw-toggle note.
+// SanitizeControlSequences strips C0/C1 control characters and ANSI CSI/OSC
+// escape sequences from s, keeping "\n" and "\t". Untrusted model and tool
+// output reaches the rendered transcript pane verbatim (#721) and Bubble Tea
+// does not filter control sequences, so crafted escapes could move the cursor
+// or rewrite the terminal title. The raw path stays unsanitized (#721 AC2).
 func SanitizeControlSequences(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -28,18 +24,11 @@ func SanitizeControlSequences(s string) string {
 			if i >= len(s) {
 				continue
 			}
-			// Only CSI ('[') and OSC (']') introducers get a body-aware
-			// skip below. Other ESC introducers (DCS "ESC P", APC "ESC _",
-			// PM "ESC ^", RIS "ESC c", ...) fall through this switch with
-			// no case matched, so only the ESC byte just consumed above is
-			// dropped — their body and terminator bytes are plain text to
-			// this loop and get copied through by the default rune-copy
-			// branch below. That's deliberate, not a gap: every raw ESC
-			// byte is still stripped, so no sequence can reach the
-			// terminal, but an unrecognized introducer's body renders as
-			// visible garbage instead of vanishing. Parsing DCS/APC/PM/RIS
-			// bodies to strip them too isn't worth the complexity for a
-			// cosmetic-only tradeoff (#1018).
+			// Only CSI ('[') and OSC (']') get a body-aware skip. Other
+			// introducers (DCS, APC, PM, RIS) match no case, so only the ESC
+			// byte is dropped and their body copies through as visible
+			// garbage. That is deliberate: no sequence can reach the terminal,
+			// and parsing those bodies would only tidy the display (#1018).
 			switch s[i] {
 			case '[':
 				i++
@@ -63,12 +52,10 @@ func SanitizeControlSequences(s string) string {
 				}
 			}
 		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
-			// drop remaining C0/C1 control characters. A raw invalid C1
-			// byte (e.g. 0x9b or 0x9d) decodes via utf8.DecodeRuneInString
-			// as U+FFFD, which is > 0x9f and so misses this range check and
-			// survives to the default branch below. Harmless: no
-			// terminal reads U+FFFD as a CSI/C1 introducer — don't
-			// misdiagnose this as a strip bug (#1019).
+			// A raw invalid C1 byte (0x9b, 0x9d) decodes as U+FFFD, misses this
+			// range check, and survives to the default branch. No terminal
+			// reads U+FFFD as a CSI or C1 introducer, so that is not a strip
+			// bug (#1019).
 			i += size
 		default:
 			b.WriteRune(r)

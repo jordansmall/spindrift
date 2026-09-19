@@ -8,26 +8,18 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// SettleAdopted runs the merge gate (selfHealAdopted → verifyMerged) on an
-// already-discovered open PR for num, draft or not (issue #2408). Prints
-// "status=adopted" before running the gate. Called only by the
-// reconcile/recover entry points — an operator's explicit agent-recover
-// label, never Settle's own no-outcome path (issue #1654), which reports
-// status=blocked instead of adopting off draft-ness. Unlike Settle's own
-// "ready" path, this PR's head SHA was not necessarily pushed by this
-// process, so the gate cannot trust an immediately-green rollup without
-// first seeing evidence it registered (issue #1652) — bounded, not withheld
-// forever (issue #2475) — see selfHealAdopted, gateToGreen, and
-// registrationWindowPolls.
+// SettleAdopted runs the merge gate on an already-discovered open PR for num,
+// draft or not (issue #2408). Only reconcile/recover call it, never Settle's
+// own no-outcome path, which reports status=blocked (issue #1654). The head
+// SHA may not come from this process, so the gate waits for evidence the
+// rollup registered (issue #1652), bounded by registrationWindowPolls (#2475).
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	branch := s.cf.AgentBranch(num)
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
 	landing, reason := s.selfHealAdopted(d, num, gen, prURL)
 	switch landing {
 	case landingMerged:
-		// verifyMerged reads PR state, which a push-only Code Forge does not
-		// have (mirrors gate.go's "ready" case guard: silent skip, no
-		// logging when s.pr is nil).
+		// A push-only Code Forge has no PR state for verifyMerged to read.
 		if s.pr != nil {
 			s.verifyMerged(num, prURL)
 		}
@@ -38,9 +30,9 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 	}
 }
 
-// verifyMerged is the tripwire: it confirms a PR reported merged actually
-// carries a MERGED state and CompleteLabel, demoting the issue to Failed
-// otherwise (evidence of a merge outside the gate).
+// verifyMerged confirms a PR reported merged carries both a MERGED state and
+// the CompleteLabel, and demotes the issue to Failed otherwise, since a gap
+// there means something merged outside the gate.
 func (s *Settle) verifyMerged(num, pr string) {
 	prState, _ := s.pr.PRState(pr)
 	iss, _ := s.it.Issue(num)
@@ -63,16 +55,13 @@ func (s *Settle) verifyMerged(num, pr string) {
 	s.transitionState(num, forge.InProgress, forge.Failed)
 }
 
-// postUsageComment posts d's aggregate usage-statistics comment to the
-// issue. Errors posting the comment are logged but do not abort the caller.
+// postUsageComment posts d's aggregate usage-statistics comment to the issue.
+// It logs a post failure instead of returning one, so the caller continues.
 func (s *Settle) postUsageComment(num string, d dispatch.Dispatcher) {
-	// Audited (issue #1233, extending #831): d.UsageReport() (dispatch/usage.go)
-	// never returns an error to its caller — on an ExtractUsage failure it
-	// substitutes a static "Usage data unavailable" string. Its only external
-	// input is the MODEL env var (a model name, not a credential), so there is
-	// no Box-internal output for it to leak. commentErr below is the
-	// forge-comment-post failure itself, not a UsageReport error, and it never
-	// leaves the process (stderr only) — nothing here needs redaction.
+	// Audited for leaks (issue #1233, extending #831): UsageReport's only
+	// external input is the MODEL env var, so it carries no Box-internal
+	// output, and commentErr is a post failure that reaches stderr only.
+	// Nothing here needs redaction.
 	if commentErr := s.it.Comment(num, d.UsageReport()); commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: post usage comment: %v\n", num, commentErr)
 	}

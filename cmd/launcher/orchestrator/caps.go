@@ -8,41 +8,20 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// defaultMaxReviewRounds and defaultMaxSlices are the orchestrator's shipped
-// --max-review-rounds / --max-slices defaults (issue #2460), aliased from
-// promptassembly.DefaultMaxReviewRounds/DefaultMaxSlices so this package's
-// own coherence test (TestValidateCapsAcceptsShippedDefaults) and
-// assemble-prompt's own flag defaults (which populate Handoff.Caps) can
-// never drift apart (issue #2975).
+// defaultMaxReviewRounds and defaultMaxSlices alias the promptassembly
+// defaults so this package's coherence test and assemble-prompt's own flag
+// defaults, which populate Handoff.Caps, cannot drift apart (issues #2460,
+// #2975).
 const (
 	defaultMaxReviewRounds = promptassembly.DefaultMaxReviewRounds
 	defaultMaxSlices       = promptassembly.DefaultMaxSlices
 )
 
-// validateCaps detects an incoherent (maxReviewRounds, maxSlices) pair
-// (issue #2460). Two different driver loops can run depending on whether a
-// review pass is configured (run.go's run(), around line 130, dispatches
-// between them on cfg.reviewPromptFile), and each has its own reachability
-// math for how many maxSlices invocations it takes to let reviewRounds
-// actually reach maxReviewRounds -- so the minSlices threshold depends on
-// reviewPassEnabled.
-//
-// Rather than hand-deriving that threshold as a formula (issue #2548: that
-// formula silently drifted out of sync with the loop it was describing
-// once), minSlices is computed by simulateReviewRoundCapPass, which drives
-// passmachine.Transition -- the same pure decision function run.go's own
-// loops call -- to find how many passes it takes the review-round cap
-// itself to fire. That keeps this check anchored to the loop's real
-// transition logic instead of a derivation that can go stale.
-//
-// In both loop shapes, when maxSlices is too small to let reviewRounds ever
-// reach maxReviewRounds, maxSlices always fires first and silently shadows
-// the review-round cap -- the loop stops for the wrong reason and the
-// review-round cap never gets attributed as the stop reason.
-//
-// Zero means "disabled" for either cap (run.go's existing convention): a
-// pair where either cap is 0 is never incoherent, since there is no
-// shadowing risk when one of the two caps doesn't exist.
+// validateCaps rejects a (maxReviewRounds, maxSlices) pair where maxSlices
+// is too small for reviewRounds to ever reach maxReviewRounds, so maxSlices
+// fires first and the loop stops for the wrong reason (issue #2460). The
+// threshold comes from simulating the real passmachine loop, not a formula,
+// which drifted out of sync once (issue #2548). Zero disables either cap.
 func validateCaps(maxReviewRounds, maxSlices int, reviewPassEnabled bool) error {
 	if maxReviewRounds <= 0 || maxSlices <= 0 {
 		return nil
@@ -58,18 +37,11 @@ func validateCaps(maxReviewRounds, maxSlices int, reviewPassEnabled bool) error 
 	return nil
 }
 
-// simulateReviewRoundCapPass returns the 1-indexed pass count at which the
-// review-round cap itself fires for the caller's own maxReviewRounds
-// (issue #2548). Looping passmachine.Transition maxReviewRounds times
-// directly, as an earlier version of this function did, made validateCaps'
-// own runtime scale with an operator-supplied -max-review-rounds value --
-// including a hostile or mistyped one as large as MaxInt -- instead of
-// staying O(1). Instead, this probes capFiredPass at exactly two small,
-// fixed review-round caps (1 and 2), derives the per-round pass cost as the
-// delta between those two probes, and extrapolates linearly for the real
-// maxReviewRounds -- staying anchored to passmachine.Transition's real
-// logic (not a hand-derived formula) while doing only a handful of
-// Transition calls regardless of how large maxReviewRounds is.
+// simulateReviewRoundCapPass returns the 1-indexed pass at which the
+// review-round cap fires for maxReviewRounds (issue #2548). It probes caps
+// 1 and 2 and extrapolates the per-round cost linearly to stay O(1):
+// looping Transition maxReviewRounds times would let an operator-supplied
+// cap, including a mistyped MaxInt, drive this function's own runtime.
 func simulateReviewRoundCapPass(maxReviewRounds int, reviewPassEnabled bool) (int, error) {
 	pass1, err := capFiredPass(1, reviewPassEnabled)
 	if err != nil {
@@ -88,34 +60,20 @@ func simulateReviewRoundCapPass(maxReviewRounds int, reviewPassEnabled bool) (in
 	}
 	extraRounds := maxReviewRounds - 1
 	if extraRounds > (math.MaxInt-pass1)/perRound {
-		// The real minSlices threshold would overflow int here; return
-		// MaxInt-1 (validateCaps adds 1 to get minSlices, landing exactly on
-		// MaxInt) instead of a wrapped/negative value, so the maxSlices <
-		// minSlices comparison still fails closed (rejects the pair) rather
-		// than silently passing an incoherent one.
+		// The real threshold would overflow int, so return MaxInt-1:
+		// validateCaps' minSlices then lands exactly on MaxInt and the
+		// comparison still rejects the pair instead of passing on a wrapped
+		// negative.
 		return math.MaxInt - 1, nil
 	}
 	return pass1 + extraRounds*perRound, nil
 }
 
-// capFiredPass drives passmachine.Transition forward, pass by pass, with
-// maxSlices disabled and a reviewer that always BLOCKs, until the
-// review-round cap itself fires at the given probeMaxReviewRounds --
-// returning the 1-indexed pass count at which that happens.
-// simulateReviewRoundCapPass only ever calls this with probeMaxReviewRounds
-// 1 or 2, never the caller's own, possibly huge, -max-review-rounds value,
-// so this loop's own length is bounded independent of that value.
-//
-// The review-pass loop branch below compares the typed d.Cap field against
-// passmachine.StopMaxReviewRoundsReached, not d.CapFired's prose string
-// (issue #2548 finding 3) -- CapFired doubles as operator-facing prompt
-// text (run.go's seedPromptFromState) that can be reworded independently of
-// this comparison. probeMaxPasses additionally guards against an
-// unexpected non-cap stop: the pre-fix version of this loop never checked
-// Decision.Continue at all (issue #2548 finding 2), so a future
-// passmachine.Transition change that introduced a new, earlier-firing stop
-// condition on this synthetic BLOCK-forever input would have spun this
-// loop forever instead of erroring.
+// capFiredPass drives passmachine.Transition with maxSlices disabled and a
+// reviewer that always BLOCKs until the review-round cap fires, returning
+// the 1-indexed pass. probeMaxReviewRounds is only ever 1 or 2, so the loop
+// is bounded regardless of the operator's cap; probeMaxPasses and the
+// Continue check catch a Transition that stops earlier (issue #2548).
 func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error) {
 	const probeMaxPasses = 64
 
@@ -149,8 +107,8 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 	}
 
 	passKind := passmachine.KindImplement
-	// Named phase, not landPhase, so it doesn't shadow the package-level
-	// landPhase() helper in run.go (issue #2548 review).
+	// Named phase so it does not shadow run.go's package-level landPhase()
+	// helper (issue #2548 review).
 	phase := passmachine.LandPhaseActive
 	lastVerdict := passmachine.VerdictNone
 	for {
@@ -181,6 +139,9 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 				LastVerdict:      lastVerdict,
 			})
 		}
+		// Compare the typed Cap field, not CapFired's prose string: that
+		// string doubles as operator-facing prompt text and can be reworded
+		// independently of this comparison (issue #2548 finding 3).
 		if d.Cap == passmachine.StopMaxReviewRoundsReached {
 			return pass, nil
 		}

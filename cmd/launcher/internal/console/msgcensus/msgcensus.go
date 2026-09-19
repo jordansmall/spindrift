@@ -1,8 +1,6 @@
-// Package msgcensus AST-walks a directory of Go source and reports the
-// sorted list of type names whose method set includes a marker method named
-// "isConsoleMsg" (any receiver form — value or pointer). It has no
-// dependency on the console package; it is a generic walker parametrized
-// only by directory path and the hardcoded marker method name.
+// Package msgcensus AST-walks a directory of Go source and reports the sorted
+// type names whose method set includes a marker method named "isConsoleMsg",
+// under either receiver form. It does not import the console package.
 package msgcensus
 
 import (
@@ -17,9 +15,8 @@ import (
 
 const markerMethod = "isConsoleMsg"
 
-// Collect parses every non-test Go file in dir and returns the sorted list
-// of type names that declare a method named "isConsoleMsg" (value or
-// pointer receiver).
+// Collect parses every non-test Go file in dir and returns the sorted names
+// of types that declare the marker method.
 func Collect(dir string) ([]string, error) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool {
@@ -58,8 +55,6 @@ func Collect(dir string) ([]string, error) {
 	return names, nil
 }
 
-// receiverTypeName resolves a receiver's type expression to the underlying
-// *ast.Ident name, unwrapping a pointer receiver's *ast.StarExpr.
 func receiverTypeName(expr ast.Expr) string {
 	if star, ok := expr.(*ast.StarExpr); ok {
 		expr = star.X

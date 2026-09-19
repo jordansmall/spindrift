@@ -8,34 +8,27 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// verdictBlockToken and verdictApproveToken are the exact reviewer verdict
-// markers this file greps a rendered transcript for, composed from
-// outcome.ReviewVerdictToken the same way orchestrator/markers.go builds its
-// own VerdictBlock/VerdictApprove -- so neither package hardcodes the bare
-// "VERDICT:" literal a second time (lib/prompt-contract.nix's markerChannels
-// registry is the one source of truth for it).
+// Composed from outcome.ReviewVerdictToken the same way orchestrator/markers.go
+// builds its own VerdictBlock/VerdictApprove, so neither package hardcodes the
+// bare "VERDICT:" literal. lib/prompt-contract.nix's markerChannels registry is
+// the one source of truth for it.
 const (
 	verdictBlockToken   = outcome.ReviewVerdictToken + " BLOCK"
 	verdictApproveToken = outcome.ReviewVerdictToken + " APPROVE"
 )
 
-// ScanResult is passmachine.Scan's own result.
+// ScanResult is what Scan returns.
 type ScanResult struct {
 	Verdict Verdict
-	// BlockLine is the index (into strings.Split(rendered, "\n")) of the
-	// rendered line whose match determined Verdict -- meaningful only for
-	// KindReview (a caller extracting the reviewer's findings text continues
-	// reading from here), -1 for every other kind or when Verdict is
-	// VerdictNone.
+	// BlockLine indexes into strings.Split(rendered, "\n"), for a caller that
+	// reads on from there to collect the reviewer's findings. Only KindReview
+	// sets it; every other kind, and VerdictNone, leave it -1.
 	BlockLine int
 }
 
-// Scan is passmachine's pure verdict scanner (issue #2980): given a driver's
-// already-rendered transcript text (Driver.RenderTranscript's own
-// "[role] text" / "[role]   -> summary" / "[role]   -> [subagentRole]
-// summary" convention) and the pass kind that produced it, returns the
-// verdict the loop should act on, using the match rule that pass kind's own
-// contract requires.
+// Scan returns the verdict the loop should act on, reading the "[role]" line
+// format Driver.RenderTranscript produces (issue #2980). Each pass kind has its
+// own match rule, so the caller must pass the kind that produced the text.
 func Scan(rendered string, kind PassKind) ScanResult {
 	if kind == KindReview {
 		return scanReviewVerdict(rendered)
@@ -43,27 +36,17 @@ func Scan(rendered string, kind PassKind) ScanResult {
 	return scanSubagentReviewVerdict(rendered)
 }
 
-// renderedRolePrefixRe extracts the bracketed role name a rendered line
-// leads with -- "[role] text" for an assistant-authored event, "[role]  ->
-// summary" for a tool_result echo. Capture group 1 is the role name. A line
-// with no match at all is a bare physical-line continuation of a prior
-// multi-line rendered entry.
+// Capture group 1 is the bracketed role name. A line that does not match is a
+// bare physical-line continuation of a prior multi-line rendered entry.
 var renderedRolePrefixRe = regexp.MustCompile(`^\[([^\]]*)\]`)
 
-// renderedEventPrefix matches RenderTranscript's own "[role] " event prefix
-// at the start of a line.
 var renderedEventPrefix = regexp.MustCompile(`^\[\S+\] `)
 
-// scanReviewVerdict ports run.go's scanReviewLog verdict half verbatim
-// (strict-first-line, last-block-wins): a review pass's verdict is its own
-// top-level final assistant message, so only a top-level "[reviewer]"-role
-// block's FIRST line counts, and only when that line strictly STARTS WITH a
-// verdict token -- unlike the non-review fold below, a finding quoting
-// "VERDICT: APPROVE" elsewhere in the same message never counts. Kept as its
-// own function, physically disjoint from scanSubagentReviewVerdict, so
-// review-prompt.md's own-message contract and the tool_result-tag contract
-// below it can never be accidentally merged or reordered against each
-// other by a future edit to either.
+// scanReviewVerdict is strict-first-line, last-block-wins: a review pass states
+// its verdict in its own top-level final assistant message, so only a top-level
+// "[reviewer]" line counts, and only when it starts with a verdict token. A
+// finding quoting "VERDICT: APPROVE" mid-message never counts. Kept physically
+// apart from scanSubagentReviewVerdict so the two rule sets cannot be merged.
 func scanReviewVerdict(rendered string) ScanResult {
 	lines := strings.Split(rendered, "\n")
 	blockLine := -1
@@ -92,29 +75,18 @@ func scanReviewVerdict(rendered string) ScanResult {
 	return ScanResult{Verdict: verdict, BlockLine: blockLine}
 }
 
-// reviewerToolResultPrefixRe matches a tool_result line RenderTranscript
-// tagged with a completed "reviewer" subagent report (transcript_render.go's
-// "user" case, issue #2980 slice 1): "[outerRole]   -> [reviewer] summary".
-// An ordinary tool_result (no recorded Task/Agent spawn behind its
-// tool_use_id) or one tagged with any OTHER subagent role never matches this
-// prefix, so it's never eligible for the fold below -- the actual security
-// fix this issue lands: attacker-controlled Bash/Read output echoing the
-// literal verdict string can no longer flip a non-review pass's fold.
+// Matches only a tool_result line tagged with a completed "reviewer" subagent
+// report (issue #2980). An ordinary tool_result, or one tagged with another
+// subagent role, cannot match, which is the security fix: attacker-controlled
+// Bash or Read output echoing the literal verdict string can no longer flip a
+// non-review pass's fold.
 var reviewerToolResultPrefixRe = regexp.MustCompile(`^\[[^\]]*\]   -> \[reviewer\] `)
 
-// scanSubagentReviewVerdict ports run.go's scanPassLog verdict half
-// (BLOCK-dominant fold), narrowed to only the lines a completed reviewer
-// subagent's own tool_result actually carries. BLOCK-dominant, not
-// last-match-wins, remains correct even after scoping: an eligible tagged
-// line can still itself carry attacker-influenced text after a genuine
-// reviewer verdict word within the same rendered summary (the subagent's
-// own report can quote earlier tool output), so a BLOCK anywhere among
-// eligible lines still wins outright over an APPROVE anywhere else among
-// eligible lines, regardless of order. Kept as its own function, physically
-// disjoint from scanReviewVerdict, for the same reason implementFixTransition
-// and terminalLandTransition are kept apart in passmachine.go: the two rule
-// sets must never be reordered against each other by a future case added to
-// either one.
+// scanSubagentReviewVerdict folds BLOCK-dominant over the reviewer-tagged lines
+// only. BLOCK-dominant rather than last-match-wins because an eligible line can
+// still carry attacker-influenced text after a genuine verdict word (the
+// subagent's report may quote earlier tool output), so a BLOCK anywhere wins
+// over an APPROVE anywhere, whatever the order.
 func scanSubagentReviewVerdict(rendered string) ScanResult {
 	var sawBlock, sawApprove bool
 	sc := bufio.NewScanner(strings.NewReader(rendered))

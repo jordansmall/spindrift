@@ -9,25 +9,17 @@ import (
 	"spindrift.dev/launcher/internal/logscan"
 )
 
-// RenderTranscript scans the box log at logPath and returns a readable
-// rendering of its assistant turns and tool calls — the claude Driver's
-// transcript-rendering strategy (ADR 0009), used by a Console drill-in to
-// show the work instead of raw stream-json. It is a thin wrapper around
-// RenderTranscriptWithRole with an empty topLevelRole (the ImplementorRole
-// default).
-//
-// Returns ("", nil) when logPath does not exist, matching sumInLog and
-// breakdownByModelFile's not-found contract.
+// RenderTranscript renders the box log at logPath as readable assistant turns
+// and tool calls (ADR 0009). It returns ("", nil) when logPath does not exist,
+// matching sumInLog and breakdownByModelFile's not-found contract.
 func RenderTranscript(logPath string) (string, error) {
 	return RenderTranscriptWithRole(logPath, "")
 }
 
-// RenderTranscriptWithRole is like RenderTranscript, but attributes every
-// top-level (empty parent_tool_use_id) event to topLevelRole instead of the
-// ImplementorRole default — for rendering a top-level pass the orchestrator
-// owns as something other than implementation, e.g. a review pass (issue
-// #2092). An empty topLevelRole preserves RenderTranscript's ImplementorRole
-// default.
+// RenderTranscriptWithRole attributes every top-level (empty
+// parent_tool_use_id) event to topLevelRole, so a pass the orchestrator owns
+// renders as something other than implementation (issue #2092). An empty
+// topLevelRole keeps the ImplementorRole default.
 func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 	var lines []string
 	taskRole := make(map[string]string)
@@ -69,13 +61,10 @@ func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 					continue
 				}
 				summary := summarizeResult(block)
-				// block.ToolUseID (the tool_use this result answers) is the
-				// right key here, not the event's own parent_tool_use_id
-				// (used for role above): a subagent's completed report
-				// answers its own Task/Agent spawn ID, which taskRole
-				// records — an ordinary tool's result, or a tool_result
-				// nested inside a subagent's own work, never matches a
-				// spawn ID, so it renders exactly as before.
+				// Key on block.ToolUseID, not the event's own
+				// parent_tool_use_id used for role above: a subagent's final
+				// report answers its own spawn ID, which taskRole records.
+				// Any other tool_result misses the map and renders unprefixed.
 				if subagentRole, ok := taskRole[block.ToolUseID]; ok {
 					summary = "[" + subagentRole + "] " + summary
 				}
@@ -95,14 +84,10 @@ func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 	return strings.Join(lines, "\n") + "\n", nil
 }
 
-// resultTextMaxLen caps a rendered tool_result summary so one noisy tool
-// call (a huge file read, a long command's stdout) can't dominate the
-// transcript.
+// resultTextMaxLen keeps one noisy tool call (a huge file read, a long
+// command's stdout) from dominating the transcript.
 const resultTextMaxLen = 200
 
-// summarizeResult renders a tool_result block's content as a single-line
-// summary, capped at resultTextMaxLen runes and prefixed "error: " when the
-// block is IsError.
 func summarizeResult(block ContentBlock) string {
 	text := strings.TrimSpace(strings.ReplaceAll(resultText(block.Content), "\n", " "))
 	if len(text) > resultTextMaxLen {
@@ -119,9 +104,8 @@ func summarizeResult(block ContentBlock) string {
 	return text
 }
 
-// resultText decodes a tool_result block's content field, which the Claude
-// API allows to be either a bare string or an array of {"type":"text",...}
-// blocks — joining any text blocks found, space-separated.
+// resultText decodes a tool_result block's content field, which the Claude API
+// allows to be either a bare string or an array of {"type":"text",...} blocks.
 func resultText(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -145,16 +129,13 @@ func resultText(raw json.RawMessage) string {
 	return string(raw)
 }
 
-// formatToolUse returns a tool call rendered as "Name(target)", where target
-// is the tool's most identifying input field (file path, command, pattern,
-// URL, ...), empty for a tool this function does not special-case.
 func formatToolUse(name string, input json.RawMessage) string {
 	return name + "(" + toolTarget(name, input) + ")"
 }
 
-// toolTarget extracts the input field that best identifies what a tool call
-// acted on, per tool name. Returns "" for an unrecognized tool or missing
-// field, in which case formatToolUse renders a bare "Name()".
+// toolTarget picks the input field that best identifies what a tool call acted
+// on. An unrecognized tool or missing field yields "", which formatToolUse
+// renders as a bare "Name()".
 func toolTarget(name string, input json.RawMessage) string {
 	if len(input) == 0 {
 		return ""

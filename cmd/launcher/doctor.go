@@ -11,40 +11,22 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// cmdDoctor is the `doctor` subcommand: probe each forge seam through its
-// own adapter (not the combined Client) so a CODE_FORGE=git deployment
-// checks the actual remote it will push to, not the IssueTracker's repo a
-// second time. No runner/dispatch/settle wiring needed, so it builds its
-// wiring via newReadContext (issue #2941) rather than going through
-// bootstrap.
+// cmdDoctor is the `doctor` subcommand. It probes each forge seam through its
+// own adapter rather than the combined Client, so a CODE_FORGE=git deployment
+// checks the actual remote it will push to instead of the IssueTracker's repo
+// a second time. It needs no runner/dispatch/settle wiring, so it builds its
+// own via newReadContext (issue #2941) instead of bootstrap.
 func cmdDoctor() int {
-	// "" (not dispatchKindWork): doctor never dispatches, so it carries no
-	// dispatch kind at all, matching its config before kind threading (issue
-	// #2944) existed.
+	// doctor never dispatches, so it carries no dispatch kind (issue #2944).
 	rc := newReadContext("", false)
 	return doctorReport(rc, os.Stdout, os.Stderr, os.Stdin, isStdinTTY())
 }
 
-// doctorReport runs cmdDoctor's full exit-vocabulary classification (issue
-// #2569). It always runs both rc.validation() and runDoctor — an invalid
-// configuration never skips runDoctor, so a config-invalid run still prints
-// every ok/MISSING/advisory status line runDoctor would otherwise produce,
-// the same full report origin/main's doctor always gave regardless of
-// config validity. Either failure's explanation goes to stderr as it's
-// found, so a caller that redirects stdout never loses the reason for a
-// non-zero exit (AC2) even when both configErr and runErr are non-nil at
-// once. doctorExitCodeFor still gives configErr precedence for the exit
-// code itself — an invalid configuration makes runDoctor's own result
-// unreliable — but both explanations are already on stderr by the time it
-// runs.
-//
-// The doctorCheckSets(rc.config)-once contract (issue #3144: every
-// route-credential Probe shared between classification and the report is
-// wrapped by memoizeCheckProbes, so each credential's Peek must run at most
-// once per `spindrift doctor` invocation) now lives entirely inside
-// rc.validation() (issue #2992) — doctorReport calls it exactly once and
-// takes both the configErr and the paired report checks from the single
-// readValidation it returns, rather than building either half itself.
+// doctorReport runs cmdDoctor's exit-vocabulary classification (issue #2569).
+// An invalid configuration never skips runDoctor, so a config-invalid run still
+// prints the full report (issue #2559), and both failures explain themselves on
+// stderr so redirecting stdout never loses the reason for a non-zero exit. Call
+// rc.validation() once: it holds the memoized Probes (issues #3144, #2992).
 func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, interactive bool) int {
 	v := rc.validation()
 	if v.configErr != nil {
@@ -58,23 +40,10 @@ func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, int
 }
 
 // doctorExitCodeFor maps cmdDoctor's two failure sources to the doctor
-// exit-code vocabulary (issue #2569): 0 healthy (advisory findings
-// allowed), 2 configuration invalid — either configErr itself, or a runErr
-// wrapping errReadOnlyGateMisconfigured (the read-only token gate's
-// misconfiguration errors: BOX_GH_TOKEN/BOX_FORGEJO_TOKEN unset, identical
-// to the Launcher's own token, or write-capable) or errLaunchGateConfigInvalid
-// (the read-only-capability and network-mode-runtime gates' misconfiguration
-// errors, issue #2942), 3 auth or connectivity (doctor.ErrConnectivity, which
-// also covers the read-only token gate's own introspection failures), 4
-// required checks failed or declined (doctor.ErrRequiredLabelsMissing), 1
-// reserved for internal/unclassified errors. configErr, from rc.validation()
-// (readcontext.go, via validateConfigChecks), always wins the exit code —
-// doctorReport runs runDoctor regardless of configErr (issue #2559's
-// full-report behavior), so both can be genuinely non-nil at once; an
-// invalid configuration just makes whatever runDoctor found unreliable, so
-// it doesn't get to pick the exit code. runErr is never a bare errConfigInvalid: that sentinel is
-// bootstrap.go's own validate(c) wrap, which doctorReport surfaces separately
-// as configErr, not through runDoctor.
+// exit-code vocabulary (issues #2569, #2942): 0 healthy, 2 configuration
+// invalid, 3 auth or connectivity, 4 required checks failed or declined, 1
+// unclassified. Both errors can be non-nil at once, and configErr wins because
+// an invalid configuration makes runDoctor's findings unreliable.
 func doctorExitCodeFor(configErr, runErr error) int {
 	switch {
 	case configErr != nil:
@@ -92,17 +61,10 @@ func doctorExitCodeFor(configErr, runErr error) int {
 	}
 }
 
-// runDoctor adapts the launcher's full config to doctor.Config and delegates
-// to the shared internal/doctor package (also used in-process by
-// Quickstart's finish line, ADR 0027) — this file exists only to keep the
-// `spindrift doctor` subcommand's call site (main.go) and its tests
-// unchanged by the extraction. extraChecks is threaded in by the caller
-// (doctorReport, or a test) rather than built here from c:
-// readContext.validation() (readcontext.go) builds one doctorCheckSets(c)
-// result and doctorReport passes its report half through, so each memoized
-// Probe (issue #3144) still runs at most once across the classify/report
-// split, which a fresh doctorReportChecks(c) call here would undo by
-// rebuilding un-memoized checks.
+// runDoctor adapts the launcher's config to doctor.Config and delegates to the
+// shared internal/doctor package (ADR 0027). The caller passes extraChecks in
+// rather than runDoctor building them from c: rebuilding them here would create
+// un-memoized checks and run each credential Probe a second time (issue #3144).
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check) error {
 	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
@@ -119,29 +81,17 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 	}, w, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
-	// gateRegistry's two token gate entries are Applicable only under
-	// BOX_FORGE_AND_ISSUE_ACCESS=read-only (launchgates.go, code-review fix
-	// on issue #2942: their Check funcs self-noop under read-write, so
-	// walkGateRegistry skips them entirely there — no Check call, no report
-	// line — rather than printing a false "ok" for a check that never ran
-	// against anything real). That leaves read-write with no token-gate
-	// mention at all, silently dropping the explicit operator-facing no-op
-	// line origin/main's doctor always printed (reportReadOnlyTokenGate,
-	// deleted by this issue). Restore it here, doctor-only: gatedContext's
-	// enforcement path (gatedcontext.go) never printed this line before
-	// #2942 either, and adding it there would introduce new stdout noise
-	// for preview/bootstrap, which AC5 requires to stay quiet.
+	// The two token gates are Applicable only under read-only (issue #2942), so
+	// walkSplitGateRegistry prints nothing for them here. Without this line
+	// read-write would never mention the token gate. It stays doctor-only:
+	// printing it from gatedContext would add stdout noise to preview and
+	// bootstrap, which must stay quiet.
 	if c.boxForgeAndIssueAccess == "read-write" {
 		fmt.Fprintln(w, "ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
 	}
-	// Surfaces gateRegistry's four launch gates (issue #2942) in `spindrift
-	// doctor` by walking it through walkSplitGateRegistry — the same
-	// splitGateRegistryByNetwork construction gatedContext uses for
-	// enforcement, not gateRegistry's raw declaration order — so "doctor
-	// reports what gatedContext enforces" holds for gateRegistry's own
-	// entries regardless of future edits to it, closing both the prior gap
-	// where doctor only ever reported the two token gates (silently omitting
-	// the capability and network-mode gates) and a later review finding that
-	// the two paths could still silently diverge in order.
+	// Walk the launch gates (issue #2942) through the same
+	// splitGateRegistryByNetwork construction gatedContext enforces with, not
+	// gateRegistry's raw declaration order, so doctor cannot report a different
+	// set or order from what gatedContext enforces.
 	return walkSplitGateRegistry(gateRegistry, c, w, w, true)
 }

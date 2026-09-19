@@ -1,21 +1,8 @@
-// Package markergate owns the pure decision logic for the in-box
-// "required-marker gate" recovery flow (issue #2511): when a Driver pass
-// exits cleanly but leaves a required marker (SPINDRIFT_OUTCOME or
-// SPINDRIFT_PR_INTENT) missing or malformed, what corrective resume prompt
-// to send (RenderNudgePrompt) and, once the resume has run, what to
-// conclude from its result (Resolve). ShouldNudgeOutcome, ShouldNudgePRIntent,
-// and Resolve scan the Driver log themselves, via the outcome package's own
-// exported scanners (outcome.LastFieldedOutcomeLine, outcome.
-// LastNearMissOutcomeLine, outcome.ReadyBeforeNote, outcome.LastPRIntentInLog)
-// rather than hand-rolling any marker grammar of their own; only the actual
-// driver re-invocation stays with the caller. It remains deterministic and
-// unit-testable -- scanning a file on disk, never spawning a process. Every
-// entry point returns a scan error alongside its decision value rather than
-// discarding it: the decision itself is always the fail-safe "marker
-// absent" direction regardless, but the error is the caller's to log. The
-// alternative -- logging the scan error from this package directly, at the
-// site that hits it -- was rejected to keep that deterministic purity:
-// markergate performs no I/O side effects (logging included) of its own.
+// Package markergate decides how to recover when a Driver pass exits cleanly
+// but leaves a required marker missing or malformed (issue #2511). It scans
+// logs with the outcome package's own scanners, never its own marker grammar,
+// and it logs nothing: on a scan error it returns the fail-safe "marker
+// absent" decision alongside the error, which the caller logs.
 package markergate
 
 import (
@@ -39,27 +26,19 @@ const (
 type NudgeConfig struct {
 	Marker Marker
 
-	// -- Marker == MarkerOutcome --
-	// Issue and Landing substitute into the ready-to-copy example line.
+	// Issue and Landing substitute into the MarkerOutcome example line.
 	Issue, Landing string
 
-	// -- Marker == MarkerPRIntent --
 	// Nonce is this run's RUN_NONCE, embedded in the PR-intent grammar.
 	Nonce string
-	// OriginalOutcomeLine is the exact status=ready SPINDRIFT_OUTCOME line to
-	// ask the resumed pass to repeat verbatim as its final message.
+	// OriginalOutcomeLine is the status=ready SPINDRIFT_OUTCOME line the
+	// resumed pass must repeat verbatim as its final message.
 	OriginalOutcomeLine string
 
-	// LogPath is scanned to detect whether the marker is already present,
-	// and its meaning depends on cfg.Marker. For MarkerOutcome, it is the
-	// Driver's unwrapped-and-markdown-stripped final-message text (not the
-	// raw stream-json log) -- plain text with the SPINDRIFT_OUTCOME token
-	// leading a physical line when present, scanned via
-	// outcome.LastFieldedOutcomeLine/outcome.LastNearMissOutcomeLine for
-	// field-marker presence (see ShouldNudgeOutcome), not full grammar
-	// validity. For MarkerPRIntent, it is the raw Driver stream_log, scanned
-	// via outcome.LastPRIntentInLog for an already-present genuine
-	// SPINDRIFT_PR_INTENT line.
+	// LogPath is scanned to detect whether the marker is already present.
+	// Its meaning depends on cfg.Marker: for MarkerOutcome, the Driver's
+	// unwrapped and markdown-stripped final-message text, not the raw
+	// stream-json log; for MarkerPRIntent, the raw Driver stream_log.
 	LogPath string
 }
 
@@ -74,14 +53,10 @@ func RenderNudgePrompt(cfg NudgeConfig) (string, error) {
 	}
 }
 
-// renderOutcomeNudge renders the SPINDRIFT_OUTCOME gate's nudge: the generic
-// wording when no fielded marker line was present at all, or the near-miss
-// wording (quoting the offending line and restating the grammar) when a
-// SPINDRIFT_OUTCOME-token-leading line was present but did not carry both a
-// landing= and a status= field marker (outcome.LastNearMissOutcomeLine --
-// see ShouldNudgeOutcome's doc comment for why this is field-presence, not
-// outcome.Parse's full-grammar validity). A scan error reads the same as
-// "no near-miss line", so it renders the generic wording.
+// renderOutcomeNudge picks the near-miss wording when a token-leading line
+// was present but missing a field marker, and the generic wording otherwise.
+// A scan error reads the same as "no near-miss line", so it renders the
+// generic wording.
 func renderOutcomeNudge(cfg NudgeConfig) (string, error) {
 	nearMiss, found, err := outcome.LastNearMissOutcomeLine(cfg.LogPath)
 	if err != nil {
@@ -101,9 +76,8 @@ func renderOutcomeNudge(cfg NudgeConfig) (string, error) {
 	), err
 }
 
-// substituteFieldShape fills a fieldShape's issue= and landing= fields with
-// this run's actual values field-wise, passing every other field through
-// verbatim as a literal placeholder.
+// substituteFieldShape fills in the issue= and landing= fields and passes
+// every other field through as a literal placeholder.
 func substituteFieldShape(fieldShape, issue, landing string) string {
 	fields := strings.Fields(fieldShape)
 	for i, field := range fields {
@@ -117,7 +91,6 @@ func substituteFieldShape(fieldShape, issue, landing string) string {
 	return strings.Join(fields, " ")
 }
 
-// renderPRIntentNudge renders the SPINDRIFT_PR_INTENT gate's nudge.
 func renderPRIntentNudge(cfg NudgeConfig) string {
 	return fmt.Sprintf(
 		"Your last message ended with a status=ready %s line but printed no %s line, so the launcher has no draft PR to open. Print exactly one %s line, grammar: %s %s <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: %s",
@@ -125,26 +98,11 @@ func renderPRIntentNudge(cfg NudgeConfig) string {
 	)
 }
 
-// ShouldNudgeOutcome reports whether the SPINDRIFT_OUTCOME required-marker
-// gate should fire its corrective resume: false only when cfg.LogPath
-// already carries a "fielded" SPINDRIFT_OUTCOME-token-leading line --
-// carrying both a landing= and a status= field marker, any value included
-// (outcome.LastFieldedOutcomeLine) -- true both when the marker is entirely
-// absent and when the last token-leading line is missing either field
-// marker.
-//
-// This deliberately mirrors the deleted bash gate's presence-only test
-// (outcomeExtractFnBody + entrypoint.sh's old `[ -z "$_last_outcome_line" ]`
-// gate, git show a2addd2b:lib/drivers/claude.nix), not outcome.Parse's
-// full-grammar validity: Parse rejects an empty landing field as
-// ErrNearMiss, which would spuriously nudge on a line the deleted bash
-// treated as already satisfying the gate, and Parse-via-self-report always
-// classifies the unconditional LAST token-leading line in the log, which
-// would wrongly flip this to true when a later, non-fielded token-leading
-// line (e.g. a bare "SPINDRIFT_OUTCOME: all set" paraphrase) follows a
-// genuine fielded line -- the deleted bash instead filtered to fielded
-// lines first and only then took the last of those. See
-// outcome.LastFieldedOutcomeLine.
+// ShouldNudgeOutcome reports whether the SPINDRIFT_OUTCOME gate should fire
+// its corrective resume: false only when cfg.LogPath carries a token-leading
+// line with both a landing= and a status= field marker. Field presence, not
+// outcome.Parse validity: Parse nudges spuriously on an empty landing, and it
+// takes the last token-leading line, so a later paraphrase masks a real one.
 func ShouldNudgeOutcome(cfg NudgeConfig) (bool, error) {
 	_, found, err := outcome.LastFieldedOutcomeLine(cfg.LogPath)
 	if err != nil {
@@ -153,17 +111,11 @@ func ShouldNudgeOutcome(cfg NudgeConfig) (bool, error) {
 	return !found, nil
 }
 
-// ShouldNudgePRIntent reports whether the PR-intent required-marker gate
-// should fire its corrective resume: cfg.OriginalOutcomeLine must carry
-// status=ready before its note field (outcome.ReadyBeforeNote -- looser than
-// full outcome.Parse validity, since a nudge decision only cares whether the
-// driver claimed ready, not whether every other field is well-formed; see
-// ReadyBeforeNote's own doc comment for why a full Parse would both
-// under-nudge on a valid-but-incomplete ready line and over-nudge on a
-// status=ready mention buried inside free-text note), and cfg.LogPath must
-// not already carry a genuine, cfg.Nonce-verified SPINDRIFT_PR_INTENT line.
-// A not-ready OriginalOutcomeLine short-circuits before the scan, so that
-// case reports no error either.
+// ShouldNudgePRIntent reports whether the PR-intent gate should fire its
+// corrective resume: cfg.OriginalOutcomeLine must claim status=ready before
+// its note field, and cfg.LogPath must not already carry a nonce-verified
+// SPINDRIFT_PR_INTENT line. A not-ready line short-circuits before the scan,
+// so that case reports no error either.
 func ShouldNudgePRIntent(cfg NudgeConfig) (bool, error) {
 	if !outcome.ReadyBeforeNote(cfg.OriginalOutcomeLine) {
 		return false, nil
@@ -172,13 +124,10 @@ func ShouldNudgePRIntent(cfg NudgeConfig) (bool, error) {
 	return !present, err
 }
 
-// prIntentPresent reports whether path already carries a genuine,
-// nonce-verified SPINDRIFT_PR_INTENT line -- the one presence rule both
-// ShouldNudgePRIntent and Resolve gate on. A scan error (every
-// token-bearing line failed to verify -- a spoof attempt or a corrupted
-// line, never conflated with the token being entirely absent) is reported
-// with the rejected-line count, the actionable detail; the nonce itself
-// never appears in the message.
+// prIntentPresent is the one presence rule both ShouldNudgePRIntent and
+// Resolve gate on. A scan error means every token-bearing line failed to
+// verify (a spoof or a corrupted line), never that the token was absent; the
+// message carries the rejected-line count but never the nonce.
 func prIntentPresent(path, nonce string) (bool, error) {
 	_, found, rejected, err := outcome.LastPRIntentInLog(path, nonce)
 	if err != nil {
@@ -187,17 +136,14 @@ func prIntentPresent(path, nonce string) (bool, error) {
 	return found, nil
 }
 
-// nearMissScanErr wraps an outcome.LastNearMissOutcomeLine failure with the
-// scanned path and which scanner hit it. Shared by renderOutcomeNudge and
-// Resolve, which scan different logs with the same scanner and so must keep
-// reporting it identically.
+// nearMissScanErr wraps a near-miss scan failure so renderOutcomeNudge and
+// Resolve, which run the same scanner over different logs, report it
+// identically.
 func nearMissScanErr(path string, err error) error {
 	return fmt.Errorf("scan %s for a near-miss %s line: %w", path, outcome.Token, err)
 }
 
-// statusProse renders statuses as an Oxford-comma-joined list ("a", "a or
-// b", "a, b, or c", ...) for the near-miss nudge's "only valid status
-// values are ..." sentence.
+// statusProse joins statuses with an Oxford comma ("a", "a or b", "a, b, or c").
 func statusProse(statuses []string) string {
 	switch len(statuses) {
 	case 0:
@@ -211,77 +157,55 @@ func statusProse(statuses []string) string {
 	}
 }
 
-// ResolveConfig is the input to Resolve -- called only for MarkerPRIntent,
-// after the corrective resume already ran.
+// ResolveConfig is the input to Resolve, called only for MarkerPRIntent and
+// only after the corrective resume already ran.
 type ResolveConfig struct {
-	// Attempts is the number of nudge attempts exhausted (always 1 today,
-	// but not hardcoded).
+	// Attempts is the number of nudge attempts exhausted (always 1 today).
 	Attempts int
-	// LogPath is the resumed pass's own raw Driver log to scan, via
-	// outcome.LastPRIntentInLog, for a genuine SPINDRIFT_PR_INTENT line --
-	// the resume already ran by the time Resolve is called.
-	LogPath string
-	// Nonce is this run's RUN_NONCE, used to verify the scanned
+	// LogPath is the resumed pass's raw Driver log, scanned for a genuine
 	// SPINDRIFT_PR_INTENT line.
+	LogPath string
+	// Nonce is this run's RUN_NONCE, used to verify the scanned line.
 	Nonce string
-	// ResumedOutcomeLine is the resumed pass's own freshly-scanned
-	// SPINDRIFT_OUTCOME line (the same extraction the initial pass uses);
-	// empty means the resumed pass produced no valid outcome line of its
-	// own.
+	// ResumedOutcomeLine is the resumed pass's own SPINDRIFT_OUTCOME line;
+	// empty means it produced no valid outcome line of its own.
 	ResumedOutcomeLine string
-	// ResumedDriverTextLogPath is the resumed pass's own unwrapped-text log
-	// (mirrors NudgeConfig.LogPath's marker==outcome meaning: the Driver's
-	// unwrapped-and-markdown-stripped final-message text, not the raw
-	// stream-json log). It is scanned via outcome.LastNearMissOutcomeLine --
-	// the same scanner ShouldNudgeOutcome/renderOutcomeNudge use -- to
-	// detect whether the resumed pass shadowed the original outcome line in
-	// the container log with a garbled SPINDRIFT_OUTCOME-shaped line of its
-	// own, unifying "near-miss" to one Go-owned definition instead of two.
+	// ResumedDriverTextLogPath is the resumed pass's unwrapped-text log, with
+	// the same meaning as NudgeConfig.LogPath under MarkerOutcome. Scanning it
+	// for a near-miss detects whether the resumed pass shadowed the original
+	// outcome line in the container log with a garbled one of its own.
 	ResumedDriverTextLogPath string
-	// OriginalOutcomeLine is the status=ready line captured before the
-	// resume ran -- the restore fallback's source of truth.
+	// OriginalOutcomeLine is the status=ready line captured before the resume
+	// ran, the restore fallback's source of truth.
 	OriginalOutcomeLine string
-	// OutcomeViaBackstop reports whether this run's ready status came from
-	// the synthetic outcome-backstop verb rather than a genuine driver
-	// self-report.
+	// OutcomeViaBackstop reports whether this run's ready status came from the
+	// synthetic outcome-backstop verb rather than a driver self-report.
 	OutcomeViaBackstop bool
 	// ResumeExitCode is the corrective resume's own driver exit code.
 	ResumeExitCode int
 }
 
-// Resolution is Resolve's result. GiveUp and Restore are independent,
-// separately-gated outcomes (both, either, or neither may fire on a single
-// call -- see Resolve's doc comment for why this isn't a strict one-of-three
-// enum) -- a caller checks each field for non-emptiness/non-falseness
-// independently rather than switching on a single "type".
+// Resolution is Resolve's result. Its fields are independently gated, so a
+// caller checks each one rather than switching on a single kind.
 type Resolution struct {
-	// OpLine is a single, newline-terminated spindrift_op heartbeat JSON line
-	// to print (claude.EncodeSpindriftOp appends the trailing newline), set
-	// iff the nudge is exhausted (no verified PR-intent line found in
-	// LogPath).
+	// OpLine is one newline-terminated spindrift_op heartbeat JSON line to
+	// print, set iff the nudge is exhausted.
 	OpLine string `json:"op_line,omitempty"`
-	// OutcomeLine is the original SPINDRIFT_OUTCOME line to reprint
-	// verbatim, set iff the resumed pass shadowed it with a near-miss and
-	// produced no valid outcome of its own.
+	// OutcomeLine is the original SPINDRIFT_OUTCOME line to reprint verbatim,
+	// set iff the resumed pass shadowed it with a near-miss and produced no
+	// valid outcome of its own.
 	OutcomeLine string `json:"outcome_line,omitempty"`
-	// ForceExitZero reports whether the caller must force a non-zero
-	// ResumeExitCode back to zero: true only when OutcomeViaBackstop is set
-	// and ResumeExitCode != 0 (a crash in this best-effort nudge must never
-	// retroactively undo an already-terminal backstop-declared ready run).
+	// ForceExitZero asks the caller to force a non-zero ResumeExitCode back to
+	// zero: a crash in this best-effort nudge must never undo an already
+	// terminal, backstop-declared ready run.
 	ForceExitZero bool `json:"force_exit_zero,omitempty"`
 }
 
 // Resolve decides what to do with the corrective PR-intent resume's result.
-// GiveUp (OpLine) and Restore (OutcomeLine) are independent, separately-
-// gated outcomes rather than a single one-of-three enum: a resume can, for
-// instance, still fail to supply a PR-intent line (GiveUp fires) while its
-// own SPINDRIFT_OUTCOME text is untouched from the original (Restore does
-// not fire, since there was nothing to shadow) -- collapsing them into one
-// switch would force an arbitrary precedence between two orthogonal
-// questions ("did the nudge get its marker?" vs. "did the resume clobber
-// the original outcome line?"). Both scanners can fail independently, so
-// their errors are combined via errors.Join rather than one shadowing the
-// other.
+// Giving up (OpLine) and restoring (OutcomeLine) answer orthogonal questions,
+// so both, either, or neither may fire; collapsing them into one switch would
+// force an arbitrary precedence. Both scanners can fail, so their errors are
+// combined with errors.Join rather than one shadowing the other.
 func Resolve(cfg ResolveConfig) (Resolution, error) {
 	var r Resolution
 

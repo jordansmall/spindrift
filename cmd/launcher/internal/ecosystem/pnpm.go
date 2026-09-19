@@ -2,14 +2,13 @@ package ecosystem
 
 import "strings"
 
-// namePnpm is pnpmRow's Name -- npmFamilyVars (npm.go) compares against
-// this const instead of pnpmRow.Name directly, to avoid a package
-// initialization cycle (see nameGo's doc comment in go.go for the general
-// shape of the cycle this sidesteps).
+// namePnpm is pnpmRow's Name. npmFamilyVars (npm.go) compares against this
+// const rather than pnpmRow.Name to avoid a package initialization cycle.
 const namePnpm = "pnpm"
 
-// pnpmRow is the pnpm ecosystem's Table entry (see yarnRow's doc comment for
-// why this row carries a BindingEnvVar despite a nil EnvExports).
+// pnpmRow is the pnpm ecosystem's Table entry. It carries a BindingEnvVar
+// despite a nil EnvExports because npmRow's EnvExports (NpmFamilyBindings)
+// renders all three npm-family vars, pnpm's included, in one call.
 var pnpmRow = Row{
 	Name:             namePnpm,
 	LockfileNames:    []string{"pnpm-lock.yaml"},
@@ -19,12 +18,10 @@ var pnpmRow = Row{
 	ConfigParser:     parsePnpmRegistryConfig,
 }
 
-// isPnpmRegistryKey reports whether key is a real pnpm registry key: the
-// bare top-level "registry", or a scoped catalog key "<scope>:registry"
-// where scope starts with "@" (a quoted key like "\"@myorg:registry\""
-// arrives here already unquoted by splitYAMLKeyValue). A suffix-only check
-// would also match an unrelated key like "myregistry" or a YAML list item
-// key like "- registry".
+// isPnpmRegistryKey reports whether key is the bare top-level "registry" or a
+// scoped catalog key "<scope>:registry". splitYAMLKeyValue has already
+// unquoted the key. A suffix-only check would also match an unrelated key
+// like "myregistry" or a YAML list item key like "- registry".
 func isPnpmRegistryKey(key string) bool {
 	if key == "registry" {
 		return true
@@ -32,14 +29,10 @@ func isPnpmRegistryKey(key string) bool {
 	return strings.HasPrefix(key, "@") && strings.HasSuffix(key, ":registry")
 }
 
-// parsePnpmRegistryConfig is pnpmRow's ConfigParser: it scans content (a
-// pnpm-workspace.yaml) line-by-line for the bare "registry:" key or a scoped
-// catalog key like "\"@myorg:registry\":" with an http(s) value -- same
-// line-based approach as parseYarnRegistryConfig, avoiding a YAML library
-// for this single key (adding one is an ADR 0048 promotion trigger, see
-// package doc, not a prohibition). isPnpmRegistryKey exact-matches the key
-// so an unrelated key merely ending in "registry" or a YAML list item is
-// never mistaken for a real pnpm registry declaration.
+// parsePnpmRegistryConfig scans a pnpm-workspace.yaml line by line for the
+// bare "registry" key or a scoped catalog key with an http(s) value. Scanning
+// lines covers the shapes pnpm emits without a YAML library for one key;
+// adding one is an ADR 0048 promotion trigger, not a prohibition.
 func parsePnpmRegistryConfig(content string) ([]Declaration, bool, error) {
 	seenURL := make(map[string]bool)
 	var out []Declaration
@@ -47,8 +40,8 @@ func parsePnpmRegistryConfig(content string) ([]Declaration, bool, error) {
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
-			// A full-line comment -- skip it outright rather than feeding it
-			// to splitYAMLKeyValue, which has no notion of "#" as special.
+			// splitYAMLKeyValue has no notion of "#" as special, so
+			// this loop drops full-line comments itself.
 			continue
 		}
 		key, value, ok := splitYAMLKeyValue(trimmed)
@@ -68,8 +61,7 @@ func parsePnpmRegistryConfig(content string) ([]Declaration, bool, error) {
 		})
 	}
 
-	// sawDeclaration means a real registry key (per isPnpmRegistryKey) was
-	// set but every value was unusable -- distinct from a file with no such
-	// key at all.
+	// sawDeclaration means a real registry key was set but every value was
+	// unusable, which is distinct from a file with no such key at all.
 	return out, sawDeclaration, nil
 }

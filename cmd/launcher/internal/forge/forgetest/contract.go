@@ -1,8 +1,7 @@
-// Package forgetest is the executable contract for forge.IssueTracker: one
-// shared test suite every adapter — github, forgejo, jira, local, and the
-// shared Fake — runs against its own scripted-backend harness, so semantic
-// drift between the Fake and a real adapter fails CI instead of resting on
-// "mirrors the real adapter" comments and reviewer discipline.
+// Package forgetest is the executable contract for forge.IssueTracker: every
+// adapter (github, forgejo, jira, local, and the shared Fake) runs this one
+// suite against its own scripted-backend harness, so drift between the Fake
+// and a real adapter fails CI.
 package forgetest
 
 import (
@@ -14,50 +13,40 @@ import (
 // Harness lets RunTrackerContract drive an IssueTracker's scripted backend
 // without knowing which adapter it is.
 type Harness interface {
-	// Tracker returns the IssueTracker under test.
 	Tracker() forge.IssueTracker
-	// SeedIssue puts an issue in the scripted backend.
 	SeedIssue(forge.Issue)
 	// FailNativeDeps scripts a native-API error for issue num's next DepsOf
 	// call, on harnesses that implement NativeFailureIsolatable.
 	FailNativeDeps(num string)
 }
 
-// NativeCapable is implemented by harnesses whose backend has a genuine
-// native dependency-relationship concept distinct from body-text parsing
-// (github, forgejo, jira, and the Fake once NativeDeps is seeded) —
-// RunTrackerContract type-asserts for it to decide whether the native-wins
-// scenario applies. The local adapter has no native concept and does not
-// implement it.
+// NativeCapable is implemented by harnesses whose backend has a native
+// dependency-relationship concept distinct from body-text parsing, so the
+// native-wins scenario applies to them. The local adapter has none.
 type NativeCapable interface {
-	// SeedNativeDeps registers ids as num's native dependency relationships,
-	// independent of whatever body text SeedIssue wrote.
+	// SeedNativeDeps registers ids as num's native dependencies, independent
+	// of whatever body text SeedIssue wrote.
 	SeedNativeDeps(num string, ids []string)
 }
 
 // NativeFailureIsolatable is implemented by harnesses where a native lookup
-// failure can be exercised independent of body-content availability — the
-// Fake, github, and forgejo (issue #1544 AC2). Jira's native lookup and its
-// Issue body fetch share one underlying request, so the two can't be
-// decoupled; local has no native concept to fail.
+// failure can be exercised independent of body-content availability (issue
+// #1544 AC2). Jira's native lookup and its Issue body fetch share one request,
+// so the two cannot be decoupled; local has no native concept to fail.
 type NativeFailureIsolatable interface {
 	IsolatesNativeFailure()
 }
 
 // PriorityCapable is implemented by harnesses whose adapter resolves the
-// agent-priority-* label family (ADR 0040) into a real forge.Priority tier —
-// github and the Fake as of issue #2281, forgejo as of issue #2283. jira/local
-// are documented to default every issue to PriorityNormal permanently.
-// testLabelToPriority type-asserts for this marker to decide whether a
-// labeled issue should resolve to its tier or, for a harness that hasn't
-// implemented one, stay at PriorityNormal.
+// agent-priority-* label family (ADR 0040) into a forge.Priority tier: github
+// and the Fake (#2281), forgejo (#2283). jira and local default every issue to
+// PriorityNormal permanently, so testLabelToPriority asserts that instead.
 type PriorityCapable interface {
 	IsPriorityCapable()
 }
 
-// RunTrackerContract runs the shared IssueTracker conformance suite against
-// h. Every adapter package calls this from its own test file, backed by its
-// own scripted-backend Harness.
+// RunTrackerContract runs the shared IssueTracker conformance suite against h,
+// backed by the calling adapter's own scripted-backend Harness.
 func RunTrackerContract(t *testing.T, h Harness) {
 	t.Run("DispatchLifecycle", func(t *testing.T) { testDispatchLifecycle(t, h) })
 	t.Run("DoubleDispatchGuard", func(t *testing.T) { testDoubleDispatchGuard(t, h) })
@@ -67,10 +56,8 @@ func RunTrackerContract(t *testing.T, h Harness) {
 	t.Run("LabelToPriority", func(t *testing.T) { testLabelToPriority(t, h) })
 }
 
-// testDispatchLifecycle verifies TransitionState's label/state swaps move an
-// issue through the full work-kind lifecycle — Untriaged through each
-// terminal — and that ListIssues(state) reflects exactly the current state
-// at each step, never a stale one.
+// testDispatchLifecycle checks that ListIssues(state) reflects the current
+// state after each TransitionState, never a stale one.
 func testDispatchLifecycle(t *testing.T, h Harness) {
 	tr := h.Tracker()
 	h.SeedIssue(forge.Issue{Number: "101", Title: "lifecycle"})
@@ -107,11 +94,9 @@ func testDispatchLifecycle(t *testing.T, h Harness) {
 	requireNotIn(t, tr, forge.InProgress, "102")
 }
 
-// testDoubleDispatchGuard verifies CompleteVerdict asserts the issue still
-// carries InProgress before swapping in a verdict label: it must succeed the
-// first time (InProgress present), then error — without changing the
-// terminal label already landed — on a second call for the same issue,
-// which no longer carries InProgress (#701, mirrored in Fake by d07bfb0).
+// testDoubleDispatchGuard checks that CompleteVerdict requires InProgress: it
+// succeeds once, then errors on a second call without changing the terminal
+// label already landed (#701).
 func testDoubleDispatchGuard(t *testing.T, h Harness) {
 	tr := h.Tracker()
 	h.SeedIssue(forge.Issue{Number: "201", Title: "double dispatch"})
@@ -131,19 +116,16 @@ func testDoubleDispatchGuard(t *testing.T, h Harness) {
 	}
 }
 
-// testDepsOf verifies DepsOf's native-wins-when-non-empty rule and, where
-// the harness's backend can decouple native failure from body-content
-// availability, the native-error-falls-back-to-body path (issue #1544 AC2:
-// exercised on the Fake, github, and forgejo — jira's native lookup and
-// Issue fetch share one request, and local has no native concept at all, so
-// neither harness implements NativeFailureIsolatable).
+// testDepsOf checks DepsOf's native-wins-when-non-empty rule and, where the
+// harness can decouple native failure from body-content availability, the
+// fallback to body (issue #1544 AC2).
 func testDepsOf(t *testing.T, h Harness) {
 	nc, hasNative := h.(NativeCapable)
 
 	if !hasNative {
-		// Non-native-concept adapters (currently only local) use their own
-		// body grammar for blocker refs — local's slug-bullet "## Blocked
-		// by" section, not github/Fake's inline "blocked by #N" prose.
+		// local has no native concept and uses its own body grammar: a
+		// slug-bullet "## Blocked by" section, not github/Fake's inline
+		// "blocked by #N" prose.
 		h.SeedIssue(forge.Issue{Number: "301", Body: "## Blocked by\n- 7\n"})
 		deps, err := h.Tracker().DepsOf("301")
 		if err != nil {
@@ -186,11 +168,10 @@ func testDepsOf(t *testing.T, h Harness) {
 	}
 }
 
-// testResearchVerdictTerminals verifies CompleteVerdict lands each of the
-// three research verdict terminals (ADR 0022) and clears InProgress — the
-// harness's Tracker must be constructed with forge.ResearchVerdictLabels()
-// (fixed, not operator-configurable per verdict.go) so the expected label
-// strings below hold for every adapter.
+// testResearchVerdictTerminals checks CompleteVerdict lands each research
+// verdict terminal (ADR 0022) and clears InProgress. The harness's Tracker
+// must be constructed with forge.ResearchVerdictLabels() for the expected
+// label strings to hold.
 func testResearchVerdictTerminals(t *testing.T, h Harness) {
 	verdictLabels := forge.ResearchVerdictLabels()
 	cases := []struct {
@@ -233,12 +214,10 @@ func testResearchVerdictTerminals(t *testing.T, h Harness) {
 	}
 }
 
-// testDispatchOrder verifies ListIssues returns issues in each adapter's
-// canonical order — seeded and moved to Dispatchable in ascending-number
-// order, so the assertion holds regardless of whether an adapter's native
-// order key is issue number (github, forgejo, Fake) or creation time (local,
-// jira), which naturally coincides with insertion order in a scripted-backend
-// harness.
+// testDispatchOrder checks ListIssues returns issues in each adapter's
+// canonical order. Seeding in ascending-number order makes the assertion hold
+// whether the adapter orders by issue number or by creation time, which
+// matches insertion order in a scripted backend.
 func testDispatchOrder(t *testing.T, h Harness) {
 	tr := h.Tracker()
 	want := []string{"501", "502", "503"}
@@ -270,16 +249,11 @@ func testDispatchOrder(t *testing.T, h Harness) {
 	}
 }
 
-// testLabelToPriority verifies label->Priority resolution (ADR 0040): an
-// unlabeled issue resolves to PriorityNormal on every adapter, unconditionally
-// — that assertion holds whether or not the adapter maps agent-priority-*
-// labels at all. Harnesses that implement PriorityCapable (github, forgejo,
-// Fake) are additionally asserted to resolve each agent-priority-* label to
-// its own tier, and a conflicting pair to the highest tier present. Harnesses
-// that don't implement it (jira, local) are asserted to stay at
-// PriorityNormal even when an issue carries an agent-priority-* label —
-// documenting today's non-capable-adapter behavior rather than a future
-// commitment (jira/local never map it, per ADR 0040).
+// testLabelToPriority checks label-to-Priority resolution (ADR 0040). An
+// unlabeled issue resolves to PriorityNormal on every adapter. A
+// PriorityCapable harness resolves each agent-priority-* label to its tier and
+// a conflicting pair to the highest; jira and local stay at PriorityNormal
+// even when an issue carries one of those labels.
 func testLabelToPriority(t *testing.T, h Harness) {
 	tr := h.Tracker()
 	_, capable := h.(PriorityCapable)
@@ -307,7 +281,6 @@ func testLabelToPriority(t *testing.T, h Harness) {
 	}
 }
 
-// requirePriority fails the test unless tr.Issue(num).Priority equals want.
 func requirePriority(t *testing.T, tr forge.IssueTracker, num string, want forge.Priority) {
 	t.Helper()
 	iss, err := tr.Issue(num)
@@ -331,7 +304,6 @@ func equalDeps(a, b []forge.Dependency) bool {
 	return true
 }
 
-// requireIn fails the test unless num appears in ListIssues(state).
 func requireIn(t *testing.T, tr forge.IssueTracker, state forge.DispatchState, num string) {
 	t.Helper()
 	issues, err := tr.ListIssues(state)
@@ -346,7 +318,6 @@ func requireIn(t *testing.T, tr forge.IssueTracker, state forge.DispatchState, n
 	t.Fatalf("ListIssues(%v) = %v, want it to contain %q", state, numbers(issues), num)
 }
 
-// requireNotIn fails the test if num appears in ListIssues(state).
 func requireNotIn(t *testing.T, tr forge.IssueTracker, state forge.DispatchState, num string) {
 	t.Helper()
 	issues, err := tr.ListIssues(state)

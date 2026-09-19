@@ -7,8 +7,7 @@ type RecordLandingCall struct {
 	Num, Landing string
 }
 
-// RecordLanding implements the optional LandingRecorder surface (ADR 0029),
-// recording each call for tests to assert against.
+// RecordLanding implements the optional LandingRecorder interface (ADR 0029).
 func (tf *IssueTrackerFake) RecordLanding(num, landing string) error {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -23,8 +22,7 @@ type RecordLandingPassCall struct {
 	Kind string
 }
 
-// RecordLandingPass implements the optional LandingPassRecorder surface
-// (issue #2983), recording each call for tests to assert against.
+// RecordLandingPass implements the optional LandingPassRecorder interface (issue #2983).
 func (tf *IssueTrackerFake) RecordLandingPass(num string, pass int, kind string) error {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -32,9 +30,7 @@ func (tf *IssueTrackerFake) RecordLandingPass(num string, pass int, kind string)
 	return tf.RecordLandingPassErr
 }
 
-// CloseIssue implements the optional IssueCloser surface (ADR 0029), setting
-// the issue's State to IssueClosed and recording the call for tests to
-// assert against.
+// CloseIssue implements the optional IssueCloser interface (ADR 0029).
 func (tf *IssueTrackerFake) CloseIssue(num string) error {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -51,9 +47,8 @@ func (tf *IssueTrackerFake) CloseIssue(num string) error {
 	return nil
 }
 
-// CloseMergedIssue implements the optional MergeCloser surface (issue
-// #1892), setting the issue's State to IssueClosed and recording the call
-// (separately from CloseIssueCalls) for tests to assert against.
+// CloseMergedIssue implements the optional MergeCloser interface (issue #1892).
+// It records into CloseMergedIssueCalls, not CloseIssueCalls.
 func (tf *IssueTrackerFake) CloseMergedIssue(num string) error {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -70,9 +65,7 @@ func (tf *IssueTrackerFake) CloseMergedIssue(num string) error {
 	return nil
 }
 
-// FlagAbandoned implements the optional AbandonedFlagger surface (ADR 0029),
-// setting the issue's Abandoned field and recording the call for tests to
-// assert against.
+// FlagAbandoned implements the optional AbandonedFlagger interface (ADR 0029).
 func (tf *IssueTrackerFake) FlagAbandoned(num string) error {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -89,8 +82,7 @@ func (tf *IssueTrackerFake) FlagAbandoned(num string) error {
 	return nil
 }
 
-// PriorClaimState implements the optional PriorClaimStateReader surface,
-// returning the issue's scripted PriorClaimStates entry.
+// PriorClaimState implements the optional PriorClaimStateReader interface.
 func (tf *IssueTrackerFake) PriorClaimState(num string) (DispatchState, bool, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()

@@ -10,20 +10,16 @@ import (
 	"spindrift.dev/launcher/internal/bindregistry"
 )
 
-// isForwardRegistryTCPInvocation reports whether args (os.Args[1:]) selects
-// the forward-registry-tcp subcommand: a distinct verb, not a top-level
-// flag, mirroring isProbeRegistrySocketInvocation.
+// isForwardRegistryTCPInvocation reports whether args selects the
+// forward-registry-tcp subcommand, which is a verb rather than a top-level flag.
 func isForwardRegistryTCPInvocation(args []string) bool {
 	return len(args) > 0 && args[0] == "forward-registry-tcp"
 }
 
-// runForwardRegistryTCP is the `forward-registry-tcp` subcommand's thin CLI
-// wrapper (ADR 0007's thin-exec-glue tier, issue #3111): it is the detached,
-// long-running child bindregistry.SpawnHTTPForwarder execs -- the TCP-mode
-// counterpart of the detached `socat` process bindregistry.SpawnSocat
-// leaves running. It never returns on success; http.ListenAndServe blocks
-// forever, which is correct here since this subcommand only ever runs as
-// that detached child, never inline in a caller waiting on its exit code.
+// runForwardRegistryTCP runs the forward-registry-tcp subcommand (ADR 0007,
+// issue #3111). It is the detached child bindregistry.SpawnHTTPForwarder execs,
+// so on success it never returns: http.ListenAndServe blocks forever and no
+// caller waits on its exit code.
 func runForwardRegistryTCP(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("forward-registry-tcp", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -47,10 +43,9 @@ func runForwardRegistryTCP(args []string, stdout io.Writer) int {
 		return 1
 	}
 
-	// Read from the environment, not a flag: the secret must never appear
-	// on this process's own argv, which is visible via ps/proc to any local
-	// user (see bindregistry.SpawnHTTPForwarder, which sets this exact
-	// variable rather than passing a flag).
+	// bindregistry.SpawnHTTPForwarder sets this variable rather than passing a
+	// flag: the secret must never reach this process's argv, which ps/proc
+	// expose to any local user.
 	secret := os.Getenv("REGISTRY_PROXY_TCP_SECRET")
 	if secret == "" {
 		fmt.Fprintln(stdout, "driver-exec forward-registry-tcp: REGISTRY_PROXY_TCP_SECRET is required")

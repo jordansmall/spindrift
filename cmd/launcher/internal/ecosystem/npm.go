@@ -9,15 +9,10 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// nameNpm is npmRow's Name -- npmFamilyVars compares against this const
-// (alongside nameYarn/namePnpm from yarn.go/pnpm.go) instead of npmRow.Name
-// directly, to avoid a package initialization cycle (see nameGo's doc
-// comment in go.go for the general shape of the cycle this sidesteps).
+// nameNpm exists so npmFamilyVars can compare against a const rather than
+// npmRow.Name, which would create a package initialization cycle.
 const nameNpm = "npm"
 
-// npmRow is the npm ecosystem's Table entry (see yarnRow/pnpmRow for why
-// those two rows carry a BindingEnvVar despite this row's EnvExports
-// rendering all three vars).
 var npmRow = Row{
 	Name:             nameNpm,
 	LockfileNames:    []string{"package-lock.json"},
@@ -38,12 +33,10 @@ var npmRow = Row{
 	}},
 }
 
-// parseNpmRegistryConfig is npmRow's ConfigParser: it scans content (a
-// .npmrc) line-by-line for "registry=<url>" and "@scope:registry=<url>"
-// entries (any scope name). .npmrc is npm's own ini-ish format, not TOML or
-// YAML, and npm accepts values with no quoting at all -- a line-based scan
-// matches what npm itself parses far more closely than reaching for a
-// general-purpose ini library would for this one line shape.
+// parseNpmRegistryConfig scans a .npmrc for "registry=" and
+// "@scope:registry=" lines. npm's format is ini-ish and accepts unquoted
+// values, so a line-based scan matches npm's own parsing more closely than a
+// general-purpose ini library would.
 func parseNpmRegistryConfig(content string) ([]Declaration, bool, error) {
 	seenURL := make(map[string]bool)
 	var out []Declaration
@@ -74,75 +67,29 @@ func parseNpmRegistryConfig(content string) ([]Declaration, bool, error) {
 		})
 	}
 
-	// sawDeclaration means the file named a registry key but its value (or
-	// every one, if repeated) was unusable -- distinct from a file that
-	// names no registry key at all.
+	// sawDeclaration tells the caller the file named a registry key but no
+	// usable value, which differs from a file that names no registry key.
 	return out, sawDeclaration, nil
 }
 
-// npmFamilyVar is one of the three env vars NpmFamilyBindings binds, paired
-// with the registrypathset/registrymanifest ecosystem tag its path lookup
-// keys on.
 type npmFamilyVar struct {
 	name      string
 	ecosystem string
 }
 
-// npmFamilyVars is the fixed npm/pnpm/yarn var-to-ecosystem-tag mapping
-// NpmFamilyBindings walks, one independent computation per entry (issue
-// #3259) -- a route's per-ecosystem tagged paths can differ across the
-// three, so each var is decided on its own.
+// NpmFamilyBindings computes each of these entries independently (issue
+// #3259): a route's tagged paths can differ across npm, pnpm, and yarn.
 var npmFamilyVars = []npmFamilyVar{
 	{name: "npm_config_registry", ecosystem: nameNpm},
 	{name: "pnpm_config_registry", ecosystem: namePnpm},
 	{name: "YARN_NPM_REGISTRY_SERVER", ecosystem: nameYarn},
 }
 
-// NpmFamilyBindings mirrors the npm/pnpm/yarn berry portion of the deleted
-// entrypoint.sh phase_registry_proxy_forwarder (see git history): all three
-// package managers get pointed at the same Forwarder URL, each via the one
-// env-var-override mechanism that beats a Target repo's own committed
-// project-level config (npm's env > project .npmrc > user .npmrc > global
-// .npmrc; pnpm's own pnpm_config_* prefix, since it no longer honors
-// npm_config_*; yarn berry's YARN_<KEY> single-key override convention).
-// Unlike cargo, npm has no per-registry table -- the env var overrides its
-// one default registry outright, and it wins even over a Target repo's own
-// committed project-level .npmrc. These bindings still cover
-// packument/metadata requests only: npm's packument JSON embeds an absolute
-// tarball URL that pacote fetches verbatim rather than deriving it from this
-// registry setting. That URL no longer leaves the proxy, though -- npmRow's
-// own packument rewrite row (see rewriteNpmPackument, issue #3401) re-points
-// every same-host dist.tarball at the Forwarder, so the download stays on
-// the credentialed path. What that row deliberately leaves alone is a
-// tarball URL naming a different host (a CDN): the proxy holds no credential
-// for that host.
-// Unscoped only -- per-scope registry entries stay entrypoint-side, applied
-// by the *_intree_binding_apply phases.
-//
-// routes[0] is the manifest route these bindings point at -- see
-// runBindRegistryBindings in cmd/launcher/driver-exec/bindregistry_cmd.go
-// for why it's always the first manifest route's prefix. Each var is
-// decided independently against routes[0].EnforcedPaths, looking up the
-// entries tagged for that var's own ecosystem -- zero
-// matches exports nothing for that var (the route declares no such registry
-// at all, so there's nothing to bind, matching AC3's fallback); exactly one
-// match exports the full-path URL onto that tagged subtree; more than one
-// match is ambiguous (registrydiscover doesn't distinguish a scoped
-// "@scope:registry=" declaration from an unscoped "registry=" one, so there
-// is no way to tell which tagged path, if any, is the default registry the
-// env var should point at) and exports nothing for that var, with a warning
-// instead.
-//
-// One tagging wrinkle worth knowing: a pnpm registry declared only in
-// .npmrc (pnpm honors .npmrc, not just its own pnpm-workspace.yaml) is
-// extracted and tagged "npm" by registrydiscover's walker calling
-// parseNpmRegistryConfig, since .npmrc is read as the npm row's own
-// InTreeConfigPath -- parsePnpmRegistryConfig only handles
-// pnpm-workspace.yaml (see ecosystem.Table's pnpm row). So
-// pnpm_config_registry's lookup here finds no
-// "pnpm"-tagged path and falls back to unset (no export), even though the
-// in-tree rewrite still correctly covers pnpm's actual traffic by rewriting
-// that same .npmrc's host in place.
+// NpmFamilyBindings points npm, pnpm, and yarn berry at the Forwarder on
+// routes[0], each through its own env var: pnpm no longer honors
+// npm_config_*, and an env var is the only override that beats a Target
+// repo's committed .npmrc. Unscoped registries only; these bind packument
+// requests, and rewriteNpmPackument (#3401) re-points embedded tarball URLs.
 func NpmFamilyBindings(port int, prefix string, routes []registrymanifest.Route) ([]EnvExport, []string) {
 	route := firstRoute(routes)
 
@@ -158,15 +105,14 @@ func NpmFamilyBindings(port int, prefix string, routes []registrymanifest.Route)
 
 		switch len(matches) {
 		case 0:
-			// No tagged path for this ecosystem on this route -- no
-			// declaration to bind, fall back to no export (AC3).
+			// Nothing tagged for this ecosystem, so nothing to bind (AC3).
+			// A pnpm registry declared only in .npmrc is tagged "npm", so
+			// pnpm_config_registry lands here; the in-tree rewrite still
+			// covers pnpm's traffic.
 		case 1:
-			// registrypathset's Path convention renders a whole-host
-			// declaration as the literal "/" (pathset.go's normalizePath),
-			// not "". Left as-is, that "/" concatenates into a double
-			// slash below (".../prefix//"); normalize it to "" first --
-			// "no extra path segment to embed" -- mirroring cargo's own
-			// ""-means-"no path" convention (see cargoIndexPath).
+			// registrypathset renders a whole-host declaration as "/"
+			// (pathset.go's normalizePath), which would concatenate into a
+			// double slash below.
 			matchPath := matches[0]
 			if matchPath == "/" {
 				matchPath = ""
@@ -176,6 +122,9 @@ func NpmFamilyBindings(port int, prefix string, routes []registrymanifest.Route)
 				Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, matchPath),
 			})
 		default:
+			// registrydiscover does not distinguish a scoped
+			// "@scope:registry=" declaration from an unscoped "registry=",
+			// so there is no way to tell which path is the default.
 			warnings = append(warnings, fmt.Sprintf(
 				"==> WARNING: route %q has %d %s-tagged paths (%s); %s is ambiguous and will not be bound",
 				route.Prefix, len(matches), v.ecosystem, strings.Join(matches, ", "), v.name))

@@ -2,21 +2,19 @@ package forge
 
 import "fmt"
 
-// DepSource records whether a Dependency was resolved from the tracker's
-// native dependency-relationship API or parsed from issue/file body text.
+// DepSource records whether a Dependency came from the tracker's native
+// dependency API or was parsed from issue body text.
 type DepSource int
 
 const (
-	// DepSourceUnknown is the zero value: no source was recorded for this
-	// ref (e.g. a sources map lookup miss). Keeping it — rather than
-	// DepSourceNative — as the zero value means a missing entry renders
-	// "unknown" instead of silently misreporting "native".
+	// DepSourceUnknown is the zero value, so a sources map miss renders
+	// "unknown" rather than silently misreporting "native".
 	DepSourceUnknown DepSource = iota
-	// DepSourceNative means the ref came from a native relationship (GitHub
-	// issue-dependencies API, Jira "is blocked by" issue links).
+	// DepSourceNative means a native relationship (GitHub's
+	// issue-dependencies API, Jira "is blocked by" links).
 	DepSourceNative
-	// DepSourceBody means the ref was parsed from body text (inline
-	// "blocked by #N" / "depends on #N", or a "## Blocked by" section).
+	// DepSourceBody means the ref came from body text: inline "blocked by
+	// #N" / "depends on #N", or a "## Blocked by" section.
 	DepSourceBody
 )
 
@@ -32,24 +30,20 @@ func (s DepSource) String() string {
 	}
 }
 
-// Dependency is a single resolved blocker reference: the blocking issue's
-// canonical ID and the source DepsOf resolved it from.
+// Dependency is a single resolved blocker reference.
 type Dependency struct {
 	ID     string
 	Source DepSource
 }
 
-// Ref formats a blocker ID with its source annotation for operator-facing
-// diagnostics, e.g. "#42 (native)" — the single renderer shared by the
-// preview, blocked-skip, and blocked-claim marker call sites so the format
-// exists exactly once.
+// Ref formats a blocker ID with its source annotation, e.g. "#42 (native)".
+// The preview, blocked-skip, and blocked-claim markers all call it so the
+// format exists once.
 func Ref(id string, source DepSource) string {
 	return fmt.Sprintf("#%s (%s)", id, source)
 }
 
-// WithSource tags a batch of same-sourced IDs, the shape every DepsOf
-// implementation resolves in one shot (a native list, or ParseBlockerRefs'
-// output).
+// WithSource tags a batch of same-sourced IDs.
 func WithSource(ids []string, source DepSource) []Dependency {
 	deps := make([]Dependency, len(ids))
 	for i, id := range ids {
@@ -58,49 +52,37 @@ func WithSource(ids []string, source DepSource) []Dependency {
 	return deps
 }
 
-// IssueTracker is the seam through which the launcher reads issues and
-// transitions their dispatch state. Implementations map DispatchState to
-// their native mechanism (GitHub labels, Jira workflow statuses, local
-// file frontmatter).
+// IssueTracker reads issues and transitions their dispatch state.
+// Implementations map DispatchState to
+// their own mechanism: GitHub labels, Jira workflow statuses, local file
+// frontmatter.
 type IssueTracker interface {
-	// ListIssues returns open issues in the given dispatch state, in canonical
-	// order (GitHub: ascending issue number).
+	// ListIssues returns open issues in the given dispatch state, in
+	// canonical order (GitHub: ascending issue number).
 	ListIssues(state DispatchState) ([]Issue, error)
-	// ListOpenIssues returns every open issue, in canonical order (GitHub:
-	// ascending issue number), regardless of dispatch state — including
-	// issues the operator has not yet triaged onto the dispatch lifecycle.
-	// Unlike ListIssues, which filters to a single dispatch state's label,
-	// this is the full backlog the Console browses.
+	// ListOpenIssues returns every open issue in canonical order whatever
+	// its dispatch state, including issues the operator has not yet
+	// triaged. This is the full backlog the Console browses.
 	ListOpenIssues() ([]Issue, error)
 	// Issue returns full details (body, labels, state) for the given number.
 	Issue(num string) (Issue, error)
-	// TransitionState moves issue num from state from to state to. It adds
-	// the label for to and removes the label for from, matching the
-	// SwapLabel(add, remove) contract with typed state identifiers.
+	// TransitionState moves issue num from state from to state to, adding
+	// the label for to and removing the label for from.
 	TransitionState(num string, from, to DispatchState) error
-	// CompleteVerdict moves issue num from InProgress to its verdict-specific
-	// terminal label — the research dispatch kind's Complete transition
-	// (ADR 0022), which carries data plain TransitionState(num, InProgress,
-	// Complete) cannot express: which of the three verdicts a human should
-	// act on. Work-kind dispatches never call this; work's Complete carries
-	// no verdict.
+	// CompleteVerdict moves issue num from InProgress to its
+	// verdict-specific terminal label, the research kind's Complete
+	// transition (ADR 0022). Plain TransitionState cannot express which
+	// verdict a human should act on. Work-kind dispatches never call this.
 	CompleteVerdict(num string, verdict Verdict) error
-	// DepsOf returns the canonical dependencies for the given issue, each
-	// tagged with the source it was resolved from. Implementations prefer
-	// the tracker's native dependency relationships (e.g. GitHub's
-	// issue-dependencies API, Jira's "is blocked by" issue links) and fall
-	// back to body-text parsing (GitHub body "depends on #N" / "## Blocked
-	// by" section) only when native lookup yields no relationships or is
-	// unavailable. Native wins when non-empty — body text is never merged
-	// with a non-empty native result.
+	// DepsOf returns the canonical dependencies for the issue, each tagged
+	// with its source. Implementations prefer the tracker's native
+	// dependency relationships and fall back to body-text parsing only when
+	// native yields nothing. A non-empty native result is never merged.
 	DepsOf(num string) ([]Dependency, error)
-	// TouchesOf returns the declared touch-set for the given issue — the
-	// path globs an issue names as the files/areas its work will touch,
-	// used by the wave engine's overlap gate. All adapters currently share
-	// the body-grammar default (a "## Touches" section, ParseTouchPaths);
-	// adapters remain free to go native later, mirroring DepsOf's
-	// native-preferred-over-body pattern. An issue with no such section
-	// returns nil, nil.
+	// TouchesOf returns the path globs an issue names as the files its work
+	// will touch, which the wave engine's overlap gate consumes. Every
+	// adapter uses the body-grammar default (a "## Touches" section,
+	// ParseTouchPaths). An issue with no such section returns nil, nil.
 	TouchesOf(num string) ([]string, error)
 	// Comment posts a comment on the issue.
 	Comment(num, body string) error
@@ -113,217 +95,137 @@ type IssueTracker interface {
 	CreateLabel(name, description, color string) error
 }
 
-// BlockersLister is the optional IssueTracker surface for adapters with a
-// genuine native reverse-dependency concept — the issues a given issue
-// blocks, as opposed to DepsOf's forward "blocked by" direction. Only
-// github and jira implement it: both track blocked/blocking as a true
-// bidirectional native relationship (GitHub's issue-dependencies API,
-// Jira's "Blocks" link type), so the reverse direction costs one more
-// native call, not a whole-backlog scan (issue #1744). The local adapter's
-// only blocker concept is one-directional body-text parsing ("## Blocked
-// by"), with no formal way to discover which other issues declare this one
-// as a blocker short of scanning every issue file, so it does not
-// implement this — a caller that needs it type-asserts, exactly as
-// LandingRecorder and IssueCloser callers already do.
+// BlockersLister is the optional IssueTracker capability for adapters with a
+// native reverse-dependency concept, the issues a given issue blocks. Only
+// github and jira track blocked/blocking bidirectionally, so the reverse
+// direction costs one more native call rather than a whole-backlog scan
+// (issue #1744).
 type BlockersLister interface {
-	// BlocksOf returns the canonical issues that num blocks — DepsOf's
-	// reverse direction — each tagged with the source it was resolved
-	// from. Always DepSourceNative: there is no body-text grammar for
-	// declaring a forward "blocks" relationship, so a body-sourced
-	// blocked-by edge has no reverse this method can ever surface.
+	// BlocksOf returns the canonical issues that num blocks, DepsOf's
+	// reverse direction. Always DepSourceNative: no body-text grammar
+	// declares a forward "blocks" relationship, so a body-sourced
+	// blocked-by edge has no reverse to surface.
 	BlocksOf(num string) ([]Dependency, error)
 }
 
-// HostPostedCommenter is the optional IssueTracker surface for adapters
-// whose Comment call is safe to invoke host-side, from the Launcher's own
-// credential, without the Box ever needing to post the comment itself
-// (issue #1914): under BOX_FORGE_AND_ISSUE_ACCESS=read-only, the Box holds
-// no write token, so its blocked/verdict comment travels as a
-// SPINDRIFT_COMMENT stdout block for the Launcher to post via Comment
-// instead of an in-box `gh issue comment`. Every current adapter (github,
-// local, jira) already implements the base IssueTracker.Comment method the
-// Launcher calls host-side today for merge-guard/landing notes, so this
-// marker is trivially satisfied by all of them now; it exists so the
-// read-only capability gate (issue #1916) has a named seam to type-assert
-// against, matching the pattern PRForge/BundleRelay/LandingRecorder use, in
-// case a future adapter's Comment needs the Box's own credential and can't
-// be called host-side.
+// HostPostedCommenter is the optional IssueTracker capability for adapters
+// whose Comment the Launcher may call host-side from its own credential
+// (issue #1914): a read-only Box holds no write token, so its comment travels
+// as a SPINDRIFT_COMMENT stdout block. Every adapter satisfies it today; it
+// exists so the read-only gate (issue #1916) has a name to assert against.
 type HostPostedCommenter interface {
-	// Comment posts a comment on the issue — identical to the base
-	// IssueTracker.Comment, restated here as a distinct, discoverable
-	// capability.
+	// Comment posts a comment on the issue.
 	Comment(num, body string) error
 }
 
-// HostPostedIssueFiler is the optional IssueTracker surface for host-side
-// issue filing (issue #2018): under BOX_FORGE_AND_ISSUE_ACCESS=read-only,
-// the Box holds no write token, so it cannot `gh issue create` itself; the
-// Launcher files the issue host-side instead, from a title/body/labels a
-// read-only Box hands it as a SPINDRIFT_ISSUE_INTENT stdout signal — the
-// fourth host-mediated write channel alongside branch→bundle, PR→intent
-// line, and comment→comment line (ADR 0034). Discovered via type assertion,
-// like DraftPRCreator/HostPostedCommenter. The destination repo is implicit
-// in which IssueTracker instance the Launcher holds — there is no repo
-// argument for a payload to redirect — and labels are always supplied by the
-// caller, never read back out of the Box's own payload (issue #1949's
-// do-not-trust-the-agent-target invariant, extended from destination repo to
-// labels). github (exec_issues.go's execClient.PostIssue, issue #2028) and
-// forgejo (forgejo.go's forgejoClient.PostIssue, issue #1964) both implement
-// it; the Fake does too, behind AsIssueFiler() (issue #2018).
+// HostPostedIssueFiler is the optional IssueTracker capability for host-side
+// issue filing (issue #2018): a read-only Box cannot create an issue, so it
+// hands the Launcher a SPINDRIFT_ISSUE_INTENT stdout signal (ADR 0034). Labels
+// always come from the caller and the destination repo from the tracker
+// instance, never from the Box's payload (issue #1949).
 type HostPostedIssueFiler interface {
-	// PostIssue files a new issue with the given title, body, and labels,
-	// and returns its URL.
+	// PostIssue files a new issue and returns its URL.
 	PostIssue(title, body string, labels []string) (url string, err error)
 }
 
-// LandingRecorder is the optional IssueTracker surface for adapters that can
-// persist where a Dispatch's work landed (ADR 0029). Only the local adapter
-// implements it — github/jira issues close through the forge's own
-// mechanisms and have no such ref to persist. Callers discover it with a
-// type assertion — `lr, ok := it.(LandingRecorder)` — the same
-// optional-interface pattern PRForge uses.
+// LandingRecorder is the optional IssueTracker capability for adapters that
+// can persist where a Dispatch's work landed (ADR 0029). Only the local
+// adapter implements it; github and jira issues close through the forge's own
+// mechanisms and have no such ref to persist.
 type LandingRecorder interface {
 	// RecordLanding persists landing (a PR URL or push-only branch ref) as
-	// issue num's immutable landing reference. Only the ref is stored; no
-	// merge-state is cached — a later reconcile re-checks the forge live.
+	// issue num's immutable landing reference. Only the ref is stored, no
+	// merge state, so a later reconcile re-checks the forge live.
 	RecordLanding(num, landing string) error
 }
 
-// LandingPassRecorder is the optional IssueTracker surface for adapters that
-// can record which pass produced a landing's outcome (ADR 0029, issue #2983)
-// — purely advisory provenance alongside RecordLanding's own landing ref, never
-// consulted by any settle decision or the Resolved outcome's own tier
-// selection. Only the local adapter implements it — github/jira have no
-// per-issue-file record to annotate. Callers discover it with a type
-// assertion — `lpr, ok := it.(LandingPassRecorder)` — the same
-// optional-interface pattern LandingRecorder uses.
+// LandingPassRecorder is the optional IssueTracker capability for adapters
+// that can record which pass produced a landing's outcome (ADR 0029, issue
+// #2983). Advisory provenance only: no settle decision and no Resolved tier
+// selection ever reads it. Only the local adapter implements it.
 type LandingPassRecorder interface {
-	// RecordLandingPass persists pass and kind — the 1-indexed pass number
-	// and role ("implement", "review", "fix", "land", ...) of the pass whose
-	// own log the settled outcome was parsed from — as issue num's landing
-	// provenance. Best-effort, additive metadata only: never gates or
-	// changes anything RecordLanding itself does.
+	// RecordLandingPass persists the 1-indexed pass number and role
+	// ("implement", "review", "fix", "land", ...) of the pass whose log the
+	// settled outcome was parsed from. Best-effort and additive: it never
+	// changes what RecordLanding does.
 	RecordLandingPass(num string, pass int, kind string) error
 }
 
-// GithubTracker is the optional IssueTracker capability marking the github
-// adapter specifically (issue #2341) — narrower than "not LandingRecorder,"
-// which local excludes but forgejo would still pass, even though forgejo
-// issue numbers are a foreign namespace from GitHub's: injecting a GitHub
-// `Closes #N` keyword against a forgejo-tracked issue would falsely
-// reference (and could auto-close) an unrelated real GitHub issue #N. The
-// prompt-side PR_BODY_CLOSES gate this marker backs also covers jira, but
-// jira can't host-mediate a draft PR and its issue keys aren't bare digits,
-// so this narrower github-only marker is sufficient here.
-// Callers discover it with a type assertion — `_, ok :=
-// it.(GithubTracker)` — the same optional-interface pattern LandingRecorder
-// uses. Only the github adapter implements it. IsGithubTracker is exported
-// (unlike a bare unexported marker method) because the implementer lives in
-// a different package (forge/github): an unexported interface method can
-// only be satisfied by types declared in the interface's own package, so a
-// sealed-style unexported marker would make it impossible for execClient to
-// ever implement this interface.
+// GithubTracker marks the github adapter specifically (issue #2341). It is
+// narrower than "not LandingRecorder," which forgejo also passes: a `Closes
+// #N` injected for a forgejo-tracked issue could auto-close an unrelated
+// GitHub issue. The PR_BODY_CLOSES gate it backs also covers jira, but jira
+// keys are not bare digits, so a github-only marker is enough.
 type GithubTracker interface {
-	// IsGithubTracker is a no-op marker; its only purpose is to exist so a
-	// type assertion against GithubTracker succeeds. It always returns true.
+	// IsGithubTracker is a no-op marker that always returns true. It is
+	// exported because the implementer lives in package forge/github, and
+	// an unexported interface method could only be satisfied by types
+	// declared here.
 	IsGithubTracker() bool
 }
 
-// IssueCloser is the optional IssueTracker surface for adapters with a
+// IssueCloser is the optional IssueTracker capability for adapters with a
 // native open/closed axis reconcile can flip (ADR 0029). Only the local
-// adapter implements it — a github/jira issue closes through the forge's own
-// merged-PR auto-close, with no separate axis for reconcile to drive.
-// Callers discover it with a type assertion — `ic, ok := it.(IssueCloser)` —
-// the same optional-interface pattern PRForge and LandingRecorder use.
+// adapter implements it; a github or jira issue closes through the forge's
+// own merged-PR auto-close.
 type IssueCloser interface {
 	// CloseIssue marks issue num closed (the local closed: axis, ADR 0029).
 	// Reconcile is its sole caller.
 	CloseIssue(num string) error
 }
 
-// MergeCloser is the optional IssueTracker surface for an adapter that can
-// close an issue directly as settle's deterministic backstop (issue #1892)
-// for a Code Forge's own merge-driven auto-close — used only by settle's
-// post-merge verification, never by reconcile. It is deliberately a
-// distinctly-named method rather than reusing IssueCloser: ISSUE_TRACKER and
-// CODE_FORGE are selected independently (main.go's newIssueTracker/
-// newCodeForge), so ISSUE_TRACKER=local paired with CODE_FORGE=github is a
-// valid combination — were this surface named CloseIssue like IssueCloser,
-// the local adapter's existing method would satisfy it too, and settle would
-// drive the local closed: axis directly, a write only reconcile's sweep may
-// make. Only github and forgejo implement MergeCloser. Callers discover
-// it with a type assertion — `mc, ok := it.(MergeCloser)`.
+// MergeCloser is the optional IssueTracker capability for closing an issue as
+// settle's backstop (issue #1892) for a forge's merge-driven auto-close. Only
+// github and forgejo implement it. The method is not named CloseIssue because
+// ISSUE_TRACKER=local with CODE_FORGE=github is valid, and a shared name would
+// let settle drive the local closed: axis, a write only reconcile may make.
 type MergeCloser interface {
 	// CloseMergedIssue closes issue num once settle has independently
-	// confirmed a genuine merge. Idempotent: closing an already-closed issue
-	// is a successful no-op.
+	// confirmed a genuine merge. Idempotent.
 	CloseMergedIssue(num string) error
 }
 
-// AbandonedFlagger is the optional IssueTracker surface for adapters with a
+// AbandonedFlagger is the optional IssueTracker capability for adapters with a
 // native abandoned axis reconcile can flip (ADR 0029). Only the local adapter
-// implements it — a github/jira PR closed without merging needs no further
-// local tracking. Callers discover it with a type assertion — `af, ok :=
-// it.(AbandonedFlagger)` — the same optional-interface pattern IssueCloser
-// and LandingRecorder use.
+// implements it; a github or jira PR closed without merging needs no further
+// local tracking.
 type AbandonedFlagger interface {
 	// FlagAbandoned marks issue num abandoned (the local abandoned: axis,
-	// ADR 0029) — set when the issue's landing PR was closed without
-	// merging. Reconcile is its sole caller.
+	// ADR 0029) when its landing PR was closed without merging. Reconcile
+	// is its sole caller.
 	FlagAbandoned(num string) error
 }
 
-// SeamLister is the optional IssueTracker surface for adapters that group
-// issues under a parent/broad-ticket field (ADR 0033). Only the local
-// adapter implements it — github/jira issues have no such grouping for the
-// launcher to query. Callers discover it with a type assertion — `sl, ok :=
-// it.(SeamLister)` — the same optional-interface pattern IssueCloser and
-// LandingRecorder use.
+// SeamLister is the optional IssueTracker capability for adapters that group
+// issues under a parent/broad-ticket field (ADR 0033). Only the local adapter
+// implements it; github and jira have no such grouping to query.
 type SeamLister interface {
-	// AllIssues returns every issue (open or closed) the tracker holds, in
-	// canonical order, regardless of parent, state, or dispatch marker —
-	// the auto-surface sweep's basis for discovering every distinct
-	// resolved parent across a mixed batch (ADR 0033, issue #1734).
+	// AllIssues returns every issue the tracker holds, open or closed, in
+	// canonical order and whatever its parent, state, or dispatch marker.
+	// The auto-surface sweep uses it to find every distinct resolved parent
+	// across a mixed batch (ADR 0033, issue #1734).
 	AllIssues() ([]Issue, error)
 }
 
-// PriorClaimStateReader is the optional IssueTracker surface for adapters
-// that can look up the terminal dispatch state (Complete or Failed) an issue
-// carried immediately before its most recent claim onto InProgress — state a
-// TransitionState(_, InProgress) call's ClaimRemoveLabels strip destroys from
-// the issue's current label set the instant the claim runs. recoverByNumber
-// (cmd/launcher/main.go) is the intended caller: agent-recover.yml's claim
-// step runs host-side, ahead of the launcher, so by the time recoverByNumber
-// ever sees the issue, its current labels already read agent-in-progress
-// regardless of what came before — this is the launcher's only route back to
-// "what was this issue before the claim wiped it," letting a terminal
-// recover failure restore a prior agent-complete rather than downgrade it to
-// agent-failed (issue #2477). Callers discover it with a type assertion —
-// `pr, ok := it.(PriorClaimStateReader)` — the same optional-interface
-// pattern LandingRecorder and IssueCloser use.
+// PriorClaimStateReader is the optional IssueTracker capability for reading
+// the terminal dispatch state an issue held just before its latest claim onto
+// InProgress, which the claim's ClaimRemoveLabels strip destroys. Since
+// agent-recover.yml claims ahead of the launcher, this is recoverByNumber's one
+// route back to agent-complete instead of a downgrade (issue #2477).
 type PriorClaimStateReader interface {
 	// PriorClaimState returns the terminal DispatchState (Complete or
-	// Failed) the issue carried immediately before its most recent claim
-	// onto InProgress, and whether one was found at all — false when the
-	// issue's history carries no terminal-label removal (e.g. a fresh
-	// dispatch that was never previously terminal).
+	// Failed) the issue carried before its most recent claim onto
+	// InProgress, and whether one was found. It reports false when the
+	// issue's history holds no terminal-label removal, such as a fresh
+	// dispatch that was never terminal.
 	PriorClaimState(num string) (DispatchState, bool, error)
 }
 
-// LabeledTracker is the optional IssueTracker surface for adapters whose
-// entire DispatchState space reduces to one DispatchLabels value (github,
-// local, and the Fake test double). PickIssue's double-box guard (#1742)
-// uses it to recognize a state the tracker's label family leaves unmapped
-// (e.g. research's Complete, which reaches its terminal state through
-// verdict labels instead, ADR 0022) and treat it as "never present"
-// without paying a ListIssues round-trip — one that would otherwise
-// false-match every open issue (GitHub ignores an empty --label filter;
-// Local's frontmatter.State == "" matches every untriaged issue). Jira
-// blends a per-state StatusMapping with Labels, which doesn't reduce to a
-// single DispatchLabels value, so it doesn't implement this and keeps
-// paying the round-trip. Callers discover it with a type assertion —
-// `lt, ok := tracker.(LabeledTracker)` — the same optional-interface
-// pattern IssueCloser and LandingRecorder use.
+// LabeledTracker is the optional IssueTracker capability for adapters whose
+// whole DispatchState space reduces to one DispatchLabels value (github, local,
+// the Fake; jira's StatusMapping blend does not). PickIssue's double-box guard
+// (#1742) uses it to spot a state the labels leave unmapped, like research's
+// Complete (ADR 0022), where a ListIssues filter would match every open issue.
 type LabeledTracker interface {
 	// StateLabels returns the DispatchLabels family this tracker resolves
 	// DispatchState values through.

@@ -7,12 +7,9 @@ import (
 	"spindrift.dev/launcher/internal/logscan"
 )
 
-// ScanLog calls logscan.ForEachLine(path, policy, fn). A missing log file
-// degrades to an empty scan: if the underlying error satisfies
-// errors.Is(err, os.ErrNotExist), ScanLog returns nil without having called
-// fn, so the caller falls through to its own zero-value result instead of
-// treating a not-yet-written log as an error. Any other error from
-// ForEachLine is returned unchanged.
+// ScanLog calls logscan.ForEachLine and degrades a missing log file to an
+// empty scan, so a caller reading a not-yet-written log falls through to its
+// own zero-value result instead of seeing an error.
 func ScanLog(path string, policy logscan.Policy, fn func(line string)) error {
 	err := logscan.ForEachLine(path, policy, fn)
 	if err != nil && errors.Is(err, os.ErrNotExist) {

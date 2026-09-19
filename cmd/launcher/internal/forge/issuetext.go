@@ -7,61 +7,38 @@ import (
 	"unicode/utf8"
 )
 
-// maxIssueTextBytes bounds the string IssueText returns. An issue thread
-// with an unbounded comment count has no length limit of its own, but the
-// value travels into a Box through the runner process's own environment on
-// both routes (offArgvKeys in cmd/launcher/internal/runner: resolvedRunEnv
-// under bwrap, ociRunEnv under OCI; issue #3470), and
-// execve bounds each environment string the same way it bounds each
-// argument -- so IssueText truncates rather than letting a pathological
-// thread blow past that limit. When t is also a LinkedIssueLister, this is
-// one shared budget for the subject text plus the whole rendered link
-// chain, not a separate allowance per section -- see IssueText.
+// maxIssueTextBytes bounds the string IssueText returns. The value reaches a
+// Box through the runner's environment (offArgvKeys, issue #3470), and execve
+// bounds each environment string as it bounds each argument, so IssueText
+// truncates an unbounded comment thread. When t is also a LinkedIssueLister,
+// the subject text and the rendered link chain share this one budget.
 const maxIssueTextBytes = 64 * 1024
 
 // issueTextCommentWindow bounds the trailing slice of comments IssueText
-// renders -- the "last-10-comment snapshot" every prompt fragment promises.
+// renders, the last-10-comment snapshot every prompt fragment promises.
 const issueTextCommentWindow = 10
 
-// Comment is a single issue comment, normalized from an adapter's native
-// shape into the three fields IssueText renders.
+// Comment is a single issue comment, normalized from an adapter's native shape.
 type Comment struct {
 	Author    string
 	CreatedAt string
 	Body      string
 }
 
-// CommentLister is the optional IssueTracker surface for adapters that can
-// list an issue's comments. Discovered via type assertion, like
-// BlockersLister and the other optional IssueTracker surfaces above: not
-// every adapter needs one (a local file-backed issue has no comment
-// thread), so this stays outside the required IssueTracker interface rather
-// than forcing every implementation to grow a stub.
+// CommentLister is the optional IssueTracker interface for adapters that can
+// list an issue's comments, discovered via type assertion. A local file-backed
+// issue has no comment thread, so this stays outside IssueTracker.
 type CommentLister interface {
-	// Comments returns issue num's comments, oldest first -- the order
-	// IssueText assumes when it takes the trailing window of the slice.
+	// Comments returns issue num's comments, oldest first, the order IssueText
+	// assumes when it takes the trailing window of the slice.
 	Comments(num string) ([]Comment, error)
 }
 
-// IssueText renders issue num's body, plus -- when t also implements
-// CommentLister -- its last 10 comments under a "## Comments" heading, each
-// rendered "author (createdAt): body". This mirrors the snapshot shape the
-// prompt fragments used to prescribe via
-// `.comments[-10:][] | "\(.author.login) (\(.createdAt)): \(.body)"`, now
-// resolved host-side instead of in-box.
-//
-// When t also implements LinkedIssueLister and num has at least one linked
-// issue, a "## Linked issues" section follows the subject text, rendering
-// num's transitive "## Blocked by" and parent: chain (see LinkedIssueLister
-// and renderLinkedIssues) within what's left of the shared maxIssueTextBytes
-// budget. A remote tracker (github, jira) is never a LinkedIssueLister, so
-// its output is untouched by this: byte-identical to before this feature.
-//
-// A t.Issue error is returned -- there is no text to build without it. A
-// comments-fetch error, and a LinkedIssues error, are both deliberately
-// swallowed: each degrades to the text built so far rather than failing
-// IssueText, since losing the comment snapshot or the link chain must never
-// fail a dispatch that would otherwise have proceeded on the subject alone.
+// IssueText renders issue num's body, its last 10 comments under "## Comments"
+// when t implements CommentLister, and num's transitive link chain under
+// "## Linked issues" when t implements LinkedIssueLister. A t.Issue error is
+// returned; a comments or LinkedIssues error is swallowed, so losing either
+// section never fails a dispatch the subject text alone would have carried.
 func IssueText(t IssueTracker, num string) (string, error) {
 	iss, err := t.Issue(num)
 	if err != nil {
@@ -83,9 +60,8 @@ func IssueText(t IssueTracker, num string) (string, error) {
 		}
 	}
 
-	// The subject alone already exceeds the budget: there's no room left
-	// for a linked section, and truncateIssueText's marker-and-cut behavior
-	// must stay exactly what it was before this feature existed.
+	// No room left for a linked section, and truncation must keep the
+	// marker-and-cut behavior it had before linked issues existed.
 	if len(text) > maxIssueTextBytes {
 		return truncateIssueText(text), nil
 	}
@@ -101,17 +77,15 @@ func IssueText(t IssueTracker, num string) (string, error) {
 	return text + renderLinkedIssues(links, maxIssueTextBytes-len(text)), nil
 }
 
-// linkedIssuesHeading opens the "## Linked issues" section renderLinkedIssues
-// appends to the subject text.
 const linkedIssuesHeading = "\n\n## Linked issues\n\n"
 
 // blockSep separates each top-level block (a rendered entry, the unresolved
 // list, the omitted list) inside the "## Linked issues" section.
 const blockSep = "\n\n"
 
-// relationRank orders LinkBlockedBy ahead of LinkParent for admission and
-// display: a direct blocker is what's stopping num from proceeding right
-// now, so it earns budget priority over an informational parent link.
+// relationRank orders LinkBlockedBy ahead of LinkParent: a direct blocker is
+// what stops num from proceeding now, so it earns budget priority over an
+// informational parent link.
 func relationRank(r LinkRelation) int {
 	if r == LinkBlockedBy {
 		return 0
@@ -119,27 +93,11 @@ func relationRank(r LinkRelation) int {
 	return 1
 }
 
-// renderLinkedIssues renders links -- num's transitive link chain from a
-// LinkedIssueLister -- as the body of a "## Linked issues" section, fit
-// within budget bytes (what's left of maxIssueTextBytes after the subject
-// text).
-//
-// Entries are ordered shallowest depth first, blocked-by before parent
-// within a depth, and admitted into that order greedily against budget: an
-// entry too big to fit is never cut mid-body (a half-rendered issue is
-// worse than none), it is omitted whole and listed by ref under "Omitted
-// for size" instead, while a smaller lower-priority entry that still fits
-// is still admitted. A resolution failure (Err set) is cheap to render as a
-// one-line reason, so every one is listed under "Unresolved references"
-// unconditionally rather than competing for admission at all.
-//
-// Sizing reserves for the heading, the (fully known) unresolved list, and
-// the worst case where every resolvable entry lands in the omitted list,
-// before spending any of what's left on full entry bodies -- so the
-// admission loop below can never discover a fit that, once assembled,
-// actually overruns budget. That reservation is deliberately conservative
-// (a flat per-block separator charge rather than the exact N-1 count), so
-// the assembled section can end a few bytes under budget but never over.
+// renderLinkedIssues renders links as the body of a "## Linked issues" section
+// within budget bytes. An entry too big to fit is omitted whole and listed by
+// ref, never cut mid-body. Sizing reserves the heading, the unresolved list,
+// and the worst case where every resolvable entry lands in the omitted list
+// before spending on bodies, so the section can end under budget, never over.
 func renderLinkedIssues(links []LinkedIssue, budget int) string {
 	if budget <= len(linkedIssuesHeading) {
 		return ""
@@ -177,9 +135,8 @@ func renderLinkedIssues(links []LinkedIssue, budget int) string {
 		budget -= len(unresolvedBlock) + len(blockSep)
 	}
 
-	// Reserve as if every resolvable entry ends up omitted -- the worst
-	// case admission can produce -- before deciding which actually get
-	// rendered in full.
+	// Reserve as if every resolvable entry ends up omitted, the worst case
+	// admission can produce, before deciding which get rendered in full.
 	omittedLines := make([]string, len(resolved))
 	worstOmitted := 0
 	if len(resolved) > 0 {
@@ -228,11 +185,10 @@ func renderLinkedIssues(links []LinkedIssue, budget int) string {
 	return linkedIssuesHeading + strings.Join(blocks, blockSep)
 }
 
-// renderLinkedEntry renders one resolved LinkedIssue as a "### ref — title
-// (relation of linkedFrom)" heading, a status line built only from what the
-// adapter actually recorded (no derived or invented frontmatter), and the
-// issue's own body verbatim -- which, for the local adapter, already
-// carries its own "## Comments" section as plain body text.
+// renderLinkedEntry renders one resolved LinkedIssue as a heading, a status
+// line built only from what the adapter recorded (nothing derived or invented),
+// and the issue's body verbatim, which for the local adapter already carries
+// its own "## Comments" section as plain body text.
 func renderLinkedEntry(l LinkedIssue) string {
 	var b strings.Builder
 	b.WriteString("### ")
@@ -264,11 +220,9 @@ func renderLinkedEntry(l LinkedIssue) string {
 	return b.String()
 }
 
-// truncateIssueText caps s at maxIssueTextBytes, cutting on a rune boundary
-// so the truncated tail cannot become a mangled half-rune, and appends an
-// explicit, visible marker -- unlike a silent cut, a marker line makes the
-// truncation itself part of what the prompt sees, rather than something an
-// agent could mistake for the issue simply having no more text.
+// truncateIssueText caps s at maxIssueTextBytes, cutting on a rune boundary so
+// the tail cannot become a mangled half-rune, and appends a visible marker so
+// an agent cannot mistake the cut for the issue simply having no more text.
 func truncateIssueText(s string) string {
 	if len(s) <= maxIssueTextBytes {
 		return s

@@ -7,24 +7,17 @@ import (
 	"syscall"
 )
 
-// AccumulationLock is a held cross-process advisory lock on an Accumulation
-// repo's path, acquired via AcquireAccumulationLock. Release unlocks and
-// closes the underlying lock file.
+// AccumulationLock is a held cross-process advisory lock on an Accumulation repo's path.
 type AccumulationLock struct {
 	path string
 	file *os.File
 }
 
-// AcquireAccumulationLock takes a non-blocking exclusive lock on
-// repoPath+".lock", creating the lock file (and its parent directory, if
-// missing — repoPath's parent isn't guaranteed to exist ahead of time,
-// since git init --bare creates any missing leading directories itself)
-// if absent. Returns a descriptive error if another process already holds
-// the lock rather than blocking: this is a cross-process serialization
-// point (issue #2441) guarding against two independent `spindrift`
-// processes (e.g. research + dispatch) seeding/mounting the same
-// Accumulation repo concurrently, and for an operator-driven workflow a
-// clear "try again" error beats a silent hang.
+// AcquireAccumulationLock takes a non-blocking exclusive lock on repoPath+".lock".
+// It serializes two independent spindrift processes (research and dispatch, say) that
+// would otherwise seed or mount the same Accumulation repo at once (issue #2441). It
+// errors instead of blocking so an operator sees "try again" rather than a silent hang.
+// It creates the lock file's parent directory, since the repo may not exist yet.
 func AcquireAccumulationLock(repoPath string) (*AccumulationLock, error) {
 	lockPath := repoPath + ".lock"
 
@@ -45,8 +38,7 @@ func AcquireAccumulationLock(repoPath string) (*AccumulationLock, error) {
 	return &AccumulationLock{path: lockPath, file: file}, nil
 }
 
-// Release unlocks and closes the lock file. Safe to call once; the caller
-// owns the returned *AccumulationLock's lifecycle (no finalizer).
+// Release unlocks and closes the lock file. Call it exactly once; there is no finalizer.
 func (l *AccumulationLock) Release() error {
 	if err := syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN); err != nil {
 		_ = l.file.Close()

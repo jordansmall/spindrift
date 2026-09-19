@@ -6,88 +6,64 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// Fake is an in-memory Runner for unit tests. All methods are safe for
+// Fake is an in-memory Runner for unit tests. Every method is safe for
 // concurrent use.
 type Fake struct {
 	mu sync.Mutex
 
-	// EnsureReadyCalls counts how many times EnsureReady was called.
 	EnsureReadyCalls int
 
-	// IsReadyCalls counts how many times IsReady was called.
 	IsReadyCalls int
 
-	// RunCalls records all Run invocations in order.
 	RunCalls []Box
 
-	// ReapCalls records names passed to Reap in order.
 	ReapCalls []string
 
-	// KillCalls records names passed to Kill in order.
 	KillCalls []string
-	// KillErr, if non-nil, is returned by every Kill call.
-	KillErr error
+	KillErr   error
 
-	// EnsureReadyErr, if non-nil, is returned by EnsureReady.
 	EnsureReadyErr error
 
-	// IsReadyErr, if non-nil, is returned by IsReady.
 	IsReadyErr error
 
-	// RunErr, if non-nil, is returned by every Run call (when RunErrs is nil).
 	RunErr error
 
-	// RunErrs, if non-nil, provides per-call errors: RunErrs[i] is returned for
-	// the i-th Run call. The last element is reused when the sequence is
-	// exhausted. Takes precedence over RunErr.
+	// RunErrs holds per-call errors: RunErrs[i] is returned for the i-th Run
+	// call, and the last element is reused once the sequence is exhausted. A
+	// non-nil RunErrs takes precedence over RunErr.
 	RunErrs []error
 
 	// WriteToOutput, if non-nil, is written to box.Output before Run returns.
 	WriteToOutput []byte
 
-	// RunFunc, if non-nil, is called instead of the RunErrs/RunErr logic —
-	// tests use it to control completion order and timing (e.g. staggered
-	// finishes for continuous-dispatch tests) without real sleeps. Called
-	// with the Fake's lock released, so it may block or trigger concurrent
-	// Run calls without deadlocking.
+	// RunFunc, if non-nil, replaces the RunErrs/RunErr logic so a test can
+	// control completion order and timing without real sleeps. Run calls it
+	// with the Fake's lock released, so it may block or start concurrent Run
+	// calls without deadlocking.
 	RunFunc func(Box) error
 
-	// IsRunningRet is returned by every IsRunning call.
 	IsRunningRet bool
 
-	// IsRunningCalls records the names passed to IsRunning, in order.
 	IsRunningCalls []string
 
-	// RunningNames is returned by ListRunning — the orphan-detection seam
-	// (issue #651): tests set this to simulate sandboxes still running from
-	// a prior, crashed session.
+	// RunningNames is the orphan-detection seam (issue #651): a test sets it
+	// to simulate sandboxes still running from a prior, crashed session.
 	RunningNames []string
 
-	// ListRunningErr, if non-nil, is returned by ListRunning instead of
-	// RunningNames.
 	ListRunningErr error
 
-	// RegistryProxyTransportCalls counts how many times
-	// RegistryProxyTransport was called.
 	RegistryProxyTransportCalls int
 
-	// RegistryProxyTransportEndpoint is returned as RegistryProxyTransport's
-	// endpoint value. Defaults to the zero Endpoint (neither IsUnix() nor
-	// IsTCP()), so a test opting into transport probing must set it
-	// explicitly -- e.g. registrymanifest.NewUnixEndpoint("") for a
-	// socket-capable runtime -- rather than silently inheriting a
-	// real-runtime-shaped default. A single field, unlike the deleted
-	// SocketCapable/TCPHost pair, so a test can no longer script both a
-	// unix and a TCP answer at once.
+	// RegistryProxyTransportEndpoint defaults to the zero Endpoint (neither
+	// IsUnix() nor IsTCP()), so a test opting into transport probing must set
+	// it explicitly rather than inherit a default shaped like a real runtime.
+	// It is one field, so a test cannot script a unix and a TCP answer at once.
 	RegistryProxyTransportEndpoint registrymanifest.Endpoint
 
-	// RegistryProxyTransportAddHost is returned as RegistryProxyTransport's
-	// tcpAddHost value. Defaults to false: the runtime resolves the TCP host
-	// on its own and needs no --add-host mapping.
+	// RegistryProxyTransportAddHost defaults to false: the runtime resolves
+	// the TCP host on its own and needs no --add-host mapping.
 	RegistryProxyTransportAddHost bool
 
-	// RegistryProxyTransportErr, if non-nil, is returned by
-	// RegistryProxyTransport.
 	RegistryProxyTransportErr error
 }
 
@@ -110,12 +86,8 @@ func (f *Fake) IsReady() error {
 	return f.IsReadyErr
 }
 
-// Run records the box and returns the error for this call index. When
-// RunFunc is set, it is called instead (lock released first, so it may
-// block or trigger concurrent Run calls). Otherwise, if RunErrs is non-nil,
-// RunErrs[i] is used (last element reused when exhausted); otherwise RunErr
-// is returned. If WriteToOutput is set and box.Output is non-nil, the bytes
-// are written to box.Output before returning.
+// Run records the box and returns the scripted error for this call index, or
+// calls RunFunc when it is set.
 func (f *Fake) Run(box Box) error {
 	f.mu.Lock()
 	i := len(f.RunCalls)
@@ -127,7 +99,7 @@ func (f *Fake) Run(box Box) error {
 	var err error
 	switch {
 	case fn != nil:
-		// i unused; RunFunc decides the outcome below.
+		// RunFunc decides the outcome below, so i is unused here.
 	case len(f.RunErrs) > 0:
 		if i < len(f.RunErrs) {
 			err = f.RunErrs[i]
@@ -161,7 +133,7 @@ func (f *Fake) Kill(name string) error {
 	return f.KillErr
 }
 
-// IsRunning records name and returns IsRunningRet.
+// IsRunning records the name and returns IsRunningRet.
 func (f *Fake) IsRunning(name string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -179,9 +151,8 @@ func (f *Fake) ListRunning() ([]string, error) {
 	return f.RunningNames, nil
 }
 
-// RegistryProxyTransport records the call and returns the scripted
-// RegistryProxyTransportEndpoint/RegistryProxyTransportAddHost/
-// RegistryProxyTransportErr fields.
+// RegistryProxyTransport records the call and returns the scripted endpoint,
+// add-host flag and error.
 func (f *Fake) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

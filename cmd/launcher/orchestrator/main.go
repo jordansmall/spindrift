@@ -1,12 +1,8 @@
-// Command orchestrator sits above driver-exec (issue #1996, ADR 0007): a Go
-// binary that owns the implementor loop's control flow instead of leaving it
-// to entrypoint.sh. It loops driver-exec for as many passes as the
-// implementor's own review verdicts and its numeric caps call for (issue
-// #1998), each pass forwarding the shared handoff file plus this pass's own
-// prompt/session/log paths (issue #2975 -- every driver/model/effort/devshell/
-// argv-shape fact now lives inside that handoff, sourced by driver-exec
-// itself) and streaming its raw stdout unchanged, and returns the last pass's
-// exit code.
+// Command orchestrator owns the implementor loop's control flow instead of
+// leaving it to entrypoint.sh (issue #1996, ADR 0007). It loops driver-exec
+// for as many passes as the implementor's review verdicts and numeric caps
+// call for (issue #1998), forwarding the shared handoff file that carries
+// every driver/model/effort/devshell/argv fact (issue #2975).
 package main
 
 import (
@@ -18,18 +14,15 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// defaultScoutBriefPath is the -scout-brief-path flag's default, named here
-// (rather than inlined into the fs.String call below) so
-// TestScoutBriefPathMatchesPromptProse (markers_test.go) can pin it against
-// the same literal the scout/coordinator/worker prompt fragments hardcode --
-// issue #3157: nothing else keeps those four copies in sync.
+// defaultScoutBriefPath is a named constant, not an inline literal, so
+// TestScoutBriefPathMatchesPromptProse can pin it against the same literal the
+// scout/coordinator/worker prompt fragments hardcode. Nothing else keeps those
+// four copies in sync (issue #3157).
 const defaultScoutBriefPath = "/tmp/brief.md"
 
-// mainRun parses argv against a scoped FlagSet (rather than the global flag
-// package, which panics on re-registering flags across repeated calls in the
-// same test binary) and drives one orchestrator invocation end to end,
-// returning the process exit code instead of calling os.Exit directly so
-// tests can exercise it repeatedly with different argv.
+// mainRun uses a scoped FlagSet, since the global flag package panics on
+// re-registering flags across repeated calls in one test binary, and returns
+// the exit code instead of calling os.Exit so tests can rerun it.
 func mainRun(argv []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("orchestrator", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -70,33 +63,21 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// The review pass's own prompt file (handoff.ReviewPromptFile) is both the
-	// master switch that dispatches run() into runWithReviewPass and the signal
-	// validateCaps needs to pick the review-pass reachability formula over the
+	// handoff.ReviewPromptFile both dispatches run() into runWithReviewPass and
+	// tells validateCaps to pick the review-pass reachability formula over the
 	// legacy-loop one.
 	reviewPassEnabled := handoff.ReviewPromptFile != ""
-	// An incoherent cap pair is surfaced as a warning, not a fatal error
-	// (issue #2460): the run still proceeds with the loop behaving the way
-	// it did pre-#2460 (the review-round cap simply never fires; maxSlices
-	// shadows it), just now with the misconfiguration visibly flagged
-	// instead of silently swallowed.
+	// An incoherent cap pair warns rather than fails (issue #2460): the run
+	// proceeds with the review-round cap never firing, since maxSlices shadows
+	// it.
 	if err := validateCaps(handoff.Caps.MaxReviewRounds, handoff.Caps.MaxSlices, reviewPassEnabled); err != nil {
 		fmt.Fprintln(stderr, err)
 	}
 
-	// The budget caps arrive already typed (handoff.Caps is int/float64, not a
-	// raw operator string), so a malformed value can no longer reach here --
-	// LoadHandoffFile's JSON unmarshal would already have failed. Both handoff
-	// producers (assembleprompt_cmd.go and envhandoff_cmd.go) also already run
-	// their raw string through promptassembly.ParseNonnegBudgetTokens/
-	// ParseNonnegBudgetUSD before writing the handoff JSON, and those reject a
-	// negative value the same as a malformed one -- so a negative value can
-	// never appear in a handoff file either producer wrote. This clamp is
-	// defense-in-depth against a hand-edited or otherwise corrupted handoff
-	// file, not a live path a normal run can hit (issue #2694 / #2975). Unlike
-	// the host launcher's own silent fallback, a degrade here is worth one
-	// stderr line: the Box has no other channel back to an operator watching a
-	// run land earlier than a mistyped cap should have allowed.
+	// Both handoff producers reject a negative budget before writing the JSON, so
+	// this clamp only guards a hand-edited or corrupted handoff file (issue #2694
+	// / #2975). It still prints one stderr line, because the Box has no other way
+	// to tell an operator why a run landed earlier than the cap should allow.
 	maxBudgetTokens := handoff.Caps.MaxBudgetTokens
 	if maxBudgetTokens < 0 {
 		fmt.Fprintf(stderr, "orchestrator: max-budget-tokens=%d is negative, treating as 0 (disabled)\n", maxBudgetTokens)

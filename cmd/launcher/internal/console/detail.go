@@ -1,9 +1,3 @@
-// Package console: detail.go carries the ticket detail modal's async
-// fetch — its body and its Blocked-by/Blocks lists — the seam through which
-// tea.go's openDetailModal reaches the forge.IssueTracker. tea.go stays the
-// thin key-routing adapter; this file holds the actual data-resolution
-// logic, mirroring activity.go/transcript.go's own split from tea.go for
-// the live-tail sidebar.
 package console
 
 import (
@@ -13,20 +7,11 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// openDetailModalCmd loads number's body — a separate Issue fetch, since
-// ListOpenIssues never carries Body — plus its Blocked-by and Blocks lists,
-// each resolved directly from number's own dependency edge rather than a
-// whole-backlog readiness graph (issue #1744, replacing the
-// waves.NewReadiness sweep issue #1632 originally used here, and the
-// keep-it-warm-across-refresh mitigation issue #1746 layered onto that
-// sweep in turn — both moot once nothing here ever builds the whole graph
-// to begin with): Blocked-by is a single DepsOf call, and Blocks is a
-// single BlocksOf call on trackers that implement forge.BlockersLister
-// (github, jira, whose blocked/blocking relationship is genuinely native
-// and bidirectional) — nil on trackers that don't (local, whose only
-// blocker concept is one-directional body-text parsing with no reverse to
-// query short of scanning every issue file). This keeps first-open latency
-// independent of backlog size, on every open, not just a warm one.
+// openDetailModalCmd fetches number's body separately because ListOpenIssues
+// never carries Body, then resolves Blocked-by from DepsOf and Blocks from
+// BlocksOf, which only forge.BlockersLister trackers have (not local, which
+// has no reverse edge to query). Reading one issue's edges keeps first-open
+// latency independent of backlog size (issue #1744, replacing #1632/#1746).
 func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, number string) tea.Cmd {
 	return func() tea.Msg {
 		issue, err := tracker.Issue(number)
@@ -35,11 +20,9 @@ func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, number st
 		}
 		blockedBy := resolveEdgeRefs(tracker, all, tracker.DepsOf, number)
 		var blocks []BlockerRef
-		// caps is tracker's resolved forge.Capabilities (issue #2946),
-		// resolved fresh per modal open rather than a raw
-		// tracker.(forge.BlockersLister) assertion — cf is nil since this
-		// seam has no CodeForge in scope, and BlockersLister lives on the
-		// tracker side only.
+		// Resolve capabilities rather than asserting
+		// tracker.(forge.BlockersLister) directly (issue #2946). CodeForge is
+		// nil because BlockersLister lives on the tracker side only.
 		caps := forge.ResolveCapabilities(nil, tracker, backend.Descriptor{}, backend.Descriptor{})
 		if caps.BlockersLister != nil {
 			blocks = resolveEdgeRefs(tracker, all, caps.BlockersLister.BlocksOf, number)
@@ -48,11 +31,9 @@ func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, number st
 	}
 }
 
-// resolveEdgeRefs resolves number's dependency edge in one direction —
-// fetch is tracker.DepsOf for Blocked-by, or a BlockersLister's BlocksOf for
-// Blocks — into BlockerRefs. A fetch failure resolves to no refs rather
-// than failing the whole modal load, matching resolveBlockerRef's own
-// per-ref tolerance below (issue #1744).
+// resolveEdgeRefs resolves one direction of number's dependency edge into
+// BlockerRefs. A fetch failure yields no refs rather than failing the whole
+// modal load (issue #1744).
 func resolveEdgeRefs(tracker forge.IssueTracker, all []forge.Issue, fetch func(string) ([]forge.Dependency, error), number string) []BlockerRef {
 	deps, err := fetch(number)
 	if err != nil {
@@ -67,9 +48,8 @@ func resolveEdgeRefs(tracker forge.IssueTracker, all []forge.Issue, fetch func(s
 	return resolveBlockerRefs(tracker, all, ids, sourceOf)
 }
 
-// resolveBlockerRefs resolves each of ids into a BlockerRef, tagged with its
-// DepSource from sourceOf — the Blocked-by and Blocks sections' shared
-// resolution step (issue #1632).
+// resolveBlockerRefs resolves ids into BlockerRefs tagged with their DepSource
+// (issue #1632).
 func resolveBlockerRefs(tracker forge.IssueTracker, all []forge.Issue, ids []string, sourceOf map[string]forge.DepSource) []BlockerRef {
 	refs := make([]BlockerRef, 0, len(ids))
 	for _, id := range ids {
@@ -78,12 +58,10 @@ func resolveBlockerRefs(tracker forge.IssueTracker, all []forge.Issue, ids []str
 	return refs
 }
 
-// resolveBlockerRef resolves one blocker/blocked issue's title and
-// open/closed state: free (no fetch) when it's already loaded in the
-// backlog list, fetched with its own Issue call otherwise — e.g. a closed
-// blocker, or one dispatched past the backlog's open-only listing (issue
-// #1632). A resolution failure (the issue was deleted, or the fetch erred)
-// leaves Title empty rather than failing the whole modal load.
+// resolveBlockerRef skips the fetch when the issue is already in the backlog
+// list; a closed blocker, or one past the backlog's open-only listing, costs
+// its own Issue call. A failed resolution leaves Title empty rather than
+// failing the whole modal load (issue #1632).
 func resolveBlockerRef(tracker forge.IssueTracker, all []forge.Issue, id string, source forge.DepSource) BlockerRef {
 	for _, iss := range all {
 		if iss.Number == id {

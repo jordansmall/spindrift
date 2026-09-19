@@ -6,34 +6,26 @@ import (
 	"spindrift.dev/launcher/internal/terminate"
 )
 
-// queueSettler wraps a settle.Settler so a successful settle also marks the
-// queue's matching pick PickSettled — the last leg of a launched pick's row
-// ("queued -> claiming -> running -> settled") — and signals notify, so a
-// settle (a tracker write) triggers Run's auto-refresh (#647 AC4). SettleAdopted
-// is unused by the continuous engine's launch path, so it is left to the
-// embedded Settler unmodified.
+// queueSettler wraps a settle.Settler so a settle also marks the queue's
+// matching pick and signals notify, letting a tracker write trigger Run's
+// auto-refresh (#647 AC4). The continuous engine's launch path never calls
+// SettleAdopted, so the embedded Settler handles it unmodified.
 type queueSettler struct {
 	settle.Settler
 	q      *Queue
 	notify func()
-	// terminated is checked before touching the pick row: a Terminate
-	// (ADR 0024, issue #649) can land in the window between Run()
-	// succeeding and this Settle call completing, after which the wrapped
-	// Settler itself abandons internally (landingAbandoned) but still
-	// returns normally — this wrapper has no way to tell that apart from an
-	// ordinary settle except by checking the same registry Terminate marked,
-	// so it must not overwrite Terminate's own PickTerminated back to
-	// PickSettled. Nil (every construction site but the Console's) means
-	// "never terminated".
+	// A Terminate (ADR 0024, issue #649) can land between Run() succeeding
+	// and Settle completing; the wrapped Settler then abandons internally
+	// but still returns normally, so checking the registry Terminate marked
+	// is the only way to keep this wrapper from overwriting PickTerminated
+	// with PickSettled. A nil registry means nothing was ever terminated.
 	terminated *terminate.Registry
 }
 
-// Settle delegates to the wrapped Settler, then — unless num was terminated
-// while this settle was in flight — marks num settled and notifies. gen is
-// the terminate.Registry generation (waves.Issue.Generation, issue #743)
-// this settle's own dispatch was launched under, so the check below can
-// never be fooled by a re-pick's later generation clearing the mark out from
-// under a stale, still-in-flight settle for an earlier one.
+// Settle delegates to the wrapped Settler, then marks num settled and notifies
+// unless num was terminated in flight. gen is the terminate.Registry generation
+// (waves.Issue.Generation, issue #743) this dispatch launched under, so a
+// re-pick's later generation cannot clear the mark under a stale settle.
 func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
 	qs.Settler.Settle(d, num, gen, result)
 	if qs.terminated.Marked(num, gen) {
@@ -45,10 +37,10 @@ func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	}
 }
 
-// Fail delegates to the wrapped Settler, then — unless num was terminated
-// while this Box was in flight — marks num failed and notifies, so a Box
-// that ran and exited non-zero reaches a terminal queue row instead of
-// stranding at PickRunning (issue #705). gen is as in Settle.
+// Fail delegates to the wrapped Settler, then marks num failed and notifies
+// unless num was terminated in flight, so a Box that exited non-zero reaches a
+// terminal queue row instead of stranding at PickRunning (issue #705). gen is
+// as in Settle.
 func (qs queueSettler) Fail(num string, gen uint64, result dispatch.Result) {
 	qs.Settler.Fail(num, gen, result)
 	if qs.terminated.Marked(num, gen) {
