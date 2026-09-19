@@ -13,36 +13,12 @@ import (
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
-// registryRouteChecks defers to the existing registry-proxy-routes row
-// (checks.go), which already reports this same read failure, rather than
-// reporting a duplicate error over the identical cause.
-func TestRegistryRouteChecks_UnreadableRoutesFileReturnsNil(t *testing.T) {
-	c := minimalValidConfig()
-	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
-
-	if got := registryRouteChecks(c); got != nil {
-		t.Errorf("registryRouteChecks() = %#v, want nil for an unreadable routes file", got)
-	}
-}
-
-// registryRouteChecks defers to the existing registry-proxy-routes row
-// (checks.go), which already reports this same parse failure, rather than
-// reporting a duplicate error over the identical cause.
-func TestRegistryRouteChecks_UnparsableRoutesFileReturnsNil(t *testing.T) {
-	c := minimalValidConfig()
-	c.registryProxyRoutesFile = writeRoutesFile(t, `not valid toml [[[`)
-
-	if got := registryRouteChecks(c); got != nil {
-		t.Errorf("registryRouteChecks() = %#v, want nil for an unparsable routes file", got)
-	}
-}
-
 // Built through routeChecksFor because registryroutes.Parse already rejects a
 // userinfo-bearing upstream-origin at parse time, so a real routes file cannot
 // produce this Route. Unlike its two sibling branches, this branch omits raw
 // from its message, so the error must name "userinfo" while carrying neither
 // the password nor the raw URL it came from.
-func TestRegistryRouteChecks_UpstreamOriginWithUserinfoFailsWithoutLeakingCredential(t *testing.T) {
+func TestRouteChecksFor_UpstreamOriginWithUserinfoFailsWithoutLeakingCredential(t *testing.T) {
 	const raw = "https://user:s3cr3t@host.example.com"
 	routes := []registryroutes.Route{{
 		MatchHost:      "registry.example.com",
@@ -66,20 +42,10 @@ func TestRegistryRouteChecks_UpstreamOriginWithUserinfoFailsWithoutLeakingCreden
 	}
 }
 
-// The per-route rows are opt-in alongside the routes file, so with none set
-// registryRouteChecks must return nil, not an empty non-nil slice (issue #3144
-// slice 1 gate; the scalar REGISTRY_PROXY_* knobs are retired, issue #3145).
-func TestRegistryRouteChecks_UnsetFileReturnsNil(t *testing.T) {
-	c := minimalValidConfig()
-	if got := registryRouteChecks(c); got != nil {
-		t.Errorf("registryRouteChecks() = %#v, want nil when registryProxyRoutesFile is unset", got)
-	}
-}
-
 // Each route yields a credential row and an upstream row, and every row's Name
 // comes from its own route's match host, not a shared generic name (issue #3144
 // AC: "rows named by the route's match host").
-func TestRegistryRouteChecks_ValidFileYieldsTwoRowsPerRouteNamedByMatchHost(t *testing.T) {
+func TestRouteChecksFor_ValidFileYieldsTwoRowsPerRouteNamedByMatchHost(t *testing.T) {
 	const envVar = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_VALID"
 	t.Setenv(envVar, "s3cr3t-value")
 
@@ -94,9 +60,10 @@ match-host = "registry-b.example.com"
 credential = { env = "`+envVar+`" }
 `)
 
-	checks := registryRouteChecks(c)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	checks := routeChecksFor(routes)
 	if len(checks) != 4 {
-		t.Fatalf("registryRouteChecks() returned %d rows, want 4", len(checks))
+		t.Fatalf("routeChecksFor() returned %d rows, want 4", len(checks))
 	}
 	for _, host := range []string{"registry-a.example.com", "registry-b.example.com"} {
 		found := false
@@ -119,7 +86,7 @@ credential = { env = "`+envVar+`" }
 // The failing row's error names the route's match host and the "credential"
 // field, never the credential value, following the shape the existing
 // registry-proxy-routes row already uses for its own per-route Peek.
-func TestRegistryRouteChecks_UnresolvableCredentialFailsNamingRouteAndField(t *testing.T) {
+func TestRouteChecksFor_UnresolvableCredentialFailsNamingRouteAndField(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
@@ -127,7 +94,8 @@ match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_UNSET" }
 `)
 
-	checks := registryRouteChecks(c)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	checks := routeChecksFor(routes)
 	ch := checkByName(t, checks, "registry-route-credential[registry.example.com]")
 	_, err := ch.Probe()
 	if err == nil {
@@ -145,7 +113,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_UNSET" }
 // registryroutes.Parse already rejects a malformed upstream-origin at parse
 // time, so a real file cannot produce this Route. See routeChecksFor's doc
 // comment.
-func TestRegistryRouteChecks_InvalidUpstreamOriginFailsNamingRouteAndField(t *testing.T) {
+func TestRouteChecksFor_InvalidUpstreamOriginFailsNamingRouteAndField(t *testing.T) {
 	routes := []registryroutes.Route{{
 		MatchHost:      "registry.example.com",
 		UpstreamOrigin: "not-a-url",
@@ -169,7 +137,7 @@ func TestRegistryRouteChecks_InvalidUpstreamOriginFailsNamingRouteAndField(t *te
 
 // A route serves the paths its derived path-set admits, never a declared base
 // path (ADR 0047, issue #3261).
-func TestRegistryRouteChecks_UpstreamOriginWithPathFails(t *testing.T) {
+func TestRouteChecksFor_UpstreamOriginWithPathFails(t *testing.T) {
 	routes := []registryroutes.Route{{
 		MatchHost:      "registry.example.com",
 		UpstreamOrigin: "https://registry.example.com/artifactory",
@@ -183,7 +151,7 @@ func TestRegistryRouteChecks_UpstreamOriginWithPathFails(t *testing.T) {
 
 // The row reports the declared origin as its detail so an operator reading the
 // report can see which origin the route will forward to.
-func TestRegistryRouteChecks_DeclaredUpstreamOriginRowReportsIt(t *testing.T) {
+func TestRouteChecksFor_DeclaredUpstreamOriginRowReportsIt(t *testing.T) {
 	routes := []registryroutes.Route{{
 		MatchHost:      "registry.example.com",
 		UpstreamOrigin: "https://registry.example.com:8443",
@@ -202,7 +170,7 @@ func TestRegistryRouteChecks_DeclaredUpstreamOriginRowReportsIt(t *testing.T) {
 // Declaring no upstream-origin is the common case, so the row must pass and say
 // so, rather than routeUpstreamCheck running ValidateUpstreamOrigin against ""
 // and reporting a route Parse itself already accepted as broken.
-func TestRegistryRouteChecks_DerivedOriginRowPasses(t *testing.T) {
+func TestRouteChecksFor_DerivedOriginRowPasses(t *testing.T) {
 	routes := []registryroutes.Route{{
 		MatchHost: "registry.example.com",
 	}}
@@ -217,23 +185,17 @@ func TestRegistryRouteChecks_DerivedOriginRowPasses(t *testing.T) {
 	}
 }
 
-// Issue #3144 slice 1: "no routes rows, no new output at all" when the routes
-// file isn't configured.
-func TestDoctorReportChecks_WiresRegistryRouteChecks(t *testing.T) {
+// Issue #3144 slice 1: doctorCheckSets wires the per-route rows into the
+// report half for a configured routes file.
+func TestDoctorCheckSets_WiresPerRouteRows(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_WIRING" }
 `)
-	checkByName(t, doctorReportChecks(c), "registry-route-credential[registry.example.com]")
-
-	c = minimalValidConfig()
-	for _, ch := range doctorReportChecks(c) {
-		if strings.HasPrefix(ch.Name, "registry-route-") {
-			t.Errorf("doctorReportChecks output contains %q when registryProxyRoutesFile is unset", ch.Name)
-		}
-	}
+	_, checks := doctorCheckSets(c)
+	checkByName(t, checks, "registry-route-credential[registry.example.com]")
 }
 
 // Each Peek spawns the credential's subprocess, and a real exec credential can
@@ -278,7 +240,7 @@ credential = { exec = ["/bin/sh", "-c", "echo x >> `+counterFile+`; echo tok"] }
 // row over the identical cause (issue #3144 review finding). Now only the
 // per-route row fails, because the aggregate row no longer peeks credentials in
 // the doctor report path.
-func TestDoctorReportChecks_UnresolvableCredentialFailsOnlyPerRouteRow(t *testing.T) {
+func TestDoctorCheckSets_UnresolvableCredentialFailsOnlyPerRouteRow(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
@@ -286,7 +248,7 @@ match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_DEDUP_UNSET" }
 `)
 
-	checks := doctorReportChecks(c)
+	_, checks := doctorCheckSets(c)
 	failing := []string{}
 	for _, ch := range checks {
 		if _, err := ch.Probe(); err != nil {
@@ -294,7 +256,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_DEDUP_UNSET" }
 		}
 	}
 	if len(failing) != 1 || failing[0] != "registry-route-credential[registry.example.com]" {
-		t.Errorf("doctorReportChecks(c) failing rows = %v, want exactly [\"registry-route-credential[registry.example.com]\"]", failing)
+		t.Errorf("doctorCheckSets(c) report failing rows = %v, want exactly [\"registry-route-credential[registry.example.com]\"]", failing)
 	}
 
 	routesCh := checkByName(t, checks, registryProxyRoutesCheckName)
@@ -327,7 +289,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_LAUNCH_GATE_UN
 // identical "resolves" detail, so a routes file that lost its credential key to
 // a typo looked no different from an intentional pass-through (review finding
 // on issue #3145).
-func TestRegistryRouteChecks_CredentialDetailDistinguishesPassThroughFromResolved(t *testing.T) {
+func TestRouteChecksFor_CredentialDetailDistinguishesPassThroughFromResolved(t *testing.T) {
 	const envVar = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_PASSTHROUGH"
 	t.Setenv(envVar, "s3cr3t-value")
 
@@ -341,7 +303,8 @@ match-host = "registry-resolved.example.com"
 credential = { env = "`+envVar+`" }
 `)
 
-	checks := registryRouteChecks(c)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	checks := routeChecksFor(routes)
 
 	passthroughCh := checkByName(t, checks, "registry-route-credential[registry-passthrough.example.com]")
 	detail, err := passthroughCh.Probe()
@@ -371,4 +334,15 @@ func checkNames(checks []doctor.Check) []string {
 		names[i] = ch.Name
 	}
 	return names
+}
+
+// mustLoadRoutes parses file through the same loader doctorCheckSets uses, so
+// these tests exercise the production parse rather than hand-built Routes.
+func mustLoadRoutes(t *testing.T, file string) []registryroutes.Route {
+	t.Helper()
+	routes, err := loadRegistryRoutes(file)
+	if err != nil {
+		t.Fatalf("loadRegistryRoutes(%q) unexpected error: %v", file, err)
+	}
+	return routes
 }

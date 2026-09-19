@@ -47,13 +47,17 @@ func TestGitCheckoutRoot_NestedSubdirWalksUpToRoot(t *testing.T) {
 }
 
 // Drift is only meaningful alongside a routes file, so an unset
-// registryProxyRoutesFile returns nil, the slice-1 gate pattern (issue #3144
-// slice 2).
-func TestRegistryRouteDriftCheck_UnsetFileReturnsNil(t *testing.T) {
+// registryProxyRoutesFile excludes the row from the report, the slice-1 gate
+// pattern (issue #3144 slice 2). The drift seams are stubbed to the state
+// that does yield the row, so the routes-file gate is the only thing left
+// that can suppress it.
+func TestDoctorCheckSets_UnsetRoutesFileExcludesRegistryRouteDriftRow(t *testing.T) {
+	withDriftRepoDir(t, t.TempDir())
+	withDriftMatchingRemote(t)
+
 	c := minimalValidConfig()
-	if got := registryRouteDriftCheck(c); got != nil {
-		t.Errorf("registryRouteDriftCheck() = %#v, want nil when registryProxyRoutesFile is unset", got)
-	}
+	_, report := doctorCheckSets(c)
+	assertNoDriftRow(t, report, "when registryProxyRoutesFile is unset")
 }
 
 // The production seam behind registryRouteDriftRepoDirFn is os.Getwd.
@@ -75,7 +79,20 @@ func withDriftMatchingRemote(t *testing.T) {
 	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = orig })
 }
 
-func TestRegistryRouteDriftCheck_UncoveredHostFailsNamingHostAndRemedy(t *testing.T) {
+// assertNoDriftRow scans report for the registry-route-drift row and fails
+// naming the condition that should have excluded it, the shared assertion
+// behind the doctorCheckSets-level gating tests. condition completes "want it
+// excluded ...", so each caller carries its own leading preposition.
+func assertNoDriftRow(t *testing.T, report []doctor.Check, condition string) {
+	t.Helper()
+	for _, ch := range report {
+		if ch.Name == registryRouteDriftCheckName {
+			t.Errorf("doctorCheckSets(c) report contains %q, want it excluded %s", ch.Name, condition)
+		}
+	}
+}
+
+func TestRegistryRouteDriftCheckForRoutes_UncoveredHostFailsNamingHostAndRemedy(t *testing.T) {
 	repoDir := t.TempDir()
 	npmrc := "registry=https://uncovered.example.com/\n"
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
@@ -91,9 +108,10 @@ match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED" }
 `)
 
-	checks := registryRouteDriftCheck(c)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	checks := registryRouteDriftCheckForRoutes(c, routes)
 	if len(checks) != 1 {
-		t.Fatalf("registryRouteDriftCheck() returned %d rows, want 1", len(checks))
+		t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 	}
 	ch := checks[0]
 	_, err := ch.Probe()
@@ -114,7 +132,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED" }
 	}
 }
 
-func TestRegistryRouteDriftCheck_FullyCoveredRepoPasses(t *testing.T) {
+func TestRegistryRouteDriftCheckForRoutes_FullyCoveredRepoPasses(t *testing.T) {
 	repoDir := t.TempDir()
 	npmrc := "registry=https://covered.example.com/\n"
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
@@ -130,9 +148,10 @@ match-host = "covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 `)
 
-	checks := registryRouteDriftCheck(c)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	checks := registryRouteDriftCheckForRoutes(c, routes)
 	if len(checks) != 1 {
-		t.Fatalf("registryRouteDriftCheck() returned %d rows, want 1", len(checks))
+		t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 	}
 	if _, err := checks[0].Probe(); err != nil {
 		t.Errorf("Probe() unexpected error for a fully covered repo: %v", err)
@@ -151,7 +170,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 // registryroutes.Parse. The len(checks) == 1 assertion plus a passing Probe
 // together prove the migrated grammar reached the drift check rather than
 // degrading down the parse-error path, which returns zero rows.
-func TestRegistryRouteDriftCheck_BlockGrammarRouteParsesAndReportsNoDrift(t *testing.T) {
+func TestRegistryRouteDriftCheckForRoutes_BlockGrammarRouteParsesAndReportsNoDrift(t *testing.T) {
 	repoDir := t.TempDir()
 	npmrc := "registry=https://covered.example.com/\n"
 	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
@@ -173,9 +192,10 @@ path = "/go-modules"
 registries = ["internal"]
 `)
 
-	checks := registryRouteDriftCheck(c)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	checks := registryRouteDriftCheckForRoutes(c, routes)
 	if len(checks) != 1 {
-		t.Fatalf("registryRouteDriftCheck() returned %d rows, want 1", len(checks))
+		t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 	}
 	if _, err := checks[0].Probe(); err != nil {
 		t.Errorf("Probe() unexpected error for a fully covered repo with a block-grammar route: %v", err)
@@ -192,7 +212,7 @@ registries = ["internal"]
 
 // With no checkout available, drift has nothing to compare the routes file
 // against, so the row is skipped entirely rather than failing or passing.
-func TestRegistryRouteDriftCheck_NoCheckoutAvailable_ReturnsNil(t *testing.T) {
+func TestRegistryRouteDriftCheckForRoutes_NoCheckoutAvailable_ReturnsNil(t *testing.T) {
 	orig := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return "", os.ErrNotExist }
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
@@ -203,9 +223,10 @@ func TestRegistryRouteDriftCheck_NoCheckoutAvailable_ReturnsNil(t *testing.T) {
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NO_CHECKOUT" }
 `)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
 
-	if got := registryRouteDriftCheck(c); got != nil {
-		t.Errorf("registryRouteDriftCheck() = %#v, want nil when no repo checkout is available", got)
+	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when no repo checkout is available", got)
 	}
 }
 
@@ -213,7 +234,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NO_CHECKOUT" }
 // gitCheckoutRoot case where the walk reached the filesystem root. No
 // checkout available is not the same as an error resolving one, but both
 // must suppress the row.
-func TestRegistryRouteDriftCheck_EmptyRepoDirReturnsNil(t *testing.T) {
+func TestRegistryRouteDriftCheckForRoutes_EmptyRepoDirReturnsNil(t *testing.T) {
 	orig := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return "", nil }
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
@@ -224,32 +245,42 @@ func TestRegistryRouteDriftCheck_EmptyRepoDirReturnsNil(t *testing.T) {
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_EMPTY_REPO_DIR" }
 `)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
 
-	if got := registryRouteDriftCheck(c); got != nil {
-		t.Errorf("registryRouteDriftCheck() = %#v, want nil when no checkout is resolved", got)
+	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when no checkout is resolved", got)
 	}
 }
 
-// A read error belongs to the existing registry-proxy-routes row, so this
-// check skips rather than reporting it twice.
-func TestRegistryRouteDriftCheck_UnreadableRoutesFileReturnsNil(t *testing.T) {
+// doctorCheckSets defers to the existing registry-proxy-routes row
+// (checks.go), which already reports this same read failure, rather than
+// reporting a duplicate error over the identical cause. The drift seams are
+// stubbed to the state that does yield the row, so only the read failure can
+// suppress it.
+func TestDoctorCheckSets_UnreadableRoutesFileExcludesRegistryRouteDriftRow(t *testing.T) {
+	withDriftRepoDir(t, t.TempDir())
+	withDriftMatchingRemote(t)
+
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
 
-	if got := registryRouteDriftCheck(c); got != nil {
-		t.Errorf("registryRouteDriftCheck() = %#v, want nil for an unreadable routes file", got)
-	}
+	_, report := doctorCheckSets(c)
+	assertNoDriftRow(t, report, "for an unreadable routes file")
 }
 
-// A parse error belongs to the existing registry-proxy-routes row, so this
-// check skips rather than reporting it twice.
-func TestRegistryRouteDriftCheck_UnparsableRoutesFileReturnsNil(t *testing.T) {
+// The parse-failure counterpart of the unreadable case above: the aggregate
+// registry-proxy-routes row already reports it, so the drift row stays out.
+// The drift seams are stubbed to the state that does yield the row, so only
+// the parse failure can suppress it.
+func TestDoctorCheckSets_UnparsableRoutesFileExcludesRegistryRouteDriftRow(t *testing.T) {
+	withDriftRepoDir(t, t.TempDir())
+	withDriftMatchingRemote(t)
+
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `not valid toml [[[`)
 
-	if got := registryRouteDriftCheck(c); got != nil {
-		t.Errorf("registryRouteDriftCheck() = %#v, want nil for an unparsable routes file", got)
-	}
+	_, report := doctorCheckSets(c)
+	assertNoDriftRow(t, report, "for an unparsable routes file")
 }
 
 // An indeterminate probe is distinct from a genuine drift finding, so a
@@ -295,10 +326,7 @@ func TestRegistryRouteDriftCheckFor_UncoveredHostRendersAdvisoryNotMissing(t *te
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_ADVISORY_RENDER" }
 `)
-	routes, err := loadRegistryRoutes(routesFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	routes := mustLoadRoutes(t, routesFile)
 
 	ch := registryRouteDriftCheckFor(repoDir, routes)
 	_, probeErr := ch.Probe()
@@ -334,10 +362,7 @@ func TestRegistryRouteDriftCheckFor_DifferingPathsOnCoveredHostIsNotDrift(t *tes
 match-host = "artifactory.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_PATH_NOT_CATEGORY" }
 `)
-	routes, err := loadRegistryRoutes(routesFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	routes := mustLoadRoutes(t, routesFile)
 
 	ch := registryRouteDriftCheckFor(repoDir, routes)
 	if _, err := ch.Probe(); err != nil {
@@ -360,13 +385,10 @@ func TestRegistryRouteDriftCheckFor_UncoveredHostFailureIsSilentAboutPath(t *tes
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED_PATH_SILENT" }
 `)
-	routes, err := loadRegistryRoutes(routesFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	routes := mustLoadRoutes(t, routesFile)
 
 	ch := registryRouteDriftCheckFor(repoDir, routes)
-	_, err = ch.Probe()
+	_, err := ch.Probe()
 	if err == nil {
 		t.Fatal("Probe() succeeded, want an error naming the uncovered host")
 	}
@@ -382,7 +404,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED_PATH_SILENT"
 // Without this identity gate the row reports the enclosing checkout's own
 // drift as if it were the Target repo's, a false all-clear or false failure
 // whenever the two roles differ.
-func TestRegistryRouteDriftCheck_NonTargetCheckoutReturnsNil(t *testing.T) {
+func TestRegistryRouteDriftCheckForRoutes_NonTargetCheckoutReturnsNil(t *testing.T) {
 	repoDir := t.TempDir()
 	mustRunGit(t, repoDir, "init")
 	mustRunGit(t, repoDir, "remote", "add", "origin", "git@github.com:other/elsewhere.git")
@@ -398,9 +420,10 @@ func TestRegistryRouteDriftCheck_NonTargetCheckoutReturnsNil(t *testing.T) {
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NON_TARGET" }
 `)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
 
-	if got := registryRouteDriftCheck(c); got != nil {
-		t.Errorf("registryRouteDriftCheck() = %#v, want nil when the checkout's origin remote does not match the configured Target repo", got)
+	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when the checkout's origin remote does not match the configured Target repo", got)
 	}
 }
 
@@ -409,7 +432,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NON_TARGET" }
 // the t.Chdir into an unrelated directory both exist so a fallback to the
 // cwd-checkout branch fails loudly instead of passing from the wrong source.
 // Follows TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo.
-func TestRegistryRouteDriftCheck_LocalForgeReadsFromAccumulationRepo(t *testing.T) {
+func TestRegistryRouteDriftCheckForRoutes_LocalForgeReadsFromAccumulationRepo(t *testing.T) {
 	orig := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) {
 		// t.Error, not t.Fatal: the subtests below call this stub on their own
@@ -429,10 +452,11 @@ func TestRegistryRouteDriftCheck_LocalForgeReadsFromAccumulationRepo(t *testing.
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 `)
+		routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
 
-		checks := registryRouteDriftCheck(c)
+		checks := registryRouteDriftCheckForRoutes(c, routes)
 		if len(checks) != 1 {
-			t.Fatalf("registryRouteDriftCheck() returned %d rows, want 1", len(checks))
+			t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 		}
 		_, err := checks[0].Probe()
 		if err == nil {
@@ -451,10 +475,11 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 match-host = "covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_COVERED" }
 `)
+		routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
 
-		checks := registryRouteDriftCheck(c)
+		checks := registryRouteDriftCheckForRoutes(c, routes)
 		if len(checks) != 1 {
-			t.Fatalf("registryRouteDriftCheck() returned %d rows, want 1", len(checks))
+			t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 		}
 		if _, err := checks[0].Probe(); err != nil {
 			t.Errorf("Probe() unexpected error for a fully covered Accumulation repo: %v", err)
@@ -465,23 +490,24 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_COVERED" }
 // AC2: a codeForgeAccumulationRepoDir that does not exist degrades to the
 // same skipped row the cwd-checkout path produces with no checkout
 // available, never a false "no drift".
-func TestRegistryRouteDriftCheck_LocalForgeMissingAccumulationRepo_ReturnsNil(t *testing.T) {
+func TestRegistryRouteDriftCheckForRoutes_LocalForgeMissingAccumulationRepo_ReturnsNil(t *testing.T) {
 	c := minimalValidLocalConfigForRoutes(filepath.Join(t.TempDir(), "does-not-exist.git"))
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
 `)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
 
-	if got := registryRouteDriftCheck(c); got != nil {
-		t.Errorf("registryRouteDriftCheck() = %#v, want nil when the Accumulation repo does not exist", got)
+	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when the Accumulation repo does not exist", got)
 	}
 }
 
 // AC2's other half: a reachable Accumulation repo whose baseBranch names a
 // ref it does not have also skips the row, rather than failing with a git
 // error where a checkout-availability skip belongs.
-func TestRegistryRouteDriftCheck_LocalForgeUnresolvableRef_ReturnsNil(t *testing.T) {
+func TestRegistryRouteDriftCheckForRoutes_LocalForgeUnresolvableRef_ReturnsNil(t *testing.T) {
 	accumRepo := mustLocalAccumulationRepo(t, "registry=https://uncovered.example.com/\n")
 	c := minimalValidLocalConfigForRoutes(accumRepo)
 	c.baseBranch = "does-not-exist"
@@ -490,13 +516,14 @@ func TestRegistryRouteDriftCheck_LocalForgeUnresolvableRef_ReturnsNil(t *testing
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_BAD_REF" }
 `)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
 
-	if got := registryRouteDriftCheck(c); got != nil {
-		t.Errorf("registryRouteDriftCheck() = %#v, want nil when baseBranch names a ref the Accumulation repo does not have", got)
+	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when baseBranch names a ref the Accumulation repo does not have", got)
 	}
 }
 
-func TestDoctorReportChecks_WiresRegistryRouteDriftCheck(t *testing.T) {
+func TestDoctorCheckSets_WiresRegistryRouteDriftRow(t *testing.T) {
 	withDriftRepoDir(t, t.TempDir())
 	withDriftMatchingRemote(t)
 
@@ -506,14 +533,8 @@ func TestDoctorReportChecks_WiresRegistryRouteDriftCheck(t *testing.T) {
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_WIRING" }
 `)
-	checkByName(t, doctorReportChecks(c), "registry-route-drift")
-
-	c = minimalValidConfig()
-	for _, ch := range doctorReportChecks(c) {
-		if ch.Name == "registry-route-drift" {
-			t.Errorf("doctorReportChecks output contains %q when registryProxyRoutesFile is unset", ch.Name)
-		}
-	}
+	_, checks := doctorCheckSets(c)
+	checkByName(t, checks, registryRouteDriftCheckName)
 }
 
 // A real checkout, not a stub, so checkoutIsTargetRepo's tests exercise the
