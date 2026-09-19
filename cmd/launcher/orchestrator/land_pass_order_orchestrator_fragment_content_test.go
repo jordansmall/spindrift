@@ -168,6 +168,17 @@ func TestLandPassOrderOrchestratorFragmentDistinctionPrecedesDefaults(t *testing
 	}
 }
 
+// Content-invariant guard for issue #3506. Without these clauses the land
+// pass has no rule for answering a finding about prose, and answers one the
+// way PR #3499 did — a sentence appended beside the line each finding names.
+func TestLandPassOrderOrchestratorFragmentProseFoldsRewriteInPlace(t *testing.T) {
+	assertPromptClauses(t, "fragments/land-pass-order-orchestrator.md", []promptClause{
+		{name: "rewrites in place", clause: "A fold answering a finding about a comment or doc line rewrites that line in place"},
+		{name: "stays proportional", clause: "stays proportional to the change it documents"},
+		{name: "owes no declaration", clause: "A prose fold owes no declaration"},
+	})
+}
+
 // Guards against issue #3214 introducing a code-out action into a fragment
 // gated on REVIEW_LOOP_ORCHESTRATOR. lib/prompt-contract.nix forbids a bare
 // substring match of any of these literals in a read-only-reachable fragment,
