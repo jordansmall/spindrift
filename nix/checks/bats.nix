@@ -124,6 +124,8 @@ let
     pkgs.gnused
     pkgs.jq
     pkgs.socat
+    # `ps` for the dogfood Ctrl-C test's process-group assertions.
+    pkgs.procps
   ];
 
   batsEnv = {

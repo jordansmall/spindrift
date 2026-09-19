@@ -113,13 +113,93 @@ if [ "$DOGFOOD_RUNTIME" = "podman" ]; then
   check_podman_machine_memory
 fi
 
-# Signal this PID with USR1 or TERM (the devShell `dogfood-stop` alias) to exit
-# after the current wave: bash defers the trap until the in-flight `nix run`
-# returns. Ctrl-C stays the hard abort, though a backgrounded `nix build` from
-# NixRealizer deliberately survives it (docs/reference.md). The pid file is
-# untracked, so it is written after the dirty-tree check it would otherwise trip.
+# Signal this PID with USR1 or TERM (the devShell `dogfood-stop` alias) to wind
+# the loop down: under CONTINUOUS_DISPATCH the trap forwards SIGTERM to the
+# in-flight launcher, which drains the Boxes it already claimed and exits 7 (a
+# clean stop below). That refill loop keeps the launcher busy until the whole
+# queue is gone, so latching stop_requested alone would defer the stop
+# indefinitely; stop_requested remains only as the backstop for a launcher that
+# exits on its own before the signal reaches it. Under the opt-out nothing is
+# forwarded: the launcher installs its SIGTERM handler (installStopSignal,
+# cmd/launcher/main.go) only on the continuous path, so a forwarded TERM would
+# take Go's default disposition and kill it mid-wave with its Boxes and
+# registry proxies still up — and without refill the wave it is draining is
+# itself the boundary the backstop waits for. Ctrl-C stays the hard abort: see
+# `abort` below. The pid file is untracked, so it is written after the
+# dirty-tree check it would otherwise trip.
+
+# Mirrors how the launcher reads a `--<flag>=<value>` bool (cmd/launcher/flags.go):
+# empty, `0`, and `false` are the only off-values.
+bool_is_on() {
+  case "$1" in
+    "" | 0 | false) return 1 ;;
+    *) return 0 ;;
+  esac
+}
 stop_requested=0
-trap 'stop_requested=1; echo "==> dogfood: stop requested — will exit after the current wave"' USR1 TERM
+launcher_pid=""
+wait_interrupted=0
+request_stop() {
+  stop_requested=1
+  wait_interrupted=1
+  if [ -n "$launcher_pid" ] && bool_is_on "$CONTINUOUS_DISPATCH"; then
+    echo "==> dogfood: stop requested — forwarding SIGTERM to the launcher, which drains its in-flight Boxes before exiting"
+    kill -TERM "$launcher_pid" 2>/dev/null || true
+  else
+    echo "==> dogfood: stop requested — will exit after the current wave"
+  fi
+}
+# Prints, one per line, the descendants of $1 that share its process group,
+# walked breadth-first from a single `ps` snapshot. Prints nothing where `ps`
+# is unavailable, leaving the caller's own signalling to carry on.
+same_group_descendants() {
+  local root="$1" snapshot pid ppid pgid root_pgid="" frontier next
+  local found=()
+  snapshot="$(ps -eo pid=,ppid=,pgid= 2>/dev/null)" || return 0
+  while read -r pid ppid pgid; do
+    if [ "$pid" = "$root" ]; then root_pgid="$pgid"; fi
+  done <<<"$snapshot"
+  [ -n "$root_pgid" ] || return 0
+  frontier=" $root "
+  while [ -n "${frontier// /}" ]; do
+    next=""
+    while read -r pid ppid pgid; do
+      if [[ "$frontier" == *" $ppid "* ]]; then
+        next+=" $pid "
+        if [ "$pgid" = "$root_pgid" ]; then found+=("$pid"); fi
+      fi
+    done <<<"$snapshot"
+    frontier="$next"
+  done
+  if [ "${#found[@]}" -gt 0 ]; then printf '%s\n' "${found[@]}"; fi
+}
+abort() {
+  # Ctrl-C has to reach the launcher's children too: `podman run` is started
+  # without `--rm` (cmd/launcher/internal/runner/oci.go), so a surviving client leaves a
+  # container behind, and the SIG_IGN noted above the backgrounded `nix run`
+  # below makes the terminal's own SIGINT a no-op throughout that whole tree.
+  # TERM is what still lands there, and `podman run`'s signal proxy forwards
+  # it to the container's PID 1. The pgid filter is load-bearing: NixRealizer
+  # forks its background `nix build` into its own process group (Setpgid,
+  # cmd/launcher/internal/runner/nixrealize.go) precisely so a Ctrl-C aimed at this loop's
+  # group spares it (docs/reference.md, "Background realize process
+  # isolation"), and matching on pgid honours that by construction. The
+  # launcher itself gets HUP, not TERM: TERM is this script's *drain* request
+  # (request_stop above) whereas Ctrl-C is a hard abort, and HUP is the one
+  # signal bash leaves at its default disposition in an async command.
+  # Deliberately no `wait`: before the launcher was backgrounded, Ctrl-C
+  # reached shell and launcher at once and the shell exited immediately.
+  local pid
+  if [ -n "$launcher_pid" ]; then
+    for pid in $(same_group_descendants "$launcher_pid"); do
+      kill -TERM "$pid" 2>/dev/null || true
+    done
+    kill -HUP "$launcher_pid" 2>/dev/null || true
+  fi
+  exit 130
+}
+trap request_stop USR1 TERM
+trap abort INT
 mkdir -p .spindrift
 echo $$ > .spindrift/dogfood.pid
 trap 'rm -f .spindrift/dogfood.pid' EXIT
@@ -137,8 +217,32 @@ nix run "$NIX_APP" -- build
 
 while :; do
   echo "==> dogfood: nix run $NIX_APP -- $DOGFOOD_KIND --max-jobs $MAX_JOBS --continuous-dispatch=$CONTINUOUS_DISPATCH"
-  nix_exit=0
-  nix run "$NIX_APP" -- "$DOGFOOD_KIND" --max-jobs "$MAX_JOBS" --continuous-dispatch="$CONTINUOUS_DISPATCH" || nix_exit=$?
+  # Backgrounded so the USR1/TERM trap above can forward SIGTERM to it. `<&0`
+  # is load-bearing: bash redirects an async command's stdin from /dev/null
+  # "in the absence of any explicit redirections", which would hide the
+  # terminal from the launcher's isInteractiveTTY (flags.go) and so from any
+  # SPINDRIFT_GH_TOKEN_CMD vault-unlock prompt. No `set -m` (no job control):
+  # that keeps the launcher in this loop's own process group, which is the
+  # terminal's foreground group, so a vault prompt's tty read stays a legal
+  # foreground read instead of raising SIGTTIN and stopping the launcher
+  # (`ps` state T) — the bug this replaces. The cost is that bash hard-ignores
+  # SIGINT/SIGQUIT (SIG_IGN) in an async command with job control off, an
+  # ignore inherited through `nix run` into the launcher, so `abort` above
+  # relays SIGHUP instead of SIGINT.
+  nix run "$NIX_APP" -- "$DOGFOOD_KIND" --max-jobs "$MAX_JOBS" --continuous-dispatch="$CONTINUOUS_DISPATCH" <&0 &
+  launcher_pid=$!
+  while :; do
+    wait_interrupted=0
+    nix_exit=0
+    wait "$launcher_pid" || nix_exit=$?
+    # A trapped signal makes `wait` return 128+signum without reaping the
+    # launcher, so that status is not the launcher's own — wait again for the
+    # real one. bash keeps a reaped child's status in its jobs table, so the
+    # re-wait still lands it even when the launcher exited inside the handler;
+    # a `kill -0` liveness probe would see nothing there and keep 128+signum.
+    [ "$wait_interrupted" -eq 1 ] && [ "$nix_exit" -gt 128 ] || break
+  done
+  launcher_pid=""
 
   if [ "$nix_exit" -eq 2 ]; then
     echo "==> dogfood: queue empty — done after $iteration iteration(s)."
@@ -172,6 +276,11 @@ while :; do
 
   if [ "$nix_exit" -eq 5 ]; then
     echo "==> dogfood: halting — non-converging (host-tainted) image divergence, a rebuild cannot fix this."
+    break
+  fi
+
+  if [ "$nix_exit" -eq 7 ]; then
+    echo "==> dogfood: stopped on request — launcher drained and exited after a SIGTERM."
     break
   fi
 
