@@ -26,8 +26,28 @@ type Delta struct {
 	// Paths is sorted lexicographically for determinism (issue #3246).
 	// len(Paths) == Files when Known is true; nil when Known is false.
 	Paths []string `json:"paths,omitempty"`
+	// Ranges holds the pre-image hunk ranges for a subset of Paths, keyed by
+	// path; nil when Known is false. A path absent from the map has no
+	// determinable pre-image hunks: a binary file; a mode-only change, which
+	// numstat counts as "0 0 <path>" while -U0 renders the mode lines and no
+	// hunk; on a rebased branch, a path the moved base also touched; a
+	// renamed path (numstat reports it as the composite "d/{old => new}"
+	// key, which never matches a diff header); or a path git renders quoted
+	// (core.quotePath, e.g. non-ASCII).
+	Ranges map[string][]Range `json:"ranges,omitempty"`
 	// Reason names why Known is false. Empty when Known is true.
 	Reason string `json:"reason,omitempty"`
+}
+
+// Range is a pre-image line range from a unified diff hunk header, i.e. the
+// reviewed-anchor side of the diff — the coordinate space a reviewer's
+// path:line findings are already recorded in. Count == 0 marks a pure
+// insertion that added no pre-image lines: it landed immediately after old
+// line Start, mirroring git's own `@@ -N,0 +... @@` convention, which is how
+// an insertion stays distinguishable from a modification.
+type Range struct {
+	Start int `json:"start"`
+	Count int `json:"count"`
 }
 
 // Summary renders Delta as the one-line, PR-visible report (issue #3244). It
@@ -234,4 +254,79 @@ func abs(n int) int {
 		return -n
 	}
 	return n
+}
+
+// hunkHeaderRe matches a unified-diff hunk header's old side, anchored to
+// column zero so a `+`-prefixed content line that happens to start with
+// "@@" (legal diff content) can never match. Count is optional: git omits
+// ",Count" when it is 1.
+var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+`)
+
+// oldPathHeaderRe matches a `--- a/<path>` line, the pre-image path, and
+// newPathHeaderRe the `+++ b/<path>` post-image one. Hunk content takes
+// those shapes too, so parseOldSideRanges only consults them outside a hunk.
+var oldPathHeaderRe = regexp.MustCompile(`^--- a/(.+)$`)
+var newPathHeaderRe = regexp.MustCompile(`^\+\+\+ b/(.+)$`)
+
+// parseOldSideRanges parses `git diff -U0 <from> <to>` output (unified=0, so
+// every hunk header is already the minimal changed region) into per-path
+// old-side ranges, in the order git emits them. It tracks path from the
+// `+++ b/<path>` header, falling back to the preceding `--- a/<path>` line
+// when the post-image is `+++ /dev/null` (a deleted file), so a deletion
+// still gets its old-side ranges attributed to a path.
+//
+// Path headers are only trusted before the file's first hunk: a land pass
+// that adds the line `++ b/evil.go` renders it as `+++ b/evil.go`, a
+// header's shape exactly. Only a column-zero `diff --git ` line is an
+// unambiguous per-file boundary — every content line carries a `+`/`-`
+// prefix — so the scan keys off that. It never errors.
+func parseOldSideRanges(out string) map[string][]Range {
+	var ranges map[string][]Range
+	var oldPath, path string
+	inHunk := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "diff --git ") {
+			oldPath, path = "", ""
+			inHunk = false
+			continue
+		}
+		if !inHunk {
+			if m := oldPathHeaderRe.FindStringSubmatch(line); m != nil {
+				oldPath = m[1]
+				continue
+			}
+			if m := newPathHeaderRe.FindStringSubmatch(line); m != nil {
+				path = m[1]
+				continue
+			}
+			if line == "+++ /dev/null" {
+				path = oldPath
+				continue
+			}
+		}
+		m := hunkHeaderRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		inHunk = true
+		if path == "" {
+			continue
+		}
+		start, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		count := 1
+		if m[2] != "" {
+			count, err = strconv.Atoi(m[2])
+			if err != nil {
+				continue
+			}
+		}
+		if ranges == nil {
+			ranges = map[string][]Range{}
+		}
+		ranges[path] = append(ranges[path], Range{Start: start, Count: count})
+	}
+	return ranges
 }

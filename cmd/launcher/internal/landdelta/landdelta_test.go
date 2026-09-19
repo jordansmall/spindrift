@@ -1,6 +1,7 @@
 package landdelta
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -250,5 +251,195 @@ func TestDeltaSummary(t *testing.T) {
 				t.Fatalf("Summary() = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestParseOldSideRanges(t *testing.T) {
+	cases := []struct {
+		name string
+		diff string
+		want map[string][]Range
+	}{
+		{
+			name: "single hunk modification",
+			diff: "diff --git a/foo.txt b/foo.txt\n" +
+				"--- a/foo.txt\n" +
+				"+++ b/foo.txt\n" +
+				"@@ -3,2 +3,2 @@\n" +
+				"-old1\n" +
+				"-old2\n" +
+				"+new1\n" +
+				"+new2\n",
+			want: map[string][]Range{
+				"foo.txt": {{Start: 3, Count: 2}},
+			},
+		},
+		{
+			name: "pure insertion",
+			diff: "diff --git a/foo.txt b/foo.txt\n" +
+				"--- a/foo.txt\n" +
+				"+++ b/foo.txt\n" +
+				"@@ -7,0 +8,3 @@\n" +
+				"+new1\n" +
+				"+new2\n" +
+				"+new3\n",
+			want: map[string][]Range{
+				"foo.txt": {{Start: 7, Count: 0}},
+			},
+		},
+		{
+			name: "pure deletion",
+			diff: "diff --git a/foo.txt b/foo.txt\n" +
+				"--- a/foo.txt\n" +
+				"+++ b/foo.txt\n" +
+				"@@ -4,3 +3,0 @@\n" +
+				"-old1\n" +
+				"-old2\n" +
+				"-old3\n",
+			want: map[string][]Range{
+				"foo.txt": {{Start: 4, Count: 3}},
+			},
+		},
+		{
+			name: "single line hunk comma omitted both sides",
+			diff: "diff --git a/foo.txt b/foo.txt\n" +
+				"--- a/foo.txt\n" +
+				"+++ b/foo.txt\n" +
+				"@@ -12 +12 @@\n" +
+				"-old\n" +
+				"+new\n",
+			want: map[string][]Range{
+				"foo.txt": {{Start: 12, Count: 1}},
+			},
+		},
+		{
+			name: "multi hunk file",
+			diff: "diff --git a/foo.txt b/foo.txt\n" +
+				"--- a/foo.txt\n" +
+				"+++ b/foo.txt\n" +
+				"@@ -3,1 +3,1 @@\n" +
+				"-old1\n" +
+				"+new1\n" +
+				"@@ -10,2 +10,2 @@\n" +
+				"-old2\n" +
+				"-old3\n" +
+				"+new2\n" +
+				"+new3\n" +
+				"@@ -20,0 +22,1 @@\n" +
+				"+new4\n",
+			want: map[string][]Range{
+				"foo.txt": {
+					{Start: 3, Count: 1},
+					{Start: 10, Count: 2},
+					{Start: 20, Count: 0},
+				},
+			},
+		},
+		{
+			name: "multi file diff",
+			diff: "diff --git a/foo.txt b/foo.txt\n" +
+				"--- a/foo.txt\n" +
+				"+++ b/foo.txt\n" +
+				"@@ -1,1 +1,1 @@\n" +
+				"-old\n" +
+				"+new\n" +
+				"diff --git a/bar.txt b/bar.txt\n" +
+				"--- a/bar.txt\n" +
+				"+++ b/bar.txt\n" +
+				"@@ -5,2 +5,2 @@\n" +
+				"-old1\n" +
+				"-old2\n" +
+				"+new1\n" +
+				"+new2\n",
+			want: map[string][]Range{
+				"foo.txt": {{Start: 1, Count: 1}},
+				"bar.txt": {{Start: 5, Count: 2}},
+			},
+		},
+		{
+			name: "deleted file dev null",
+			diff: "diff --git a/gone.txt b/gone.txt\n" +
+				"deleted file mode 100644\n" +
+				"--- a/gone.txt\n" +
+				"+++ /dev/null\n" +
+				"@@ -1,3 +0,0 @@\n" +
+				"-old1\n" +
+				"-old2\n" +
+				"-old3\n",
+			want: map[string][]Range{
+				"gone.txt": {{Start: 1, Count: 3}},
+			},
+		},
+		{
+			name: "hunk content mimics new-path header",
+			diff: "diff --git a/f.md b/f.md\n" +
+				"--- a/f.md\n" +
+				"+++ b/f.md\n" +
+				"@@ -1,0 +2,1 @@\n" +
+				"+++ b/evil.go\n" +
+				"@@ -5,1 +6,1 @@\n" +
+				"-old5\n" +
+				"+new5\n",
+			want: map[string][]Range{
+				"f.md": {
+					{Start: 1, Count: 0},
+					{Start: 5, Count: 1},
+				},
+			},
+		},
+		{
+			name: "hunk content mimics old-path header",
+			diff: "diff --git a/f.md b/f.md\n" +
+				"--- a/f.md\n" +
+				"+++ b/f.md\n" +
+				"@@ -1,1 +0,0 @@\n" +
+				"--- a/evil.go\n" +
+				"@@ -5,1 +5,1 @@\n" +
+				"-old5\n" +
+				"+new5\n",
+			want: map[string][]Range{
+				"f.md": {
+					{Start: 1, Count: 1},
+					{Start: 5, Count: 1},
+				},
+			},
+		},
+		{
+			name: "empty input",
+			diff: "",
+			want: nil,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseOldSideRanges(c.diff)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("parseOldSideRanges() = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestDeltaRangesJSONTag(t *testing.T) {
+	withRanges := Delta{
+		Known:  true,
+		Files:  1,
+		Ranges: map[string][]Range{"foo.txt": {{Start: 3, Count: 2}}},
+	}
+	b, err := json.Marshal(withRanges)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"ranges":{"foo.txt":[{"start":3,"count":2}]}`) {
+		t.Fatalf("json = %s, want ranges key with start/count", b)
+	}
+
+	withoutRanges := Delta{Known: true}
+	b, err = json.Marshal(withoutRanges)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"ranges"`) {
+		t.Fatalf("json = %s, want no ranges key", b)
 	}
 }
