@@ -1,10 +1,6 @@
 // Package bundleout is the harness-owned code-out step for CODE_FORGE=local
-// (ADR 0033, issue #1808): bundling the base..branch commit range into the
-// outbox, in place of the Agent's own `git bundle create` prompt
-// instruction. driver-exec's `bundle-out` verb is a thin CLI wrapper around
-// Run; the localloop composed test calls Run directly as the same real
-// producer, so both consumers share one implementation instead of the
-// prompt↔Go string coupling this replaces.
+// (ADR 0033, issue #1808): it bundles the base..branch commit range into the
+// outbox instead of asking the Agent to run `git bundle create` itself.
 package bundleout
 
 import (
@@ -23,35 +19,26 @@ import (
 
 // Config is everything Run needs to bundle one seam's code-out.
 type Config struct {
-	// Repo is the path to the git repository holding both Base and Branch.
-	Repo string
-	// Base is the base ref, e.g. "main" or "origin/main".
-	Base string
-	// Branch is the agent branch name, e.g. "agent/issue-42".
-	Branch string
-	// OutboxDir is the directory Run writes the bundle into.
+	Repo      string
+	Base      string
+	Branch    string
 	OutboxDir string
-	// Issue is the issue number, carried into a corrective outcome line.
+	// Issue is only used in the corrective outcome line Run may print.
 	Issue string
-	// PriorOutcomeLine is the Agent's own SPINDRIFT_OUTCOME line, verbatim,
-	// or "" if it never emitted one. Only its parsed status matters: a
-	// status=ready claim against an empty range is the contradiction Run
-	// corrects.
+	// PriorOutcomeLine is the Agent's own SPINDRIFT_OUTCOME line, verbatim, or
+	// "" if it never emitted one. Only its parsed status matters: a status=ready
+	// claim against an empty range is the contradiction Run corrects.
 	PriorOutcomeLine string
 }
 
 // Run bundles Base..Branch from Repo into OutboxDir/seambundle.FileName.
-// An empty range after the Agent's own claimed status=ready is a
-// contradiction the Box can't leave standing: no bundle is written, and a
-// corrective status=blocked SPINDRIFT_OUTCOME line is printed to w instead,
-// picked up by the launcher's last-line-wins log scan (outcome.Resolve)
-// with no launcher changes. An empty range after any other claimed status is
-// already consistent — nothing is written.
+// An empty range after the Agent claimed status=ready is a contradiction: Run
+// writes no bundle and prints a corrective status=blocked SPINDRIFT_OUTCOME
+// line to w, which the launcher's last-line-wins log scan (outcome.Resolve)
+// picks up. An empty range after any other status is already consistent.
 func Run(cfg Config, w io.Writer) error {
-	// Defense in depth, matching forge/local's relayBundle: Base and Branch
-	// are harness-controlled today (BASE_BRANCH/BRANCH), but both interpolate
-	// directly into a `base..branch` range spec, so guard them the same way
-	// regardless.
+	// Base and Branch interpolate into a `base..branch` range spec, so guard
+	// them even though the harness controls both today.
 	if err := validateRef(cfg.Base); err != nil {
 		return err
 	}
@@ -93,8 +80,8 @@ func commitCount(repo, base, branch string) (int, error) {
 	cmd := exec.Command("git", "-C", repo, "rev-list", "--count", base+".."+branch)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	// Output() (stdout only) rather than CombinedOutput(): a git warning on
-	// stderr would otherwise merge into the count text and break Atoi below.
+	// Output(), not CombinedOutput(): a git warning on stderr would merge into
+	// the count text and break Atoi below.
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("bundleout: rev-list --count %s..%s: %w: %s", base, branch, err, stderr.String())

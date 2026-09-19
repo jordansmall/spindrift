@@ -12,36 +12,17 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// dispatchWithRetry runs once, retrying transient failures according to
-// cfg, and returns the parsed Result once once() exits zero or the failure
-// is terminal / the retry cap is exhausted.
-//
-//   - 429 with a known resetsAt: hold until the reset time (+ Policy.Jitter),
-//     then re-dispatch. A hold that ends in success or terminal does NOT
-//     consume the retry cap. Consecutive holds that each end in another 429
-//     count toward the cap (the "no-progress" case — the token never
-//     recovered).
-//   - Other transients (529/overloaded, network, 429 without resetsAt):
-//     linear backoff retry up to Policy.Max, then give up.
-//   - Terminal: give up immediately, no retry.
-//
-// Applies uniformly to Run and Fix (issue #441): a 429 during a fix pass now
-// holds until reset instead of burning a fix attempt.
-//
-// A zero-exit box that reports no SPINDRIFT_OUTCOME line is classified the
-// same as a non-zero exit (issue #565): a transient classification — rate
-// limit or otherwise — feeds into the same hold/backoff decision below
-// instead of dead-ending as status=missing. Only a genuinely terminal
-// classification (no transient marker at all) returns as before, so
-// status=missing still means "box finished cleanly but told us nothing, and
-// there's nothing to retry."
+// dispatchWithRetry calls once until it exits zero, the failure is terminal, or
+// a cap is exhausted. A 429 with a known reset holds until that time, consuming
+// the cap only when the previous iteration also held; other transients back off
+// linearly. It covers Run and Fix alike (issue #441). A zero-exit box printing
+// no SPINDRIFT_OUTCOME line is classified like a non-zero exit (issue #565).
 func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold bool) error) Result {
 	holdCount := 0
 	transientCount := 0
 	prevWasHold := false
-	// prevRedispatched threads the resume signal on ANY re-dispatch — hold
-	// OR backoff — distinct from prevWasHold, which is purely hold-cap
-	// (no-progress) accounting below and must not be repurposed for this.
+	// prevRedispatched covers any re-dispatch, hold or backoff. prevWasHold is
+	// purely hold-cap accounting below and must not be repurposed for it.
 	prevRedispatched := false
 
 	for {
@@ -58,9 +39,8 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				return result
 			}
 			if exists, prErr := d.cfg.OpenPRForIssue(d.number); prErr == nil && exists {
-				// The box's work already landed a PR; re-dispatching
-				// would duplicate it. Pass the Result through unchanged
-				// so settle's own PR lookup routes it (issue #565).
+				// The box's work already landed a PR; re-dispatching would
+				// duplicate it. Let settle's own PR lookup route it (issue #565).
 				return result
 			}
 			cls = result.Classification
@@ -71,32 +51,11 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 
 			var qErr quarantineErr
 			if errors.As(err, &qErr) {
-				// quarantinePriorRunLogs failed before this attempt ever
-				// dispatched anything, so logPath may still hold the exact
-				// prior run's content it was trying to move aside. Neither
-				// settledOutcome nor ClassifyTransient may be trusted
-				// against it here (issue #2575): never fall through to
-				// either below -- `continue` retries with the same
-				// backoff any other transient uses instead.
-				//
-				// It still must not give up on the FIRST failure the way a
-				// hard Result{Success:false} would: a local filesystem
-				// hiccup (a lock held for a moment, a transient EACCES) is
-				// exactly the kind of thing a short retry clears, and
-				// failing the whole dispatch outright over it -- never
-				// running the agent at all -- is a strictly worse outcome
-				// than the mis-charge risk a stray uncounted pass log
-				// carries (the same "contributes nothing rather than
-				// aborting" posture #2575's own budget-gate degrade takes
-				// on a pass with no result event).
-				//
-				// prevRedispatched/prevWasHold are deliberately left
-				// untouched here: no box attempt happened yet, so the next
-				// retry must still see resumeAfterHold=false on its next
-				// call -- rerunning quarantine fresh (Run's own
-				// `!resumeAfterHold` guard) rather than skipping it, and
-				// never setting RESUME_AFTER_HOLD on a session that never
-				// started.
+				// Quarantine failed before this attempt dispatched anything,
+				// so logPath may still hold the prior run's content: neither
+				// settledOutcome nor ClassifyTransient may be trusted against
+				// it (issue #2575). Leave prevRedispatched/prevWasHold alone
+				// too, so the retry reruns quarantine and skips the resume.
 				fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, qErr)
 				transientCount++
 				if transientCount > d.cfg.Policy.Max {
@@ -112,13 +71,10 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			}
 
 			if result, ok := d.settledOutcome(logPath); ok {
-				// A non-zero exit still settles on a genuine, nonce-gated
-				// outcome the box printed before dying (issue #2075): a run
-				// resumed after a 429 hold can finish and print
-				// status=ready/blocked yet exit non-zero, and reclassifying
-				// that into another hold or an agent-failed would re-spend the
-				// tokens the resume preserved. A limit-hit box prints no
-				// outcome and still falls through to classification below.
+				// A non-zero exit still settles on a genuine outcome the box
+				// printed before dying (issue #2075): reclassifying it would
+				// re-spend the tokens a post-hold resume preserved. A limit-hit
+				// box prints no outcome and falls through to classification.
 				return result
 			}
 
@@ -132,11 +88,10 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			if cls.Class == driver.Terminal {
 				result := Result{Success: false, KilledBySignal: runner.KilledBySignal(err)}
 				if logIsEmpty(logPath) {
-					// A box that ran and genuinely failed left something in
-					// its log; an empty log means it never launched at all
-					// (a pre-Box registry-proxy or outbox-setup error, issue
-					// #3119) -- surface that error rather than the terse,
-					// reason-free "FAILED" a caller would otherwise print.
+					// A box that ran and failed left something in its log, so an
+					// empty log means it never launched (a pre-Box registry-proxy
+					// or outbox-setup error, issue #3119). Report that error
+					// rather than the reason-free "FAILED" a caller would print.
 					result.Err = err
 				}
 				return result
@@ -144,11 +99,8 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 		}
 
 		if cls.Reason == driver.RateLimit && cls.ResetAt != nil {
-			// 429 with known reset: hold until reset + jitter. A hold
-			// following another hold (prevWasHold=true) means the token has
-			// not recovered — consume the cap. A hold after a non-hold
-			// iteration (success, terminal, or different transient) is
-			// "free".
+			// A hold following another hold means the token never recovered, so
+			// it consumes the cap. A hold after any other iteration is free.
 			if prevWasHold {
 				holdCount++
 			}
@@ -169,8 +121,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			continue
 		}
 
-		// 529/overloaded, network, or 429 without a known reset time →
-		// backoff retry.
+		// 529/overloaded, network, or a 429 with no known reset time.
 		prevWasHold = false
 		prevRedispatched = true
 		transientCount++
@@ -186,12 +137,9 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 	}
 }
 
-// logIsEmpty reports whether logPath is missing or exists with zero bytes --
-// the "box never launched" signal a Terminal classification uses to decide
-// whether to surface once()'s error on Result.Err (issue #3119). A stat
-// error other than not-exist (e.g. a permissions problem) is treated as
-// non-empty: there's no evidence the box never launched, so err stays
-// unsurfaced rather than guessed at.
+// logIsEmpty reports whether logPath is missing or zero bytes, the "box never
+// launched" signal behind Result.Err (issue #3119). A stat error other than
+// not-exist counts as non-empty: no evidence the box never launched.
 func logIsEmpty(logPath string) bool {
 	info, err := os.Stat(logPath)
 	if err != nil {
@@ -200,14 +148,10 @@ func logIsEmpty(logPath string) bool {
 	return info.Size() == 0
 }
 
-// successResult parses logPath's outcome line after a zero-exit dispatch. An
-// unparseable line is reported via ParseErr without attempting
-// classification; a missing outcome line (a box that exited zero without
-// reporting one) falls back to a best-effort classification so the caller
-// can explain what happened. The scan is no longer nonce-gated (ADR 0039,
-// docs/adr/0039-*.md): the freshness boundary for this line is now purely
-// structural — it must be the leading line of the box's log, a guarantee
-// the upstream in-box extractor enforces before this scan ever runs.
+// successResult parses logPath's outcome line after a zero-exit dispatch,
+// falling back to a best-effort classification when no line parses. The scan is
+// not nonce-gated (ADR 0039): the freshness boundary is structural, since the
+// in-box extractor guarantees the line leads the box's log.
 func (d *Dispatch) successResult(logPath string) Result {
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
 	if err != nil {
@@ -220,11 +164,10 @@ func (d *Dispatch) successResult(logPath string) Result {
 	return Result{Success: true, Classification: cls, ClassifyErr: clsErr}
 }
 
-// outcomeResult builds the fully populated Result for a parsed outcome o,
-// gathering the companion comment / PR-intent / issue-intent host-mediated
-// signals from logPath. Shared by the zero-exit success path (successResult)
-// and the non-zero-exit settled-outcome path (settledOutcome, issue #2075) so
-// both surface the identical signals.
+// outcomeResult builds the fully populated Result for a parsed outcome,
+// gathering the comment, PR-intent and issue-intent signals from logPath.
+// Shared by the zero-exit and non-zero-exit settled paths (issue #2075) so both
+// report identical signals.
 func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Result {
 	comment, commentFound, commentRejected, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
 	if commentErr != nil {
@@ -254,18 +197,11 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 	}
 }
 
-// settledOutcome scans logPath for this run's nonce-bearing SPINDRIFT_OUTCOME
-// line after a NON-ZERO exit. When one parses cleanly it returns the fully
-// populated Result (Success and OutcomeFound true) plus ok=true, so a run
-// that finished its work and printed status=ready/blocked yet exited non-zero
-// -- a run resumed after a 429 hold whose driver process dies after emitting
-// its verdict (issue #2075) -- settles on that verdict instead of being
-// reclassified into another hold or an agent-failed, re-spending the tokens
-// the resume preserved. ok=false means no genuine outcome was printed (a
-// limit-hit box prints none, and a near-miss/unparseable line is left to the
-// caller's transient classification), so the caller proceeds to classify. The
-// scan is no longer nonce-gated (ADR 0039): the same structural, leading-line
-// freshness boundary as successResult's applies here too.
+// settledOutcome returns the Result for an outcome line printed before a
+// NON-ZERO exit, so a run that finished its work and died after emitting its
+// verdict (issue #2075) settles on it instead of re-spending the tokens a resume
+// preserved. ok=false when none parses, and the caller classifies instead. Not
+// nonce-gated (ADR 0039), same leading-line boundary as successResult.
 func (d *Dispatch) settledOutcome(logPath string) (Result, bool) {
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
 	if err != nil || !resolved.Found || !resolved.IsGenuineOrSynthetic() {

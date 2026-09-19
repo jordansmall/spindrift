@@ -10,22 +10,14 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// failureExitCode is the synthesized exit code SynthesizeExit reports when
-// it finds no trustworthy evidence of success. Any non-zero value works —
-// callers only branch on zero vs. non-zero — but a fixed constant keeps the
-// two return sites below consistent.
+// failureExitCode is the exit code SynthesizeExit reports when it finds no
+// trustworthy evidence of success.
 const failureExitCode = 1
 
-// SynthesizeExit returns 0 iff logPath contains both a valid
-// SPINDRIFT_OUTCOME line in some type:"text" event's part.text and no
-// type:"error" event anywhere in the log; otherwise it returns a non-zero
-// code. This exists because the opencode CLI exits 0 even when it hit an
-// error mid-run — unlike claude, whose stream-json type:"result" event
-// carries its own trustworthy is_error/subtype fields — so a caller cannot
-// rely on the opencode process's own exit code to detect a mid-run failure.
-//
-// A missing log file — no evidence of a valid outcome — returns
-// failureExitCode.
+// SynthesizeExit returns 0 only when logPath holds a valid SPINDRIFT_OUTCOME
+// line in a type:"text" event and no type:"error" event anywhere. The opencode
+// CLI exits 0 even after a mid-run error, so its own exit code cannot tell a
+// caller whether the run failed. A missing log file returns failureExitCode.
 func SynthesizeExit(logPath string) (int, error) {
 	sawError := false
 	hasOutcome := false

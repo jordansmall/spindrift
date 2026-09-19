@@ -10,15 +10,12 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// isOutcomeBackstopInvocation reports whether args (os.Args[1:]) selects the
-// outcome-backstop subcommand: a distinct verb, not a top-level flag (issue
-// #2157), mirroring isBundleOutInvocation.
+// Issue #2157 made outcome-backstop a distinct verb rather than a top-level
+// flag.
 func isOutcomeBackstopInvocation(args []string) bool {
 	return len(args) > 0 && args[0] == "outcome-backstop"
 }
 
-// outcomeBackstopFlags holds the parsed (or default, pre-Parse) values of
-// every outcome-backstop flag, keyed by the flag.FlagSet that owns them.
 type outcomeBackstopFlags struct {
 	repo               *string
 	issue              *string
@@ -35,11 +32,8 @@ type outcomeBackstopFlags struct {
 	runStateFile       *string
 }
 
-// newOutcomeBackstopFlagSet builds the outcome-backstop subcommand's
-// flag.FlagSet and registers every flag, without parsing it against any
-// args. Split out from runOutcomeBackstop so a test can inspect a flag's
-// default value (e.g. fs.Lookup("run-state-file").DefValue) without ever
-// invoking outcomebackstop.Run or touching a real file on disk.
+// Registering the flags without parsing them lets a test read a flag's default
+// value without running outcomebackstop.Run or touching a real file on disk.
 func newOutcomeBackstopFlagSet() (*flag.FlagSet, *outcomeBackstopFlags) {
 	fs := flag.NewFlagSet("outcome-backstop", flag.ContinueOnError)
 	flags := &outcomeBackstopFlags{
@@ -60,11 +54,8 @@ func newOutcomeBackstopFlagSet() (*flag.FlagSet, *outcomeBackstopFlags) {
 	return fs, flags
 }
 
-// runOutcomeBackstop is the `outcome-backstop` subcommand's thin CLI wrapper
-// (ADR 0007's thin-exec-glue tier, issue #2157): it parses args into an
-// outcomebackstop.Config and delegates to outcomebackstop.Run, the same
-// producer entrypoint.sh's retired emit_outcome_backstop shell function used
-// to implement in bash. Returns the process exit code.
+// ADR 0007 keeps this wrapper as thin CLI glue (issue #2157): parse args and
+// delegate to outcomebackstop.Run.
 func runOutcomeBackstop(args []string, stdout io.Writer) int {
 	fs, flags := newOutcomeBackstopFlagSet()
 	if err := fs.Parse(args); err != nil {

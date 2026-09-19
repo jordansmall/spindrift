@@ -1,10 +1,7 @@
-// Package deltareview holds the trigger decision for issue #3246's bounded
-// land-delta review pass: after a land pass lands, should the run spend one
-// more review pass checking that what actually landed stayed within what
-// the reviewer already looked at? Modeled on passmachine's own posture
-// (passmachine.go's package doc): deliberately I/O-free, no cfg/state/log
-// access, so Decide's every case is table-testable against plain landdelta.Delta
-// and string values, with no Driver invocation.
+// Package deltareview decides whether a run spends one more review pass
+// checking that what a land pass landed stayed within what the reviewer
+// already looked at (issue #3246). It is I/O-free, so every Decide case is
+// table-testable against plain values without invoking a Driver.
 package deltareview
 
 import (
@@ -16,35 +13,21 @@ import (
 	"spindrift.dev/launcher/internal/landdelta"
 )
 
-// GateWorkPhrase is the exact substring GateWorkDeclared matches
-// case-insensitively against a land pass's own decisions.md text. Exported
-// so the orchestrator can pin it, via a markers.go-style
-// prompt-literal-coupling test (cmd/launcher/orchestrator/markers.go's own
-// doc comment names the idiom), against
-// templates/default/prompts/fragments/land-pass-order-orchestrator.md's own
-// "Gate-discovered work" wording (issue #3245) -- so a reword on either side
-// is caught pre-merge instead of silently decoupling the trigger from the
-// prose that tells the land pass to write this phrase.
+// GateWorkPhrase is the substring GateWorkDeclared matches case-insensitively
+// against a land pass's decisions.md. Exported so a prompt-literal-coupling
+// test pins it against land-pass-order-orchestrator.md's "Gate-discovered work"
+// wording (issue #3245), catching a reword on either side pre-merge.
 const GateWorkPhrase = "gate-discovered"
 
-// bulletRe matches one findings bullet line -- "-" or "*", any leading
-// indent, at least one space before the content -- capturing everything
-// after the marker.
 var bulletRe = regexp.MustCompile(`^\s*[-*]\s+(.*)$`)
 
-// lineSuffixRe strips a trailing :<digits> or :<digits>:<digits> location
-// suffix (file:line or file:line:col) off a bullet's leading token.
 var lineSuffixRe = regexp.MustCompile(`:\d+(:\d+)?$`)
 
-// FindingPaths parses findings -- the verbatim VERDICT line plus the
-// `## Blocking` / `## Non-blocking` sections that state.ReviewFindings holds
-// (review-prompt.md:109-113, scanReviewLog) -- into the distinct
-// repo-relative paths those findings name, sorted. Only bullets under one of
-// the two named headings count; a heading's own prose, a bullet under any
-// other heading (e.g. the APPROVE-only `## Probed` section), and a bullet
-// whose leading token doesn't look like a path (no "/" and no "." -- a
-// reviewer wrote prose instead of a location) are all silently excluded
-// rather than widening the set Decide compares the land delta against.
+// FindingPaths returns the distinct repo-relative paths that findings name,
+// sorted, parsing the section format review-prompt.md defines. Only bullets
+// under the `## Blocking` and `## Non-blocking` headings count, and it drops a
+// bullet whose leading token does not look like a path rather than widen the
+// set Decide compares the land delta against.
 func FindingPaths(findings string) []string {
 	seen := map[string]struct{}{}
 	inSection := false
@@ -76,13 +59,10 @@ func FindingPaths(findings string) []string {
 	return paths
 }
 
-// bulletPath extracts the location path from one bullet's own content
-// (everything after "- "/"* "): the leading whitespace-delimited token,
-// unwrapped of a single surrounding pair of backticks or "**" emphasis, with
-// any :<line> or :<line>:<col> suffix stripped. ok is false for the `- none`
-// convention and for any token that doesn't look like a path (checked last,
-// after stripping, so a bare "none" -- itself pathless -- is rejected by the
-// same shape check rather than needing its own special case).
+// bulletPath extracts a bullet's leading token, unwrapping one surrounding
+// pair of backticks or "**" and stripping a :<line>[:<col>] suffix. The path
+// shape check runs last, after stripping, so it also rejects the `- none`
+// convention without a special case.
 func bulletPath(content string) (string, bool) {
 	fields := strings.Fields(content)
 	if len(fields) == 0 {
@@ -98,9 +78,8 @@ func bulletPath(content string) (string, bool) {
 	return token, true
 }
 
-// unwrap strips a single matching prefix/suffix pair off s, if both are
-// present and s is longer than prefix+suffix combined (so "**" alone isn't
-// stripped to "").
+// unwrap strips a matching prefix/suffix pair off s only when s is longer than
+// the two combined, so "**" alone does not collapse to "".
 func unwrap(s, prefix, suffix string) string {
 	if len(s) > len(prefix)+len(suffix) && strings.HasPrefix(s, prefix) && strings.HasSuffix(s, suffix) {
 		return s[len(prefix) : len(s)-len(suffix)]
@@ -108,55 +87,30 @@ func unwrap(s, prefix, suffix string) string {
 	return s
 }
 
-// GateWorkDeclared reports whether decisions -- the land pass's own
-// /tmp/decisions.md text -- declares gate-discovered work, per issue #3245's
-// prose-only contract (land-pass-order-orchestrator.md:36-44): there is no
-// structured field for this declaration, only the fragment's own wording, so
-// this is a case-insensitive substring match against GateWorkPhrase rather
-// than a parse.
+// GateWorkDeclared reports whether a land pass's decisions.md text declares
+// gate-discovered work. Issue #3245 gives the declaration no structured field,
+// only the prompt fragment's prose, so this matches a substring, not a parse.
 func GateWorkDeclared(decisions string) bool {
 	return strings.Contains(strings.ToLower(decisions), GateWorkPhrase)
 }
 
-// Trigger is the bounded delta-review gate's decision (issue #3246): whether
-// to spend one extra review pass checking the land delta, and why.
+// Trigger is the bounded delta-review gate's decision (issue #3246).
 type Trigger struct {
 	// Fire is true when the delta-review pass should run.
 	Fire bool
-	// Reason is a human-readable explanation, always non-empty regardless of
-	// Fire, mirroring passmachine.Decision's own "every decision carries a
-	// reason" convention (passmachine.go's package doc, issue #2655).
+	// Reason is always non-empty, whatever Fire is (issue #2655).
 	Reason string
-	// Beyond lists the land delta's own paths (landdelta.Delta.Paths) that
-	// fall outside the findings' named locations, sorted -- populated only
-	// on the delta-exceeded-findings Fire case; nil otherwise, including on
-	// the gate-work-declared Fire case, which needs no delta comparison at
-	// all.
+	// Beyond lists the delta paths outside the findings' named locations,
+	// sorted. Decide fills it only on the delta-exceeded-findings Fire case
+	// and leaves it nil otherwise, gate-discovered work included.
 	Beyond []string
 }
 
-// Decide is the bounded gate's whole decision (issue #3246): given the land
-// pass's own delta, the reviewer's own findings text, and the land pass's
-// own decisions.md text, should one more (bounded -- never looped, per
-// issue #3244/#3246's own "only ever one delta-review pass" contract that
-// this package's caller enforces) review pass run before settling?
-//
-// A gate-discovered-work declaration (GateWorkDeclared) is checked first and
-// fires unconditionally, without even looking at delta: #3245's own contract
-// is that inline gate fixes are sometimes unavoidable but always owed a
-// declaration, and that declaration alone is reason enough for a human (via
-// one more review pass) to see what was fixed, independent of whether the
-// delta machinery could resolve a comparison at all.
-//
-// Only once that check is clear does delta enter the decision, and only when
-// delta.Known: an unknown delta (Known == false, e.g. an unresolvable
-// rebase) must NOT fire on its own, matching landdelta's own contract
-// (landdelta.go's package doc) that an unknown delta degrades rather than
-// escalates -- there is nothing to compare against, so silence, not a
-// trigger, is the fail-open choice. Fire otherwise only when some path in
-// delta.Paths falls outside FindingPaths(findings), i.e. the land pass
-// touched something the reviewer never looked at.
+// Decide reports whether one more review pass should run before settling. The
+// caller runs at most one, never a loop (issues #3244, #3246).
 func Decide(delta landdelta.Delta, findings, decisions string) Trigger {
+	// This fires before delta is consulted, because issue #3245 requires a human
+	// look at every inline gate fix even when no comparison resolves.
 	if GateWorkDeclared(decisions) {
 		return Trigger{Fire: true, Reason: "land pass decisions record declares gate-discovered work"}
 	}
@@ -174,6 +128,7 @@ func Decide(delta landdelta.Delta, findings, decisions string) Trigger {
 
 	switch {
 	case !delta.Known:
+		// Nothing to compare an unknown delta against, so it never fires alone.
 		return Trigger{Reason: fmt.Sprintf("land delta unknown (%s); declining to trigger without a comparison", delta.Reason)}
 	case len(delta.Paths) == 0 && delta.Files == 0 && delta.Insertions == 0 && delta.Deletions == 0:
 		return Trigger{Reason: "land delta is zero; landing did not alter the reviewed tree"}
@@ -184,10 +139,9 @@ func Decide(delta landdelta.Delta, findings, decisions string) Trigger {
 	}
 }
 
-// pathsBeyond returns the deltaPaths entries not present in findingPaths,
-// sorted -- deltaPaths already arrives sorted (landdelta.Delta.Paths's own
-// contract), but sorted defensively here too since this is Trigger.Beyond's
-// own documented contract, not landdelta's.
+// pathsBeyond returns the deltaPaths entries absent from findingPaths. It
+// sorts even though deltaPaths arrives sorted, because the order is
+// Trigger.Beyond's own contract, not landdelta's.
 func pathsBeyond(deltaPaths, findingPaths []string) []string {
 	if len(deltaPaths) == 0 {
 		return nil

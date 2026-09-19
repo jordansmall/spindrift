@@ -8,26 +8,19 @@ import (
 
 var _ forge.LinkedIssueLister = (*LocalTracker)(nil)
 
-// linkedIssueQueueEntry is one pending node in LinkedIssues' breadth-first
-// walk: the issue's number and already-parsed contents (carried through so
-// a node resolved once during ref resolution is never read a second time
-// when it is dequeued), and the depth it was reached at.
+// linkedIssueQueueEntry carries each node's already-parsed contents so the walk
+// does not re-read an issue when it dequeues that node.
 type linkedIssueQueueEntry struct {
 	num   string
 	li    localIssue
 	depth int
 }
 
-// LinkedIssues implements forge.LinkedIssueLister: a breadth-first walk of
-// num's "## Blocked by" and parent: references, each linked issue visited
-// once at its shallowest depth. num itself seeds the visited set, so a
-// blocked-by or parent back-link to the subject terminates instead of
-// re-emitting it.
-//
-// Per-reference resolution failures (a missing file, a malformed file, a
-// parent: value that isn't a local slug) become entries with Err set rather
-// than aborting the walk -- only num's own read failure is returned as an
-// error, since without num there is nothing to walk.
+// LinkedIssues walks num's "## Blocked by" and parent: references
+// breadth-first, visiting each linked issue once at its shallowest depth. num
+// seeds the visited set, so a back-link to the subject terminates instead of
+// re-emitting it. A reference that fails to resolve becomes an entry with Err
+// set; only num's own read failure aborts the walk.
 func (lt *LocalTracker) LinkedIssues(num string) ([]forge.LinkedIssue, error) {
 	subjectLi, err := lt.readIssueFile(num)
 	if err != nil {

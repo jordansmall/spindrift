@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// The When values a ValidateMarkerRow's When field is compared against in
-// Validate, named so a row-value typo is a compile-time/IDE-assisted
-// mismatch rather than only a runtime fallback-arm error.
+// The When values Validate compares a row's When field against. Using named
+// constants turns a typo into a compile error instead of a runtime trip through
+// Validate's default arm.
 const (
 	whenReadOnlyResearch    = "readOnlyResearch"
 	whenOrchestratorEnabled = "orchestratorEnabled"
@@ -19,46 +19,34 @@ const (
 	whenResearchFileRelay   = "researchFileRelay"
 )
 
-// The Severity values a ValidateMarkerRow's Severity field is compared
-// against in Validate.
 const (
 	severityReject = "reject"
 	severityWarn   = "warn"
 )
 
-// ValidateMarkerRow is the Go mirror of one row in
-// lib/prompt-contract.nix's validateMarkers registry. JSON tags mirror the
-// nix attrset's field names literally, the same convention FragmentRow
-// (registry.go) follows, so a later slice's nix-rendered JSON (built from
-// the same validateMarkers list via builtins.toJSON) decodes into this type
-// without any renaming.
+// ValidateMarkerRow is the Go mirror of one row in lib/prompt-contract.nix's
+// validateMarkers registry. The JSON tags copy the nix attrset's field names
+// literally so that registry's builtins.toJSON output decodes without renaming.
 type ValidateMarkerRow struct {
-	// ID names the row, e.g. "verdict-comment-relay".
 	ID string `json:"id"`
 	// Marker is the literal substring Validate scans a row's haystack for.
 	Marker string `json:"marker"`
-	// Carrier documents (informationally only -- Validate never branches on
-	// it) which rendered text is supposed to carry Marker, e.g.
-	// "fragment-body" or "subagent-first-line".
+	// Carrier records which rendered text is supposed to carry Marker.
+	// Validate never branches on it.
 	Carrier string `json:"carrier"`
-	// Severity is "reject" (fatal, stop processing further rows) or "warn"
-	// (advisory, collected and processing continues) when the row's gate is
-	// active and Marker is missing.
+	// Severity is "reject" (fatal, stop checking further rows) or "warn"
+	// (advisory, collected while checking continues).
 	Severity string `json:"severity"`
-	// When names which gate condition activates this row -- one of
-	// "readOnlyResearch", "orchestratorEnabled", "boxAccessReadOnly",
-	// "filerFileRelay", or "researchFileRelay". See Validate's switch for
-	// exactly what each resolves to.
+	// When names the gate that activates this row, one of the when constants
+	// above.
 	When string `json:"when"`
-	// Message is the row's fully pre-rendered diagnostic prose, marker
-	// already interpolated by the nix registry.
+	// Message is the row's diagnostic prose, marker already interpolated by
+	// the nix registry.
 	Message string `json:"message"`
 }
 
-// LoadValidateMarkers reads and parses a validateMarkers registry JSON
-// document (a bare JSON array of ValidateMarkerRow objects, matching
-// lib/prompt-contract.nix's builtins.toJSON shape) from r. Malformed JSON is
-// reported as a wrapped error, never a panic.
+// LoadValidateMarkers decodes a validateMarkers registry from r: a bare JSON
+// array of rows, the shape lib/prompt-contract.nix's builtins.toJSON writes.
 func LoadValidateMarkers(r io.Reader) ([]ValidateMarkerRow, error) {
 	var rows []ValidateMarkerRow
 	if err := json.NewDecoder(r).Decode(&rows); err != nil {
@@ -67,11 +55,7 @@ func LoadValidateMarkers(r io.Reader) ([]ValidateMarkerRow, error) {
 	return rows, nil
 }
 
-// LoadValidateMarkersFile opens path and loads it via LoadValidateMarkers --
-// a convenience wrapper for callers working from a filesystem path (e.g. the
-// nix-baked registry file a later slice's CLI verb reads) rather than an
-// already-open reader. A missing or unreadable file is reported as a wrapped
-// error, never a panic.
+// LoadValidateMarkersFile opens path and loads it via LoadValidateMarkers.
 func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -81,34 +65,11 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 	return LoadValidateMarkers(f)
 }
 
-// Validate is the Go successor to agent/entrypoint.sh's
-// _validate_prompt_contract (issue #2249), moved here by issue #2356: the
-// in-box reject/warn matrix run once, at the tail of prompt assembly, after
-// every fragment has been rendered/injected and Result's prompt/agents JSON
-// are fully assembled, strictly before the Driver is ever invoked. It scans
-// for the markers lib/prompt-contract.nix's validateMarkers registry
-// (rows) names, each gated on the exact same condition that gated the
-// fragment/step supposed to carry it.
-//
-// Validate reads exactly the gates Assemble itself computed for e (via a
-// single Gates(e) call up front, reused for every row) rather than
-// re-deriving any gate condition a second, possibly-diverging way -- the
-// actual source of truth for what got rendered, so this can never silently
-// drift from Assemble's own fragment-gating logic (see brief for #2249).
-//
-// A "reject" row's marker missing under its gate condition means the Box's
-// own contract with the launcher/host is unmet in a way nothing downstream
-// can recover from: Validate returns immediately with a non-nil error (its
-// bash predecessor's exit 1), so no later row is even checked. A "warn" row
-// already has a working non-fatal backstop, so its marker missing is only
-// ever advisory: its message is appended to warnings and the loop continues
-// to the next row.
-//
-// Dispatches on each row's When field to decide whether its gate is active
-// and which rendered text to scan, then on its Severity field to decide
-// whether a missing marker under an active gate is fatal or advisory --
-// driven by rows' own data rather than a hardcoded per-id switch (issue
-// #2318).
+// Validate runs the reject/warn marker matrix at the tail of prompt assembly,
+// after every fragment is rendered and before the Driver is invoked (it
+// succeeds agent/entrypoint.sh's _validate_prompt_contract; issues #2249 and
+// #2356). It reads gates from one Gates(e) call so it cannot drift from the
+// gating Assemble used, and dispatches on row data rather than id (#2318).
 func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string, err error) {
 	gates := Gates(e)
 	kind := e.DispatchKind
@@ -125,9 +86,8 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 			gateActive = kind == "research" && (gates["BOX_ACCESS_READ_ONLY"] || gates["FILER_FILE_RELAY"])
 			haystack = result.Prompt
 		case whenOrchestratorEnabled:
-			// ReviewPromptText, not Handoff.ReviewPromptFile: Assemble
-			// stopped populating the latter with rendered text once it
-			// became a genuine on-disk path (issue #2975).
+			// ReviewPromptText, not Handoff.ReviewPromptFile: the latter became
+			// a real on-disk path and no longer holds rendered text (#2975).
 			gateActive = gates["ORCHESTRATOR"] && result.ReviewPromptText != ""
 			haystack = result.ReviewPromptText
 		case whenBoxAccessReadOnly:
@@ -162,10 +122,8 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 	return warnings, nil
 }
 
-// filerPromptFrom extracts the filer's own rendered prompt text from
-// agentsJSON, mirroring _validate_prompt_contract's `jq -r '.filer.prompt //
-// empty'` (entrypoint.sh: 583) on agents_json. An empty or malformed
-// agentsJSON never panics, just yields "".
+// filerPromptFrom mirrors _validate_prompt_contract's `jq -r '.filer.prompt //
+// empty'` (entrypoint.sh: 583). Empty or malformed agentsJSON yields "".
 func filerPromptFrom(agentsJSON string) string {
 	var parsed struct {
 		Filer struct {

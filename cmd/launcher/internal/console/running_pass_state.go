@@ -8,21 +8,11 @@ import (
 	"spindrift.dev/launcher/internal/passmanifest"
 )
 
-// RunningPassState returns the live per-pass status a running pick's queue
-// row shows (issue #2983): the last entry of number's pass manifest,
-// formatted as "pass <N> (<kind>)" or "pass <N> (<kind>: <verdict>)" when a
-// verdict was recorded. Kind can be empty on a stale or malformed entry
-// (manifest.json is Box-authored, untrusted input); RunningPassState then
-// drops the kind from the parenthetical rather than emitting "()" or
-// "(: <verdict>)", falling back to "pass <N>" or "pass <N> (<verdict>)".
-// Returns "" when no manifest file exists yet (the
-// common case: no outbox mounted, or a legacy/non-orchestrator box, or one
-// that simply hasn't written its first pass yet) or the file is empty or
-// malformed — degrading silently, the same "no heartbeat yet" contract
-// RunningHeartbeat's own callers already rely on. Unlike RunningHeartbeat,
-// this does no incremental tailing or caching: passmanifest.Read is a single
-// small ReadFile+Unmarshal against a handful of JSON entries, cheap enough
-// to redo whole on every refresh.
+// RunningPassState returns a running pick's live pass status (issue #2983) as
+// "pass <N> (<kind>: <verdict>)", dropping either part the last manifest entry
+// leaves empty: manifest.json is Box-authored, untrusted input. Returns "" when
+// no manifest exists yet or it is empty or malformed. Unlike RunningHeartbeat it
+// neither tails nor caches; the file is small enough to re-read on every refresh.
 func RunningPassState(pwd, number string) string {
 	entries, err := passmanifest.Read(passManifestPath(pwd, number))
 	if err != nil || len(entries) == 0 {
@@ -41,10 +31,8 @@ func RunningPassState(pwd, number string) string {
 	}
 }
 
-// passManifestPath returns number's pass-manifest path under pwd's outbox —
-// the same path a mounted-outbox Box's orchestrator writes to (wired by
-// entrypoint.sh's -manifest-path flag); this reads whatever's there, or
-// nothing at all.
+// passManifestPath mirrors the path entrypoint.sh hands the Box orchestrator as
+// -manifest-path; this side reads whatever is there, or nothing at all.
 func passManifestPath(pwd, number string) string {
 	return filepath.Join(dispatch.OutboxDirFor(pwd, number), passmanifest.FileName)
 }

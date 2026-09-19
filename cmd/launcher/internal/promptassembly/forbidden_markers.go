@@ -7,67 +7,49 @@ import (
 	"os"
 )
 
-// ForbiddenMarkerRow is the Go mirror of one row in
-// lib/prompt-contract.nix's forbiddenMarkers registry (issue #2464), sharing
-// ValidateMarkerRow's six fields/JSON tags -- id/marker/carrier/severity/
-// when/message -- plus two more of its own, kind and enforce (issue #2499),
-// decoded from nix-rendered JSON built via the same builtins.toJSON
-// convention. Unlike validateMarkers, which asserts a
-// marker is present under an active gate, forbiddenMarkers asserts a
-// marker is absent -- specifically, never rendered as an imperative
-// telling a read-only Box to perform the operation -- under an active
-// gate. Issue #2513 deleted this package's own Validate loop over
-// forbiddenMarkers; the sole remaining consumer of this type is
-// cmd/launcher/internal/readonlyguards, which renders "git-hook"/
-// "command-shim" rows into runtime guards.
+// ForbiddenMarkerRow mirrors one row of lib/prompt-contract.nix's
+// forbiddenMarkers registry (issue #2464, plus kind and enforce from issue
+// #2499), decoded from its builtins.toJSON output. Where validateMarkers
+// asserts a marker is present under an active gate, this asserts it is
+// absent. Issue #2513 left readonlyguards the only consumer.
 type ForbiddenMarkerRow struct {
-	// ID names the row, e.g. "forbidden-git-push".
 	ID string `json:"id"`
-	// Marker is the literal marker text a Box's rendered prompt must not
-	// carry as an imperative.
+	// Marker is the literal text a rendered prompt must not carry as an
+	// imperative telling a read-only Box to perform the operation.
 	Marker string `json:"marker"`
-	// Carrier documents (informationally only) where Marker would appear
-	// if it were (wrongly) present, e.g. "fragment-body".
+	// Carrier names where Marker would appear if it were wrongly present,
+	// e.g. "fragment-body". No code reads it.
 	Carrier string `json:"carrier"`
-	// Severity is "reject" or "warn", same vocabulary as
+	// Severity is "reject" or "warn", the same vocabulary as
 	// ValidateMarkerRow.Severity.
 	Severity string `json:"severity"`
-	// When names which gate condition activates this row, same vocabulary
-	// as ValidateMarkerRow.When.
+	// When names the gate condition that activates this row, the same
+	// vocabulary as ValidateMarkerRow.When.
 	When string `json:"when"`
-	// Kind is "substring" (the default meaning) for a row whose Marker is
-	// checked as literal rendered text (lib/prompt-contract.nix's
-	// buildTimeForbiddenMarkerViolations), or "gh-api-mutation" for the one
-	// row backed by readonlyguards.go's `gh api` argument-scan shim, whose
-	// Marker is display-only (not scanned as a prompt substring).
+	// Kind is "substring" for a row whose Marker is scanned as literal
+	// rendered text, or "gh-api-mutation" for the one row backed by
+	// readonlyguards.go's `gh api` argument scan, whose Marker is
+	// display-only and never scanned as a prompt substring.
 	Kind string `json:"kind"`
-	// Enforce names which runtime mechanism actually stops this
-	// operation: "command-shim" (a PATH-shadowing wrapper, e.g. the
-	// read-only `gh` shim), "git-hook" (a pre-push/pre-receive hook), or
-	// "prompt-only" (no runtime guard exists -- enforcement is solely the
-	// build-time corpus scan, since a runtime guard would collide with a
-	// legitimate in-box use of the same operation).
+	// Enforce names the runtime mechanism that stops the operation:
+	// "command-shim" (a PATH-shadowing wrapper), "git-hook", or "prompt-only"
+	// when only the build-time corpus scan enforces the row, because a
+	// runtime guard would collide with a legitimate in-box use of the same
+	// operation.
 	Enforce string `json:"enforce"`
-	// Message is the row's fully pre-rendered diagnostic prose, marker
-	// already interpolated by the nix registry.
+	// Message is pre-rendered by the nix registry with the marker already
+	// interpolated.
 	Message string `json:"message"`
-	// RuntimeMessage is the distinct, runtime-facing wording rendered into
-	// the installed shim/hook script by
-	// cmd/launcher/internal/readonlyguards when Enforce is "git-hook" or
-	// "command-shim" (issue #2509). It is deliberately not Message: Message
-	// stays written for a rendered-prompt-facing diagnostic ("the rendered
-	// prompt orders...", "Refusing to invoke the Driver"), which is
-	// nonsensical printed by a runtime shim after the agent typed the
-	// offending command itself mid-run -- only that one command is
-	// rejected, the run itself continues. A "prompt-only" row carries no
-	// RuntimeMessage, so it is empty for such rows.
+	// RuntimeMessage is the wording readonlyguards renders into the installed
+	// shim or hook script when Enforce is "git-hook" or "command-shim" (issue
+	// #2509). Message is written for a prompt-facing diagnostic and reads as
+	// nonsense from a shim that rejected one command mid-run while the run
+	// continues. A "prompt-only" row leaves this empty.
 	RuntimeMessage string `json:"runtimeMessage"`
 }
 
-// LoadForbiddenMarkers reads and parses a forbiddenMarkers registry JSON
-// document (a bare JSON array of ForbiddenMarkerRow objects, matching
-// lib/prompt-contract.nix's builtins.toJSON shape) from r. Malformed JSON is
-// reported as a wrapped error, never a panic.
+// LoadForbiddenMarkers parses a forbiddenMarkers registry document from r: a
+// bare JSON array of ForbiddenMarkerRow objects.
 func LoadForbiddenMarkers(r io.Reader) ([]ForbiddenMarkerRow, error) {
 	var rows []ForbiddenMarkerRow
 	if err := json.NewDecoder(r).Decode(&rows); err != nil {
@@ -76,11 +58,7 @@ func LoadForbiddenMarkers(r io.Reader) ([]ForbiddenMarkerRow, error) {
 	return rows, nil
 }
 
-// LoadForbiddenMarkersFile opens path and loads it via LoadForbiddenMarkers
-// -- a convenience wrapper for callers working from a filesystem path (e.g.
-// the nix-baked registry file readonlyguards' CLI verb reads) rather than an
-// already-open reader. A missing or unreadable file is reported as a wrapped
-// error, never a panic.
+// LoadForbiddenMarkersFile opens path and loads it via LoadForbiddenMarkers.
 func LoadForbiddenMarkersFile(path string) ([]ForbiddenMarkerRow, error) {
 	f, err := os.Open(path)
 	if err != nil {

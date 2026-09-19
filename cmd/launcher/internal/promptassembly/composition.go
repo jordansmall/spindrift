@@ -13,15 +13,11 @@ type SourceBytes struct {
 	Bytes int `json:"bytes"`
 }
 
-// CarriedText is a pass-specific block a later stage appends to the
-// assembled prompt at pass time -- the orchestrator's own run-state handoff
-// (reviewer findings, the decisions record) is the concrete case. Assemble
-// never sees it, so a caller that wants it counted hands it to Compose.
-// It is appended, never prepended (issue #3445): prompt caching is
-// a prefix match, so keeping the assembled prompt as a byte-identical
-// leading block across a run's passes -- rather than shifting it under a
-// prepended block -- is what lets a seeded pass hit cache instead of paying
-// a full re-write.
+// CarriedText is a pass-specific block a later stage appends to the assembled
+// prompt at pass time, such as the orchestrator's run-state handoff. Assemble
+// never sees it, so a caller that wants it counted hands it to Compose. It is
+// appended, never prepended (issue #3445): prompt caching matches on a prefix,
+// so the assembled prompt has to stay a byte-identical leading block.
 type CarriedText struct {
 	Pass string // pass kind it is carried into; empty means every pass
 	Name string
@@ -47,18 +43,16 @@ type PassDiff struct {
 	OnlyB       []SourceBytes `json:"onlyB"`
 }
 
-// Composition is Compose's report: every pass kind the cell renders, broken
-// down by source, plus every pairwise diff between them.
+// Composition is Compose's report: every pass kind's source breakdown, plus
+// every pairwise diff between them.
 type Composition struct {
 	Passes []PassComposition `json:"passes"`
 	Diffs  []PassDiff        `json:"diffs"`
 }
 
-// sourceAggregator sums bytes per Source in first-appearance order. Both
-// inputs that feed one pass's Sources -- the rendered body's segments, then
-// zero or more carried blocks -- run through the same aggregator, so a
-// Source (e.g. two --composition-carried flags sharing one name) can never
-// appear twice in the result even though it is built incrementally.
+// sourceAggregator sums bytes per Source in first-appearance order. The
+// rendered body's segments and the carried blocks both run through it, so a
+// Source cannot appear twice even though the result is built incrementally.
 type sourceAggregator struct {
 	order  []Source
 	totals map[Source]int
@@ -75,7 +69,6 @@ func (a *sourceAggregator) add(src Source, n int) {
 	a.totals[src] += n
 }
 
-// addBody folds every segment of b into the aggregator.
 func (a *sourceAggregator) addBody(b body) {
 	for _, seg := range b {
 		a.add(seg.src, len(seg.text))
@@ -90,11 +83,10 @@ func (a *sourceAggregator) sources() []SourceBytes {
 	return out
 }
 
-// Compose reports the assembled prompt's composition for every pass kind
-// e/reg's cell renders, without dispatching a Box: it calls
-// checkCoveredCell then assemblePromptBodies -- the exact helper Assemble
-// itself renders through -- so the report can never drift from what
-// Assemble would actually produce.
+// Compose reports the assembled prompt's composition for every pass kind the
+// cell described by e and reg renders, without dispatching a Box. It renders
+// through assemblePromptBodies, the same helper Assemble uses, so the report
+// cannot drift from what Assemble produces.
 func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
 	if err := checkCoveredCell(e); err != nil {
 		return Composition{}, err
@@ -111,9 +103,9 @@ func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
 		template string
 	}
 
-	// orchestratorOnFreshWork is true when the orchestrator is on for
-	// fresh, non-research work, so the cell renders all five orchestrator
-	// pass kinds rather than the single legacy or research pass.
+	// A review body exists only when the orchestrator is on for fresh,
+	// non-research work, where the cell renders all five orchestrator pass
+	// kinds rather than a single legacy or research pass.
 	orchestratorOnFreshWork := bodies.review != nil
 
 	var defs []passDef
@@ -133,9 +125,9 @@ func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
 	}
 
 	// A carried block naming a pass kind this cell doesn't render would
-	// otherwise vanish silently from every pass's Sources -- validate against
-	// the actual pass set up front rather than inside the per-pass loop
-	// below, so the check runs exactly once regardless of len(defs).
+	// otherwise vanish silently from every pass's Sources. Validating here
+	// rather than in the per-pass loop runs the check once regardless of
+	// len(defs).
 	knownPasses := make([]string, len(defs))
 	knownPass := make(map[string]bool, len(defs))
 	for i, d := range defs {
@@ -188,10 +180,9 @@ func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
 }
 
 // DiffPasses partitions a and b's sources: a Source both carry contributes
-// min(aBytes, bBytes) to Shared, with the positive remainder (if any) on
-// each side going to that side's Only list; a Source only one side carries
-// goes wholly to that side's Only list. Shared/OnlyA follow a's own source
-// order, OnlyB follows b's.
+// min(aBytes, bBytes) to Shared, and each side's positive remainder goes to
+// that side's Only list. Shared and OnlyA follow a's source order, OnlyB
+// follows b's.
 func DiffPasses(a, b PassComposition) PassDiff {
 	bIndex := make(map[Source]int, len(b.Sources))
 	for i, sb := range b.Sources {

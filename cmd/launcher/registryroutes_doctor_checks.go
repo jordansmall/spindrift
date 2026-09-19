@@ -9,14 +9,10 @@ import (
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
-// loadRegistryRoutes reads and parses file, the read+Parse sequence shared
-// by registryRouteChecks, registryRouteDriftCheck (registryroutesdrift_
-// doctor_checks.go), and registryProxyRoutesCheck (checks.go) -- one helper
-// so the three never drift apart on how a read failure is worded. The read
-// error is wrapped with file's own name, matching registryProxyRoutesCheck's
-// wording before this helper existed; a Parse failure passes through
-// unwrapped since registryroutes.Parse's own "registryroutes: ..." messages
-// already name what's wrong without a second prefix here.
+// loadRegistryRoutes reads and parses file so registryRouteChecks,
+// registryRouteDriftCheck, and registryProxyRoutesCheck word a read failure the
+// same way. A Parse failure passes through unwrapped: registryroutes.Parse's
+// own "registryroutes: ..." message already names what is wrong.
 func loadRegistryRoutes(file string) ([]registryroutes.Route, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -25,27 +21,11 @@ func loadRegistryRoutes(file string) ([]registryroutes.Route, error) {
 	return registryroutes.Parse(data)
 }
 
-// registryRouteChecks returns two doctor.Check rows per route declared in
-// c.registryProxyRoutesFile (ADR 0045, issue #3144 slice 1): a credential
-// row and an upstream-origin row, each named after that route's own match
-// host so a failure points straight at the offending route without an
-// operator having to cross-reference a bundled multi-route error.
-//
-// Gated on c.registryProxyRoutesFile: nil when it's unset, since per-route
-// rows only make sense alongside a routes file -- with none set, there's
-// nothing to configure (the scalar REGISTRY_PROXY_* knobs are retired,
-// issue #3145).
-//
-// A read or parse failure here also yields nil rather than a failing row:
-// the registry-proxy-routes row (checks.go) already reads and parses this
-// same file and reports that failure, so a second row over the identical
-// cause would be duplicate noise, not new information. Credential
-// resolution gets the same one-cause-one-row treatment, just from the other
-// direction: doctorReportChecks (bwrap_doctor_checks.go) substitutes
-// registryProxyRoutesCheck(c, false) for the aggregate row whenever these
-// per-route rows are in play, so it's the routeCredentialCheck Peek below
-// that owns credential peeking in the doctor report, not a second Peek loop
-// in the aggregate row.
+// registryRouteChecks returns a credential row and an upstream-origin row per
+// route declared in c.registryProxyRoutesFile (ADR 0045, issue #3144), each
+// named after that route's own match host. It returns nil when the file is
+// unset (issue #3145) or fails to read or parse, because the
+// registry-proxy-routes row in checks.go already reports that same failure.
 func registryRouteChecks(c config) []doctor.Check {
 	if c.registryProxyRoutesFile == "" {
 		return nil
@@ -57,15 +37,9 @@ func registryRouteChecks(c config) []doctor.Check {
 	return routeChecksFor(routes)
 }
 
-// routeChecksFor builds the credential and upstream-origin rows for an
-// already-parsed route slice. Split out from registryRouteChecks so a test
-// can hand it a route built without going through registryroutes.Parse --
-// Parse itself already rejects a malformed upstream-origin at parse time
-// (via registryroutes.ValidateUpstreamOrigin, the same validator
-// routeUpstreamCheck below calls), so a route with an invalid one is
-// otherwise unreachable from a real routes file; the origin row still
-// exists as its own per-route signal, and this seam lets that failing
-// branch be exercised directly.
+// routeChecksFor takes an already-parsed route slice so a test can pass a route
+// carrying an invalid upstream-origin, which registryroutes.Parse rejects and
+// so no real routes file can produce.
 func routeChecksFor(routes []registryroutes.Route) []doctor.Check {
 	checks := make([]doctor.Check, 0, len(routes)*2)
 	for _, route := range routes {
@@ -74,8 +48,9 @@ func routeChecksFor(routes []registryroutes.Route) []doctor.Check {
 	return checks
 }
 
-// routeCredentialCheck reports whether route's credential resolves, without
-// consuming it.
+// routeCredentialCheck reports whether route's credential resolves. It is the
+// only credential peek in the doctor report: doctorReportChecks passes
+// registryProxyRoutesCheck(c, false) whenever these per-route rows are present.
 func routeCredentialCheck(route registryroutes.Route) doctor.Check {
 	return doctor.Check{
 		Name:   fmt.Sprintf("registry-route-credential[%s]", route.MatchHost),
@@ -84,8 +59,7 @@ func routeCredentialCheck(route registryroutes.Route) doctor.Check {
 		Probe: func() (any, error) {
 			// Peek, never Resolve: the env adapter's Resolve unsets its source
 			// var on success, and that must happen exactly once, at
-			// resolveRegistryRoutesFromFile's later real resolution
-			// (registryroutesresolve.go), not here.
+			// resolveRegistryRoutesFromFile's later real resolution.
 			if _, err := credresolver.New(route.Credential).Peek(); err != nil {
 				return nil, fmt.Errorf("route %q: credential: %w", route.MatchHost, err)
 			}
@@ -97,17 +71,10 @@ func routeCredentialCheck(route registryroutes.Route) doctor.Check {
 	}
 }
 
-// routeUpstreamCheck reports where route's upstream origin comes from: the
-// declared upstream-origin, validated via registryroutes.
-// ValidateUpstreamOrigin -- the package's own validator, the same one Parse
-// runs, so this row's signal can never drift from what Parse itself accepts
-// -- or the Target repo's committed config, which is where a route that
-// declares no origin derives one from (ADR 0047, issue #3261).
-//
-// An empty route.UpstreamOrigin is the common case, not a broken URL --
-// ValidateUpstreamOrigin rejects "" outright, so this row short-circuits
-// rather than calling it and reporting a route Parse itself already
-// accepted as a failure.
+// routeUpstreamCheck validates a declared upstream-origin with
+// registryroutes.ValidateUpstreamOrigin, the validator Parse runs, so this row
+// cannot drift from what Parse accepts. An empty origin is not an error: the
+// route derives one from the Target repo's committed config (ADR 0047, issue #3261).
 func routeUpstreamCheck(route registryroutes.Route) doctor.Check {
 	return doctor.Check{
 		Name:   fmt.Sprintf("registry-route-origin[%s]", route.MatchHost),

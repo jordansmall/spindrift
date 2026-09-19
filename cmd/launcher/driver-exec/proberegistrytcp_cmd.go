@@ -11,28 +11,19 @@ import (
 	"spindrift.dev/launcher/internal/registryprobe"
 )
 
-// probeRegistryTCPDialTimeout bounds probeRegistryTCPConnect's dial: this
-// verb runs inside a throwaway container against a proxy that should
-// already be up (an --add-host host-gateway route into the Box), so a
-// genuinely unreachable route should fail fast rather than eat into the
-// outer probe's own ~30s budget.
+// probeRegistryTCPDialTimeout keeps an unreachable route failing fast so it
+// does not eat into the outer probe's own ~30s budget.
 const probeRegistryTCPDialTimeout = 5 * time.Second
 
-// isProbeRegistryTCPInvocation reports whether args (os.Args[1:]) selects
-// the probe-registry-tcp subcommand: a distinct verb, not a top-level flag,
-// mirroring isProbeRegistrySocketInvocation.
 func isProbeRegistryTCPInvocation(args []string) bool {
 	return len(args) > 0 && args[0] == "probe-registry-tcp"
 }
 
 // probeRegistryTCPConnect reports whether host:port can be dialed over TCP
-// -- the guest-side half of issue #3111's live reachability sub-probe: the
-// TCP fallback binds a listener the Box is meant to reach via `--add-host
-// host-gateway`, but on a plain Linux bridge that resolves to the bridge IP
-// and a remote-context daemon runs on a different machine entirely, so
-// nothing short of an actual dial from inside the guest proves the route is
-// live. Returns the dial error on failure so the CLI wrapper can surface
-// the real diagnostic.
+// (issue #3111). Only a real dial from inside the guest proves the route is
+// live: `--add-host host-gateway` resolves to the bridge IP on a plain Linux
+// bridge, and a remote-context daemon runs on another machine entirely. It
+// returns the dial error so the caller can print the real diagnostic.
 func probeRegistryTCPConnect(host string, port int) (bool, error) {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, probeRegistryTCPDialTimeout)
@@ -43,18 +34,10 @@ func probeRegistryTCPConnect(host string, port int) (bool, error) {
 	return true, nil
 }
 
-// runProbeRegistryTCP is the `probe-registry-tcp` subcommand's thin CLI
-// wrapper (ADR 0007's thin-exec-glue tier, issue #3111): it runs inside a
-// throwaway container in the guest so the host-side capability prober can
-// tell whether the configured --add-host host-gateway route actually
-// reaches the launcher's TCP registry-proxy fallback, rather than trusting
-// the route exists just because the flag was set. Unlike
-// probe-registry-socket's CLI wrapper, this one calls the shared
-// probeRegistryTCPConnect directly -- there is exactly one dial code path,
-// not a production one and a separately-tested one. Exits
-// registryprobe.ExitCapable/ExitIncapable for the verdict (issue #3120) and
-// leaves usage/flag-parse errors at 1, since those aren't a verdict at all.
-// Returns the process exit code.
+// runProbeRegistryTCP implements the `probe-registry-tcp` subcommand (ADR 0007's
+// thin-exec-glue tier, issue #3111). It exits registryprobe.ExitCapable or
+// ExitIncapable for the verdict (issue #3120) and leaves usage and flag-parse
+// errors at 1, since those are not a verdict at all.
 func runProbeRegistryTCP(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("probe-registry-tcp", flag.ContinueOnError)
 	fs.SetOutput(stdout)

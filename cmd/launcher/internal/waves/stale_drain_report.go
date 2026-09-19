@@ -6,46 +6,31 @@ import (
 	"time"
 )
 
-// StaleDrainReport summarizes what a stale drain cost (issue #2678): the
-// wall-clock window between refilling stopping and every in-flight Box
-// landing, the slot-seconds that sat idle across that window, and how many
-// issues HeldBack's own doc comment below counts as held back by the drain
-// itself.
+// StaleDrainReport summarizes what a stale drain cost (issue #2678).
+// FreeSlotSecs totals the slot-seconds that sat idle between StaleAt and
+// DrainedAt.
 type StaleDrainReport struct {
 	StaleAt      time.Time
 	DrainedAt    time.Time
 	FreeSlotSecs float64
 	// HeldBack counts issues that didn't launch solely because the run had
-	// already gone stale by the time they were reached. It is populated by
-	// whatever Queue.Pending() returns (#2939), a quiet remaining-candidate
-	// count defined by each Queue adapter in its own terms: headlessQueue
-	// (queue.go) filters an unlogged queryOpenIssues listing through
-	// CountReady (continuous.go) -- blocked/touch-overlap/DepsOf-failed
-	// candidates excluded, matching the pre-#2937 countReady this seam
-	// replaced -- while Console's runContinuousQueue (console/launcher.go)
-	// uses Queue.PendingCount's raw PickQueued tally, with no equivalent
-	// filtering. It is a scope decision either way, not a claim that every
-	// excluded issue would definitely never have launched fresh (#2778).
+	// already gone stale by the time they were reached. Queue.Pending()
+	// supplies it (#2939) and each adapter defines it in its own terms:
+	// headlessQueue filters through CountReady, Console's runContinuousQueue
+	// uses a raw PickQueued tally. Either way it is a scope decision (#2778).
 	HeldBack int
-	// HeldBackUnknown is true when the stale-drain report's held-back count
-	// could not be determined (queue.Pending() errored at the moment of the
-	// stale verdict, #2678, #2939) -- Console()/HostLog() must render this
-	// distinctly from a confirmed zero, never silently reporting 0 as if it
-	// were a real count.
+	// HeldBackUnknown is true when queue.Pending() errored at the moment of the
+	// stale verdict (#2678, #2939). Console() and HostLog() must render this
+	// distinctly from a confirmed zero.
 	HeldBackUnknown bool
 }
 
-// Duration returns the wall-clock gap between StaleAt and DrainedAt. It is
-// not rounded here: a zero-length drain (StaleAt == DrainedAt) must return
-// exactly zero, not a near-zero rounding artifact.
+// Duration returns the wall-clock gap between StaleAt and DrainedAt. It is not
+// rounded here so a zero-length drain returns exactly zero.
 func (r StaleDrainReport) Duration() time.Duration {
 	return r.DrainedAt.Sub(r.StaleAt)
 }
 
-// heldBackText renders r.HeldBack (or "unknown" when HeldBackUnknown) as the
-// tail both Console and HostLog embed -- the only part their formats differ
-// on, so rendering it once here keeps the two Sprintf calls from drifting
-// out of sync with each other.
 func (r StaleDrainReport) heldBackText() string {
 	if r.HeldBackUnknown {
 		return "unknown"
@@ -53,10 +38,6 @@ func (r StaleDrainReport) heldBackText() string {
 	return strconv.Itoa(r.HeldBack)
 }
 
-// heldBackTail renders the trailing held-back clause Console embeds -- the
-// only part its two shapes (HeldBackUnknown or not) differ on, so extracting
-// it here keeps Console down to a single Sprintf call instead of duplicating
-// the whole format string across both branches.
 func (r StaleDrainReport) heldBackTail() string {
 	if r.HeldBackUnknown {
 		return fmt.Sprintf("held back: %s (query failed)", r.heldBackText())
@@ -72,9 +53,8 @@ func (r StaleDrainReport) Console() string {
 	)
 }
 
-// HostLog renders a single space-delimited key=value line, prefixed
-// "STALE_DRAIN ", ending in "\n", machine-parseable and summable by an external
-// loop script across repeated appends.
+// HostLog renders one space-delimited key=value line prefixed "STALE_DRAIN ",
+// ending in "\n", so an external loop script can parse and sum repeated appends.
 func (r StaleDrainReport) HostLog() string {
 	return fmt.Sprintf(
 		"STALE_DRAIN staleAt=%s drainedAt=%s durationSeconds=%.3f freeSlotSeconds=%.3f heldBack=%s\n",

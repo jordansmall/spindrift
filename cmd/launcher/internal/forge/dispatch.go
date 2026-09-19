@@ -4,33 +4,29 @@ package forge
 type DispatchState int
 
 const (
-	Dispatchable DispatchState = iota // ready for an agent to pick up
-	InProgress                        // an agent is actively working this issue
-	Complete                          // agent work merged and green
-	Failed                            // box exited non-zero; needs human triage
-	Recoverable                       // work is salvageable; needs recovery, not a fresh dispatch
-	Ambiguous                         // title/body describe materially unrelated work; needs human triage
-	// Untriaged is not a real tracker state — it is the "from" state a
-	// promotion TransitionState(Untriaged, Dispatchable) call names for an
-	// issue that has never carried a dispatch label. Its Label is "", so
-	// every adapter's remove-label step is a no-op (TransitionState only
-	// ever adds the Dispatchable label), matching the "an unlabeled issue
-	// is first promoted" step of the Console's Pick (#646).
+	Dispatchable DispatchState = iota
+	InProgress
+	Complete    // agent work merged and green
+	Failed      // box exited non-zero; needs human triage
+	Recoverable // work is salvageable; needs recovery, not a fresh dispatch
+	Ambiguous   // title/body describe materially unrelated work; needs human triage
+	// Untriaged is not a real tracker state. It is the "from" state that a
+	// promoting TransitionState(Untriaged, Dispatchable) call names for an
+	// issue carrying no dispatch label yet. Its Label is "", so every
+	// adapter's remove-label step is a no-op (#646).
 	Untriaged
 )
 
-// DispatchLabels maps canonical DispatchState values to their issue-tracker
-// labels. The GitHub adapter uses these to translate TransitionState calls
-// into label swaps. Other adapters (Jira, local) use their own native markers.
+// DispatchLabels maps DispatchState values to issue-tracker labels. Only the
+// GitHub adapter reads them; Jira and local use their own native markers.
 type DispatchLabels struct {
 	Dispatchable string // default "ready-for-agent"
 	InProgress   string // default "agent-in-progress"
 	Complete     string // default "agent-complete"
 	Failed       string // default "agent-failed"
 	Recoverable  string // local-only frontmatter marker; not a real GitHub label
-	// Ambiguous is, unlike Recoverable, a real issue-tracker label: the fixed
-	// literal "agent-ambiguous-spec", wired at construction sites in a later
-	// slice (main.go/quickstart.go) — this file only defines the seam.
+	// Ambiguous, unlike Recoverable, is a real issue-tracker label: the fixed
+	// literal "agent-ambiguous-spec".
 	Ambiguous string
 }
 
@@ -54,24 +50,18 @@ func (d DispatchLabels) Label(s DispatchState) string {
 	}
 }
 
-// AllLabels returns all five dispatch label strings that back a real
-// GitHub label. Recoverable is deliberately excluded: it is a local-only
-// frontmatter marker (never a real GitHub label), so it must not appear in
-// the registry-membership set adapters like the local tracker's ListLabels
-// report as present. Ambiguous, unlike Recoverable, IS a real label, so it
-// is included.
+// AllLabels returns the dispatch labels that back a real GitHub label.
+// Recoverable is excluded because it is a local-only frontmatter marker, so
+// adapters like the local tracker's ListLabels must not report it as present.
+// Ambiguous is a real label and is included.
 func (d DispatchLabels) AllLabels() []string {
 	return []string{d.Dispatchable, d.InProgress, d.Complete, d.Failed, d.Ambiguous}
 }
 
-// ClaimRemoveLabels returns the labels a from -> to TransitionState call
-// should remove: ordinarily just the from-state label, but a claim (to ==
-// InProgress) also strips any stale Complete/Failed terminal label the issue
-// might still carry from a prior run — matching the dispatch workflow's
-// claim-remove-labels set (.github/workflows/agent-dispatch.yml) for the
-// subset of labels this DispatchState model tracks (#1985). Empty labels are
-// skipped and the result is deduplicated, so both the github adapter and
-// forge.Fake can call this instead of each re-deriving the same rule.
+// ClaimRemoveLabels returns the labels a TransitionState call should remove.
+// A claim (to == InProgress) also strips any stale Complete/Failed label left
+// by a prior run, matching the claim-remove-labels set in
+// .github/workflows/agent-dispatch.yml (#1985).
 func (d DispatchLabels) ClaimRemoveLabels(from, to DispatchState) []string {
 	seen := map[string]bool{}
 	var out []string

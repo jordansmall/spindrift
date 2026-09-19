@@ -8,13 +8,11 @@ import (
 	"strings"
 )
 
-// TokenOAuthScopes reads the X-OAuth-Scopes response header `gh api -i`
-// returns for a classic/OAuth token (issue #1950's read-only token gate;
-// mirrors quickstart's own hostEnvironment.TokenScopes, ADR 0027 -- kept
-// separate rather than shared since quickstart is its own `package main`
-// that predates any forge client and cannot import this package). token is
-// passed via GH_TOKEN so the probe reflects the token under audit, not
-// whatever credential the caller's own environment already carries.
+// TokenOAuthScopes reads the X-OAuth-Scopes header `gh api -i` returns for a
+// classic/OAuth token (issue #1950, ADR 0027). It passes token via GH_TOKEN so
+// the probe reflects the token under audit, not the caller's own credential.
+// Quickstart duplicates it in hostEnvironment.TokenScopes because quickstart is
+// its own `package main` and cannot import this package.
 func TokenOAuthScopes(token string) ([]string, error) {
 	cmd := exec.Command("gh", "api", "-i", "user")
 	cmd.Env = append(os.Environ(), "GH_TOKEN="+token)
@@ -40,11 +38,10 @@ func TokenOAuthScopes(token string) ([]string, error) {
 	return nil, nil
 }
 
-// TokenRepoPushPermission reports whether token (typically a GitHub App
-// installation token) carries push access to repoSlug, per the repo
-// endpoint's `permissions.push` field -- an App identity has no ambient user
-// role to blur the result the way a fine-grained PAT's underlying account
-// would, so this field accurately reflects the installation's own grant.
+// TokenRepoPushPermission reports whether token has push access to repoSlug, per
+// the repo endpoint's `permissions.push` field. A GitHub App installation token
+// has no ambient user role, so the field reflects the installation's own grant;
+// a fine-grained PAT's underlying account role can inflate it.
 func TokenRepoPushPermission(token, repoSlug string) (bool, error) {
 	cmd := exec.Command("gh", "api", "repos/"+repoSlug)
 	cmd.Env = append(os.Environ(), "GH_TOKEN="+token)

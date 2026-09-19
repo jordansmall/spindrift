@@ -11,17 +11,14 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// carriedTextSpec is one parsed --composition-carried value. Set validates
-// the value's syntax eagerly, but the file at path is read lazily, only when
-// --composition-output is set (issue #3444 slice 3): reading it eagerly
-// would make an unreadable carried file fail even a normal, report-free run
-// that only ever parses the flag.
+// carriedTextSpec is one parsed --composition-carried value. Set checks the
+// syntax, but nothing opens the file at path unless --composition-output is
+// set (issue #3444 slice 3), so an unreadable carried file cannot fail a
+// normal, report-free run that only parses the flag.
 type carriedTextSpec struct {
 	pass, name, path string
 }
 
-// carriedTextFlag accumulates repeated --composition-carried flags into
-// promptassembly.CarriedText specs (a flag.Value so the flag can repeat).
 type carriedTextFlag []carriedTextSpec
 
 func (f *carriedTextFlag) String() string {
@@ -39,9 +36,9 @@ func (f *carriedTextFlag) String() string {
 	return strings.Join(parts, ",")
 }
 
-// Set parses "[<pass>:]<name>=<path>": the pass prefix, if any, is whatever
-// precedes the first ':' that itself precedes the first '=', so a ':' inside
-// path never gets mistaken for the pass separator.
+// Set parses "[<pass>:]<name>=<path>". The pass prefix is whatever precedes
+// the first ':' that itself precedes the first '=', so a ':' inside path
+// never acts as the pass separator.
 func (f *carriedTextFlag) Set(v string) error {
 	eq := strings.Index(v, "=")
 	if eq < 0 {
@@ -51,9 +48,8 @@ func (f *carriedTextFlag) Set(v string) error {
 	pass, name := "", head
 	if colon := strings.Index(head, ":"); colon >= 0 {
 		pass, name = head[:colon], head[colon+1:]
-		// An explicit ":" with nothing before it can't match any pass kind,
-		// so treat it the same as a missing name rather than silently
-		// falling back to "every pass".
+		// An explicit ":" with nothing before it matches no pass kind, so
+		// reject it rather than silently falling back to "every pass".
 		if pass == "" {
 			return malformedCarriedText(v)
 		}
@@ -65,29 +61,24 @@ func (f *carriedTextFlag) Set(v string) error {
 	return nil
 }
 
-// malformedCarriedText is the shared rejection for every --composition-carried
-// syntax error Set detects, so the message can't drift across call sites.
 func malformedCarriedText(v string) error {
 	return fmt.Errorf("malformed --composition-carried value %q, want [<pass>:]<name>=<path>", v)
 }
 
 // isAssemblePromptInvocation reports whether args (os.Args[1:]) selects the
-// assemble-prompt subcommand: a distinct verb, not a top-level flag (issue
-// #2349), mirroring isBundleOutInvocation/isOutcomeBackstopInvocation.
+// assemble-prompt subcommand, which is a verb and not a top-level flag (issue
+// #2349).
 func isAssemblePromptInvocation(args []string) bool {
 	return len(args) > 0 && args[0] == "assemble-prompt"
 }
 
-// runAssemblePrompt is the `assemble-prompt` subcommand's thin CLI wrapper
-// (ADR 0007's thin-exec-glue tier, issue #2349): it parses args into a
-// promptassembly.Env, loads the fragment registry, delegates to
-// promptassembly.Assemble, and writes the three resulting output files.
-// Returns the process exit code.
+// runAssemblePrompt is the `assemble-prompt` subcommand's CLI wrapper and
+// returns the process exit code. Keep it thin: the real work belongs in
+// promptassembly (ADR 0007's thin-exec-glue tier, issue #2349).
 func runAssemblePrompt(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("assemble-prompt", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 
-	// Skill-baking presence flags.
 	// BEGIN GENERATED SKILL-BAKED FLAGS -- nix run .#regen -- DO NOT EDIT
 	cavemanSkillBaked := fs.Bool("caveman-skill-baked", false, "true when DRIVER_SKILLS_DIR/caveman/SKILL.md was baked")
 	tddSkillBaked := fs.Bool("tdd-skill-baked", false, "true when DRIVER_SKILLS_DIR/tdd/SKILL.md was baked")
@@ -121,8 +112,8 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	var compositionCarried carriedTextFlag
 	fs.Var(&compositionCarried, "composition-carried", "[<pass>:]<name>=<path> carried-text block fed to Compose (repeatable); only meaningful with --composition-output")
 
-	// The following flags are pure passthrough into result.Handoff after
-	// Assemble returns -- Assemble itself never reads them (issue #2975).
+	// Assemble never reads the flags below; they pass straight through into
+	// result.Handoff after it returns (issue #2975).
 	argvPromptStyle := fs.String("argv-prompt-style", "flag", "Handoff.ArgvShape.PromptStyle")
 	argvPromptFlag := fs.String("argv-prompt-flag", "", "Handoff.ArgvShape.PromptFlag")
 	argvModelFlag := fs.String("argv-model-flag", "--model", "Handoff.ArgvShape.ModelFlag")
@@ -141,13 +132,11 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 
 	maxReviewRounds := fs.Int("max-review-rounds", promptassembly.DefaultMaxReviewRounds, "Handoff.Caps.MaxReviewRounds")
 	maxSlices := fs.Int("max-slices", promptassembly.DefaultMaxSlices, "Handoff.Caps.MaxSlices")
-	// String, not Int/Float64: a malformed forwarded value must degrade to 0
-	// via promptassembly.ParseNonnegBudgetTokens/ParseNonnegBudgetUSD after
-	// fs.Parse succeeds, never make fs.Parse itself fail and return non-zero
-	// -- entrypoint.sh runs under set -euo pipefail, so a fatal exit here
-	// kills the whole box run over a value that was never fatal before this
-	// cap existed (issue #2975 review finding #1, issue #2694's original
-	// rationale).
+	// String, not Int/Float64: a malformed value degrades to 0 below, after
+	// fs.Parse succeeds. If fs.Parse failed instead, the non-zero exit would
+	// kill the whole box run under entrypoint.sh's set -euo pipefail, over a
+	// value that was never fatal before this cap existed (issue #2975 review
+	// finding #1, issue #2694).
 	maxBudgetTokensRaw := fs.String("max-budget-tokens", "0", "Handoff.Caps.MaxBudgetTokens")
 	maxBudgetUSDRaw := fs.String("max-budget-usd", "0", "Handoff.Caps.MaxBudgetUSD")
 
@@ -157,9 +146,9 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 		return 1
 	}
 
-	// Degrades a malformed/negative --max-budget-tokens/--max-budget-usd to 0
-	// rather than failing the run; ok is discarded since this passthrough CLI
-	// wrapper has no operator-facing diagnostics channel for it today.
+	// A malformed or negative value degrades to 0 rather than failing the run.
+	// This wrapper discards the ok result because it has no diagnostics channel
+	// to report the degradation on.
 	maxBudgetTokens, _ := promptassembly.ParseNonnegBudgetTokens(*maxBudgetTokensRaw)
 	maxBudgetUSD, _ := promptassembly.ParseNonnegBudgetUSD(*maxBudgetUSDRaw)
 
@@ -225,11 +214,10 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 		return 1
 	}
 
-	// Every field set below is pure passthrough (issue #2975): Assemble never
-	// touches them, so they're layered onto result.Handoff here, after
-	// Assemble/Validate both succeed, straight from this command's own flags
-	// (Issue from env.IssueNumber, issue #2979 -- ISSUE_NUMBER is now read via
-	// EnvFromEnviron rather than its own flag).
+	// Passthrough only (issue #2975): Assemble never touches these fields, so
+	// this command layers its own flags on once Assemble and Validate both
+	// succeed. Issue comes from env.IssueNumber because EnvFromEnviron reads
+	// ISSUE_NUMBER rather than a flag (issue #2979).
 	result.Handoff.PromptFile = *promptOutput
 	if result.AgentsJSON != "" {
 		result.Handoff.AgentsFile = *agentsJSONOutput
@@ -276,9 +264,9 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 		return 1
 	}
 
-	// Runs after every other output succeeds, so a composition failure can
-	// never cost the real prompt/agents/handoff/review-prompt artifacts
-	// (issue #3444 slice 3).
+	// Composition runs last, after every other output succeeds, so a failure
+	// here cannot cost the real prompt, agents, handoff, or review-prompt
+	// files (issue #3444 slice 3).
 	if *compositionOutput != "" {
 		var carried []promptassembly.CarriedText
 		for _, spec := range compositionCarried {

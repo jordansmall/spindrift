@@ -17,52 +17,40 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// execCommand builds the *exec.Cmd for hardcoded-binary orchestration (nix,
-// bwrap) that has no configurable CLI field to intercept. Tests swap this
-// package-level seam to substitute a fake binary; production always uses the
-// standard library's exec.Command unmodified.
+// execCommand is the test seam for hardcoded-binary orchestration (nix, bwrap)
+// that has no configurable CLI field to intercept.
 var execCommand = exec.Command
 
-// statResolvConf backs the "does the host have /etc/resolv.conf to bind"
-// check in buildArgs. Tests swap this seam so the resolv.conf-bind
-// assertions don't depend on whether the CI runner's own filesystem happens
-// to have /etc/resolv.conf (it doesn't inside some nix build sandboxes).
+// statResolvConf is the test seam for buildArgs' "does the host have
+// /etc/resolv.conf to bind" check, so the resolv.conf-bind assertions do not
+// depend on the test machine having that file (some nix build sandboxes do not).
 var statResolvConf = func() error {
 	_, err := os.Stat("/etc/resolv.conf")
 	return err
 }
 
-// statHostNixDB backs the "does hostNixDBPath exist" preflight check in
-// snapshotStoreDB. Tests swap this package-level seam so the missing-host-db
-// assertion doesn't depend on whether the machine running `go test` happens
-// to have a real /nix/var/nix/db/db.sqlite.
+// statHostNixDB is the test seam for snapshotStoreDB's hostNixDBPath preflight,
+// so the missing-host-db assertion does not depend on the test machine having a
+// real /nix/var/nix/db/db.sqlite.
 var statHostNixDB = func() error {
 	_, err := os.Stat(hostNixDBPath)
 	return err
 }
 
-// lockRaceWindowHook runs synchronously inside sweepOrphanedLock,
-// reclaimStaleSnapshots' stale-generation branch, and lockSnapshotShared's
-// own acquire loop, between the os.OpenFile that opens a lock path and the
-// syscall.Flock attempt that follows it. It exists purely so a test can
-// deterministically swap the path's underlying inode inside that exact
-// nanosecond-scale window issue #3005's lockedFDMatchesPath guard exists to
-// catch, instead of hoping concurrent goroutines land there under real OS
-// scheduling. No-op in production.
+// lockRaceWindowHook runs between the os.OpenFile that opens a lock path and the
+// syscall.Flock that follows, so a test can deterministically swap the path's
+// inode inside the window lockedFDMatchesPath guards (issue #3005). No-op in
+// production.
 var lockRaceWindowHook = func() {}
 
-// cgroupProvisionRaceWindowHook runs synchronously in Run between
-// cmd.Start() returning and the cgroup.procs write that follows, so a test
-// can land a Reap call deterministically inside the provisioning race
-// window -- see bwrapAdapter's provisioning field below for what that
-// window is -- on Run's own goroutine, the same idiom lockRaceWindowHook
-// above uses. No-op in production.
+// cgroupProvisionRaceWindowHook runs in Run between cmd.Start() and the
+// cgroup.procs write, so a test can land a Reap inside the provisioning race
+// window (see bwrapAdapter's provisioning field). No-op in production.
 var cgroupProvisionRaceWindowHook = func() {}
 
-// readSelfCgroup returns the calling (launcher) process's own cgroup v2
-// path, parsed from /proc/self/cgroup's unified-hierarchy line ("0::<path>").
-// Tests swap this seam to fake an ancestor path directly rather than writing
-// a fake /proc/self/cgroup, which isn't writable in a test sandbox anyway.
+// readSelfCgroup returns the launcher's own cgroup v2 path from
+// /proc/self/cgroup's unified-hierarchy line ("0::<path>"). Tests swap this seam
+// because /proc/self/cgroup is not writable in a test sandbox.
 var readSelfCgroup = func() (string, error) {
 	raw, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
@@ -76,185 +64,126 @@ var readSelfCgroup = func() (string, error) {
 	return "", fmt.Errorf("no unified cgroup v2 line (0::...) in /proc/self/cgroup")
 }
 
-// cgroupFSRoot is the host's cgroup v2 filesystem mountpoint. Tests
-// reassign this to a t.TempDir() to fake a writable delegated subtree
-// without touching the real host cgroup filesystem.
+// cgroupFSRoot is the host's cgroup v2 mountpoint. Tests reassign it to a
+// t.TempDir() to fake a writable delegated subtree.
 var cgroupFSRoot = "/sys/fs/cgroup"
 
-// writeCgroupLimit is os.WriteFile, swappable in tests to fail a single
-// limit write (pids.max or memory.max) without needing to make the parent
-// dir itself unwritable -- provisionCgroup owns that dir's os.Mkdir, so a
-// test can't pre-create the limit file as a directory to force EEXIST.
-// Scoped to the limit writes only: Run's cgroup.procs write stays a real
-// os.WriteFile so tests can assert the PID actually landed.
+// writeCgroupLimit is os.WriteFile, swappable in tests to fail a single limit
+// write (pids.max or memory.max). Scoped to the limit writes only: Run's
+// cgroup.procs write stays a real os.WriteFile so tests can assert the PID
+// actually landed.
 var writeCgroupLimit = os.WriteFile
 
-// homeAgentStagingDir is the fixed in-box path bwrap ro-binds agentFiles'
-// baked /home/agent subtree onto (issue #2843). It must be a fresh
-// top-level path, not nested under /agent: /agent is already bound
-// read-only by the time this mount is added, and bwrap cannot create a
-// new mountpoint inside an existing read-only bind.
+// homeAgentStagingDir is the in-box path bwrap ro-binds agentFiles' baked
+// /home/agent subtree onto (issue #2843). It must be a fresh top-level path, not
+// nested under /agent: /agent is already bound read-only by the time this mount
+// is added, and bwrap cannot create a mountpoint inside a read-only bind.
 const homeAgentStagingDir = "/home-agent-staged"
 
-// offArgvKeys is the set of box.Env keys whose values must never appear on a
-// runner process's argv: ps and /proc/<pid>/cmdline expose argv to any local
-// user for the Box's whole lifetime, while the process's own environment is
-// readable only by its owner. The membership test is "must never appear on
-// argv", not "is a credential": ISSUE_TEXT below is a private issue body,
-// sensitive without being a secret. Values are delivered through the runner
-// process's environment instead.
+// offArgvKeys names the box.Env keys whose values must never appear on a runner
+// process's argv: ps and /proc/<pid>/cmdline expose argv to any local user for
+// the Box's whole lifetime, while the process's own environment is readable only
+// by its owner. The test is "must never appear on argv", not "is a credential":
+// ISSUE_TEXT is a private issue body, sensitive without being a secret.
 var offArgvKeys = map[string]bool{
 	"GH_TOKEN":                true,
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	"ANTHROPIC_API_KEY":       true,
 	"OPENCODE_AUTH_CONTENT":   true,
-	// REGISTRY_PROXY_TCP_SECRET: issue #3111's registry-proxy TCP fallback
-	// secret -- same class of value as the entries above, a bearer-token-
-	// shaped credential.
+	// Registry-proxy TCP fallback secret, a bearer-token-shaped credential
+	// (issue #3111).
 	"REGISTRY_PROXY_TCP_SECRET": true,
 	"FORGEJO_TOKEN":             true,
-	// ISSUE_TEXT: the subject issue's injected body and comments (issue
-	// #3445). ADR 0032 keeps local issues private on purpose, and a
-	// private-repo GitHub body is sensitive too.
+	// The subject issue's injected body and comments (issue #3445). ADR 0032
+	// keeps local issues private, and a private-repo GitHub body is sensitive.
 	"ISSUE_TEXT": true,
 }
 
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
-// EnsureReady delegates to IsReady rather than realizing anything itself —
-// store closures are realized by the build command.
+// EnsureReady delegates to IsReady rather than realizing anything itself, since
+// the build command realizes the store closures.
 type bwrapAdapter struct {
 	agentFiles    string // baked nix store path for agent files (/agent/…)
 	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
 	passwdFile    string // baked nix store path for /etc/passwd
 	groupFile     string // baked nix store path for /etc/group
 	bakedPrefetch string // baked prefetch snippet fed to the entrypoint
-	// nixConfigFile is the baked nix store path for /etc/nix/nix.conf (ADR
-	// 0042); empty when the Consumer's nixInBox knob is off, which gates both
-	// this mount and nixVarSnapshotDir's mount together (nix isn't even on
-	// PATH in that case). nixVarSnapshotDir is the host-side directory
-	// standing in for /nix/var's overlay lower (see nixVarSnapshotDir below);
-	// it is always computed, so its presence on disk — not its own emptiness
-	// — is what IsReady/EnsureReady actually check when nixConfigFile is set,
-	// surfacing a missing snapshot as an actionable launcher-level error
-	// before bwrap ever runs, rather than a raw bwrap mount failure.
+	// nixConfigFile is the baked store path for /etc/nix/nix.conf (ADR 0042),
+	// empty when the Consumer's nixInBox knob is off. That emptiness gates this
+	// mount and nixVarSnapshotDir's together, since nix is not on PATH either
+	// way. nixVarSnapshotDir stands in for /nix/var's overlay lower; it is always
+	// computed, so IsReady checks its presence on disk, not its emptiness.
 	nixConfigFile     string
 	nixVarSnapshotDir string
 	// nixVarSnapshotRoot is the pwd-derived root snapshotDirFor joins a
-	// per-launch generation (box.ClosureGeneration, issue #2681) onto — see
-	// nixVarSnapshotRoot(pwd) below.
+	// per-launch generation onto (box.ClosureGeneration, issue #2681).
 	nixVarSnapshotRoot string
-	// nixStoreWritable gates whether /nix/store itself gets the same
-	// overlay treatment as /nix/var above (ADR 0042): an ephemeral tmpfs
-	// upper over the host's real store, so paths built/substituted in the
-	// Box land in the upper and vanish with the sandbox instead of ever
-	// touching host disk. AND-gated with nixConfigFile in buildArgs — true
-	// here alone does nothing when nixConfigFile is empty (nixInBox off),
-	// since nix isn't on PATH in the Box in that case either.
+	// nixStoreWritable gives /nix/store the same overlay treatment as /nix/var
+	// (ADR 0042): an ephemeral tmpfs upper, so paths built in the Box vanish with
+	// the sandbox instead of touching host disk. buildArgs AND-gates it with
+	// nixConfigFile, so true here alone does nothing when nixInBox is off.
 	nixStoreWritable bool
-	// mountParams carries this run's host-mount facts straight through from
-	// Config to buildMountSpecs, unmodified; see MountParams. DriverSessionCacheDir
-	// is ADR 0009; the CODE_FORGE=local mount specs are issue #1697.
+	// mountParams passes this run's host-mount facts from Config to
+	// buildMountSpecs unmodified. DriverSessionCacheDir is ADR 0009; the
+	// CODE_FORGE=local mount specs are issue #1697.
 	mountParams MountParams
-	unshareNet  bool   // raw BWRAP_UNSHARE_NET knob; forces network isolation on (redundant with the new isolate-by-default, kept for defense in depth — see buildArgs)
-	networkMode string // NETWORK_MODE knob; every value except the "host" opt-out (issue #2666) isolates from the host netns. "no-host-loopback" never legitimately reaches bwrap — nix eval-rejects it for a valid Consumer flake (lib/mkHarness.nix networkModeCoherenceOk).
-	// pidsLimit is the PIDS_LIMIT knob (empty disables it, matching the OCI
-	// adapter's own convention — oci.go's pidsLimit field). bwrap itself
-	// imposes no process-count cap; the sole containment mechanism is the
-	// per-Box cgroup v2 pids.max control file (ADR 0042, provisionCgroup),
-	// which already has its own warn-and-degrade posture when delegation is
-	// unavailable.
+	unshareNet  bool   // raw BWRAP_UNSHARE_NET knob; redundant with isolate-by-default, kept for defense in depth
+	networkMode string // NETWORK_MODE knob; every value except the "host" opt-out isolates from the host netns (issue #2666)
+	// pidsLimit is the PIDS_LIMIT knob (empty disables it). bwrap imposes no
+	// process-count cap of its own, so the per-Box cgroup v2 pids.max control
+	// file is the only containment mechanism (ADR 0042, provisionCgroup).
 	pidsLimit string
-	// memoryLimit is the MEMORY_LIMIT knob (empty disables it, same
-	// convention as pidsLimit above and the OCI adapter's own memoryLimit
-	// field). It backs the per-Box cgroup's memory.max control file (ADR
-	// 0042, provisionCgroup) rather than any bwrap flag — bwrap has no
-	// per-process memory cap of its own, and memory.max needs a raw byte
-	// count (memoryLimitToBytes), unlike podman's own --memory flag which
-	// accepts the unit-suffixed string as-is.
+	// memoryLimit is the MEMORY_LIMIT knob (empty disables it). It backs the
+	// per-Box cgroup's memory.max control file (ADR 0042, provisionCgroup)
+	// rather than any bwrap flag, and memory.max takes a raw byte count
+	// (memoryLimitToBytes), unlike podman's --memory which accepts the suffix.
 	memoryLimit string
 
-	// syscallFilterPath is the baked nix store path to the compiled BPF
-	// syscall filter (issue #2670). When non-empty, buildArgs appends
-	// "--seccomp <seccompFilterFD>" and Run opens the file and attaches it
-	// via cmd.ExtraFiles so bwrap can read it. A failure to open it at Run
-	// time is treated as a hardening gap, not a safety blocker (matches ADR
-	// 0042's degrade-don't-lie posture for missing cgroup delegation) -- Run
-	// warns and proceeds without the filter rather than refusing to launch
-	// the Box.
+	// syscallFilterPath is the baked store path to the compiled BPF syscall
+	// filter (issue #2670). When non-empty, buildArgs emits "--seccomp
+	// <seccompFilterFD>" and Run attaches the file via cmd.ExtraFiles. A failed
+	// open at Run time warns and proceeds without the filter rather than
+	// refusing to launch the Box (ADR 0042's degrade-don't-lie posture).
 	syscallFilterPath string
 
-	// mu guards running, the box-name -> live process map Kill (issue #649)
-	// consults — bwrap sandboxes are unnamed child processes with no
-	// persistent daemon IsRunning/Reap can query by name, so Run tracks its
-	// own process handle here for the one caller (Terminate) that needs to
-	// reach a live one from outside Run's own goroutine.
+	// mu guards running, the box-name to live-process map Kill consults (issue
+	// #649). A bwrap sandbox is an unnamed child process with no daemon to query
+	// by name, so Run tracks its own handle here for Terminate, the one caller
+	// that reaches a live process from outside Run's goroutine.
 	mu      sync.Mutex
 	running map[string]*os.Process
 
-	// provisioning refcounts box names currently between Run's
-	// beginProvisioning call and the matching release: the window (issue
-	// #2960) in which a per-Box cgroup dir already exists (provisionCgroup's
-	// mkdir runs well before cmd.Start()) but IsRunning still reads false,
-	// since cgroup.procs stays empty until the write that follows Start.
-	// Without this guard, a Reap landing in that window would delete a
-	// genuinely mid-launch Box's cgroup dir. Guarded by mu, same as running;
-	// refcounted rather than a plain set so two concurrent Run calls for the
-	// same name (e.g. a caller relaunching before Terminate's own reap
-	// completes) don't let the first Run's release unblock Reap while the
-	// second is still provisioning.
+	// provisioning refcounts box names between Run's beginProvisioning call and
+	// the matching release (issue #2960): the window where a per-Box cgroup dir
+	// exists but IsRunning still reads false, so a Reap landing there would
+	// delete a mid-launch Box's dir. Guarded by mu; refcounted, not a set, so
+	// two concurrent Runs for one name cannot release each other's guard.
 	provisioning map[string]int
 }
 
-// nixVarSnapshotDir is the host-side directory that stands in for /nix/var
-// inside a bwrap Box's overlay lower (ADR 0042): the build command writes an
-// agent-owned, VACUUMed snapshot of the host's own /nix/var/nix/db/db.sqlite
-// to <dir>/nix/db/db.sqlite (bwrapBuildAdapter.EnsureReady, via
-// snapshotStoreDB), and the run adapter overlays this whole directory onto
-// /nix/var so the Box's nix trusts host-present store paths without
-// re-substituting them. Shared, package-level, between the run adapter (this
-// file, to mount) and the build adapter (snapshotStoreDB, to write) so the
-// path convention lives in exactly one place.
-//
-// generation (see closureGeneration) nests the snapshot one directory level
-// deeper, scoped to the agent-closure it was taken against (issue #2680), so
-// two different closures get two different, coexisting directories instead
-// of colliding on one shared path. An empty generation
-// (no closure known, e.g. a bare test-constructed adapter) falls back to the
-// pre-#2680 flat path — filepath.Join drops empty components, so this is the
-// same call either way.
+// nixVarSnapshotDir is the host-side directory standing in for /nix/var inside a
+// bwrap Box's overlay lower (ADR 0042): the build command writes a VACUUMed
+// snapshot of /nix/var/nix/db/db.sqlite to <dir>/nix/db/db.sqlite so the Box's
+// nix trusts host-present store paths. generation scopes it to one agent-closure
+// (issue #2680); empty means the flat pre-#2680 path.
 func nixVarSnapshotDir(pwd, generation string) string {
 	return filepath.Join(nixVarSnapshotRoot(pwd), generation)
 }
 
-// nixVarSnapshotRoot is the directory nixVarSnapshotDir nests generation
-// subdirs under -- the sweep root reclaimStaleSnapshots reads/RemoveAlls
-// entries of. Factored out so callers that need the root (bwrapBuildAdapter,
-// to reclaim stale generations) derive it the same way nixVarSnapshotDir
-// does, from pwd directly, rather than by filepath.Dir/Base surgery on an
-// already-joined nixVarSnapshotDir path -- surgery that misidentifies the
-// root when generation is "" (issue #2680 review finding: the flat/legacy
-// path IS the snapshot dir, not a subdir of it, so its parent is actually
-// .spindrift, home to unrelated siblings a sweep must never touch).
+// nixVarSnapshotRoot is the directory nixVarSnapshotDir nests generation subdirs
+// under, and the sweep root reclaimStaleSnapshots RemoveAlls entries of. Derive
+// it from pwd, never by filepath.Dir on an already-joined nixVarSnapshotDir:
+// with an empty generation the flat path IS the snapshot dir, so its parent is
+// .spindrift, home to unrelated siblings a sweep must never touch (issue #2680).
 func nixVarSnapshotRoot(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "nix-var-snapshot")
 }
 
-// closureGeneration derives the generation subdir nixVarSnapshotDir nests
-// under from a bwrap-runtime Config.ImageTag (the bundled agent-closure's
-// loaded nix store path, e.g. /nix/store/<hash>-agent-closure — see
-// Config.ImageTag's doc comment). imageTag is read from an environment
-// variable / input-document artifact (getenvArtifact,
-// cmd/launcher/inputdoc.go) that an untrusted source can influence, and the
-// result becomes a path component threaded into a directory
-// reclaimStaleSnapshots later os.RemoveAll's — see safePathComponent's doc
-// comment for the empty/"."/".."/separator rejection rule this delegates to.
-// A non-empty imageTag that safePathComponent rejects prints a warning,
-// since the caller would otherwise silently fall back to the legacy flat
-// nix-var snapshot path (disabling stale-generation reclaim); an empty
-// imageTag is the ordinary unset case and stays silent. The warning says
-// "generation source" rather than "ImageTag" because SnapshotGeneration
-// (issue #2682's hot-swap path) passes a freshness-probe closure path here
-// instead, so naming the field would be wrong for that caller.
+// closureGeneration derives nixVarSnapshotDir's generation subdir from a
+// bwrap-runtime Config.ImageTag. imageTag comes from an environment variable an
+// untrusted source can influence and becomes a path component
+// reclaimStaleSnapshots later os.RemoveAlls, hence safePathComponent. A rejected
+// non-empty imageTag warns: it would otherwise silently disable stale reclaim.
 func closureGeneration(imageTag string) string {
 	gen := safePathComponent(imageTag)
 	if imageTag != "" && gen == "" {
@@ -264,16 +193,13 @@ func closureGeneration(imageTag string) string {
 }
 
 // generationLabelWarnLimit bounds how much of a rejected generation source
-// closureGeneration's warning echoes. The value is untrusted environment /
-// input-document text with no length bound of its own, so printing it whole
-// would let a hostile one emit an arbitrarily long line into the launcher's
-// log.
+// closureGeneration's warning echoes. The value is untrusted text with no length
+// bound of its own, so printing it whole would let a hostile one emit an
+// arbitrarily long line into the launcher's log.
 const generationLabelWarnLimit = 256
 
-// truncateGenerationLabel cuts s on a rune boundary so the truncated tail
-// cannot become a mangled half-rune -- fmt's %q would escape one safely
-// either way, but as \xNN bytes that read as noise rather than as the label
-// the operator is being told about.
+// truncateGenerationLabel cuts s on a rune boundary so the tail cannot become a
+// mangled half-rune that %q would escape as \xNN noise.
 func truncateGenerationLabel(s string) string {
 	if len(s) <= generationLabelWarnLimit {
 		return s
@@ -285,21 +211,11 @@ func truncateGenerationLabel(s string) string {
 	return string(r[:generationLabelWarnLimit]) + "..."
 }
 
-// NewAgentGeneration derives an AgentGeneration for a Box launch from
-// closure -- the just-realized tip agent-closure linkFarm's own store output
-// path (issue #2682's bwrap Box-only hot-swap; e.g.
-// /nix/store/<hash>-agent-closure, what freshness.Probe reports as
-// res.TipTag under bwrap), NOT the agentFiles derivation directly. That
-// linkFarm nests four children (lib/mkHarness.nix's agentClosure =
-// pkgs.linkFarm "agent-closure" [...]): "files" (the agentFiles derivation),
-// "env" (the agentEnv derivation), "nix-config", and "prefetch" (issue
-// #2954). AgentFiles, AgentEnv, NixConfigFile, and PrefetchFile are
-// therefore closure's "files", "env", "nix-config", and "prefetch"
-// children, not closure itself. Generation is still derived from the closure
-// path itself, the same way closureGeneration derives one from a baked
-// Config.ImageTag (safePathComponent), so a hot-swapped generation nests its
-// store-DB snapshot dir under the identical naming convention an ordinary
-// baked generation uses, rather than a second one.
+// NewAgentGeneration derives an AgentGeneration from closure, the just-realized
+// tip agent-closure linkFarm's own store output path (issue #2682), NOT the
+// agentFiles derivation. That linkFarm nests four children, so AgentFiles,
+// AgentEnv, NixConfigFile and PrefetchFile are closure's "files", "env",
+// "nix-config" and "prefetch" children (lib/mkHarness.nix, issue #2954).
 func NewAgentGeneration(closure string) AgentGeneration {
 	return AgentGeneration{
 		AgentFiles:    filepath.Join(closure, "files"),
@@ -310,12 +226,10 @@ func NewAgentGeneration(closure string) AgentGeneration {
 	}
 }
 
-// safePathComponent returns s unless it is unsafe to use as a single path
-// component — empty, ".", "..", or a bare separator — in which case it
-// returns "" so the caller can fall back to a known-safe default. Shared by
-// closureGeneration (derives a generation label from Config.ImageTag) and
-// snapshotDirFor (validates a Box-supplied AgentGeneration.Generation, issue
-// #2681) so both rejection paths stay in lockstep.
+// safePathComponent returns s unless it is unsafe as a single path component
+// (empty, ".", "..", or a bare separator), in which case it returns "" so the
+// caller falls back to a known-safe default. Shared by closureGeneration and
+// snapshotDirFor (issue #2681) so both rejection paths stay in lockstep.
 func safePathComponent(s string) string {
 	if s == "" {
 		return ""
@@ -327,40 +241,19 @@ func safePathComponent(s string) string {
 	return base
 }
 
-// snapshotLockPath is the one place the "<generation dir>.lock" naming
-// convention is spelled: a sibling of the generation dir itself, never a
-// file inside it, since the generation dir is what buildArgs --overlay-src
-// binds into the sandbox and a lock file living inside it would risk being
-// swept up by that mount. Shared by Run (to acquire a shared lock for the
-// life of the sandboxed process) and reclaimStaleSnapshots (to probe for an
-// exclusive lock, i.e. no live Box holding the shared one).
+// snapshotLockPath spells the "<generation dir>.lock" convention: a sibling of
+// the generation dir, never a file inside it, since buildArgs --overlay-src
+// binds that dir into the sandbox and a lock file inside it would risk being
+// swept up by the mount.
 func snapshotLockPath(dir string) string {
 	return dir + ".lock"
 }
 
 // lockSnapshotShared opens (creating if needed) and takes a blocking shared
-// advisory flock on dir's snapshotLockPath. The lock file is NOT guaranteed
-// to stay the same inode for a generation's whole existence: sweepOrphanedLock
-// (reclaimStaleSnapshots) removes it once a later pass's os.ReadDir no longer
-// sees a matching generation dir -- deleting and recreating it without the
-// guard below would let two callers each believe they hold "the" lock while
-// actually flocking two different inodes that happen to share a name (issue
-// #2680 review finding).
-//
-// EnsureReady, unlike Run, calls this before the generation dir exists --
-// sweepOrphanedLock (a concurrent build's own reclaim pass) can therefore
-// legitimately see this lock file with no matching generation dir yet and
-// classify it as orphaned. If sweepOrphanedLock's LOCK_EX probe lands
-// between this func's os.OpenFile and its Flock(LOCK_SH), it can win the
-// exclusive lock on the not-yet-locked fd and os.Remove the path out from
-// under it -- Flock still succeeds afterward (flock locks the open file
-// description, not the path), so a naive caller would believe it holds a
-// live lock on a path that actually resolves to nothing, letting a later
-// pass O_CREATE a fresh inode there and win its own lock uncontested. So
-// after locking, verify the fd still identifies whatever is currently at
-// the path (fstat vs. a fresh os.Stat via os.SameFile) and retry against a
-// freshly opened fd if not, bounded so a persistent adversary gets a clear
-// error instead of an infinite loop.
+// advisory flock on dir's snapshotLockPath. The path's inode is not stable: a
+// concurrent sweepOrphanedLock can remove it between this open and the Flock,
+// leaving a lock on an inode nothing resolves to, so verify identity afterwards
+// (lockedFDMatchesPath) and retry against a fresh fd, bounded (issues #2680, #3005).
 func lockSnapshotShared(dir string) (*os.File, error) {
 	const maxAttempts = 100
 	path := snapshotLockPath(dir)
@@ -377,28 +270,18 @@ func lockSnapshotShared(dir string) (*os.File, error) {
 		if lockedFDMatchesPath(lf, path) {
 			return lf, nil
 		}
-		// The path was swapped or unlinked out from under lf between open
-		// and lock (e.g. by a concurrent sweepOrphanedLock) -- lf's lock is
-		// now worthless, since it protects an inode nothing resolves to
-		// anymore. Drop it and retry against whatever is at the path now.
+		// lf's lock protects an inode nothing resolves to anymore. Drop it and
+		// retry against whatever is at the path now.
 		unlockSnapshot(lf)
 	}
 	return nil, fmt.Errorf("lockSnapshotShared: %s kept changing identity after locking across %d attempts", path, maxAttempts)
 }
 
-// lockedFDMatchesPath reports whether lf -- an fd a caller just flocked --
-// still identifies whatever currently sits at path. A successful flock on
-// an fd never licenses trusting or acting on path: the fd's identity
-// relative to path can go stale between the caller's open and its flock
-// (a concurrent remove/recreate wins that window), so flock success alone
-// proves the fd is locked, not that it still names path (issue #2680,
-// #3005). Compares a fresh fstat of lf against a fresh os.Stat of path via
-// os.SameFile; any stat failure (e.g. path no longer exists) is treated as
-// a mismatch. The single spelling of that check, shared by the one acquire
-// site (lockSnapshotShared) and the two remove sites that would otherwise
-// delete a live inode out from under a winning LOCK_EX
-// (sweepOrphanedLock's lock-file removal, reclaimStaleSnapshots' stale
-// generation-dir removal) -- issue #3005.
+// lockedFDMatchesPath reports whether lf, an fd a caller just flocked, still
+// identifies whatever currently sits at path. A successful flock proves the fd
+// is locked, not that it still names path: a concurrent remove/recreate can win
+// the window between the caller's open and its flock (issues #2680, #3005). Any
+// stat failure counts as a mismatch.
 func lockedFDMatchesPath(lf *os.File, path string) bool {
 	fdStat, err := lf.Stat()
 	if err != nil {
@@ -411,9 +294,8 @@ func lockedFDMatchesPath(lf *os.File, path string) bool {
 	return os.SameFile(fdStat, pathStat)
 }
 
-// unlockSnapshot releases lf's flock and closes it; lf == nil (lock
-// acquisition itself failed, or was never attempted) is a no-op so callers
-// can defer/call this unconditionally.
+// unlockSnapshot releases lf's flock and closes it; a nil lf is a no-op so
+// callers can defer this unconditionally.
 func unlockSnapshot(lf *os.File) {
 	if lf == nil {
 		return
@@ -422,15 +304,11 @@ func unlockSnapshot(lf *os.File) {
 	lf.Close()
 }
 
-// NewBwrap constructs a bwrap adapter for the run command from cfg and pwd
-// (the launcher's own working directory, mirroring NewOCI's pwd parameter).
-// EnsureReady delegates to IsReady, which checks readiness rather than
-// realizing anything; call NewBwrapBuild for the build command. By
-// default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
-// resulting adapter isolates the sandbox into its own network namespace,
-// with egress restored via a hardened pasta helper (ADR 0042) — podman-
-// rootless parity. cfg.NetworkMode="host" and the raw cfg.BwrapUnshareNet
-// knob are documented separately in buildArgs.
+// NewBwrap constructs a bwrap adapter for the run command from cfg and pwd (the
+// launcher's own working directory); call NewBwrapBuild for the build command.
+// By default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
+// adapter isolates the sandbox into its own network namespace, with egress
+// restored via a hardened pasta helper (ADR 0042), matching rootless podman.
 func NewBwrap(cfg Config, pwd string) Runner {
 	return &bwrapAdapter{
 		agentFiles:         cfg.AgentFiles,
@@ -451,21 +329,16 @@ func NewBwrap(cfg Config, pwd string) Runner {
 	}
 }
 
-// EnsureReady does not build anything for bwrap run: store closures are
-// realized by `launcher build` (bwrapBuildAdapter.EnsureReady) before `run`
-// is invoked. It delegates to IsReady so the same actionable
-// snapshot-missing error fires on the default run/dispatch path too, not
-// only on `--no-build` (bootstrap only calls IsReady there) — issue #2664.
+// EnsureReady builds nothing for bwrap run: `launcher build` realizes the store
+// closures first. It delegates to IsReady so the actionable snapshot-missing
+// error fires on the default run/dispatch path too, not only on `--no-build`
+// (issue #2664).
 func (a *bwrapAdapter) EnsureReady() error { return a.IsReady() }
 
-// IsReady checks that the nix-in-box snapshot `launcher build` writes is
-// present, when the Consumer's nixInBox knob is on (ADR 0042). Store
-// closures otherwise (agentFiles/agentEnv/passwd/group) are realized
-// out-of-band by `spindrift build` too, but buildArgs never conditions a
-// mount on their absence the way it does nixVarSnapshotDir, so this check is
-// scoped to that one gap (issue #2664): without it, a missing snapshot only
-// surfaces as a raw bwrap overlay mount failure instead of an actionable
-// launcher-level error.
+// IsReady checks that the nix-in-box snapshot `launcher build` writes is present
+// when the Consumer's nixInBox knob is on (ADR 0042). Scoped to that one gap
+// (issue #2664): buildArgs conditions no other mount on absence, so without this
+// a missing snapshot surfaces only as a raw bwrap overlay mount failure.
 func (a *bwrapAdapter) IsReady() error {
 	if a.nixConfigFile == "" {
 		return nil
@@ -496,47 +369,33 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 
 // RegistryProxyTransport always reports a unix Endpoint for bwrap: an
 // unprivileged bwrap sandbox shares enough of the host mount namespace that a
-// bind-mounted unix domain socket is always connectable from the guest, so
-// there is nothing to probe. Per issue #3111's own acceptance criterion,
-// "behaviour on Linux and under bwrap is unchanged" — this seam exists only
-// so the OCI adapter has somewhere to report a genuine TCP-fallback answer.
-// The returned Endpoint's path is unset -- the caller mints the real per-Box
-// socket path itself once it knows the transport decision.
+// bind-mounted unix socket is always connectable from the guest, so there is
+// nothing to probe (issue #3111). The Endpoint's path is unset; the caller mints
+// the real per-Box socket path once it knows the transport decision.
 func (a *bwrapAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	return registrymanifest.NewUnixEndpoint(""), false, nil
 }
 
-// isolateNet is the effective "cut off the host netns" decision (issue
-// #2666, ADR 0042): every NetworkMode value except the explicit "host"
-// opt-out isolates by default, including the Go zero value and
-// "no-host-loopback" (nix eval-rejects the latter reaching bwrap in
-// production; main.go's checkNetworkModeRuntimeGate backstops it). The raw
-// BwrapUnshareNet knob can only ever force isolation on, already the
-// default outcome, but is kept for defense in depth. See
-// TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate.
+// isolateNet is the effective "cut off the host netns" decision (issue #2666,
+// ADR 0042): every NetworkMode except the explicit "host" opt-out isolates,
+// including the Go zero value and "no-host-loopback". The raw BwrapUnshareNet
+// knob can only force isolation on, already the default, and is kept for defense
+// in depth.
 func (a *bwrapAdapter) isolateNet() bool {
 	return a.unshareNet || a.networkMode != NetworkModeHost
 }
 
-// pastaPath reports whether the isolated network namespace gets restored
-// egress via a pasta helper. networkMode="none" is the deliberate exception:
-// fully offline, bare --unshare-net, no helper, no egress at all (a Driver
-// can't reach its Provider under it, documented elsewhere).
+// pastaPath reports whether the isolated network namespace gets egress restored
+// via a pasta helper. networkMode="none" is the exception: fully offline, bare
+// --unshare-net, no helper, no egress at all.
 func (a *bwrapAdapter) pastaPath() bool {
 	return a.isolateNet() && a.networkMode != NetworkModeNone
 }
 
-// pick returns override if it's non-empty, else baked -- the shared shape
-// behind agentFilesFor/agentEnvFor/nixConfigFileFor below: a box's
-// ClosureGeneration override (issue #2681, extended to agentEnv/nixConfig by
-// issue #2682's bwrap Box-only hot-swap) wins when set AND non-empty, else
-// the adapter's own startup-baked value -- today's behaviour, unchanged. A
-// non-nil ClosureGeneration with an empty field (a partially-populated
-// override) falls back to baked too, rather than returning "" verbatim --
-// every caller appends a path segment to this result, and an empty base
-// would silently bind/point at the sandbox's own root or the host's, not a
-// store closure (issue #2682 review finding: was three copies of this same
-// two-line shape).
+// pick returns override when non-empty, else baked. A ClosureGeneration with an
+// empty field (a partially-populated override) falls back to baked rather than
+// returning "": every caller appends a path segment, and an empty base would
+// point at the sandbox's own root instead of a store closure (issue #2682).
 func pick(override, baked string) string {
 	if override != "" {
 		return override
@@ -544,9 +403,8 @@ func pick(override, baked string) string {
 	return baked
 }
 
-// agentFilesFor resolves the agent-closure store path box's launch should
-// bind: box.ClosureGeneration.AgentFiles when set, else a.agentFiles.
-// Callers append "/agent" and "/home/agent" to this result.
+// agentFilesFor resolves the agent-closure store path box's launch should bind.
+// Callers append "/agent" and "/home/agent" to the result.
 func (a *bwrapAdapter) agentFilesFor(box Box) string {
 	if box.ClosureGeneration == nil {
 		return a.agentFiles
@@ -555,9 +413,8 @@ func (a *bwrapAdapter) agentFilesFor(box Box) string {
 }
 
 // agentEnvFor resolves the agentEnv store path box's launch should bind for
-// PATH/SSL_CERT_FILE/GIT_SSL_CAINFO: box.ClosureGeneration.AgentEnv when
-// set, else a.agentEnv. Callers append "/bin" and
-// "/etc/ssl/certs/ca-bundle.crt" to this result.
+// PATH/SSL_CERT_FILE/GIT_SSL_CAINFO. Callers append "/bin" and
+// "/etc/ssl/certs/ca-bundle.crt" to the result.
 func (a *bwrapAdapter) agentEnvFor(box Box) string {
 	if box.ClosureGeneration == nil {
 		return a.agentEnv
@@ -565,9 +422,8 @@ func (a *bwrapAdapter) agentEnvFor(box Box) string {
 	return pick(box.ClosureGeneration.AgentEnv, a.agentEnv)
 }
 
-// nixConfigFileFor resolves the nix.conf store path box's launch should bind
-// for /etc/nix/nix.conf: box.ClosureGeneration.NixConfigFile when set, else
-// a.nixConfigFile.
+// nixConfigFileFor resolves the nix.conf store path box's launch binds at
+// /etc/nix/nix.conf.
 func (a *bwrapAdapter) nixConfigFileFor(box Box) string {
 	if box.ClosureGeneration == nil {
 		return a.nixConfigFile
@@ -575,14 +431,11 @@ func (a *bwrapAdapter) nixConfigFileFor(box Box) string {
 	return pick(box.ClosureGeneration.NixConfigFile, a.nixConfigFile)
 }
 
-// prefetchFor resolves the PREFETCH value box's launch should --setenv:
-// box.ClosureGeneration.PrefetchFile's contents when set, else a.
-// bakedPrefetch. Deliberately does not call pick -- PrefetchFile is a path,
-// not the value itself, and prefetch's empty string is a legitimate swapped
-// value (lib/mkHarness.nix's prefetch ? ""), not "unset". A read error
-// (missing/unreadable file) falls back to a.bakedPrefetch and prints one
-// diagnostic line rather than aborting the launch: an unreadable swapped
-// prefetch child must never take down a Box.
+// prefetchFor resolves the PREFETCH value box's launch should --setenv.
+// Deliberately not pick: PrefetchFile is a path, not the value, and prefetch's
+// empty string is a legitimate swapped value (lib/mkHarness.nix's prefetch ? ""),
+// not "unset". A read error falls back to a.bakedPrefetch with one diagnostic
+// line, since an unreadable swapped prefetch child must never take down a Box.
 func (a *bwrapAdapter) prefetchFor(box Box) string {
 	if box.ClosureGeneration == nil || box.ClosureGeneration.PrefetchFile == "" {
 		return a.bakedPrefetch
@@ -595,20 +448,11 @@ func (a *bwrapAdapter) prefetchFor(box Box) string {
 	return string(content)
 }
 
-// snapshotDirFor resolves the nix-var store-DB snapshot directory box's
-// launch should overlay onto /nix/var and lock for its lifetime: box.
-// ClosureGeneration's Generation label (issue #2681), validated through
-// safePathComponent and joined onto the adapter's own pwd-derived root, when
-// set and safe — else the adapter's own startup-baked a.nixVarSnapshotDir,
-// today's behaviour, unchanged. An empty or unsafe (".", "..", bare
-// separator) Generation falls back the same way: joining a raw "" would
-// resolve to the root itself (the container of every generation dir, with
-// no db.sqlite of its own), and joining a raw ".." would escape it entirely.
-// Joins directly with filepath.Join rather than calling the
-// nixVarSnapshotDir free function (which itself re-derives the root via
-// nixVarSnapshotRoot(pwd)) — a.nixVarSnapshotRoot is already that root, so
-// routing it back through nixVarSnapshotDir would double-append
-// ".spindrift/nix-var-snapshot".
+// snapshotDirFor resolves the nix-var snapshot directory box's launch overlays
+// onto /nix/var and locks for its lifetime (issue #2681). An empty or unsafe
+// Generation falls back to the baked dir: joining a raw "" resolves to the root
+// itself, which has no db.sqlite, and ".." escapes it. Joins onto
+// a.nixVarSnapshotRoot directly, since nixVarSnapshotDir would re-append it.
 func (a *bwrapAdapter) snapshotDirFor(box Box) string {
 	if box.ClosureGeneration != nil {
 		if gen := safePathComponent(box.ClosureGeneration.Generation); gen != "" {
@@ -618,15 +462,11 @@ func (a *bwrapAdapter) snapshotDirFor(box Box) string {
 	return a.nixVarSnapshotDir
 }
 
-// buildArgs constructs the bwrap command-line arguments for the given box.
-// The /etc/passwd and /etc/group binds source a.passwdFile/a.groupFile, baked
-// nix store paths rather than a runner-written temp-dir copy (issue #2663).
-// etcDir is only still needed for the synthesised /etc/resolv.conf (pastaPath
-// only, see below) -- passwd/group no longer live there. Secret env vars
-// (GH_TOKEN, auth tokens) are intentionally excluded from argv; they reach
-// the sandbox via inherited process environment (no --clearenv). Pasta
-// itself is never part of this return value -- see execTarget, which wraps
-// bwrap's own argv with pasta as the outer process when pastaPath applies.
+// buildArgs constructs the bwrap command-line arguments for box. Secret env vars
+// stay off argv and reach the sandbox via the inherited process environment (no
+// --clearenv); see offArgvKeys. etcDir is only still needed for the synthesised
+// /etc/resolv.conf on the pasta path, since passwd/group are baked store paths
+// (issue #2663). Pasta is never part of this return value; see execTarget.
 func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	isolateNet := a.isolateNet()
 	var args []string
@@ -645,21 +485,11 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		"--ro-bind", a.passwdFile, "/etc/passwd",
 		"--ro-bind", a.groupFile, "/etc/group",
 	)
-	// nixConfigFile empty means the Consumer's nixInBox knob is off (nix isn't
-	// even on PATH in that case), so both nix-related mounts below are
-	// skipped together rather than independently. When set: --overlay-src +
-	// --tmp-overlay gives bwrap a read-only lower (the VACUUMed
-	// /nix/var/nix/db/db.sqlite snapshot written by `launcher build`, ADR
-	// 0042) with an ephemeral tmpfs upper, so nix's own writes inside the Box
-	// (gcroots, profiles, WAL files) land in the upper and vanish with the
-	// sandbox rather than touching host disk. The store itself (/nix/store,
-	// rendered at the top of this function) is gated on nixConfigFile alone
-	// plus one further AND with nixStoreWritable, not nixConfigFile alone
-	// like the mounts below: with nixStoreWritable false (the default) it
-	// stays a plain read-only bind even when nixConfigFile is set, and only
-	// becomes an ephemeral tmpfs overlay — new store paths built/substituted
-	// in the Box land in the upper and vanish on exit, never touching the
-	// host's real store — when both are true.
+	// An empty nixConfigFile means nixInBox is off and nix is not on PATH, so
+	// both nix mounts below are skipped together. When set, --overlay-src plus
+	// --tmp-overlay gives a read-only lower (the VACUUMed db.sqlite snapshot,
+	// ADR 0042) under an ephemeral tmpfs upper, so nix's own writes in the Box
+	// (gcroots, profiles, WAL files) vanish instead of touching host disk.
 	if a.nixConfigFile != "" {
 		args = append(args, "--ro-bind", a.nixConfigFileFor(box), "/etc/nix/nix.conf")
 		args = append(args, "--overlay-src", a.snapshotDirFor(box), "--tmp-overlay", "/nix/var")
@@ -669,29 +499,24 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 			args = append(args, "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf")
 		}
 	} else if a.pastaPath() {
-		// Nothing writes /etc/resolv.conf inside the guest otherwise (unlike
-		// the OCI runner, where podman supplies its own) -- Run writes this
-		// file pointed at pastaDNSForwardAddr before invoking bwrap.
+		// Nothing else writes /etc/resolv.conf inside the guest, unlike the OCI
+		// runner where podman supplies one; Run writes this file pointed at
+		// pastaDNSForwardAddr before invoking bwrap.
 		args = append(args, "--ro-bind", filepath.Join(etcDir, "resolv.conf"), "/etc/resolv.conf")
 	}
 	agentFiles := a.agentFilesFor(box)
 	args = append(args, "--ro-bind", agentFiles+"/agent", "/agent")
-	// The real /home/agent above is a fresh writable tmpfs, so baked content
-	// (Claude hooks, settings.json, opencode agent files) can't be ro-bound
-	// there directly; stage it read-only at a fresh top-level path instead.
-	// It cannot nest under /agent: the --ro-bind above already bound /agent
-	// read-only, and bwrap processes --ro-bind args in argv order, so it
-	// cannot fabricate a new mountpoint inside a bind already made read-only
-	// (issue #2843). entrypoint.sh copies the staged content into the
-	// writable /home/agent at startup.
+	// The real /home/agent is a fresh writable tmpfs, so baked content (Claude
+	// hooks, settings.json, opencode agent files) cannot be ro-bound there.
+	// Stage it at a fresh top-level path instead: bwrap processes --ro-bind in
+	// argv order and cannot fabricate a mountpoint inside the /agent bind made
+	// read-only above (issue #2843). entrypoint.sh copies it in at startup.
 	args = append(args, "--ro-bind", agentFiles+"/home/agent", homeAgentStagingDir)
-	// Mount decisions (gates, existence guards, operator messages) are
-	// computed once in buildMountSpecs, shared with the OCI adapter; bwrap
-	// only renders each spec into its own bind syntax. The driver-cache spec
-	// (issue #427), scoped to the Driver's declared session-cache dir rather
-	// than its parent so it can never shadow a sibling skills bind regardless
-	// of order, and the CODE_FORGE=local outbox spec (ADR 0033, issue #1697)
-	// are the only writable mounts buildMountSpecs ever produces.
+	// buildMountSpecs computes the mount decisions (gates, existence guards,
+	// operator messages) once and shares them with the OCI adapter; bwrap only
+	// renders each spec into bind syntax. The driver-cache spec (issue #427) and
+	// the CODE_FORGE=local outbox spec (ADR 0033, issue #1697) are the only
+	// writable mounts it ever produces.
 	for _, m := range a.mountSpecs(box) {
 		if m.Message != "" {
 			fmt.Print(m.Message)
@@ -706,11 +531,9 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		}
 		args = append(args, "--ro-bind", m.Source, m.Target)
 	}
-	// --clearenv is intentionally absent: offArgvKeys values reach the
-	// sandbox via resolvedRunEnv(box.Env) below -- the offArgvKeys subset of
-	// the schema-driven box.Env -- which Run sets as cmd.Env and bwrap
-	// inherits without --clearenv. See offArgvKeys for why they stay off
-	// argv.
+	// --clearenv is deliberately absent: the offArgvKeys subset of box.Env
+	// reaches the sandbox through resolvedRunEnv, which Run sets as cmd.Env and
+	// bwrap inherits. See offArgvKeys for why those keys stay off argv.
 	agentEnv := a.agentEnvFor(box)
 	args = append(args,
 		"--setenv", "HOME", "/home/agent",
@@ -724,29 +547,23 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 			args = append(args, "--setenv", k, v)
 		}
 	}
-	// bwrap is PID 1 inside its own unshared PID namespace, so
-	// --die-with-parent's PR_SET_PDEATHSIG kills the whole sandbox when
-	// bwrap's own immediate OS parent dies (issue #2669) -- the launcher
-	// itself on the direct-exec chain, but only pasta on the pasta chain
-	// (see setDeathSignal's call-site comment in Run for that gap).
+	// bwrap is PID 1 in its own unshared PID namespace, so --die-with-parent's
+	// PR_SET_PDEATHSIG kills the whole sandbox when bwrap's immediate OS parent
+	// dies (issue #2669): the launcher on the direct-exec chain, but only pasta
+	// on the pasta chain (see setDeathSignal's call site in Run).
 	unshareFlags := []string{"--unshare-user", "--uid", "1000", "--gid", "1000",
 		"--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent"}
-	// bwrap only unshares net itself for the fully offline networkMode=none
-	// case. Every other isolating mode leaves this to pasta: pasta's own
-	// documented behavior is to create and configure the fresh network
-	// namespace (tap device, routes) for its COMMAND argument, then exec that
-	// command inside the namespace it just built -- bwrap must inherit that
-	// already-configured namespace via execTarget's pasta-as-outer-process
-	// composition, not re-unshare a second, empty one on top of it (issue
-	// #2666).
+	// bwrap only unshares net itself for the fully offline networkMode=none case.
+	// Every other isolating mode leaves that to pasta, which creates and
+	// configures the fresh namespace (tap device, routes) for its COMMAND and
+	// then execs it there; bwrap must inherit that namespace rather than
+	// re-unshare a second, empty one on top of it (issue #2666).
 	if isolateNet && !a.pastaPath() {
 		unshareFlags = append(unshareFlags, "--unshare-net")
 	}
 	args = append(args, unshareFlags...)
-	// --seccomp only ever names seccompFilterFD, the one fd Run's
-	// cmd.ExtraFiles ever attaches (issue #2670); empty syscallFilterPath
-	// (e.g. before the nix threading in a later slice populates it) skips
-	// the flag entirely.
+	// --seccomp only ever names seccompFilterFD, the one fd Run's cmd.ExtraFiles
+	// attaches (issue #2670); an empty syscallFilterPath skips the flag.
 	if a.syscallFilterPath != "" {
 		args = append(args, "--seccomp", strconv.Itoa(seccompFilterFD))
 	}
@@ -754,23 +571,11 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	return args
 }
 
-// execTarget computes the top-level host-exec'd program and argv for box's
-// bwrap invocation. When pastaPath applies, pasta must be the outer process
-// (see buildArgs' unshare-net comment for why); otherwise bwrap itself is the
-// top-level program. Process-count containment (a.pidsLimit) plays no part
-// in this chain: it's enforced entirely via cgroup v2 pids.max delegation
-// (provisionCgroup), which has its own warn-and-degrade posture when
-// delegation is unavailable, so pasta or bwrap alone are the only possible
-// top-level programs.
-//
-// The third return, childExecsByName, is true whenever the returned program
-// (pasta) will exec its own child by bare argv name ("bwrap") via execvp, so
-// Run must forward a PATH into its env for that resolution to succeed — Go's
-// exec.Command LookPath only ever resolves the top-level program itself.
-// Deciding this here, where the chain is assembled, keeps Run from
-// re-deriving it off program names: a future wrapper added without updating
-// this flag fails closed (its child exec breaks loudly under test) instead
-// of silently inheriting forwarding.
+// execTarget computes the top-level host-exec'd program and argv for box's bwrap
+// invocation; pasta must be the outer process when pastaPath applies (see
+// buildArgs' unshare-net comment). childExecsByName is true when that program
+// execs its own child by bare argv name via execvp, so Run must forward a PATH:
+// Go's exec.Command LookPath only ever resolves the top-level program itself.
 func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, bool) {
 	bwrapArgs := a.buildArgs(etcDir, box)
 	var program string
@@ -780,12 +585,11 @@ func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, boo
 	} else {
 		pastaArgs := append([]string{}, pastaHardenedFlags...)
 		pastaArgs = append(pastaArgs, "--dns-forward", pastaDNSForwardAddr,
-			// -f/--foreground is load-bearing, not cosmetic: pasta's documented
-			// default is to fork into the background and detach once the
-			// namespace is set up. Without it, Go's cmd.Start()/cmd.Wait() would
-			// track pasta's own short-lived detaching parent instead of the real
-			// bwrap+entrypoint child, breaking exit-code propagation, stdout/
-			// stderr capture, and the Kill()/Terminate() process map (a.running).
+			// -f/--foreground is load-bearing: pasta's default is to fork into
+			// the background and detach once the namespace is set up. Without
+			// it, cmd.Start()/cmd.Wait() would track pasta's short-lived
+			// detaching parent instead of the real bwrap child, breaking exit
+			// codes, output capture, and the a.running process map.
 			"-f", "--", "bwrap")
 		pastaArgs = append(pastaArgs, bwrapArgs...)
 		program, args = "pasta", pastaArgs
@@ -794,36 +598,25 @@ func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, boo
 	return program, args, childExecsByName
 }
 
-// pastaDNSForwardAddr is pasta's own documented default IPv4 gateway address
-// when it creates a namespace with no host default route visible (always
-// true here, since pasta always creates a brand-new, empty netns in this
-// "run given command" unshare mode) -- see pasta(1) NOTES ("Default gateways
-// will be assigned as the link-local address 169.254.2.2 for IPv4 ...
-// 169.254.2.1 [guest]"). Passed to --dns-forward so pasta itself (running on
-// the host, with full host network access) relays DNS queries to whatever
-// the host's real resolver is -- independent of --no-map-gw, which only
-// disables the generic loopback-splice-on-any-port behavior; --dns-forward
-// is a separate, always-on interception rule scoped to port 53/853 traffic
-// to this address, restoring DNS without reopening the general host-loopback
-// splice (ADR 0042).
+// pastaDNSForwardAddr is pasta's documented default IPv4 gateway address when it
+// creates a namespace with no host default route visible, always true in this
+// "run given command" unshare mode (pasta(1) NOTES). --dns-forward is a separate
+// always-on rule scoped to port 53/853 traffic to this address, independent of
+// --no-map-gw, so DNS works without reopening the host-loopback splice (ADR 0042).
 const pastaDNSForwardAddr = "169.254.2.2"
 
-// seccompFilterFD is the file descriptor number bwrap's own --seccomp
-// flag argument names. Go's exec.Cmd.ExtraFiles numbers extra file
-// descriptors sequentially starting at 3 (0/1/2 are stdin/stdout/stderr);
-// this is the only entry the bwrap adapter ever adds to ExtraFiles, so
-// the number is fixed at 3, and it survives the pasta/bwrap exec
-// chain unchanged (execTarget's outer wrappers never touch fd 3, and a
-// non-close-on-exec fd -- which is what ExtraFiles produces -- is
-// preserved across every execve() in that chain, not just the first).
+// seccompFilterFD is the file descriptor number bwrap's --seccomp flag names.
+// Go's exec.Cmd.ExtraFiles numbers extra fds from 3, and this is the only entry
+// the bwrap adapter ever adds, so the number is fixed. It survives the
+// pasta/bwrap exec chain: ExtraFiles produces a non-close-on-exec fd, preserved
+// across every execve in that chain, and the outer wrappers never touch fd 3.
 const seccompFilterFD = 3
 
-// removeSeccompFlag strips a "--seccomp <fd>" pair back out of a flattened
-// argv slice, used by Run when a.syscallFilterPath is set but the file
-// failed to open: execTarget/buildArgs decide whether to emit the flag
-// purely from a.syscallFilterPath's own emptiness (they have no way to know
-// the open failed), so Run reconciles argv with the real outcome afterward
-// rather than threading the open result down through execTarget/buildArgs.
+// removeSeccompFlag strips a "--seccomp <fd>" pair back out of a flattened argv,
+// used by Run when a.syscallFilterPath is set but the file failed to open.
+// execTarget/buildArgs emit the flag from a.syscallFilterPath's emptiness alone
+// and cannot know the open failed, so Run reconciles argv afterwards rather than
+// threading the open result down through them.
 func removeSeccompFlag(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -836,40 +629,18 @@ func removeSeccompFlag(args []string) []string {
 	return out
 }
 
-// pastaHardenedFlags are the exact 5 flags ADR 0042 requires when a bwrap
-// Box's exec target is wrapped with pasta to restore egress inside its
-// isolated network namespace: no TCP/UDP port forwarding into the box and no
-// gateway-address mapping, closing the host-loopback splice pasta's own
-// defaults leave open.
+// pastaHardenedFlags are the exact 5 flags ADR 0042 requires when a bwrap Box's
+// exec target is wrapped with pasta to restore egress inside its isolated
+// network namespace: no TCP/UDP port forwarding into the box and no
+// gateway-address mapping, closing the host-loopback splice pasta's own defaults
+// leave open.
 var pastaHardenedFlags = []string{"-t", "none", "-T", "none", "-u", "none", "-U", "none", "--no-map-gw"}
 
-// resolvedRunEnv returns the process environment the bwrap child should
-// inherit. It is an allowlist, not a denylist: the launcher's own ambient
-// environment (os.Environ()) is never read here, so nothing outside boxEnv
-// can reach the sandbox this way. boxEnv is already the schema-driven
-// allowlist (lib/env-schema.nix boxEnv=true names, resolved through
-// dispatchConfig's ResolveEnv chain -- including any BOX_GH_TOKEN override,
-// ADR 0016, issue #380 -- plus a fixed set of launcher-synthesized keys);
-// buildArgs's --setenv loop already delivers every one of those keys to the
-// sandbox on argv except the keys in offArgvKeys, which it deliberately
-// keeps off argv (see offArgvKeys for why). This function's sole remaining
-// job is handing that same subset to the sandbox via the inherited process
-// environment instead (bwrap runs with no --clearenv). BOX_GH_TOKEN itself is never forwarded:
-// it isn't an offArgvKeys key, and lib/env-schema.nix's boxGhToken entry is
-// boxEnv=false, so it's never a key in boxEnv to begin with -- by the time
-// Run(box) is called, any BOX_GH_TOKEN override has already been folded
-// into boxEnv["GH_TOKEN"] upstream (main.go's boxTokenResolver).
-//
-// TERM/LANG/LC_ALL/TZ/TMPDIR/proxy vars are deliberately not part of this
-// allowlist: the OCI runner (oci.go buildRunArgs) is existing production
-// precedent that none are load-bearing -- it has never forwarded ambient
-// env at all (podman/docker don't inherit host env by default), and the
-// same in-Box agent runs under it today without them. A sweep of
-// agent/entrypoint.sh and every nix-rendered preamble found no read of any
-// of them either, though that sweep covers the Box's shell surface, not
-// the Driver binary's own env reads (ANTHROPIC_BASE_URL,
-// NODE_EXTRA_CA_CERTS, proxy variables) -- the OCI precedent is what
-// actually carries the claim for those.
+// resolvedRunEnv returns the process environment the bwrap child inherits. It is
+// an allowlist, not a denylist: os.Environ() is never read here, so nothing
+// outside boxEnv reaches the sandbox this way, and only the offArgvKeys subset
+// needs it (buildArgs delivers every other key on argv). TERM/LANG/TZ/TMPDIR and
+// the proxy vars are excluded on the OCI runner's precedent: it forwards none.
 func resolvedRunEnv(boxEnv map[string]string) []string {
 	keys := make([]string, 0, len(offArgvKeys))
 	for k := range offArgvKeys {
@@ -885,11 +656,10 @@ func resolvedRunEnv(boxEnv map[string]string) []string {
 	return out
 }
 
-// memoryLimitToBytes converts a podman/docker-style unit-suffixed memory
-// limit ("5g", "512m", "1024k"; bare digits already bytes; case-insensitive
-// suffix) to a raw byte count. cgroup v2's memory.max control file, unlike
-// podman's own --memory flag, takes only a plain integer (or the literal
-// "max"), so this conversion has no OCI-adapter equivalent to reuse.
+// memoryLimitToBytes converts a podman/docker-style unit-suffixed memory limit
+// ("5g", "512m", "1024k"; bare digits are already bytes) to a raw byte count.
+// cgroup v2's memory.max takes only a plain integer or the literal "max", unlike
+// podman's --memory, so this has no OCI-adapter equivalent to reuse.
 func memoryLimitToBytes(limit string) (int64, error) {
 	if limit == "" {
 		return 0, fmt.Errorf("empty memory limit")
@@ -914,18 +684,11 @@ func memoryLimitToBytes(limit string) (int64, error) {
 	return n * mult, nil
 }
 
-// cgroupDirForName computes the per-Box cgroup v2 directory path that
-// provisionCgroup creates, anchored via cgroupParentDir(a.cgroupControllers())
-// at the outermost ancestor that actually delegates the controllers this
-// adapter's configured limits need -- falling back to the launcher's own
-// delegated cgroup (readSelfCgroup + cgroupFSRoot) only when no ancestor
-// qualifies. It is creation-time-only: IsRunning/ListRunning/Reap read back
-// via findCgroupDir instead (see its doc comment), since a Box's creating
-// process and the process later polling/reaping it are often different
-// launcher invocations with different self-cgroup paths, let alone
-// different anchors. Returns an error when this host has no cgroup v2
-// delegation at all (readSelfCgroup fails); provisionCgroup turns that into
-// a one-time warning.
+// cgroupDirForName computes the per-Box cgroup v2 directory provisionCgroup
+// creates, anchored at the outermost ancestor that delegates the controllers this
+// adapter's limits need. Creation-time only: IsRunning/ListRunning/Reap read back
+// via findCgroupDir instead, since a Box's creating process and the process later
+// polling or reaping it are often launcher invocations with different anchors.
 func (a *bwrapAdapter) cgroupDirForName(name string) (string, error) {
 	parent, err := cgroupParentDir(a.cgroupControllers())
 	if err != nil {
@@ -934,16 +697,11 @@ func (a *bwrapAdapter) cgroupDirForName(name string) (string, error) {
 	return filepath.Join(parent, "spindrift-"+name), nil
 }
 
-// CgroupControllers returns the cgroup v2 controllers the given limits
-// actually need: "memory" iff memoryLimit is set, "pids" iff pidsLimit is
-// set. resolveCgroupAnchor uses this to reject an ancestor that doesn't
-// delegate a controller a limit write will need, without over-rejecting one
-// that's merely missing a controller nothing configured here needs (e.g. a
-// host with MEMORY_LIMIT disabled but PIDS_LIMIT set must still accept a
-// pids-only delegation). Exported because `spindrift doctor` resolves the
-// same set from the same two config values before probing, so its reported
-// posture and the runtime's enforcement can never drift apart on this
-// mapping (issue #3273).
+// CgroupControllers returns the cgroup v2 controllers the given limits need:
+// "memory" iff memoryLimit is set, "pids" iff pidsLimit is set.
+// resolveCgroupAnchor rejects an ancestor missing one of these without
+// over-rejecting one missing a controller nothing configured here needs.
+// Exported so `spindrift doctor` resolves the same set and cannot drift (#3273).
 func CgroupControllers(memoryLimit, pidsLimit string) []string {
 	var want []string
 	if memoryLimit != "" {
@@ -959,14 +717,11 @@ func (a *bwrapAdapter) cgroupControllers() []string {
 	return CgroupControllers(a.memoryLimit, a.pidsLimit)
 }
 
-// cgroupSubtreeControlHasAll reports whether dir's cgroup.subtree_control
-// lists every controller in want. A missing or unreadable file (an
-// undelegated ancestor, or a plain non-cgroupfs directory in tests)
-// disqualifies the candidate rather than erroring, matching the walk's
-// warn-and-degrade posture. An empty want is vacuously satisfied by any
-// dir; resolveCgroupAnchor short-circuits an empty want before the walk
-// rather than relying on that, since no limit write will need a controller
-// in that case.
+// cgroupSubtreeControlHasAll reports whether dir's cgroup.subtree_control lists
+// every controller in want. A missing or unreadable file (an undelegated
+// ancestor, or a plain non-cgroupfs directory in tests) disqualifies the
+// candidate rather than erroring, matching the walk's warn-and-degrade posture.
+// An empty want is vacuously satisfied, though resolveCgroupAnchor bails first.
 func cgroupSubtreeControlHasAll(dir string, want []string) bool {
 	if len(want) == 0 {
 		return true
@@ -987,13 +742,11 @@ func cgroupSubtreeControlHasAll(dir string, want []string) bool {
 	return true
 }
 
-// cgroupDirWritable reports whether this process can create a subdirectory
-// in dir, by making and immediately removing a throwaway one -- the only
-// reliable test, since ownership and mode alone don't settle it. A leftover
-// probe from a launcher killed between the Mkdir and the Remove (or from a
-// since-reused PID) would otherwise disqualify a perfectly good directory,
-// so ErrExist clears the stale dir and retries once, the same self-heal
-// ValidateCgroupDelegation applies to its own probe.
+// cgroupDirWritable reports whether this process can create a subdirectory in
+// dir, by making and immediately removing a throwaway one: ownership and mode
+// alone do not settle it. A leftover probe from a launcher killed between the
+// Mkdir and the Remove would otherwise disqualify a good directory, so ErrExist
+// clears the stale dir and retries once, as ValidateCgroupDelegation does.
 func cgroupDirWritable(dir string) bool {
 	probe := filepath.Join(dir, fmt.Sprintf("spindrift-anchor-probe-%d", os.Getpid()))
 	err := os.Mkdir(probe, 0o755)
@@ -1009,38 +762,25 @@ func cgroupDirWritable(dir string) bool {
 	return true
 }
 
-// resolveCgroupAnchor walks the strict ancestors of the launcher's own
-// cgroup v2 path (self, as readSelfCgroup returns it) down to that cgroup
-// itself, returning the OUTERMOST candidate that both lists every controller
-// in want in its cgroup.subtree_control and accepts a throwaway Mkdir.
-// Outermost first is deliberate: cgroup v2 forbids enabling a controller on
-// any cgroup that currently holds processes, and the launcher's own cgroup
-// always does, so its subtree_control is typically empty even when a real
-// delegation exists higher up (e.g. a systemd user session delegates at the
-// user@<uid>.service slice, several levels above the launcher's own terminal
-// scope). The subtree_control check runs before the write probe so a
-// non-delegated ancestor is never even probed with a write.
-//
-// The candidate list starts below cgroupFSRoot: the root of the unified
-// hierarchy is the init system's, never a delegation target, so a Box cgroup
-// never belongs there. Two further guards bound the walk to a genuinely
-// delegated subtree instead of trusting permission failure to stop it
-// somewhere sane. An empty want means nothing configured needs a controller,
-// so there is nothing to climb for. And a writable cgroupFSRoot means this
-// process (running as root, or on a hierarchy that is entirely ours) could
-// create a cgroup anywhere on the path, so there is no delegation boundary
-// to find and every candidate would pass the write probe on permission
-// alone. Both return ("", false), as does a walk that finds no qualifying
-// ancestor; cgroupParentDir turns that into the pre-#3273 fallback rather
-// than refusing to launch.
+// resolveCgroupAnchor returns the OUTERMOST strict ancestor of self (down to
+// self itself) that both lists every controller in want in its
+// cgroup.subtree_control and accepts a throwaway Mkdir. Outermost first because
+// cgroup v2 forbids enabling a controller on a cgroup holding processes, so the
+// launcher's own subtree_control is typically empty even under a real delegation.
 func resolveCgroupAnchor(self string, want []string) (string, bool) {
 	if len(want) == 0 {
 		return "", false
 	}
+	// A writable cgroupFSRoot means this process (root, or a hierarchy entirely
+	// ours) could create a cgroup anywhere on the path, so there is no
+	// delegation boundary to find and every candidate would pass the write
+	// probe on permission alone.
 	if cgroupDirWritable(cgroupFSRoot) {
 		return "", false
 	}
 
+	// The unified hierarchy's root belongs to the init system and is never a
+	// delegation target, so candidates start one level below it.
 	var candidates []string
 	acc := cgroupFSRoot
 	for _, part := range strings.Split(self, "/") {
@@ -1051,6 +791,8 @@ func resolveCgroupAnchor(self string, want []string) (string, bool) {
 		candidates = append(candidates, acc)
 	}
 
+	// The subtree_control check runs before the write probe so a non-delegated
+	// ancestor is never probed with a write.
 	for _, dir := range candidates {
 		if !cgroupSubtreeControlHasAll(dir, want) {
 			continue
@@ -1063,16 +805,11 @@ func resolveCgroupAnchor(self string, want []string) (string, bool) {
 	return "", false
 }
 
-// cgroupParentDir is the single shared seam the per-Box runner
-// (provisionCgroup) and the doctor check (ValidateCgroupDelegation) both
-// resolve their anchor through, so the two probe -- and later create under
-// -- the same directory. It reads the launcher's own cgroup path once and
-// hands it to resolveCgroupAnchor, preferring that hit; when no ancestor
-// qualifies, it falls back to the launcher's own cgroup directory, the
-// pre-#3273 anchor. That fallback IS the degrade path (ADR 0042): the
-// launcher's own cgroup can still hold a Box's PID for tracking purposes
-// even though cgroup v2 refuses to let it carry pids.max/memory.max, so
-// individual limit writes degrade there instead of the whole cgroup feature.
+// cgroupParentDir is the shared seam the per-Box runner (provisionCgroup) and
+// the doctor check (ValidateCgroupDelegation) both resolve their anchor through,
+// so the two probe and later create under the same directory. Falling back to
+// the launcher's own cgroup IS the degrade path (ADR 0042): it can still hold a
+// Box's PID for tracking even though cgroup v2 refuses to let it carry limits.
 func cgroupParentDir(want []string) (string, error) {
 	self, err := readSelfCgroup()
 	if err != nil {
@@ -1084,19 +821,11 @@ func cgroupParentDir(want []string) (string, error) {
 	return filepath.Join(cgroupFSRoot, self), nil
 }
 
-// findCgroupDir searches the whole cgroupFSRoot tree (not just the calling
-// process's own self-cgroup subtree) for a directory named "spindrift-"+name
-// at any depth, and returns its path. This backs IsRunning/ListRunning/Reap
-// so a Box created by one launcher invocation/session (via cgroupDirForName,
-// under whichever anchor that invocation resolved -- possibly several levels
-// above its own self-cgroup path) is still discoverable by a read/cleanup call
-// from a different invocation/session with a different self-cgroup path --
-// e.g. a dropped SSH reconnect, a second console, or a concurrent dogfood
-// loop. A missing cgroupFSRoot, a walk error, or no match anywhere all
-// degrade to ("", false) rather than an error, matching the read paths'
-// existing warn-never, degrade-sanely posture. A per-entry walk error (e.g.
-// permission denied descending into some other process's non-delegated
-// cgroup subtree) is skipped rather than aborting the whole walk.
+// findCgroupDir searches the whole cgroupFSRoot tree, not just the calling
+// process's own self-cgroup subtree, for a directory named "spindrift-"+name at
+// any depth. That width is the point: a Box created under one invocation's
+// anchor stays discoverable from another with a different self-cgroup path. A
+// missing root, a walk error, or no match all degrade to ("", false).
 func findCgroupDir(name string) (dir string, ok bool) {
 	want := "spindrift-" + name
 	_ = filepath.WalkDir(cgroupFSRoot, func(path string, entry fs.DirEntry, err error) error {
@@ -1119,16 +848,10 @@ func findCgroupDir(name string) (dir string, ok bool) {
 }
 
 // removeCgroupDir removes a per-Box delegated cgroup v2 directory created by
-// provisionCgroup. The three individual os.Remove calls on pids.max/
-// memory.max/cgroup.procs are a plain unlink no-op on a real cgroupfs (its
-// control files are kernel interface nodes that a real rmdir clears as part
-// of removing the whole subtree, not files unlink can touch individually) --
-// they only do real work against a plain directory standing in for cgroupfs
-// in tests, where they're genuine files that would otherwise make the final
-// os.Remove(dir) fail with ENOTEMPTY. Shared by Run's deferred cleanup (dir
-// is empty: cmd.Wait() has already returned) and Reap (dir is expected to be
-// empty: IsRunning's unsynchronized snapshot found no resident PID a moment
-// earlier, not a guarantee held under a lock).
+// provisionCgroup. The three os.Remove calls on the control files are a plain
+// unlink no-op on a real cgroupfs, where rmdir clears them with the subtree;
+// they only do work against the plain directory standing in for cgroupfs in
+// tests, where they are real files that would make the final rmdir ENOTEMPTY.
 func removeCgroupDir(dir string) error {
 	for _, f := range []string{"pids.max", "memory.max", "cgroup.procs"} {
 		_ = os.Remove(filepath.Join(dir, f))
@@ -1136,24 +859,11 @@ func removeCgroupDir(dir string) error {
 	return os.Remove(dir)
 }
 
-// provisionCgroup attempts to create a per-Box cgroup v2 subtree at the
-// anchor cgroupDirForName resolves (the outermost ancestor that delegates
-// the controllers this adapter's configured limits need, falling back to
-// the launcher's own delegated cgroup when none qualifies), then writes
-// pids.max/memory.max into it. Detection and creation are the same
-// os.Mkdir call rather than a separate probe-then-create step: whether the
-// parent subtree is writable can only be learned by trying, and a distinct
-// probe would just race this Mkdir for nothing. Failure to find or create
-// the dir itself — no unified cgroup v2 mount (cgroup v1/hybrid hosts), or a
-// non-delegated (read-only) parent — means no usable delegation on this
-// host, which ADR 0042 treats as expected and non-fatal: it warns and
-// returns "" so Run proceeds without cgroup enforcement rather than
-// refusing to launch. Once the dir exists, though, it is kept regardless of
-// what happens next: a failed pids.max/memory.max write or a malformed
-// a.memoryLimit degrades only that one limit (warned individually) rather
-// than the whole cgroup, since the dir is still perfectly usable for PID
-// tracking (Run moving the process in, IsRunning/ListRunning/Reap) even
-// with a limit control file missing or stale.
+// provisionCgroup creates a per-Box cgroup v2 subtree at the anchor
+// cgroupDirForName resolves and writes pids.max/memory.max into it. Failing to
+// create the dir means no usable delegation on this host, which ADR 0042 treats
+// as expected: warn, return "", and let Run proceed unenforced. Once the dir
+// exists it is kept, since a failed limit write leaves it usable for PID tracking.
 func (a *bwrapAdapter) provisionCgroup(box Box) (dir string) {
 	dir, err := a.cgroupDirForName(box.Name)
 	if err != nil {
@@ -1182,9 +892,8 @@ func (a *bwrapAdapter) provisionCgroup(box Box) (dir string) {
 
 // Run launches a single issue into a bubblewrap sandbox.
 func (a *bwrapAdapter) Run(box Box) error {
-	// etcDir is only needed for the synthesised /etc/resolv.conf (pastaPath
-	// only) -- passwd/group are baked nix store paths now (issue #2663) and
-	// no longer written here.
+	// Only the synthesised /etc/resolv.conf lives here; passwd/group are baked
+	// store paths (issue #2663).
 	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
 	if err != nil {
 		return fmt.Errorf("mktemp: %w", err)
@@ -1192,8 +901,6 @@ func (a *bwrapAdapter) Run(box Box) error {
 	defer os.RemoveAll(etcDir)
 
 	if a.pastaPath() {
-		// Nothing else writes /etc/resolv.conf into the guest for the bwrap
-		// runtime; buildArgs ro-binds this file when pastaPath applies.
 		resolvConf := "nameserver " + pastaDNSForwardAddr + "\n"
 		if err := os.WriteFile(filepath.Join(etcDir, "resolv.conf"), []byte(resolvConf), 0o644); err != nil {
 			return err
@@ -1205,30 +912,21 @@ func (a *bwrapAdapter) Run(box Box) error {
 		out = io.Discard
 	}
 
-	// Marked before provisionCgroup's mkdir below, not after -- see the
-	// provisioning field above for why. The deferred release covers every
-	// early return before the cgroup.procs write; the explicit release past
-	// that write is what unblocks Reap in the common case.
+	// Marked before provisionCgroup's mkdir, not after (see the provisioning
+	// field). The deferred release covers every early return; the explicit one
+	// past the cgroup.procs write unblocks Reap in the common case.
 	releaseProvisioning := a.beginProvisioning(box.Name)
 	defer releaseProvisioning()
 
-	// Provisioned before Start, so a dir (with as many of pids.max/
-	// memory.max as could be written) exists by the time bwrap is exec'd;
-	// moving the process in happens after Start below, once the real PID
-	// exists. An empty cgroupDir means provisionCgroup couldn't even create
-	// the dir (ADR 0042 degrade-don't-lie); a non-empty one is moved into
-	// and cleaned up below regardless of whether its limits were written.
+	// Provisioned before Start so the dir and its limits exist by the time bwrap
+	// is exec'd; moving the process in waits for the real PID. An empty
+	// cgroupDir means provisionCgroup could not create the dir at all.
 	cgroupDir := a.provisionCgroup(box)
 
-	// The bwrap process's env is resolvedRunEnv(box.Env) -- the offArgvKeys
-	// subset of box.Env, not the launcher's own ambient environment. Without
-	// --clearenv, the sandbox inherits it. Those values are therefore
-	// available inside the sandbox without appearing on argv.
-	// Opened here, before cmd is built, not after: a failed open must also
-	// drop the "--seccomp" flag itself from argv, not just skip attaching
-	// ExtraFiles -- otherwise bwrap tries to read a nonexistent fd 3 at its
-	// own startup and the whole Box launch fails over a hardening nicety,
-	// defeating the warn-and-proceed contract (issue #2670).
+	// Opened before cmd is built: a failed open must also drop the "--seccomp"
+	// flag from argv, not just skip attaching ExtraFiles, or bwrap reads a
+	// nonexistent fd 3 at startup and the whole Box launch fails over a
+	// hardening nicety (issue #2670).
 	var syscallFilterFile *os.File
 	syscallFilterOpenFailed := false
 	if a.syscallFilterPath != "" {
@@ -1243,42 +941,25 @@ func (a *bwrapAdapter) Run(box Box) error {
 	}
 	program, execArgs, childExecsByName := a.execTarget(etcDir, box)
 	if syscallFilterOpenFailed {
-		// buildArgs (via execTarget) unconditionally appended "--seccomp
-		// <fd>" from a.syscallFilterPath alone, before the open above was
-		// known to fail; strip that pair back out of the flattened argv
-		// rather than mutate a shallow copy of *a (which would copy the
-		// live sync.Mutex embedded in bwrapAdapter -- go vet's copylocks
-		// check, and a real hazard since Run executes concurrently for
-		// different boxes under MAX_PARALLEL).
+		// Strip the pair from the flattened argv rather than mutate a shallow
+		// copy of *a: copying the struct copies its live sync.Mutex, which go
+		// vet's copylocks flags and Run's concurrency makes a real hazard.
 		execArgs = removeSeccompFlag(execArgs)
 	}
 	cmd := execCommand(program, execArgs...)
-	// Pdeathsig kills this direct child (bwrap or pasta, whichever execTarget
-	// resolved to) the moment the launcher itself dies, so a killed/crashed
-	// launcher never leaves an orphaned Box running. This is separate from
-	// bwrap's own --die-with-parent flag (buildArgs), which only protects
-	// bwrap against ITS immediate OS parent -- pasta, in the fork case, not
-	// the launcher two hops up. setDeathSignal is a platform-split seam
-	// (bwrap_pdeathsig_linux.go / bwrap_pdeathsig_other.go):
-	// syscall.SysProcAttr.Pdeathsig is Linux-only, but the launcher binary
-	// itself must still cross-compile for darwin (nix/checks/go.nix's
-	// launcher-cross-build).
+	// Pdeathsig kills this direct child (bwrap or pasta) the moment the launcher
+	// dies, so a crashed launcher never leaves an orphaned Box. Separate from
+	// bwrap's own --die-with-parent, which only protects bwrap against ITS
+	// immediate parent: pasta, in the fork case, not the launcher two hops up.
+	// setDeathSignal is a platform split, since Pdeathsig is Linux-only.
 	setDeathSignal(cmd)
 	cmd.Env = resolvedRunEnv(box.Env)
 	if childExecsByName {
-		// The top-level program (pasta, per execTarget) execs its own child
-		// by bare name ("bwrap") via execvp, using its own process
-		// environment's PATH, not Go's exec.Command LookPath (which only
-		// resolved the top-level program, at Command-construction time,
-		// against the launcher's ambient PATH). Without this, that env
-		// carries no PATH at all (resolvedRunEnv is an offArgvKeys-only
-		// allowlist), so the child exec fails with ENOENT even though the
-		// wrapper itself started fine. Decided inside execTarget, next to
-		// the chain assembly, so a future wrapper added there fails closed
-		// instead of silently inheriting forwarding. PATH is not an
-		// offArgvKeys value, so forwarding it doesn't widen
-		// resolvedRunEnv's documented no-ambient-leak guarantee for the
-		// values that are.
+		// pasta execs "bwrap" by bare name via execvp, using its own process
+		// environment's PATH rather than Go's LookPath, which resolved only the
+		// top-level program. Without this the env carries no PATH at all and the
+		// child exec fails with ENOENT. PATH is not an offArgvKeys value, so
+		// forwarding it does not widen resolvedRunEnv's no-ambient-leak guarantee.
 		cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
 	}
 	if syscallFilterFile != nil {
@@ -1287,32 +968,15 @@ func (a *bwrapAdapter) Run(box Box) error {
 	cmd.Stdout = out
 	cmd.Stderr = out
 
-	// nixVarSnapshotLock, when non-nil, holds a shared advisory flock on
-	// snapshotLockPath(a.snapshotDirFor(box)) for the life of the sandboxed
-	// process. Gated on nixConfigFile, the same condition buildArgs uses to
-	// decide whether to mount a.snapshotDirFor(box) at all -- nix-in-box off
-	// means nothing is mounted, so there is nothing to protect.
-	// reclaimStaleSnapshots attempts a non-blocking exclusive lock on this
-	// same file to tell whether any live Box is still reading this
-	// generation, without tracking box->generation mappings anywhere else.
-	// lockSnapshotShared's Flock(LOCK_SH) call is blocking (no LOCK_NB), so
-	// Run genuinely waits out a concurrent reclaim's exclusive hold rather
-	// than racing past it -- but the open and the blocking lock acquire are
-	// still two separate steps, leaving a window where reclaim can win the
-	// exclusive lock and RemoveAll the generation dir in between. Once the
-	// shared lock is actually held, Run re-stats the generation dir (below)
-	// to close that window: proceeding to exec bwrap against a directory
-	// reclaim has already removed would break --overlay-src's mount, so a
-	// failed re-stat here returns an error instead. A failure to open or
-	// lock the file in the first place only degrades reclaim's ability to
-	// detect this box (ADR 0042's own degrade-don't-lie precedent) -- that
-	// path alone must never fail Run, which is why it's warn-and-proceed.
+	// A shared flock held for the life of the sandboxed process is how
+	// reclaimStaleSnapshots detects a live Box still reading this generation.
+	// Gated on nixConfigFile, the same condition buildArgs mounts the dir under.
+	// Reclaim can still win the gap between the open and the blocking acquire, so
+	// re-stat after locking: --overlay-src against a removed dir would not mount.
 	var nixVarSnapshotLock *os.File
 	if a.nixConfigFile != "" {
-		// snapshotDirFor doc comment above covers the resolution rule; this
-		// is the same call buildArgs' --overlay-src bind uses, so the
-		// lock/stat below always guards the exact directory this launch
-		// actually mounts.
+		// The same call buildArgs' --overlay-src bind uses, so the lock and stat
+		// guard the exact directory this launch mounts.
 		snapshotDir := a.snapshotDirFor(box)
 		lf, err := lockSnapshotShared(snapshotDir)
 		if err != nil {
@@ -1336,40 +1000,26 @@ func (a *bwrapAdapter) Run(box Box) error {
 	}
 	cgroupProvisionRaceWindowHook()
 	if cgroupDir != "" {
-		// Best-effort: the box process is already running by this point, so
-		// a failure to move it in must not fail Run over it -- it just means
-		// this Box runs outside cgroup enforcement despite delegation being
-		// available.
+		// Best-effort: the box is already running, so failing to move it in
+		// means this Box runs unenforced, never that Run fails.
 		pid := strconv.Itoa(cmd.Process.Pid)
 		if err := os.WriteFile(filepath.Join(cgroupDir, "cgroup.procs"), []byte(pid), 0o644); err != nil {
 			fmt.Printf("==> bwrap runner: warning: could not move box %q into cgroup %s: %v\n", box.Name, cgroupDir, err)
 		}
 	}
-	// Provisioning ends here, at the cgroup.procs write above, not at
-	// trackRunning below -- see the provisioning field above for why.
+	// Provisioning ends at the cgroup.procs write above, not at trackRunning
+	// below; see the provisioning field for why.
 	releaseProvisioning()
 	a.trackRunning(box.Name, cmd.Process)
 	defer a.untrackRunning(box.Name)
-	// Deferred (unconditionally -- unlockSnapshot no-ops on a nil lock) so a
-	// held shared lock spans cmd.Wait()'s entire duration and is released
-	// only once it returns below -- releasing it any earlier would let
-	// reclaimStaleSnapshots believe this generation is free while the
-	// sandboxed process is still reading it. syscall.Flock releases
-	// automatically if the launcher process itself dies before this defer
-	// runs (fd closes on process exit), so no separate crash-recovery path
-	// is needed here.
+	// Deferred so the shared lock spans cmd.Wait()'s whole duration: releasing
+	// earlier would let reclaimStaleSnapshots believe this generation is free
+	// while the sandboxed process is still reading it. Flock releases on process
+	// exit, so a crashed launcher needs no separate recovery path.
 	defer unlockSnapshot(nixVarSnapshotLock)
 	if cgroupDir != "" {
-		// Deferred so cleanup runs after cmd.Wait() below returns -- the
-		// cgroup dir can only be rmdir'd once no live process remains
-		// inside it (ADR 0042's strictly-ephemeral posture). The three
-		// os.Remove calls on the individual control files are a plain
-		// unlink no-op on a real cgroupfs (its pids.max/memory.max/
-		// cgroup.procs are kernel interface nodes that a real rmdir clears
-		// as part of removing the whole subtree, not files unlink can touch
-		// individually) — they only do real work against a plain directory
-		// standing in for cgroupfs in tests, where they're genuine files
-		// that would otherwise make the final rmdir fail with ENOTEMPTY.
+		// Deferred so cleanup runs after cmd.Wait() returns: the cgroup dir can
+		// only be rmdir'd once no live process remains inside it (ADR 0042).
 		defer func() {
 			if err := removeCgroupDir(cgroupDir); err != nil {
 				fmt.Printf("==> bwrap runner: warning: could not remove cgroup %s: %v\n", cgroupDir, err)
@@ -1379,11 +1029,8 @@ func (a *bwrapAdapter) Run(box Box) error {
 	return asRunError(cmd.Wait())
 }
 
-// trackRunning records proc as the live process for name, so a concurrent
-// Kill call can find it. A blank name (every call site but Terminate's ever
-// scripts one — box.Name is always set in production) is tracked like any
-// other; Kill on a blank name would then reach whichever box last ran
-// nameless, which never happens outside tests.
+// trackRunning records proc as the live process for name, so a concurrent Kill
+// can find it.
 func (a *bwrapAdapter) trackRunning(name string, proc *os.Process) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1400,13 +1047,11 @@ func (a *bwrapAdapter) untrackRunning(name string) {
 	delete(a.running, name)
 }
 
-// beginProvisioning marks name as mid-launch so Reap skips it -- see the
-// provisioning field for the race this closes. The returned release func is
-// wrapped in sync.Once:
-// Run calls it once explicitly right after the cgroup.procs write, and once
-// more via its own deferred call covering every earlier return, and the two
-// must not double-decrement the refcount out from under a second concurrent
-// Run for the same name.
+// beginProvisioning marks name as mid-launch so Reap skips it; see the
+// provisioning field for the race this closes. The returned release is wrapped
+// in sync.Once because Run calls it explicitly after the cgroup.procs write and
+// again via defer, and the two must not double-decrement the refcount out from
+// under a second concurrent Run for the same name.
 func (a *bwrapAdapter) beginProvisioning(name string) (release func()) {
 	a.mu.Lock()
 	if a.provisioning == nil {
@@ -1428,30 +1073,17 @@ func (a *bwrapAdapter) beginProvisioning(name string) (release func()) {
 	}
 }
 
-// Reap best-effort removes a leftover per-Box delegated cgroup dir (see
-// provisionCgroup) for name, e.g. one orphaned by a launcher that crashed
-// before Run's own deferred cleanup could rmdir it once the sandboxed
-// process exited. It resolves the dir via findCgroupDir (searching the whole
-// cgroupFSRoot tree) rather than this process's own self-cgroup, so it can
-// clean up a Box left behind by a DIFFERENT, e.g. crashed, launcher
-// invocation/session too. It never touches a running sandbox -- Kill is the
-// operator-driven counterpart for that, per the Runner.Reap contract. No
-// cgroup dir for name (never ran, already reaped, or Run's own deferred
-// cleanup already removed it), no cgroup v2 tree to search, and any removal
-// failure all degrade to a silent nil return rather than propagating an
-// error, matching Reap's best-effort contract and the OCI adapter's own
-// Reap.
-//
-// Holds a.mu across the whole provisioning check plus IsRunning,
-// findCgroupDir, and removeCgroupDir below -- see the provisioning field for
-// the race this closes.
-// Dropping the lock in between would leave the same window open: a
-// beginProvisioning mkdir could land right after the check and still get
-// deleted. Neither IsRunning nor removeCgroupDir takes a.mu itself, so
-// holding it here doesn't deadlock. This only covers a Reap issued by THIS
-// launcher process; see ADR 0042's "Amendment (issue #2960)" section for the
-// cross-process limitation that remains.
+// Reap best-effort removes a leftover per-Box cgroup dir for name, e.g. one
+// orphaned by a launcher that crashed before Run's deferred cleanup ran. It
+// resolves the dir via findCgroupDir, so it cleans up after a different launcher
+// invocation too, and never touches a running sandbox: Kill is the
+// operator-driven counterpart. Every failure degrades to a silent nil return.
 func (a *bwrapAdapter) Reap(name string) error {
+	// a.mu is held across the provisioning check, IsRunning, findCgroupDir and
+	// removeCgroupDir: dropping it in between would let a beginProvisioning
+	// mkdir land right after the check and still get deleted. Neither callee
+	// takes a.mu, so this cannot deadlock. It covers only this launcher process;
+	// ADR 0042's "Amendment (issue #2960)" records the cross-process gap.
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.provisioning[name] > 0 {
@@ -1468,9 +1100,9 @@ func (a *bwrapAdapter) Reap(name string) error {
 	return nil
 }
 
-// Kill sends SIGKILL to name's tracked live process, if Run currently has
-// one running under that name. A miss (already exited, or never launched) is
-// not an error — Terminate's reap step is best-effort by design.
+// Kill sends SIGKILL to name's tracked live process, if Run has one under that
+// name. A miss (already exited, or never launched) is not an error: Terminate's
+// reap step is best-effort by design.
 func (a *bwrapAdapter) Kill(name string) error {
 	a.mu.Lock()
 	proc := a.running[name]
@@ -1478,27 +1110,19 @@ func (a *bwrapAdapter) Kill(name string) error {
 	if proc == nil {
 		return nil
 	}
-	// The process can finish (and untrackRunning's deferred delete race
-	// past the read above) between the map lookup and this Kill call --
-	// os.ErrProcessDone means it's already gone, matching the "a miss is
-	// not an error" contract exactly as much as a nil map entry does.
+	// The process can finish between the map lookup above and this call, so
+	// os.ErrProcessDone means it is already gone: a miss, not an error.
 	if err := proc.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
 	}
 	return nil
 }
 
-// IsRunning reports whether a Box's per-name delegated cgroup (see
-// provisionCgroup) still has a resident PID in its cgroup.procs. The dir is
-// resolved via findCgroupDir, which searches the whole cgroupFSRoot tree
-// rather than just this process's own self-cgroup subtree, so a Box created
-// by a DIFFERENT launcher invocation/session is found too. This is a
-// best-effort, read-only check: no cgroup v2 tree to search, or no cgroup
-// dir for this name (never ran, already reaped, or the deferred cleanup in
-// Run already removed it), both degrade to false rather than erroring,
-// matching ADR 0042's warn-and-proceed tiering -- but IsRunning itself never
-// warns, since a poll loop calling it repeatedly would make that noisy;
-// provisionCgroup already warns once at launch time.
+// IsRunning reports whether name's per-Box cgroup still has a resident PID in
+// its cgroup.procs, resolving the dir via findCgroupDir so a Box created by a
+// different launcher invocation is found too. No cgroup tree and no dir both
+// degrade to false. IsRunning itself never warns, since a poll loop calling it
+// repeatedly would be noisy; provisionCgroup already warns once at launch.
 func (a *bwrapAdapter) IsRunning(name string) bool {
 	dir, ok := findCgroupDir(name)
 	if !ok {
@@ -1512,18 +1136,10 @@ func (a *bwrapAdapter) IsRunning(name string) bool {
 }
 
 // ListRunning enumerates every spindrift-* cgroup dir anywhere under
-// cgroupFSRoot -- not just the calling process's own delegated self-cgroup
-// subtree -- and reports the subset that are actually live, so Console
-// startup orphan detection (issue #651) can find Boxes started by a PRIOR,
-// possibly different, launcher invocation/session (issue #2669). No cgroup
-// v2 tree to search degrades to a nil slice and no error, matching
-// IsRunning's own warn-never, degrade-sanely posture -- this is a read-only
-// capability probe, not a hard failure. Liveness is checked directly against
-// each candidate's own cgroup.procs (the walk callback already has the
-// path, so there's no need to re-derive it through findCgroupDir/IsRunning
-// per candidate), so a leftover empty/stale cgroup dir (crashed launcher,
-// cleanup never ran, sandboxed process since exited) is excluded rather than
-// reported as running.
+// cgroupFSRoot and reports the live subset, so Console startup orphan detection
+// (issue #651) finds Boxes started by a prior launcher invocation (issue #2669).
+// Liveness is read from each candidate's own cgroup.procs, so a leftover empty
+// dir is excluded. No cgroup v2 tree yields a nil slice and no error.
 func (a *bwrapAdapter) ListRunning() ([]string, error) {
 	var names []string
 	_ = filepath.WalkDir(cgroupFSRoot, func(path string, entry fs.DirEntry, err error) error {
@@ -1552,41 +1168,33 @@ func (a *bwrapAdapter) ListRunning() ([]string, error) {
 // bwrapBuildAdapter implements Runner for the `launcher build` bwrap path.
 // EnsureReady realizes the agent store closures; Run is not supported.
 type bwrapBuildAdapter struct {
-	agentFilesDrv string // .drv path for agentFiles
-	agentEnvDrv   string // .drv path for agentEnv
-	passwdFileDrv string // .drv path for passwdFile
-	groupFileDrv  string // .drv path for groupFile
-	// nixConfigFileDrv is the .drv path for /etc/nix/nix.conf (ADR 0042);
-	// empty when the Consumer's nixInBox knob is off, which gates both the
-	// extra nix-config closure realization and the store-DB snapshot step
-	// below together.
+	agentFilesDrv string
+	agentEnvDrv   string
+	passwdFileDrv string
+	groupFileDrv  string
+	// nixConfigFileDrv is empty when the Consumer's nixInBox knob is off, which
+	// gates both the extra nix-config closure realization and the store-DB
+	// snapshot step below together (ADR 0042).
 	nixConfigFileDrv string
-	// syscallFilterDrv is the .drv path for the compiled BPF syscall filter
-	// (issue #2670). Unconditional in production (see Config.SyscallFilterDrv),
-	// but guarded the same way as nixConfigFileDrv below so a zero-value
-	// adapter (e.g. an existing test's bare struct literal) never tries to
-	// realize an empty drv path.
+	// syscallFilterDrv is unconditional in production (issue #2670) but guarded
+	// like nixConfigFileDrv, so a zero-value adapter (a bare test struct
+	// literal) never tries to realize an empty drv path.
 	syscallFilterDrv string
-	// nixVarSnapshotDir is the host-side directory snapshotStoreDB writes
-	// into (shared package-level convention with the run adapter's mount —
-	// see nixVarSnapshotDir's doc comment).
+	// nixVarSnapshotDir is the host-side directory snapshotStoreDB writes into,
+	// the same directory the run adapter mounts.
 	nixVarSnapshotDir string
-	// nixVarSnapshotRoot and nixVarGeneration are the same pwd/generation
-	// EnsureReady built nixVarSnapshotDir from, kept as their own fields
-	// (rather than re-derived from nixVarSnapshotDir via filepath.Dir/Base)
-	// so reclaimStaleSnapshots' root/keepGeneration arguments can never be
-	// misidentified by path surgery on the already-joined dir (issue #2680
-	// review finding). nixVarGeneration == "" is the flat/legacy path,
-	// distinguishable here from "" meaning "root itself" the way Dir/Base
-	// surgery could not.
+	// nixVarSnapshotRoot and nixVarGeneration are kept as their own fields,
+	// rather than re-derived from nixVarSnapshotDir by path surgery, so
+	// reclaimStaleSnapshots' arguments cannot be misidentified (issue #2680).
+	// An empty nixVarGeneration is the flat/legacy path, distinguishable here
+	// from "the root itself" the way filepath.Dir/Base surgery could not be.
 	nixVarSnapshotRoot string
 	nixVarGeneration   string
 }
 
 // NewBwrapBuild constructs a bwrap adapter for the build command from cfg and
-// pwd (the launcher's own working directory, mirroring NewBwrap's pwd
-// parameter). EnsureReady realizes agent store closures via nix build and,
-// when nixInBox is on, snapshots the host nix store DB.
+// pwd (the launcher's own working directory). EnsureReady realizes the agent
+// store closures and, when nixInBox is on, snapshots the host nix store DB.
 func NewBwrapBuild(cfg Config, pwd string) Runner {
 	generation := closureGeneration(cfg.ImageTag)
 	return &bwrapBuildAdapter{
@@ -1603,19 +1211,16 @@ func NewBwrapBuild(cfg Config, pwd string) Runner {
 }
 
 // closureSpec pairs a human-readable label with the .drv path EnsureReady
-// realizes it from, so the same shape isn't respelled at each of the two call
-// sites that build a []closureSpec (the fixed four closures and the
-// conditionally-appended nix-config one).
+// realizes it from.
 type closureSpec struct {
 	label string
 	drv   string
 }
 
-// EnsureReady realizes the agent store closures via nix build. Nix is
-// idempotent — if already realized this is fast. Real nix errors surface.
-// When nixConfigFileDrv is set (Consumer's nixInBox knob is on), it also
-// realizes the nix-config closure and snapshots the host nix store DB (ADR
-// 0042) for the run adapter's /nix/var overlay to mount.
+// EnsureReady realizes the agent store closures via nix build; nix is
+// idempotent, so an already-realized closure is fast. When nixConfigFileDrv is
+// set (nixInBox on) it also realizes the nix-config closure and snapshots the
+// host nix store DB (ADR 0042) for the run adapter's /nix/var overlay to mount.
 func (a *bwrapBuildAdapter) EnsureReady() error {
 	fmt.Println("==> bwrap runner: realizing agent store closures (no image build/load)")
 
@@ -1638,33 +1243,17 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 	}
 
 	if a.nixConfigFileDrv != "" {
-		// Hold the same shared advisory lock Run holds for the life of a
-		// sandboxed process, but here only for the duration of the write below:
-		// a concurrently-running `launcher build` (a different process, against
-		// a different closure) has no idea this generation is mid-write, and
-		// its own reclaimStaleSnapshots pass skips keepGeneration by name only
-		// for *its own* generation, not this one -- from that other process's
-		// point of view this dir looks like any other unreferenced stale
-		// generation, and its non-blocking exclusive Flock probe would succeed
-		// and RemoveAll it out from under the still-running VACUUM INTO below
-		// (issue #2680 review finding). A failure to acquire the lock only
-		// degrades protection against that narrow race; it must never fail the
-		// build (same degrade-don't-lie precedent as every other lock-acquire
-		// site in this file).
-		//
-		// lockSnapshotShared opens dir+".lock", a sibling of dir itself --
-		// a child of nixVarSnapshotRoot in the generation-scoped case, or a
-		// sibling of the root in the flat/legacy case where
-		// nixVarSnapshotDir IS nixVarSnapshotRoot. Either way its parent
-		// must already exist for O_CREATE to succeed, and on a fresh
-		// checkout nixVarSnapshotRoot itself doesn't exist yet. MkdirAll
-		// here so the lock below gets a real shot at succeeding instead of
-		// always degrading on the first build; a MkdirAll failure degrades
-		// the same way a lock-acquire failure already does (warn, don't
-		// fail the build).
+		// MkdirAll first: lockSnapshotShared opens dir+".lock", a sibling of dir,
+		// so its parent must exist for O_CREATE, and on a fresh checkout the
+		// root does not exist yet. A failure here degrades like a lock failure.
 		if mkErr := os.MkdirAll(a.nixVarSnapshotRoot, 0o755); mkErr != nil {
 			fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", a.nixVarSnapshotRoot, mkErr)
 		}
+		// Hold the same shared lock Run holds, here only for the write below: a
+		// concurrent `launcher build` skips only its OWN keepGeneration, so from
+		// its point of view this dir is one more stale generation and its
+		// exclusive probe would RemoveAll it mid-VACUUM (issue #2680). Failing to
+		// lock degrades only that protection; it must never fail the build.
 		lf, lockErr := lockSnapshotShared(a.nixVarSnapshotDir)
 		if lockErr != nil {
 			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", snapshotLockPath(a.nixVarSnapshotDir), lockErr)
@@ -1674,19 +1263,14 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 		if err != nil {
 			return err
 		}
-		// nixVarGeneration == "" means the flat/legacy path: nixVarSnapshotDir
-		// IS a.nixVarSnapshotRoot (nixVarSnapshotDir(pwd, "") drops the empty
-		// component), so there is no set of sibling generations to sweep --
-		// reclaiming against the root here would sweep the root's own
-		// unrelated siblings (e.g. .spindrift/accum.git) as if they were
-		// stale generations.
+		// An empty nixVarGeneration is the flat/legacy path: nixVarSnapshotDir IS
+		// the root, so there are no sibling generations to sweep, and reclaiming
+		// against the root would sweep unrelated siblings like .spindrift/accum.git.
 		if a.nixVarGeneration == "" {
 			fmt.Println("==> bwrap runner: nix-var snapshot is unscoped (no closure generation known); skipping stale-generation reclaim")
 		} else if err := reclaimStaleSnapshots(a.nixVarSnapshotRoot, a.nixVarGeneration); err != nil {
-			// Best-effort, like the backup cleanup above: an old generation that
-			// couldn't be reclaimed wastes disk but doesn't make the snapshot
-			// EnsureReady just produced any less usable, so it's not worth
-			// failing an otherwise-successful `launcher build` over.
+			// Best-effort: an unreclaimed old generation wastes disk but leaves
+			// the snapshot EnsureReady just produced perfectly usable.
 			fmt.Printf("==> bwrap runner: warning: could not reclaim stale nix-var snapshots under %s: %v\n", a.nixVarSnapshotRoot, err)
 		}
 	}
@@ -1695,58 +1279,11 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 	return nil
 }
 
-// SnapshotGeneration is the hot-swap counterpart to
-// bwrapBuildAdapter.EnsureReady's build-time snapshot step above: `launcher
-// build` writes a generation once, at startup, against the adapter's own
-// baked closure; a hot-swap (ADR 0043, issue #2682) realizes a new agent
-// closure mid-run, without ever going through a bwrapBuildAdapter at all, so
-// nothing has written a generation for it until this runs. ADR 0043: "A
-// swap therefore adds a generation named for the closure it was taken
-// against; it never replaces a file a running Box is reading." Call this
-// once per successful swap, after the closure is realized and before
-// binding it (runner.NewAgentGeneration) onto subsequent Box launches --
-// bwrapAdapter.IsReady/Run's stat guard fails any Box that names a
-// generation with no directory on disk.
-//
-// closurePath is the same just-realized agent-closure store path
-// runner.NewAgentGeneration derives AgentFiles/AgentEnv/NixConfigFile/
-// PrefetchFile/Generation from (e.g. freshness.Result.TipTag under bwrap);
-// generation here is derived the identical way (closureGeneration/
-// safePathComponent) so this function's snapshot dir and
-// NewAgentGeneration's own Generation field always name the same directory.
-// pwd is the launcher's own working directory, mirroring every other
-// nixVarSnapshotDir/nixVarSnapshotRoot caller in this file.
-//
-// Unlike EnsureReady, this never calls reclaimStaleSnapshots -- reclaim
-// stays a build-time-only operation. A dispatch.Dispatch can launch a Box
-// (Run), finish it, and sit idle for minutes waiting on CI before launching
-// another Box against the same generation (Fix) -- during that gap no flock
-// is held on its generation dir at all, so a swap reclaiming here could
-// delete a generation a still-live Dispatch will need again. There is no
-// mechanism tracking which generations a live-but-idle Dispatch references
-// across that gap, so a hot-swapped run simply accumulates generation
-// directories for the life of the launcher process; they're cleaned up on
-// the next `launcher build`. ADR 0043's Consequences section records this
-// as an accepted divergence from the concurrent-Box-bounded reclaim it
-// originally specified, not an oversight.
-//
-// Idempotent per closure: generations are immutable once created (keyed by
-// closure path, see above), and a generation dir may already be
-// --overlay-src-mounted by a live Box (e.g. a revert commit swapping back to
-// a previously-seen closure). vacuumStoreDBInto renames the existing
-// db.sqlite aside and writes a fresh one in its place, which would mutate a
-// file a running Box is reading (forbidden by ADR 0043) -- so if dir's
-// db.sqlite already exists, this skips the vacuum entirely.
-//
-// Otherwise mirrors EnsureReady's own MkdirAll-root-best-effort /
-// lockSnapshotShared-best-effort / vacuum / unlock shape and its
-// degrade-don't-lie posture: a failure to create the root or acquire the
-// snapshot lock only degrades a concurrent build/reclaim's ability to detect
-// this generation is mid-write (warn, continue) since the actual write below
-// is unaffected either way, but a vacuumStoreDBInto failure is real -- the
-// generation this call was supposed to produce genuinely doesn't exist --
-// and propagates as this function's own returned error, exactly like
-// EnsureReady propagates snapshotStoreDB's.
+// SnapshotGeneration writes the nix-var snapshot for a closure hot-swapped
+// mid-run (ADR 0043, issue #2682), before binding it: Run's stat guard fails a
+// Box naming a generation with no directory. It skips the vacuum when db.sqlite
+// already exists, since a live Box may be reading it, and never reclaims: an
+// idle Dispatch holds no flock on a generation it will launch against again.
 func SnapshotGeneration(pwd, closurePath string) error {
 	generation := closureGeneration(closurePath)
 	dir := nixVarSnapshotDir(pwd, generation)
@@ -1772,37 +1309,26 @@ func SnapshotGeneration(pwd, closurePath string) error {
 	return err
 }
 
-// hostNixDBPath is the host's real, live nix store database — never a path
-// inside a sandbox. snapshotStoreDB runs during `launcher build`, on the
-// operator's (or CI job's) own machine.
+// hostNixDBPath is the host's real, live nix store database, never a path inside
+// a sandbox: snapshotStoreDB runs during `launcher build`, on the operator's own
+// machine. It is the one Go call site that reaches into live host store metadata.
 const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
 
 // snapshotStoreDB copies the host's live nix store database into
-// a.nixVarSnapshotDir, compacting it in the same step (ADR 0042: ~302MB raw
-// vs ~104MB compacted — an overlay copy-up rewrites a file whole, so the
-// compacted size is what actually lands in the Box's tmpfs upper on first
-// touch). This is the one Go call site in the whole launcher that reaches
-// into the host's live nix store metadata (as opposed to a nix-store-
-// realized artifact). The resulting file's ownership is whatever uid runs
-// `launcher build` (the operator, or the CI job), never root, regardless of
-// hostNixDBPath's own ownership — sqlite3's "VACUUM INTO" always creates a
-// fresh file owned by the invoking process (ADR 0042's "agent-owned"
-// requirement), so no explicit chown is needed here.
+// a.nixVarSnapshotDir, compacting it in the same step (ADR 0042: ~302MB raw vs
+// ~104MB compacted, and an overlay copy-up rewrites a file whole, so the
+// compacted size is what lands in the Box's tmpfs upper on first touch). VACUUM
+// INTO creates a file owned by the invoking uid, so no explicit chown is needed.
 func (a *bwrapBuildAdapter) snapshotStoreDB() error {
 	fmt.Println("==> bwrap runner: snapshotting host nix store DB (VACUUMed)")
 	return vacuumStoreDBInto(a.nixVarSnapshotDir)
 }
 
-// vacuumStoreDBInto does the actual VACUUM INTO/backup-rename work
-// snapshotStoreDB used to do inline against a.nixVarSnapshotDir, factored
-// out to a free function over an explicit dir parameter (issue #2682's
-// hot-swap slice) so a run-time caller — SnapshotGeneration, invoked once
-// per hot-swap rather than once per `launcher build` — can reuse the exact
-// same VACUUM INTO/backup-rename dance against a directory it derives
-// itself, instead of this logic only ever being reachable through a
-// bwrapBuildAdapter's own startup-baked nixVarSnapshotDir field. Writes
-// dir's own db.sqlite (dir/nix/db/db.sqlite), the shared destination layout
-// nixVarSnapshotDir's callers all expect.
+// vacuumStoreDBInto does the VACUUM INTO and backup-rename work against an
+// explicit dir, so the run-time hot-swap caller (SnapshotGeneration) reuses it
+// rather than reaching it only through a bwrapBuildAdapter's baked field (issue
+// #2682). Writes dir/nix/db/db.sqlite, the layout every nixVarSnapshotDir caller
+// expects.
 func vacuumStoreDBInto(dir string) error {
 	if err := statHostNixDB(); err != nil {
 		return fmt.Errorf("host nix store db not found at %s: %w", hostNixDBPath, err)
@@ -1813,24 +1339,10 @@ func vacuumStoreDBInto(dir string) error {
 		return fmt.Errorf("mkdir nix-var-snapshot: %w", err)
 	}
 
-	// "VACUUM INTO" uses the same online-backup mechanism as sqlite's ".backup"
-	// dot-command internally, so it correctly handles a concurrent host
-	// nix-daemon write (WAL journal not yet checkpointed) that a plain file
-	// copy could snapshot mid-write, producing a truncated/inconsistent
-	// database — while also compacting into the destination in the same
-	// step, so no separate VACUUM pass is needed. dest is escaped for
-	// embedding in a single-quoted SQL string literal; sqlite3's dot-commands
-	// are whitespace-tokenized (a bare ".backup <dest>" with a space in dest
-	// breaks), but a SQL statement passed as sqlite3's third argv element is
-	// not.
-	//
-	// "VACUUM INTO" refuses to run if dest already exists (e.g. a prior
-	// `launcher build` on the same nixVarSnapshotDir), so move any existing
-	// snapshot aside instead of deleting it outright: if VACUUM INTO then
-	// fails (disk full, host db locked), the rename below lets us restore the
-	// previously-working snapshot instead of leaving `launcher run` unable to
-	// start from a snapshot that was destroyed for nothing (issue #2664
-	// review finding).
+	// "VACUUM INTO" refuses to run when dest already exists, so move an existing
+	// snapshot aside rather than deleting it outright: if the vacuum then fails
+	// (disk full, host db locked), the rename below restores the previously
+	// working snapshot instead of leaving `launcher run` with nothing (#2664).
 	backup := dest + ".bak"
 	hadBackup := false
 	if _, err := os.Stat(dest); err == nil {
@@ -1842,6 +1354,11 @@ func vacuumStoreDBInto(dir string) error {
 		return fmt.Errorf("stat nix store db snapshot %s: %w", dest, err)
 	}
 
+	// "VACUUM INTO" uses sqlite's online-backup mechanism, so it handles a
+	// concurrent nix-daemon write (WAL not yet checkpointed) that a plain file
+	// copy could snapshot mid-write, and it compacts into the destination in the
+	// same step. dest is escaped for a single-quoted SQL literal; sqlite3's
+	// dot-commands are whitespace-tokenized, but a SQL statement on argv is not.
 	escapedDest := strings.ReplaceAll(dest, "'", "''")
 	stmt := fmt.Sprintf("VACUUM INTO '%s';", escapedDest)
 	vacuumInto := execCommand("sqlite3", hostNixDBPath, stmt)
@@ -1858,9 +1375,8 @@ func vacuumStoreDBInto(dir string) error {
 	}
 
 	if hadBackup {
-		// Backup cleanup is best-effort: a leftover .bak file wastes disk but
-		// doesn't break the snapshot VACUUM INTO just wrote to dest, so it's
-		// not worth failing an otherwise-successful EnsureReady over.
+		// Best-effort: a leftover .bak wastes disk but does not break the
+		// snapshot just written to dest.
 		if err := os.Remove(backup); err != nil {
 			fmt.Printf("==> bwrap runner: warning: could not remove backup snapshot %s: %v\n", backup, err)
 		}
@@ -1869,25 +1385,10 @@ func vacuumStoreDBInto(dir string) error {
 }
 
 // reclaimStaleSnapshots removes generation directories under root that are
-// neither keepGeneration (the generation this build invocation just
-// produced/is using) nor still referenced by a live Box. Liveness is
-// detected via bwrapAdapter.Run's own shared lock: a non-blocking exclusive
-// Flock attempt on the generation's sibling snapshotLockPath fails while any
-// Box holds the shared lock Run takes for the life of the sandboxed
-// process, and succeeds once none do -- no separate box->generation
-// tracking is needed anywhere else. This loop removes only the generation
-// dir, never its lock file directly (see snapshotLockPath/lockSnapshotShared)
-// -- the lock file outlives its generation dir by at least one reclaim pass,
-// removed later (and only then) by sweepOrphanedLock below, once a pass's own
-// os.ReadDir no longer sees a matching dir for it; lockSnapshotShared's own
-// doc comment covers why a caller mid-lock-acquire tolerates that removal
-// instead of it silently breaking mutual exclusion. A root that doesn't exist
-// yet (e.g. the very first build) is not an error; there is simply nothing to
-// reclaim. Every
-// other step is best-effort per entry: a failure removing one stale
-// generation is warned and reclamation continues with the rest, matching
-// this file's own degrade-don't-lie precedent rather than aborting the
-// whole pass over one bad entry.
+// neither keepGeneration nor still referenced by a live Box. Liveness is a
+// non-blocking exclusive Flock on the generation's sibling lock file, which
+// fails while any Box holds the shared lock Run takes. It never removes the lock
+// file itself; sweepOrphanedLock does that a pass later. Per-entry errors warn.
 func reclaimStaleSnapshots(root, keepGeneration string) error {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -1896,12 +1397,10 @@ func reclaimStaleSnapshots(root, keepGeneration string) error {
 		}
 		return fmt.Errorf("read nix-var-snapshot root %s: %w", root, err)
 	}
-	// Captured once, before any removal in this pass, so sweepOrphanedLock
-	// can tell "orphaned before this pass started" (safe to remove its lock)
-	// apart from "this pass itself just reclaimed it a moment ago" (must
-	// not touch its lock -- see sweepOrphanedLock). Directory entries sort
-	// before their "<name>.lock" sibling, so a live os.Stat post-removal
-	// would always see the former as gone (issue #2680 review finding).
+	// Captured before any removal in this pass so sweepOrphanedLock can tell
+	// "orphaned before this pass started" from "this pass just reclaimed it".
+	// Directory entries sort before their "<name>.lock" sibling, so a live
+	// post-removal os.Stat would always see the former as gone (issue #2680).
 	knownGenerations := make(map[string]bool, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -1926,7 +1425,7 @@ func reclaimStaleSnapshots(root, keepGeneration string) error {
 		}
 		lockRaceWindowHook()
 		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-			// A live Box holds the shared lock -- leave this generation alone.
+			// A live Box holds the shared lock, so leave this generation alone.
 			lf.Close()
 			continue
 		}
@@ -1942,28 +1441,18 @@ func reclaimStaleSnapshots(root, keepGeneration string) error {
 	return nil
 }
 
-// sweepOrphanedLock removes entryName from root if it's a "<generation>.lock"
-// file whose generation dir was already absent from knownGenerations -- the
-// set of directories present when this pass's os.ReadDir ran, before any of
-// this pass's own removals (e.g. Run created the lock file via
-// lockSnapshotShared's O_CREATE, then lost the re-verify-after-lock race
-// against an *earlier* reclaim pass that had already RemoveAll'd the dir) --
-// otherwise these accumulate in root forever, since the main loop above only
-// ever considers directory entries. knownGenerations, not a live os.Stat,
-// is what makes this safe: a live check would also treat "this pass just
-// RemoveAll'd it a moment ago" as orphaned, deleting a lock file whose
-// generation was still live at the start of the pass and breaking mutual
-// exclusion for anyone concurrently holding it (issue #2680 review
-// finding). Best-effort and silent on any failure, same posture as every
-// other per-entry step in reclaimStaleSnapshots: a leftover orphaned lock
-// file wastes a negligible amount of disk, never correctness.
+// sweepOrphanedLock removes entryName from root when it is a "<generation>.lock"
+// whose generation dir was already absent from knownGenerations, since the main
+// loop only considers directory entries and these would otherwise accumulate
+// forever. knownGenerations, not a live os.Stat, is what makes it safe: a live
+// check would also treat "this pass just removed it" as orphaned (issue #2680).
 func sweepOrphanedLock(root, entryName, keepGeneration string, knownGenerations map[string]bool) {
 	generation, ok := strings.CutSuffix(entryName, ".lock")
 	if !ok || generation == keepGeneration {
 		return
 	}
 	if knownGenerations[generation] {
-		return // generation dir was present at the start of this pass -- not orphaned
+		return // the generation dir was present at the start of this pass
 	}
 	lockPath := filepath.Join(root, entryName)
 	lf, err := os.OpenFile(lockPath, os.O_RDWR, 0o644)
@@ -1972,8 +1461,8 @@ func sweepOrphanedLock(root, entryName, keepGeneration string, knownGenerations 
 	}
 	lockRaceWindowHook()
 	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		// Still referenced (e.g. Run is mid-race, about to discover its
-		// generation dir is gone) -- leave it for a later reclaim pass.
+		// Still referenced (Run may be mid-race, about to discover its
+		// generation dir is gone); leave it for a later reclaim pass.
 		lf.Close()
 		return
 	}
@@ -2008,22 +1497,18 @@ func (a *bwrapBuildAdapter) Run(_ Box) error {
 // Reap is a no-op for the build adapter.
 func (a *bwrapBuildAdapter) Reap(_ string) error { return nil }
 
-// Kill is a no-op for the build adapter — it never launches a box, so there
-// is nothing to kill.
+// Kill is a no-op for the build adapter: it never launches a box.
 func (a *bwrapBuildAdapter) Kill(_ string) error { return nil }
 
-// IsRunning always reports false for the build adapter: it never launches a
-// box, so there is nothing to be running.
+// IsRunning always reports false: the build adapter never launches a box.
 func (a *bwrapBuildAdapter) IsRunning(_ string) bool { return false }
 
-// ListRunning always returns an empty list for the build adapter: it never
-// launches a box, so there is nothing running to find.
+// ListRunning always returns an empty list: the build adapter never launches a
+// box.
 func (a *bwrapBuildAdapter) ListRunning() ([]string, error) { return nil, nil }
 
-// RegistryProxyTransport always reports a unix Endpoint for the build
-// adapter, mirroring bwrapAdapter's own answer (issue #3111): it never
-// launches a box either, so there is nothing to probe, and bwrap's own
-// behaviour is unchanged regardless of adapter variant.
+// RegistryProxyTransport always reports a unix Endpoint, mirroring bwrapAdapter's
+// own answer (issue #3111); the build adapter never launches a box to probe.
 func (a *bwrapBuildAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	return registrymanifest.NewUnixEndpoint(""), false, nil
 }

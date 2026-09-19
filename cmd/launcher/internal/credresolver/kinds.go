@@ -2,13 +2,11 @@ package credresolver
 
 import "slices"
 
-// StoreFacts is the dependency-free stand-in for an ecosystem.Declaration:
-// credresolver imports stdlib only (it must never grow an import of
-// ecosystem, registrydiscover, or registryvocab), so a store kind's
-// StoreConfig takes this instead of the real declaration type. Host and
-// HostKey are deliberately distinct fields, not one field two callers
-// reinterpret: npmrc's store keys on the raw host, gradle-properties' keys
-// on registryvocab.HostKey(host), and those are not the same value.
+// StoreFacts is a dependency-free stand-in for an ecosystem.Declaration:
+// credresolver imports stdlib only and must never grow an import of
+// ecosystem, registrydiscover, or registryvocab. Host and HostKey hold
+// different values: npmrc's store keys on the raw host, gradle-properties'
+// on registryvocab.HostKey(host).
 type StoreFacts struct {
 	Host            string
 	HostKey         string
@@ -16,68 +14,54 @@ type StoreFacts struct {
 	RegistryName    string
 }
 
-// Kind is one row of the seven-source table: the operator-facing TOML
-// spelling plus every column New and a discovery-side store lookup dispatch
-// on. kindTable's row order is the canonical source-key order, which callers
-// read back through SourceKeys().
+// Kind is one row of the seven-source table. kindTable's row order is the
+// canonical source-key order, which callers read back through SourceKeys().
 type Kind struct {
-	// SourceKey is the operator-facing TOML key naming this source (ADR
-	// 0045), e.g. "env", "cargo-credentials".
+	// SourceKey is the operator-facing TOML key naming this source (ADR 0045).
 	SourceKey string
 	// CompanionKey is the TOML key alongside SourceKey supplying a second
-	// required value (RegistryName, PropertyKey) -- "" when this kind
-	// takes no companion. registry-name and key are companions, never
-	// sources, in their own right.
+	// required value, "" when this kind takes no companion. A companion key
+	// is never a source key in its own right.
 	CompanionKey string
-	// FileFormat is the value New's Config.FileFormat takes for this kind
-	// -- "" for env and exec, neither of which is file-backed.
+	// FileFormat is "" for env and exec, neither of which is file-backed.
 	FileFormat string
 	// ArgvValue is true only for exec, whose TOML value is an argv array
-	// rather than a string -- the one kind parseCredential must pull out
-	// of the generic string/empty check.
+	// rather than a string, so parseCredential must pull it out of the
+	// generic string/empty check.
 	ArgvValue bool
 
 	// ValueField selects the Config field this kind's primary value lands
-	// in. nil only for exec, which lands in Config.ExecArgv instead (see
-	// ArgvValue).
+	// in. nil only for exec, which lands in Config.ExecArgv instead.
 	ValueField func(*Config) *string
-	// CompanionField selects the Config field this kind's companion value
-	// lands in -- nil when CompanionKey is "".
+	// CompanionField is nil when CompanionKey is "".
 	CompanionField func(*Config) *string
 
-	// StorePath is this kind's discoverable store file as $HOME-relative
-	// path segments, nil when the kind is not a store. env and exec are
-	// never searched (env is only the unmatched-host placeholder); file/raw
-	// is not a store either -- only four of the seven kinds are.
+	// StorePath is this kind's store file as $HOME-relative path segments,
+	// nil for the three kinds that are not stores (env, exec, file/raw).
 	StorePath []string
-	// StoreConfig builds the Config a discovery-side store lookup produces
-	// for this kind, given the store's resolved path and the route's
-	// facts. nil when the kind is not a store.
+	// StoreConfig builds the Config a discovery-side store lookup produces,
+	// given the store's resolved path and the route's facts. nil when the
+	// kind is not a store.
 	StoreConfig func(path string, f StoreFacts) Config
 	// StoreApplicable reports whether this store kind applies given f; nil
-	// means always applicable. Only cargo-credentials' is non-nil: a cargo
-	// store lookup only makes sense once the ecosystem names a registry.
+	// means always applicable. Only cargo-credentials sets it, because a
+	// cargo store lookup needs the ecosystem to name a registry first.
 	StoreApplicable func(f StoreFacts) bool
 
-	// newFileResolver builds New's Resolver adapter for this kind from a
-	// Config. Non-nil only for the five file-backed kinds (file/raw,
-	// netrc, cargo-credentials, npmrc, gradle-properties) -- New walks the
-	// table by matching FileFormat rather than switching on it directly.
+	// newFileResolver is non-nil only for the five file-backed kinds. New
+	// walks the table matching FileFormat rather than switching on it.
 	newFileResolver func(Config) Resolver
 
 	// storeSearchOrder is this store kind's position in the documented
-	// search order (netrc, npmrc, cargo-credentials, gradle-properties) --
-	// zero and unused on the three non-store kinds. Deliberately differs
-	// from kindTable's own row order, which places cargo-credentials
-	// before npmrc.
+	// search order, which differs from kindTable's row order. Zero and
+	// unused on the three non-store kinds.
 	storeSearchOrder int
 }
 
 // kindTable is the seven credential sources in canonical source-key order.
-// registryroutes takes that order from here (its credentialSourceKeys is
-// credresolver.SourceKeys()), and it is load-bearing twice over there: the
-// "names more than one source" error text and the retired-key renderer's key
-// order both key off it, so reordering a row here is operator-visible.
+// registryroutes takes that order from here for its "names more than one
+// source" error text and its retired-key renderer, so reordering a row here
+// is operator-visible.
 var kindTable = []Kind{
 	{
 		SourceKey:  "env",
@@ -155,9 +139,8 @@ var kindTable = []Kind{
 }
 
 // clone is the copy every accessor below hands out. A Kind copied by value
-// still shares its StorePath backing array with the package's own table, so
-// a caller writing StorePath[0] would rewrite the table for every later
-// call.
+// still shares its StorePath backing array with kindTable, so a caller
+// writing StorePath[0] would rewrite the table for every later call.
 func (k Kind) clone() Kind {
 	if k.StorePath != nil {
 		k.StorePath = append([]string(nil), k.StorePath...)
@@ -165,9 +148,8 @@ func (k Kind) clone() Kind {
 	return k
 }
 
-// Kinds returns the seven-entry table in kindTable's order. Each
-// row is a copy per call, StorePath included, so a caller mutating its
-// result can't corrupt the package's own table for a later call.
+// Kinds returns the seven-entry table in kindTable's order, each row a fresh
+// copy so a caller mutating the result cannot corrupt the table.
 func Kinds() []Kind {
 	out := make([]Kind, len(kindTable))
 	for i, k := range kindTable {
@@ -176,8 +158,8 @@ func Kinds() []Kind {
 	return out
 }
 
-// KindBySourceKey looks up a kind by its operator-facing TOML key (e.g.
-// "cargo-credentials"), reporting false when key names none of the seven.
+// KindBySourceKey looks up a kind by its operator-facing TOML key, reporting
+// false when key names none of the seven.
 func KindBySourceKey(key string) (Kind, bool) {
 	for _, k := range kindTable {
 		if k.SourceKey == key {
@@ -187,8 +169,8 @@ func KindBySourceKey(key string) (Kind, bool) {
 	return Kind{}, false
 }
 
-// SourceKeys returns the seven operator-facing TOML keys, in kindTable's
-// order -- registryroutes' credentialSourceKeys is this call.
+// SourceKeys returns the seven operator-facing TOML keys in kindTable's
+// order.
 func SourceKeys() []string {
 	out := make([]string, len(kindTable))
 	for i, k := range kindTable {
@@ -197,9 +179,9 @@ func SourceKeys() []string {
 	return out
 }
 
-// IsCompanionKey reports whether key is one of the companion keys
-// (registry-name, key) rather than a source key -- a companion key is
-// never valid as a route's top-level credential source.
+// IsCompanionKey reports whether key is a companion key (registry-name, key)
+// rather than a source key. A companion key is never valid as a route's
+// top-level credential source.
 func IsCompanionKey(key string) bool {
 	if key == "" {
 		return false
@@ -212,12 +194,9 @@ func IsCompanionKey(key string) bool {
 	return false
 }
 
-// StoreKinds returns the four discoverable stores (netrc, npmrc,
-// cargo-credentials, gradle-properties) in the documented search order --
-// distinct from kindTable's own row order (see Kind.storeSearchOrder).
-// env, exec, and file/raw are never stores, so they're excluded. This is
-// the single source of truth for both the search order and each store's
-// path; cmd/launcher/registrydiscover.go derives its store list by walking
+// StoreKinds returns the four discoverable stores in the documented search
+// order, which differs from kindTable's row order. It is the single source
+// of truth for both that order and each store's path; registrydiscover walks
 // this slice rather than keeping its own copy.
 func StoreKinds() []Kind {
 	var out []Kind

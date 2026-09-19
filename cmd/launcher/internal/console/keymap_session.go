@@ -4,9 +4,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// sessionBindings is the keymap cluster for ModeList's session-level keys —
-// orphan adoption, parallelism cap, rebuild, and rebuild-output open
-// (entries 36-40 of the original keymap literal).
+// sessionBindings holds ModeList's session-level keys: orphan adoption,
+// parallelism cap, rebuild, and rebuild-output open.
 var sessionBindings = []Binding{
 	{
 		Keys: []string{"A"}, Modes: []Mode{ModeList},
@@ -29,12 +28,10 @@ var sessionBindings = []Binding{
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if t.launch != nil {
 				t.launch.Resize(1)
-				// Resize's own Grown signal only reaches a drain already
-				// running; a session with no active drain (nothing picked
-				// yet, or the last one already went idle) has no listener to
-				// catch it, so a raise falls back to tryLaunch — a no-op if a
-				// drain is in fact already running, or if nothing is
-				// queued/held to launch into the freed slot (#754).
+				// Resize's Grown signal only reaches a drain that is already
+				// running, so a session with no active drain would miss the
+				// raise. tryLaunch covers that case and is a no-op when a
+				// drain is running or nothing is queued or held (#754).
 				t.launch.tryLaunch(t.tracker, t.pwd)
 			}
 			return t, nil

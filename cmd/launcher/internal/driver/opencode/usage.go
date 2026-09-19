@@ -13,9 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// stepEvent decodes the fields of one opencode NDJSON line that this file
-// cares about: a step_start's timestamp (the run's start-of-turn marker) or a
-// step_finish's timestamp, per-turn token/cost tallies, and cache figures.
+// stepEvent decodes only the opencode NDJSON fields this file reads.
 type stepEvent struct {
 	Type      string   `json:"type"`
 	Timestamp int64    `json:"timestamp"`
@@ -41,27 +39,11 @@ type stepTokenCache struct {
 	Read  int `json:"read"`
 }
 
-// breakdownByModelFile scans the file at path and returns per-model token
-// breakdowns, split into the five billable categories, by parsing
-// step_finish events.
-//
-// Each step_finish in opencode's NDJSON stream is one API call's own
-// per-call usage — like claude-code's per-message usage, not a cumulative
-// running total — so aggregation here is a SUM across every DISTINCT
-// part.messageID, keyed by the exact part.modelID. opencode can re-emit
-// multiple lines for one message's part (mirroring claude-code's
-// multi-content-block re-emit), each carrying the SAME messageID; summing
-// every such line would double-count that one call's usage. The first
-// occurrence of a non-empty messageID wins and every later line sharing
-// that id is skipped; a line with an empty messageID is always counted,
-// since there is nothing to dedup it against. Reasoning tokens fold into
-// OutputTokens, matching Totals's aggregate. opencode's tokens.cache
-// carries a single collapsed write total with no TTL split (unlike
-// claude-code's ephemeral_5m/1h split), so the whole write total is
-// attributed to the 5-minute bucket — the Anthropic-backed default TTL is
-// 5m, mirroring claude's own collapsed-total fallback rule.
-//
-// Returns (nil, nil) when the file does not exist.
+// breakdownByModelFile returns per-model breakdowns from the step_finish events
+// in the file at path, or (nil, nil) when the file is absent. Each event is one
+// call's own usage, not a running total, so these sum; opencode re-emits lines
+// sharing a messageID, so the first occurrence wins. tokens.cache.write has no
+// TTL split, so it all lands in the 5m bucket, the Anthropic default TTL.
 func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 	buckets := make(map[string]*usage.ModelUsage)
 	ensure := func(model string) *usage.ModelUsage {
@@ -106,9 +88,8 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 		return nil, err
 	}
 
-	// Deterministic order: sort by exact model id ascending. opencode
-	// models are not claude families, so there is no family-rank pass —
-	// "unknown" sorts by its literal string like any other id.
+	// opencode models are not claude families, so there is no family-rank
+	// pass; "unknown" sorts by its literal string like any other id.
 	var models []string
 	for model := range buckets {
 		models = append(models, model)
@@ -121,35 +102,15 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 	return result, nil
 }
 
-// breakdownByModel indirects to breakdownByModelFile so tests can simulate a
-// breakdownByModelFile I/O error without a real filesystem race between it
-// and the step_finish aggregation scan.
+// breakdownByModel indirects so tests can simulate an I/O error without a real
+// filesystem race against the step_finish aggregation scan.
 var breakdownByModel = breakdownByModelFile
 
-// ExtractUsage scans logPath — an opencode NDJSON run log — and sums the
-// per-turn token/cost tallies carried by every step_finish event into one
-// aggregate usage.Report.
-//
-// Each step_finish is an independent per-turn tally, not a cumulative
-// snapshot (unlike claude-code's single result event), so aggregation here
-// is a plain sum over every step_finish line — no dedup or "last one wins"
-// logic is needed. Reasoning tokens are folded into OutputTokens since
-// opencode reports them as a separate token class but spindrift's
-// usage.Usage has no distinct reasoning field. DurationMs is wall-clock: the
-// last step_finish timestamp minus the first step_start timestamp seen in
-// the log. DurationApiMs is left zero — opencode's NDJSON stream carries no
-// separate api-only timing. usage.Report.SummedByModel is populated
-// separately by breakdownByModel, which sums per-call usage across distinct
-// messageIDs (dedup collapses multi-part re-emits of one message) keyed by
-// exact modelID; opencode's single tokens.cache.write total maps to the
-// 5-minute cache-write bucket since opencode reports no TTL split. A
-// breakdownByModel I/O error degrades only the per-model section
-// (SummedByModel is set to nil with a stderr warning), not the aggregate
-// Totals already summed above.
-//
-// Returns usage.Report{Found: false} when the log contains no step_finish
-// event or does not exist. Returns (usage.Report{}, err) on other I/O
-// errors.
+// ExtractUsage sums the per-turn tallies of every step_finish in the opencode
+// NDJSON log at logPath into one usage.Report. Each step_finish is an
+// independent per-turn tally, not a cumulative snapshot, so a plain sum is
+// correct here. DurationApiMs stays zero because opencode logs no api-only
+// timing. Found is false when the log has no step_finish event or is absent.
 func ExtractUsage(logPath string) (usage.Report, error) {
 	var u usage.Usage
 	var firstStart, lastFinish int64
@@ -188,25 +149,22 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		return usage.Report{Found: false}, nil
 	}
 
-	// Only report wall-clock when a step_start anchored the window; a
-	// step_finish with no preceding step_start would otherwise subtract a
-	// zero firstStart and yield a raw epoch-ms figure.
+	// Without a step_start to anchor the window, subtracting a zero firstStart
+	// would report a raw epoch-ms figure as the duration.
 	if haveStart {
 		u.DurationMs = lastFinish - firstStart
 	}
 
-	// A breakdownByModel I/O error degrades the per-model section, not the
-	// aggregate totals already parsed above — mirrors claude's ExtractUsage
-	// (issue #674).
+	// An I/O error here degrades only the per-model section, not the totals
+	// already parsed above, mirroring claude's ExtractUsage (issue #674).
 	models, err := breakdownByModel(logPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
 	report := usage.Report{Totals: u, Found: true, SummedByModel: models}
-	// Mirror the haveStart guard above: EarliestEventMs/LatestEventMs are
-	// only meaningful when a step_start anchored the window, matching
-	// DurationMs's own condition exactly.
+	// Same guard as DurationMs: the event span means nothing unless a
+	// step_start anchored the window.
 	if haveStart {
 		report.EarliestEventMs = firstStart
 		report.LatestEventMs = lastFinish

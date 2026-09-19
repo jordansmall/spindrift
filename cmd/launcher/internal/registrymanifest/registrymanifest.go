@@ -1,11 +1,7 @@
 // Package registrymanifest is the shared handoff type for the registry
-// proxy's Box-facing contract (ADR 0045): everything a Box needs to know
-// about the proxy -- where it is reachable, and which route prefixes map to
-// which upstream hosts -- crosses in one JSON document carried by a single
-// environment variable, rather than one environment variable per
-// routes-file field. The launcher mints a Manifest and encodes it; the
-// bind-registry verb parses the same string back. Both sides import this
-// package so the shape can never drift between mint and parse.
+// proxy's Box-facing contract (ADR 0045). The launcher mints a Manifest and
+// encodes it into one environment variable, the bind-registry verb parses it
+// back, and both import this package so the shape cannot drift.
 package registrymanifest
 
 import (
@@ -18,23 +14,18 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// EnvVar is the environment variable name carrying the encoded manifest
-// (ADR 0045). Both the launcher (mint) and the bind-registry verb (parse)
-// import this constant rather than each hard-coding the string, so a rename
-// can't silently split the two sides of the handoff.
+// EnvVar names the environment variable carrying the encoded manifest (ADR
+// 0045). Both sides import it, so a rename cannot split the handoff.
 const EnvVar = "REGISTRY_PROXY_MANIFEST"
 
-// TCPSecretHeader is the HTTP header a Box must carry the per-run TCP
-// secret in on every request when the registry proxy is served over
-// loopback TCP (issue #3111) -- a unix socket needs no equivalent since
-// its own filesystem permissions already gate access.
+// TCPSecretHeader carries the per-run TCP secret on every Box request when
+// the proxy is served over loopback TCP (issue #3111). A unix socket needs
+// none: its file permissions already gate access.
 const TCPSecretHeader = "X-Spindrift-Registry-Proxy-Secret"
 
-// endpointScheme discriminates an Endpoint's transport: exactly one of the
-// two ADR-0045 forms, "unix://<path>" or "tcp://<host>:<port>" -- the probe
-// this Endpoint is minted from (RegistryProxyTransport, issue #3111) always
-// picks one or the other, never both, so the zero value (neither) exists
-// only before ParseEndpoint/NewUnixEndpoint/NewTCPEndpoint has run.
+// endpointScheme is one of the two ADR-0045 forms, "unix://<path>" or
+// "tcp://<host>:<port>". The transport probe (issue #3111) always picks one,
+// so the zero value exists only before a constructor has run.
 type endpointScheme string
 
 const (
@@ -42,11 +33,9 @@ const (
 	schemeTCP  endpointScheme = "tcp"
 )
 
-// Endpoint is the typed value ADR 0045 assigns the manifest's "endpoint"
-// field: a unix domain socket path, or a TCP host:port pair. Fields are
-// unexported so a caller can't construct an incoherent value (e.g. a
-// scheme with both a path and a host) -- use NewUnixEndpoint,
-// NewTCPEndpoint, or ParseEndpoint.
+// Endpoint is the manifest's "endpoint" field (ADR 0045): a unix socket path
+// or a TCP host:port pair. The fields stay unexported so a caller cannot
+// build an incoherent value; use the constructors or ParseEndpoint.
 type Endpoint struct {
 	scheme endpointScheme
 	path   string
@@ -59,10 +48,8 @@ func NewUnixEndpoint(path string) Endpoint {
 	return Endpoint{scheme: schemeUnix, path: path}
 }
 
-// NewTCPEndpoint builds a TCP Endpoint from a host and port. The TCP
-// secret's value (carried per request via TCPSecretHeader) is deliberately
-// not a field here -- ADR 0045 keeps it in a separate env var, off the
-// manifest entirely, so it never round-trips through Encode/Parse.
+// NewTCPEndpoint builds a TCP Endpoint from a host and port. The TCP secret
+// is deliberately not a field: ADR 0045 keeps it in a separate env var.
 func NewTCPEndpoint(host, port string) Endpoint {
 	return Endpoint{scheme: schemeTCP, host: host, port: port}
 }
@@ -73,8 +60,7 @@ func (e Endpoint) IsUnix() bool { return e.scheme == schemeUnix }
 // IsTCP reports whether e is a TCP endpoint.
 func (e Endpoint) IsTCP() bool { return e.scheme == schemeTCP }
 
-// SocketPath returns the socket path for a unix endpoint, or "" for any
-// other endpoint (including the zero value).
+// SocketPath returns the socket path for a unix endpoint, or "" for any other endpoint.
 func (e Endpoint) SocketPath() string { return e.path }
 
 // Host returns the host for a TCP endpoint, or "" for any other endpoint.
@@ -83,8 +69,7 @@ func (e Endpoint) Host() string { return e.host }
 // Port returns the port for a TCP endpoint, or "" for any other endpoint.
 func (e Endpoint) Port() string { return e.port }
 
-// String renders e in the ADR-0045 string form, the exact inverse of
-// ParseEndpoint for any Endpoint ParseEndpoint itself produced.
+// String renders e in the ADR-0045 string form, the inverse of ParseEndpoint.
 func (e Endpoint) String() string {
 	switch e.scheme {
 	case schemeUnix:
@@ -96,16 +81,14 @@ func (e Endpoint) String() string {
 	}
 }
 
-// MarshalJSON renders e as its ADR-0045 string form -- the manifest's
-// "endpoint" field is a string, not an object, so Endpoint's Go struct
-// shape stays a private implementation detail on the wire.
+// MarshalJSON renders e as its ADR-0045 string form: the manifest's
+// "endpoint" field is a string on the wire, not an object.
 func (e Endpoint) MarshalJSON() ([]byte, error) {
 	return json.Marshal(e.String())
 }
 
-// UnmarshalJSON parses the "endpoint" field's string form via ParseEndpoint,
-// so a malformed endpoint fails at Manifest-decode time with an
-// *EndpointError, not later when some accessor is first called.
+// UnmarshalJSON parses the "endpoint" field through ParseEndpoint, so a bad
+// endpoint fails at decode time with an *EndpointError, not at first use.
 func (e *Endpoint) UnmarshalJSON(data []byte) error {
 	var raw string
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -119,10 +102,8 @@ func (e *Endpoint) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// EndpointError reports why Raw could not be parsed as an Endpoint. It
-// always names Raw in Error(), so a caller that only has the error (e.g. a
-// warning logged from bindregistry, later) can still identify the
-// offending endpoint without threading the raw string through separately.
+// EndpointError reports why Raw could not be parsed as an Endpoint. Error()
+// always names Raw, so a caller holding only the error can identify it.
 type EndpointError struct {
 	Raw    string
 	Reason string
@@ -132,10 +113,8 @@ func (e *EndpointError) Error() string {
 	return fmt.Sprintf("registrymanifest: endpoint %q: %s", e.Raw, e.Reason)
 }
 
-// ParseEndpoint parses the ADR-0045 endpoint string form, "unix://<path>"
-// or "tcp://<host>:<port>". Neither scheme's host/port component is
-// validated further here (e.g. a unix path is not checked for existence) --
-// that is a later transport-probe concern, not a manifest-parsing one.
+// ParseEndpoint parses "unix://<path>" or "tcp://<host>:<port>" (ADR 0045).
+// It checks no further: a unix path's existence is a transport-probe concern.
 func ParseEndpoint(raw string) (Endpoint, error) {
 	if raw == "" {
 		return Endpoint{}, &EndpointError{Raw: raw, Reason: "empty"}
@@ -156,27 +135,20 @@ func ParseEndpoint(raw string) (Endpoint, error) {
 	return Endpoint{}, &EndpointError{Raw: raw, Reason: `unrecognized scheme, must be "unix://" or "tcp://"`}
 }
 
-// Route is one manifest route (ADR 0045): the prefix a Box-bound request
-// arrives carrying, the upstream host it's rewritten toward, and the
-// per-ecosystem declarations a Box-side binding renderer works from.
+// Route is one manifest route (ADR 0045): the prefix a request arrives
+// carrying, the upstream host it is rewritten toward, and its declarations.
 type Route struct {
 	Prefix       string `json:"prefix"`
 	UpstreamHost string `json:"upstreamHost"`
-	// EnforcedPaths is copied one-to-one from registryproxy.Route's
-	// EnforcedSubtrees (issue #3259): the same derived path-set the Forwarder
-	// enforces, tagged by which ecosystem declared each entry, so a
-	// pre-clone client-side binding renderer (npm/yarn/pnpm) can pick out
-	// just its own ecosystem's path(s) -- these bindings run before a Box
-	// can re-derive anything from a Target repo checkout of its own.
+	// EnforcedPaths copies registryproxy.Route's EnforcedSubtrees (issue
+	// #3259), tagged by declaring ecosystem so a client-side binding renderer
+	// can pick out its own paths before a Box has a checkout to re-derive
+	// them from.
 	EnforcedPaths []registryvocab.Subtree `json:"enforcedPaths,omitempty"`
-	// Ecosystems is the route's per-ecosystem [routes.ecosystems.<name>]
-	// declaration block (issue #3403), copied one-to-one from
-	// registryproxy.Route's own Ecosystems field. It is the single carrier
-	// for every per-ecosystem declaration a route makes -- a cargo
-	// registries list, a gradle or go path, whatever a later row declares
-	// -- and each Box-side binding renderer reads its own ecosystem's entry
-	// back out of it (issue #3404). Omitted from the JSON entirely, not
-	// emitted empty, when the route declares nothing per-ecosystem.
+	// Ecosystems carries the route's [routes.ecosystems.<name>] blocks (issue
+	// #3403), which each Box-side binding renderer reads its own entry out of
+	// (issue #3404). A route declaring none omits the field, never emits it
+	// empty.
 	Ecosystems registryvocab.RouteEcosystems `json:"ecosystems,omitempty"`
 }
 
@@ -187,15 +159,12 @@ type Manifest struct {
 	Routes   []Route  `json:"routes"`
 }
 
-// ErrAbsent is returned by Parse for an empty string -- the distinct "no
-// manifest" answer distinguishing REGISTRY_PROXY_MANIFEST unset/empty (the
-// verb, later, stays silent) from a manifest present but malformed (the
-// verb warns). Check with errors.Is, not equality, since Parse only ever
-// returns this value directly, never wraps it.
+// ErrAbsent is Parse's distinct "no manifest" answer for an empty string, so
+// the verb can stay silent when REGISTRY_PROXY_MANIFEST is unset and warn
+// when one is present but malformed. Check it with errors.Is.
 var ErrAbsent = errors.New("registrymanifest: manifest absent")
 
-// Encode renders m as the compact JSON string form REGISTRY_PROXY_MANIFEST
-// carries.
+// Encode renders m as the compact JSON string REGISTRY_PROXY_MANIFEST carries.
 func Encode(m Manifest) (string, error) {
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -204,11 +173,10 @@ func Encode(m Manifest) (string, error) {
 	return string(b), nil
 }
 
-// validPrefixCharset reports whether prefix contains only [a-z0-9-] -- the
-// exact charset the launcher's own minting side (registryproxy.isValidPrefix)
-// already restricts a Prefix to. An empty prefix is not checked here; Parse
-// treats "" as its own allowed, no-prefix case (existing callers, e.g.
-// bindings mode's empty-prefix warn-and-skip, depend on it staying legal).
+// validPrefixCharset reports whether prefix contains only [a-z0-9-], the
+// charset registryproxy.isValidPrefix already mints within. An empty prefix
+// passes: Parse treats "" as its own legal no-prefix case, which callers
+// such as bindings mode's warn-and-skip depend on.
 func validPrefixCharset(prefix string) bool {
 	for i := 0; i < len(prefix); i++ {
 		c := prefix[i]
@@ -219,22 +187,11 @@ func validPrefixCharset(prefix string) bool {
 	return true
 }
 
-// Parse decodes raw -- the REGISTRY_PROXY_MANIFEST value -- into a
-// Manifest, validating its endpoint and every route's Prefix charset. raw ==
-// "" returns ErrAbsent, checkable with errors.Is, so a caller can
-// distinguish "no manifest" (silent) from every other error this returns
-// (manifest present but malformed: bad JSON, an endpoint ParseEndpoint
-// rejects, or a route Prefix outside [a-z0-9-]) -- the JSON and
-// *EndpointError cases wrap the underlying error via %w, so errors.As still
-// reaches it through this wrapper.
-//
-// The Prefix charset check is defense-in-depth, mirroring
-// ecosystem.CargoRegistryPlaceholders' own belt-and-suspenders guard: the
-// launcher only ever mints a Prefix from [a-z0-9-]
-// (registryproxy.isValidPrefix), but the Box interpolates Prefix into a
-// shell-sourced `export GOPROXY="…"` line and a Groovy double-quoted
-// GString (the gradle init script), either of which would execute an
-// unchecked character rather than merely misroute a request.
+// Parse decodes the REGISTRY_PROXY_MANIFEST value into a Manifest. An empty
+// raw returns ErrAbsent; other failures wrap with %w, so errors.As still
+// reaches an *EndpointError. The Prefix charset check is defense in depth: the
+// Box interpolates Prefix into a shell-sourced `export GOPROXY="…"` line and
+// a Groovy double-quoted GString, where an unchecked character would execute.
 func Parse(raw string) (Manifest, error) {
 	if raw == "" {
 		return Manifest{}, ErrAbsent

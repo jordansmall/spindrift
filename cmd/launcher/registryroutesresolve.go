@@ -13,18 +13,11 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// buildRegistryProxyRoutes is the single synthesis point for
-// dispatch.Config's resolved registry-proxy route table (issue #3139): a
-// routes file (ADR 0045), when set, is parsed and every route's credential
-// resolved. With no routes file, the registry proxy stays off -- there is no
-// other input this function looks at (issue #3145 retired the five scalar
-// REGISTRY_PROXY_* knobs' bridge-route synthesis; validateRetiredRegistryProxyKnobs
-// already refuses a run where any of them is still set, before this runs).
-//
-// AssignPrefixes runs here, once, over resolveRegistryRoutesFromFile's
-// result, so every production route table carries a Prefix (issue #3142)
-// while resolveRegistryRoutesFromFile stays testable on its own without also
-// having to reason about prefix assignment.
+// buildRegistryProxyRoutes resolves dispatch.Config's registry-proxy route
+// table (issue #3139) from the routes file (ADR 0045), the only input since
+// issue #3145 retired the scalar REGISTRY_PROXY_* knobs. AssignPrefixes runs
+// here, not in the file parser, so every production table carries a Prefix
+// (issue #3142) while the parser stays testable on its own.
 func buildRegistryProxyRoutes(c config) ([]registryproxy.Route, error) {
 	if c.registryProxyRoutesFile == "" {
 		return nil, nil
@@ -40,17 +33,11 @@ func buildRegistryProxyRoutes(c config) ([]registryproxy.Route, error) {
 	return registryproxy.AssignPrefixes(routes), nil
 }
 
-// resolveHostRootedUpstreams fills in Upstream and EnforcedPaths for every
-// route (all of them host-rooted since ADR 0047, issue #3261; Upstream still
-// "" from resolveRegistryRoutesFromFile) by deriving the enforced path-set
-// from deriveHostRootedPathSets, which owns the choice of where that
-// path-set comes from (issue #3310) -- host-side, before any Box starts.
-// Derivation runs whenever there is a route at all, even one declaring its
-// own upstream-origin: a declared origin replaces the derived origin, never
-// the derived subtrees, so what such a route enforces must not silently
-// depend on whether a checkout happened to be reachable. Every failure path
-// fails the launch closed, naming the affected route's match-host -- there
-// is no unenforced fallback.
+// resolveHostRootedUpstreams fills Upstream and EnforcedPaths for every route
+// (all host-rooted since ADR 0047, issue #3261). Derivation runs even for a
+// route declaring its own upstream-origin: that origin replaces the derived
+// origin, never the derived subtrees, so what a route enforces never depends
+// on whether a checkout was reachable. Every failure fails the launch closed.
 func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]registryproxy.Route, error) {
 	if len(routes) == 0 {
 		return routes, nil
@@ -80,31 +67,11 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 	return resolved, nil
 }
 
-// deriveHostRootedPathSets picks the one source of truth
-// resolveHostRootedUpstreams derives host-rooted routes' enforced path-sets
-// from, keyed on c.codeForge's HostMediatedRemote row the same way
-// seedAccumulationRepoIfHostMediated (bootstrap.go) and
-// absCodeForgeAccumulationRepoDir (main.go) already do, rather than a raw
-// c.codeForge == "local" string compare that a future host-mediated backend
-// would silently miss.
-//
-// A host-mediated forge (CODE_FORGE=local) derives from
-// c.codeForgeAccumulationRepoDir's c.baseBranch ref, not a cwd checkout:
-// buildRegistryProxyRoutes runs once per process in bootstrap(), after
-// seedAccumulationRepoIfHostMediated has already pushed pwd's own
-// baseBranch ref into the Accumulation repo and before any Box is
-// dispatched, so baseBranch is the one snapshot every route in this launch
-// can key on -- there is no per-seam integration/<parent> ref yet at this
-// point in bootstrap, and keying on one would be wrong regardless: that
-// branch carries landed agent work, and ADR 0047's containment story
-// requires the enforced set to come from a snapshot no in-Box agent can
-// widen. checkoutIsTargetRepo is skipped entirely on this path rather than
-// taught a "local" case -- its contract is remote-based identity, and a
-// host-mediated forge has no remote to compare against.
-//
-// Every other forge keeps the pre-#3310 gate byte-for-byte: a checkout
-// registryRouteDriftRepoDirFn resolves and checkoutIsTargetRepo positively
-// identifies as the Target repo, or the launch fails closed.
+// deriveHostRootedPathSets keys on c.codeForge's HostMediatedRemote row rather
+// than comparing c.codeForge against "local", which a future host-mediated
+// backend would miss. Such a forge derives from the Accumulation repo's
+// baseBranch ref (issue #3310), the one snapshot no in-Box agent can widen, and
+// skips checkoutIsTargetRepo, whose contract is remote-based identity.
 func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypathset.HostPathSet, error) {
 	row, _ := backendByName(c.codeForge)
 	if row.HostMediatedRemote {
@@ -127,35 +94,11 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 	return sets, nil
 }
 
-// applyHostPathSet projects the HostPathSet matching route's match-host (by
-// the registryvocab.HostKey normalization Derive already applied to sets' keys)
-// onto route: Upstream becomes the route's declared upstream-origin, or
-// failing that the path-set's origin with any trailing "/" trimmed, since
-// registryproxy.New rejects a host-rooted Upstream carrying a path;
-// EnforcedPaths the derived subtrees in derivation order, then
-// route.Allow, then each operator-declared path (declaredPaths); and
-// EnforcedSubtrees the derived subtrees, each tagged with its Ecosystem
-// (allow entries name none, so they never appear), plus one tagged entry
-// per declared path.
-//
-// EnforcedPaths dedupes, since a path repeated across derivation, allow,
-// and a declaration would read confusingly in the 403 body's listing.
-// EnforcedSubtrees deliberately does not: a declared path always gets its
-// own tagged entry even when it duplicates a derived or allow path, because
-// the Forwarder keys a rewrite row's bases off that tag (see
-// routeState.basesByEcosystem in registryproxy), not off the path's
-// presence in EnforcedPaths, and suppressing the append on collision would
-// silently drop the operator's explicit declaration.
-//
-// A route naming a host absent from sets, and declaring no upstream-origin
-// of its own, is an error naming that match-host, never a route left
-// unenforced. A declared path names one ecosystem's subtree, not an origin,
-// so it cannot establish an origin even when it is all the route declares --
-// the !ok branch below names whichever declarations are present rather than
-// inventing an origin from them. An upstream-origin can: such a route
-// resolves with hp's zero value, enforcing exactly what it declares itself
-// (allow plus declared paths, possibly nothing at all, which registryproxy
-// reads as default-deny).
+// applyHostPathSet projects the HostPathSet matching route's match-host onto
+// route. Upstream loses any trailing "/", since registryproxy.New rejects a
+// host-rooted Upstream carrying a path. A route naming a host absent from sets
+// and declaring no upstream-origin of its own is an error, never a route left
+// unenforced; one declaring an origin enforces only what it declares itself.
 func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet) (registryproxy.Route, error) {
 	hp, ok := sets[registryvocab.HostKey(route.MatchHost)]
 	if !ok && route.UpstreamOrigin == "" {
@@ -169,9 +112,8 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 		route.Upstream = route.UpstreamOrigin
 	}
 	paths := make([]string, len(hp.Subtrees))
-	// Field-by-field, not a copy of sub itself: this drops
-	// hp.Subtrees[i].RegistryName, which the proxy's manifest-facing
-	// EnforcedSubtrees has never carried.
+	// Field-by-field, not a copy of sub: this drops RegistryName, which the
+	// proxy's manifest-facing EnforcedSubtrees has never carried.
 	subtrees := make([]registryvocab.Subtree, len(hp.Subtrees))
 	for i, sub := range hp.Subtrees {
 		paths[i] = sub.Path
@@ -188,6 +130,10 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 		derived[allow] = true
 		paths = append(paths, allow)
 	}
+	// EnforcedPaths dedupes, EnforcedSubtrees does not: a declared path keeps
+	// its own tagged entry even when it duplicates a derived or allow path,
+	// because the Forwarder keys a rewrite row's bases off that tag (see
+	// routeState.basesByEcosystem in registryproxy), not off EnforcedPaths.
 	for _, d := range declaredPaths(route) {
 		subtrees = append(subtrees, registryvocab.Subtree{Ecosystem: d.ecosystem, Path: d.path})
 		if !derived[d.path] {
@@ -200,22 +146,16 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 	return route, nil
 }
 
-// declaredPath is one ecosystem.Table row's declared path (issue #3403),
-// read out of route.Ecosystems, paired with the ecosystem tag its
-// EnforcedSubtrees entry carries.
+// declaredPath is one ecosystem.Table row's declared path (issue #3403), read
+// out of route.Ecosystems with the tag its EnforcedSubtrees entry carries.
 type declaredPath struct {
 	ecosystem string
 	path      string
 }
 
-// declaredPaths returns route's Ecosystems block's declared paths, one per
-// ecosystem.Table row that has one, walking Table in its own load-bearing
-// order (issue #3403) rather than the block's own map -- Go map iteration
-// is random, and both the subtree/path append loop and
-// declaredPathAloneLabel need this enumeration deterministic. It is the
-// single enumeration of declared-path rows -- a row gaining a declared path
-// of its own needs no edit here, since the walk already reads every row's
-// block.
+// declaredPaths walks ecosystem.Table in Table's own order (issue #3403), not
+// route.Ecosystems' map, because Go map iteration is random and both callers
+// need this enumeration deterministic.
 func declaredPaths(route registryproxy.Route) []declaredPath {
 	var set []declaredPath
 	for _, row := range ecosystem.Table {
@@ -226,13 +166,8 @@ func declaredPaths(route registryproxy.Route) []declaredPath {
 	return set
 }
 
-// declaredPathAloneLabel names route's set declared paths by their
-// [routes.ecosystems.<name>] spelling, for applyHostPathSet's !ok branch:
-// none of them alone can establish a host-rooted route's upstream origin,
-// and that limitation reads identically whichever declaration(s) triggered
-// it, so one shared message names whichever declaration(s) are present
-// rather than duplicating near-identical prose per ecosystem or per
-// combination.
+// declaredPathAloneLabel names route's declared paths by their
+// [routes.ecosystems.<name>] spelling, for applyHostPathSet's error message.
 func declaredPathAloneLabel(route registryproxy.Route) string {
 	var labels []string
 	for _, d := range declaredPaths(route) {
@@ -241,13 +176,10 @@ func declaredPathAloneLabel(route registryproxy.Route) string {
 	return strings.Join(labels, " and ")
 }
 
-// resolveRegistryRoutesFromFile reads and parses routesFile (ADR 0045), then
-// resolves every route's credential exactly once via credresolver.New(...)
-// .Resolve() -- destructive for an env-var source (os.Unsetenv on success),
-// so a route's credential is never resolved (and never unset) more than once
-// per run. A resolve failure names the offending route's match-host, so a
-// multi-route file's failure doesn't leave an operator guessing which route
-// broke.
+// resolveRegistryRoutesFromFile parses routesFile (ADR 0045) and resolves each
+// route's credential exactly once: resolving an env-var source is destructive
+// (os.Unsetenv on success), so a second resolve would find nothing. A failure
+// names the offending route's match-host.
 func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, error) {
 	data, err := os.ReadFile(routesFile)
 	if err != nil {
@@ -270,10 +202,9 @@ func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, er
 			Ecosystems:     r.Ecosystems,
 			UpstreamOrigin: r.UpstreamOrigin,
 			Allow:          r.Allow,
-			// Upstream and EnforcedPaths are filled in by
-			// resolveHostRootedUpstreams, not here, since that needs the
-			// whole route slice plus a Target-repo checkout, neither of
-			// which resolveRegistryRoutesFromFile has reason to depend on.
+			// resolveHostRootedUpstreams fills Upstream and EnforcedPaths;
+			// it needs the whole route slice and a Target-repo checkout,
+			// which this function does not depend on.
 		})
 	}
 	return routes, nil

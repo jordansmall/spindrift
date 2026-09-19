@@ -9,50 +9,41 @@ import (
 type LandingKind int
 
 const (
-	// LandingPRURL is a github PR URL, the landing grammar CODE_FORGE=github
-	// records.
+	// LandingPRURL is a github PR URL, the landing grammar CODE_FORGE=github records.
 	LandingPRURL LandingKind = iota
-	// LandingBranchRef is a raw, pre-merge branch name — CODE_FORGE=local's
-	// landing record before its post-merge upgrade to LandingIntegrationRef,
-	// and CODE_FORGE=git's only landing shape.
+	// LandingBranchRef is a raw, pre-merge branch name: CODE_FORGE=local's record
+	// before its post-merge upgrade to LandingIntegrationRef, and CODE_FORGE=git's
+	// only landing shape.
 	LandingBranchRef
-	// LandingIntegrationRef is CODE_FORGE=local's immutable post-merge
-	// reference (ADR 0029/0033): the Integration branch name plus the commit
-	// sha the merge landed at, "<branch>@<sha>".
+	// LandingIntegrationRef is CODE_FORGE=local's immutable post-merge reference
+	// (ADR 0029/0033), "<branch>@<sha>".
 	LandingIntegrationRef
 )
 
-// Landing is the sealed, typed form of the landing reference stored as a
-// plain string in issue frontmatter, the outcome line, and every
-// remote-tracker interface (ADR 0029, issue #1809). ParseLanding is the
-// single seam that produces one from a stored string; String is its inverse.
-// Consumers match on Kind instead of re-deriving the three grammars from the
-// raw string themselves.
+// Landing is the typed form of the landing reference stored as a plain string in
+// issue frontmatter, the outcome line, and every remote-tracker interface (ADR
+// 0029, issue #1809). ParseLanding is the only constructor, so consumers match
+// on Kind rather than re-deriving the three grammars from the raw string.
 type Landing struct {
 	Kind LandingKind
-	// URL holds the PR URL for LandingPRURL.
-	URL string
-	// Branch holds the branch name for LandingBranchRef and LandingIntegrationRef.
+	URL  string
+	// Branch holds the branch name for both LandingBranchRef and LandingIntegrationRef.
 	Branch string
-	// SHA holds the landed commit sha for LandingIntegrationRef.
-	SHA string
+	SHA    string
 }
 
-// ParseLanding parses a stored landing string into its typed Landing value.
-// A github PR URL (http:// or https://) parses as LandingPRURL; a
-// "<branch>@<sha>" ref (ADR 0029/0033) parses as LandingIntegrationRef; any
-// other non-empty string — a raw branch name — parses as LandingBranchRef.
-// Only an empty string is rejected: recordLanding's callers already guard
-// against writing one, so ParseLanding treats reaching one as a caller bug
-// worth erroring on rather than a landing shape to represent.
+// ParseLanding parses a stored landing string into its typed Landing value. An
+// http:// or https:// string is a LandingPRURL, a "<branch>@<sha>" ref is a
+// LandingIntegrationRef, and any other non-empty string is a LandingBranchRef.
+// Only the empty string is rejected: recordLanding's callers already guard
+// against writing one, so reaching it is a caller bug.
 func ParseLanding(s string) (Landing, error) {
 	if s == "" {
 		return Landing{}, errors.New("forge: empty landing")
 	}
-	// Checked ahead of the "@" cut below: a URL prefix wins over any
-	// IntegrationRef/BranchRef reading. Real branch names never carry an
-	// "http(s)://" prefix (AgentBranch's own naming, ADR 0033's
-	// "integration/<parent>"), so this never misclassifies a genuine one.
+	// Checked ahead of the "@" cut below so a URL wins over any IntegrationRef
+	// reading. Real branch names never carry an "http(s)://" prefix, so this
+	// never misclassifies a genuine one.
 	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
 		return Landing{Kind: LandingPRURL, URL: s}, nil
 	}
@@ -62,9 +53,8 @@ func ParseLanding(s string) (Landing, error) {
 	return Landing{Kind: LandingBranchRef, Branch: s}, nil
 }
 
-// String renders l back into the stored-string grammar ParseLanding parses.
-// ParseLanding(l.String()) reproduces l for every Landing ParseLanding itself
-// can produce.
+// String renders l back into the grammar ParseLanding parses, so
+// ParseLanding(l.String()) reproduces every Landing ParseLanding can produce.
 func (l Landing) String() string {
 	switch l.Kind {
 	case LandingPRURL:

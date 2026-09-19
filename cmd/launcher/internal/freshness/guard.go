@@ -1,8 +1,6 @@
-// guard.go seals the host-taint halt decision — previously split across the
-// main package's classifyStaleOutcome and staleRevTracker — inside the
-// freshness package as a single Guard type, so the record/clear discipline
-// that keeps a non-converging divergence from looping forever (issues
-// #2113, #2128) lives beside the Result it classifies.
+// guard.go holds the host-taint halt decision as a single Guard type, so the
+// record/clear discipline that keeps a non-converging divergence from looping
+// forever (issues #2113, #2128) lives beside the Result it classifies.
 package freshness
 
 import (
@@ -18,19 +16,18 @@ import (
 type Disposition int
 
 const (
-	// Rebuild indicates content staleness — a new base tip a rebuild will
-	// fix.
+	// Rebuild is content staleness: a new base tip that a rebuild fixes.
 	Rebuild Disposition = iota
-	// HostTainted indicates a non-converging divergence — the same base tip
-	// a caller already rebuilt against is still stale (the signature of a
-	// host-system derivation reaching the image graph).
+	// HostTainted is a non-converging divergence: the same base tip a caller
+	// already rebuilt against is still stale, which is the signature of a
+	// host-system derivation reaching the image graph.
 	HostTainted
 )
 
-// Guard wraps the persisted prior-stale-rev memory and classifies a stale
-// Probe Result, keeping record/clear discipline internal so a future edit
-// cannot reintroduce the perpetual-rebuild loop by clearing state at the
-// wrong moment (issues #2113, #2128).
+// Guard classifies a stale Probe Result against the persisted prior-stale-rev
+// memory. Record/clear discipline stays internal so a later edit cannot
+// reintroduce the perpetual-rebuild loop by clearing state at the wrong moment
+// (issues #2113, #2128).
 type Guard struct {
 	path string
 }
@@ -40,18 +37,11 @@ func NewGuard(pwd string) Guard {
 	return Guard{path: filepath.Join(dispatch.HostLogDirFor(pwd), "freshness-stale-rev")}
 }
 
-// Classify decides whether a stale Probe Result is content staleness
-// (Rebuild) or a non-converging host-tainted divergence (HostTainted),
-// updating the persisted prior-stale-rev memory as a side effect: it
-// records the rev on Rebuild and clears the memory on HostTainted. The
-// empty-tip-tag guard lives here beside the post-condition it depends on —
-// TipTag is empty for every stale Result that is NOT a genuine "the
-// evaluated image tag differs from the loaded image tag" divergence: a
-// stuck image eval/tag-derive failure, a stuck launcher eval/hash-derive
-// failure (the image itself may have succeeded and matched), or a
-// launcher-only-stale verdict (image matched; only the launcher dimension
-// is stale). All of these repeat at the same rev but are NOT host taint, so
-// they stay Rebuild.
+// Classify decides whether a stale Result is content staleness (Rebuild) or a
+// non-converging host-tainted divergence (HostTainted), recording the rev on
+// Rebuild and clearing the memory on HostTainted. A stuck eval or a
+// launcher-only-stale verdict leaves TipTag empty and repeats at the same rev
+// without being host taint, so the empty-TipTag check keeps those on Rebuild.
 func (g Guard) Classify(res Result) Disposition {
 	if NonConverging(res.Rev, g.prior()) && res.TipTag != "" {
 		_ = g.clear()
@@ -61,21 +51,20 @@ func (g Guard) Classify(res Result) Disposition {
 	return Rebuild
 }
 
-// Reset forgets any armed divergence — the queue-drained reset point.
+// Reset forgets any armed divergence. Callers reset once the queue drains.
 func (g Guard) Reset() error {
 	return g.clear()
 }
 
-// Prior returns the rev recorded by the previous run, or "" — read-only
-// observation; mutation stays internal via record/clear. Exported so tests
-// can assert the armed/cleared state that Classify manages internally.
+// Prior returns the rev recorded by the previous run, or "". It is read-only
+// so that record and clear stay internal; tests use it to assert the
+// armed/cleared state Classify manages.
 func (g Guard) Prior() string {
 	return g.prior()
 }
 
-// prior returns the rev recorded by the previous run, or "" if none is
-// recorded or the file cannot be read (a missing/unreadable state file is
-// treated as "no prior stale", never an error — detection must fail open).
+// A missing or unreadable state file means "no prior stale", never an error:
+// detection must fail open.
 func (g Guard) prior() string {
 	b, err := os.ReadFile(g.path)
 	if err != nil {
@@ -84,7 +73,6 @@ func (g Guard) prior() string {
 	return strings.TrimSpace(string(b))
 }
 
-// record writes rev as the last stale rev, creating the logs dir if needed.
 func (g Guard) record(rev string) error {
 	if err := os.MkdirAll(filepath.Dir(g.path), 0o755); err != nil {
 		return err
@@ -92,7 +80,6 @@ func (g Guard) record(rev string) error {
 	return os.WriteFile(g.path, []byte(rev+"\n"), 0o644)
 }
 
-// clear removes the state file; a missing file is not an error.
 func (g Guard) clear() error {
 	err := os.Remove(g.path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

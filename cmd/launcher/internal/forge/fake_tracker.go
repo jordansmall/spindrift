@@ -7,145 +7,93 @@ import (
 	"strconv"
 )
 
-// IssueTrackerFake is the tracker-capability slice of Fake, holding every
-// field the IssueTracker surface (plus its optional LandingRecorder,
-// IssueCloser, MergeCloser, and AbandonedFlagger surfaces) reads or writes.
-// It embeds *core — see core's doc comment for the admission rule — so its
-// methods can reach mu/prStates/etc. directly.
+// IssueTrackerFake is the tracker-capability slice of Fake: every field
+// IssueTracker and its optional LandingRecorder, IssueCloser, MergeCloser, and
+// AbandonedFlagger interfaces read or write.
 type IssueTrackerFake struct {
-	// *core is the shared substrate promoted through to IssueTrackerFake —
-	// see core's doc comment for the admission rule.
 	*core
 
 	labels DispatchLabels
-	// VerdictLabels configures the Verdict-to-label mapping CompleteVerdict
-	// uses, the same way labels configures TransitionState; set directly
-	// (there is no constructor argument for it) since only research-kind
-	// tests exercise it.
+	// VerdictLabels maps a Verdict to the label CompleteVerdict writes. Set it
+	// directly: there is no constructor argument.
 	VerdictLabels VerdictLabels
 	issues        map[string]Issue
-	// NativeDeps, when set for an issue number, is returned by DepsOf as
-	// DepSourceNative and takes precedence over body parsing — the
-	// native-wins-when-non-empty rule forgetest.RunTrackerContract's DepsOf
-	// scenario pins across every adapter, so tests can script native-sourced,
-	// body-sourced, and mixed-batch blockers.
+	// NativeDeps, keyed by issue number, is returned by DepsOf as
+	// DepSourceNative and wins over body parsing when non-empty.
+	// forgetest.RunTrackerContract pins that rule across every adapter.
 	NativeDeps map[string][]string
-	// NativeDepsErr, keyed by issue number, is returned by DepsOf for that
-	// number instead of consulting NativeDeps — scripts the native-API
-	// failure DepsOf falls back to body parsing for (forgetest's
-	// NativeFailureIsolatable scenario, issue #1544).
+	// NativeDepsErr, keyed by issue number, is returned by DepsOf instead of
+	// consulting NativeDeps, scripting the native-API failure DepsOf falls
+	// back to body parsing for (issue #1544).
 	NativeDepsErr map[string]error
 
-	// TouchesOfErr, keyed by issue number, is returned by TouchesOf for that
-	// number instead of parsing its body. Per-number (not blanket, unlike
-	// PRFilesErr) because a single overlap-gate check calls TouchesOf for
-	// both an in-progress issue and the candidate being checked against it —
-	// a blanket error couldn't isolate which side failed.
+	// TouchesOfErr, keyed by issue number, is returned by TouchesOf instead of
+	// parsing the body. Per-number, because one overlap-gate check calls
+	// TouchesOf for both issues and a blanket error hides which side failed.
 	TouchesOfErr map[string]error
 
-	// TransitionStateCalls records all TransitionState invocations in order.
 	TransitionStateCalls []TransitionStateCall
-	// TransitionStateErr, if non-nil, is returned by every TransitionState call.
-	TransitionStateErr error
-	// CompleteVerdictCalls records all CompleteVerdict invocations in order.
+	TransitionStateErr   error
 	CompleteVerdictCalls []CompleteVerdictCall
-	// CompleteVerdictErr, if non-nil, is returned by every CompleteVerdict call.
-	CompleteVerdictErr error
-	// CommentCalls records all Comment invocations in order.
-	CommentCalls []CommentCall
-	// CommentErr, if non-nil, is returned by every Comment call.
-	CommentErr error
+	CompleteVerdictErr   error
+	CommentCalls         []CommentCall
+	CommentErr           error
 
-	// ListIssuesErr, if non-nil, is returned by every ListIssues call.
 	ListIssuesErr error
-	// ListIssuesCalls records the state argument of every ListIssues
-	// invocation in order — lets a test assert call count directly instead
-	// of inferring it from side effects (#987).
+	// ListIssuesCalls records each call's state argument so a test can assert
+	// the call count directly instead of inferring it (#987).
 	ListIssuesCalls []DispatchState
 
-	// IssueCalls records the issue number argument of every Issue
-	// invocation in order — lets a test assert call count directly instead
-	// of inferring it from side effects (#1098).
+	// IssueCalls records each call's issue number so a test can assert the
+	// call count directly instead of inferring it (#1098).
 	IssueCalls []string
-	// IssueErr, if non-nil, is returned by every Issue call instead of the
-	// looked-up issue — a blanket override (ListIssuesErr's own pattern),
-	// letting a test simulate a body-fetch failure independently of
-	// ListOpenIssues/ListIssues, which read the same issues map but never
-	// consult this field (issue #1632).
+	// IssueErr, if non-nil, is returned by every Issue call. ListOpenIssues
+	// and ListIssues read the same issues map but never consult it, so a
+	// body-fetch failure can be simulated independently (issue #1632).
 	IssueErr error
 
-	// DepsOfCalls records the issue number argument of every DepsOf
-	// invocation in order — mirrors IssueCalls, letting a test assert a
-	// dependency-graph build's exact call count (e.g. a whole-backlog
-	// NewReadiness sweep) instead of inferring it from side effects
-	// (issue #1632).
+	// DepsOfCalls records each call's issue number so a test can assert a
+	// dependency-graph build's exact call count (issue #1632).
 	DepsOfCalls []string
 
-	// Labels is the list of label names returned by ListLabels on success.
-	// When LabelsSeq is non-empty, each call pops the next entry from it
-	// instead (falling back to Labels once the sequence is exhausted).
 	Labels []string
-	// LabelsSeq, when non-empty, is a per-call queue drained by ListLabels.
-	// Each call pops the first slice; when exhausted, Labels is used.
-	LabelsSeq [][]string
-	// ListLabelsErr, if non-nil, is returned by ListLabels.
+	// LabelsSeq, when non-empty, is a per-call queue drained by ListLabels:
+	// each call pops the first slice, and Labels is used once it is exhausted.
+	LabelsSeq     [][]string
 	ListLabelsErr error
 
-	// CreateLabelCalls records all CreateLabel invocations in order.
 	CreateLabelCalls []CreateLabelCall
-	// CreateLabelErr, if non-nil, is returned by every CreateLabel call.
-	CreateLabelErr error
+	CreateLabelErr   error
 
-	// RecordLandingCalls records all RecordLanding invocations in order.
 	RecordLandingCalls []RecordLandingCall
-	// RecordLandingErr, if non-nil, is returned by every RecordLanding call.
-	RecordLandingErr error
+	RecordLandingErr   error
 
-	// RecordLandingPassCalls records all RecordLandingPass invocations in
-	// order (issue #2983).
+	// RecordLandingPassCalls records each call in order (issue #2983).
 	RecordLandingPassCalls []RecordLandingPassCall
-	// RecordLandingPassErr, if non-nil, is returned by every
-	// RecordLandingPass call.
-	RecordLandingPassErr error
+	RecordLandingPassErr   error
 
-	// CloseIssueCalls records the issue number argument of every CloseIssue
-	// invocation in order.
 	CloseIssueCalls []string
-	// CloseIssueErr, if non-nil, is returned by every CloseIssue call.
-	CloseIssueErr error
+	CloseIssueErr   error
 
-	// CloseMergedIssueCalls records the issue number argument of every
-	// CloseMergedIssue invocation in order — the optional MergeCloser
-	// surface's own call log (issue #1892), kept separate from
-	// CloseIssueCalls so a test can tell settle's post-merge backstop apart
-	// from reconcile's closed: axis write.
+	// CloseMergedIssueCalls logs the optional MergeCloser calls separately
+	// from CloseIssueCalls so a test can tell settle's post-merge backstop
+	// apart from reconcile's closed: axis write (issue #1892).
 	CloseMergedIssueCalls []string
-	// CloseMergedIssueErr, if non-nil, is returned by every CloseMergedIssue
-	// call.
-	CloseMergedIssueErr error
+	CloseMergedIssueErr   error
 
-	// FlagAbandonedCalls records the issue number argument of every
-	// FlagAbandoned invocation in order.
 	FlagAbandonedCalls []string
-	// FlagAbandonedErr, if non-nil, is returned by every FlagAbandoned call.
-	FlagAbandonedErr error
+	FlagAbandonedErr   error
 
-	// CommentsFor, keyed by issue number, scripts the comments Comments
-	// returns for that number -- the optional CommentLister surface's own
-	// test script, mirroring NativeDeps' per-number map shape.
 	CommentsFor map[string][]Comment
-	// CommentsErr, keyed by issue number, is returned by Comments for that
-	// number instead of consulting CommentsFor -- scripts the comments-
-	// fetch failure IssueText degrades to body-only for (issue #3445).
+	// CommentsErr, keyed by issue number, is returned by Comments instead of
+	// consulting CommentsFor: the fetch failure IssueText degrades to
+	// body-only for (issue #3445).
 	CommentsErr map[string]error
 
-	// PriorClaimStates, keyed by issue number, scripts what a real tracker's
-	// optional PriorClaimStateReader surface would read back from the issue's
-	// timeline for the terminal label a claim stripped immediately before —
-	// unset (key absent) means "not found" (ok=false), matching a fresh
-	// dispatch that carries no prior terminal label at all.
-	PriorClaimStates map[string]DispatchState
-	// PriorClaimStateErr, if non-nil, is returned by every PriorClaimState call.
+	// PriorClaimStates, keyed by issue number, scripts the terminal label a
+	// claim stripped immediately before. An absent key means not found
+	// (ok=false), like a fresh dispatch carrying no prior terminal label.
+	PriorClaimStates   map[string]DispatchState
 	PriorClaimStateErr error
 }
 
@@ -187,17 +135,14 @@ func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
 		if iss.State == IssueClosed {
 			continue
 		}
-		// Resolved from Labels at read time, not stored separately, so
-		// Labels stays the single source of truth (#2281): a test that sets
-		// Labels via SetIssue without also setting Priority can't drift the
-		// two out of sync, mirroring the github adapter's resolution at its
-		// own read edge (exec_issues.go).
+		// Resolved from Labels at read time, not stored, so a test that sets
+		// Labels without Priority cannot drift the two apart (#2281). The
+		// github adapter resolves at its own read edge for the same reason.
 		iss.Priority = ResolvePriority(iss.Labels)
 		if label == "" {
-			// Mirrors GitHub's `--label ""` (ignored by gh, returns every
-			// open issue) and Local's `frontmatter.State == ""` (matches
-			// every untriaged issue): a DispatchState left unmapped by the
-			// tracker's label family matches everything, not nothing.
+			// A DispatchState the tracker's label family leaves unmapped
+			// matches every open issue, not none: gh ignores `--label ""` and
+			// Local's empty frontmatter state matches every untriaged issue.
 			out = append(out, iss)
 			continue
 		}
@@ -216,8 +161,8 @@ func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
 	return out, nil
 }
 
-// ListOpenIssues returns every non-closed issue regardless of dispatch
-// label, ascending by number — mirroring ListIssues' canonical order.
+// ListOpenIssues returns every non-closed issue, ascending by number, whatever
+// its dispatch label.
 func (tf *IssueTrackerFake) ListOpenIssues() ([]Issue, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -226,8 +171,6 @@ func (tf *IssueTrackerFake) ListOpenIssues() ([]Issue, error) {
 		if iss.State == IssueClosed {
 			continue
 		}
-		// See ListIssues's matching comment: resolved from Labels at read
-		// time so Labels stays the single source of truth.
 		iss.Priority = ResolvePriority(iss.Labels)
 		out = append(out, iss)
 	}
@@ -239,18 +182,14 @@ func (tf *IssueTrackerFake) ListOpenIssues() ([]Issue, error) {
 	return out, nil
 }
 
-// allIssues returns every issue (open or closed) the fake holds, ascending
-// by number — the scriptable backing for the optional SeamLister surface.
-// Kept lowercase, unlike ListOpenIssues, so a bare *IssueTrackerFake never
-// itself satisfies SeamLister; only seamListedIssueTracker (fake_shapes.go)
-// promotes it to the exported AllIssues name.
+// allIssues returns every issue, open or closed, ascending by number. It stays
+// lowercase so a bare *IssueTrackerFake never satisfies SeamLister; only
+// seamListedIssueTracker promotes it to the exported AllIssues name.
 func (tf *IssueTrackerFake) allIssues() ([]Issue, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	var out []Issue
 	for _, iss := range tf.issues {
-		// See ListIssues's matching comment: resolved from Labels at read
-		// time so Labels stays the single source of truth.
 		iss.Priority = ResolvePriority(iss.Labels)
 		out = append(out, iss)
 	}
@@ -273,18 +212,15 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 	if !ok {
 		return Issue{}, fmt.Errorf("issue %s not found", num)
 	}
-	// See ListIssues's matching comment: resolved from Labels at read time
-	// so Labels stays the single source of truth.
 	iss.Priority = ResolvePriority(iss.Labels)
 	return iss, nil
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
-// num. Best-effort on missing issues (no error), matching gh CLI behavior. A
-// claim (to == InProgress) also strips any stale Complete/Failed terminal
-// label the issue still carries from a prior run, mirroring the github
-// adapter's TransitionState (exec_issues.go) so a launcher-level test built
-// on the Fake can't pass while the real adapter still misbehaves (#1985).
+// num, best-effort on a missing issue (no error) to match the gh CLI. A claim
+// (to == InProgress) also strips any stale Complete/Failed label left by a
+// prior run, as the github adapter does, so a test on the Fake cannot pass
+// while the real adapter misbehaves (#1985).
 func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) error {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -314,12 +250,10 @@ func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) 
 }
 
 // CompleteVerdict swaps the InProgress label for verdict's terminal label on
-// issue num. Best-effort on missing issues (no error), matching
-// TransitionState's contract. Unlike TransitionState, it asserts num
-// currently carries InProgress before editing — the double-dispatch guard
-// (#701) forgetest.RunTrackerContract's DoubleDispatchGuard scenario pins
-// across every adapter — and errors without mutating labels when it's
-// absent.
+// issue num, best-effort on a missing issue like TransitionState. Unlike
+// TransitionState it first asserts num carries InProgress and errors without
+// mutating labels when it does not, the double-dispatch guard
+// forgetest.RunTrackerContract pins across every adapter (#701).
 func (tf *IssueTrackerFake) CompleteVerdict(num string, verdict Verdict) error {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -369,16 +303,11 @@ func (tf *IssueTrackerFake) DepsOf(num string) ([]Dependency, error) {
 	return WithSource(ParseBlockerRefs(iss.Body), DepSourceBody), nil
 }
 
-// BlocksOf returns every issue number keyed in NativeDeps whose own deps
-// name num as a blocker — DepsOf's reverse direction, mirroring the real
-// github/jira adapters' native issue-dependencies relationship, which is
-// stored (and so queryable) in both directions (issue #1744). Always
-// DepSourceNative: NativeDeps has no body-sourced counterpart to reverse.
-// Sorted ascending by numeric value for deterministic test assertions —
-// unlike DepsOf, which preserves API response order and makes no ordering
-// promise of its own, NativeDeps is an unordered map with no natural
-// "response order" to preserve, so a real github/jira adapter's own
-// BlocksOf may legitimately return the same set in a different order.
+// BlocksOf returns every issue number keyed in NativeDeps whose own deps name
+// num as a blocker, the reverse of DepsOf, which the github and jira adapters
+// can query because they store the relationship both ways (issue #1744). It is
+// always DepSourceNative, sorted numerically only for deterministic assertions:
+// NativeDeps is an unordered map, so a real adapter may order the set its way.
 func (tf *IssueTrackerFake) BlocksOf(num string) ([]Dependency, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -399,8 +328,8 @@ func (tf *IssueTrackerFake) BlocksOf(num string) ([]Dependency, error) {
 	return WithSource(ids, DepSourceNative), nil
 }
 
-// TouchesOf returns the touch-set parsed from num's issue body, mirroring
-// the real adapters' shared body-grammar default.
+// TouchesOf returns the touch-set parsed from num's issue body, matching the
+// real adapters' shared body-grammar default.
 func (tf *IssueTrackerFake) TouchesOf(num string) ([]string, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -421,9 +350,8 @@ func (tf *IssueTrackerFake) Comment(num, body string) error {
 	return tf.CommentErr
 }
 
-// Comments implements the optional CommentLister surface, returning num's
-// scripted CommentsFor entry (nil, nil for an unscripted number -- a fresh
-// map read, not an error, matching an issue with no comments).
+// Comments returns num's scripted CommentsFor entry. An unscripted number
+// yields nil and no error, matching an issue with no comments.
 func (tf *IssueTrackerFake) Comments(num string) ([]Comment, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -472,8 +400,8 @@ func (tf *IssueTrackerFake) Probe() (string, error) {
 	return tf.ProbeRepo, nil
 }
 
-// StateLabels implements LabeledTracker, returning the DispatchLabels the
-// Fake was constructed with.
+// StateLabels implements LabeledTracker, returning the DispatchLabels the Fake
+// was constructed with.
 func (tf *IssueTrackerFake) StateLabels() DispatchLabels {
 	return tf.labels
 }

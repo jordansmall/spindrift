@@ -1,21 +1,8 @@
 // Package passmachine holds the orchestrator's pure "continue to another
-// pass, or stop" decision logic (issue #2548), extracted verbatim from the
-// three switch statements in cmd/launcher/orchestrator/run.go: the legacy
-// single loop's own decision (run.go:244-259), the review loop's
-// implement/fix/land decision (run.go:355-401), and the review loop's own
-// review-pass decision (run.go:461-487). Transition reproduces every case
-// and priority order of those three switches exactly, and state.CapFired
-// is part of a byte-for-byte-pinned op stream existing tests assert on --
-// but the Reason strings are not pinned verbatim to the original switches:
-// issue #2655 rewrote three previously-empty Reason fallthroughs
-// (legacyTransition's BLOCK-with-rounds-remaining case,
-// implementFixTransition's no-cap-fired case, and reviewTransition's
-// default case, split into its own APPROVE and BLOCK reasons) so every
-// decision carries a non-empty, human-readable reason -- a deliberate,
-// in-scope change to the Reason text. This package is deliberately I/O-free:
-// it takes an Input struct and returns a Decision, with no access to cfg,
-// state, or stdout, so its every transition can be table-tested without
-// executing a Driver.
+// pass, or stop" decision logic (issue #2548), extracted from three switch
+// statements in cmd/launcher/orchestrator/run.go. It takes no cfg, state or
+// I/O, so every transition is table-testable. Decision.CapFired feeds a
+// byte-for-byte pinned op stream tests assert on; Reason is not pinned (#2655).
 package passmachine
 
 import (
@@ -23,74 +10,53 @@ import (
 	"strings"
 )
 
-// PassKind names which of the orchestrator's five distinct pass shapes just
-// finished executing (the input to a Transition call), or which one should
-// run next (part of a Transition call's own Decision).
+// PassKind names which pass shape just finished, or which one runs next.
 type PassKind int
 
 const (
-	// KindLegacy is the legacy single loop's own pass kind (run.go's
-	// pre-#2037 run()) -- the loop that alternates BLOCK-driven passes
-	// against a single prompt file, with no separate review pass.
+	// KindLegacy is the legacy single loop's pass kind (run.go's pre-#2037
+	// run()): BLOCK-driven passes against one prompt file, no review pass.
 	KindLegacy PassKind = iota
-	// KindImplement is the review loop's first pass: a fresh implement
-	// session against cfg.promptFile.
+	// KindImplement is the review loop's first pass, against cfg.promptFile.
 	KindImplement
-	// KindFix is the review loop's post-review pass: another lap through
-	// the same implement/fix code path, seeded with the reviewer's BLOCK
-	// findings.
+	// KindFix is the review loop's post-review pass, seeded with the
+	// reviewer's BLOCK findings.
 	KindFix
-	// KindLand is the review loop's terminal pass: another lap through the
-	// same implement/fix code path, reached either because the prior
-	// review APPROVEd or because a cap committed the run to a terminal
-	// land pass. It can still make edits -- it's seeded with the
-	// reviewer's non-blocking findings and told to fix cheap ones inline
-	// -- but the role names what makes it terminal (it lands), not those
-	// incidental edits.
+	// KindLand is the review loop's terminal pass, reached after an APPROVE
+	// or after a cap committed the run to landing. It still makes edits: its
+	// prompt carries the reviewer's non-blocking findings.
 	KindLand
-	// KindReview is the review loop's review pass: a fresh session against
-	// cfg.reviewPromptFile, whose own verdict (not the implement/fix/land
-	// pass's log) is what drives state.LastVerdict.
+	// KindReview is the review loop's review pass, against
+	// cfg.reviewPromptFile. Its verdict, not the implement/fix/land pass's
+	// log, drives state.LastVerdict.
 	KindReview
-	// KindDeltaReview is the bounded, post-land, run-once scoped review pass
-	// from issue #3246: once a terminal land pass has settled, one extra
-	// review session re-checks only the delta the land pass introduced
-	// beyond what the review pass already found. Structurally distinct from
-	// KindReview -- KindReview's verdict drives the implement/fix/review
-	// loop's every lap (a BLOCK there means "run KindFix again"), while a
-	// KindDeltaReview verdict is terminal in both directions (see
-	// deltaReviewTransition): neither BLOCK nor APPROVE ever schedules
-	// another pass, so this pass can never loop. Appended last, after
-	// KindReview, for the same reason StopBudgetExceeded documents on its
-	// own const block: PassKind ordinals are compared and stored, never
-	// serialized, but appending is still the safer habit to default to.
+	// KindDeltaReview is the run-once review pass (issue #3246) that re-checks
+	// only the delta a settled terminal land pass introduced. Unlike
+	// KindReview, neither BLOCK nor APPROVE schedules another pass, so it
+	// never loops (see deltaReviewTransition).
 	KindDeltaReview
 )
 
 // Role is the string form of a pass's role, as sent in the pass_start op's
-// own Role field (a plain string -- see driver/claude's transcript.go,
-// which this package does not import).
+// Role field.
 type Role string
 
 // KindLegacy never sets Role.
 const (
-	// RoleImplement is the review loop's first pass's Role value.
+	// RoleImplement is the implement pass's Role.
 	RoleImplement Role = "implement"
-	// RoleReview is the review loop's review pass's Role value.
+	// RoleReview is the review pass's Role.
 	RoleReview Role = "review"
-	// RoleFix is the review loop's post-review pass's Role value.
+	// RoleFix is the fix pass's Role.
 	RoleFix Role = "fix"
-	// RoleLand is the review loop's terminal pass's Role value.
+	// RoleLand is the terminal land pass's Role.
 	RoleLand Role = "land"
-	// RoleDeltaReview is KindDeltaReview's own Role value.
+	// RoleDeltaReview is the delta-review pass's Role.
 	RoleDeltaReview Role = "delta-review"
 )
 
-// String returns the pass_start op's own Role field value for k --
-// RoleImplement/RoleFix/RoleLand/RoleReview for the review loop's four pass
-// kinds, matching run.go's own pre-#2548 implRole string literals and its
-// review pass's literal "review" Role value, and "" for KindLegacy, which
-// never sets Role at all (the legacy single loop has no role concept).
+// String returns the pass_start op's Role field value for k, and "" for
+// KindLegacy, which never sets Role at all.
 func (k PassKind) String() string {
 	switch k {
 	case KindImplement:
@@ -108,13 +74,10 @@ func (k PassKind) String() string {
 	}
 }
 
-// ManifestKind returns the pass-manifest entry's own Kind field value for
-// k -- "legacy" for KindLegacy, else String()'s own value unchanged. A
-// separate method from String() because the two serialize k into different
-// fields with different semantics: the pass_start op's Role field must stay
-// blank for the legacy loop (String()'s documented contract, still relied on
-// by that call site), but the manifest's Kind field must always name which
-// pass shape ran, so KindLegacy needs a non-empty value here instead.
+// ManifestKind returns the pass-manifest entry's Kind field value for k:
+// "legacy" for KindLegacy, else String(). Separate from String() because the
+// pass_start op's Role must stay blank for the legacy loop, while the
+// manifest's Kind must always name which pass shape ran.
 func (k PassKind) ManifestKind() string {
 	if k == KindLegacy {
 		return "legacy"
@@ -127,8 +90,7 @@ func (k PassKind) ManifestKind() string {
 type Verdict string
 
 const (
-	// VerdictNone means the pass's log never resolved into a verdict word
-	// at all.
+	// VerdictNone means the pass's log never resolved into a verdict word.
 	VerdictNone Verdict = ""
 	// VerdictBlock is the reviewer's "keep going" verdict.
 	VerdictBlock Verdict = "BLOCK"
@@ -136,243 +98,169 @@ const (
 	VerdictApprove Verdict = "APPROVE"
 )
 
-// StopReason names why Transition decided to stop the loop -- the zero
-// value, StopNone, is only ever returned alongside a Continue: true
-// Decision (a review-pass decision, per run.go:461-487, never stops at
-// all, so every KindReview Decision carries StopNone). This same type also
-// names which cap fired via Decision.Cap (below) -- reusing StopReason's
-// existing StopMaxSlicesReached/StopMaxReviewRoundsReached/StopNoVerdict
-// constants for both purposes, since the underlying cause is the same
-// whether it winds up stopping the loop outright (legacy) or committing it
-// to one terminal land pass (review loop).
+// StopReason names why Transition decided to stop the loop. StopNone is
+// returned only alongside a Continue: true Decision. Decision.Cap reuses this
+// same type to name which cap fired, since the cause is the same whether it
+// stops the loop (legacy) or commits it to one terminal land pass (review).
 type StopReason int
 
-// CapReason is StopReason under a name that doesn't say "Stop" for a
-// decision that isn't stopping (Decision.Cap, below, can be non-StopNone on
-// a Continue: true Decision) -- a plain alias, not a distinct type, so
-// every StopMaxSlicesReached/StopMaxReviewRoundsReached/StopNoVerdict
-// constant is usable as either without conversion.
+// CapReason is StopReason under a name that doesn't say "Stop", for
+// Decision.Cap on a decision that is continuing. A plain alias, so every
+// constant below works as either without conversion.
 type CapReason = StopReason
 
 const (
-	// StopNone means the loop is not stopping this pass -- Decision.Continue
-	// is true.
+	// StopNone means the loop is not stopping this pass.
 	StopNone StopReason = iota
-	// StopOutcomeReached fires when the pass that just ran reached its own
+	// StopOutcomeReached fires when the pass that just ran reached its
 	// terminal SPINDRIFT_OUTCOME line.
 	StopOutcomeReached
-	// StopNoVerdict fires on the legacy loop's own decision when the pass's
-	// log never scanned out a verdict word, and (as Decision.Cap) on the
-	// review loop's own review-pass decision when a review pass never
-	// resolved into a verdict word at all.
+	// StopNoVerdict fires on the legacy decision when the pass's log scanned
+	// out no verdict word, and as Decision.Cap on the review-pass decision
+	// for the same case.
 	StopNoVerdict
-	// StopVerdictNotBlock fires on the legacy loop's own decision when the
-	// verdict was a non-empty, non-BLOCK word (i.e. APPROVE).
+	// StopVerdictNotBlock fires on the legacy decision when the verdict was
+	// non-empty and not BLOCK.
 	StopVerdictNotBlock
-	// StopMaxSlicesReached fires when cfg.maxSlices is a positive cap and
-	// the pass count has reached or exceeded it -- on the legacy loop this
-	// is a hard stop; on the review loop's two decision points it instead
-	// commits the run to one terminal land pass (see LandPhase).
+	// StopMaxSlicesReached fires when cfg.maxSlices is positive and the pass
+	// count has reached it. A hard stop on the legacy loop; on the review
+	// loop it commits the run to one terminal land pass (see LandPhase).
 	StopMaxSlicesReached
-	// StopMaxReviewRoundsReached fires when cfg.maxReviewRounds is a
-	// positive cap and reviewRounds has reached or exceeded it -- on the
-	// legacy loop this is a hard stop; on the review loop's own review-pass
-	// decision it instead commits the run to one terminal land pass.
+	// StopMaxReviewRoundsReached fires when cfg.maxReviewRounds is positive
+	// and reviewRounds has reached it. A hard stop on the legacy loop; on the
+	// review-pass decision it commits the run to one terminal land pass.
 	StopMaxReviewRoundsReached
-	// StopTerminalLandNoOutcome fires on the review loop's implement/fix/
-	// land decision when the pass that just ran was itself the committed
-	// terminal land pass (in.LandPhase was already LandPhaseTerminalCommitted
-	// going in) and still produced no outcome -- the bound that caps the
-	// terminal-land mechanism at exactly one extra pass.
+	// StopTerminalLandNoOutcome fires when the committed terminal land pass
+	// itself produced no outcome. It bounds the terminal-land mechanism at
+	// exactly one extra pass.
 	StopTerminalLandNoOutcome
-	// StopApproveNoOutcome fires on the review loop's implement/fix/land
-	// decision when the pass that just ran followed an APPROVE verdict and
-	// still produced no outcome -- the bound on the land-after-APPROVE
-	// mechanism.
+	// StopApproveNoOutcome fires when the pass following an APPROVE verdict
+	// produced no outcome. It bounds the land-after-APPROVE mechanism.
 	StopApproveNoOutcome
 	// StopBudgetExceeded fires when Caps.MaxBudgetTokens or Caps.MaxBudgetUSD
-	// is a positive cap and the cumulative usage so far (Input.CumulativeTokens/
-	// CumulativeUSD) has reached or exceeded it, on a BLOCK verdict only --
-	// same gating as StopMaxReviewRoundsReached, since both cap "a further
-	// review round", which only a BLOCK verdict triggers; on the review
-	// loop's own review-pass decision it commits the run to one terminal
-	// land pass rather than stopping outright (issue #2694). Appended last,
-	// after every pre-existing StopReason, so a future addition to this
-	// const block never again shifts an existing constant's ordinal value --
-	// this package's Decision.Cap/StopReason values are compared
-	// programmatically (never serialized), so the shift itself is not a
-	// live bug here, but appending is the safer habit for a pinned-op-stream
-	// package.
+	// is positive and cumulative usage has reached it, on a BLOCK verdict
+	// only, because it caps a further review round. On the review-pass
+	// decision it commits the run to a terminal land pass (issue #2694).
 	StopBudgetExceeded
-	// StopDeltaReviewBlocked fires on deltaReviewTransition's own decision
-	// (issue #3246) when the delta-review pass's verdict is BLOCK: the run
-	// stops outright, with no further fix lap -- unlike a KindReview BLOCK,
-	// which schedules KindFix. Appended last, after StopBudgetExceeded, per
-	// this const block's own "never insert mid-block" convention: ordinals
-	// are compared and stored, never serialized, but appending is still the
-	// safer habit for a pinned-op-stream package.
+	// StopDeltaReviewBlocked fires on a BLOCK delta-review verdict (issue
+	// #3246): the run stops outright with no further fix lap, unlike a
+	// KindReview BLOCK, which schedules KindFix.
 	StopDeltaReviewBlocked
-	// StopDeltaReviewApproved fires on deltaReviewTransition's own decision
-	// when the delta-review pass's verdict is APPROVE: the run settles as
-	// usual. Appended last, after StopDeltaReviewBlocked, for the same
-	// reason.
+	// StopDeltaReviewApproved fires on an APPROVE delta-review verdict: the
+	// run settles as usual.
 	StopDeltaReviewApproved
-	// StopDeltaReviewNoVerdict fires on deltaReviewTransition's own decision
-	// when the delta-review pass produced no verdict at all. Deliberately
-	// fails open -- the same settle-as-usual outcome as
-	// StopDeltaReviewApproved, not StopDeltaReviewBlocked -- because a
-	// malfunctioning extra gate must not strand a run the review pass
-	// already approved; this mirrors the review loop's own existing
-	// fail-open convention for a pass that never resolved (reviewTransition's
-	// VerdictNone case commits to landing rather than blocking). Appended
-	// last, after StopDeltaReviewApproved, for the same reason.
+	// StopDeltaReviewNoVerdict fires when the delta-review pass produced no
+	// verdict. It fails open to the same settle-as-usual outcome as
+	// StopDeltaReviewApproved, because a malfunctioning extra gate must not
+	// strand a run the review pass already approved.
 	StopDeltaReviewNoVerdict
 )
 
-// Caps carries the orchestrator-configured budget caps a Transition decision
-// may consult -- a zero value (0) for any field means that cap is disabled,
-// mirroring cfg.maxSlices/cfg.maxReviewRounds's own "0 means unlimited"
-// convention. Static, per-run config only -- the dynamic usage-so-far values
-// these token/USD caps are compared against live on Input instead
-// (Input.CumulativeTokens/CumulativeUSD), mirroring the existing
-// Pass/ReviewRounds split against MaxSlices/MaxReviewRounds.
+// Caps carries the orchestrator-configured caps a Transition decision may
+// consult. A zero value disables that cap, matching cfg.maxSlices's "0 means
+// unlimited" convention. Static per-run config only: the usage-so-far values
+// these caps are compared against live on Input.
 type Caps struct {
 	// MaxSlices is the coarse backstop on total pass count (cfg.maxSlices).
 	MaxSlices int
 	// MaxReviewRounds is the cap on review rounds elapsed (cfg.maxReviewRounds).
 	MaxReviewRounds int
-	// MaxBudgetTokens is the cap on cumulative token usage (pre-summed across
-	// input/output/cache-read/cache-creation categories by the caller, not
-	// this package), compared against Input.CumulativeTokens. 0 disables this
+	// MaxBudgetTokens is the cap on cumulative token usage, which the caller
+	// sums across usage categories, not this package. 0 disables this
 	// dimension independently of MaxBudgetUSD (issue #2694).
 	MaxBudgetTokens int
-	// MaxBudgetUSD is the cap on cumulative USD cost, compared against
-	// Input.CumulativeUSD. 0 disables this dimension independently of
-	// MaxBudgetTokens (issue #2694).
+	// MaxBudgetUSD is the cap on cumulative USD cost. 0 disables this
+	// dimension independently of MaxBudgetTokens (issue #2694).
 	MaxBudgetUSD float64
 }
 
-// LandPhase names whether a prior decision has already committed this run
-// to a terminal land pass (issue #2548 AC2). Transition dispatches the
-// implement/fix/land decision point to one of two entirely separate
-// functions based on this field alone -- terminalLandTransition once
-// LandPhaseTerminalCommitted, implementFixTransition while still
-// LandPhaseActive -- so the two rule sets live in physically disjoint
-// functions and can never again be reordered against each other by a
-// future case added to either switch.
+// LandPhase names whether a prior decision has already committed this run to
+// a terminal land pass (issue #2548 AC2). Transition dispatches the
+// implement/fix/land decision on this field alone, so terminalLandTransition
+// and implementFixTransition can never be reordered against each other.
 type LandPhase int
 
 const (
-	// LandPhaseActive is the ordinary state: no prior decision has yet
-	// committed this run to a terminal land pass.
+	// LandPhaseActive is the ordinary state: nothing has committed this run
+	// to a terminal land pass yet.
 	LandPhaseActive LandPhase = iota
-	// LandPhaseTerminalCommitted means a prior decision -- a maxSlices cap
-	// firing on the implement/fix/land decision point, or a no-verdict/
-	// maxSlices/maxReviewRounds cap firing on the review-pass decision
-	// point -- already committed this run to landing, regardless of the
-	// PassKind label the pass that just ran happens to carry. The caller
-	// threads this field, not PassKind, back into the next call's
-	// Input.LandPhase; reviewTransition maps a LandPhase already (or
-	// newly) TerminalCommitted -- or a plain APPROVE verdict -- to
-	// NextPass == KindLand.
+	// LandPhaseTerminalCommitted means a cap firing on an earlier decision
+	// already committed this run to landing, whatever PassKind label the
+	// pass that just ran carries. The caller threads this field, not
+	// PassKind, back into the next call's Input.LandPhase.
 	LandPhaseTerminalCommitted
 )
 
-// Input is everything a single Transition call needs to reproduce one of
-// the three source switches' decisions -- no cfg, state, or I/O, so every
-// case is exercisable from a table test alone.
+// Input is everything a single Transition call needs, with no cfg, state or
+// I/O, so every case is exercisable from a table test alone.
 type Input struct {
-	// PassJustExecuted names which pass kind's decision point this call is
-	// evaluating -- KindImplement, KindFix, and KindLand share one decision
-	// point (run.go:355-401) and are treated identically.
+	// PassJustExecuted names which decision point this call is evaluating.
+	// KindImplement, KindFix and KindLand share one, treated identically.
 	PassJustExecuted PassKind
 	// Verdict is the verdict word scanned from the pass that just ran.
-	// Meaningful for KindLegacy (the pass's own verdict) and KindReview
-	// (the review pass's own reviewVerdict) only -- zero/irrelevant for
-	// KindImplement/KindFix/KindLand, whose own pass log is scanned only
-	// for HasOutcome.
+	// Meaningful for KindLegacy and KindReview only; an implement, fix or
+	// land pass log is scanned only for HasOutcome.
 	Verdict Verdict
-	// HasOutcome is whether the pass that just ran reached its own
-	// terminal SPINDRIFT_OUTCOME line. Meaningful for KindLegacy and
-	// KindImplement/KindFix/KindLand only -- a review pass's own decision
-	// point (run.go:461-487) never consults it.
+	// HasOutcome is whether the pass that just ran reached its terminal
+	// SPINDRIFT_OUTCOME line. A review pass's decision never consults it.
 	HasOutcome bool
 	// Pass is the 1-indexed count of passes run so far, including the one
-	// that just finished -- compared against Caps.MaxSlices.
+	// that just finished, compared against Caps.MaxSlices.
 	Pass int
 	// ReviewRounds is the number of review rounds elapsed strictly before
-	// this decision -- compared against Caps.MaxReviewRounds.
+	// this decision, compared against Caps.MaxReviewRounds.
 	ReviewRounds int
-	// Caps carries the two orchestrator-configured budget caps.
+	// Caps are the static per-run caps this decision checks against.
 	Caps Caps
 	// LandPhase is state.TerminalLand's value going into this decision,
-	// converted to the machine's own LandPhase type (before this call may
-	// commit it to LandPhaseTerminalCommitted) -- see LandPhase's own doc
-	// comment for how Transition dispatches on it at the implement/fix/land
-	// decision point.
+	// before this call may commit it to LandPhaseTerminalCommitted.
 	LandPhase LandPhase
 	// LastVerdict is state.LastVerdict going into this decision. Meaningful
-	// for KindImplement/KindFix/KindLand only (the "land pass reached no
-	// terminal outcome after APPROVE" check).
+	// for KindImplement/KindFix/KindLand only, for the "land pass reached no
+	// terminal outcome after APPROVE" check.
 	LastVerdict Verdict
-	// CumulativeTokens is the caller's own sum of cumulative token usage so
-	// far (across all four usage.Usage token categories -- this package does
-	// no summing itself), compared against Caps.MaxBudgetTokens. Meaningful
-	// only for KindReview's own decision point, mirroring how ReviewRounds is
-	// compared against Caps.MaxReviewRounds there (issue #2694).
+	// CumulativeTokens is the caller's sum of token usage so far across the
+	// four usage.Usage categories; this package does no summing. Meaningful
+	// only for KindReview's decision point (issue #2694).
 	CumulativeTokens int
-	// CumulativeUSD is the cumulative USD cost so far, compared against
-	// Caps.MaxBudgetUSD. Meaningful only for KindReview's own decision point,
-	// mirroring CumulativeTokens (issue #2694).
+	// CumulativeUSD is the cumulative USD cost so far. Meaningful only for
+	// KindReview's decision point (issue #2694).
 	CumulativeUSD float64
 }
 
-// Decision is Transition's result: whether to continue into another pass
-// (and if so, which kind, and what state mutations that continuation
-// implies) or stop the loop outright (and why).
+// Decision is Transition's result: whether to continue into another pass, and
+// if so which kind and what state mutations that implies, or stop the loop.
 type Decision struct {
-	// Continue is false when the loop should stop after the pass that just
-	// ran; true when it should run another pass.
+	// Continue is false when the loop should stop after this pass.
 	Continue bool
-	// Reason is the exact decision-op Reason text the source switch emits
-	// for whichever case matched -- byte-identical to today's strings, or
-	// the empty string for a fallthrough continue that matched no case.
+	// Reason is the decision-op Reason text for whichever case matched.
 	Reason string
-	// Stop names why the loop is stopping -- StopNone whenever Continue is
-	// true.
+	// Stop names why the loop is stopping, StopNone when Continue is true.
 	Stop StopReason
-	// NextPass names which pass kind runs next -- meaningful only when
-	// Continue is true.
+	// NextPass names which pass kind runs next, only when Continue is true.
 	NextPass PassKind
-	// LandPhase is LandPhaseTerminalCommitted when this decision commits
-	// the run to a terminal land pass (a cap firing) -- the caller persists
-	// this onto its own state so a LATER call's Input.LandPhase reflects
-	// it; LandPhaseActive (the zero value) otherwise.
+	// LandPhase is LandPhaseTerminalCommitted when this decision commits the
+	// run to a terminal land pass. The caller persists it so a later call's
+	// Input.LandPhase reflects it.
 	LandPhase LandPhase
-	// CapFired is the exact state.CapFired text the source switch assigns
-	// -- set only when LandPhase is LandPhaseTerminalCommitted.
+	// CapFired is the state.CapFired text, set only when LandPhase is
+	// LandPhaseTerminalCommitted.
 	CapFired string
-	// Cap is the typed counterpart to CapFired: StopNone (the zero value)
-	// whenever LandPhase is LandPhaseActive, else the CapReason naming
-	// which cap fired (StopMaxSlicesReached, StopMaxReviewRoundsReached, or
-	// StopNoVerdict for the review pass's own "no verdict" case). Callers
-	// that need to detect a specific cap programmatically (e.g. caps.go's
-	// own simulateReviewRoundCapPass) compare against this instead of
-	// CapFired's prose string, which doubles as operator-facing prompt text
+	// Cap is the typed counterpart to CapFired, StopNone whenever LandPhase
+	// is LandPhaseActive. Detect a specific cap against this, not against
+	// CapFired: that prose doubles as operator-facing prompt text
 	// (run.go's seedPromptFromState) and can be reworded independently.
 	Cap CapReason
 	// IncrementReviewRounds is true when this decision implies
-	// reviewRounds++ (unconditional on KindLegacy's own continue path;
-	// gated on reviewVerdict == BLOCK, regardless of which case matched,
-	// on KindReview's own decision point).
+	// reviewRounds++: unconditional on KindLegacy's continue path, gated on
+	// a BLOCK verdict on KindReview's decision point.
 	IncrementReviewRounds bool
 }
 
-// Transition reproduces exactly one of the three orchestrator decision
-// switches, chosen by in.PassJustExecuted -- KindImplement, KindFix, and
-// KindLand all share the same implement/fix/land decision point, which
-// itself dispatches on in.LandPhase (issue #2548 AC2) between
-// implementFixTransition and terminalLandTransition.
+// Transition runs one of the orchestrator decision switches, chosen by
+// in.PassJustExecuted. KindImplement, KindFix and KindLand share the
+// implement/fix/land decision point, which dispatches again on in.LandPhase
+// (issue #2548 AC2).
 func Transition(in Input) Decision {
 	switch in.PassJustExecuted {
 	case KindLegacy:
@@ -390,8 +278,7 @@ func Transition(in Input) Decision {
 	}
 }
 
-// legacyTransition reproduces run.go:244-259, the legacy single loop's own
-// decision after each pass.
+// legacyTransition is the legacy single loop's decision after each pass.
 func legacyTransition(in Input) Decision {
 	switch {
 	case in.HasOutcome:
@@ -405,20 +292,14 @@ func legacyTransition(in Input) Decision {
 	case in.Caps.MaxReviewRounds > 0 && in.ReviewRounds >= in.Caps.MaxReviewRounds:
 		return Decision{Continue: false, Reason: "max review rounds reached", Stop: StopMaxReviewRoundsReached}
 	}
-	// Only reachable when Verdict == BLOCK, HasOutcome is false, and
-	// neither cap fired: reviewRounds++ unconditionally, loop continues
-	// with the same single pass kind.
 	return Decision{Continue: true, Reason: "blocked, running another pass", NextPass: KindLegacy, IncrementReviewRounds: true}
 }
 
-// terminalLandTransition reproduces the in.LandPhase ==
-// LandPhaseTerminalCommitted half of what was previously a single switch at
-// run.go:355-401 (issue #2548 AC2): once a prior decision has already
-// committed this run to a terminal land pass, nothing else about the pass
-// that just ran matters except whether it finally reached its own outcome.
-// Kept as its own function, physically disjoint from implementFixTransition,
-// so the two rule sets can never again be reordered against each other by a
-// future case added to either one.
+// terminalLandTransition is the in.LandPhase == LandPhaseTerminalCommitted
+// half of the implement/fix/land decision (issue #2548 AC2): once the run is
+// committed to landing, only whether the pass reached its outcome matters.
+// Kept disjoint from implementFixTransition so the two rule sets cannot be
+// reordered against each other.
 func terminalLandTransition(in Input) Decision {
 	if in.HasOutcome {
 		return Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached}
@@ -426,28 +307,21 @@ func terminalLandTransition(in Input) Decision {
 	return Decision{Continue: false, Reason: "terminal land pass reached no outcome", Stop: StopTerminalLandNoOutcome}
 }
 
-// implementFixTransition reproduces the in.LandPhase == LandPhaseActive half
-// of what was previously a single switch at run.go:355-401 (issue #2548
-// AC2): the ordinary implement/fix/land decision rules (APPROVE,
-// maxSlices). It deliberately carries NO terminal-land case -- once
-// a prior decision commits this run to landing, Transition dispatches to
-// terminalLandTransition instead, so that commitment's own rule lives
-// somewhere this switch's case order can never reprioritize against it.
+// implementFixTransition is the in.LandPhase == LandPhaseActive half of the
+// implement/fix/land decision (issue #2548 AC2). It carries no terminal-land
+// case on purpose: Transition dispatches that to terminalLandTransition, so
+// this switch's case order can never reprioritize against it.
 func implementFixTransition(in Input) Decision {
 	switch {
 	case in.HasOutcome:
 		return Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached}
-	// After an APPROVE verdict the land pass runs exactly once: a land pass
-	// cut off before its own terminal SPINDRIFT_OUTCOME is recovered by the
-	// within-pass required_marker_gate session-resume nudge (issue #2044,
-	// agent/entrypoint.sh) inside that single land driver-exec, not by
-	// re-entering this decision again -- a fresh land pass would re-invoke
-	// the Filer / FILE ISSUES step on every extra lap, bounded only by the
-	// coarse maxSlices cap below (issue #2069).
+	// After an APPROVE the land pass runs exactly once. The
+	// required_marker_gate session-resume nudge recovers a land pass cut off
+	// before its outcome within that same pass (issue #2044), not here: a
+	// fresh land pass re-invokes the Filer on every extra lap (issue #2069).
 	case in.LastVerdict == VerdictApprove:
 		return Decision{Continue: false, Reason: "land pass reached no terminal outcome after APPROVE", Stop: StopApproveNoOutcome}
-	// maxSlices is a hard ceiling on total driver-exec invocations (issue
-	// #2457).
+	// maxSlices is a hard ceiling on total driver-exec invocations (#2457).
 	case in.Caps.MaxSlices > 0 && in.Pass >= in.Caps.MaxSlices:
 		return Decision{
 			Continue:  true,
@@ -458,19 +332,13 @@ func implementFixTransition(in Input) Decision {
 			CapFired:  "max slices reached",
 		}
 	}
-	// No case matched: falls through to entering the review pass.
 	return Decision{Continue: true, Reason: "no cap fired, entering review pass", NextPass: KindReview}
 }
 
-// budgetExceeded reports whether tokens or usd has reached or exceeded
-// either of caps.MaxBudgetTokens/caps.MaxBudgetUSD, and if so, a human-
-// readable reason naming which dimension(s) tripped and by how much --
-// deliberately duplicated from settle's own budgetExceeded
-// (cmd/launcher/internal/settle/budget.go), same return shape and message
-// format, rather than imported, to keep this package dependency-free of
-// settle. Same "0 disables this dimension, independently of the other"
-// convention as every other cap in this file: a zero cap never fires
-// regardless of tokens or usd, and either dimension alone can trip it.
+// budgetExceeded reports whether tokens or usd reached either budget cap, and
+// a reason naming which dimensions tripped. Duplicated from settle's own
+// budgetExceeded (cmd/launcher/internal/settle/budget.go), same message
+// format, rather than imported, to keep this package free of that dependency.
 func budgetExceeded(caps Caps, tokens int, usd float64) (bool, string) {
 	var reasons []string
 	if caps.MaxBudgetTokens > 0 && tokens >= caps.MaxBudgetTokens {
@@ -485,10 +353,8 @@ func budgetExceeded(caps Caps, tokens int, usd float64) (bool, string) {
 	return true, strings.Join(reasons, "; ")
 }
 
-// reviewTransition reproduces run.go:461-487, the review loop's own
-// decision after a review pass. Every branch of this decision continues --
-// there is no case that stops the loop; that is existing, deliberate
-// behavior (a review pass alone never stops the run).
+// reviewTransition is the review loop's decision after a review pass. Every
+// branch continues by design: a review pass alone never stops the run.
 func reviewTransition(in Input) Decision {
 	var d Decision
 	alreadyCommitted := in.LandPhase == LandPhaseTerminalCommitted
@@ -518,11 +384,9 @@ func reviewTransition(in Input) Decision {
 			Cap:       StopMaxReviewRoundsReached,
 			CapFired:  "max review rounds reached",
 		}
-	// This case must come last among the caps above: when a budget cap and
-	// an earlier cap (no-verdict, maxSlices, maxReviewRounds) both fire on
-	// the same pass, the earlier cap's Reason/CapFired/Cap keep reporting
-	// priority over this one -- the same ordering rule the caps in
-	// implementFixTransition above follow.
+	// This case must stay last among the caps: when a budget cap and an
+	// earlier cap both fire on the same pass, the earlier cap's
+	// Reason/CapFired/Cap keep reporting priority over this one.
 	case in.Verdict == VerdictBlock && budgetHit:
 		d = Decision{
 			Continue:  true,
@@ -532,17 +396,16 @@ func reviewTransition(in Input) Decision {
 			CapFired:  "budget exceeded (" + budgetReason + ")",
 		}
 	case in.Verdict == VerdictApprove:
-		// A plain APPROVE deliberately does not stop the run: the
-		// implement/fix pass it followed was told to stop right after
-		// COMMIT, so at the moment of approval the work is committed but
-		// not pushed, has no PR, and has produced no outcome -- one more
-		// (terminal) pass is required to land it (issue #2069).
+		// A plain APPROVE does not stop the run: the implement/fix pass it
+		// followed stopped right after COMMIT, so the work is committed but
+		// unpushed, has no PR, and produced no outcome. One more terminal
+		// pass lands it (issue #2069).
 		d = Decision{Continue: true, Reason: "approved, running the land pass"}
 	default:
-		// A plain BLOCK with no cap hit. Normally another fix pass is
-		// needed -- but if in.LandPhase is already LandPhaseTerminalCommitted
-		// on entry, the dispatch below still routes NextPass to KindLand
-		// in that case, so the Reason must say so too (issue #2782).
+		// A plain BLOCK with no cap hit normally needs another fix pass, but
+		// if in.LandPhase was already TerminalCommitted on entry the
+		// dispatch below still routes NextPass to KindLand, so the Reason
+		// must say so too (issue #2782).
 		reason := "blocked, running another fix pass"
 		if alreadyCommitted {
 			reason = "blocked, but the run is already committed to the terminal land pass; running it anyway"
@@ -550,17 +413,14 @@ func reviewTransition(in Input) Decision {
 		d = Decision{Continue: true, Reason: reason}
 	}
 
-	// Unconditional, regardless of which case fired: a BLOCK verdict
-	// increments reviewRounds, even for a capped BLOCK.
+	// A BLOCK verdict increments reviewRounds whichever case fired above,
+	// even for a capped BLOCK.
 	if in.Verdict == VerdictBlock {
 		d.IncrementReviewRounds = true
 	}
 
-	// LandPhase already TerminalCommitted from before, or just committed
-	// above by this decision, or the verdict is a plain APPROVE (which
-	// always means "nothing left to fix, land it" even with no cap in
-	// play): next pass kind is Land; else (a BLOCK, or no verdict yet
-	// outside this function's other branches) Fix.
+	// A plain APPROVE means "nothing left to fix, land it" even with no cap
+	// in play, so it routes to KindLand like a committed LandPhase does.
 	if alreadyCommitted || d.LandPhase == LandPhaseTerminalCommitted || in.Verdict == VerdictApprove {
 		d.NextPass = KindLand
 	} else {
@@ -570,16 +430,9 @@ func reviewTransition(in Input) Decision {
 	return d
 }
 
-// deltaReviewTransition is KindDeltaReview's own decision (issue #3246),
-// kept physically disjoint from legacyTransition/implementFixTransition/
-// terminalLandTransition/reviewTransition above, mirroring how
-// terminalLandTransition is kept apart from implementFixTransition: the
-// delta-review pass's rules -- terminal in every direction, never a cap
-// check, never a loop -- can never be reordered against another pass
-// kind's rules by a future case added to one of those other functions.
-// Every branch returns Continue: false; the delta-review pass runs at
-// most once per the caller's own ExtraPassAllowed gate, so there is
-// nothing left for this function to schedule.
+// deltaReviewTransition is KindDeltaReview's decision (issue #3246). Every
+// branch returns Continue: false: the delta-review pass runs at most once,
+// gated by ExtraPassAllowed, so there is nothing left to schedule.
 func deltaReviewTransition(in Input) Decision {
 	switch in.Verdict {
 	case VerdictBlock:
@@ -595,9 +448,8 @@ func deltaReviewTransition(in Input) Decision {
 			Stop:     StopDeltaReviewApproved,
 		}
 	default:
-		// VerdictNone: fails open, the same settle-as-usual outcome as
-		// VerdictApprove above -- see StopDeltaReviewNoVerdict's own doc
-		// comment for why.
+		// VerdictNone fails open to the same settle-as-usual outcome as
+		// VerdictApprove; see StopDeltaReviewNoVerdict for why.
 		return Decision{
 			Continue: false,
 			Reason:   "delta review produced no verdict; the run settles as usual rather than blocking a landing the review pass already approved",
@@ -608,22 +460,9 @@ func deltaReviewTransition(in Input) Decision {
 
 // ExtraPassAllowed reports whether the orchestrator may still spend the one
 // extra delta-review pass issue #3246 allows once a terminal land pass has
-// settled, checked against the same MaxSlices/MaxBudgetTokens/MaxBudgetUSD
-// caps every other pass in this package already respects -- MaxReviewRounds
-// is deliberately not consulted here, since the delta-review pass runs
-// strictly after the implement/fix/review loop has already settled, so it
-// is not itself a review round of that loop. pass is the 1-indexed count of
-// passes already run, including the land pass that just settled; 0 disables
-// the MaxSlices dimension, matching every cap in this package's own "0
-// means unlimited" convention. Checked in slices-then-tokens-then-USD
-// order, the same priority order the existing transitions already use for
-// these constants, and reusing StopMaxSlicesReached/StopBudgetExceeded
-// (rather than minting delta-review-specific cap constants) so a caller
-// correlating this call against a Transition-driven cap firing sees the
-// same StopReason value either way. A cap firing here skips the extra pass
-// outright rather than deferring it to a later pass: this run-once
-// mechanism has no later pass to defer to -- the run is already committed
-// to landing by the time this check runs.
+// settled. It skips MaxReviewRounds, since that pass is not a round of the
+// implement/fix/review loop. pass counts the settled land pass too, and the
+// reused StopReasons let a caller match a cap here against Transition's.
 func ExtraPassAllowed(caps Caps, pass int, cumulativeTokens int, cumulativeUSD float64) (bool, CapReason) {
 	switch {
 	case caps.MaxSlices > 0 && pass >= caps.MaxSlices:

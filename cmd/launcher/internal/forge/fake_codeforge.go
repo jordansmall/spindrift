@@ -4,41 +4,36 @@ var _ CodeForge = (*CodeForgeFake)(nil)
 
 var _ BranchProtectionForge = (*CodeForgeFake)(nil)
 
-// CodeForgeFake is the code-forge-capability slice of Fake, holding every
-// field the CodeForge surface reads or writes. It embeds *core — see core's
-// doc comment for the admission rule — so its methods can reach mu/prStates/
-// LandingCallLog/etc. directly, the same shared core instance Fake and
-// IssueTrackerFake also embed.
+// CodeForgeFake is the CodeForge-capability slice of Fake. It embeds the same
+// *core instance that Fake and IssueTrackerFake embed, so mu, prStates and
+// LandingCallLog are shared state across all three.
 type CodeForgeFake struct {
-	// *core is the shared substrate promoted through to CodeForgeFake — see
-	// core's doc comment for the admission rule.
 	*core
 
-	// BranchPrefix is baked into AgentBranch's output. Zero value "" matches
-	// an unconfigured config.branchPrefix; set explicitly to exercise a real
-	// prefix (e.g. "agent/issue-").
+	// BranchPrefix's zero value "" matches an unconfigured config.branchPrefix;
+	// set it to exercise a real prefix such as "agent/issue-".
 	BranchPrefix string
-	branchExists map[string]bool // branch → scripted BranchExists result
+	branchExists map[string]bool
 	// BranchExistsErr, if non-nil, is returned by every BranchExists call.
 	BranchExistsErr error
 
-	branchProtected    map[string]bool  // branch → scripted BranchProtected result
-	branchProtectedErr map[string]error // branch → scripted BranchProtected error
+	branchProtected    map[string]bool
+	branchProtectedErr map[string]error
 
-	// MergeErr, if non-nil, is returned by every Merge call (after MergeErrs is drained).
+	// MergeErr, if non-nil, is returned by every Merge call once MergeErrs is drained.
 	MergeErr error
-	// MergeErrs is a per-call queue drained before MergeErr is checked.
-	// A nil entry means success; a non-nil entry is returned as the error.
+	// MergeErrs is a per-call queue drained before MergeErr is checked. A nil
+	// entry means success.
 	MergeErrs []error
-	// Merged is set to the URL of the last successful Merge call.
+	// Merged holds the URL of the last successful Merge call.
 	Merged string
-	// RebaseErr, if non-nil, is returned by every Rebase call (after
-	// RebaseErrs is drained).
+	// RebaseErr, if non-nil, is returned by every Rebase call once RebaseErrs
+	// is drained.
 	RebaseErr error
-	// RebaseErrs is a per-call queue drained before RebaseErr is checked.
-	// A nil entry means success; a non-nil entry is returned as the error.
+	// RebaseErrs is a per-call queue drained before RebaseErr is checked. A nil
+	// entry means success.
 	RebaseErrs []error
-	// RebasedURLs records all URLs passed to Rebase in order.
+	// RebasedURLs records every URL passed to Rebase, in order.
 	RebasedURLs []string
 }
 
@@ -49,8 +44,8 @@ func (cf *CodeForgeFake) AgentBranch(num string) string {
 	return cf.BranchPrefix + num
 }
 
-// BranchExists returns the scripted result set by SetBranchExists (false for
-// an unscripted branch), or BranchExistsErr if set.
+// BranchExists returns BranchExistsErr if set, else the result scripted by
+// SetBranchExists, which is false for an unscripted branch.
 func (cf *CodeForgeFake) BranchExists(branch string) (bool, error) {
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
@@ -60,18 +55,16 @@ func (cf *CodeForgeFake) BranchExists(branch string) (bool, error) {
 	return cf.branchExists[branch], nil
 }
 
-// SetBranchExists scripts BranchExists's result for branch. Unset branches
-// default to false (not found).
+// SetBranchExists scripts BranchExists's result for branch.
 func (cf *CodeForgeFake) SetBranchExists(branch string, exists bool) {
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
 	cf.branchExists[branch] = exists
 }
 
-// BranchProtected returns the scripted result set by SetBranchProtected
-// (false for an unscripted branch, mirroring BranchExists's own
-// unset-means-false default), or the per-branch error set by
-// SetBranchProtectedErr, if any.
+// BranchProtected returns the per-branch error set by SetBranchProtectedErr if
+// there is one, else the result scripted by SetBranchProtected, which is false
+// for an unscripted branch.
 func (cf *CodeForgeFake) BranchProtected(branch string) (bool, error) {
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
@@ -81,18 +74,16 @@ func (cf *CodeForgeFake) BranchProtected(branch string) (bool, error) {
 	return cf.branchProtected[branch], nil
 }
 
-// SetBranchProtected scripts BranchProtected's result for branch. Unset
-// branches default to false (not protected), the same zero-value
-// convention SetBranchExists uses.
+// SetBranchProtected scripts BranchProtected's result for branch.
 func (cf *CodeForgeFake) SetBranchProtected(branch string, protected bool) {
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
 	cf.branchProtected[branch] = protected
 }
 
-// SetBranchProtectedErr scripts BranchProtected to return err for branch,
-// taking precedence over any SetBranchProtected result for that branch —
-// the probe-failed outcome, distinct from a definitive "not protected".
+// SetBranchProtectedErr scripts BranchProtected to return err for branch. It
+// takes precedence over any SetBranchProtected result for that branch, so it
+// models a failed probe rather than a definitive "not protected".
 func (cf *CodeForgeFake) SetBranchProtectedErr(branch string, err error) {
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
@@ -133,10 +124,8 @@ func (cf *CodeForgeFake) Rebase(url string) error {
 	return cf.RebaseErr
 }
 
-// Probe locks cf's own embedded *core and returns the scripted repo/error —
-// CodeForgeFake's own copy of Fake's identically-bodied Probe, needed so
-// CodeForgeFake independently satisfies CodeForge (var _ CodeForge above),
-// matching IssueTrackerFake's own Probe from the tracker-capability slice.
+// Probe returns the scripted repo or error. It duplicates Fake's identical
+// method so that CodeForgeFake satisfies CodeForge on its own.
 func (cf *CodeForgeFake) Probe() (string, error) {
 	cf.mu.Lock()
 	defer cf.mu.Unlock()

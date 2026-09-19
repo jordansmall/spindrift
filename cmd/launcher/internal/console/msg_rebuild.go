@@ -1,53 +1,39 @@
 package console
 
-// Msg types for the image-freshness/rebuild state and its output pane.
-
-// StaleStatusMsg carries the launcher's live image-freshness/rebuild state
-// into the pure core — Run's per-render sync, alongside QueueSnapshotMsg,
-// since the background drain (not Update) is what learns the probe result
-// and a rebuild's outcome (issue #652). One RebuildStatus value replaces
-// the six scalar fields this used to carry (issue #1541).
+// StaleStatusMsg carries the launcher's image-freshness and rebuild state into
+// the pure core (issue #1541). Run syncs it per render because the background
+// drain, not Update, learns the probe result and a rebuild's outcome (#652).
 type StaleStatusMsg struct {
 	RebuildStatus RebuildStatus
 }
 
 func (StaleStatusMsg) isConsoleMsg() {}
 
-// RebuildOutputOpenMsg is the tea layer's signal that the operator pressed
-// "o" — opens the rebuild-output pane, RebuildOutput's only consumer; a
-// no-op while RebuildOutput is "" (no rebuild has captured output yet),
-// issue #1128.
+// RebuildOutputOpenMsg opens the rebuild-output pane on "o" (issue #1128). It
+// is a no-op while RebuildOutput is "", before any rebuild captures output.
 type RebuildOutputOpenMsg struct{}
 
 func (RebuildOutputOpenMsg) isConsoleMsg() {}
 
-// RebuildOutputCloseMsg is the tea layer's signal that the operator pressed
-// "x"/Esc while the rebuild-output pane is open — closes it, returning to
-// the backlog/queue view (issue #1128).
+// RebuildOutputCloseMsg closes the rebuild-output pane on "x" or Esc (issue #1128).
 type RebuildOutputCloseMsg struct{}
 
 func (RebuildOutputCloseMsg) isConsoleMsg() {}
 
-// RebuildOutputScrollMsg is the tea layer's signal that the operator pressed
-// a scroll key while the rebuild-output pane is open — Delta is the number
-// of lines to move, a no-op while the pane is closed (issue #1128).
+// RebuildOutputScrollMsg scrolls the rebuild-output pane by Delta lines, a
+// no-op while the pane is closed (issue #1128).
 type RebuildOutputScrollMsg struct {
 	Delta int
 }
 
 func (RebuildOutputScrollMsg) isConsoleMsg() {}
 
-// RebuildOutputJumpToFirstMsg is the tea layer's signal that "gg" completed
-// in the rebuild-output pane — resets RebuildOutputOffset to 0, reusing the
-// g-leader chord CursorJumpToFirstMsg introduced for the list body rather
-// than duplicating it (issue #1630).
+// RebuildOutputJumpToFirstMsg resets RebuildOutputOffset to 0 on "gg" (issue #1630).
 type RebuildOutputJumpToFirstMsg struct{}
 
 func (RebuildOutputJumpToFirstMsg) isConsoleMsg() {}
 
-// RebuildOutputJumpToLastMsg is the tea layer's signal that "G" was pressed
-// in the rebuild-output pane — jumps RebuildOutputOffset to the last page,
-// mirroring CursorJumpToLastMsg for the list body (issue #1630).
+// RebuildOutputJumpToLastMsg jumps RebuildOutputOffset to the last page on "G" (issue #1630).
 type RebuildOutputJumpToLastMsg struct{}
 
 func (RebuildOutputJumpToLastMsg) isConsoleMsg() {}

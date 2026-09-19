@@ -13,21 +13,11 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// NewTCPForwarder builds an http.Handler that transparently relays every
-// request to http://upstreamHost:upstreamPort, attaching secret via
-// registrymanifest.TCPSecretHeader on the outbound leg -- the box-local
-// half of issue #3111's TCP-fallback transport. Ecosystem tooling (cargo,
-// npm, Go, gradle) points at a bare loopback Forwarder port exactly as it
-// does for the unix-socket transport (forwarder.go's socat bridge); this
-// handler is what a Forwarder listening on that port relays through when
-// the socket can't cross, standing in for socat, which can carry raw bytes
-// but can't inject an HTTP header. GET/HEAD enforcement and the real upstream
-// credential attach both stay launcher-side (registryproxy.New's Handler,
-// served over the same ListenAndServeTCP this forwards to) -- this handler
-// only adds the one header a socket transport gets for free from its own
-// filesystem permissions. Relaying the inbound Host across the hop (see the
-// Rewrite hook) also puts the Forwarder's own address in the X-Forwarded-Host
-// the launcher sends the real registry, matching what socat already sent.
+// NewTCPForwarder relays every request to http://upstreamHost:upstreamPort,
+// attaching secret via registrymanifest.TCPSecretHeader (issue #3111). That
+// header authenticates the hop: a loopback port has none of the filesystem
+// permissions guarding the unix-socket transport, and socat cannot inject it.
+// GET/HEAD enforcement and the upstream credential attach stay launcher-side.
 func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http.Handler, error) {
 	if upstreamHost == "" {
 		return nil, fmt.Errorf("bindregistry: upstream host must not be empty")
@@ -58,15 +48,11 @@ func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http
 	return rp, nil
 }
 
-// SpawnHTTPForwarder starts an HTTP-aware Forwarder detached, listening on
-// 127.0.0.1:port and relaying to upstreamHost:upstreamPort with secret
-// attached via NewTCPForwarder -- the TCP-fallback transport's SpawnFunc-
-// compatible counterpart to SpawnSocat. It works by re-executing this same
-// driver-exec binary (os.Executable()) in a new "forward-registry-tcp"
-// subcommand mode, mirroring how SpawnSocat execs an external "socat"
-// binary -- the same Setsid-detach mechanism, just re-invoking ourselves
-// instead of a separate binary, since there's no free-standing HTTP-proxy
-// binary already on the image the way socat is.
+// SpawnHTTPForwarder starts a detached Forwarder on 127.0.0.1:port relaying
+// to upstreamHost:upstreamPort with secret attached via NewTCPForwarder. It
+// re-execs this binary in its "forward-registry-tcp" subcommand mode because
+// the image carries no free-standing HTTP proxy binary the way it carries
+// socat.
 func SpawnHTTPForwarder(upstreamHost string, upstreamPort int, secret string, port int) (int, error) {
 	self, err := os.Executable()
 	if err != nil {
@@ -85,19 +71,17 @@ func SpawnHTTPForwarder(upstreamHost string, upstreamPort int, secret string, po
 		"-upstream-host", upstreamHost,
 		"-upstream-port", fmt.Sprintf("%d", upstreamPort),
 	)
-	// The secret must never appear on the child's argv (visible via ps/
-	// /proc to any local user); it rides the child's environment instead,
-	// read back by the forward-registry-tcp subcommand via
-	// REGISTRY_PROXY_TCP_SECRET. os.Environ() may already carry this key
-	// (the caller read it from its own environment) -- drop any prior
-	// value so the child sees exactly one, unambiguous entry.
+	// The secret must never appear on the child's argv, which ps and /proc
+	// expose to any local user, so it rides the environment instead.
+	// os.Environ() may already carry this key, so drop any prior value and
+	// leave the child exactly one entry.
 	cmd.Env = append(filterEnv(os.Environ(), "REGISTRY_PROXY_TCP_SECRET"), "REGISTRY_PROXY_TCP_SECRET="+secret)
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull
-	// Setsid detaches the Forwarder from the caller's session/process
-	// group so it outlives the caller process; cmd.Wait() is deliberately
-	// never called -- this must stay a detached, long-running process.
+	// Setsid detaches the Forwarder from the caller's session so it outlives
+	// the caller. cmd.Wait() is never called; this stays a detached,
+	// long-running process.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := closeOnExecInheritedFDs(); err != nil {
@@ -110,9 +94,8 @@ func SpawnHTTPForwarder(upstreamHost string, upstreamPort int, secret string, po
 	return cmd.Process.Pid, nil
 }
 
-// filterEnv returns env with every entry for key removed, preserving order
-// of the rest -- used to drop a pre-existing value before appending a fresh
-// one, so a child process never sees the same key twice.
+// filterEnv returns env with every entry for key removed, so a caller can
+// append a fresh value and leave a child exactly one entry for that key.
 func filterEnv(env []string, key string) []string {
 	prefix := key + "="
 	out := make([]string, 0, len(env))

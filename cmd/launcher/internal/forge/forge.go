@@ -1,5 +1,5 @@
-// Package forge is the seam through which the Harness speaks to the Target
-// repo's host. GitHub is today's only adapter; the name goes into the glossary.
+// Package forge is the interface through which the Harness speaks to the
+// Target repo's host. GitHub is today's only adapter.
 package forge
 
 import (
@@ -7,60 +7,48 @@ import (
 	"strings"
 )
 
-// ErrMergeConflict is returned by Merge when the PR branch cannot be
-// auto-merged due to conflicts with the base branch. Callers may attempt to
-// rebase the head branch and retry.
+// ErrMergeConflict is returned by Merge when the PR branch conflicts with the
+// base branch. Callers may rebase the head branch and retry.
 var ErrMergeConflict = errors.New("merge conflict")
 
-// ErrMergeBlockedByChecks is returned by Merge when the PR itself has no
-// content conflict (mergeable state MERGEABLE) but required status checks
-// are still pending or failing, so the forge refuses the merge. GitHub's gh
-// CLI reports this refusal with the same "not mergeable" wording as a
-// genuine conflict; callers must tell the two apart by querying the PR's
-// mergeable state (see PRForge.Mergeable) rather than the refusal text.
-// Unlike ErrMergeConflict, this is not conflict-resolvable — retrying the
-// merge once checks settle is the only valid next step.
+// ErrMergeBlockedByChecks is returned by Merge when the PR has no content
+// conflict but required checks are pending or failing. The gh CLI reports this
+// with the same "not mergeable" wording as a genuine conflict, so callers must
+// tell the two apart by the PR's mergeable state (see PRForge.Mergeable). A
+// rebase does not help here; the only next step is to retry once checks settle.
 var ErrMergeBlockedByChecks = errors.New("merge blocked by checks")
 
-// ErrTransientPushFailure is returned by Rebase when its force-push fails
-// for a reason unrelated to the branch state — a forge outage, network
-// fault, or locked ref — as opposed to a genuine stale-lease or
-// non-fast-forward rejection. Callers may retry a bounded number of times.
+// ErrTransientPushFailure is returned by Rebase when its force-push fails for a
+// reason unrelated to branch state, such as a forge outage or a locked ref, and
+// not a stale-lease or non-fast-forward rejection. Callers may retry a bounded
+// number of times.
 var ErrTransientPushFailure = errors.New("transient push failure")
 
-// ErrMergeTransient is returned by Merge when the merge call itself fails
-// for a transient transport/server reason — an HTTP 5xx from the forge, a
-// network timeout, or similar — as opposed to a genuine merge rejection
-// (conflict, blocked by checks, branch protection). Callers may retry a
-// bounded number of times with backoff.
+// ErrMergeTransient is returned by Merge when the merge call fails for a
+// transient transport or server reason rather than a genuine rejection
+// (conflict, blocked by checks, branch protection). Callers may retry with
+// backoff.
 var ErrMergeTransient = errors.New("transient merge failure")
 
-// ErrAuthFailure is returned by Probe when the forge credentials are missing
-// or invalid. Callers should advise the user to check GH_TOKEN.
+// ErrAuthFailure is returned by Probe when the forge credentials are missing or
+// invalid. Callers should advise the user to check GH_TOKEN.
 var ErrAuthFailure = errors.New("forge auth failure")
 
-// ErrRepoNotFound is returned by Probe when the configured repository cannot
-// be reached or does not exist under the authenticated account.
+// ErrRepoNotFound is returned by Probe when the configured repository cannot be
+// reached or does not exist under the authenticated account.
 var ErrRepoNotFound = errors.New("forge repo not found")
 
-// ErrBundleNotFound is returned by a BundleRelay's RelayBundle when the
-// outbox seam bundle is simply absent — nothing was written because the
-// Box's branch range was empty (issue #2096), a benign "nothing to relay"
-// outcome the blocked-hand-off call site logs informationally rather than
-// as a relay failure. A bundle that is present but unreadable or corrupt
-// is a genuine error and is NOT this sentinel.
+// ErrBundleNotFound is returned by RelayBundle when the outbox bundle is absent
+// because the Box's branch range was empty (issue #2096), a benign "nothing to
+// relay" outcome. A present but corrupt bundle is a genuine error, not this.
 var ErrBundleNotFound = errors.New("forge bundle not found")
 
-// ErrNotFound is returned when a requested resource (an issue, a pull
-// request, a label, etc.) does not exist on the forge. Unlike
-// ErrRepoNotFound, which is Probe-specific (the configured repository
-// itself is unreachable), ErrNotFound is the generic per-resource sentinel
-// callers can errors.Is check for any REST lookup.
+// ErrNotFound is the generic per-resource sentinel for any REST lookup, unlike
+// ErrRepoNotFound, which means the configured repository itself is unreachable.
 var ErrNotFound = errors.New("forge: not found")
 
-// ErrRateLimit is returned when a forge operation fails because GitHub is
-// rate-limiting the caller — either the primary hourly API quota or the
-// secondary/abuse-detection limit. Callers may retry after backing off.
+// ErrRateLimit is returned when GitHub rate-limits the caller, on either the
+// primary hourly quota or the secondary abuse-detection limit.
 var ErrRateLimit = errors.New("forge rate limited")
 
 // Issue is a GitHub issue as seen by the launcher.
@@ -70,56 +58,38 @@ type Issue struct {
 	Body   string
 	State  IssueState
 	Labels []string
-	// Landing is the local adapter's immutable landing ref (ADR 0029, a PR
-	// URL or push-only branch ref) — empty for github/jira, which have no
-	// such field to report.
+	// Landing is the local adapter's immutable landing ref (ADR 0029, a PR URL
+	// or push-only branch ref). Empty for github/jira, which have no such field.
 	Landing string
-	// Abandoned reports the local adapter's abandoned: axis (ADR 0029) — set
-	// by reconcile when the issue's landing PR closed without merging.
-	// Always false for github/jira, which have no such field to report.
+	// Abandoned reports the local adapter's abandoned: axis (ADR 0029), set by
+	// reconcile when the issue's landing PR closed without merging. Always false
+	// for github/jira.
 	Abandoned bool
-	// Parent is the local adapter's opaque, operator-authored parent:
-	// frontmatter field (ADR 0033) — the broad-ticket key CODE_FORGE=local
-	// resolves this seam's Integration branch from. Empty for github/jira,
-	// which have no such field, and for a local issue with no parent: set
-	// (a parentless seam is its own broad ticket, keyed on its own slug
-	// instead — see local.ResolveParent).
+	// Parent is the local adapter's parent: frontmatter field (ADR 0033), the
+	// broad-ticket key CODE_FORGE=local resolves the Integration branch from.
+	// Empty for github/jira, and for a parentless local seam, which is its own
+	// broad ticket keyed on its own slug (see local.ResolveParent).
 	Parent string
-	// Priority is the canonical dispatch priority (ADR 0040), resolved by
-	// each IssueTracker adapter from its own agent-priority-* labels (or
-	// left at the zero value PriorityNormal for adapters that don't map
-	// priority labels yet). The launcher sorts the dispatchable pool by
-	// this value, highest tier first, with oldest-first as the
-	// within-tier tiebreaker — that sort is not part of this type.
+	// Priority is the canonical dispatch priority (ADR 0040), resolved by each
+	// IssueTracker adapter from its own agent-priority-* labels. The sort that
+	// consumes it is not part of this type.
 	Priority Priority
 }
 
-// Priority is the canonical dispatch priority a launcher sorts the
-// dispatchable pool by (ADR 0040): Critical > High > Normal > Low. Each
-// IssueTracker adapter (github, jira, local, and the fake) translates its
-// own agent-priority-* labels to these values at its own edge — priority is
-// a canonical launcher concept resolved from labels, never a native
-// per-tracker field or a per-adapter sort.
-//
-// The zero value is PriorityNormal, so an issue built without setting
-// Priority (e.g. an adapter that hasn't wired label resolution yet) safely
-// defaults to the tier an unlabeled issue occupies. The four constants are
-// ordered so that plain Go comparison operators (<, >) already express the
-// ADR's total order — a future central sort can compare two Priority values
-// directly with no separate ranking method.
+// Priority is the canonical dispatch priority (ADR 0040): Critical > High >
+// Normal > Low. Each IssueTracker adapter resolves it from its own
+// agent-priority-* labels at its own edge. The zero value is PriorityNormal,
+// the tier an unlabeled issue occupies, and the constants are ordered so that
+// < and > already express the ADR's total order.
 type Priority int
 
 const (
-	// PriorityLow is the "run only when the pool would otherwise idle"
-	// tier — the ADR's bury tier, below the Normal default.
+	// PriorityLow runs only when the pool would otherwise idle.
 	PriorityLow Priority = iota - 1
-	// PriorityNormal is the zero value and the tier an unlabeled issue
-	// occupies.
 	PriorityNormal
-	// PriorityHigh boosts an issue above the Normal default.
 	PriorityHigh
-	// PriorityCritical is the top tier; highest label wins if an issue
-	// somehow carries more than one priority label.
+	// PriorityCritical wins if an issue somehow carries more than one priority
+	// label.
 	PriorityCritical
 )
 
@@ -139,17 +109,16 @@ func (p Priority) String() string {
 	}
 }
 
-// IssueState is the canonical open/closed state of an issue. Each
-// IssueTracker adapter (github, jira, local, and the fake) translates its own
-// native representation to these values at its own edge; no adapter's native
-// literal should leak past that boundary.
+// IssueState is the canonical open/closed state of an issue. Each IssueTracker
+// adapter translates its own native representation at its own edge; no
+// adapter's native literal leaks past that boundary.
 type IssueState string
 
 const (
 	IssueOpen   IssueState = "OPEN"
 	IssueClosed IssueState = "CLOSED"
-	// IssueMerged is the state gh issue view reports when a blocker ref
-	// resolves to a merged PR rather than an agent-worked issue.
+	// IssueMerged is what gh issue view reports when a blocker ref resolves to a
+	// merged PR rather than an agent-worked issue.
 	IssueMerged IssueState = "MERGED"
 )
 
@@ -158,10 +127,8 @@ type PR struct {
 	URL string
 }
 
-// PRState is the canonical state of a pull request. Each CodeForge adapter
-// (github, the fake) translates its own native representation to these
-// values at its own edge; the push-only git adapter has no PR concept and
-// never returns one.
+// PRState is the canonical state of a pull request. The push-only git adapter
+// has no PR concept and never returns one.
 type PRState string
 
 const (
@@ -170,11 +137,10 @@ const (
 	PRClosed PRState = "CLOSED"
 )
 
-// MergeableState is GitHub's PR-content mergeability classification —
-// whether the PR's changes conflict with its base branch. It is distinct
-// from RollupState (CI check results) and from required-review/branch-
-// protection gating: a MergeableMergeable PR can still be refused by Merge
-// if its checks haven't passed.
+// MergeableState is GitHub's classification of whether a PR's changes conflict
+// with its base branch. It is distinct from RollupState (CI results) and from
+// required-review or branch-protection gating: Merge can still refuse a
+// MergeableMergeable PR whose checks have not passed.
 type MergeableState string
 
 // Known MergeableState values returned by the GitHub API or by the fake.
@@ -184,13 +150,11 @@ const (
 	MergeableConflicting MergeableState = "CONFLICTING"
 )
 
-// ClassifyMergeFailure maps a PR's MergeableState to the sentinel error a
-// failed Merge should return, shared by every CodeForge adapter so the
-// conflict-vs-checks distinction (see ErrMergeConflict, ErrMergeBlockedByChecks)
-// is made in one place. ok is false for any state the caller must not mask
-// behind a sentinel — MergeableUnknown, or any adapter-native value this
-// package doesn't recognize — telling the caller to build its own
-// adapter-specific raw error instead.
+// ClassifyMergeFailure maps a PR's MergeableState to the sentinel a failed
+// Merge should return, so every adapter makes the conflict-vs-checks
+// distinction in one place. ok is false for a state the caller must not mask
+// behind a sentinel (MergeableUnknown, or an unrecognized adapter-native
+// value), telling it to build its own raw error instead.
 func ClassifyMergeFailure(state MergeableState) (err error, ok bool) {
 	switch state {
 	case MergeableConflicting:
@@ -220,19 +184,16 @@ const (
 const MaxFailureDetailBytes = 4000
 
 // FailureDetailEntry is one failing check or status, normalized from an
-// adapter's native shape (github: CheckRun name+conclusion+summary or
-// StatusContext context+state+description, unioned; forgejo: context+state+
-// description) into the common fields RenderFailureDetail formats.
+// adapter's native shape into the fields RenderFailureDetail formats.
 type FailureDetailEntry struct {
 	Name    string
 	State   string
 	Summary string
 }
 
-// RenderFailureDetail formats already-filtered failing entries into a
-// bounded, human-readable excerpt: one "Name: State" header per entry plus
-// its summary, truncated to MaxFailureDetailBytes. Callers are responsible
-// for filtering entries down to failing ones before calling this function.
+// RenderFailureDetail formats failing entries into a bounded excerpt, truncated
+// to MaxFailureDetailBytes. Callers must filter entries down to failing ones
+// first.
 func RenderFailureDetail(entries []FailureDetailEntry) string {
 	var b strings.Builder
 	for _, e := range entries {

@@ -15,8 +15,6 @@ import (
 )
 
 // ghLabel is the label shape gh issue view/list emit under --json labels.
-// Shared across ListOpenIssues, Issue, and issueLabels so the field tag
-// lives in one place.
 type ghLabel struct {
 	Name string `json:"name"`
 }
@@ -70,10 +68,9 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	return issues, nil
 }
 
-// ListOpenIssues returns every open issue, in canonical order (ascending
-// issue number), regardless of dispatch state — unlike ListIssues, which
-// scopes to one dispatch state's label, this carries no --label filter, so
-// untriaged issues (no dispatch label yet) are included too.
+// ListOpenIssues returns every open issue in ascending number order. Unlike
+// ListIssues it passes no --label filter, so issues with no dispatch label
+// yet are included.
 func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 	cmd := exec.Command("gh", "issue", "list",
 		"--repo", e.repo,
@@ -152,10 +149,8 @@ type ghComment struct {
 	Body      string `json:"body"`
 }
 
-// Comments implements the optional forge.CommentLister surface, returning
-// issue num's comments oldest-first -- the order gh's own comments field
-// emits them in and the order forge.IssueText assumes when it windows to
-// the last 10.
+// Comments returns issue num's comments oldest-first, the order gh emits them
+// in and the order forge.IssueText assumes when it windows to the last 10.
 func (e *execClient) Comments(num string) ([]forge.Comment, error) {
 	cmd := exec.Command("gh", "issue", "view", num,
 		"--repo", e.repo,
@@ -184,20 +179,16 @@ func (e *execClient) Comments(num string) ([]forge.Comment, error) {
 
 var _ forge.CommentLister = (*execClient)(nil)
 
-// StateLabels implements forge.LabeledTracker, returning the DispatchLabels
-// e resolves DispatchState values through.
+// StateLabels returns the DispatchLabels e resolves DispatchState values through.
 func (e *execClient) StateLabels() forge.DispatchLabels {
 	return e.labels
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
-// num. It emits exactly one --add-label and, ordinarily, one --remove-label,
-// matching the prior SwapLabel(add, remove) call contract with typed state
-// identifiers. A claim (to == InProgress) additionally strips any stale
-// terminal label (Complete, Failed) the issue might still carry from a prior
-// run, matching the dispatch workflow's claim-remove-labels set (#1985) —
-// otherwise a re-triggered or recovered issue could run while still labeled
-// agent-failed or agent-complete.
+// num. A claim (to == InProgress) also strips any stale terminal label
+// (Complete, Failed) left by a prior run, matching the dispatch workflow's
+// claim-remove-labels set (#1985), so a re-triggered or recovered issue cannot
+// run while still labeled agent-failed or agent-complete.
 func (e *execClient) TransitionState(num string, from, to forge.DispatchState) error {
 	add := e.labels.Label(to)
 	args := []string{"issue", "edit", num, "--repo", e.repo, "--add-label", add}
@@ -211,9 +202,8 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 	return nil
 }
 
-// issueLabels fetches only the label set for issue num, skipping the
-// title/body/state fields Issue also fetches — CompleteVerdict's InProgress
-// precondition check needs nothing else.
+// issueLabels skips the title/body/state fields Issue fetches; CompleteVerdict's
+// InProgress precondition check needs nothing but the labels.
 func (e *execClient) issueLabels(num string) ([]string, error) {
 	cmd := exec.Command("gh", "issue", "view", num,
 		"--repo", e.repo,
@@ -232,19 +222,11 @@ func (e *execClient) issueLabels(num string) ([]string, error) {
 	return labelNames(raw.Labels), nil
 }
 
-// CompleteVerdict swaps the InProgress label for verdict's terminal label on
-// issue num, emitting exactly one --add-label and one --remove-label —
-// TransitionState's contract, with the to-label resolved from verdictLabels
-// instead of DispatchLabels.Complete.
-//
-// Before editing, it asserts num currently carries InProgress: a
-// double-dispatched issue would otherwise have InProgress silently left in
-// place alongside the verdict label instead of erroring. This is a
-// check-then-edit, not an atomic compare-and-swap — another process could
-// still flip the label between the read below and the edit, so it narrows
-// the double-dispatch window without closing it. The mismatch error renders
-// labels comma-joined, matching local.go and view.go, rather than Go's
-// bracketed %v slice form.
+// CompleteVerdict swaps the InProgress label on issue num for verdict's
+// terminal label, resolved from verdictLabels rather than DispatchLabels.
+// It first asserts num carries InProgress, so a double-dispatched issue errors
+// instead of silently keeping InProgress alongside the verdict label. The check
+// is not atomic: another process can flip the label between the read and edit.
 func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	add := e.verdictLabels.Label(verdict)
 	if add == "" {
@@ -273,10 +255,9 @@ func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	return nil
 }
 
-// DepsOf returns the canonical dependencies for issue num, preferring
-// GitHub's native issue-dependencies API and falling back to body-text
-// parsing (inline refs / "## Blocked by" section) when the native lookup
-// errors or yields no relationships.
+// DepsOf returns issue num's dependencies, preferring GitHub's native
+// issue-dependencies API and falling back to body-text parsing when that
+// lookup errors or returns no relationships.
 func (e *execClient) DepsOf(num string) ([]forge.Dependency, error) {
 	deps, err := e.nativeDepsOf(num)
 	if err == nil && len(deps) > 0 {
@@ -292,17 +273,14 @@ func (e *execClient) DepsOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(forge.ParseBlockerRefs(iss.Body), forge.DepSourceBody), nil
 }
 
-// nativeDepsOf queries GitHub's issue-dependencies API for the issues that
-// block num.
 func (e *execClient) nativeDepsOf(num string) ([]string, error) {
 	return e.nativeDependencyIDs(num, "blocked_by")
 }
 
-// BlocksOf returns the canonical issues num blocks — DepsOf's reverse
-// direction — read from GitHub's native issue-dependencies API. Unlike
-// DepsOf there is no body-text fallback: no prose grammar declares a
-// forward "blocks" relationship, so a native lookup failure has nothing to
-// degrade to and is returned directly (issue #1744).
+// BlocksOf returns the issues num blocks, read from GitHub's native
+// issue-dependencies API. No prose grammar declares a forward "blocks"
+// relationship, so unlike DepsOf there is no body-text fallback and a lookup
+// failure is returned directly (issue #1744).
 func (e *execClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	ids, err := e.nativeDependencyIDs(num, "blocking")
 	if err != nil {
@@ -311,9 +289,8 @@ func (e *execClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(ids, forge.DepSourceNative), nil
 }
 
-// nativeDependencyIDs queries GitHub's issue-dependencies API for num's
-// relationships in the given direction ("blocked_by" or "blocking"),
-// deduplicating results in API response order.
+// nativeDependencyIDs reads num's relationships in the given direction,
+// either "blocked_by" or "blocking", deduplicating in API response order.
 func (e *execClient) nativeDependencyIDs(num, direction string) ([]string, error) {
 	cmd := exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/issues/%s/dependencies/%s", e.repo, num, direction),
@@ -336,14 +313,11 @@ func (e *execClient) nativeDependencyIDs(num, direction string) ([]string, error
 	return deps, nil
 }
 
-// PriorClaimState implements the optional forge.PriorClaimStateReader
-// surface (issue #2477): it reads issue num's timeline for the most recent
-// "unlabeled" event naming either the Complete or Failed terminal label —
-// the label a claim's TransitionState(_, InProgress) call (ClaimRemoveLabels)
-// stripped immediately before recoverByNumber ever runs, and so the only
-// route back to what the issue was before that claim. Timeline events are
-// chronological (oldest first, preserved across --paginate pages), so the
-// last matching event seen while scanning is the most recent one.
+// PriorClaimState reads issue num's timeline for the most recent "unlabeled"
+// event naming the Complete or Failed label (issue #2477). A claim's
+// TransitionState(_, InProgress) strips that label before recoverByNumber runs,
+// so the timeline is the only route back to it. Events arrive oldest first,
+// across --paginate pages too, so the last match scanned is the most recent.
 func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, error) {
 	cmd := exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/issues/%s/timeline", e.repo, num),
@@ -368,9 +342,8 @@ func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, err
 	return prior, found, nil
 }
 
-// TouchesOf returns the declared touch-set parsed from issue num's body —
-// the shared body-grammar default (forge.ParseTouchPaths); this adapter has
-// no native touch-set concept to prefer over it.
+// TouchesOf parses the declared touch-set from issue num's body; this adapter
+// has no native touch-set concept to prefer over the shared body grammar.
 func (e *execClient) TouchesOf(num string) ([]string, error) {
 	iss, err := e.Issue(num)
 	if err != nil {
@@ -379,12 +352,10 @@ func (e *execClient) TouchesOf(num string) ([]string, error) {
 	return forge.ParseTouchPaths(iss.Body), nil
 }
 
-// CloseMergedIssue implements the optional forge.MergeCloser surface (issue
-// #1892): a deterministic backstop for a merged agent PR whose body's
-// Closes #<N> keyword GitHub's own auto-close missed. Checks state before
-// shelling out so an already-closed issue (the common case — auto-close
-// already ran) is a true no-op rather than relying on gh's own exit code for
-// a redundant close.
+// CloseMergedIssue closes issue num as a backstop for a merged agent PR whose
+// Closes #<N> keyword GitHub's auto-close missed (issue #1892). It checks state
+// first so the common already-closed case is a true no-op instead of leaning on
+// gh's exit code for a redundant close.
 func (e *execClient) CloseMergedIssue(num string) error {
 	iss, err := e.Issue(num)
 	if err != nil {
@@ -411,10 +382,9 @@ func (e *execClient) Comment(num, body string) error {
 	return nil
 }
 
-// PostIssue implements forge.HostPostedIssueFiler (issue #2028): it files a
-// new issue against this adapter's own repo — never a caller-suppliable
-// repo, per the do-not-trust-the-agent-target invariant (issue #1949) — and
-// returns the created issue's URL, which `gh issue create` writes to stdout.
+// PostIssue files an issue against this adapter's own repo, never a
+// caller-supplied one, per the do-not-trust-the-agent-target invariant (issues
+// #2028, #1949). It returns the created issue's URL from gh's stdout.
 func (e *execClient) PostIssue(title, body string, labels []string) (string, error) {
 	args := []string{"issue", "create",
 		"--repo", e.repo,

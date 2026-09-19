@@ -16,27 +16,25 @@ type Store struct {
 	Path string // the store file's path, as written into credential references
 }
 
-// Lookup reports whether store holds a credential for the declaration --
-// injected so engine tests run against no real store. It never returns the
-// credential value; found is all the engine needs.
+// Lookup reports whether store holds a credential for the declaration. It is
+// injected so engine tests run against no real store, and never returns the
+// credential value.
 type Lookup func(store Store, d ecosystem.Declaration) (found bool, err error)
 
-// Probe answers the auth scheme for an upstream base URL. Injected; the
-// real probe reads the registry's WWW-Authenticate answer and defaults to
-// "bearer" when unreachable.
+// Probe answers the auth scheme for an upstream base URL. The real probe reads
+// the registry's WWW-Authenticate answer and defaults to "bearer" when the
+// registry is unreachable.
 type Probe func(upstreamBaseURL string) string
 
-// Route is one proposed route, engine output -- shaped to write directly
-// into a registry routes file (registryroutes.Route), minus the optional
-// keys this engine has no basis to guess (allow, the per-ecosystem path
-// declarations).
+// Route is one proposed route, shaped to write directly into a registry routes
+// file (registryroutes.Route) minus the optional keys this engine has no basis
+// to guess (allow, the per-ecosystem path declarations).
 type Route struct {
 	MatchHost string
-	// UpstreamBaseURL is the full URL the config declared, kept for the
-	// auth-scheme probe and the credential-store match. It is not a routes
-	// file key: Render distills it down to an upstream-origin, and only when
-	// the scheme or port says something match-host does not (see
-	// upstreamOrigin).
+	// UpstreamBaseURL is not a routes file key: Render distills it down to an
+	// upstream origin, and only when the scheme or port says something
+	// match-host does not. It is kept here for the auth-scheme probe and the
+	// credential-store match.
 	UpstreamBaseURL  string
 	AuthScheme       string
 	CredentialSource string // "netrc"|"npmrc"|"cargo-credentials"|"gradle-properties"|"env" (env = placeholder for unmatched)
@@ -59,11 +57,9 @@ type UnmatchedHost struct {
 	StoresSearched []string
 }
 
-// Report summarizes a Discover run for the operator: which declared hosts
-// matched a store, which didn't, and which config files are present but
-// declare no registry -- either naming no registry at all, or naming only
-// unusable ones (carried through from Extract's Note, including its
-// Skipped distinction).
+// Report summarizes a Discover run: which declared hosts matched a store,
+// which did not, and which config files declare no usable registry (carried
+// through from Extract's Note, including its Skipped distinction).
 type Report struct {
 	Matched    []MatchedHost
 	Unmatched  []UnmatchedHost
@@ -98,10 +94,9 @@ func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Rou
 		if found {
 			route.CredentialSource = matchedStore.Name
 			route.CredentialValue = matchedStore.Path
-			// Every companion a matched store contributes is already
-			// spelled by that kind's own StoreConfig -- RegistryName for
-			// cargo, PropertyKey for gradle, empty for the rest -- so both
-			// are assigned unconditionally rather than per store name.
+			// Each kind's own StoreConfig already names every companion it
+			// contributes, so Discover assigns both unconditionally rather
+			// than branching per store name.
 			if kind, ok := credresolver.KindBySourceKey(matchedStore.Name); ok && kind.StoreConfig != nil {
 				cfg := kind.StoreConfig(matchedStore.Path, declarationFacts(d))
 				route.RegistryName = cfg.RegistryName
@@ -122,14 +117,10 @@ func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Rou
 }
 
 // disambiguateEnvPlaceholders resolves envPlaceholder collisions among this
-// run's unmatched routes: two hosts differing only in which byte a hyphen
-// vs. a dot occupies (both fold to "_") would otherwise share one env var
-// name, so a value an operator sets for one host would silently also reach
-// the other. Every route sharing a base name gets a short host-keyed hash
-// suffix -- deterministic per host and independent of declaration order, so
-// a route's name never depends on what else happened to be discovered
-// alongside it in a way an operator could not reproduce by hand. Hosts with
-// a unique base name are untouched.
+// run's unmatched routes: envPlaceholder folds hyphens and dots alike to "_",
+// so two hosts can share one name and a value an operator sets for one host
+// silently reaches the other. The suffix hashes the host alone, so a route's
+// name never depends on what else the run discovered.
 func disambiguateEnvPlaceholders(routes []Route) {
 	byName := make(map[string][]int)
 	for i, r := range routes {
@@ -148,20 +139,17 @@ func disambiguateEnvPlaceholders(routes []Route) {
 	}
 }
 
-// hostHash renders an 8-hex-digit fnv32a hash of host -- short enough to
-// keep the env var name readable, long enough that two distinct hosts
-// colliding on the same base name essentially never also collide on the
-// suffix.
+// hostHash renders host as 8 hex digits of fnv32a: short enough to keep the
+// env var name readable, long enough that two hosts colliding on one base
+// name essentially never also collide on the suffix.
 func hostHash(host string) string {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(host)) // fnv32a's Write never errors
 	return fmt.Sprintf("%08X", h.Sum32())
 }
 
-// declarationFacts derives the credresolver kind table's dependency-free
-// facts from a declaration -- the one place in this package computing
-// registryvocab.HostKey for the table's benefit. See credresolver.StoreFacts
-// for why Host and HostKey are kept distinct.
+// declarationFacts fills Host and HostKey separately because the stores key on
+// different ones: npmrc on the raw host, gradle-properties on the HostKey.
 func declarationFacts(d ecosystem.Declaration) credresolver.StoreFacts {
 	return credresolver.StoreFacts{
 		Host:            d.Host,
@@ -171,23 +159,18 @@ func declarationFacts(d ecosystem.Declaration) credresolver.StoreFacts {
 	}
 }
 
-// firstMatch searches stores in order for a credential matching d, returning
-// the first hit plus every configured store name, in order (so the report's
-// StoresSearched always names what was considered, even a store skipped as
-// inapplicable, e.g. cargo-credentials for a non-cargo declaration -- a
-// store list that skips every entry must never leave StoresSearched empty
-// and the report naming nothing). A lookup error is treated as not-found and
-// the search continues -- one unreachable store must never abort discovery
+// firstMatch searches stores in order and returns the first hit plus every
+// configured store name, so StoresSearched names even a store skipped as
+// inapplicable and never comes back empty. A lookup error counts as not-found
+// and the search continues: one unreachable store must never abort discovery
 // of the rest.
 func firstMatch(stores []Store, lookup Lookup, d ecosystem.Declaration) (store Store, searched []string, found bool) {
 	facts := declarationFacts(d)
 	for _, s := range stores {
 		searched = append(searched, s.Name)
-		// A store kind's StoreApplicable (only cargo-credentials' is
-		// non-nil today: a declaration with no RegistryName has nothing
-		// for that lookup to key on) says a store has nothing to search
-		// for this declaration -- still named above but never actually
-		// queried.
+		// StoreApplicable (cargo-credentials only today: a declaration with
+		// no RegistryName gives that lookup nothing to key on) marks a store
+		// with nothing to search here, named above but never queried.
 		if kind, ok := credresolver.KindBySourceKey(s.Name); ok && kind.StoreApplicable != nil && !kind.StoreApplicable(facts) {
 			continue
 		}
@@ -200,11 +183,9 @@ func firstMatch(stores []Store, lookup Lookup, d ecosystem.Declaration) (store S
 	return Store{}, searched, false
 }
 
-// normalizeAuthScheme accepts probe's answer verbatim when it is "bearer",
-// "basic", or "header:<Name>" with Name a valid RFC 7230 token, and falls
-// back to "bearer" for anything else -- mirrors
-// registryroutes.validateAuthScheme's shape rule, but a bad probe answer
-// here is a wrong guess to overwrite, not a routes-file error to reject.
+// normalizeAuthScheme applies registryroutes.validateAuthScheme's shape rule to
+// probe's answer, but falls back to "bearer" instead of rejecting: a bad probe
+// answer is a wrong guess for the operator to overwrite, not a routes-file error.
 func normalizeAuthScheme(scheme string) string {
 	if scheme == "bearer" || scheme == "basic" {
 		return scheme
@@ -215,11 +196,9 @@ func normalizeAuthScheme(scheme string) string {
 	return "bearer"
 }
 
-// envPlaceholder names the environment variable an unmatched route's
-// credential value points at -- a stable, readable name derived from the
-// host so an operator can grep the routes file for what still needs wiring.
-// This is a base name only: two hosts that fold to the same base name are
-// disambiguated afterward by disambiguateEnvPlaceholders.
+// envPlaceholder derives a stable, readable env var name from the host so an
+// operator can grep the routes file for what still needs wiring. It returns a
+// base name only; disambiguateEnvPlaceholders resolves collisions afterward.
 func envPlaceholder(host string) string {
 	var b strings.Builder
 	b.WriteString("SPINDRIFT_REGISTRY_CREDENTIAL_")

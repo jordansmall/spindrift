@@ -1,20 +1,14 @@
 package forge
 
-// CodeForge is the seam every adapter honors: agent branch naming, rebase,
-// merge/landing under MERGE_MODE, and connectivity probe. Both adapters
-// (github, the push-only git remote) implement it with real behavior — no
-// stubs.
+// CodeForge is the seam every adapter implements: agent branch naming, rebase,
+// merge/landing under MERGE_MODE, and connectivity probe.
 type CodeForge interface {
-	// AgentBranch returns the agent branch name for issue num, with the
-	// branch prefix baked in at construction. The Code Forge seam's single
-	// owner of the branch-prefix rule — callers never concatenate it
-	// themselves.
+	// AgentBranch returns the agent branch name for issue num. The prefix is
+	// baked in at construction; callers never concatenate it themselves.
 	AgentBranch(num string) string
-	// BranchExists reports whether branch exists on the remote, independent
-	// of any PR — the signal a bare `git push` with no PR opened yet (or a
-	// PR already closed) still leaves behind. Reconcile's gated orphan reset
-	// (#1432, #600) needs this alongside PRForge's PR-shaped checks, so it
-	// lives on the core CodeForge surface every adapter honors.
+	// BranchExists reports whether branch exists on the remote, independent of
+	// any PR, the signal a bare `git push` with no PR opened yet still leaves
+	// behind. Reconcile's gated orphan reset (#1432, #600) needs it.
 	BranchExists(branch string) (bool, error)
 	// Merge lands ref onto the target branch: a rebase merge of the PR (github)
 	// or a plain merge-and-push of the branch name (git, MERGE_MODE=immediate).
@@ -26,123 +20,83 @@ type CodeForge interface {
 	Probe() (string, error)
 }
 
-// BundleRelay is CODE_FORGE=local's optional pre-merge landing hook (ADR
-// 0033): the Box cannot push to its read-only Accumulation-repo mount, so it
-// leaves its finished branch as a git bundle in the writable outbox instead;
-// before Merge(ref) can find that branch as a ref on the backing repo, the
-// bundle must be relayed in. Discovered via type assertion, like PRForge and
-// LandingRecorder — only the local adapter implements it.
+// BundleRelay is CODE_FORGE=local's optional pre-merge landing hook (ADR 0033):
+// the Box cannot push to its read-only Accumulation-repo mount, so it leaves
+// its branch as a git bundle in the writable outbox, which must be relayed in
+// before Merge(ref) can find that branch. Only the local adapter implements it.
 type BundleRelay interface {
 	// RelayBundle imports ref from the bundle file the Box left in outboxDir
-	// into the Code Forge's backing repo, so a subsequent Merge(ref) finds
-	// the branch. Returns an error, leaving the seam unlanded, when the
-	// bundle is missing or malformed.
+	// into the Code Forge's backing repo. An error leaves the seam unlanded.
 	RelayBundle(outboxDir, ref string) error
 }
 
 // LandingRef is CODE_FORGE=local's optional post-merge landing-reference
-// resolver (ADR 0029, ADR 0033): once Merge has landed the seam's branch,
-// LandingRef resolves the immutable Integration ref + commit sha the
-// landing: field records — richer than the raw branch name RecordLanding
-// gets for github/git. Discovered via type assertion; only the local
-// adapter implements it. Unlike Merge/Rebase, it takes no ref argument: the
-// value it resolves is a property of the adapter's own fixed Integration
-// branch (baked in at construction), not of whichever branch was merged.
+// resolver (ADR 0029, ADR 0033): it resolves the immutable Integration ref and
+// commit sha the landing: field records. It takes no ref argument because that
+// value belongs to the adapter's own fixed Integration branch, baked in at
+// construction, not to whichever branch was merged.
 type LandingRef interface {
 	// LandingRef resolves the landing reference, once a merge has landed.
 	LandingRef() (string, error)
 }
 
-// LandingRepair is CODE_FORGE=local's optional bookkeeping-repair surface
-// (ADR 0029, ADR 0033, issue #1809): Reconcile's healing path for a seam
-// whose merge landed but whose post-merge landing upgrade (settle's
-// LandingRef call) never ran, leaving a stale LandingBranchRef recorded
-// instead of the rich LandingIntegrationRef. Unlike LandingRef — which leans
-// on the adapter's own construction-time parent — Reconcile's sweep holds
-// one Code Forge instance across a whole, possibly mixed-parent batch (its
-// cf is always constructed with an empty parent), so IntegrationTip takes
-// the issue's own resolved parent explicitly rather than relying on the
-// adapter's own. Discovered via type assertion, like BundleRelay/LandingRef;
-// only the local adapter implements it.
+// LandingRepair is CODE_FORGE=local's optional bookkeeping-repair interface (ADR
+// 0029, ADR 0033, issue #1809): it heals a seam whose merge landed but whose
+// post-merge LandingRef call never ran, leaving a stale LandingBranchRef
+// recorded. Reconcile's sweep holds one Code Forge instance, constructed with
+// an empty parent, across a mixed-parent batch, so IntegrationTip takes one.
 type LandingRepair interface {
-	// IntegrationTip resolves parent's own Integration branch to its
-	// current landing-ready "<branch>@<sha>" reference — the value
-	// Reconcile's repair records once LandingContained confirms the merge,
-	// the same grammar LandingRef produces for the fresh-merge path.
+	// IntegrationTip resolves parent's own Integration branch to its current
+	// landing-ready "<branch>@<sha>" reference, the same grammar LandingRef
+	// produces for the fresh-merge path.
 	IntegrationTip(parent string) (string, error)
 }
 
-// LandingContainmentQuery is CODE_FORGE=local's optional single
-// containment-check surface (issue #2129, issue #1734, ADR 0033, issue
-// #2151): the sole no-network merge-observation seam reconcile's closing
-// authority and the wave engine's dependent blocker gate both check a local
-// Code Forge through, replacing the three narrower single-purpose methods
-// this issue collapsed into it: a no-scope self-verification check, a
-// bookkeeping-repair ancestry check that used to live on LandingRepair, and
-// this interface's own prior narrower single-shape query. Like LandingRepair,
-// scope's parent is an explicit argument rather than the adapter's own
-// construction-time one, so
-// a single shared Code Forge instance can answer the question for any
-// parent — including a batch's own broad ticket parent (reconcile's own
-// case, where scope's parent equals landing's own recorded parent) or a
-// dependent's cross-seam parent (the wave gate's own case, ADR 0033 D2) — in
-// a single mixed pass.
+// LandingContainmentQuery is CODE_FORGE=local's single no-network
+// merge-observation seam (issues #2129, #1734, #2151, ADR 0033), used by both
+// reconcile's closing authority and the wave engine's dependent blocker gate.
+// scope's parent is an explicit argument, not the adapter's construction-time
+// one, so one shared instance answers for any parent in a mixed pass.
 type LandingContainmentQuery interface {
-	// LandingContained reports whether landing's commit is already
-	// contained in scope's own Integration branch, either as a plain git
-	// ancestor or by patch-equivalence, since a rebase-based land (issue
-	// #1889) replays commits under new shas that a pure ancestry check can
-	// no longer see. landing's own commit sha comes from its Kind: a
-	// LandingIntegrationRef supplies it directly; a LandingBranchRef (the
-	// raw, pre-merge record settle's outcome line wrote before any
-	// post-merge upgrade) resolves it by looking up the named branch's
-	// current tip; any other shape (e.g. a PR URL reaching this local-only
-	// path) reports contained=false, nil outright. A landing whose resolved
-	// commit is absent from the Accumulation repo, or whose commit hasn't
-	// (yet) reached scope's Integration branch, both report
-	// contained=false, nil — the same "stays open, blocked" posture either
-	// way; a non-nil error is reserved for a genuine local-git failure
-	// (e.g. the Accumulation repo itself is unreadable).
+	// LandingContained reports whether landing's commit already sits in scope's
+	// own Integration branch, by git ancestry or by patch-equivalence, since a
+	// rebase-based land (issue #1889) replays commits under new shas. A commit
+	// this cannot resolve, or that has not reached scope, reports (false, nil);
+	// an error is reserved for a genuine local-git failure.
 	LandingContained(landing Landing, scope SeedScope) (contained bool, err error)
 }
 
-// PRForge is the optional PR, CI-rollup, and auto-merge surface. Only
-// adapters that open pull requests and watch CI implement it (github); the
-// push-only git adapter does not. Callers discover it with a type assertion —
-// `pr, ok := cf.(PRForge)` — the standard Go optional-interface pattern,
-// rather than a PushOnly capability flag.
+// PRForge is the optional PR, CI-rollup, and auto-merge interface. Only adapters
+// that open pull requests and watch CI implement it (github); the push-only git
+// adapter does not. Callers discover it with a type assertion.
 type PRForge interface {
 	// OpenPRForBranch returns the open PR for branch, if any, draft or not
-	// (issue #2408) — a stranded draft is exactly as adoptable as a ready
-	// PR.
+	// (issue #2408): a stranded draft is exactly as adoptable as a ready PR.
 	OpenPRForBranch(branch string) (PR, bool, error)
 	// PRForBranch returns the URL of any PR (any state) for branch, if any.
 	PRForBranch(branch string) (string, bool, error)
 	// PRState returns the canonical state of the given PR URL.
 	PRState(url string) (PRState, error)
-	// Mergeable returns the PR's content-mergeability state — whether the
-	// PR's changes conflict with its base branch, as distinct from CI checks
-	// or branch-protection gating.
+	// Mergeable reports whether the PR's changes conflict with its base branch,
+	// as distinct from CI checks or branch-protection gating.
 	Mergeable(url string) (MergeableState, error)
 	// CheckState returns the aggregate CI rollup state for the PR's head commit.
 	CheckState(url string) (RollupState, error)
-	// HeadCommitSHA returns the PR's current head commit SHA — the signal
-	// selfHealGate compares before and after a fix pass to tell a genuine
-	// push (CI restarts on a new commit) from a no-op fix pass that left the
-	// head unchanged, so a stale terminal rollup is never mistaken for a
-	// fresh genuine red (issue #1980).
+	// HeadCommitSHA returns the PR's current head commit SHA. selfHealGate
+	// compares it across a fix pass to tell a genuine push, which restarts CI,
+	// from a no-op pass whose stale terminal rollup would read as a fresh red
+	// (issue #1980).
 	HeadCommitSHA(url string) (string, error)
 	// NeedsUpdate reports whether the PR's base branch has commits its head
-	// branch has not yet incorporated — a pure git-ancestry fact, distinct
-	// from Mergeable's conflict check: a PR can need updating (its tested
-	// tree predates a just-merged sibling) while still being MERGEABLE (no
-	// textual conflict). That gap let #670 and #672 land a combined compile
-	// break on main even though each was individually green (issue #936).
+	// branch has not yet incorporated, a git-ancestry fact distinct from
+	// Mergeable's conflict check: a PR can need updating and still be
+	// MERGEABLE. That gap let #670 and #672 land a combined compile break on
+	// main even though each was individually green (issue #936).
 	NeedsUpdate(url string) (bool, error)
 	// FailureDetail returns the failed check names plus a bounded log excerpt
 	// for the PR's head commit, or "" when nothing is currently failing.
-	// Best-effort: callers must treat a non-nil error as "detail unavailable"
-	// and proceed without it rather than failing the caller's own operation.
+	// Best-effort: a non-nil error means detail unavailable, and callers must
+	// proceed without it rather than failing their own operation.
 	FailureDetail(url string) (string, error)
 	// ListPRFiles returns every path changed by the PR (added, modified, deleted).
 	ListPRFiles(url string) ([]string, error)
@@ -150,69 +104,46 @@ type PRForge interface {
 	CanAutoMerge() (bool, error)
 	// EnqueueAutoMerge enqueues native auto-merge for the PR.
 	EnqueueAutoMerge(prURL string) error
-	// MarkReady flips the PR out of draft. Marking an already-ready PR is
-	// idempotent: it succeeds without error rather than reporting a failure.
-	MarkReady(prURL string) error
-	// MarkDraft flips the PR back to draft — the inverse of MarkReady.
-	// Marking an already-draft PR is idempotent: it succeeds without error
+	// MarkReady flips the PR out of draft. Marking an already-ready PR succeeds
 	// rather than reporting a failure.
+	MarkReady(prURL string) error
+	// MarkDraft flips the PR back to draft. Marking an already-draft PR
+	// succeeds rather than reporting a failure.
 	MarkDraft(prURL string) error
 }
 
-// DraftPRCreator is the optional Code Forge surface for host-side draft-PR
-// creation (issue #1914): under BOX_FORGE_AND_ISSUE_ACCESS=read-only, the Box
-// holds no write token, so it cannot `gh pr create` itself; the Launcher
-// opens the draft PR host-side instead, from a title/body/base/head the Box
-// supplies. Only meaningful for a PR-shaped forge (one that also implements
-// PRForge) — a forge with no PR concept at all (local) needs no such
-// capability. Discovered via type assertion, like PRForge/BundleRelay. No
-// adapter implements it yet; a later issue lands the github implementation.
-// Declaring it now lets BOX_FORGE_AND_ISSUE_ACCESS=read-only's startup
-// capability gate (issue #1916) name it as the missing seam.
+// DraftPRCreator is the optional host-side draft-PR creation interface (issue
+// #1914): under BOX_FORGE_AND_ISSUE_ACCESS=read-only the Box holds no write
+// token, so the Launcher opens the draft PR instead, from a title, body, base,
+// and head the Box supplies. Only meaningful for a forge that also implements
+// PRForge. No adapter implements it yet; issue #1916's startup gate names it.
 type DraftPRCreator interface {
-	// CreateDraftPR opens a draft PR from head onto base with the given
-	// title and body, and returns its URL. created reports whether this call
-	// actually opened a fresh PR (true) or instead adopted a pre-existing
-	// open PR for head after the underlying create call refused it as a
-	// duplicate (false) -- both real adapters treat that refusal as
-	// idempotent success rather than a failure (issue #2407). A caller
-	// cannot always treat the two the same: settle's read-only reconstructed
-	// -PR path (issue #2447) derives title/body host-side from the branch's
-	// own commits only when no PR-intent line survived, and adopting a PR
-	// some earlier call already opened means that PR's title/body were
-	// already set then -- writing the reconstructed text over it would only
-	// be correct if this call created it fresh. created lets a caller like
-	// that one tell the two cases apart instead of silently treating an
-	// adopted box-authored PR as if this call had just worded it.
+	// CreateDraftPR opens a draft PR from head onto base and returns its URL.
+	// created is false when the adapter instead adopted a pre-existing open PR
+	// for head after the create call refused it as a duplicate (issue #2407).
+	// Settle's reconstructed-PR path (issue #2447) must not word over an
+	// adopted PR's title and body, so it needs the two cases apart.
 	CreateDraftPR(title, body, base, head string) (url string, created bool, err error)
 }
 
-// BranchProtectionForge is the optional branch-protection-query surface
-// (issue #2570): only a forge with a protection API (github, forgejo)
-// implements it; the push-only git adapter and CODE_FORGE=local's
-// host-mediated adapter do not, since neither has a branch-protection
-// concept to query. Callers discover it with a type assertion —
-// `bp, ok := cf.(BranchProtectionForge)` — the same optional-interface
-// pattern PRForge uses.
+// BranchProtectionForge is the optional branch-protection-query interface (issue
+// #2570): only a forge with a protection API (github, forgejo) implements it.
+// Callers discover it with a type assertion, as with PRForge.
 type BranchProtectionForge interface {
-	// BranchProtected reports whether branch has protection configured.
-	// A non-nil error means the probe itself could not determine the
-	// answer (e.g. a permission error) -- it never means "determined
-	// unprotected"; a definitive "not protected" result is (false, nil).
+	// BranchProtected reports whether branch has protection configured. A
+	// non-nil error means the probe could not determine the answer, a
+	// permission error for instance; a definitive "not protected" is
+	// (false, nil).
 	BranchProtected(branch string) (bool, error)
 }
 
-// BundleCommitSubjects is settle's read-only PR-intent-fallback hook (issue
-// #2447): when a read-only Box's status=ready outcome carries no usable
-// SPINDRIFT_PR_INTENT line, settle still has the relayed branch's own
-// commits to reconstruct a draft PR's title/body from host-side, rather than
-// blocking a genuinely finished hand-off. Only meaningful alongside
-// BundleRelay + DraftPRCreator — a Code Forge with no PR concept at all
-// (local) never opens a PR to word in the first place, so it has no need for
-// this either. Discovered via type assertion, like BundleRelay/DraftPRCreator.
+// BundleCommitSubjects is settle's read-only PR-intent fallback (issue #2447):
+// when a read-only Box's status=ready outcome carries no usable
+// SPINDRIFT_PR_INTENT line, settle reconstructs the draft PR's title and body
+// host-side from the relayed branch's own commits rather than blocking a
+// finished hand-off. Only meaningful alongside BundleRelay and DraftPRCreator.
 type BundleCommitSubjects interface {
 	// CommitSubjects returns the one-line commit subjects the bundle at
-	// outboxDir/seambundle.FileName carries for ref, relative to base,
-	// oldest first.
+	// outboxDir/seambundle.FileName carries for ref, relative to base, oldest first.
 	CommitSubjects(outboxDir, base, ref string) ([]string, error)
 }

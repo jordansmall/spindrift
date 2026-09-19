@@ -12,60 +12,40 @@ import (
 	"spindrift.dev/launcher/internal/forge/github"
 )
 
-// errReadOnlyGateMisconfigured is the sentinel checkReadOnlyTokenGate and
-// checkReadOnlyForgejoTokenGate wrap their own misconfiguration errors with
+// errReadOnlyGateMisconfigured marks a read-only token gate misconfiguration
 // (BOX_GH_TOKEN/BOX_FORGEJO_TOKEN unset, identical to the Launcher's own
-// token, or write-capable). It is deliberately distinct from bootstrap.go's
-// errConfigInvalid: these gates are called not just from doctor.go's
-// runDoctor (via gateRegistry, issue #2942), but directly by bootstrap.go,
-// and by preview.go through gatedcontext.go's newGatedContext, too. Reusing
-// errConfigInvalid would make
-// bootstrapExitCode -- which checks errors.Is(err, errConfigInvalid) to
-// award exit 6 for validate(c) failures only -- also award exit 6 to
-// dispatch/recover/preview for a read-only-token misconfiguration, an
-// undocumented change to a versioned exit code those subcommands never
-// signed up for. doctorExitCodeFor (doctor.go) checks for this sentinel
-// instead, so `spindrift doctor` keeps classifying it as exit 2.
+// token, or write-capable). It stays distinct from bootstrap.go's
+// errConfigInvalid so bootstrapExitCode does not award exit 6 to
+// dispatch/recover/preview; doctorExitCodeFor classifies it as exit 2 (#2942).
 var errReadOnlyGateMisconfigured = errors.New("read-only token gate misconfigured")
 
-// tokenIntrospectionResult reports what checkReadOnlyTokenGate's GitHub-side
-// probe learned about a Box token. Introspectable is false only for a
-// fine-grained PAT (github_pat_ prefix), which GitHub exposes no endpoint to
-// enumerate; WriteCapable is meaningful only when Introspectable is true.
+// tokenIntrospectionResult reports what a Box token probe learned.
+// Introspectable is false only for a fine-grained PAT (github_pat_ prefix),
+// whose granted permissions GitHub exposes no endpoint to enumerate.
+// WriteCapable is meaningful only when Introspectable is true.
 type tokenIntrospectionResult struct {
 	Introspectable bool
 	WriteCapable   bool
 }
 
-// tokenIntrospector probes token (scoped to repoSlug where the probe itself
-// is repo-scoped) for write capability. The production implementation is
-// ghTokenIntrospector; tests fake it to avoid a live GitHub call.
+// tokenIntrospector probes token for write capability, scoped to repoSlug
+// where the probe itself is repo-scoped.
 type tokenIntrospector func(token, repoSlug string) (tokenIntrospectionResult, error)
 
 // checkReadOnlyTokenGate enforces BOX_FORGE_AND_ISSUE_ACCESS=read-only's
-// startup token gate (issue #1950, sibling to checkReadOnlyCapabilityGate):
-// under read-only, the Box must be handed a credential distinct from the
-// Launcher's own GH_TOKEN -- otherwise read-only is a prompt-level fiction,
-// since the Box would hold the very token that can write. read-write is
-// untouched: this never inspects BOX_GH_TOKEN nor calls introspect outside
-// read-only, exactly like the capability gate.
-//
-// verified reports whether the Box token's non-write-capability was actually
-// confirmed by introspection (true) versus accepted on trust because the
-// token isn't introspectable, e.g. a fine-grained PAT (false) -- callers that
-// print a success message use this to avoid claiming more certainty than the
-// gate actually established. verified is always false when err != nil.
+// startup token gate (issue #1950): the Box must hold a credential distinct
+// from the Launcher's GH_TOKEN, or read-only is a fiction. read-write never
+// reads BOX_GH_TOKEN. verified is true only when introspection confirmed the
+// token has no write scopes, and is always false when err is non-nil.
 func checkReadOnlyTokenGate(c config, introspect tokenIntrospector, w io.Writer) (verified bool, err error) {
 	if c.boxForgeAndIssueAccess != "read-only" {
 		return false, nil
 	}
-	// The github token gate governs GH_TOKEN, relevant only when the active
-	// Code Forge or Issue Tracker resolves to a backend sharing GitHub's
-	// TokenEnvVar (tokenGateApplicable, launchgates.go) -- the same
-	// TokenEnvVar-keyed check gateRegistry's "read-only-token-github"
-	// Applicable closure uses, so the two can never disagree about whether
-	// this gate governs c's active backend. A pure-forgejo (or pure-local)
-	// read-only deployment has no GH_TOKEN to withhold, so skip it there.
+	// This gate governs GH_TOKEN, so it applies only when the active Code Forge
+	// or Issue Tracker resolves to a backend sharing GitHub's TokenEnvVar.
+	// gateRegistry's "read-only-token-github" Applicable closure keys off the
+	// same check, so the two can never disagree. A pure-forgejo or pure-local
+	// read-only deployment has no GH_TOKEN to withhold.
 	if !tokenGateApplicable(c, backend.GitHub) {
 		return false, nil
 	}
@@ -90,43 +70,29 @@ func checkReadOnlyTokenGate(c config, introspect tokenIntrospector, w io.Writer)
 	return true, nil
 }
 
-// ghTokenWriteScopes are classic/OAuth scopes (ADR 0027's quickstart audit
-// uses the same X-OAuth-Scopes signal) that grant repo write access. Classic
-// tokens have no read-only variant of repo access, so either scope's
-// presence alone means the token can push.
+// ghTokenWriteScopes are the classic/OAuth scopes that grant repo write access
+// (the same X-OAuth-Scopes signal ADR 0027's quickstart audit uses). Classic
+// tokens have no read-only variant of repo access, so either scope's presence
+// alone means the token can push.
 var ghTokenWriteScopes = map[string]bool{
 	"repo":        true,
 	"public_repo": true,
 }
 
 // newGHTokenIntrospector builds a tokenIntrospector that dispatches on the
-// token's prefix rather than calling one endpoint, since GitHub exposes
-// write capability through different signals depending on token shape.
-// oauthScopes and repoPush are injected so the prefix-dispatch and
-// write-scope-matching logic below can be unit-tested without a live gh
-// call; ghTokenIntrospector is the production instance, wired to the real
-// gh-shelling functions in internal/forge/github (TestNoGhExecOutsideForge
-// keeps every gh invocation behind the forge seam):
-//
-//   - github_pat_ (fine-grained PAT): GitHub exposes no endpoint that reports
-//     a fine-grained PAT's own restricted grant, so it is not introspectable.
-//   - ghp_/gho_ (classic PAT / OAuth app token): oauthScopes reads the
-//     X-OAuth-Scopes response header, which enumerates exactly what was
-//     granted (ADR 0027's quickstart audit uses the same signal).
-//   - ghs_ (GitHub App installation token): has no X-OAuth-Scopes header, but
-//     an App identity has no ambient user role to blur the result the way a
-//     fine-grained PAT's underlying account would, so repoPush's
-//     `permissions.push` field accurately reflects the installation's own
-//     grant.
-//   - any other/unknown prefix: treated as not introspectable, the same safe
-//     default as a fine-grained PAT, rather than trusting a signal that may
-//     not mean what it means for the shapes above.
+// token's prefix, since GitHub reports write capability through a different
+// signal for each token shape. Callers inject oauthScopes and repoPush so tests
+// can drive the dispatch without a live gh call, and so every gh invocation
+// stays behind the forge seam (TestNoGhExecOutsideForge).
 func newGHTokenIntrospector(oauthScopes func(token string) ([]string, error), repoPush func(token, repoSlug string) (bool, error)) tokenIntrospector {
 	return func(token, repoSlug string) (tokenIntrospectionResult, error) {
 		switch {
 		case strings.HasPrefix(token, "github_pat_"):
+			// GitHub exposes no endpoint reporting a fine-grained PAT's own
+			// restricted grant.
 			return tokenIntrospectionResult{Introspectable: false}, nil
 		case strings.HasPrefix(token, "ghp_"), strings.HasPrefix(token, "gho_"):
+			// X-OAuth-Scopes enumerates exactly what the token was granted.
 			scopes, err := oauthScopes(token)
 			if err != nil {
 				return tokenIntrospectionResult{}, err
@@ -140,17 +106,21 @@ func newGHTokenIntrospector(oauthScopes func(token string) ([]string, error), re
 			}
 			return tokenIntrospectionResult{Introspectable: true, WriteCapable: writeCapable}, nil
 		case strings.HasPrefix(token, "ghs_"):
+			// An App installation token carries no X-OAuth-Scopes header, but it
+			// also has no ambient user role to blur permissions.push the way a
+			// fine-grained PAT's underlying account would.
 			push, err := repoPush(token, repoSlug)
 			if err != nil {
 				return tokenIntrospectionResult{}, err
 			}
 			return tokenIntrospectionResult{Introspectable: true, WriteCapable: push}, nil
 		default:
+			// An unknown prefix is not introspectable: a signal that is reliable
+			// for the shapes above may mean something else here.
 			return tokenIntrospectionResult{Introspectable: false}, nil
 		}
 	}
 }
 
-// ghTokenIntrospector is the production tokenIntrospector, wired to the real
-// gh-shelling functions in internal/forge/github.
+// ghTokenIntrospector is the production tokenIntrospector.
 var ghTokenIntrospector = newGHTokenIntrospector(github.TokenOAuthScopes, github.TokenRepoPushPermission)

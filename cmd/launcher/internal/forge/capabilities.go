@@ -2,16 +2,14 @@ package forge
 
 import "spindrift.dev/launcher/internal/backend"
 
-// Capabilities is "what this backend pairing can do", resolved once: one
-// typed handle per optional forge/tracker seam interface (nil = adapter
-// doesn't implement it) plus the two backend.Descriptor rows' config-time
-// facts (ADR 0013's second amendment: declaration stays optional
-// interfaces, resolution is this constructed value, consumers read instead
-// of asserting).
+// Capabilities holds one typed handle per optional forge/tracker seam
+// interface, resolved once. A nil field means the adapter does not implement
+// that interface. Consumers read these fields instead of asserting for
+// themselves (ADR 0013's second amendment).
 type Capabilities struct {
-	// one field per optional CodeForge-side interface declared anywhere in
-	// this package (capabilities_completeness_test.go scans the directory,
-	// not a fixed file list)
+	// One field per optional CodeForge-side interface declared anywhere in
+	// this package. capabilities_completeness_test.go scans the whole
+	// directory, not a fixed file list.
 	BundleRelay             BundleRelay
 	LandingRef              LandingRef
 	LandingRepair           LandingRepair
@@ -21,9 +19,8 @@ type Capabilities struct {
 	BranchProtectionForge   BranchProtectionForge
 	BundleCommitSubjects    BundleCommitSubjects
 
-	// one field per optional IssueTracker-side interface declared anywhere
-	// in this package (same directory scan as the CodeForge-side fields
-	// above)
+	// One field per optional IssueTracker-side interface. The same directory
+	// scan covers these fields.
 	BlockersLister        BlockersLister
 	HostPostedCommenter   HostPostedCommenter
 	HostPostedIssueFiler  HostPostedIssueFiler
@@ -40,16 +37,14 @@ type Capabilities struct {
 	CommentLister         CommentLister
 	LinkedIssueLister     LinkedIssueLister
 
-	// ForgeDescriptor/TrackerDescriptor are the config-time half of the
-	// same value -- CODE_FORGE's and ISSUE_TRACKER's own backend.Descriptor
-	// rows, kept separate since the two knobs select independently.
+	// CODE_FORGE and ISSUE_TRACKER select independently, so each knob keeps
+	// its own descriptor row.
 	ForgeDescriptor   backend.Descriptor
 	TrackerDescriptor backend.Descriptor
 }
 
-// ResolveCapabilities resolves cf's and it's optional-interface surfaces
-// once via type assertion and folds in forgeDesc/trackerDesc's config-time
-// facts, so a caller reads a typed handle instead of asserting itself.
+// ResolveCapabilities type-asserts cf and it against every optional interface
+// once and folds in the two descriptor rows.
 func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc backend.Descriptor) Capabilities {
 	var c Capabilities
 

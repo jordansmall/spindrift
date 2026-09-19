@@ -7,14 +7,9 @@ import (
 	"testing"
 )
 
-// ParseWorkflowRemoveLabelSet reads the workflow YAML file at path and
-// returns the label set from the first key: line found (e.g.
-// "claim-remove-labels:" or "remove-labels:"), plus the raw matched value
-// for callers that want it in an error message. It fails the test via
-// t.Fatalf if the file can't be read or the key isn't found — shared by
-// claim_strip_parity_test.go (package forge) and exec_test.go (package
-// github), which both need the same "labels a workflow's remove-label(s)
-// line lists" extraction (#2507).
+// ParseWorkflowRemoveLabelSet returns the label set on the first "<key>:" line
+// of the workflow YAML at path, plus the raw matched value. It calls t.Fatalf
+// when the file cannot be read or the key is missing (#2507).
 func ParseWorkflowRemoveLabelSet(t *testing.T, path, key string) (map[string]bool, string) {
 	t.Helper()
 	raw, err := os.ReadFile(path)

@@ -2,35 +2,18 @@ package main
 
 import "io"
 
-// gatedContext extends readContext (issue #2941) with the validate+gate
-// prologue a dispatch-capable entry point needs before it can trust config
-// enough to act on it: readContext alone deliberately never validates, so it
-// is only safe for the read-only paths (doctor's probes, reconcile) that
-// came before this issue. preview() and bootstrap() (issue #2944) both
-// build one; doctor never constructs a gatedContext at all — it walks
-// gateRegistry directly (runDoctor/walkSplitGateRegistry), with no
-// validate() step. Embedding readContext means a gatedContext
-// carries the same config/issueTracker/codeForge trio, just with the
-// guarantee that construction already ran validate(c) and every gate in
-// gateRegistry (issue #2942).
+// gatedContext is a readContext whose construction already ran validate() and
+// every gate in gateRegistry (issues #2941, #2942). preview() and bootstrap()
+// build one (issue #2944); the read-only paths keep the plain readContext,
+// which never validates.
 type gatedContext struct {
 	readContext
 }
 
-// newGatedContext builds a gatedContext: it validates rc.config first, since
-// enforcing that invariant is exactly what distinguishes a gatedContext from
-// the plain readContext it embeds, then walks every gate in the deliberate
-// interleaved order both preview() and bootstrap() require — capability,
-// network-mode, bwrap-pasta, bwrap-overlay, gh-token, forgejo-token —
-// stopping at and returning the first failure. The bwrap gates are spliced
-// between gateRegistry's non-Network and Network halves (via
-// splitGateRegistryByNetwork) rather than appended after, so a config that
-// trips both a bwrap gate and a token gate reports the same "first broken
-// thing" preview (via this function) and real dispatch (via bootstrap())
-// would each stop at, and the token gates' live network calls never run
-// ahead of a bwrap-pasta/bwrap-overlay failure dispatch itself would never
-// get past either. See splitGateRegistryByNetwork's doc in launchgates.go
-// for why this split can't silently diverge from doctor's report order.
+// newGatedContext splices the bwrap gates between gateRegistry's non-Network
+// and Network halves rather than appending them after, so preview and real
+// dispatch stop at the same first failure and the token gates' live network
+// calls never run ahead of a bwrap failure.
 func newGatedContext(w io.Writer, kind string, selfContained bool) (gatedContext, error) {
 	rc := newReadContext(kind, selfContained)
 	if err := validate(rc.config); err != nil {

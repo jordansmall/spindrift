@@ -6,8 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// sidebarBindings is the keymap cluster for ModeSidebar's focus, scroll, and
-// zoom keys (entries 12-19 of the original keymap literal).
+// sidebarBindings holds ModeSidebar's focus, scroll, and zoom keys.
 var sidebarBindings = []Binding{
 	{
 		Keys: []string{"t"}, Modes: []Mode{ModeSidebar},
@@ -21,9 +20,8 @@ var sidebarBindings = []Binding{
 		},
 	},
 	{
-		// The docked layout's own "return focus to the list" case (ModeList
-		// never sees this key with this meaning — it's handleListKey's own
-		// "h"/"left" no-op instead, covered by the entry above).
+		// This returns focus to the list in the docked layout. ModeList has its
+		// own "h"/"left" no-op in handleListKey instead.
 		Keys: []string{"h", "left"}, Modes: []Mode{ModeSidebar},
 		Footer: "[h] list",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
@@ -38,11 +36,8 @@ var sidebarBindings = []Binding{
 		Help:   "  x / esc     close the sidebar (while it has focus)",
 		Footer: "[x] close",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			// ModeSidebar closes unconditionally; ModeList only when a docked
-			// sidebar is actually open (a fullscreen/zoomed one routes to
-			// ModeSidebar instead, per ActiveMode, so ModeList never sees this
-			// key with Sidebar nil in that case either — the guard exists for
-			// the plain "no sidebar at all" case).
+			// The guard only matters for ModeList with no sidebar open. A
+			// fullscreen or zoomed sidebar routes to ModeSidebar via ActiveMode.
 			if mode == ModeSidebar || t.m.Sidebar != nil {
 				t = t.apply(SidebarCloseMsg{})
 			}
@@ -108,8 +103,8 @@ var sidebarBindings = []Binding{
 		Help: "  z           toggle the sidebar's fullscreen zoom (while it has\n" +
 			"              focus)",
 		Footer: "[z] zoom",
-		// FooterCompact shortened to make room for the docked footer's new
-		// "H/L" hint (issue #1846) within the 42-column sidebarWidth floor.
+		// Shortened to fit the docked footer's "H/L" hint inside the 42-column
+		// sidebarWidth floor (issue #1846).
 		FooterCompact: "[z]",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			t = t.apply(SidebarZoomToggleMsg{})
