@@ -3,6 +3,7 @@ package dispatch
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -45,9 +47,51 @@ type Dispatch struct {
 	// live so a Fix() launched minutes later (settle/ready.go, after a Box
 	// idles awaiting CI) stays on the generation this Dispatch started on.
 	agentGeneration *runner.AgentGeneration
+
+	// killed is this issue's kill latch, minted by Factory.New and closed by
+	// Factory.Kill (issue #3521). Nil for a Dispatch built without a Factory,
+	// which then behaves exactly as it did before.
+	killed <-chan struct{}
 }
 
 var _ Dispatcher = (*Dispatch)(nil)
+
+// errKilled reports that Factory.Kill landed before this attempt created its
+// container, so the attempt must not start one (issue #3521).
+var errKilled = errors.New("dispatch: killed before launch")
+
+// isKilled reports whether this issue's kill latch has closed.
+func (d *Dispatch) isKilled() bool {
+	if d.killed == nil {
+		return false
+	}
+	select {
+	case <-d.killed:
+		return true
+	default:
+		return false
+	}
+}
+
+// sleepOrKilled waits out dur unless the kill latch closes first, so an abort
+// landing inside a retry backoff — or a rate-limit hold that can run an hour —
+// exits promptly (issue #3521). The orphaned sleeper goroutine is bounded by
+// dur, and the process is on its way out.
+func (d *Dispatch) sleepOrKilled(dur time.Duration) {
+	if d.killed == nil {
+		d.clock.Sleep(dur)
+		return
+	}
+	slept := make(chan struct{})
+	go func() {
+		d.clock.Sleep(dur)
+		close(slept)
+	}()
+	select {
+	case <-slept:
+	case <-d.killed:
+	}
+}
 
 func (d *Dispatch) logPath() string {
 	return logPathFor(d.pwd, d.number)
@@ -172,6 +216,9 @@ func (d *Dispatch) Close() {
 // issue is already running, a live run (possibly orphaned by a killed
 // launcher) owns that log, so runOnce returns ErrAlreadyRunning first (#562).
 func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string) error {
+	if d.isKilled() {
+		return errKilled
+	}
 	name := BoxName(d.number)
 	if d.runner.IsRunning(name) {
 		return runner.ErrAlreadyRunning
