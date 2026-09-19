@@ -25,6 +25,11 @@ ordinarily surfaced when step 3's check gate first runs red. The two
 are not interchangeable — a fold still folds into the commit it belongs
 to as usual, but gate-discovered work is governed by the default below.
 
+A fold answering a finding about a comment or doc line rewrites that line
+in place, and stays proportional to the change it documents — a two-line
+reword earns no ten-line rationale header above it. A prose fold owes no
+declaration.
+
 The default for gate-discovered work is file, don't fix. When step 3's
 failure is proven pre-existing on the base — the REVIEW section's own
 clean-checkout proof, not a guess — file it through the FILE ISSUES step
