@@ -4440,7 +4440,7 @@ PATH together with the host binaries the launcher execs from ambient PATH —
 `spindrift build && spindrift dispatch <issue> --yes` works directly, with
 no `nix run` prefix and no reliance on the default dev shell's toolchain.
 
-**Baked skills.** The dogfood Box bakes six skills — five pinned upstream,
+**Baked skills.** The dogfood Box bakes nine skills — eight pinned upstream,
 one authored in this repo — via the Consumer-configured `skills` list (see
 the `skills` row and `skillsDirRelative` entry above for the build-time
 `/agent/skills` path and the runtime copy into the Driver's actual skills
@@ -4463,6 +4463,17 @@ agent can invoke them as slash commands:
 - [`code-review`](https://github.com/mattpocock/skills) — `/code-review`
   (pinned at tag `v1.1.0`, the same upstream as `/tdd`/`/to-tickets`). Reviews
   a diff along Standards and Spec axes in parallel sub-agents.
+- [`principle-fix-root-causes`](https://github.com/jordansmall/skills),
+  [`principle-laziness-protocol`](https://github.com/jordansmall/skills), and
+  [`principle-redesign-from-first-principles`](https://github.com/jordansmall/skills)
+  — three engineering principles adapted from the MIT
+  [`pstack`](https://github.com/cursor/plugins/tree/main/pstack) plugin. The
+  fix pass and the worker path's CHECK section defer to
+  `/principle-fix-root-causes` before code changes that make a failing check
+  pass; IMPLEMENT defers to the other two. `/principle-laziness-protocol` and
+  `/principle-redesign-from-first-principles` are deliberately absent from the
+  fix pass, which already scopes itself to the smallest change and forbids
+  redesign.
 - `nix-checks` — `/nix-checks`. Not pinned upstream: authored in this repo at
   `skills/nix-checks/SKILL.md` and read straight from the repo tree, the same
   way the other rows read from a pinned flake input. Carries the Nix check
@@ -4472,13 +4483,13 @@ agent can invoke them as slash commands:
 
 Beyond the generic "skills available, prefer them" preamble, each of these
 skills gets a deferral placed at the exact prompt section its inline guidance
-would otherwise duplicate, gated on that skill being baked. The five pinned
+would otherwise duplicate, gated on that skill being baked. The eight pinned
 skills are non-flake `caveman` / `matt-skills` / `jordan-skills` inputs in
 `flake.nix` (`flake.lock` owns the revs); `nix-checks` is a repo path instead
 of a flake input. The full baked set — pinned and repo-local alike — lives in
 `nix/dogfood-skills.nix`. See [Contributing](../CONTRIBUTING.md) for how it's
 wired. To opt out of a skill, drop it from the consumer's `skills` list; each
-of the six Consumer-configured deferrals above is rendered only when that
+of the nine Consumer-configured deferrals above is rendered only when that
 skill's `SKILL.md` is actually present at the baked skills path, so a
 consumer that skips a skill gets prompts with zero residue for it.
 `auto-format`, `auto-lint`, `check-hygiene`, and `code-comments` (see the
