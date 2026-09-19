@@ -1,14 +1,14 @@
-# Eval-level pins for lib/preambles.nix (issue #513): one assertion per
-# preamble renderer, on top of the byte-identity equivalence checks in
-# equivalence.nix that already cover mkHarness.nix's generated output.
+# Eval-level pins for lib/preambles.nix (issue #513), on top of the
+# byte-identity equivalence checks in equivalence.nix that already cover
+# mkHarness.nix's generated output.
 { pkgs, ... }:
 let
   preambles = import ../../lib/preambles.nix;
   inherit (pkgs.lib) assertMsg hasInfix;
 
-  # Shared by preambles-run-artifacts-bwrap and its
-  # -nix-config-omitted sibling below, which differ only in whether
-  # nixConfigPath is set (issue #2664).
+  # Shared by preambles-run-artifacts-bwrap and its -nix-config-omitted
+  # sibling below, which differ only in whether nixConfigPath is set
+  # (issue #2664).
   bwrapRunArtifactsBase = {
     runnerKind = "bwrap";
     driverEntry = {
@@ -19,11 +19,10 @@ let
     agentEnvPath = "/nix/store/bbb-agent-env";
     passwdFilePath = "/nix/store/eee-passwd";
     groupFilePath = "/nix/store/fff-group";
-    # Same literal values preambles-build-artifacts-bwrap's own fixture uses
-    # for these (below) -- runArtifacts and buildArtifacts render both the
-    # run-time paths above and these build-time drvs from the same Consumer
-    # config (issue #2672); preambles-run-build-artifacts-bwrap-key-parity
-    # below asserts the two outputs actually agree on these six keys.
+    # Deliberately the same literals preambles-build-artifacts-bwrap's fixture
+    # uses, because both renderers derive these drvs from one Consumer config
+    # (issue #2672). preambles-run-build-artifacts-bwrap-key-parity below
+    # asserts the two outputs agree on these six keys.
     agentFilesDrv = "/nix/store/aaa-agent-files.drv";
     agentEnvDrv = "/nix/store/bbb-agent-env.drv";
     passwdFileDrv = "/nix/store/eee-passwd.drv";
@@ -94,15 +93,11 @@ in
       "renderDefaultsPreamble export=true must prefix each line with `export `";
     pkgs.runCommand "preambles-defaults-shape" { } "touch $out";
 
-  # Issue #2234: renderDefaultsPreamble used to splice a baked flakeOption
-  # default raw inside a double-quoted `VAR="${VAR:-<baked>}"` shell
-  # assignment, so a default that itself contained double quotes (e.g. a
-  # JSON string) broke out of that quoting and tripped shellcheck's SC2140.
-  # The renderer now escapes each baked default with escapeShellArg. Pins
-  # that the rendered preamble is shellcheck-clean and round-trips the baked
-  # default unchanged when the env var is unset — for a value carrying both
-  # double quotes and an embedded single quote, exercising escapeShellArg's
-  # `'\''` path — while an explicit env override still wins.
+  # Issue #2234: renderDefaultsPreamble used to splice a baked default raw
+  # inside a double-quoted `VAR="${VAR:-<baked>}"` assignment, so a default
+  # containing double quotes broke out of that quoting and tripped SC2140.
+  # The renderer now uses escapeShellArg. The fixture value carries both a
+  # double quote and a single quote to exercise the `'\''` path.
   preambles-defaults-quote-containing =
     let
       verdicts = builtins.toJSON [
@@ -199,11 +194,10 @@ in
       "renderDriverMountPreamble must export an empty DRIVER_SESSION_CACHE_DIR when the Driver declares none, got: ${out}";
     pkgs.runCommand "preambles-driver-mount-without-cache" { } "touch $out";
 
-  # Pins renderAgentPathsPreamble's shape: one `VAR=${VAR:-<baked>}`
-  # fallback-preserving line per attrset entry (issue #2531), mirroring
-  # renderDefaultsPreamble's shape above rather than renderDriverMountPreamble's
-  # unconditional `export VAR=` lines -- these 8 vars must stay overridable by
-  # an already-exported env var.
+  # renderAgentPathsPreamble must emit `VAR=${VAR:-<baked>}` lines
+  # (issue #2531), not renderDriverMountPreamble's unconditional
+  # `export VAR=`: these 8 vars stay overridable by an already-exported
+  # env var.
   preambles-agent-paths-shape =
     let
       out = preambles.renderAgentPathsPreamble {
@@ -218,9 +212,9 @@ in
       "renderAgentPathsPreamble must emit one line per attrset entry, got: ${out}";
     pkgs.runCommand "preambles-agent-paths-shape" { } "touch $out";
 
-  # A path value containing a shell-special character (a space) must
-  # round-trip safely through escapeShellArg, the same guard
-  # preambles-defaults-quote-containing pins for renderDefaultsPreamble.
+  # A path containing a shell-special character must round-trip through
+  # escapeShellArg, the guard preambles-defaults-quote-containing pins for
+  # renderDefaultsPreamble.
   preambles-agent-paths-escapes-value =
     let
       out = preambles.renderAgentPathsPreamble {
@@ -253,22 +247,18 @@ in
         touch $out
       '';
 
-  # Proves the real production bindings (lib/agent-paths.nix) render
-  # correctly -- lib/image.nix / lib/mkHarness.nix consume the rendered
-  # preamble directly (issue #2531, commit 895a1fdc). Builds the
-  # expected-lines list generically from the imported attrset instead of
-  # hand-typing all 8, so a 9th path added later doesn't silently escape
-  # this check's coverage.
+  # Covers the real bindings (lib/agent-paths.nix), which lib/image.nix and
+  # lib/mkHarness.nix consume directly (issue #2531, commit 895a1fdc). The
+  # expected list is built from the imported attrset rather than hand-typed,
+  # so a 9th path added later cannot escape this check.
   preambles-agent-paths-real-bindings-render =
     let
       inherit (pkgs.lib) mapAttrsToList removeSuffix;
       agentPaths = import ../../lib/agent-paths.nix;
       out = preambles.renderAgentPathsPreamble agentPaths;
-      # Each expected line comes from the real renderer itself (called on a
-      # single-entry attrset), not a hand-re-derived `VAR=${VAR:-path}`
-      # shape -- a hand-typed shape drops renderAgentPathsPreamble's
-      # escapeShellArg treatment and can silently pass even when the real
-      # renderer's output diverges from it.
+      # Each expected line comes from the renderer itself, not a hand-typed
+      # `VAR=${VAR:-path}` shape: a hand-typed shape drops escapeShellArg and
+      # can pass even when the renderer's real output diverges from it.
       missing = builtins.filter (line: !hasInfix line out) (
         mapAttrsToList (
           var: path: removeSuffix "\n" (preambles.renderAgentPathsPreamble { ${var} = path; })
@@ -387,9 +377,8 @@ in
     ) "runArtifacts (bwrap) must set SYSCALL_FILTER, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-bwrap" { } "touch $out";
 
-  # Issue #2665: the sibling knob to nixConfigPath/NIX_CONFIG_FILE -- proves
-  # the literal-string rendering flips both ways, not just the "true" case
-  # preambles-run-artifacts-bwrap above already pins.
+  # Issue #2665: the literal-string rendering must flip both ways, not just
+  # the "true" case preambles-run-artifacts-bwrap above already pins.
   preambles-run-artifacts-bwrap-store-not-writable =
     let
       out = preambles.runArtifacts (
@@ -404,16 +393,15 @@ in
       "runArtifacts (bwrap) must render NIX_STORE_WRITABLE as the literal string \"false\" when nixStoreWritable is false, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-bwrap-store-not-writable" { } "touch $out";
 
-  # Issue #2664: nixConfigPath is optional (defaults to ""), the shape
-  # mkHarness.nix relies on when the Consumer has nixInBox off -- the key
-  # must still be present (not absent), just empty, matching the OCI branch's
-  # "never even a key" absence being a *different* case (asserted below in
-  # preambles-run-artifacts-oci).
+  # Issue #2664: nixConfigPath is optional, the shape mkHarness.nix relies on
+  # when the Consumer has nixInBox off. The key must still be present, just
+  # empty. The OCI branch omitting the key entirely is a different case,
+  # asserted in preambles-run-artifacts-oci below.
   preambles-run-artifacts-bwrap-nix-config-omitted =
     let
-      # nixConfigPath deliberately omitted -- pins the nixInBox-off default
+      # nixConfigPath is omitted on purpose: it pins the nixInBox-off default
       # mkHarness.nix's `if nixInBox then nixConfigFilePath else ""` relies
-      # on, which a Go-side test can't see directly.
+      # on, which a Go-side test cannot see.
       out = preambles.runArtifacts bwrapRunArtifactsBase;
     in
     assert assertMsg (out.NIX_CONFIG_FILE == "")
@@ -432,9 +420,8 @@ in
         agentEnvPath = "/nix/store/bbb-agent-env";
         passwdFilePath = "/nix/store/eee-passwd";
         groupFilePath = "/nix/store/fff-group";
-        # Required (no default), same reasoning as nixStoreWritable/
-        # syscallFilterPath below -- the OCI branch never reads these either
-        # (issue #2672).
+        # Required (no default) even though the OCI branch never reads them
+        # (issue #2672), like nixStoreWritable and syscallFilterPath below.
         agentFilesDrv = "/nix/store/aaa-agent-files.drv";
         agentEnvDrv = "/nix/store/bbb-agent-env.drv";
         passwdFileDrv = "/nix/store/eee-passwd.drv";
@@ -466,12 +453,12 @@ in
         scoutProvisioned = false;
         reviewLoopInline = false;
         reviewLoopOrchestrator = true;
-        # OCI's own writable-store mechanism (lib/image.nix) is separate and
-        # never reads this artifact -- false is a harmless placeholder here,
-        # required only because nixStoreWritable has no default (issue #2665).
+        # OCI's writable-store mechanism (lib/image.nix) never reads this
+        # artifact, so false is a placeholder, required only because
+        # nixStoreWritable has no default (issue #2665).
         nixStoreWritable = false;
-        # Required (no default), same reasoning as nixStoreWritable above --
-        # the OCI branch never reads it either (issue #2670).
+        # Required (no default) even though the OCI branch never reads it
+        # (issue #2670).
         syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
         syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
       };
@@ -551,9 +538,9 @@ in
     ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
 
-  # Issue #262 AC1: a driver-scoped image name flows into IMAGE_TAG, so an
+  # Issue #262 AC1: a driver-scoped image name must reach IMAGE_TAG, so an
   # opencode Box's run artifacts point the launcher at the spindrift-opencode
-  # archive, not the historical spindrift one.
+  # archive rather than the plain spindrift one.
   preambles-run-artifacts-oci-driver-scoped-image-name =
     let
       out = preambles.runArtifacts {
@@ -566,9 +553,8 @@ in
         agentEnvPath = "/nix/store/bbb-agent-env";
         passwdFilePath = "/nix/store/eee-passwd";
         groupFilePath = "/nix/store/fff-group";
-        # Required (no default), same reasoning as nixStoreWritable/
-        # syscallFilterPath below -- the OCI branch never reads these either
-        # (issue #2672).
+        # Required (no default) even though the OCI branch never reads them
+        # (issue #2672), like nixStoreWritable and syscallFilterPath below.
         agentFilesDrv = "/nix/store/aaa-agent-files.drv";
         agentEnvDrv = "/nix/store/bbb-agent-env.drv";
         passwdFileDrv = "/nix/store/eee-passwd.drv";
@@ -694,14 +680,11 @@ in
     ) "buildArtifacts (bwrap) must set SYSCALL_FILTER_DRV, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-bwrap" { } "touch $out";
 
-  # Issue #2672: runArtifacts and buildArtifacts render the six drv keys
-  # from the same shared bwrapDrvArtifacts helper (lib/preambles.nix) against
-  # the same Consumer config, so the two outputs must agree bit-for-bit --
-  # unlike preambles-run-artifacts-bwrap and preambles-build-artifacts-bwrap
-  # above, which each only pin their own output against a literal and would
-  # both go on passing even if the two renderers silently diverged from each
-  # other. IMAGE_TAG joins them (issue #2966): each renderer's own bwrap
-  # branch spells it out rather than sharing a helper.
+  # Issue #2672: the two checks above each pin only their own output against
+  # a literal, so both would keep passing if the renderers diverged from each
+  # other. This one compares them directly. IMAGE_TAG joins the six drv keys
+  # (issue #2966) because each renderer's bwrap branch spells it out instead
+  # of sharing the bwrapDrvArtifacts helper.
   preambles-run-build-artifacts-bwrap-key-parity =
     let
       runOut = preambles.runArtifacts (
@@ -765,7 +748,7 @@ in
           host = "aarch64-darwin";
           linux = "x86_64-linux";
         };
-        # Required (no default) -- the OCI branch never reads either
+        # Required (no default) even though the OCI branch never reads either
         # (issues #2670, #2966).
         syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
         agentClosurePath = "/nix/store/ggg-agent-closure";
@@ -809,18 +792,16 @@ in
     ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-oci" { } "touch $out";
 
-  # documentArtifactKeys must be derived from what runArtifacts/buildArtifacts
-  # actually emit across both runnerKind branches (issue #810), not a
-  # hand-maintained list that can silently drift from them. Pins the exact
-  # union so a key added/renamed/dropped in either renderer forces a
-  # conscious update here instead of passing unnoticed.
+  # documentArtifactKeys must be derived from what runArtifacts and
+  # buildArtifacts emit across both runnerKind branches (issue #810), not a
+  # hand-maintained list that can drift. Pinning the exact union forces a
+  # conscious update here when either renderer gains or loses a key.
   preambles-document-artifact-keys =
     let
       out = preambles.documentArtifactKeys;
-      # Hand-maintained, unlike `out`: lib/preambles.nix:220 sorts the real
-      # keys with builtins.sort, but this pin does not sort itself. Must stay
-      # alphabetical or the assert below fails with a bare "got: [...]"
-      # dump that doesn't say why. Insert new keys in sorted position.
+      # lib/preambles.nix sorts the real keys, but this list does not sort
+      # itself. Insert new keys in alphabetical position or the assert below
+      # fails with a bare "got: [...]" dump that does not say why.
       expected = [
         "AGENT_ENV"
         "AGENT_ENV_DRV"
@@ -871,8 +852,7 @@ in
       "documentArtifactKeys must be the sorted union of runArtifacts/buildArtifacts output keys (both runnerKinds) plus the manual IMAGE and GITHUB_OUTPUT escape hatches, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-document-artifact-keys" { } "touch $out";
 
-  # renderInputDocumentJSON must combine settings + artifacts into the
-  # top-level {settings, artifacts} JSON object the Go inputDocument struct
+  # The {settings, artifacts} nesting is what the Go inputDocument struct
   # parses (ADR 0020).
   preambles-render-input-document-json =
     let

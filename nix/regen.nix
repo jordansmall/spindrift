@@ -1,49 +1,20 @@
-# One-shot regenerator for every schema-generated artifact (issue #402):
-# `nix run .#regen` renders templates/default/harness.env.example,
-# cmd/launcher/flagtable_gen.go, docs/flake-options.md,
-# cmd/launcher/internal/driver/drivernames_gen.go,
-# cmd/launcher/internal/agentpaths/agentpaths_gen.go,
-# cmd/launcher/internal/runner/runtimevalues_gen.go,
-# cmd/launcher/quickstart/quickstart_paths_gen.go,
-# cmd/launcher/subcommands_gen.go,
-# cmd/launcher/internal/outcome/status_gen.go,
-# cmd/launcher/internal/outcome/markerchannels_gen.go,
-# cmd/launcher/internal/backend/registry_gen.go,
-# cmd/launcher/internal/doctor/labelmeta_gen.go (lib/labels.nix, issue
-# #2528), tests/box_env_gen.bash, tests/default_models_gen.bash,
-# cmd/launcher/defaultmodels_gen_test.go, the generated section of
-# templates/default/flake.nix's commented-out `settings` example, every
-# documented-fact row's generated block in docs/reference.md (the Default
-# models table and the `models`/`issueDiscovery`+`lifecycleLabels`/
-# `branches`+`concurrency` sub-blocks of its `settings = { ... }` example;
-# lib/documented-facts.nix, issue #2948),
-# MIGRATING.md's generated legacy settings alias -> domain path table (issue
-# #2558), agent/entrypoint.sh's generated skill-baked probe block, and the
-# generated skill-baked flags/Env-assignments/fields/gates spans of
-# cmd/launcher/driver-exec/assembleprompt_cmd.go,
-# cmd/launcher/internal/promptassembly/env.go, and
-# cmd/launcher/internal/promptassembly/gates.go (lib/baked-skills.nix, issue
-# #2532), and cmd/launcher/internal/promptassembly/boxenv_gen.go
-# (lib/promptassembly-boxenv.nix, issue #2979), from their respective Nix
-# sources, and writes them into the working tree. Calls the
-# exact same renderers as the nix/checks.nix drift guards (lib/renderers.nix),
-# so resolving a source-edit conflict is: fix the Nix source, run this, commit.
-#
-# This is spindrift's own dev workflow, not consumer surface — it is not
-# wired into env-schema.nix or the generated flake-options reference.
-#
-# One schema-derived artifact is deliberately out of scope: the man page
-# (lib/mkHarness.nix manpageRoff) is rebuilt fresh from the schema on every
-# `nix flake check` run; there is no committed copy to drift, so there is
-# nothing to regenerate.
-#
-# templates/default/flake.nix's commented-out `settings` example used to be
-# hand-curated (its knob order didn't follow schema declaration order) with
-# its own drift check flagging missing sections/knobs to hand-add. As of
-# issue #520 it is fully regen-owned and exhaustive (every flakeOption knob,
-# with its doc string) between its BEGIN/END GENERATED SETTINGS EXAMPLE
-# markers — a new knob needs no hand-edit here, only in lib/env-schema.nix
-# and this regen run.
+# One-shot regenerator (issue #402): `nix run .#regen` renders every
+# schema-generated artifact from its Nix source and writes it into the working
+# tree. It calls the same renderers (lib/renderers.nix) as the nix/checks.nix
+# drift guards, so resolving a source-edit conflict is: fix the Nix source,
+# run this, commit.
+
+# This is spindrift's own dev workflow, not a consumer-facing option: it is
+# not wired into env-schema.nix or the generated flake-options reference.
+
+# The man page (lib/mkHarness.nix manpageRoff) is deliberately out of scope.
+# Every `nix flake check` rebuilds it from the schema, so no committed copy
+# exists to drift.
+
+# templates/default/flake.nix's commented-out `settings` example is regen-owned
+# and exhaustive between its BEGIN/END GENERATED SETTINGS EXAMPLE markers
+# (issue #520), so a new knob needs an edit only in lib/env-schema.nix plus a
+# regen run.
 { pkgs }:
 let
   renderers = import ../lib/renderers.nix;
@@ -83,19 +54,16 @@ let
   promptAssemblyBoxEnv = import ../lib/promptassembly-boxenv.nix;
   promptAssemblyBoxEnvFile = renderers.renderPromptAssemblyBoxEnvGo promptAssemblyBoxEnv;
   documentedFacts = import ../lib/documented-facts.nix { inherit (pkgs) lib; };
-  # The shared marker-splice implementation (issue #2949) backing
-  # write_between below -- also imported by nix/checks/schema-drift.nix and
-  # nix/checks/baked-skills.nix, so this file no longer hand-mirrors its own
-  # copy of the awk-based marker-splitting logic.
+  # write_between below builds on this shared marker-splice implementation
+  # (issue #2949). nix/checks/schema-drift.nix and nix/checks/baked-skills.nix
+  # import the same one, so no file hand-mirrors the marker-splitting logic.
   documentedFactChecker = import ../lib/documented-fact-checker.nix { inherit pkgs; };
   inherit (documentedFactChecker) spliceShellFn;
   inherit (pkgs.lib) escapeShellArg concatStrings removeSuffix;
-  # write_between as a named, shared shell-function string (mirroring
-  # spliceShellFn/regenRowScript's own extraction) so
+  # write_between lives in a named shell-function string so that
   # nix/checks/schema-drift.nix's regen-write-between-preserves-mode check
-  # (issue #3128) can exercise the real function against a fixture file
-  # instead of a hand-mirrored copy that could silently drift from what
-  # `nix run .#regen` actually runs.
+  # (issue #3128) exercises the real function against a fixture, not a copy
+  # that could drift from what `nix run .#regen` runs.
   writeBetweenShellFn = ''
     # Replaces the lines strictly between (and preserving) a literal
     # begin/end marker line pair with $4, for a generated section embedded
@@ -128,16 +96,11 @@ let
       echo "regenerated $1 (generated section)"
     }
   '';
-  # Every write/write_between call site below passes a rendered artifact
-  # (Markdown, Go source, docs) through escapeShellArg into a single-quoted
-  # shell word -- any `$`, backtick, or apostrophe inside it is a literal
-  # byte of that artifact, never meant to expand, so ShellCheck's SC2016
-  # ("expressions don't expand in single quotes") is a false positive at
-  # every one of these call sites. These helpers emit the directive as part
-  # of the call it covers: the exclusion stays one line per call site (a
-  # genuine SC2016 elsewhere in this script is still caught, unlike a
-  # file-wide directive) and a future generated-content call site cannot
-  # silently omit it.
+  # escapeShellArg puts each rendered artifact in a single-quoted shell word,
+  # where a `$` or backtick is a literal byte that must not expand, so
+  # ShellCheck's SC2016 is a false positive at every call site below. These
+  # helpers emit the directive per call so ShellCheck still catches a genuine
+  # SC2016 elsewhere in this script, and a new call site cannot omit it.
   disableSC2016 = call: ''
     # shellcheck disable=SC2016
     ${call}'';
@@ -151,11 +114,10 @@ let
         ${escapeShellArg begin} \
         ${escapeShellArg end} \
         ${escapeShellArg content}'';
-  # Named so nix/checks/schema-drift.nix's regen-postsplice-dispatch-guard
-  # can call this exact function against synthetic rows (issue #2949 review
-  # finding) instead of a hand-mirrored reimplementation -- a typo in a
-  # row's postSplice field (wrong case, misspelling) would otherwise
-  # silently take the no-gofmt branch with nothing catching it.
+  # regenRowScript is named so nix/checks/schema-drift.nix's
+  # regen-postsplice-dispatch-guard can call this exact function against
+  # synthetic rows (issue #2949 review finding). A typo in a row's postSplice
+  # field would otherwise silently take the no-gofmt branch uncaught.
   regenRowScript =
     row:
     writeBetweenGenerated (escapeShellArg row.docPath) (removeSuffix "\n" row.beginMarker) row.endMarker
@@ -176,11 +138,10 @@ pkgs.writeShellApplication {
     pkgs.git
     pkgs.gawk
     pkgs.go
-    # write_between's `chmod --reference` (issue #3128) is a GNU coreutils
-    # extension BSD/macOS chmod lacks -- writeShellApplication only prepends
-    # runtimeInputs to $PATH, it doesn't supply coreutils itself, so without
-    # this pin `nix run .#regen` resolves the ambient /bin/chmod on darwin
-    # (apps.regen is not isLinux-gated) and dies on the unrecognised flag.
+    # write_between's `chmod --reference` (issue #3128) is a GNU extension that
+    # BSD/macOS chmod lacks, and writeShellApplication supplies no coreutils of
+    # its own. Without this pin, `nix run .#regen` on darwin (apps.regen is not
+    # isLinux-gated) resolves /bin/chmod and dies on the unrecognised flag.
     pkgs.coreutils
   ];
   text = ''
@@ -231,15 +192,11 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/internal/promptassembly/boxenv_gen.go"
   '';
 }
-# `//` only adds an attribute here -- it doesn't touch the derivation's
-# outPath/build behavior, so flake.nix's `${import ./nix/regen.nix { ... }}`
-# string coercion (which resolves via outPath) is unaffected. This exposes
-# regenRowScript so nix/checks/schema-drift.nix's
-# regen-postsplice-dispatch-guard can call the exact function `nix run
-# .#regen` uses, not a hand-mirrored reimplementation (issue #2949 review
-# finding). writeBetweenShellFn (issue #3128) is exposed the same way so
-# nix/checks/schema-drift.nix's regen-write-between-preserves-mode check can
-# exercise the real write_between function's mode-preservation fix.
+# `//` only adds an attribute, leaving outPath alone, so flake.nix's
+# `${import ./nix/regen.nix { ... }}` string coercion still resolves. The two
+# attributes let nix/checks/schema-drift.nix's regen-postsplice-dispatch-guard
+# (issue #2949) and regen-write-between-preserves-mode (issue #3128) exercise
+# the exact functions `nix run .#regen` uses.
 // {
   inherit regenRowScript writeBetweenShellFn;
 }

@@ -1,20 +1,12 @@
-# The Driver registry (ADR 0009): one entry per in-box agent CLI, keyed by
-# name, validated against a required-attribute list and rendered into the
-# in-box preamble/function bodies here (issue #624) so per-Driver files (e.g.
-# ./claude.nix) stay pure data. lib/mkHarness.nix selects an entry by its
-# `driver` option (default "claude") via `entries`, calls the renderers below
-# on it, and bakes the result into the image; the Go launcher selects the
-# matching host-side strategy by the same name via DRIVER (see
-# cmd/launcher/internal/driver). A parity test
-# (cmd/launcher/internal/driver/parity_test.go) asserts the two registries'
-# names never drift -- name-only by design (ADR 0009): each half now enforces
-# its own entries' completeness independently.
+# The Driver registry (ADR 0009): one entry per in-box agent CLI. Rendering
+# lives here (issue #624) so per-Driver files like ./claude.nix stay pure data.
+# The Go launcher keeps a matching host-side registry keyed by the same names;
+# cmd/launcher/internal/driver/parity_test.go asserts the two never drift on
+# names only, because each half validates its own entries independently.
 { lib }:
 let
-  # Every attribute a Driver entry must supply for the registry to validate
-  # and render it. sessionCacheDirRelative is deliberately absent here: it's
-  # optional (a Driver with no resumable session state omits it; see
-  # lib/preambles.nix's renderDriverMountPreamble).
+  # sessionCacheDirRelative is deliberately absent: a Driver with no resumable
+  # session state omits it (see lib/preambles.nix's renderDriverMountPreamble).
   requiredAttrs = [
     "name"
     "package"
@@ -30,8 +22,8 @@ let
     "argvShape"
   ];
 
-  # Fails eval naming both the Driver and the missing attribute(s), so an
-  # entry missing a required attribute dies at build time -- never a live Box.
+  # Names both the Driver and every missing attribute, so an incomplete entry
+  # dies at build time rather than in a live Box.
   assertShape =
     driverName: entry:
     let
@@ -42,9 +34,8 @@ let
     else
       throw "Driver '${driverName}' is missing required attribute(s): ${lib.concatStringsSep ", " missing}";
 
-  # The 6 argv-assembly slot names a Driver's argvShape.order must place,
-  # exactly once each (ADR 0009, issue #2534): the Go/bash side (a sibling
-  # slice) walks this list to assemble the CLI invocation.
+  # Each slot must appear in a Driver's argvShape.order exactly once (ADR 0009,
+  # issue #2534); the Go/bash side walks that order to assemble the CLI call.
   argvOrderSlots = [
     "prompt"
     "model"
@@ -54,10 +45,9 @@ let
     "effort"
   ];
 
-  # assertShape (above) only checks that a Driver entry carries an argvShape
-  # attribute at all -- this validates its internal structure, throwing
-  # naming both the Driver and every problem found (not just the first) so a
-  # malformed entry dies at build time with a complete diagnosis in one pass.
+  # assertShape only checks that argvShape exists; this validates its structure.
+  # It reports every problem found, not just the first, so one build gives a
+  # complete diagnosis.
   assertArgvShape =
     driverName: entry:
     let
@@ -69,18 +59,15 @@ let
         || (shape ? promptFlag && builtins.isString shape.promptFlag && shape.promptFlag != "");
       modelFlagOk = shape ? modelFlag && builtins.isString shape.modelFlag && shape.modelFlag != "";
       modelOmitEmptyOk = shape ? modelOmitEmpty && builtins.isBool shape.modelOmitEmpty;
-      # A nullable slot (issue #2534): absent entirely is the valid "no
-      # --agents equivalent" case (opencode), so only a *present-but-empty*
-      # value is a violation.
+      # A nullable slot (issue #2534): absent means the Driver has no --agents
+      # equivalent (opencode), so only a present-but-empty value is a violation.
       agentsFlagOk = !(shape ? agentsFlag) || (builtins.isString shape.agentsFlag && shape.agentsFlag != "");
       effortFlagOk = shape ? effortFlag && builtins.isString shape.effortFlag && shape.effortFlag != "";
       order = shape.order or null;
       orderIsList = builtins.isList order;
-      # order's own permutation set tracks agentsFlag's nullability: a Driver
-      # with no --agents equivalent has no "agents" position to place either,
-      # so its order omits that slot name the same way its argvShape omits
-      # agentsFlag itself (mirrors opencode.nix's 5-slot order vs. claude.nix's
-      # 6-slot order).
+      # The expected set tracks agentsFlag's nullability: a Driver with no
+      # --agents equivalent has no "agents" position to place, so its order
+      # omits that slot too (opencode.nix has 5, claude.nix has 6).
       expectedSlots = if shape ? agentsFlag then argvOrderSlots else lib.filter (s: s != "agents") argvOrderSlots;
       missingSlots = if orderIsList then lib.filter (s: !(builtins.elem s order)) expectedSlots else expectedSlots;
       extraSlots =
@@ -125,22 +112,17 @@ let
     opencode = assertArgvShape "opencode" (assertShape "opencode" (import ./opencode.nix { inherit lib; }));
   };
 
-  # The Driver's function definitions, shared verbatim between the image
-  # preamble and the bats harness file (issue #433) so neither can drift from
-  # the other.
+  # The image preamble and the bats harness file share these definitions
+  # verbatim (issue #433) so neither can drift from the other.
   renderFunctions =
     driverEntry:
     "_driver_extract_outcome() {\n"
     + driverEntry.outcomeExtractFnBody
     + "}\n"
-    # issue #2978: entrypoint.sh's own call site was removed (the required-
-    # marker gate's verb now scans $_last_driver_text_log itself via
-    # outcome.LastNearMissOutcomeLine instead of bash pre-extracting a near-
-    # miss line), so shellcheck sees this function as unreferenced within
-    # the composed entrypoint script it renders into. It stays defined --
-    # a prior round's decision record rejected deleting/renaming it as out
-    # of scope -- because tests/driver-registry-outcome-extraction.bats
-    # still invokes it directly to pin the extraction grammar itself.
+    # Issue #2978 removed entrypoint.sh's call site, so shellcheck sees this
+    # function as unreferenced in the composed script. It stays defined because
+    # tests/driver-registry-outcome-extraction.bats calls it directly to pin
+    # the extraction grammar.
     + "# shellcheck disable=SC2329\n"
     + "_driver_extract_near_miss_outcome() {\n"
     + driverEntry.outcomeExtractNearMissFnBody
@@ -152,19 +134,10 @@ let
     + driverEntry.sessionFlagsFnBody
     + "}\n";
 
-  # The Driver's in-box half rendered into agent/entrypoint.sh's DRIVER_* vars
-  # and function definitions (ADR 0009). /home/agent is the image's fixed
-  # HOME (see lib/image.nix's passwdFile), so the skills dir is baked as an
-  # absolute path rather than depending on $HOME at run time -- byte-identical
-  # to what mkHarness.nix used to string-build inline for all three vars.
-  # Renders driverEntry.envCommon (a Driver-specific attrset of env vars, e.g.
-  # claude.nix's CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, issue #2011) as one
-  # `export KEY=value` line per entry -- `export`, unlike the plain DRIVER_*
-  # assignments above, since the point is reaching a child process (claude,
-  # via driver-exec/orchestrator's unmodified os/exec env inheritance), not
-  # entrypoint.sh's own interpolation. Optional: a Driver entry that omits
-  # envCommon renders no lines at all, so a Driver with nothing to export
-  # (or a future one that never adds this attribute) needn't declare it.
+  # envCommon (issue #2011) renders as `export`, unlike the plain DRIVER_*
+  # assignments, because the value has to reach a child process (claude, via
+  # driver-exec's env inheritance) rather than entrypoint.sh's own
+  # interpolation. A Driver that omits envCommon renders no lines at all.
   renderEnvCommon =
     driverEntry:
     lib.concatStrings (
@@ -177,11 +150,9 @@ let
       ) (driverEntry.envCommon or { })
     );
 
-  # The Driver's argv assembly shape (ADR 0009, issue #2534) rendered into
-  # DRIVER_ARGV_* vars the Go/bash side (a sibling slice) assembles the CLI
-  # invocation from. DRIVER_ARGV_MODEL_OMIT_EMPTY and DRIVER_ARGV_AGENTS_FLAG
-  # follow the same bare-flag/optional-attr conventions as flagsCommon's
-  # --devshell and DRIVER_AGENT_FILES_DIR above: a false/absent value renders
+  # The argv shape comes from ADR 0009 and issue #2534.
+  # DRIVER_ARGV_MODEL_OMIT_EMPTY and DRIVER_ARGV_AGENTS_FLAG follow the same
+  # convention as DRIVER_AGENT_FILES_DIR below: a false or absent value renders
   # no line at all, never an empty-string assignment.
   renderArgvShape =
     driverEntry:
@@ -208,6 +179,8 @@ let
     + lib.escapeShellArg (lib.concatStringsSep " " shape.order)
     + "\n";
 
+  # /home/agent is the image's fixed HOME (lib/image.nix's passwdFile), so these
+  # paths bake in as absolute rather than depending on $HOME at run time.
   renderPreamble =
     driverEntry:
     "DRIVER_NAME="
@@ -222,24 +195,19 @@ let
     + "DRIVER_SKILLS_DIR="
     + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
     + "\n"
-    # Optional, like sessionCacheDirRelative (see requiredAttrs comment
-    # above): rendered only when the Driver entry declares
-    # agentFilesDirRelative (currently opencode.nix only), so
-    # agent/entrypoint.sh's DRIVER_AGENT_FILES_DIR-gated file-rewrite loop
-    # (issue #2153) stays a true no-op -- the var unset, not empty -- for a
-    # Driver (claude) whose subagents don't ride on-disk files.
+    # renderPreamble emits this var only when the entry declares
+    # agentFilesDirRelative (opencode only), leaving it unset rather than empty
+    # so entrypoint.sh's file-rewrite loop (issue #2153) is a true no-op for
+    # claude, whose subagents use no on-disk files.
     + lib.optionalString (driverEntry ? agentFilesDirRelative) (
       "DRIVER_AGENT_FILES_DIR="
       + lib.escapeShellArg "/home/agent/${driverEntry.agentFilesDirRelative}"
       + "\n"
     )
-    # Optional, symmetric with DRIVER_AGENT_FILES_DIR above (issue #2843):
-    # rendered only when the Driver entry declares sessionCacheDirRelative
-    # (currently claude.nix only), so agent/entrypoint.sh can see the
-    # session-cache path inside the box -- the var stays unset, not empty,
-    # for a Driver (opencode) with no resumable session state. This is a
-    # distinct consumer from lib/preambles.nix's renderDriverMountPreamble,
-    # which renders the same-named var for the host-side launcher process.
+    # Symmetric with DRIVER_AGENT_FILES_DIR above (issue #2843): the var stays
+    # unset, not empty, for opencode, which has no resumable session state.
+    # lib/preambles.nix's renderDriverMountPreamble renders a same-named var for
+    # the host-side launcher process, a separate consumer.
     + lib.optionalString (driverEntry ? sessionCacheDirRelative) (
       "DRIVER_SESSION_CACHE_DIR="
       + lib.escapeShellArg "/home/agent/${driverEntry.sessionCacheDirRelative}"

@@ -1,60 +1,18 @@
-# The promptassembly.Env box-env accessor row list (issue #2979): the
-# Env fields (cmd/launcher/internal/promptassembly/env.go) that
-# driver-exec/assembleprompt_cmd.go now populates via EnvFromEnviron reading
-# a real Box OS-process env var directly -- previously a hand-declared CLI
-# flag, itself forwarded 1:1 by agent/entrypoint.sh's phase_prompt_assembly,
-# until this issue dropped those flags. Each row's env var is either
-# forwarded by the Go launcher's dispatch code
-# (cmd/launcher/internal/dispatch/dispatch.go's buildBoxEnv, box.go) or via
-# lib/env-schema.nix's boxEnv = true knob-forwarding mechanism. This list is
-# the source lib/renderers.nix's renderPromptAssemblyBoxEnvGo renders into
-# cmd/launcher/internal/promptassembly/boxenv_gen.go's EnvFromEnviron, which
-# reads each row's env var directly via os.Getenv -- the same
-# small-Nix-list -> pure renderer -> nix/regen.nix -> drift-check house
-# style lib/baked-skills.nix and lib/env-schema.nix's schemaConfig family
-# (cmd/launcher/schemaconfig_gen.go) already established.
-#
-# Deliberately NOT part of lib/env-schema.nix: these rows are not
-# operator-facing knobs. Most are per-dispatch facts (ISSUE_NUMBER,
-# DISPATCH_KIND, ...) or nix-precomputed static gate values
-# (BOX_TRACKER_AXIS_READ, BOX_FORGE_BACKEND, ...) the launcher forwards into
-# the Box, not settings an operator's flake `settings` block sets.
-#
-# Out of scope for this list, and so still CLI flags on
-# assembleprompt_cmd.go:
-#   - The 6 *SkillBaked bool fields + SkillsFound: filesystem probes
-#     entrypoint.sh resolves by statting DRIVER_SKILLS_DIR before invoking
-#     assemble-prompt, not env reads (lib/baked-skills.nix already owns the
-#     *SkillBaked family).
-#   - PromptsDir, DriverAgentFilesDir, CommsContractFile,
-#     CheckContractFile, OutcomeContractFile,
-#     ResearchOutcomeContractFile: path-shaped CLI inputs, kept as flags per
-#     issue #2979's "Flags survive only for non-env inputs: skills-probe
-#     results and output paths."
-#   - AgentsPromptFiles: a nix-baked agent-name -> promptFile JSON map, not
-#     a path itself, but kept as a flag for a different reason -- lib/image.nix
-#     assigns its value to the plain (unexported) bash local
-#     AGENTS_PROMPT_FILES, unlike its sibling AGENTS_JSON_TEMPLATE which this
-#     issue's entrypoint.sh changes now `export`. A separate compiled
-#     process such as driver-exec can't see an unexported bash local via
-#     os.Getenv, so this field has no env var to read until that export is
-#     added.
-#
-# Each row:
-#   field - the promptassembly.Env struct field name this row populates.
-#   env   - the Box OS-process env var name EnvFromEnviron reads via
-#           os.Getenv.
-#   kind  - which read rule the renderer emits for this row:
-#             presence - os.Getenv(env) != ""
-#             string   - os.Getenv(env) verbatim
-#             int      - strconv.Atoi(os.Getenv(env)), degrading to 0 on
-#                         empty/malformed input. Unlike
-#                         cmd/launcher/main.go's atoiSchema, which falls back
-#                         to a per-key schema default (intSchemaDefault),
-#                         these rows are deliberately outside
-#                         lib/env-schema.nix (see above) and so have no
-#                         schema default to degrade to.
-#             equals1  - os.Getenv(env) == "1"
+# Source rows for lib/renderers.nix's renderPromptAssemblyBoxEnvGo, which
+# renders promptassembly/boxenv_gen.go's EnvFromEnviron (issue #2979). kind
+# picks the read rule: presence (non-empty), string, equals1, or int, which
+# degrades to 0 on empty or malformed input because these rows have no
+# env-schema default to fall back on.
+
+# These rows stay out of lib/env-schema.nix on purpose: they are per-dispatch
+# facts and nix-precomputed gate values the launcher forwards into the Box,
+# not knobs an operator sets. AgentsPromptFiles has no row because lib/image.nix
+# keeps AGENTS_PROMPT_FILES an unexported bash local, so os.Getenv in a
+# separate process cannot see it.
+
+# Fields that are not env reads stay CLI flags on assembleprompt_cmd.go per
+# issue #2979: the *SkillBaked probes entrypoint.sh resolves by statting
+# DRIVER_SKILLS_DIR, and the output path inputs.
 [
   {
     field = "OrchestratorEnabled";

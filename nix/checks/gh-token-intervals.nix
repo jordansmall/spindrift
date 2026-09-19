@@ -14,11 +14,10 @@ let
   intervals = import ../../lib/gh-token-intervals.nix;
   actionSrc = builtins.readFile ../../.github/actions/gh-token-refresher/action.yml;
 
-  # The Go sites spell their durations as `N * time.Minute`, so the
-  # registry's seconds must survive the conversion exactly. Nix integer
-  # division alone would floor refreshSeconds = 2730 to 45, pinning
-  # action.yml at 2730s while the Go guard still accepted 45 * time.Minute
-  # (2700s) — a 30-second disagreement passing this very parity check.
+  # The Go sites spell their durations as `N * time.Minute`, so the registry's
+  # seconds must survive the conversion exactly. Integer division alone would
+  # floor refreshSeconds = 2730 to 45, pinning action.yml at 2730s while the Go
+  # guard still accepted 2700s, a 30-second disagreement passing this check.
   wholeMinutes =
     attr: seconds:
     assert assertMsg (mod seconds 60 == 0)
@@ -28,15 +27,11 @@ let
   refreshMinutes = toString (wholeMinutes "refreshSeconds" intervals.refreshSeconds);
   backoffMinutes = toString (wholeMinutes "failureBackoffSeconds" intervals.failureBackoffSeconds);
 
-  # Extracts every `sleep_secs=<digits>` literal, in file order, as strings.
-  # Span-scanned off the marker (mirroring dispatch-labels.nix's tokenize
-  # idiom) rather than a per-line regex, so it doesn't matter that the loop's
-  # three sites sit on three different lines. Reads only the digit run
-  # immediately after the `=` on the marker's own line: scanning further
-  # would pick a digit out of a trailing comment and report a literal that
-  # isn't there (`sleep_secs="$var" # 45m` would yield "45"). A site whose
-  # value isn't a bare literal yields a deliberately non-numeric sentinel, so
-  # it fails the comparison below loudly instead of dropping out of the list.
+  # Extracts every `sleep_secs=<digits>` literal, in file order. Span-scanned
+  # off the marker rather than per line, because the loop's three sites sit on
+  # three different lines. It reads only the digit run right after the `=`:
+  # scanning further would pick digits out of a trailing comment. A site whose
+  # value is not a bare literal yields a sentinel that fails the comparison.
   extractSleepSecs =
     src:
     let
@@ -49,12 +44,10 @@ let
     in
     map literalAfterMarker (builtins.tail (splitString "sleep_secs=" src));
 
-  # Compares the ordered, counted literal list — not merely that each value
-  # appears somewhere, which would miss one of the two refreshSeconds sites
-  # drifting independently of the other. Factored out (mirroring
-  # dispatch-labels.nix's assertLabelsPinned) so the -regression siblings
-  # below can exercise this exact path against doctored source without
-  # touching the real files.
+  # Compares the ordered, counted list, not merely that each value appears
+  # somewhere, which would miss one of the two refreshSeconds sites drifting
+  # alone. Factored out so the -regression siblings below can exercise this
+  # path against doctored source without touching the real files.
   assertSleepSecsPinned =
     src:
     let
@@ -74,28 +67,11 @@ let
     WANT_BACKOFF_MINUTES = backoffMinutes;
   };
 
-  # Build-time (not eval-time) scan for the two Go-side constants named in
-  # issue #2893 — cmd/launcher/bootstrap.go's ghAppRefreshInterval and
-  # cmd/launcher/internal/ghapptoken/ghapptoken.go's remintFailureBackoff.
-  # Eval-time listFilesRecursive+readFile over the launcher tree would tax
-  # every flake eval for a guard that matches nothing on main today; this
-  # runs once per `nix build` instead, against whatever tree gets passed
-  # as $1.
-  #
-  # Greps assignments with \b word boundaries and no keyword requirement, so
-  # it hits a standalone `const`/`var` declaration and the bare-name form
-  # inside a grouped `const (`/`var (` block alike — remintFailureBackoff is
-  # deliberately a `var` so ghapptoken's own tests can override it. Those
-  # test overrides are the reason _test.go is excluded. The grep is
-  # deliberately loose (any assignment) and the pinned `N * time.Minute`
-  # form is checked second: an assignment in some other spelling
-  # (`2700 * time.Second`, `time.Duration(45) * time.Minute`) is a failure,
-  # not a miss, since a tighter grep would silently re-vacate the guard.
-  # `=[^=]` keeps `==` comparisons out.
-  #
-  # Zero assignments is a pass — neither symbol exists on main yet — but it
-  # prints a notice, so the log makes this guard's present vacuity visible
-  # rather than silently trusted.
+  # Scans at build time, not eval time: an eval-time walk of the launcher tree
+  # taxes every flake eval for a guard that matches nothing on main today
+  # (issue #2893). The grep takes any assignment (`=[^=]` excludes `==`), then
+  # checks the `N * time.Minute` form, so an unexpected spelling fails instead
+  # of quietly passing. It skips _test.go, where the tests override the var.
   scanScript = pkgs.writeShellScript "gh-token-intervals-go-guard-scan" ''
     set -euo pipefail
 
@@ -133,20 +109,16 @@ let
   '';
 in
 {
-  # builtins.seq forces assertSleepSecsPinned's own internal assert (the
-  # source of truth for "what's expected") without re-spelling the expected
-  # [refresh refresh backoff] list a second time here.
+  # builtins.seq forces assertSleepSecsPinned's own assert, so the expected
+  # [refresh refresh backoff] list is not re-spelled a second time here.
   gh-token-intervals-pinned-in-action = builtins.seq (assertSleepSecsPinned actionSrc) (
     pkgs.runCommand "gh-token-intervals-pinned-in-action" { } "touch $out"
   );
 
-  # Two doctored fixtures, each targeting a way this check could pass
-  # vacuously: a drift in only the SECOND sleep_secs=refreshSeconds site
-  # (refreshSeconds still appears elsewhere, so an exists-anywhere
-  # comparison would miss it), and a site whose value stops being a bare
-  # literal (an extractor scanning past the `=` would read the digits out
-  # of the trailing comment instead). Anchors are derived from `intervals`
-  # rather than spelled out, so a legitimate registry bump doesn't make
+  # Each fixture targets a way this check could pass vacuously: drift in only
+  # the second sleep_secs=refreshSeconds site, which an exists-anywhere
+  # comparison would miss, and a site whose value stops being a bare literal.
+  # Anchors derive from `intervals` so a legitimate registry bump does not make
   # these fixtures fail for an unrelated reason.
   gh-token-intervals-pinned-in-action-regression =
     let
@@ -174,10 +146,9 @@ in
           anchor = "the failure-path backoff line";
         }
       ];
-      # Guard the fixtures themselves: if action.yml's surrounding text ever
-      # reflows so a replaceStrings match stops firing, the doctored source
-      # would silently equal actionSrc and the tryEval below would pass
-      # against undoctored input.
+      # Guard the fixtures themselves: if action.yml's surrounding text reflows
+      # so a replaceStrings match stops firing, the doctored source would equal
+      # actionSrc and the tryEval below would pass against undoctored input.
       check =
         f:
         assert assertMsg (f.doctoredSrc != actionSrc)
@@ -189,9 +160,9 @@ in
     assert builtins.all check fixtures;
     pkgs.runCommand "gh-token-intervals-pinned-in-action-regression" { } "touch $out";
 
-  # Proves wholeMinutes rejects a registry value that is not a whole number
-  # of minutes instead of flooring it, which is the only thing standing
-  # between the seconds-based action.yml pin and the minutes-based Go pin.
+  # Proves wholeMinutes rejects a registry value that is not a whole number of
+  # minutes instead of flooring it, which is the only thing keeping the
+  # seconds-based action.yml pin and the minutes-based Go pin in agreement.
   gh-token-intervals-whole-minutes-regression =
     let
       truncating = builtins.tryEval (wholeMinutes "refreshSeconds" 2730);
@@ -202,24 +173,16 @@ in
       "gh-token-intervals-whole-minutes-regression: expected wholeMinutes to convert 2700 seconds to 45 minutes";
     pkgs.runCommand "gh-token-intervals-whole-minutes-regression" { } "touch $out";
 
-  # The real-tree run: passes today (both notices fire, since neither symbol
-  # exists on main); starts enforcing the moment either constant lands with
-  # issue #2867.
+  # The real-tree run passes today because neither symbol exists on main. It
+  # starts enforcing the moment either constant lands with issue #2867.
   gh-token-intervals-go-guard = pkgs.runCommand "gh-token-intervals-go-guard" wantEnv ''
     ${scanScript} ${../../cmd/launcher}
     touch $out
   '';
 
-  # Exercises scanScript against synthetic fixtures rather than the real
-  # tree, since that tree has zero matches: a drifted one (both symbols
-  # wrong — must fail), an unrecognised-form one (right interval, wrong
-  # spelling — must fail rather than silently miss), a short-declaration one
-  # (right interval, `:=` instead of `=` — must fail the same way rather
-  # than the loose grep silently missing it), a correct one (both symbols
-  # right, one standalone and one in a grouped `var (...)` block, plus a
-  # _test.go override that must be ignored — must pass), and one carrying
-  # only bootstrap.go's unrelated ghTokenRefreshInterval, a different
-  # concept that must never register as a false "found".
+  # Exercises scanScript against synthetic fixtures, because the real tree
+  # matches neither symbol today. The unrelated fixture pins that bootstrap.go's
+  # ghTokenRefreshInterval, a different concept, never counts as a match.
   gh-token-intervals-go-guard-regression =
     pkgs.runCommand "gh-token-intervals-go-guard-regression" wantEnv
       ''

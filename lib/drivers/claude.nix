@@ -1,10 +1,8 @@
-# The claude Driver: pure data only (ADR 0009, issue #624) -- the registry
-# (./default.nix) validates this entry's shape and renders it into the data
-# lib/mkHarness.nix bakes into the image: the claude-code package, the
-# entrypoint's DRIVER_* preamble, and the --agents JSON. The bats harness
-# sources mkHarness.internals.driverPreambleFile (the registry's rendered
-# preamble, byte-identical to what the image bakes in) before exec-ing the
-# entrypoint, so the suite exercises the exact same bytes (issue #433).
+# The claude Driver: pure data only (ADR 0009, issue #624). The registry
+# (./default.nix) validates this entry's shape and renders it into what
+# lib/mkHarness.nix bakes into the image. The bats harness sources
+# mkHarness.internals.driverPreambleFile, byte-identical to the preamble the
+# image bakes in, so the suite exercises the same bytes (issue #433).
 { lib }:
 let
   outcomeExtractor = import ./outcome-extractor.nix;
@@ -13,93 +11,56 @@ in
 {
   name = "claude";
 
-  # In-box package providing the `claude` binary.
   package = pkgs: pkgs.claude-code;
 
-  # Binary name agent/entrypoint.sh invokes.
   bin = "claude";
 
-  # Flags common to every claude invocation in agent/entrypoint.sh (the
-  # conflict-resolve agent, the main run, and the devShell wrapper),
-  # space-separated so the entrypoint can splice them in unquoted.
-  #
-  # --disallowedTools strips the harness's re-invocation-promising tools from
-  # the Driver's tool surface (issue #1609): none of ScheduleWakeup,
-  # CronCreate, CronDelete, CronList, RemoteTrigger, or Monitor has a
-  # legitimate use in a single-shot headless Box run, since each is a promise
-  # of a later re-invocation the headless runner will not keep (#1542 lost a
-  # run outright when the Driver backgrounded its test gate and called
-  # ScheduleWakeup, trusting a re-invocation that never came). The model
-  # cannot call a tool it never sees. A single comma-separated token so the
-  # entrypoint's unquoted word-split (see driver-exec/args.go's
-  # strings.Fields) never breaks it into separate argv elements.
+  # Space-separated so agent/entrypoint.sh can splice these in unquoted.
+  # --disallowedTools removes the tools that promise a later re-invocation the
+  # headless runner never makes (issue #1609; #1542 lost a run when the Driver
+  # backgrounded its test gate behind ScheduleWakeup). Keep the tool names one
+  # comma-separated token: driver-exec/args.go splits this value on whitespace.
   flagsCommon = "--verbose --output-format stream-json --dangerously-skip-permissions --disallowedTools ScheduleWakeup,CronCreate,CronDelete,CronList,RemoteTrigger,Monitor";
 
-  # Env vars every claude invocation needs in its process environment (issue
-  # #2011, distinct from flagsCommon's CLI args): CLAUDE_CODE_DISABLE_BACKGROUND_TASKS
-  # makes claude itself omit the run_in_background parameter from the Bash,
-  # Agent/Task, and PowerShell tools' own input schema, so none of them can
-  # ever be called asynchronously in the first place -- --disallowedTools
-  # above can't reach this, since run_in_background is a parameter of those
-  # tool calls, not a tool name of its own, and reject-background-bash.sh
-  # (agent/reject-background-bash.sh) only ever covered Bash, leaving the
-  # Agent/Task subagent-launch tool (which backgrounds by default, unlike
-  # Bash) free to park a headless run's turn awaiting a notification a
-  # one-shot `claude -p` session can never receive. Schema-level omission is
-  # strictly stronger than a PreToolUse deny hook here: the model can't even
-  # attempt the call, rather than attempting it and having to correctly act
-  # on a denial mid-turn. reject-background-bash.sh stays as defense in depth
-  # for the vector this env var doesn't reach -- a Bash command that
-  # self-backgrounds at the shell level (a trailing `&`, `nohup`, `setsid`,
-  # `coproc`) rather than through the structured parameter.
+  # Issue #2011: claude then omits run_in_background from the Bash, Agent/Task,
+  # and PowerShell input schemas, so the model cannot park a headless turn on a
+  # notification a one-shot `claude -p` never receives. --disallowedTools reaches
+  # a tool name, never a parameter. reject-background-bash.sh still covers
+  # shell-level backgrounding (`&`, nohup, setsid, coproc).
   envCommon = {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
   };
 
-  # Directory Claude Code scans for skill files, relative to $HOME.
   skillsDirRelative = ".claude/skills";
 
-  # Directory claude's session transcripts live under, relative to $HOME
-  # (issue #427/#447/#448, ADR 0009): the launcher mounts an ephemeral
-  # per-issue host directory writable over it so a fix pass can resume the
-  # initial run's session instead of cold-starting one. A Driver that omits
-  # this attribute has no resumable session state -- the launcher creates no
-  # per-issue cache and the runner adapters add no mount for it.
+  # Issue #427/#447/#448, ADR 0009: the launcher mounts a writable per-issue
+  # host directory over this so a fix pass resumes the initial run's session.
+  # A Driver that omits this attribute gets no per-issue cache and no mount,
+  # so it has no resumable session state.
   sessionCacheDirRelative = ".claude/projects";
 
-  # Shell function body extracting the SPINDRIFT_OUTCOME line from claude's
-  # stream-json result event; called as `_driver_extract_outcome "$stream_log"`.
-  # Shares its pipeline shape (markdown-strip, issue #1611; colon/space
-  # delimiter tolerance, issue #2012; required landing=/status= fields) with
-  # every other Driver's "match" body -- see outcome-extractor.nix's
-  # mkOutcomeExtractor doc comment for the full rationale on both fields it
-  # requires and the colon it normalizes.
+  # Called as `_driver_extract_outcome "$stream_log"`. Shares its pipeline
+  # shape (markdown-strip, issue #1611; colon/space delimiter tolerance, issue
+  # #2012; required landing=/status= fields) with every other Driver's "match"
+  # body; outcome-extractor.nix's mkOutcomeExtractor doc comment explains both.
   outcomeExtractFnBody = outcomeExtractor.mkOutcomeExtractor {
     inherit jqSelector;
     variant = "match";
   };
 
-  # Shell function body extracting a *near-miss* SPINDRIFT_OUTCOME line from
-  # claude's stream-json result event (issue #1900); called as
-  # `_driver_extract_near_miss_outcome "$stream_log"`. The complement of
-  # outcomeExtractFnBody above -- see outcome-extractor.nix's
-  # mkOutcomeExtractor doc comment for why this variant doesn't normalize the
-  # colon delimiter and doesn't require both landing=/status=.
+  # Called as `_driver_extract_near_miss_outcome "$stream_log"` (issue #1900).
+  # The complement of outcomeExtractFnBody above; mkOutcomeExtractor explains
+  # why this variant leaves the colon alone and requires neither field.
   outcomeExtractNearMissFnBody = outcomeExtractor.mkOutcomeExtractor {
     inherit jqSelector;
     variant = "near-miss";
   };
 
-  # Shell function body extracting claude's stream-json result text, unwrapped
-  # and markdown-stripped, with NO grep/landing/status classification and NO
-  # `tail -1` filtering on top -- the shared prefix outcomeExtractFnBody and
-  # outcomeExtractNearMissFnBody above both further classify. Factored out
-  # here so the driver-exec marker-gate verb (issue #2978) can scan the
-  # Driver's raw unwrapped text itself via outcome.LastFieldedOutcomeLine/
-  # outcome.LastNearMissOutcomeLine (cmd/launcher/internal/outcome/outcome.go)
-  # instead of trusting a bash-side classification for the SPINDRIFT_OUTCOME
-  # nudge decision; called as
-  # `_driver_extract_result_text "$stream_log"`.
+  # Called as `_driver_extract_result_text "$stream_log"`: the shared prefix
+  # the two extractors above classify further, with no landing/status grep and
+  # no `tail -1`. The driver-exec marker gate (issue #2978) scans this raw text
+  # through cmd/launcher/internal/outcome/outcome.go rather than trusting a
+  # bash-side classification for the SPINDRIFT_OUTCOME nudge decision.
   resultTextExtractFnBody = ''
     # The backtick below is a literal char in a single-quoted sed script, not
     # an unexpanded command substitution.
@@ -108,16 +69,11 @@ in
       | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
   '';
 
-  # Shell function body computing the claude-specific session pin/resume
-  # flags (issue #427/ADR 0009): a deterministic per-issue session id (so no
-  # state beyond ISSUE_NUMBER/REPO_SLUG is needed to recompute it) plus the
-  # verb claude itself uses. Called as `_driver_session_flags initial` on the
-  # cold run (pins the id) or `_driver_session_flags resume` on a fix pass
-  # (resumes it only if that session's transcript is actually present under
-  # the mounted /home/agent/.claude/projects — e.g. absent after the cache
-  # was evicted, or on the first fix pass following a crash — in which case
-  # this prints nothing and the caller falls back to the cold-context fix
-  # flow with no error).
+  # Issue #427/ADR 0009. The session id is derived so that REPO_SLUG and
+  # ISSUE_NUMBER alone recompute it, with no stored state. `resume` prints
+  # nothing when that session's transcript is missing under the mounted
+  # projects directory (an evicted cache, or the first fix pass after a
+  # crash), and the caller then falls back to the cold-context fix flow.
   sessionFlagsFnBody = ''
     local h id
     h="$(printf '%s' "spindrift-session:''${REPO_SLUG:-}:''${ISSUE_NUMBER:-}" | sha256sum | cut -c1-32)"
@@ -134,21 +90,11 @@ in
     esac
   '';
 
-  # --agents JSON rendered at eval time via builtins.toJSON (ADR 0007 tier-1):
-  # model names are never string-interpolated in bash. Takes the first-class
-  # roster (issue #264, lib/roster.nix) rather than four fixed model-knob
-  # args, so an arbitrary N-agent roster -- including a custom agent beyond
-  # the historical scout/reviewer/filer/worker set -- renders the same way.
-  # Each roster entry becomes one key; an entry with an empty model is
-  # dropped upstream, before this template ever runs, by
-  # rosterLib.dropOptedOut -- applied by lib/mkHarness.nix right after
-  # normalizeRoster succeeds (normalizeRoster itself never filters) --
-  # so every entry here is guaranteed to carry a non-empty model. The flag is omitted (empty
-  # string return) only when the roster itself is empty. `prompt` is always
-  # "" here -- entrypoint.sh injects each agent's rendered prompt at
-  # runtime, never at eval time. Deliberately NO `mode` key: claude's
-  # --agents schema has none (contrast opencode.nix's agentFilesTemplate,
-  # which does emit `mode` in its YAML frontmatter).
+  # Rendered at eval time by builtins.toJSON (ADR 0007 tier-1) so model names
+  # never reach bash as interpolated strings. Takes the whole roster (issue
+  # #264); lib/mkHarness.nix already dropped empty-model entries through
+  # rosterLib.dropOptedOut, so e.model is non-empty. `prompt` stays "" because
+  # entrypoint.sh injects it at runtime; claude's schema has no `mode` key.
   agentsJsonTemplate =
     { roster }:
     let
@@ -168,17 +114,12 @@ in
     in
     if agents == { } then "" else builtins.toJSON agents;
 
-  # opencode composes subagents from on-disk agents/*.md files under $HOME
-  # (lib/drivers/opencode.nix's agentFilesTemplate); claude declines that
-  # on-disk mechanism entirely -- its subagents ride agentsJsonTemplate's
-  # --agents JSON flag above instead. Always returns the empty attrset, so
-  # lib/image.nix's agentFiles bakes no per-agent files for this Driver.
+  # claude declares subagents through agentsJsonTemplate's --agents flag, not
+  # the on-disk agents/*.md files opencode uses, so lib/image.nix bakes none.
   agentFilesTemplate = _: { };
 
-  # claude's CLI argv shape (ADR 0009, issue #2534): the prompt rides a `-p`
-  # flag, --agents carries the roster JSON (agentsJsonTemplate above), and
-  # driver-exec assembles the invocation in this order. Reproduces the exact
-  # behavior of the args.go claude branch this issue replaces.
+  # claude's CLI argv shape (ADR 0009, issue #2534). driver-exec assembles the
+  # invocation in the order listed.
   argvShape = {
     promptStyle = "flag";
     promptFlag = "-p";
