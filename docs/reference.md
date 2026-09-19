@@ -4207,19 +4207,30 @@ overwrite an existing `<routes-file>`; pass `--force` to overwrite anyway.
 
 A host discovery can't match to any store still gets a route, pointed at a
 placeholder credential named `SPINDRIFT_REGISTRY_CREDENTIAL_<HOST>` (host
-uppercased, non-alphanumeric characters replaced with `_`) — the route does
-nothing until the operator sets that environment variable or edits the
-route by hand; the command's report and the routes file's own header
-comment both flag every route left in this state. Two unmatched hosts that
-sanitize to the same placeholder name (e.g. `a.b.example.com` and
+uppercased, non-alphanumeric characters replaced with `_`) — the route
+does nothing until the operator sets that environment variable or edits
+the route by hand; the command's report and the routes file's own header
+comment both flag every route left in this state. Two unmatched hosts
+that sanitize to the same placeholder name (e.g. `a.b.example.com` and
 `a-b.example.com`, both folding their separator to `_`) would otherwise
-share one env var — an operator's value for one host silently also reaching
-the other — so every name in the collision gets `_<8 hex digits>` appended,
-a deterministic hash of the host itself, keeping the two routes distinct and
-their names stable across repeated discovery runs. A repo with no registry
-declarations at all — none of the scanned config files, or only config
-declaring non-http/unusable registry URLs — writes nothing and exits
-non-zero, since that's indistinguishable from a mistyped `<repo-dir>`.
+share one env var — an operator's value for one host silently also
+reaching the other — so each round re-buckets the unmatched routes by
+their current placeholder name and appends `_<8 hex digits>` of the host's
+own hash to every route still contested in that round. A name contested
+again in a later round, because its new suffix collided with some other
+route's plain or already-suffixed name, picks up a second suffix — three
+hosts colliding in a chain can leave one placeholder carrying two. The
+check runs against the whole routes table, not just the colliding pair, and
+repeats until no two routes share a name; the outcome is a deterministic
+function of the discovered host set, stable across repeated discovery
+runs and independent of the order the hosts were declared in. The loop is
+bounded, and hitting that bound — only reachable if two hosts' hashes
+are equal — makes `spindrift registry discover` fail with an error
+naming the still-contested placeholder rather than write a routes file
+where two hosts share one env var. A repo with no registry declarations
+at all — none of the scanned config files, or only config declaring
+non-http/unusable registry URLs — writes nothing and exits non-zero,
+since that's indistinguishable from a mistyped `<repo-dir>`.
 
 A routes file can drift from the repo's own config after either changes —
 a new registry the repo starts using, or a route left over from one it
