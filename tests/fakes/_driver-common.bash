@@ -1,89 +1,56 @@
 #!/usr/bin/env bash
-# Shared control-flow sourced by the stub-agent fakes (tests/fakes/claude,
-# tests/fakes/opencode). NEVER calls a real LLM.
-#
-# Holds the byte-identical middle section every Driver's fake plays out the
-# same way regardless of transcript shape: log which env vars actually
-# reached this process, report discoverable skills, resolve a rebase
-# conflict when one is in progress, and play the scripted
-# commit/push/PR pipeline. Each caller sources this file after its own
-# argument parsing (which differs per Driver -- e.g. claude alone parses
-# --agents/writes DRIVER_AGENTS_FILE, so that stays in tests/fakes/claude
-# itself) and before its own transcript-shape-specific emission, which also
-# stays in the caller.
-#
-# Callers must already have `set -euo pipefail`, DRIVER_LOG validated, and
-# $model/$prompt parsed before sourcing this file.
+# Shared control flow sourced by the stub-agent fakes (tests/fakes/claude,
+# tests/fakes/opencode). It never calls a real LLM. Each caller sources it
+# after its own argument parsing and before its own transcript-shape emission,
+# with `set -euo pipefail`, DRIVER_LOG, and $model/$prompt already in place.
 
 {
   printf 'driver invoked for issue #%s model=%s\n' "${ISSUE_NUMBER:-?}" "${model:-}"
 
-  # Real claude reads CLAUDE_CODE_DISABLE_BACKGROUND_TASKS from its own
-  # process environment (issue #2011) to omit run_in_background from the
-  # Bash/Agent/Task/PowerShell tools' schema; this fake logs whatever it
-  # actually inherited so a test can assert the var reaches it identically
-  # regardless of which in-box binary (driver-exec or the orchestrator)
-  # spawned this process.
+  # Real claude reads this from its own process environment (issue #2011), so
+  # the fake logs whatever it inherited and a test can assert the var arrives
+  # whichever in-box binary spawned this process.
   printf 'env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=%s\n' "${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-}"
 
-  # Same reasoning as the CLAUDE_CODE_DISABLE_BACKGROUND_TASKS line above, but
-  # proving the registry-proxy Binding's npm_config_registry env override
-  # (issue #2854) reaches this Driver process, not just the entrypoint shell
-  # that exported it.
+  # Same proof for the registry-proxy Binding's npm_config_registry override
+  # (issue #2854): it reaches this Driver process, not just the entrypoint
+  # shell that exported it.
   printf 'env: npm_config_registry=%s\n' "${npm_config_registry:-}"
 
-  # Same reasoning again, but for the pnpm Binding (issue #2855): pnpm no
-  # longer honors the generic npm_config_registry env var, only its own
-  # pnpm_config_registry-prefixed form, so this proves that var reaches the
-  # Driver process too.
+  # Same proof for the pnpm Binding (issue #2855): pnpm no longer honors the
+  # generic npm_config_registry var, only its own pnpm_config_registry form.
   printf 'env: pnpm_config_registry=%s\n' "${pnpm_config_registry:-}"
 
-  # Same proof, but for yarn berry's own env-var override of the counterpart
-  # setting (issue #2856).
+  # Same proof for yarn berry's own env-var override (issue #2856).
   printf 'env: YARN_NPM_REGISTRY_SERVER=%s\n' "${YARN_NPM_REGISTRY_SERVER:-}"
 
-  # Same proof, but for the cargo credential-provider placeholder tokens
-  # intree_binding_apply sources for each source-replacement's own
-  # [registries.<proxy source>] table (ADR 0044's issue #3053 amendment,
-  # re-keyed to the proxy source name by issue #3201): the token binds to the
-  # replacement source cargo actually looks credentials up against, never the
-  # repo's own registry name. Unlike every other line in this block there is
-  # no single fixed var to hardcode -- the proxy source name is minted per
-  # route and per registry -- so this enumerates whatever CARGO_REGISTRIES_*
-  # vars reached this process, and each asserting test names the one its own
-  # fixture mints.
+  # Same proof for the cargo credential-provider placeholder tokens (ADR 0044's
+  # issue #3053 amendment, re-keyed to the proxy source name by issue #3201).
+  # The proxy source name is minted per route and per registry, so there is no
+  # fixed var to hardcode: enumerate whatever CARGO_REGISTRIES_* vars arrived
+  # and let each asserting test name the one its own fixture mints.
   env | sed -n 's/^CARGO_REGISTRIES_/env: CARGO_REGISTRIES_/p'
 } >>"$DRIVER_LOG"
 
-# Report any skills discoverable at the path Claude Code scans. Real claude -p
-# discovers a skill only as a directory holding a SKILL.md
-# ($HOME/.claude/skills/<name>/SKILL.md), never a flat <name>.md file; this
-# fake mirrors that so tests assert real discovery without a live LLM.
+# Real claude -p discovers a skill only as a directory holding a SKILL.md
+# ($HOME/.claude/skills/<name>/SKILL.md), never a flat <name>.md file, and
+# this fake mirrors that so tests assert real discovery without a live LLM.
 if [ -d "${HOME:-}/.claude/skills" ]; then
   for _skill in "${HOME}/.claude/skills/"*/SKILL.md; do
     [ -f "$_skill" ] && printf 'skill discovered: %s\n' "$(basename "$(dirname "$_skill")")" >>"$DRIVER_LOG"
   done
 fi
 
-# Conflict-resolution mode: simulate an agent that resolves rebase conflicts,
-# then continues the rebase. The entrypoint checks for completion afterwards.
-# Only run the git ops -- and only this fake's early exit -- when a rebase is
-# actually in progress. FAKE_DRIVER_RESOLVE_CONFLICT is exported for the whole
-# entrypoint run, so it is still "1" on every later invocation of this same
-# fake too (the main run, and now the resume-once recovery pass, issue
-# #1607); gating the exit on an in-progress rebase, not just the flag, lets
-# those later calls fall through to the ordinary stream-json path below
-# instead of silently short-circuiting with no output.
-#
-# Ordinary conflicted files accept the being-rebased version (theirs). A file
-# that declares itself generated ("DO NOT EDIT" / "Code generated by X from
-# Y") is instead resolved per the conflict-resolve prompt (issue #403):
-# merge both sides in its source file, then regenerate the artifact by
-# running the command named in its own header — never hand-merge the
-# artifact's conflict markers directly.
+# This block simulates an agent that resolves rebase conflicts.
+# FAKE_DRIVER_RESOLVE_CONFLICT stays exported for the whole entrypoint run, so
+# gating the early exit on an in-progress rebase, not just the flag, lets the
+# later calls (including the resume-once recovery pass, issue #1607) fall
+# through to the ordinary stream-json path instead of exiting with no output.
 if [ "${FAKE_DRIVER_RESOLVE_CONFLICT:-0}" = "1" ] && { [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; }; then
-  # First pass: resolve generated files by merging their source and
-  # regenerating, staging both the source and the regenerated artifact.
+  # A file declaring itself generated ("DO NOT EDIT") is resolved per the
+  # conflict-resolve prompt (issue #403): merge both sides in its source, then
+  # regenerate the artifact with the command named in its own header, never
+  # hand-merge the artifact's conflict markers.
   while IFS= read -r _f; do
     if grep -qi 'do not edit' "$_f" 2>/dev/null; then
       _header="$(grep -i 'code generated by' "$_f" | head -1)"
@@ -96,9 +63,8 @@ if [ "${FAKE_DRIVER_RESOLVE_CONFLICT:-0}" = "1" ] && { [ -d ".git/rebase-merge" 
       git add "$_f"
     fi
   done < <(git diff --name-only --diff-filter=U)
-  # Second pass: whatever is still unmerged is an ordinary file (the first
-  # pass already staged generated files and their sources) — accept the
-  # incoming side.
+  # Whatever is still unmerged is an ordinary file, and during a rebase
+  # --theirs is the branch being rebased.
   while IFS= read -r _f; do
     git checkout --theirs "$_f"
     git add "$_f"
@@ -112,28 +78,24 @@ if [ "${FAKE_DRIVER_COMMIT:-0}" = "1" ]; then
   printf 'stub agent change for issue #%s\n' "${ISSUE_NUMBER:-0}" >agent-change.txt
   git add -A
 fi
-# FAKE_DRIVER_STAGE_ONLY=1 simulates a driver that completed real work and
-# staged it, but never committed (issue #2012's #1998 dogfood shape) --
-# deliberately never followed by a `git commit`, unlike FAKE_DRIVER_COMMIT
-# above, so the outcome backstop's own commit/push salvage is what's under
-# test, not this fake's.
+# This block simulates a driver that staged real work but never committed
+# (issue #2012's #1998 dogfood shape). The missing `git commit` is deliberate,
+# unlike FAKE_DRIVER_COMMIT above, so the outcome backstop's own commit/push
+# salvage is what's under test.
 if [ "${FAKE_DRIVER_STAGE_ONLY:-0}" = "1" ]; then
   printf 'stub agent change for issue #%s (staged only)\n' "${ISSUE_NUMBER:-0}" >agent-change.txt
   git add -A
 fi
 # A resume call (issue #1607's recovery pass) re-invokes this fake against a
-# tree the first call already committed and pushed -- staging the identical
-# fixture content leaves nothing to commit, so skip straight past the rest of
-# this block instead of a `git commit` erroring on an empty index.
+# tree the first call already committed, so the identical fixture content
+# leaves an empty index and `git commit` would error.
 if [ "${FAKE_DRIVER_COMMIT:-0}" = "1" ] && ! git diff --cached --quiet; then
   git commit -m "feat: stub agent commit for #${ISSUE_NUMBER:-0}" >/dev/null
-  # A real read-only Box (BOX_WRITE_ENABLED unset) holds no push-capable
-  # token, so a driver-initiated `git push`/`gh pr create` there would fail
-  # authenticating, not succeed against a local bare repo the way this fake's
-  # `origin` (rewritten via git's insteadOf) always would (issue #2094).
-  # Gate both on the same signal the entrypoint itself gates its own pushes
-  # on, so a read-only fixture's commit lands only in this Box's own clone,
-  # never the remote -- exactly like the real credential boundary.
+  # A read-only Box (BOX_WRITE_ENABLED unset) holds no push-capable token, so
+  # a driver-initiated push would fail authenticating there, while this fake's
+  # rewritten `origin` would always accept it (issue #2094). Gate on the same
+  # signal the entrypoint gates its own pushes on, so a read-only fixture's
+  # commit lands only in this Box's clone.
   if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
     git push origin "$branch" >/dev/null 2>&1
     gh pr create \

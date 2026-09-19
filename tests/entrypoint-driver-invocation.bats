@@ -1,5 +1,4 @@
 #!/usr/bin/env bats
-# Driver invocation: stream-json, heartbeat, prefetch hook, nix-store-writable warning.
 
 load helper
 
@@ -28,9 +27,9 @@ setup() {
   ! grep -q -- "--model claude-test-model" "$DRIVER_LOG"
 }
 
-# Observability (#113): text --print emits nothing until the end, so the box
-# looks dead under `podman logs -f`. stream-json is the only --print mode that
-# emits events in realtime.
+# Issue #113: text --print emits nothing until the end, so the box looks dead
+# under `podman logs -f`. stream-json is the only --print mode that emits
+# events in realtime.
 @test "entrypoint runs claude in stream-json mode so activity streams live" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -39,9 +38,9 @@ setup() {
 }
 
 # Issue #1609: the claude Driver's flagsCommon strips the harness's
-# re-invocation-promising tools from the Driver's tool surface -- exercised
-# here through DRIVER_PREAMBLE_FILE (the same registry-rendered bytes the
-# image bakes, issue #433), not a hand-copied literal.
+# re-invocation-promising tools. This test reads them from
+# DRIVER_PREAMBLE_FILE, the same registry-rendered bytes the image bakes
+# (issue #433), not a hand-copied literal.
 @test "entrypoint invokes claude with --disallowedTools blocking loop/background affordances" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -54,11 +53,10 @@ setup() {
   grep -q -- "Monitor" "$DRIVER_LOG"
 }
 
-# In-box heartbeat view (#183, absorbed into driver-exec by #626): the
-# entrypoint delegates the Driver run to driver-exec, which filters heartbeats
-# in-process so a human can `tail -f /tmp/heartbeat.log` inside the box and
-# see coarse status lines instead of raw NDJSON. Raw stream-json still reaches
-# stdout unchanged for the launcher's byte-exact capture.
+# The entrypoint delegates the Driver run to driver-exec, which filters
+# heartbeats in-process (#183, absorbed into driver-exec by #626) so a human
+# can `tail -f /tmp/heartbeat.log` inside the box. Raw stream-json still
+# reaches stdout unchanged for the launcher's byte-exact capture.
 
 @test "entrypoint writes coarse heartbeat log at /tmp/heartbeat.log" {
   run bash "$ENTRYPOINT"
@@ -69,17 +67,17 @@ setup() {
 @test "heartbeat log contains status lines, not raw NDJSON" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # Heartbeat lines look like "#7 · …", not raw JSON objects.
+  # Heartbeat lines start with the issue number, so a leading "#" tells them
+  # apart from raw JSON objects.
   grep -q '^#' /tmp/heartbeat.log
   ! grep -q '"type":' /tmp/heartbeat.log
 }
 
 # Regression (#123): logs/issue-<n>.log is the sole input to outcome.Classify
-# (transient-vs-terminal retry) and outcome.LastInLog. #123 routed the console
-# through a lossy formatter that collapsed each event to a summary, stripping the
-# raw JSON — including rate_limit_error / resetsAt markers — so retryable
-# rate-limit exits were misread as terminal. The raw stream-json must reach
-# stdout verbatim; human-readable rendering is a host-side viewer over the log.
+# and outcome.LastInLog. A lossy formatter collapsed each event to a summary
+# and stripped the raw JSON, including the rate_limit_error and resetsAt
+# markers, so retryable rate-limit exits were misread as terminal. The raw
+# stream-json must reach stdout verbatim.
 @test "entrypoint streams the raw stream-json to stdout for failure classification" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -88,19 +86,18 @@ setup() {
 }
 
 # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log. Under
-# stream-json the outcome is buried in a JSON result event, so the entrypoint
-# must surface it as a bare line to keep that contract.
+# stream-json the outcome sits inside a JSON result event, so the entrypoint
+# must re-emit it as a bare line to keep that contract.
 @test "entrypoint re-emits the agent's SPINDRIFT_OUTCOME as a bare line" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -q '^SPINDRIFT_OUTCOME .*status=ready'
 }
 
-# Regression (#1611): the #1582 dogfood run wrapped the outcome line in
-# inline backticks inside claude's stream-json result text. The extractor's
-# `^SPINDRIFT_OUTCOME ` anchor failed to match, so the launcher never saw a
-# real outcome and the entrypoint's own backstop fired a synthetic
-# status=blocked over a PR that was actually green.
+# Regression (#1611): the #1582 dogfood run wrapped the outcome line in inline
+# backticks inside claude's result text, so the extractor's
+# `^SPINDRIFT_OUTCOME ` anchor missed it and the backstop fired a synthetic
+# status=blocked over a green PR.
 @test "entrypoint strips a backtick-wrapped SPINDRIFT_OUTCOME line" {
   export FAKE_DRIVER_WRAP_OUTCOME=backticks
   run bash "$ENTRYPOINT"
@@ -129,10 +126,8 @@ setup() {
   export FAKE_DRIVER_MULTI_RESULT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # Two result events each carry an outcome line, but only the last is
-  # re-emitted as a bare SPINDRIFT_OUTCOME line -- the raw stale event still
-  # appears verbatim in the raw stream-json passed through to stdout, so the
-  # assertion below is scoped to bare lines only.
+  # The stale event still appears verbatim in the passed-through stream-json,
+  # so these assertions count bare lines only.
   [ "$(printf '%s\n' "$output" | grep -c '^SPINDRIFT_OUTCOME ')" -eq 1 ]
   printf '%s\n' "$output" | grep '^SPINDRIFT_OUTCOME ' | grep -q 'status=ready note=fake$'
 }
@@ -153,10 +148,10 @@ FAKE
   grep -q "$WORK_DIR" "$PREFETCH_LOG"
 }
 
-# NIX_STORE_WRITABLE: baked into the image Env by mkHarness's nixStoreWritable
-# knob (ADR 0018, issue #469) — self-test mode trades hermeticity for in-box
-# `nix flake check` feedback, so the warning must be loud when enabled and
-# absent by default.
+# mkHarness bakes NIX_STORE_WRITABLE into the image Env from its
+# nixStoreWritable knob (ADR 0018, issue #469). Self-test mode trades
+# hermeticity for in-box `nix flake check` feedback, so the warning must be
+# loud when enabled and absent by default.
 @test "entrypoint prints a WARNING when NIX_STORE_WRITABLE=true" {
   export NIX_STORE_WRITABLE=true
   run bash "$ENTRYPOINT"

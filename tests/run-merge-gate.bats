@@ -7,8 +7,6 @@ setup() {
   setup_run_env
 }
 
-# --- Launcher merge gate (issue #135) ----------------------------------------
-
 @test "rollup SUCCESS → merges PR and reports verified-merged" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
@@ -27,7 +25,7 @@ setup() {
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="FAILURE"
-  export MAX_FIX_ATTEMPTS=0  # bare gate test — self-heal disabled
+  export MAX_FIX_ATTEMPTS=0  # Bare gate test: self-heal disabled.
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   ! grep -q 'pr merge' "$GH_LOG"
@@ -41,7 +39,7 @@ setup() {
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="ERROR"
-  export MAX_FIX_ATTEMPTS=0  # bare gate test — self-heal disabled
+  export MAX_FIX_ATTEMPTS=0  # Bare gate test: self-heal disabled.
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   ! grep -q 'pr merge' "$GH_LOG"
@@ -67,7 +65,8 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  # FAKE_GH_GRAPHQL_ROLLUP_1 unset → empty rollup (no checks registered yet)
+  # FAKE_GH_GRAPHQL_ROLLUP_1 is left unset, so the rollup is empty: no checks
+  # registered yet.
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=0
   run "$RUN_CMD"
@@ -77,7 +76,6 @@ setup() {
   [[ "$output" == *"status=failed"* ]]
 }
 
-# PENDING-then-SUCCESS: gate waits through one pending poll then merges.
 @test "rollup PENDING then SUCCESS → waits and eventually merges" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
@@ -93,13 +91,11 @@ setup() {
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-# Sequence exhaustion (issue #2650): a SEQ shorter than the number of polls
-# the loop will make must stick on its last entry rather than running off
-# the end of the array. FAKE_GH_GRAPHQL_ROLLUP_SEQ_1 has only 1 entry;
-# MERGE_POLL_TIMEOUT=4 needs 5 real calls (elapsed increments by 1 per call
-# when MERGE_POLL_INTERVAL=0 — cmd/launcher/internal/settle/watch.go) before
-# its own deadline fires, so calls 2-5 all read past the sequence's single
-# entry.
+# Sequence exhaustion (issue #2650): a SEQ shorter than the number of polls must
+# stick on its last entry instead of running off the end. This SEQ has one entry
+# and MERGE_POLL_TIMEOUT=4 needs 5 calls before the deadline fires (elapsed
+# increments by 1 per call when MERGE_POLL_INTERVAL=0, see
+# cmd/launcher/internal/settle/watch.go), so calls 2-5 read past that entry.
 @test "rollup PENDING sequence exhausted before timeout → sticks on last entry, times out cleanly" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
@@ -116,18 +112,18 @@ setup() {
 }
 
 # AC #1 (issue #130): a late-registered check appears PENDING on the
-# confirmation re-poll; gate keeps waiting and merges once the full set
-# is green.  The initial SUCCESS snapshot alone is not sufficient.
+# confirmation re-poll. The initial SUCCESS snapshot alone is not enough.
 @test "late-registered check: SUCCESS then PENDING confirmation → defers, eventually merges" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  # seq: initial=SUCCESS, confirmation=PENDING (late job registered), next poll=SUCCESS (sticks)
+  # Seq entries are the initial poll, the confirmation re-poll (a late job has
+  # registered), and the next poll, which sticks.
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,PENDING,SUCCESS"
   export MERGE_POLL_INTERVAL=0
-  # Timeout must exceed the deferral iteration count (2 loops here): elapsed
-  # increments by 1 per iteration when MERGE_POLL_INTERVAL=0, so ≥2 suffices.
+  # The timeout must exceed the deferral iteration count, 2 here: elapsed
+  # increments by 1 per iteration when MERGE_POLL_INTERVAL=0.
   export MERGE_POLL_TIMEOUT=3
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
@@ -136,17 +132,18 @@ setup() {
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-# AC #2 (issue #130): a late-registered job fails after an initial all-green
-# snapshot.  Confirmation re-poll sees FAILURE → no merge, agent-failed.
+# AC #2 (issue #130): a late-registered job turns red after the initial
+# all-green snapshot, so the confirmation re-poll sees FAILURE.
 @test "late-registered check fails after SUCCESS snapshot → no merge, agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  # seq: initial=SUCCESS, confirmation=FAILURE (late job registered and already red)
+  # Seq entries are the initial poll and the confirmation re-poll, by which
+  # time the late job has registered and is already red.
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,FAILURE"
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
-  export MAX_FIX_ATTEMPTS=0  # bare gate test — self-heal disabled
+  export MAX_FIX_ATTEMPTS=0  # Bare gate test: self-heal disabled.
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   ! grep -q 'pr merge' "$GH_LOG"
@@ -154,41 +151,38 @@ setup() {
   [[ "$output" == *"status=failed"* ]]
 }
 
-# --- Self-heal fix-agent (issue #136) -----------------------------------------
+# Self-heal fix-agent (issue #136).
 
-# Red-then-green: launcher dispatches one fix box, CI turns green, PR merges.
 @test "self-heal: red-then-green → dispatches fix box and merges" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  # First GraphQL call returns FAILURE (triggers fix box); second returns SUCCESS.
+  # The first FAILURE triggers the fix box.
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="FAILURE,SUCCESS"
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export MAX_FIX_ATTEMPTS=3
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  # Exactly 2 container runs: initial box + 1 fix box.
+  # Two container runs: the initial box plus one fix box.
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
   grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-# Red-through-cap: all fix passes fail, issue is marked agent-failed.
 @test "self-heal: red-through-cap → exhausts passes and marks agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  # CI is always FAILURE — never recovers.
   export FAKE_GH_GRAPHQL_ROLLUP_1="FAILURE"
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export MAX_FIX_ATTEMPTS=3
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  # 1 initial run + 3 fix passes = 4 total.
+  # One initial run plus three fix passes is four.
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 4 ]
   ! grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
@@ -196,11 +190,8 @@ setup() {
   [[ "$output" == *"status=failed"* ]]
 }
 
-# --- Merge-conflict rebase retry (issue #194) ---------------------------------
+# Merge-conflict rebase retry (issue #194).
 
-# conflict→rebase→merge: merge fails with conflict, rebase resolves cleanly via
-# a local bare repo (setup_bare_repo + insteadOf URL rewrite), second merge
-# attempt succeeds → issue reaches agent-complete.
 @test "merge gate: conflict → rebase → retried merge → agent-complete" {
   export MERGE_MODE=immediate
   # Set up a real local git remote so gh repo clone (which calls real git) can
@@ -232,19 +223,15 @@ setup() {
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-# conflict→rebase-fails→merge-blocked: merge fails with conflict; the rebase
-# fails (no git repo in the clone dir because gh repo clone is a no-op stub
-# here) → launcher leaves the issue at agent-complete with a merge-blocked note
-# rather than demoting it to agent-failed.
 @test "merge gate: conflict → rebase fails → merge-blocked (stays agent-complete)" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
-  export FAKE_GH_PR_MERGE_CONFLICT_1=99  # all merge calls fail with conflict
-  # gh repo clone is a no-op here (no real git remote configured), so the
-  # subsequent git checkout fails → Rebase returns an error → merge-blocked.
+  export FAKE_GH_PR_MERGE_CONFLICT_1=99  # Every merge call fails with a conflict.
+  # No real git remote is configured here, so gh repo clone is a no-op, the
+  # following git checkout fails, and Rebase returns an error.
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export MAX_REBASE_ATTEMPTS=3
@@ -257,17 +244,11 @@ setup() {
   [[ "$output" == *"status=rebase-retry"* ]]
 }
 
-# Guard (issue #2424): setup_run_env's own default poll interval/timeout must
-# bound the merge gate even when a test does NOT set MERGE_POLL_INTERVAL /
-# MERGE_POLL_TIMEOUT itself -- prove that by NOT exporting either here and
-# reaching the poll loop via a non-terminal PENDING rollup. Wrap the run in
-# the `timeout` coreutil so a regression back to the launcher's real
-# production default (MERGE_POLL_TIMEOUT=3600s, i.e. 60 minutes) fails fast
-# here instead of hanging this test: without setup_run_env's own bound
-# (issue #2424, pre-fix), the outer `timeout 5` kills the launcher first
-# (status=124, no launcher-authored deadline message); with it (post-fix),
-# the launcher's own small default deadline fires well inside the 5s bound
-# and exits 0 with its own "ci-timeout:" deadline message.
+# Guard (issue #2424): setup_run_env's default poll interval and timeout must
+# bound the merge gate even when a test sets neither, so this test sets neither
+# and reaches the poll loop with a PENDING rollup. The outer `timeout 5` catches
+# a regression back to the launcher's production default of 3600s: that kills
+# the launcher at status 124 with no launcher-authored "ci-timeout:" message.
 @test "no explicit poll override → setup_run_env default still bounds the gate" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
@@ -281,7 +262,6 @@ setup() {
   [[ "$output" == *"ci-timeout:"* ]]
 }
 
-# Pending-timeout: no fix passes consumed, gate timeout marks agent-failed.
 @test "self-heal: pending timeout does not consume fix passes" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
@@ -292,7 +272,7 @@ setup() {
   export MAX_FIX_ATTEMPTS=3
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  # Only 1 container run (the initial box); no fix passes dispatched.
+  # One container run, the initial box: no fix passes dispatched.
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 1 ]
   ! grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"

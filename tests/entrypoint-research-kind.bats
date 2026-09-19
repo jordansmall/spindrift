@@ -22,9 +22,8 @@ setup() {
   grep -q "Fresh clone, new branch" "$DRIVER_PROMPT_FILE"
 }
 
-# --- research kind skips the work-only branch/rebase phases (ADR 0022) ------
 # A research dispatch clones fresh but never cuts, checks out, or pushes an
-# agent branch -- there is no code to land, so there is nothing to rebase.
+# agent branch (ADR 0022): there is no code to land, so nothing to rebase.
 
 @test "research kind never checks out or pushes an agent branch" {
   export DISPATCH_KIND="research"
@@ -43,9 +42,8 @@ setup() {
   [ "$output" = "agent/issue-7" ]
 }
 
-# --- research kind's log line does not claim to implement (issue #734) -----
-# A research dispatch never cuts, checks out, or pushes a branch, so its log
-# line must not say "implementing ... on $BRANCH".
+# A research dispatch never pushes a branch, so its log line must not say
+# "implementing ... on $BRANCH" (issue #734).
 
 @test "research kind logs researching, not implementing, and names no branch" {
   export DISPATCH_KIND="research"
@@ -62,9 +60,8 @@ setup() {
   grep -q "==> claude implementing issue #7 on agent/issue-7" <<<"$output"
 }
 
-# --- research outcome-contract injection/idempotency (issue #640) ----------
-# Mirrors tests/entrypoint-outcome-contract.bats, for the research kind's own
-# outcome contract instead of the work "# LAND THE CHANGE" one.
+# Mirrors tests/entrypoint-outcome-contract.bats for the research kind's own
+# outcome contract instead of the work "# LAND THE CHANGE" one (issue #640).
 
 @test "runtime prompt-dir override of research-prompt.md lacking the outcome contract gets it appended" {
   export DISPATCH_KIND="research"
@@ -108,11 +105,9 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
-# --- RESEARCH_STATUS_ENUM renders in the OUTCOME grammar line (issue #2504) -
-# The OUTCOME section's SPINDRIFT_OUTCOME grammar line names its verdict
-# enumeration via the registry-generated ${RESEARCH_STATUS_ENUM} placeholder,
-# not a hand-typed literal -- this proves _subst actually substitutes it in
-# the real rendered prompt, not just that the template source references it.
+# The grammar line names its verdict enumeration via the registry-generated
+# ${RESEARCH_STATUS_ENUM} placeholder, so this proves _subst substitutes it in
+# the rendered prompt, not just that the template references it (issue #2504).
 
 @test "research kind's OUTCOME grammar line renders the registry status enum" {
   export DISPATCH_KIND="research"
@@ -121,10 +116,9 @@ setup() {
   grep -qF 'SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>' "$DRIVER_PROMPT_FILE"
 }
 
-# --- research kind's own outcome backstop (issue #640) ----------------------
 # A research driver that exits with no outcome line has no branch to push
-# best-effort (there is none) -- the backstop must not attempt one, and must
-# emit the research-appropriate blocked line instead.
+# best-effort, so the backstop must not attempt one and must emit the
+# research-appropriate blocked line instead (issue #640).
 
 @test "research kind backstop: no outcome line emits blocked with no branch push" {
   export DISPATCH_KIND="research"
@@ -133,9 +127,8 @@ setup() {
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=none status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
-  # A research dispatch pins no session worth resuming (issue #1607) --
-  # exactly one Driver invocation, no resume pass, and its note carries no
-  # mention of a recovery attempt.
+  # A research dispatch pins no session worth resuming (issue #1607): exactly
+  # one Driver invocation, no resume pass, no recovery attempt in the note.
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
   ! grep -q 'resume attempt' <<<"$output"
 }

@@ -6,27 +6,21 @@ load helper
 setup() {
   setup_entrypoint_env
   # nix/checks/bats.nix exports SKILLS_TEMPLATE_DIR for the sandboxed runs,
-  # where the repo tree isn't next to $BATS_TEST_DIRNAME; the fallback keeps a
+  # where the repo tree isn't next to $BATS_TEST_DIRNAME. The fallback keeps a
   # bare `bats tests/` run working.
   skills_template_dir="${SKILLS_TEMPLATE_DIR:-$BATS_TEST_DIRNAME/../templates/default/skills}"
   # _populate_driver_skills_dir copies HARNESS_SKILLS_DIR (/agent/skills) and
   # OPERATOR_SKILLS_DIR into DRIVER_SKILLS_DIR before every SKILLS_FOUND scan,
-  # so on a Box that bakes its own skills at those host paths the "not baked"
-  # assertions below see skills no test staged (issue #2059;
-  # tests/prompt-assembly-parity.bats:145 pins the same guard). A test that
-  # wants a baked harness skill re-exports these itself.
+  # so on a Box that bakes its own skills the "not baked" assertions below
+  # would see skills no test staged (issue #2059). A test that wants a baked
+  # harness skill re-exports these itself.
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
   export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
 }
 
-# --- skills dir discovery path (issue #118) -----------------------------------
-# Claude Code discovers skills from $HOME/.claude/skills/. In the box HOME is
-# /home/agent (mkHarness.nix sets HOME=/home/agent for OCI; bwrap.go passes
-# --setenv HOME /home/agent). The entrypoint invokes `claude -p` which
-# discovers skills from HOME. The fake claude stub mirrors real discovery:
-# it scans $HOME/.claude/skills/*/SKILL.md and logs each skill dir found. The
-# test seeds a skill there and asserts the fake claude discovers it, proving
-# the full discovery path without requiring a live LLM.
+# Claude Code discovers skills from $HOME/.claude/skills/, and in the box HOME
+# is /home/agent. The fake claude stub mirrors that scan and logs each skill
+# dir it finds, so the discovery path is testable without a live LLM (#118).
 @test "headless agent discovers a skill seeded at HOME/.claude/skills" {
   mkdir -p "$HOME/.claude/skills/test-skill"
   cat >"$HOME/.claude/skills/test-skill/SKILL.md" <<'SKILL'
@@ -38,18 +32,14 @@ Do the test thing.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # The fake claude reports each discovered skill by its directory name; assert
-  # this one was found.
   grep -q "skill discovered: test-skill" "$DRIVER_LOG"
 }
 
-# A bind mount placed directly onto DRIVER_SKILLS_DIR (how SPINDRIFT_SKILLS_DIR's
-# runtime override works) always REPLACES its entire contents -- there's no
-# union mount available in bwrap or a plain OCI volume mount. So a harness-owned
-# skill baked at HARNESS_SKILLS_DIR would otherwise vanish entirely under an
-# operator override. entrypoint.sh instead COPIES both HARNESS_SKILLS_DIR and
-# OPERATOR_SKILLS_DIR into DRIVER_SKILLS_DIR before the discovery scan runs --
-# copying is naturally additive/mergeable, mounts are not (issue #2489).
+# A bind mount onto DRIVER_SKILLS_DIR (how SPINDRIFT_SKILLS_DIR's runtime
+# override works) replaces its entire contents, and neither bwrap nor a plain
+# OCI volume mount offers a union mount. entrypoint.sh therefore copies both
+# HARNESS_SKILLS_DIR and OPERATOR_SKILLS_DIR into DRIVER_SKILLS_DIR before the
+# discovery scan: copying merges, mounting does not (issue #2489).
 @test "harness-owned skill survives an operator skills override (issue #2489)" {
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
   mkdir -p "$HARNESS_SKILLS_DIR/auto-format"
@@ -77,11 +67,8 @@ SKILL
   grep -q "skill discovered: my-skill" "$DRIVER_LOG"
 }
 
-# issue #3220: /check-hygiene joins auto-format/auto-lint as a harness-owned
-# skill -- its body ships in-repo (lib/image.nix's harnessSkills reads it
-# straight from templates/default/skills) and the generated probe span
-# forwards --check-hygiene-skill-baked once the Box has it, both of which
-# follow from the lib/baked-skills.nix row alone.
+# Both the in-repo body and the probe flag follow from the skill's single
+# lib/baked-skills.nix row (issue #3220).
 @test "harness-owned check-hygiene skill ships a body and a baked probe (issue #3220)" {
   local skill="$skills_template_dir/check-hygiene/SKILL.md"
   [ -s "$skill" ]
@@ -90,12 +77,10 @@ SKILL
 }
 
 @test "check-hygiene skill carries the relocated log and killed-build guidance" {
-  # issue #713: the #640 incident agent backgrounded the check build anyway
-  # and polled for a NIXEXIT marker file. A SIGKILLed/OOM'd build never
-  # writes that marker, so an unbounded poll for it hangs forever instead of
-  # surfacing the kill as a failure. The primary rule stays inline in CHECK
-  # ("never background it"); issue #3220 moved this defensive fallback, and
-  # the bounded-log-reading discipline, into the harness-owned skill body.
+  # issue #713: the #640 agent backgrounded the check build and polled for a
+  # NIXEXIT marker. A SIGKILLed build never writes that marker, so the poll
+  # hangs forever instead of reporting the kill. CHECK keeps the primary rule
+  # inline; issue #3220 moved this fallback into the skill body.
   local skill="$skills_template_dir/check-hygiene/SKILL.md"
   grep -qi 'never `cat`' "$skill"
   grep -qi 'vanished' "$skill"
@@ -103,9 +88,7 @@ SKILL
   grep -qi 'bound the wait' "$skill"
 }
 
-# issue #3221: /code-comments joins check-hygiene as a harness-owned skill --
-# its body ships in-repo and the generated probe span forwards
-# --code-comments-skill-baked once the Box has it.
+# Body and probe flag both follow from one lib/baked-skills.nix row (#3221).
 @test "harness-owned code-comments skill ships a body and a baked probe (issue #3221)" {
   local skill="$skills_template_dir/code-comments/SKILL.md"
   [ -s "$skill" ]
@@ -113,10 +96,9 @@ SKILL
   grep -qF -- '--code-comments-skill-baked' "$ENTRYPOINT"
 }
 
-# --- prompt skill preference (issue #120) -------------------------------------
-# When a skill is present at HOME/.claude/skills/, the rendered prompt must
-# direct the agent to use it. When absent, the inline guidance stands alone
-# with no skill reference — the inline path is the floor, the skill the upgrade.
+# The inline guidance is the floor and a baked skill is the upgrade: when a
+# skill is present the prompt must point at it, and when none is the prompt
+# must not mention skills at all (issue #120).
 
 @test "prompt references available skill when present at HOME/.claude/skills" {
   mkdir -p "$HOME/.claude/skills/tdd"
@@ -133,8 +115,6 @@ SKILL
 }
 
 @test "prompt contains no skill reference when HOME/.claude/skills is empty" {
-  # No skills seeded — inline guidance must stand alone; the word "skill"
-  # must not appear so agents on skill-free boxes get only the inline path.
   mkdir -p "$HOME/.claude/skills"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -142,9 +122,8 @@ SKILL
 }
 
 @test "prompt advertises /caveman when the caveman skill is baked (issue #486)" {
-  # The dogfood Box bakes the pinned upstream caveman skill as the directory
-  # caveman/SKILL.md; discovery is name-driven (the skill dir basename), so a
-  # skill at that path must surface "caveman" in SKILLS_FOUND.
+  # Discovery is driven by the skill directory's basename, not the SKILL.md
+  # front matter, so the dir must be named caveman to reach SKILLS_FOUND.
   mkdir -p "$HOME/.claude/skills/caveman"
   cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
 ---
@@ -158,11 +137,10 @@ SKILL
   grep -qi 'caveman' "$DRIVER_PROMPT_FILE"
 }
 
-# --- caveman-default narration (issue #487) ---------------------------------
-# #486 baked the skill; #487 makes the issue-pass prompt actually direct the
-# agent to use it for narration by default -- distinct from the generic
-# "skills available" mention SKILL_PREAMBLE already renders, which the test
-# above already satisfies without this feature.
+# #486 baked the skill; #487 makes the issue-pass prompt direct the agent to
+# narrate with it by default. That is a separate assertion from the generic
+# "skills available" mention SKILL_PREAMBLE renders, which the test above
+# already satisfies without this feature.
 
 @test "prompt directs the agent to caveman narration by default when caveman is baked" {
   mkdir -p "$HOME/.claude/skills/caveman"
@@ -193,11 +171,10 @@ SKILL
   ! grep -qi 'narration' "$DRIVER_PROMPT_FILE"
 }
 
-# The default applies to both agent passes (issue #487): CAVEMAN_STEP is
-# substituted into the COMMS section, which fix-prompt.md receives via the
-# shared-block injection (issue #455) rather than its own copy -- so this
-# exercises _inject_shared_block's runtime _subst call directly, the same
-# way the COMMS/CHECK/outcome injection tests above do.
+# The default applies to both agent passes (issue #487). CAVEMAN_STEP is
+# substituted into the COMMS section, which fix-prompt.md receives through the
+# shared-block injection (issue #455) rather than its own copy, so this
+# exercises _inject_shared_block's runtime _subst call.
 @test "fix pass gets caveman-default narration via the injected COMMS block when caveman is baked" {
   export FIX_PASS="2"
   mkdir -p "$HOME/.claude/skills/caveman"
@@ -217,12 +194,10 @@ SKILL
 }
 
 
-# --- per-skill placement: /tdd at IMPLEMENT, /commit at COMMIT ---------------
-# The generic SKILL_PREAMBLE lists every baked skill; these steps additionally
-# place the skill at the exact section whose inline guidance it owns, gated on
-# that skill being baked. /commit is still an additive deferral; /tdd is an
-# exactly-one-on pair since issue #3219 -- baking it replaces the inline
-# red/green/refactor fallback with a bare anchor line rather than adding to it.
+# SKILL_PREAMBLE lists every baked skill; these steps also place a skill at
+# the section whose inline guidance it owns. /commit is an additive deferral.
+# /tdd is an exactly-one-on pair since issue #3219: baking it replaces the
+# inline red/green/refactor fallback instead of adding to it.
 
 @test "prompt anchors the test-first workflow to /tdd when the tdd skill is baked" {
   mkdir -p "$HOME/.claude/skills/tdd"
@@ -236,7 +211,7 @@ SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'Work test-first: run `/tdd` for each slice.' "$DRIVER_PROMPT_FILE"
-  # tdd-unbaked.md's inline steps are subtracted, not merely superseded.
+  # tdd-unbaked.md's inline steps are subtracted, not superseded.
   ! grep -qF 'RED: write ONE failing test' "$DRIVER_PROMPT_FILE"
 }
 
@@ -267,8 +242,7 @@ SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'Use the `/commit` skill to write every commit message.' "$DRIVER_PROMPT_FILE"
-  # commit-unbaked.md's inline format rules are subtracted, not merely
-  # superseded.
+  # commit-unbaked.md's inline format rules are subtracted, not superseded.
   ! grep -qi 'hard-wrapped (subject' "$DRIVER_PROMPT_FILE"
 }
 
@@ -287,9 +261,9 @@ SKILL
   ! grep -qF 'Use the `/commit` skill to write every commit message.' "$DRIVER_PROMPT_FILE"
 }
 
-# The /commit anchor sits in the COMMIT section, part of the CHECK/COMMIT
-# block fix-prompt.md receives via the shared-block injection (issue #455),
-# so a warm fix pass favors /commit too when the skill is baked.
+# The /commit anchor sits in the COMMIT section, part of the CHECK/COMMIT block
+# fix-prompt.md receives through the shared-block injection (issue #455), so a
+# warm fix pass favors /commit too when the skill is baked.
 @test "fix pass gets the /commit anchor via the injected CHECK/COMMIT block when commit is baked" {
   export FIX_PASS="2"
   mkdir -p "$HOME/.claude/skills/commit"

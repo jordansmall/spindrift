@@ -1,9 +1,7 @@
 #!/usr/bin/env bats
 # Read-only Box puts a `gh` shim ahead of the real `gh` on PATH that rejects
-# write subcommands, each naming the relay that replaces it (#2465): `gh pr
-# create`, `gh pr ready`, `gh pr merge`, `gh issue comment`, `gh issue
-# create`, and `gh api` with a mutating method. Reads pass through untouched;
-# a read-write Box gets no shim at all.
+# write subcommands, each naming the relay that replaces it (#2465). Reads pass
+# through untouched, and a read-write Box gets no shim at all.
 
 load helper
 
@@ -19,34 +17,29 @@ setup() {
   [ -d "$HOME/.spindrift/readonly-gh-shim" ]
   [ -x "$HOME/.spindrift/readonly-gh-shim/gh" ]
 
-  # Regression guard: production WORK_DIR is /work, so a $WORK_DIR-derived
-  # location resolves to `/` -- root-owned, and the Box runs as uid 1000
-  # (lib/image.nix), so the install `mkdir` fails and `set -e` kills the Box
-  # mid-clone. This suite's own $WORK_DIR sits in a writable tmpdir, which is
-  # exactly what hid the failure, so assert the parent stays untouched rather
-  # than trusting the tmpdir to fail the way `/` does.
+  # Production WORK_DIR is /work, so a $WORK_DIR-derived path resolves to `/`,
+  # which is root-owned while the Box runs as uid 1000 (lib/image.nix): the
+  # install `mkdir` fails and `set -e` kills the Box mid-clone. This suite's
+  # writable tmpdir is what hid that, so assert the parent stays untouched.
   [ ! -e "$(dirname "$WORK_DIR")/readonly-gh-shim" ]
 }
 
 @test "read-only Box's gh shim rejects gh pr create, naming the PR-intent relay" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  # The shim's PATH mutation is local to the entrypoint subprocess and does not
-  # survive back to this shell -- reproduce production's PATH ordering (shim in
-  # front of the fake `gh` setup_fakes already put on $FAKE_BIN) by prepending
-  # the same deterministic, $HOME-derived shim dir the entrypoint installs to.
+  # The shim's PATH mutation is local to the entrypoint subprocess, so
+  # reproduce production's ordering by prepending the same $HOME-derived shim
+  # dir ahead of the fake `gh` that setup_fakes put on $FAKE_BIN.
   local shim_dir
   shim_dir="$HOME/.spindrift/readonly-gh-shim"
   [ -d "$shim_dir" ]
 
-  # The rejection's wording lives in lib/prompt-contract.nix's
-  # forbiddenMarkers registry (issue #2509), rendered verbatim into the
-  # installed shim by driver-exec readonly-guards -- assert the stable "gh
-  # pr create" substring the row's own message always names, plus the
-  # relay-naming text (SPINDRIFT_PR_INTENT) that distinguishes this row from
-  # a bare boilerplate rejection.
+  # The rejection's wording lives in lib/prompt-contract.nix's forbiddenMarkers
+  # registry (issue #2509), so assert only the stable "gh pr create" substring
+  # plus SPINDRIFT_PR_INTENT, which distinguishes this row from a bare
+  # boilerplate rejection.
   PATH="$shim_dir:$PATH" run gh pr create --title "x" --body "y"
   [ "$status" -ne 0 ]
   [[ "$output" == *"gh pr create"* ]]
@@ -54,7 +47,7 @@ setup() {
 }
 
 @test "read-only Box's gh shim rejects gh pr ready" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
@@ -69,7 +62,7 @@ setup() {
 }
 
 @test "read-only Box's gh shim rejects gh pr merge" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
@@ -84,7 +77,7 @@ setup() {
 }
 
 @test "read-only Box's gh shim rejects gh issue comment, naming the note= relay" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
@@ -99,7 +92,7 @@ setup() {
 }
 
 @test "read-only Box's gh shim rejects gh issue create, naming the issue-intent relay" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
@@ -114,7 +107,7 @@ setup() {
 }
 
 @test "read-only Box's gh shim rejects gh api with a mutating method (-X POST)" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
@@ -128,7 +121,7 @@ setup() {
 }
 
 @test "read-only Box's gh shim rejects gh api with a mutating method (-X post, lowercase)" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
@@ -142,7 +135,7 @@ setup() {
 }
 
 @test "read-only Box's gh shim rejects gh api with a mutating method (--method PATCH)" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
@@ -156,7 +149,7 @@ setup() {
 }
 
 @test "read-only Box's gh shim passes through gh api with no method flag (implicit GET)" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
@@ -170,7 +163,7 @@ setup() {
 }
 
 @test "read-only Box's gh shim passes through read subcommands untouched" {
-  unset BOX_WRITE_ENABLED # issue #2465: read-only Box
+  unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 

@@ -7,8 +7,6 @@ setup() {
   setup_run_env
 }
 
-# --- Automatic adoption of a bare in-progress issue is never safe (issue #600) -
-
 @test "reconcile: stranded in-progress issue with green open PR is left untouched (#600)" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
@@ -16,13 +14,13 @@ setup() {
   # Pre-seed GH_STATE so issue 1 carries the in-progress label, not ready-for-agent.
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
-  # FAKE_GH_PR_DRAFT_1 not set → defaults to "false" (non-draft)
+  # FAKE_GH_PR_DRAFT_1 is unset, so the fake reports a non-draft PR.
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   run "$RUN_CMD"
   # A bare agent-in-progress issue is indistinguishable from one a live runner
-  # is still working — dispatch must never adopt it on the strength of the
-  # label alone, green PR or not (#600). discoverIssues finds no
-  # ready-for-agent issues → launcher exits 2 (queue empty), untouched.
+  # is still working, so dispatch must never adopt it on the label alone, green
+  # PR or not (#600). discoverIssues finds no ready-for-agent issue, so the
+  # launcher exits 2 on an empty queue.
   [ "$status" -eq 2 ]
   [[ "$output" != *"status=adopted"* ]]
   ! grep -q 'pr merge' "$GH_LOG"
@@ -37,8 +35,8 @@ setup() {
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_DRAFT_1="true"
   run "$RUN_CMD"
-  # Draft PR → reconcile skips; discoverIssues finds no ready-for-agent
-  # issues (only in-progress) → launcher exits 2 (queue empty).
+  # A draft PR makes reconcile skip, and discoverIssues finds no ready-for-agent
+  # issue, so the launcher exits 2 on an empty queue.
   [ "$status" -eq 2 ]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
@@ -49,17 +47,15 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
-  # No FAKE_GH_PR_LIST_1 → no PR found
+  # FAKE_GH_PR_LIST_1 is unset, so the fake finds no PR.
   run "$RUN_CMD"
-  # No PR → reconcile skips; discoverIssues finds no ready-for-agent
-  # issues (only in-progress) → launcher exits 2 (queue empty).
+  # With no PR reconcile skips, and discoverIssues finds no ready-for-agent
+  # issue, so the launcher exits 2 on an empty queue.
   [ "$status" -eq 2 ]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
   ! grep -q -- 'agent-failed' "$GH_LOG"
 }
-
-# --- engage subcommand (issue #195) ------------------------------------------
 
 @test "recover: green PR is adopted and merged (via issue #195)" {
   export MERGE_MODE=immediate
@@ -67,10 +63,9 @@ setup() {
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
-  # recover adopts the discovered PR, so its gate (issue #1652) will not
-  # trust an immediate SUCCESS until a non-terminal state proves this run's
-  # checks registered — lead with a PENDING and bound the poll so a misscript
-  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
+  # The gate (issue #1652) will not trust an immediate SUCCESS until a non-terminal
+  # state proves this run's checks registered, so lead with PENDING. The bounded
+  # poll stops a broken fake real-sleeping out the baked MERGE_POLL_TIMEOUT (3600s).
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
@@ -89,10 +84,9 @@ setup() {
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_DRAFT_1="true"
-  # recover adopts the discovered PR, so its gate (issue #1652) will not
-  # trust an immediate SUCCESS until a non-terminal state proves this run's
-  # checks registered — lead with a PENDING and bound the poll so a misscript
-  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
+  # The gate (issue #1652) will not trust an immediate SUCCESS until a non-terminal
+  # state proves this run's checks registered, so lead with PENDING. The bounded
+  # poll stops a broken fake real-sleeping out the baked MERGE_POLL_TIMEOUT (3600s).
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
@@ -110,7 +104,7 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
-  # No FAKE_GH_PR_LIST_1 → no PR found
+  # FAKE_GH_PR_LIST_1 is unset, so the fake finds no PR.
   run "$SPINDRIFT_CMD" recover 1
   [ "$status" -ne 0 ]
   [[ "$output" == *"status=skipped"* ]]
@@ -119,18 +113,15 @@ setup() {
   ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
-# --- recover subcommand (issue #281) -----------------------------------------
-
 @test "recover: green PR is adopted and merged" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
-  # recover adopts the discovered PR, so its gate (issue #1652) will not
-  # trust an immediate SUCCESS until a non-terminal state proves this run's
-  # checks registered — lead with a PENDING and bound the poll so a misscript
-  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
+  # The gate (issue #1652) will not trust an immediate SUCCESS until a non-terminal
+  # state proves this run's checks registered, so lead with PENDING. The bounded
+  # poll stops a broken fake real-sleeping out the baked MERGE_POLL_TIMEOUT (3600s).
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
@@ -143,15 +134,11 @@ setup() {
 }
 
 @test "recover: settled-green PR (never re-registers) is adopted and merged" {
-  # issue #2475: recover adopting a PR whose checks settled to SUCCESS well
-  # before this run started watching used to burn the full
-  # MERGE_POLL_TIMEOUT waiting for a non-terminal state that never comes
-  # (issue #1652's guard) and park the issue agent-failed. gateToGreen now
-  # bounds that wait to a small registration window (registrationWindowPolls
-  # poll-intervals): a rollup that reads SUCCESS on every single poll — never
-  # PENDING/EXPECTED/NONE — reaches green once the window elapses. Unlike the
-  # sibling "green PR is adopted and merged" test above, this sequence never
-  # leads with PENDING.
+  # issue #2475: a PR whose checks settled to SUCCESS before this run started
+  # watching used to burn the full MERGE_POLL_TIMEOUT waiting for the
+  # non-terminal state issue #1652's guard demands, then park the issue
+  # agent-failed. gateToGreen now bounds that wait to registrationWindowPolls,
+  # so an always-SUCCESS rollup reaches green once the window elapses.
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
@@ -170,13 +157,10 @@ setup() {
 }
 
 @test "recover: draft PR that never re-registers is adopted, readied, and merged" {
-  # issue #2475 AC5: the never-re-registers (all-SUCCESS) sequence combined
-  # with a draft PR — every other never-re-registers scenario in this file
-  # exercises only a non-draft PR, and the draft-PR sibling above only
-  # exercises a PENDING-leading sequence, so this is the one case that
-  # proves gateToGreen's registration-window bound (see "recover:
-  # settled-green PR (never re-registers) is adopted and merged" above)
-  # also holds when recover must first flip the PR out of draft (`pr ready`).
+  # issue #2475 AC5: the only case pairing the all-SUCCESS (never re-registers)
+  # sequence with a draft PR, so it is the one test proving gateToGreen's
+  # registration-window bound still holds when recover must first flip the PR
+  # out of draft with `pr ready`.
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
@@ -203,10 +187,9 @@ setup() {
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_DRAFT_1="true"
-  # recover adopts the discovered PR, so its gate (issue #1652) will not
-  # trust an immediate SUCCESS until a non-terminal state proves this run's
-  # checks registered — lead with a PENDING and bound the poll so a misscript
-  # can't real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
+  # The gate (issue #1652) will not trust an immediate SUCCESS until a non-terminal
+  # state proves this run's checks registered, so lead with PENDING. The bounded
+  # poll stops a broken fake real-sleeping out the baked MERGE_POLL_TIMEOUT (3600s).
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
@@ -224,7 +207,7 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
-  # No FAKE_GH_PR_LIST_1 → no PR found
+  # FAKE_GH_PR_LIST_1 is unset, so the fake finds no PR.
   run "$SPINDRIFT_CMD" recover 1
   [ "$status" -ne 0 ]
   [[ "$output" == *"status=skipped"* ]]

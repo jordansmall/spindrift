@@ -1,9 +1,8 @@
 #!/usr/bin/env bats
 # CODE_FORGE=local harness-owned code-out (issue #1808): the entrypoint, not
-# the Agent, produces the seam bundle after the Driver exits, via
-# driver-exec's bundle-out verb. A Box that committed nothing yet claimed
-# ready gets a corrective blocked outcome instead of settling as a false
-# ready.
+# the Agent, produces the seam bundle after the Driver exits. A Box that
+# committed nothing yet claimed ready gets a corrective blocked outcome
+# instead of settling as a false ready.
 
 load helper
 
@@ -15,14 +14,11 @@ setup() {
 }
 
 @test "CODE_FORGE=local with real commits writes a seam bundle to the outbox" {
-  # Mirrors what a real CODE_FORGE=local Box receives from the launcher
-  # (lib/backends/default.nix's "local" row has hostMediatedRemote=true) --
-  # the bundle-out gate at entrypoint.sh:1358 now keys on this forwarded
-  # signal instead of re-deriving it from CODE_FORGE by name. Exported per
-  # CODE_FORGE=local test, not in setup(), so it never leaks into the
-  # CODE_FORGE=github tests below (issue #2527 review): those unset
-  # CODE_FORGE and need BOX_HOST_MEDIATED_REMOTE genuinely unset to exercise
-  # the gate's other disjunct, _is_readonly_outbox_relay.
+  # The launcher forwards BOX_HOST_MEDIATED_REMOTE to a real CODE_FORGE=local
+  # Box (lib/backends/default.nix's "local" row sets hostMediatedRemote=true),
+  # and the bundle-out gate keys on that, not on CODE_FORGE's name. Exported
+  # per test so the CODE_FORGE=github tests below keep it unset and exercise
+  # the gate's other disjunct, _is_readonly_outbox_relay (issue #2527).
   export BOX_HOST_MEDIATED_REMOTE=1
   export FAKE_DRIVER_COMMIT=1
   run bash "$ENTRYPOINT"
@@ -33,9 +29,9 @@ setup() {
 }
 
 @test "CODE_FORGE=local with real commits and a non-zero driver crash still writes a seam bundle and propagates the exit code" {
-  # ADR 0039 (issue #2252): bundle-out must run before the box exits, even
-  # when the driver itself crashed non-zero -- a committed branch is real
-  # work worth relaying regardless of why the driver's own process died.
+  # ADR 0039 (issue #2252): bundle-out runs before the box exits even when the
+  # driver crashed non-zero, because a committed branch is real work worth
+  # relaying.
   export BOX_HOST_MEDIATED_REMOTE=1
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_CRASH_EXIT=17
@@ -47,8 +43,8 @@ setup() {
 }
 
 @test "CODE_FORGE=local with no commits after a ready claim appends a corrective blocked outcome" {
-  # Default fake claude claims status=ready but (with no
-  # FAKE_DRIVER_COMMIT) never commits anything on the branch.
+  # The default fake claude claims status=ready but, without
+  # FAKE_DRIVER_COMMIT, commits nothing on the branch.
   export BOX_HOST_MEDIATED_REMOTE=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -58,9 +54,8 @@ setup() {
 
 @test "read-write github never invokes bundle-out" {
   unset CODE_FORGE            # default github
-  # BOX_WRITE_ENABLED=1 from setup_entrypoint_env: a push-capable Box bundles
-  # nothing itself -- the launcher merges its pushed branch. Read-only github
-  # (BOX_WRITE_ENABLED unset) is the case that now DOES bundle-out, below.
+  # BOX_WRITE_ENABLED=1 comes from setup_entrypoint_env: a push-capable Box
+  # bundles nothing itself, since the launcher merges its pushed branch.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -e "$OUTBOX_DIR" ]
@@ -68,7 +63,7 @@ setup() {
 
 @test "read-only github with real commits writes a seam bundle to the outbox" {
   unset CODE_FORGE            # default github
-  unset BOX_WRITE_ENABLED     # read-only
+  unset BOX_WRITE_ENABLED
   export FAKE_DRIVER_COMMIT=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -88,7 +83,7 @@ setup() {
 
 @test "read-only github research dispatch never invokes bundle-out" {
   unset CODE_FORGE            # default github
-  unset BOX_WRITE_ENABLED     # read-only
+  unset BOX_WRITE_ENABLED
   export DISPATCH_KIND=research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -96,12 +91,11 @@ setup() {
 }
 
 @test "read-only github research dispatch with a non-zero driver crash still never invokes bundle-out" {
-  # ADR 0039 (issue #2252): bundle-out now runs for both zero and non-zero
-  # claude_rc, but the !_is_research_kind guard on the bundle-out block
-  # itself is unchanged -- a research dispatch never cuts a branch (ADR
-  # 0022), so it must still emit no bundle even when the driver crashed.
+  # ADR 0039 (issue #2252) made bundle-out run for non-zero claude_rc too, but
+  # the !_is_research_kind guard is unchanged: a research dispatch never cuts a
+  # branch (ADR 0022), so it emits no bundle even when the driver crashed.
   unset CODE_FORGE            # default github
-  unset BOX_WRITE_ENABLED     # read-only
+  unset BOX_WRITE_ENABLED
   export DISPATCH_KIND=research
   export FAKE_DRIVER_CRASH_EXIT=17
   run bash "$ENTRYPOINT"
