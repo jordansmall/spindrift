@@ -1,212 +1,24 @@
 #!/usr/bin/env bats
-# Production-path golden harness (issue #2349 slice 6, extended by issue
-# #2350, #2351, #2352, #2353, and re-pointed at the production path by issue
-# #2354 slice 4): agent/entrypoint.sh's phase_prompt_assembly now shells out
-# to the real `driver-exec assemble-prompt` verb directly (ADR 0036) --
-# there is no separate bash-side rendering path left to diff against a
-# second, independently-built Go invocation. This suite instead runs
-# $ENTRYPOINT (via the fake driver/driver-exec chain,
-# tests/helper.bash's setup_entrypoint_env -- tests/fakes/driver-exec's own
-# `assemble-prompt` branch execs the real Go binary, not a bash
-# reimplementation) and diffs its own captured production artifacts
-# ($DRIVER_PROMPT_FILE, $DRIVER_AGENTS_FILE) against a checked-in golden
-# fixture under tests/testdata/prompt-assembly-golden/<cell-name>.{prompt.txt,
-# agents.json}, git-blame-friendly per cell. Session mode (initial vs resume)
-# and the four orchestrator-only Handoff facts (Invoker, ReviewPromptFile,
-# ReviewModel, ReviewEffort) are asserted against the real Handoff JSON itself
-# ($DRIVER_HANDOFF_FILE, tests/helper.bash's test-only capture hook, issue
-# #2395 slice 2) -- SessionMode directly against the cell's own expected
-# value, the orchestrator-only facts via a `jq -S` diff against a checked-in
-# <cell-name>.handoff.json golden fixture, the same pattern as the prompt/
-# agents fixtures above.
-#
-# Each golden fixture was captured from this branch's own already-verified
-# bash entrypoint output (every other slice of issue #2354 is green), not
-# hand-authored -- a full-text diff is a strictly stronger regression net
-# than hand-picked marker strings, catching any unintended byte change to the
-# rendered prompt or roster, not just the specific facts someone thought to
-# check.
-#
-# The orchestrator-off cells 1-13 share the orchestrator off and every skill
-# baked -- exactly tests/box_env_gen.bash's set_box_env schema-default cell,
-# plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1 default -- and differ
-# on four axes (cell 18 below is the one orchestrator-off cell that does not
-# bake every skill):
-#
-#   DISPATCH_KIND/SELF_CONTAINED/FIX_PASS/RESUME_AFTER_HOLD, with
-#   ISSUE_TRACKER/CODE_FORGE/BOX_WRITE_ENABLED held at their defaults:
-#     1. plain work (DISPATCH_KIND unset, FIX_PASS 0) -- the original
-#        covered cell, exercised with both a populated and an empty agent
-#        roster. Also the github read-write cell on the access/forge axis
-#        (the schema default).
-#     2. research (DISPATCH_KIND=research)
-#     3. research, filer-on (DISPATCH_KIND=research, roster/filer axis on
-#        below -- issue #2786)
-#     4. self-contained research (DISPATCH_KIND=research, SELF_CONTAINED=1)
-#     5. self-contained research, filer-on (DISPATCH_KIND=research,
-#        SELF_CONTAINED=1, roster/filer axis on below -- issue #2786)
-#     6. fix-pass (FIX_PASS>0)
-#
-#   CODE_FORGE/BOX_WRITE_ENABLED access/forge axis, with dispatch
-#   kind/fix-pass/ISSUE_TRACKER untouched:
-#     7. github read-only (CODE_FORGE=github, BOX_WRITE_ENABLED unset)
-#     8. forgejo read-write (CODE_FORGE=forgejo, BOX_WRITE_ENABLED=1)
-#     9. forgejo read-only (CODE_FORGE=forgejo, BOX_WRITE_ENABLED unset)
-#
-#   ISSUE_TRACKER, with SessionMode held at "initial" (dispatch kind/fix-pass
-#   untouched):
-#     10. local, no issue reference (ISSUE_TRACKER=local)
-#     11. local, issue-reference knob on (ISSUE_TRACKER=local,
-#         LOCAL_ISSUE_REFERENCE=1)
-#     12. forgejo, read-write (ISSUE_TRACKER=forgejo)
-#     13. jira, which rides the github prompt-selection arms
-#         (ISSUE_TRACKER=jira)
-#
-#   Roster/filer axis, added by cells 3 and 5 above -- unlike the axes
-#   above, not isolated to a single knob: cells 2 and 4 leave
-#   AGENTS_JSON_TEMPLATE unset entirely, so cell 3 against cell 2 flips four
-#   knobs at once (roster present at all, the filer key, BOX_FILER_ENABLED,
-#   BOX_WORKER_PROVISIONED):
-#     - filer present in the roster and BOX_FILER_ENABLED=1 pins
-#       gates_tracker.go's researchForceRelay, which forces the
-#       verdict-comment step onto the SPINDRIFT_COMMENT relay arm even
-#       though this suite's default box is read-write -- otherwise only
-#       covered at the Go unit level (issue #2786).
-#     - filer absent, BOX_FILER_ENABLED unset (every other cell in this
-#       orchestrator-off group; the orchestrator-on filer-on cell, 14, below
-#       carries both)
-#
-# The orchestrator-on cells 14-17 (issue #2353, cell 17 added by issue
-# #2512) all share dispatch kind "work" (default) with FIX_PASS unset -- the
-# only path checkCoveredCell covers combined with the orchestrator on -- and
-# differ only on the roster/skills axes:
-#   14. orchestrator on, filer-on -- roster carries a "filer" key alongside
-#       reviewer and scout (FILER_ENABLED on).
-#   15. orchestrator on, filer-off -- roster carries reviewer and scout but
-#       no "filer" key (FILER_ENABLED off).
-#   16. orchestrator on, skills-absent -- no skill baked at all, contrasting
-#       setup()'s unconditional 6-skill baking every other cell relies on.
-#   17. orchestrator on, review-effort-set -- roster's reviewer entry
-#       carries an explicit "effort" key, proving ReviewEffort's
-#       non-empty-overrides case (the filer-on/filer-off cells above only
-#       cover the empty-follows-roster case).
-#
-# Cell 18 (issue #3219) goes back to the orchestrator off and isolates the
-# tdd axis, which cell 16 above only covers with every other skill absent
-# too:
-#   18. tdd-skill-absent -- only tdd's SKILL.md removed, caveman/commit/
-#       code-review still baked. TDD_BAKED/TDD_UNBAKED are an
-#       exactly-one-on pair (lib/fragments.nix's `inverseOf`), so this is
-#       the cell that pins the unbaked arm's full red/green/refactor
-#       fallback rendering alongside the other skills' baked fragments --
-#       the realistic shape, since a consumer bakes a subset. Cell 16 pins
-#       the unbaked arm only in the all-skills-absent world, where a
-#       regression scoped to "tdd unbaked while others are baked" would
-#       slip through.
-#
-# Cell 19 (issue #3222) mirrors cell 18 for the COMMIT_BAKED/COMMIT_UNBAKED
-# pair added alongside TDD_BAKED/TDD_UNBAKED:
-#   19. commit-skill-absent -- only commit's SKILL.md removed, caveman/tdd/
-#       code-review still baked. Cell 16 only pins the unbaked arm in the
-#       all-skills-absent world, where a regression scoped to "commit
-#       unbaked while others are baked" would slip through.
-#
-# Cell 20 (issue #3222) mirrors cells 18/19 for the CODE_REVIEW_BAKED/
-# CODE_REVIEW_UNBAKED pair -- CODE_REVIEW_BAKED_STEP renders into
-# review-prompt.md, not issue-prompt.md, so this cell exercises the
-# .reviewer.prompt half of the golden agents.json fixture, not
-# $DRIVER_PROMPT_FILE (every cell using AGENTS_ROSTER already renders and
-# pins review-prompt.md through that same reviewer-roster entry, so no
-# separate golden mechanism is needed):
-#   20. code-review-skill-absent -- only code-review's SKILL.md removed,
-#       caveman/tdd/commit still baked. Cell 16 only pins the unbaked arm in
-#       the all-skills-absent world, where a regression scoped to
-#       "code-review unbaked while others are baked" would slip through.
-#
-# Cell 21 (issue #3223) is the mirror image of 18-20: every other cell in
-# this file leaves the dogfood-only nix-checks skill absent (it isn't among
-# setup()'s six), so NIX_CHECKS_STEP's baked-on rendering is otherwise pinned
-# nowhere -- the anchor could regress to rendering nothing and the whole
-# matrix would stay green.
-#   21. nix-checks-skill-baked -- setup()'s six skills plus nix-checks baked
-#       on top, so the CHECK section carries both the /check-hygiene and
-#       /nix-checks anchor lines side by side, the realistic dogfood shape.
-#
-#
-# Cell 22 (issue #3447) is the only cell whose roster provisions a
-# "review-axis" entry: every other rostered cell here carries the historical
-# four names, so they all pin code-review-baked.md's general-purpose
-# *fallback* arm of REVIEW_FANOUT_AGENT. This cell pins the governed arm end
-# to end -- the anchor naming review-axis, and the axis prompt injected into
-# .["review-axis"].prompt through AGENTS_PROMPT_FILES like any other roster
-# name:
-#   22. covered-cell-review-axis-roster -- the covered cell's roster plus a
-#       "review-axis" key, orchestrator off.
-#
-# Cell 23 (issue #3445) is the covered cell again, differing on exactly one
-# axis: ISSUE_TEXT set to a short multi-line fixture value, one line of
-# which carries a literal triple-backtick run -- so the golden pins
-# promptfence.Block's dynamic-fence widening (the untrusted issue text must
-# not be able to close its own fence, CLAUDE.md's comment-injection trust
-# boundary), not just the happy path. No golden before this cell ever set
-# ISSUE_TEXT, so neither fix-prompt.md's lead-in nor any parity cell
-# exercised the appended "# ISSUE TEXT" section through the bash entrypoint
-# path (production path, not just the Go unit tests):
-#   23. covered-cell-issue-text -- the covered cell's roster and knobs,
-#       plus ISSUE_TEXT set. The diff between this golden and
-#       covered-cell-populated-roster's own is exactly the appended
-#       section.
-#
-# Cell 24 (issue #3469) is the local-tracker no-issue-ref cell (10) again,
-# with ISSUE_TEXT set to a fixture carrying a host-rendered "## Linked
-# issues" section -- forge.IssueText's own shape (issuetext.go), not a
-# hand-picked string. Before issue #3469, the local tracker's issue-read
-# fragment told the agent to walk the link chain itself in-box (a folder
-# scan the fragment no longer carries); this cell pins that the link chain
-# now arrives pre-rendered through ISSUE_TEXT like any other tracker's, and
-# that issue-read-local.md's now-shorter body still composes cleanly with a
-# populated ISSUE_TEXT section:
-#   24. local-tracker-issue-text -- cell 10's tracker knobs, plus ISSUE_TEXT
-#       set to a fixture with one resolved "### ref — title (relation of
-#       ref)" entry (status line and body) and one "### Unresolved
-#       references" line, mirroring renderLinkedIssues's own two block
-#       kinds.
-# Every cell test funnels through the shared assert_cell_golden helper below,
-# so the prompt/agents/session-mode comparison logic lives in exactly one
-# place. This suite is not a source of truth for either representation's own
-# correctness -- that's tests/entrypoint-*.bats for the bash/production path
-# and cmd/launcher/internal/promptassembly/*_test.go for the Go package's own
-# unit coverage -- it is a regression net pinning the production path's own
-# byte-exact output per cell.
+# Golden harness for the production prompt-assembly path (issues #2349, #2350,
+# #2351, #2352, #2353, #2354, #2395): each cell runs $ENTRYPOINT, whose fake
+# driver chain execs the real Go `assemble-prompt` (ADR 0036), and diffs the
+# captured prompt, agents and handoff artifacts against the checked-in goldens.
 
 load helper
 
 setup() {
   setup_entrypoint_env
 
-  # BRANCH is computed inside entrypoint.sh's main (BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}",
-  # entrypoint.sh:55), not exported by set_box_env/setup_entrypoint_env, but
-  # nothing here needs to reproduce that computation anymore -- $ENTRYPOINT
-  # derives it itself now that there's no second, independently-built Go
-  # invocation to hand a --branch flag to.
-
-  # phase_prompt_assembly copies HARNESS_SKILLS_DIR (default /agent/skills)
-  # and OPERATOR_SKILLS_DIR (default /operator-skills) into DRIVER_SKILLS_DIR
-  # before the SKILLS_FOUND discovery scan runs (entrypoint.sh:756-762) --
-  # real, absolute host paths outside this test's $BATS_TEST_TMPDIR/$HOME
-  # sandbox. Left unset, whatever this suite happens to run on leaks into
-  # SKILLS_FOUND: a Box with its own skills baked at /agent/skills silently
-  # widens every cell's roster past the six skills setup() bakes below,
-  # producing a golden fixture that only matches that one contaminated
-  # environment (issue #2059 CI regression -- f8385e60 regenerated the
-  # golden fixtures on such a Box). Point both at guaranteed-empty
-  # directories so SKILLS_FOUND reflects only what this test controls.
+  # phase_prompt_assembly copies HARNESS_SKILLS_DIR and OPERATOR_SKILLS_DIR into
+  # DRIVER_SKILLS_DIR before the SKILLS_FOUND scan, and both default to real host
+  # paths outside this test's sandbox. A Box with its own skills baked there
+  # widens every cell's roster, so the goldens then only match that one machine
+  # (issue #2059). Point both at guaranteed-empty directories.
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
   export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
 
-  # Bake all six skills (entrypoint-prompt-fragments.bats:660-730's pattern):
-  # the covered cell requires every per-skill gate on and a non-empty
-  # SKILLS_FOUND (assemble.go's checkCoveredCell).
+  # The covered cell requires every per-skill gate on and a non-empty
+  # SKILLS_FOUND (assemble.go's checkCoveredCell), so bake all six.
   mkdir -p "$HOME/.claude/skills/caveman"
   cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
 ---
@@ -264,10 +76,7 @@ SKILL
 
 GOLDEN_DIR="${BATS_TEST_DIRNAME}/testdata/prompt-assembly-golden"
 
-# assert_golden_text_or_update: the shared diff-vs-copy primitive UPDATE_GOLDENS
-# gates (issue #2951) for plain-text goldens -- diffs produced_file against
-# golden_file as today, or, with UPDATE_GOLDENS set, overwrites golden_file
-# with produced_file's content instead.
+# UPDATE_GOLDENS (issue #2951) overwrites the golden instead of diffing it.
 assert_golden_text_or_update() {
   local golden_file="$1" produced_file="$2"
   if [ -n "${UPDATE_GOLDENS:-}" ]; then
@@ -277,11 +86,8 @@ assert_golden_text_or_update() {
   fi
 }
 
-# assert_golden_json_or_update: same as assert_golden_text_or_update but for
-# JSON goldens -- both sides are canonicalized (and optionally projected)
-# through jq_filter (default ".") before diffing or writing, so JSON key
-# order never causes a spurious diff and a golden written in update mode is
-# always canonical.
+# Both sides go through `jq -S` and jq_filter first, so key order never causes a
+# spurious diff and a golden written in update mode is always canonical.
 assert_golden_json_or_update() {
   local golden_file="$1" produced_file="$2" jq_filter="${3:-.}"
   if [ -n "${UPDATE_GOLDENS:-}" ]; then
@@ -294,20 +100,11 @@ assert_golden_json_or_update() {
   fi
 }
 
-# assert_cell_golden: runs the real bash entrypoint over whatever env the
-# calling test has already exported, then asserts its own captured
-# production artifacts against a checked-in golden fixture: byte-identical
-# prompt ($DRIVER_PROMPT_FILE vs <golden_name>.prompt.txt), byte-identical
-# agents JSON when a roster was rendered ($DRIVER_AGENTS_FILE vs
-# <golden_name>.agents.json, both canonicalized via `jq -S` first), and a
-# session mode that matches the cell's expected value -- read directly from
-# the real Handoff JSON's own SessionMode field ($DRIVER_HANDOFF_FILE,
-# tests/helper.bash's test-only DRIVER_HANDOFF_FILE hook, issue #2395 slice
-# 1), which entrypoint.sh's phase_prompt_assembly sets to exactly "initial"
-# or "resume" (assemble.go's Handoff.SessionMode). expected_session_mode is
-# reused as-is rather than round-tripped through a separate golden fixture:
-# it's already the deterministic value the calling test itself asserts,
-# there's no independent fact left to pin.
+# Runs the real entrypoint over whatever env the caller exported, then diffs the
+# captured artifacts against <golden_name>.{prompt.txt,agents.json} and reads
+# SessionMode from the real Handoff JSON (issue #2395). expected_session_mode is
+# an argument rather than a golden: the calling test already pins that value, so
+# a fixture would add no independent fact.
 assert_cell_golden() {
   local golden_name="$1" expected_session_mode="$2"
 
@@ -327,33 +124,19 @@ assert_cell_golden() {
   [ "$(jq -r .SessionMode "$DRIVER_HANDOFF_FILE")" = "$expected_session_mode" ]
 }
 
-# assert_review_handoff_golden: for the orchestrator-on cells (issue #2353),
-# asserts the Handoff facts assert_cell_golden's own prompt/agents-JSON/
-# session-mode checks don't cover -- Invoker, ReviewPromptFile, ReviewModel,
-# and ReviewEffort (issue #2512), all only ever populated with the
-# orchestrator on -- via a
-# `jq -S` diff of the real Handoff JSON ($DRIVER_HANDOFF_FILE) against a
-# checked-in <golden_name>.handoff.json fixture, the same
-# canonicalize-then-diff pattern assert_cell_golden already uses for
-# <golden_name>.agents.json. A non-empty $ORCHESTRATOR_LOG is separately kept
-# as a cheap, independent proof the orchestrator (not driver-exec) was the
-# invoker for this pass -- Invoker itself is asserted byte-exact by the diff
-# below, but this catches a run that skipped the orchestrator entirely
-# (e.g. a caller forgetting to export ORCHESTRATOR_ENABLED) with a clearer
-# failure than a JSON diff would.
+# Pins the Handoff facts only the orchestrator-on cells populate (issues #2353
+# and #2512), which assert_cell_golden does not cover. The separate
+# $ORCHESTRATOR_LOG check catches a run that skipped the orchestrator entirely,
+# say a caller that forgot ORCHESTRATOR_ENABLED, with a clearer failure than the
+# JSON diff gives.
 assert_review_handoff_golden() {
   local golden_name="$1"
 
   [ -s "$ORCHESTRATOR_LOG" ]
 
-  # Since issue #2975 the Handoff carries the full driver-invocation fact set
-  # (Model, ArgvShape, Caps, DriverBin, ...) plus per-run mktemp paths
-  # (PromptFile, AgentsFile, ReviewPromptFile) that can't be pinned byte-exact.
-  # The orchestrator-only facts this harness exists to pin are Invoker,
-  # ReviewModel, and ReviewEffort -- diff just those against the golden.
-  # ReviewPromptFile is now a path to the rendered review-prompt rather than
-  # the text itself, so assert it's a non-empty file that actually got written
-  # (the review pass's real input), not its exact value.
+  # Since issue #2975 the Handoff also carries per-run mktemp paths that no
+  # golden can pin byte-exact, so diff only the orchestrator-only facts and
+  # assert ReviewPromptFile merely names a file that actually got written.
   assert_golden_json_or_update "$GOLDEN_DIR/${golden_name}.handoff.json" "$DRIVER_HANDOFF_FILE" \
     '{Invoker, ReviewModel, ReviewEffort}'
 
@@ -424,62 +207,41 @@ assert_review_handoff_golden() {
   [ "$(jq -S . "$golden")" = "$(jq -S . <<<'{"Invoker": "orchestrator", "ReviewModel": "opus", "ReviewEffort": "high"}')" ]
 }
 
-# issue #2349: a realistic multi-agent roster -- scout, reviewer (present, not
-# dropped: the orchestrator is off in the covered cell), and worker (the
-# WORKER_PROVISIONED gate's partner axis to "skills baked" in the covered
-# cell) -- mirroring the shape at tests/entrypoint-prompt-fragments.bats's
-# WORKER_AGENTS_JSON_TEMPLATE/"entrypoint includes a read-only tools
-# whitelist" fixtures.
+# issue #2349: a realistic multi-agent roster. The reviewer entry stays even
+# though the covered cell leaves the orchestrator off.
 AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
-# issue #3157 (AC5): AGENTS_ROSTER's reviewer/worker entries, minus the
-# "scout" key -- isolates the worker-provisioned/scout-absent combination no
-# other cell in this file pins (every rostered cell exports
-# BOX_SCOUT_PROVISIONED=1; the only scout-off cell, no-roster, has no worker
-# either).
+# issue #3157 (AC5): the roster minus its "scout" key, isolating the
+# worker-provisioned and scout-absent combination no other cell here pins.
 AGENTS_ROSTER_NO_SCOUT='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
-# issue #2353: AGENTS_ROSTER plus a "filer" entry (the shape
-# tests/entrypoint-agents-json.bats:64 already exercises -- "File issues from
-# a review's non-blocking findings, best-effort"), so the orchestrator-on
-# filer-on cell and the two research filer-on cells (issue #2786) below
-# actually flip the FILER_ENABLED gate on, unlike AGENTS_ROSTER alone (the
-# filer-off cells' roster).
+# issue #2353: AGENTS_ROSTER plus a "filer" entry, so the filer-on cells below
+# actually flip the FILER_ENABLED gate that plain AGENTS_ROSTER leaves off.
 AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]},"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
-# issue #2512: AGENTS_ROSTER's reviewer entry, plus an explicit "effort" key
-# ("xhigh", a value distinct from every other effort/model literal already
-# used across this file's fixtures, so a diff against the golden fixture
-# fails loudly on any accidental drop or truncation of the field rather than
-# on a value that could silently match some other cell's default). This
-# harness sets AGENTS_JSON_TEMPLATE literally, so rosterDefaults and any
-# roster-resolution fallback never participate in this path -- the
-# distinctive value is purely for diff visibility, not to distinguish an
-# override from a fallback. Scout, reviewer, worker -- no "filer" key, so
-# this cell isolates the reviewer-effort-override axis from the filer axis
-# AGENTS_ROSTER_WITH_FILER above already covers.
+# issue #2512: AGENTS_ROSTER whose reviewer carries an explicit "effort". The
+# value "xhigh" is distinct from every other effort and model literal in this
+# file, so a dropped or truncated field fails the diff instead of matching some
+# other cell's default. No "filer" key, keeping this cell off the filer axis.
 AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"xhigh","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
 @test "production path matches the golden fixture for the covered cell, with a populated roster" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
-  # AGENTS_ROSTER carries "scout" and "worker" keys but no "filer" key (issue
-  # #2533).
+  # AGENTS_ROSTER has no "filer" key, so BOX_FILER_ENABLED stays off
+  # (issue #2533).
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
 
   assert_cell_golden "covered-cell-populated-roster" initial
 
-  # Structurally guaranteed by the covered cell, not reverse-engineered from
-  # the bash fake's capture files (entrypoint.sh:1282-1310): the orchestrator
-  # gate is off, so the invoker is always "driver-exec" and the orchestrator
-  # is never invoked at all.
+  # The covered cell leaves the orchestrator gate off, so the invoker is always
+  # "driver-exec" and the orchestrator never runs at all.
   [ ! -s "$ORCHESTRATOR_LOG" ]
 }
 
-# issue #3445: a short multi-line fixture, one line of which carries a
-# literal triple-backtick run -- the untrusted-content shape
-# promptfence.Block's dynamic fence-widening exists for (CLAUDE.md's
-# comment-injection trust boundary), not just a single-line happy path.
+# issue #3445: one line carries a literal triple-backtick run, the untrusted
+# shape promptfence.Block's dynamic fence widening exists for (CLAUDE.md's
+# comment-injection trust boundary). Untrusted text must not close its own fence.
 ISSUE_TEXT_FIXTURE='Widgets double-count on retry when the frobnicator restarts mid-batch.
 
 Repro:
@@ -498,16 +260,15 @@ Expected: each widget counted once. Actual: counted twice on retry.'
   assert_cell_golden "covered-cell-issue-text" initial
 }
 
-# issue #3447: AGENTS_ROSTER plus the "review-axis" fan-out entry the roster
-# now bakes alongside the reviewer -- the one roster shape in this file that
-# flips code-review-baked.md's ${REVIEW_FANOUT_AGENT} from the
+# issue #3447: AGENTS_ROSTER plus the "review-axis" fan-out entry, the one roster
+# shape here that flips code-review-baked.md's ${REVIEW_FANOUT_AGENT} from the
 # general-purpose fallback to the governed name.
 AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"review-axis":{"description":"Run one axis (Standards or Spec) of the code-review skill'"'"'s two-axis fan-out","model":"haiku","prompt":"","tools":["Read","Bash","Glob","Grep"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
 @test "production path matches the golden fixture for a roster that provisions review-axis" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_REVIEW_AXIS"
-  # setup_entrypoint_env's default maps only the historical four names; the
-  # fan-out entry needs its own row for the generic injection loop to reach
+  # setup_entrypoint_env's default maps only the historical four names, so the
+  # fan-out entry needs its own row for the injection loop to reach
   # templates/default/prompts/review-axis-prompt.md.
   export AGENTS_PROMPT_FILES='{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md","review-axis":"review-axis-prompt.md"}'
   export BOX_WORKER_PROVISIONED=1
@@ -519,26 +280,24 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
 @test "production path matches the golden fixture for a worker-provisioned, scout-absent roster" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_NO_SCOUT"
   export BOX_WORKER_PROVISIONED=1
-  # BOX_SCOUT_PROVISIONED deliberately left unset (issue #3157 AC5): pins
-  # that a no-scout run leaves no dangling reference to a brief that was
-  # never written, on the worker-on path the no-roster cell doesn't cover.
+  # BOX_SCOUT_PROVISIONED deliberately unset (issue #3157 AC5): pins that a
+  # no-scout run leaves no dangling reference to a brief nobody wrote, on the
+  # worker-on path the no-roster cell does not cover.
 
   assert_cell_golden "worker-no-scout" initial
 }
 
 @test "production path matches the golden fixture for omitting the agents flag entirely with no roster" {
-  # AGENTS_JSON_TEMPLATE deliberately left unset: proves the "omit the
-  # --agents flag/output stays empty" branch, not just the populated-roster
-  # branch above.
+  # AGENTS_JSON_TEMPLATE deliberately unset: pins the branch that omits the
+  # --agents flag and leaves the output empty.
   unset AGENTS_JSON_TEMPLATE
 
   assert_cell_golden "no-roster" initial
 }
 
 @test "production path matches the golden fixture for the research cell" {
-  # AGENTS_JSON_TEMPLATE deliberately left unset: this cell is about the
-  # prompt-selection/session-mode axis, not roster interaction, which the
-  # two tests above already cover independently.
+  # AGENTS_JSON_TEMPLATE deliberately unset: this cell is about the
+  # prompt-selection and session-mode axis, not roster interaction.
   export DISPATCH_KIND="research"
 
   assert_cell_golden "research" initial
@@ -546,16 +305,12 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
 
 @test "production path matches the golden fixture for the research filer-on cell" {
   export DISPATCH_KIND="research"
-  # AGENTS_ROSTER_WITH_FILER (not plain AGENTS_ROSTER, unlike the research
-  # cell above): the roster/filer axis this cell isolates (issue #2786) --
-  # see the "Roster/filer axis" header bullet above for what
-  # BOX_FILER_ENABLED=1 actually pins. No handoff fixture: research never
-  # turns the orchestrator on, so assert_review_handoff_golden doesn't apply
-  # here.
+  # A filer in the roster with BOX_FILER_ENABLED=1 pins gates_tracker.go's
+  # researchForceRelay, which forces the verdict comment onto the
+  # SPINDRIFT_COMMENT relay arm even though this suite's box is read-write
+  # (issue #2786). No handoff fixture: research never turns the orchestrator on.
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
-  # AGENTS_ROSTER_WITH_FILER carries "scout" and "worker" keys too, same as
-  # every other roster-exporting cell in this file.
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
 
@@ -572,12 +327,10 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
 @test "production path matches the golden fixture for the self-contained research filer-on cell" {
   export DISPATCH_KIND="research"
   export SELF_CONTAINED="1"
-  # Same roster/filer axis as the research filer-on cell above, isolated
-  # against the self-contained knob instead (issue #2786).
+  # The same filer axis as the research filer-on cell above, isolated against
+  # the self-contained knob instead (issue #2786).
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
-  # AGENTS_ROSTER_WITH_FILER carries "scout" and "worker" keys too, same as
-  # every other roster-exporting cell in this file.
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
 
@@ -591,52 +344,45 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
 }
 
 @test "production path matches the golden fixture for the github read-only cell" {
-  # AGENTS_JSON_TEMPLATE deliberately left unset: this cell is about the
-  # access/forge axis, not roster interaction, which the two tests at the
-  # top of this file already cover independently.
+  # AGENTS_JSON_TEMPLATE deliberately unset: this cell is about the access and
+  # forge axis, not roster interaction.
   unset BOX_WRITE_ENABLED
 
   assert_cell_golden "github-read-only" initial
 }
 
 @test "production path matches the golden fixture for the forgejo read-write cell" {
-  # AGENTS_JSON_TEMPLATE deliberately left unset, same reasoning as above.
-  # BOX_WRITE_ENABLED stays at setup_entrypoint_env's read-write default, so
-  # no extra flag override is needed here.
+  # BOX_WRITE_ENABLED stays at setup_entrypoint_env's read-write default.
   export CODE_FORGE="forgejo"
   export BOX_FORGE_BACKEND=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
-  # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
-  # https://<token>@<host>/<slug>.git; redirect that exact URL to the bare
-  # repo setup_bare_repo already seeded so the clone stays offline (mirrors
-  # tests/entrypoint-prompt-assembly.bats's CODE_FORGE=forgejo fix-pass test).
+  # clone_repo builds the clone URL as https://<token>@<host>/<slug>.git.
+  # Redirect that exact URL to the bare repo setup_bare_repo already seeded,
+  # so the clone stays offline.
   git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
 
   assert_cell_golden "forgejo-read-write" initial
 }
 
 @test "production path matches the golden fixture for the forgejo read-only cell" {
-  # AGENTS_JSON_TEMPLATE deliberately left unset, same reasoning as above.
   export CODE_FORGE="forgejo"
   export BOX_FORGE_BACKEND=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
   unset BOX_WRITE_ENABLED
-  # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
-  # https://<token>@<host>/<slug>.git; redirect that exact URL to the bare
-  # repo setup_bare_repo already seeded so the clone stays offline (mirrors
-  # tests/entrypoint-prompt-assembly.bats's CODE_FORGE=forgejo fix-pass test).
+  # clone_repo builds the clone URL as https://<token>@<host>/<slug>.git.
+  # Redirect that exact URL to the bare repo setup_bare_repo already seeded,
+  # so the clone stays offline.
   git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
 
   assert_cell_golden "forgejo-read-only" initial
 }
 
 @test "production path matches the golden fixture for the local tracker cell, no issue reference" {
-  # AGENTS_JSON_TEMPLATE deliberately left unset: this cell is about the
-  # tracker axis, not roster interaction, which the two dispatch-kind cells
-  # above already cover independently. SessionMode stays "initial" --
-  # ISSUE_TRACKER is orthogonal to dispatch kind/fix-pass.
+  # AGENTS_JSON_TEMPLATE deliberately unset: this cell is about the tracker
+  # axis, not roster interaction. SessionMode stays "initial" because
+  # ISSUE_TRACKER is orthogonal to dispatch kind and fix-pass.
   export ISSUE_TRACKER="local"
   export BOX_TRACKER_AXIS_READ=LOCAL
   unset BOX_TRACKER_AXIS_WRITE
@@ -644,12 +390,10 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
   assert_cell_golden "local-tracker-no-issue-ref" initial
 }
 
-# issue #3469: a host-rendered forge.IssueText fixture (issuetext.go's
-# renderLinkedIssues shape) covering both block kinds it can emit -- one
-# resolved "### ref — title (relation of ref)" entry with a status line and
-# a body, and one "### Unresolved references" one-liner -- so this cell
-# pins the local tracker's issue-read fragment composing with a link chain
-# that already arrived pre-rendered, not walked in-box.
+# issue #3469: a host-rendered forge.IssueText fixture covering both block kinds
+# issuetext.go's renderLinkedIssues emits. The local tracker's issue-read
+# fragment used to tell the agent to walk the link chain in-box; this pins that
+# the chain now arrives pre-rendered through ISSUE_TEXT instead.
 ISSUE_TEXT_LOCAL_TRACKER_FIXTURE='Retry math drifts when two frobnicators race the same batch.
 
 ## Linked issues
@@ -693,29 +437,23 @@ Guard the batch counter with a mutex before the retry path lands.
 
 @test "production path matches the golden fixture for the jira tracker cell" {
   # jira rides the same prompt-selection arms as github (assemble.go's
-  # checkCoveredCell). The Go side's byte-identity between jira and github
-  # is already pinned by a Go unit test in
-  # cmd/launcher/internal/promptassembly; this cell additionally proves the
-  # production BASH path renders jira through that same github arm, not just
-  # within the Go package.
+  # checkCoveredCell). A Go unit test already pins that byte-identity; this
+  # cell proves the bash path reaches the same arm.
   export ISSUE_TRACKER="jira"
 
   assert_cell_golden "jira-tracker" initial
 }
 
-# issue #2353: four orchestrator-on cells (dispatch kind "work", FIX_PASS
-# unset -- the only orchestrator-on path checkCoveredCell covers). Unlike
-# the orchestrator-off cells above, ORCHESTRATOR_ENABLED must be exported so
-# the bash side takes run_driver_in_env's orchestrator invocation path
-# (entrypoint.sh:1282-1286, tests/entrypoint-orchestrator-handoff.bats).
+# issue #2353: the orchestrator-on cells run dispatch kind "work" with FIX_PASS
+# unset, the only orchestrator-on path checkCoveredCell covers. Each must export
+# ORCHESTRATOR_ENABLED so the bash side takes run_driver_in_env's orchestrator
+# invocation path.
 
 @test "production path matches the golden fixture for the orchestrator-on filer-on cell" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
-  # AGENTS_ROSTER_WITH_FILER carries a "scout" key, a "worker" key, and a
-  # "filer" key.
   export BOX_FILER_ENABLED=1
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
@@ -729,13 +467,10 @@ Guard the batch counter with a mutex before the retry path lands.
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
-  # AGENTS_ROSTER (not the _WITH_FILER variant above): scout+reviewer, no
-  # "filer" key -- the FILER_ENABLED-off half of the roster axis. Reviewer is
-  # present in both filer-on and filer-off (filer-on/off forks only on
-  # whether "filer" itself is in the roster), so both cells assert
-  # ReviewModel the same way via assert_review_handoff_golden.
+  # AGENTS_ROSTER, not the _WITH_FILER variant: the FILER_ENABLED-off half of
+  # the roster axis. The reviewer is present either way, so both cells assert
+  # ReviewModel the same way through assert_review_handoff_golden.
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
-  # AGENTS_ROSTER carries "scout" and "worker" keys but no "filer" key.
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
 
@@ -749,15 +484,12 @@ Guard the batch counter with a mutex before the retry path lands.
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
-  # AGENTS_ROSTER carries "scout" and "worker" keys but no "filer" key.
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
 
-  # Contrast setup()'s unconditional 6-skill baking: this cell is the
-  # "SkillsFound == "" and every *SkillBaked flag false" branch
-  # checkCoveredCell also covers. Remove the skill dirs setup() just baked
-  # under $HOME (rather than restructuring setup() itself, which every other
-  # cell in this suite still relies on baking unconditionally).
+  # This cell is checkCoveredCell's "SkillsFound empty, every *SkillBaked flag
+  # false" branch. Remove the dirs setup() just baked rather than restructuring
+  # setup(), which every other cell relies on baking unconditionally.
   rm -rf "$HOME/.claude/skills"
 
   assert_cell_golden "orchestrator-skills-absent" initial
@@ -769,14 +501,10 @@ Guard the batch counter with a mutex before the retry path lands.
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
-  # AGENTS_ROSTER_WITH_REVIEW_EFFORT (not plain AGENTS_ROSTER): the reviewer
-  # entry's "effort":"xhigh" is the whole point of this cell -- issue #2512's
-  # AC2 non-empty-overrides case, contrasting the filer-on/filer-off cells
-  # above whose reviewer carries no "effort" key at all (ReviewEffort ""
-  # there, the empty-follows-roster case).
+  # The reviewer's "effort":"xhigh" is the point of this cell: issue #2512's AC2
+  # non-empty-overrides case, against the filer-on and filer-off cells above
+  # whose reviewer has no "effort" key at all (the empty-follows-roster case).
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_REVIEW_EFFORT"
-  # AGENTS_ROSTER_WITH_REVIEW_EFFORT carries "scout" and "worker" keys but no
-  # "filer" key.
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
 
@@ -787,15 +515,13 @@ Guard the batch counter with a mutex before the retry path lands.
 
 @test "production path matches the golden fixture for the tdd-skill-absent cell" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
-  # AGENTS_ROSTER carries "scout" and "worker" keys but no "filer" key.
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
 
-  # Remove only tdd's SKILL.md from the four setup() just baked: the
-  # TDD_UNBAKED arm with caveman/commit/code-review still baked (issue
-  # #3219). The skills-absent cell above flips every per-skill gate at once,
-  # so it cannot tell "tdd's unbaked fallback renders" apart from "no skill
-  # fragment renders at all".
+  # Remove only tdd's SKILL.md, leaving the rest baked: the realistic shape,
+  # since a consumer bakes a subset (issue #3219). The skills-absent cell above
+  # flips every per-skill gate at once, so it cannot tell "tdd's unbaked
+  # fallback renders" apart from "no skill fragment renders at all".
   rm -rf "$HOME/.claude/skills/tdd"
 
   assert_cell_golden "tdd-skill-absent" initial
@@ -805,11 +531,10 @@ Guard the batch counter with a mutex before the retry path lands.
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
-  # Remove only commit's SKILL.md from the five setup() just baked: the
-  # COMMIT_UNBAKED arm with caveman/tdd/code-review/check-hygiene still
-  # baked (issue #3222). The skills-absent cell above flips every per-skill
-  # gate at once, so it cannot tell "commit's unbaked fallback renders"
-  # apart from "no skill fragment renders at all".
+  # Remove only commit's SKILL.md, leaving the rest baked (issue #3222). The
+  # skills-absent cell above flips every per-skill gate at once, so it cannot
+  # tell "commit's unbaked fallback renders" apart from "no skill fragment
+  # renders at all".
   rm -rf "$HOME/.claude/skills/commit"
   assert_cell_golden "commit-skill-absent" initial
 }
@@ -818,13 +543,10 @@ Guard the batch counter with a mutex before the retry path lands.
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
-  # Remove only code-review's SKILL.md from the five setup() just baked: the
-  # CODE_REVIEW_UNBAKED arm with caveman/tdd/commit/check-hygiene still
-  # baked (issue #3222). The skills-absent cell above flips every per-skill
-  # gate at once, so it cannot tell "code-review's unbaked fallback renders"
-  # apart from "no skill fragment renders at all". AGENTS_ROSTER's "reviewer"
-  # key is what makes this cell exercise review-prompt.md at all -- the
-  # gate renders into .agents.json's reviewer.prompt, not $DRIVER_PROMPT_FILE.
+  # Remove only code-review's SKILL.md, leaving the rest baked (issue #3222).
+  # AGENTS_ROSTER's "reviewer" key is what makes this cell exercise
+  # review-prompt.md at all: the gate renders into .agents.json's
+  # reviewer.prompt, not $DRIVER_PROMPT_FILE.
   rm -rf "$HOME/.claude/skills/code-review"
   assert_cell_golden "code-review-skill-absent" initial
 }
@@ -834,9 +556,9 @@ Guard the batch counter with a mutex before the retry path lands.
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
 
-  # Bake nix-checks on top of setup()'s six: it's dogfood-only, so no other
-  # cell in this file ever bakes it, and NIX_CHECKS_BAKED's anchor would
-  # otherwise render nowhere in the golden matrix (issue #3223).
+  # Bake nix-checks on top of setup()'s six: it is dogfood-only, so no other
+  # cell bakes it, and NIX_CHECKS_BAKED's anchor would otherwise render nowhere
+  # in the golden matrix, free to regress to nothing (issue #3223).
   mkdir -p "$HOME/.claude/skills/nix-checks"
   cat >"$HOME/.claude/skills/nix-checks/SKILL.md" <<'SKILL'
 ---

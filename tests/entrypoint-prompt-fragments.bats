@@ -7,18 +7,11 @@ setup() {
   setup_entrypoint_env
 }
 
-# issue #622/#688: this mechanism test walks 3 of the registry's current
-# nine rows (lib/fragments.nix) -- AUTO_FORMAT and AUTO_LINT, both
-# knob-gated, plus FILER_ENABLED/file-issues, which is computed-gated --
-# and covers their shared off/on matrix: each row renders its marker
-# heading only when its gate is on, and leaves zero residue when it's off
-# (the conditional-residue mechanism every registry row shares); it used
-# to be six bespoke on/off test pairs. CODE_REVIEW_BAKED's on/off gate is
-# covered by its own tests further down this file (issue #788). The other
-# five rows are covered elsewhere, not in this file's other tests:
-# skill-preamble/caveman-default/tdd-baked/commit-baked in
-# tests/entrypoint-skills.bats, ci-failure's on/off gate in
-# tests/entrypoint-prompt-assembly.bats.
+# issue #622/#688: this walks 3 of the registry's rows (lib/fragments.nix) to
+# cover the off/on matrix every row shares: a row renders its marker heading
+# only when its gate is on, and leaves no residue when it is off.
+# CODE_REVIEW_BAKED has its own tests below (issue #788); the other five rows
+# live in tests/entrypoint-skills.bats and entrypoint-prompt-assembly.bats.
 @test "conditional prompt steps appear only when their knob is on" {
   local case i=0
   for case in \
@@ -28,11 +21,8 @@ setup() {
   do
     local assign="${case%%|*}" marker="${case#*|}"
 
-    # A fresh WORK_DIR per invocation -- entrypoint.sh clones into it, and
-    # this test execs the entrypoint six times (off/on for three gated
-    # cases -- AUTO_FORMAT and AUTO_LINT are knobs, FILER_ENABLED is
-    # computed-gated) -- so reusing one dir across invocations would
-    # collide on the second clone.
+    # A fresh WORK_DIR per invocation: entrypoint.sh clones into it, so
+    # reusing one dir across the six execs would collide on the second clone.
     i=$((i + 1))
     export WORK_DIR="$BATS_TEST_TMPDIR/work-$i-off"
     run bash "$ENTRYPOINT"
@@ -42,9 +32,8 @@ setup() {
     # shellcheck disable=SC2163 # $assign is itself a NAME=value pair
     export "$assign"
     # BOX_FILER_ENABLED is not a schema knob (issue #2533): FILER_ENABLED is
-    # nix-computed roster-presence, forwarded verbatim rather than reparsed
-    # from AGENTS_JSON_TEMPLATE at runtime, so this loop's AGENTS_JSON_TEMPLATE
-    # case must also flip the matching BOX_* var to actually trip the gate.
+    # nix-computed roster presence forwarded verbatim, never reparsed from
+    # AGENTS_JSON_TEMPLATE, so this case must flip the BOX_* var to trip the gate.
     if [[ "$assign" == AGENTS_JSON_TEMPLATE=* ]]; then
       export BOX_FILER_ENABLED=1
     fi
@@ -59,14 +48,11 @@ setup() {
   done
 }
 
-# issue #1429/ADR 0029: the PR-body ticket-reference step is the one
-# registry row with three mutually exclusive fragments instead of an on/off
-# pair -- ISSUE_TRACKER x LOCAL_ISSUE_REFERENCE together pick exactly one of
-# PR_BODY_CLOSES/PR_BODY_LOCAL_REF/PR_BODY_LOCAL_NOREF
-# (agent/entrypoint.sh's phase_prompt_assembly precompute block). The three
-# tests below cover the acceptance criteria's three cells; box_env_gen.bash
-# already exports ISSUE_TRACKER=github (the schema default), so the first
-# case needs no override.
+# issue #1429/ADR 0029: the PR-body ticket-reference row has three mutually
+# exclusive fragments instead of an on/off pair. ISSUE_TRACKER and
+# LOCAL_ISSUE_REFERENCE together pick exactly one of PR_BODY_CLOSES/
+# PR_BODY_LOCAL_REF/PR_BODY_LOCAL_NOREF. box_env_gen.bash already exports
+# ISSUE_TRACKER=github, so the first case needs no override.
 @test "PR-body reference: github tracker keeps Closes unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-github"
   run bash "$ENTRYPOINT"
@@ -98,11 +84,9 @@ setup() {
   ! grep -qF 'Closes #7' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #1429: same conditional-residue separation guarantee as the
-# AUTO-FORMAT/AUTO-LINT pair above, but this step abuts the next paragraph on
-# the same template line rather than a following heading (see
-# templates/default/prompts/issue-prompt.md), so the failure mode here is the
-# two gluing together with no blank line, not a missing heading.
+# issue #1429: this step abuts the next paragraph on the same template line
+# (templates/default/prompts/issue-prompt.md) rather than a following heading,
+# so the failure mode is the two gluing together with no blank line.
 @test "PR-body reference step stays separated from the following paragraph" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-sep"
   run bash "$ENTRYPOINT"
@@ -111,20 +95,10 @@ setup() {
 }
 
 # issue #1691/ADR 0032, amended by issue #3445: the issue-read step's
-# ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO gates
-# (agent/entrypoint.sh's phase_prompt_assembly precompute block) drive three
-# row families -- this exercises issue-prompt.md's, the one
-# DRIVER_PROMPT_FILE captures directly; the other two prompts share the same
-# gates and are covered at the fragment-content level by
-# nix/checks/prompts.nix.
-#
-# The step no longer reads the SUBJECT issue at all: its body and last-10-
-# comment snapshot are injected host-side at dispatch (issue #3445), so what
-# each gate still selects is only the per-tracker guidance for pulling
-# LINKED issues. These tests therefore assert the gate wiring through that
-# residual guidance, plus the absence of any subject-issue fetch -- the
-# invariant nix/checks/prompts.nix's
-# issue-read-fragments-never-fetch-the-subject-issue pins statically.
+# ISSUE_TRACKER_GITHUB/_LOCAL/_FORGEJO gates no longer select a subject-issue
+# fetch (its body and comments are injected host-side at dispatch), only the
+# per-tracker guidance for pulling LINKED issues. nix/checks/prompts.nix covers
+# the other two prompts and pins the never-fetch-the-subject invariant.
 @test "issue-read step: github tracker points at the injected issue text, never fetches it" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-github"
   run bash "$ENTRYPOINT"
@@ -151,9 +125,7 @@ setup() {
   ! grep -qF '/issues' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #1963: the forgejo tracker's third issue-read gate cell
-# (ISSUE_TRACKER_FORGEJO) selects the forgejo-flavored guidance, never the
-# github or local one.
+# issue #1963: a forgejo tracker takes the third issue-read gate cell, ISSUE_TRACKER_FORGEJO.
 @test "issue-read step: forgejo tracker selects the forgejo guidance, never the github one" {
   export ISSUE_TRACKER=forgejo
   export BOX_TRACKER_AXIS_READ=FORGEJO
@@ -168,10 +140,10 @@ setup() {
   ! grep -qF 'fj issue view' "$DRIVER_PROMPT_FILE"
 }
 
-# jira maps to the same github-flavored path as github (ISSUE_TRACKER_GITHUB=1)
-# -- this guards that mapping so a future refactor collapsing the per-tracker
-# gates into a per-axis case (whose `*)` arm covers github AND jira) can't
-# silently regress jira onto the forgejo or local variant.
+# jira maps onto the same ISSUE_TRACKER_GITHUB=1 path as github. Guard that
+# mapping so a refactor collapsing the per-tracker gates into a per-axis case
+# (whose `*)` arm covers github and jira) cannot regress jira onto the forgejo
+# or local variant.
 @test "issue-read step: jira tracker selects the github guidance, never forgejo or the local mount" {
   export ISSUE_TRACKER=jira
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-jira"
@@ -182,12 +154,10 @@ setup() {
   ! grep -qF '/issues/7.md' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #1692/ADR 0032: the local content-plane write step. A local
-# Dispatch's Box has no in-box tracker client, so the research verdict
-# travels as a single nonce-guarded SPINDRIFT_COMMENT line on stdout
-# (issue #1940) instead of a direct gh issue comment, and the work
-# blocked-note step is a no-op in-box (settle posts the outcome note=
-# host-side instead).
+# issue #1692/ADR 0032: a local Dispatch's Box has no in-box tracker client,
+# so the research verdict travels as a nonce-guarded SPINDRIFT_COMMENT line on
+# stdout (issue #1940) instead of a gh issue comment, and the blocked-note step
+# is a no-op in-box because settle posts the outcome note= host-side.
 @test "research verdict step: github tracker keeps gh issue comment unchanged" {
   export DISPATCH_KIND="research"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github"
@@ -209,10 +179,9 @@ setup() {
   grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'SPINDRIFT_COMMENT_END' "$DRIVER_PROMPT_FILE"
-  # Not the bare substring: the unconditional OUTCOME section still
-  # explains the github-side `gh issue comment` URL source for contrast.
-  # It's the invocation shape (issue number immediately after) that must
-  # be absent for local.
+  # Not the bare substring: the unconditional OUTCOME section still names
+  # `gh issue comment` to explain github's URL source, so pin the invocation
+  # shape, with the issue number immediately after, instead.
   ! grep -qF 'gh issue comment 7' "$DRIVER_PROMPT_FILE"
 }
 
@@ -235,9 +204,8 @@ setup() {
 }
 
 # issue #1917: read-only (BOX_WRITE_ENABLED absent, issue #1951) strips the
-# Box's write token, so a github tracker's write-step gate (ISSUE_TRACKER_GITHUB_READONLY,
-# distinct from the ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL gates the
-# issue-read tests above exercise) must render the same host-mediated relay
+# Box's write token, so a github tracker's write-step gate
+# (ISSUE_TRACKER_GITHUB_READONLY) must render the same host-mediated relay
 # form local always gets, never the in-box gh issue comment invocation.
 @test "research verdict step: github tracker under read-only relays via a nonce-guarded SPINDRIFT_COMMENT line, never gh issue comment" {
   export DISPATCH_KIND="research"
@@ -249,10 +217,9 @@ setup() {
   grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'SPINDRIFT_COMMENT_END' "$DRIVER_PROMPT_FILE"
-  # Not the bare substring: research-prompt.md's unconditional OUTCOME
-  # section names `gh issue comment` (with no issue number) to explain
-  # github's URL source for contrast, same reason the local variant's test
-  # above pins the invocation shape rather than the bare phrase.
+  # Not the bare substring: research-prompt.md's unconditional OUTCOME section
+  # names `gh issue comment` with no issue number, so pin the invocation shape
+  # instead, same as the local variant's test above.
   ! grep -qF 'gh issue comment 7' "$DRIVER_PROMPT_FILE"
 }
 
@@ -265,11 +232,9 @@ setup() {
   grep -qF 'the launcher posts it as the issue comment' "$DRIVER_PROMPT_FILE"
 }
 
-# jira rides github's write-step arm too: the consolidated `_it_write` case
-# maps jira through its `*)` catch-all onto ISSUE_TRACKER_GITHUB_READWRITE/
-# _READONLY (issue #2214), the same `*`-arm that carries the read step above.
-# Guard both halves so a future forge added to that arm can't silently regress
-# jira's blocked-note off the gh-flavored write path.
+# issue #2214: the `_it_write` case maps jira through its `*)` catch-all onto
+# ISSUE_TRACKER_GITHUB_READWRITE/_READONLY. Guard both halves so a future forge
+# added to that arm cannot regress jira's blocked-note off the gh write path.
 @test "issue blocked-comment step: jira tracker under read-write keeps gh issue comment unchanged" {
   export ISSUE_TRACKER=jira
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-jira-readwrite"
@@ -291,9 +256,8 @@ setup() {
 @test "research verdict step: github tracker under read-write is unaffected by the new gate" {
   export DISPATCH_KIND="research"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readwrite-explicit"
-  # helper.bash's setup_entrypoint_env already exports BOX_WRITE_ENABLED=1
-  # (mirroring the BOX_FORGE_AND_ISSUE_ACCESS=read-write schema default), so
-  # this case needs no override.
+  # setup_entrypoint_env already exports BOX_WRITE_ENABLED=1 (the
+  # BOX_FORGE_AND_ISSUE_ACCESS=read-write default), so no override is needed.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'gh issue comment 7' "$DRIVER_PROMPT_FILE"
@@ -309,9 +273,8 @@ setup() {
   export BOX_TRACKER_AXIS_WRITE=FORGEJO
   export BOX_TRACKER_AXIS_FILER=FORGEJO
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-forgejo-readwrite"
-  # helper.bash's setup_entrypoint_env already exports BOX_WRITE_ENABLED=1
-  # (mirroring the BOX_FORGE_AND_ISSUE_ACCESS=read-write schema default), so
-  # this case needs no override.
+  # setup_entrypoint_env already exports BOX_WRITE_ENABLED=1 (the
+  # BOX_FORGE_AND_ISSUE_ACCESS=read-write default), so no override is needed.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'fj issue comment 7' "$DRIVER_PROMPT_FILE"
@@ -357,11 +320,9 @@ setup() {
 }
 
 # issue #1918: the OPEN A PULL REQUEST push step's BOX_ACCESS_READ_WRITE/
-# BOX_ACCESS_READ_ONLY gates (agent/entrypoint.sh's phase_prompt_assembly
-# precompute block, derived from BOX_WRITE_ENABLED, issue #1951).
-# helper.bash's setup_entrypoint_env already exports BOX_WRITE_ENABLED=1
-# (mirroring the BOX_FORGE_AND_ISSUE_ACCESS=read-write schema default), so
-# the first case needs no override.
+# BOX_ACCESS_READ_ONLY gates, derived from BOX_WRITE_ENABLED (issue #1951).
+# setup_entrypoint_env already exports BOX_WRITE_ENABLED=1, so the first case
+# needs no override.
 @test "OPEN A PULL REQUEST push step: read-write keeps git push unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-read-write"
   run bash "$ENTRYPOINT"
@@ -377,23 +338,19 @@ setup() {
   [ "$status" -eq 0 ]
   ! grep -qF '/outbox/seam.bundle' "$DRIVER_PROMPT_FILE"
 
-  # Scoped to the OPEN A PULL REQUEST section itself -- the earlier COMMIT
-  # section's generic rebase-then-push guidance (unrelated to this gate,
-  # issue #1918's scope is the push-step fragment only) also contains the
-  # literal string 'git push --force-with-lease -u origin', so a whole-file
-  # grep would false-positive on it. The 'harness relays' note is likewise
-  # scoped: the IF BLOCKED read-only fragment shares that phrase, so a
-  # whole-file grep could false-pass on it even if this section's fragment
-  # failed to render.
+  # Scoped to this section: the COMMIT section also contains 'git push
+  # --force-with-lease -u origin' and the IF BLOCKED read-only fragment also
+  # contains the 'harness relays' phrase, so a whole-file grep would
+  # false-positive on one and false-pass on the other.
   local open_pr_section
   open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
   grep -qF 'harness relays your committed branch out' <<<"$open_pr_section"
   ! grep -qF 'git push --force-with-lease -u origin' <<<"$open_pr_section"
 }
 
-# Same conditional-residue separation guarantee as the PR-body reference
-# step's own separation test above: the push step's rendered fragment must
-# stay separated from the following `2. gh pr create` line, in both modes.
+# Same separation guarantee as the PR-body reference test above: the rendered
+# fragment must not glue onto the following `2. gh pr create` line, in either
+# mode.
 @test "OPEN A PULL REQUEST push step stays separated from the gh pr create step" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-sep-rw"
   run bash "$ENTRYPOINT"
@@ -408,11 +365,9 @@ setup() {
 }
 
 # issue #1919: the OPEN A PULL REQUEST create step's BOX_ACCESS_READ_WRITE/
-# BOX_ACCESS_READ_ONLY gates -- the counterpart to #1918's push-step gates
-# above, this time for `gh pr create` itself. helper.bash's
-# setup_entrypoint_env already exports BOX_WRITE_ENABLED=1 (mirroring the
-# BOX_FORGE_AND_ISSUE_ACCESS=read-write schema default), so the first case
-# needs no override.
+# BOX_ACCESS_READ_ONLY gates, the counterpart to issue #1918's push-step gates
+# above, this time for `gh pr create` itself. setup_entrypoint_env already
+# exports BOX_WRITE_ENABLED=1, so the first case needs no override.
 @test "OPEN A PULL REQUEST create step: read-write keeps gh pr create unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-read-write"
   run bash "$ENTRYPOINT"
@@ -422,10 +377,9 @@ setup() {
   ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #1963: the OPEN A PULL REQUEST create step's read-write case further
-# forks on CODE_FORGE (OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO
-# computed in entrypoint.sh) -- a forgejo Box opens its draft PR with
-# `fj pr create`, never `gh pr create`.
+# issue #1963: the create step's read-write case forks further on CODE_FORGE
+# (OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO), so a forgejo Box opens its
+# draft PR with `fj pr create`, never `gh pr create`.
 @test "OPEN A PULL REQUEST create step: forgejo read-write uses fj pr create, never gh pr create" {
   export ISSUE_TRACKER=forgejo
   export BOX_TRACKER_AXIS_READ=FORGEJO
@@ -435,30 +389,27 @@ setup() {
   export BOX_FORGE_BACKEND=FORGEJO
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
-  # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
-  # https://<token>@<host>/<slug>.git; redirect that exact URL to the bare
-  # repo setup_bare_repo already seeded so the clone stays offline (mirrors
-  # tests/entrypoint-clone.bats's CODE_FORGE=forgejo clone test).
+  # clone_repo builds the clone URL as https://<token>@<host>/<slug>.git;
+  # redirect that exact URL to the bare repo setup_bare_repo seeded so the
+  # clone stays offline.
   git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-forgejo-read-write"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # Scoped to the OPEN A PULL REQUEST section: LAND THE CHANGE's own
-  # CODE_FORGE=forgejo branch (above this section) unconditionally mentions
-  # `fj pr create` in its descriptive prose regardless of read/write mode,
-  # so a whole-file grep would false-positive on it.
+  # Scoped to this section: LAND THE CHANGE's CODE_FORGE=forgejo branch above
+  # mentions `fj pr create` in prose whatever the mode, so a whole-file grep
+  # would false-positive on it.
   local open_pr_section
   open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$DRIVER_PROMPT_FILE")"
-  # Anchored to the step-2 invocation itself, not a bare substring: the
-  # forgejo fragment's own step 2 also carries a "Do NOT run `gh pr create`"
-  # reminder in its prose, which a plain `grep -qF 'gh pr create'` would
-  # false-positive on.
+  # Anchored to the step-2 invocation, not a bare substring: the forgejo
+  # fragment's own step 2 carries a "Do NOT run `gh pr create`" reminder that
+  # a plain substring grep would match.
   grep -qE '^2\. `fj pr create' <<<"$open_pr_section"
   ! grep -qE '^2\. `gh pr create' <<<"$open_pr_section"
 }
 
-# Read-only stays forge-agnostic (SPINDRIFT_PR_INTENT relay, issue #1963) --
-# a read-only forgejo Box must never render `fj pr create` either.
+# issue #1963: read-only stays forge-agnostic through the SPINDRIFT_PR_INTENT
+# relay, so a read-only forgejo Box must never render `fj pr create` either.
 @test "OPEN A PULL REQUEST create step: forgejo read-only stays forge-agnostic via SPINDRIFT_PR_INTENT, never fj pr create" {
   export ISSUE_TRACKER=forgejo
   export BOX_TRACKER_AXIS_READ=FORGEJO
@@ -492,21 +443,17 @@ setup() {
   ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'SPINDRIFT_PR_INTENT_END' "$DRIVER_PROMPT_FILE"
 
-  # Not the bare substring: the read-only fragment itself explains "do NOT
-  # `gh pr create`" (naming the forbidden command, same pattern
-  # outcome-ready-means-outbox.md and CODE_FORGE=git's LAND THE CHANGE use)
-  # -- pin the concrete invocation form instead, which only the read-write
-  # fragment ever renders.
+  # Not the bare substring: the read-only fragment itself names "do NOT `gh pr
+  # create`", so pin the concrete invocation form instead, which only the
+  # read-write fragment renders.
   ! grep -qF 'gh pr create --draft --base' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #2462: the COMMIT section's push step has the same BOX_ACCESS_READ_
-# WRITE/BOX_ACCESS_READ_ONLY gate need as the OPEN A PULL REQUEST push step
-# above -- a read-only Box holds no push-capable token at commit time either,
-# so the unconditional rebase+push+retry block must not render a `git push`
-# for it. helper.bash's setup_entrypoint_env already exports
-# BOX_WRITE_ENABLED=1 (mirroring the BOX_FORGE_AND_ISSUE_ACCESS=read-write
-# schema default), so the first case needs no override.
+# issue #2462: a read-only Box holds no push-capable token at commit time
+# either, so the COMMIT push step needs the same BOX_ACCESS_READ_WRITE/
+# BOX_ACCESS_READ_ONLY gate as the OPEN A PULL REQUEST push step above.
+# setup_entrypoint_env already exports BOX_WRITE_ENABLED=1, so the first case
+# needs no override.
 @test "COMMIT push step: read-write keeps git push and the retry loop unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-commit-push-read-write"
   run bash "$ENTRYPOINT"
@@ -523,11 +470,9 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  # Scoped to the COMMIT section itself -- the later OPEN A PULL REQUEST and
-  # IF BLOCKED sections share both the 'git push --force-with-lease -u
-  # origin' string and the 'harness relays your committed branch out' phrase
-  # (issue #1918/#1933), so a whole-file grep would false-pass even if this
-  # section's own fragment failed to render.
+  # Scoped to the COMMIT section: the later OPEN A PULL REQUEST and IF BLOCKED
+  # sections share both the push string and the 'harness relays' phrase
+  # (issue #1918/#1933), so a whole-file grep would false-pass.
   local commit_section
   commit_section="$(awk '/^# COMMIT/,/^# REVIEW/' "$DRIVER_PROMPT_FILE")"
   grep -qF 'harness relays your committed branch out' <<<"$commit_section"
@@ -535,13 +480,10 @@ setup() {
   grep -qF 'git rebase origin/' <<<"$commit_section"
 }
 
-# issue #2462: the IF BLOCKED section's push-failure triage block (right
-# after the "If you can't finish (...)" paragraph) has the same
-# BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gate need as the COMMIT section's
-# push step above -- a read-only Box never attempts a `git push` in the
-# failure path either, so a denied push is the expected outcome, not evidence
-# of a broken/under-scoped token, and the `.github/workflows/` diff triage
-# (which presupposes a push was attempted) must not render for it.
+# issue #2462: a read-only Box never attempts a `git push` in the failure path
+# either, so for it a denied push is the expected outcome rather than a broken
+# token, and the `.github/workflows/` diff triage (which presupposes a push was
+# attempted) must not render. Same gate as the COMMIT push step above.
 @test "IF BLOCKED triage step: read-write keeps the push-failure triage block unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-triage-read-write"
   run bash "$ENTRYPOINT"
@@ -562,21 +504,18 @@ setup() {
   grep -qF 'denied' <<<"$if_blocked_section"
   grep -qF '`git push` here is expected' <<<"$if_blocked_section"
   ! grep -qF 'Push failure — check the actual cause before reporting it' <<<"$if_blocked_section"
-  # Not a bare no-`.github/workflows/`-anywhere check: the read-only
-  # fragment itself names that path in passing, explaining that the diff
-  # triage is skipped (same "name the forbidden thing" pattern the OPEN A
-  # PULL REQUEST/IF BLOCKED PR step's own read-only tests above use for `gh
-  # pr create`). Pin the two read-write-only artifacts that must be absent
-  # instead: the actual diff command and the "Genuine ... change" bullet.
+  # Not a bare no-`.github/workflows/`-anywhere check: the read-only fragment
+  # names that path itself when it explains that the diff triage is skipped.
+  # Pin the two read-write-only artifacts instead, the diff command and the
+  # "Genuine ... change" bullet.
   ! grep -qF "git diff origin/" <<<"$if_blocked_section"
   ! grep -qF '**Genuine `.github/workflows/` change:**' <<<"$if_blocked_section"
 }
 
-# issue #1933: the IF BLOCKED section's push step (step 1) has the same
-# BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gate need as the OPEN A PULL
-# REQUEST push step above -- a read-only Box holds no push-capable token
-# whether it reaches the happy path or the failure path, so "Push what you
-# have" must not render unconditionally.
+# issue #1933: a read-only Box holds no push-capable token on the failure path
+# any more than on the happy path, so IF BLOCKED's step 1 needs the same
+# BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gate as the push step above,
+# rather than rendering "Push what you have" unconditionally.
 @test "IF BLOCKED push step: read-write keeps push-what-you-have unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-push-read-write"
   run bash "$ENTRYPOINT"
@@ -600,10 +539,9 @@ setup() {
   ! grep -qF 'Push what you have (or note if even that is impossible)' <<<"$if_blocked_section"
 }
 
-# issue #1933: the IF BLOCKED section's PR check/create step (step 2) has the
-# same BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gate need as the OPEN A
-# PULL REQUEST create step above -- a read-only Box holds no PR-create-
-# capable token in the failure path any more than in the happy path.
+# issue #1933: a read-only Box holds no PR-create-capable token on the failure
+# path either, so IF BLOCKED's step 2 carries the same gate as the OPEN A PULL
+# REQUEST create step above.
 @test "IF BLOCKED PR step: read-write keeps gh pr view/create unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-pr-read-write"
   run bash "$ENTRYPOINT"
@@ -625,20 +563,15 @@ setup() {
   grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' <<<"$if_blocked_section"
   ! grep -qF 'gh pr view --json url' <<<"$if_blocked_section"
 
-  # Not the bare substring: the read-only fragment itself explains "do NOT
-  # `gh pr create`" (naming the forbidden command, same pattern the OPEN A
-  # PULL REQUEST create step's own read-only test above uses) -- pin the
-  # concrete invocation form instead, which only the read-write fragment
-  # ever renders.
+  # Not the bare substring: the read-only fragment itself names "do NOT `gh pr
+  # create`", so pin the concrete invocation form instead, which only the
+  # read-write fragment renders.
   ! grep -qF 'gh pr create --draft' <<<"$if_blocked_section"
 }
 
-# issue #1933: the IF BLOCKED section's own final SPINDRIFT_OUTCOME line
-# carries the same landing=<pr-url> placeholder as the ready-path OUTCOME
-# section did before #1919 gated it -- a read-only Box never opens a PR
-# in-box on the blocked path either, so it never learns a URL to report and
-# must print the branch name instead, same gate as OUTCOME's own landing=
-# step above.
+# issue #1933: a read-only Box never opens a PR in-box on the blocked path
+# either, so it never learns a URL and must print the branch name instead.
+# Same gate as OUTCOME's own landing= step (issue #1919).
 @test "IF BLOCKED outcome line: read-write keeps the pr-url placeholder unchanged" {
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-outcome-read-write"
@@ -660,19 +593,11 @@ setup() {
   ! grep -qF 'landing=<pr-url>' <<<"$if_blocked_section"
 }
 
-# issue #1919: the OUTCOME section's landing= value under read-only carries
-# the branch name, not a PR URL -- the Box never opens the PR itself, so it
-# never learns a URL to report. ISSUE_NUMBER=7/BRANCH_PREFIX=agent/issue- from
-# helper.bash/box_env_gen.bash together fix BRANCH at agent/issue-7.
-#
-# issue #2274/ADR 0039 retired the nonce gate for SPINDRIFT_OUTCOME
-# specifically: structural scoping (the in-box extractor's own
-# final-message tiebreak, the host scan's leading-token requirement) already
-# gives every genuine outcome line the freshness guarantee the nonce used to
-# provide, so neither variant's fragment needs to carry nonce=${RUN_NONCE}
-# any longer. RUN_NONCE is still set here because the same rendered prompt
-# also carries the SPINDRIFT_PR_INTENT line, which keeps its own nonce gate
-# unchanged.
+# issue #1919: under read-only the OUTCOME landing= value is the branch name,
+# since the Box never opens the PR and never learns a URL; ISSUE_NUMBER=7 and
+# BRANCH_PREFIX=agent/issue- fix BRANCH at agent/issue-7. RUN_NONCE is still
+# set because the same prompt carries SPINDRIFT_PR_INTENT, which keeps its
+# nonce gate; SPINDRIFT_OUTCOME's own was retired (issue #2274/ADR 0039).
 @test "OUTCOME landing step: read-write keeps the pr-url placeholder unchanged" {
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-write"
@@ -697,19 +622,17 @@ setup() {
   # pass if the retired nonce crept back onto the line.
   grep -qE 'status=ready note=<short reason>$' "$DRIVER_PROMPT_FILE"
 
-  # Scoped to the OUTCOME section itself -- OPEN A PULL REQUEST's own
-  # PR-intent fragment legitimately mentions "the launcher opens the draft
-  # PR" prose, so a whole-file grep for the pr-url placeholder could
-  # false-positive on unrelated read-only prose elsewhere.
+  # Scoped to the OUTCOME section: OPEN A PULL REQUEST's PR-intent fragment
+  # mentions "the launcher opens the draft PR", so a whole-file grep for the
+  # placeholder could false-positive on it.
   local outcome_section
   outcome_section="$(awk '/^# OUTCOME/,/^# IF BLOCKED/' "$DRIVER_PROMPT_FILE")"
   ! grep -qF 'landing=<pr-url>' <<<"$outcome_section"
 }
 
 # A scout/reviewer-only template (no "filer" key) must not require
-# filer-prompt.md to exist -- the file read has to be gated on the template
-# actually carrying a filer entry, same as the FILE_ISSUES_DIRECT_STEP/
-# FILE_ISSUES_RELAY_STEP gates above.
+# filer-prompt.md to exist, so the file read is gated on the template actually
+# carrying a filer entry.
 @test "entrypoint does not require filer-prompt.md when the template omits filer" {
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
@@ -723,10 +646,9 @@ setup() {
   jq -e 'has("filer") | not' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
-# issue #452: `nix fmt` can never succeed in-box (uid 1000 has no
-# /nix/store write access, so evaluating the flake dies with a store-lock
-# permission error) — the step must not list it as a usable preference, and
-# must say why it's unavailable if it names it at all.
+# issue #452: `nix fmt` can never succeed in-box, because uid 1000 has no
+# /nix/store write access and evaluating the flake dies with a store-lock
+# permission error, so the step must not list it as a usable preference.
 @test "AUTO-FORMAT step never instructs nix fmt as a usable preference" {
   export AUTO_FORMAT=1
   run bash "$ENTRYPOINT"
@@ -734,10 +656,9 @@ setup() {
   ! grep -q '`nix fmt` when the target flake defines a formatter' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #2489: the full nix-fmt rationale moved out of the always-rendered
-# prompt and into the harness-owned /auto-format skill's own SKILL.md, read
-# only when the agent actually reaches this step — the rendered prompt now
-# just points at the skill by name instead of explaining it inline.
+# issue #2489: the nix-fmt rationale moved into the /auto-format skill's own
+# SKILL.md, so the rendered prompt points at the skill by name instead of
+# explaining it inline.
 @test "AUTO-FORMAT step points to the skill instead of explaining nix fmt inline" {
   export AUTO_FORMAT=1
   run bash "$ENTRYPOINT"
@@ -746,10 +667,8 @@ setup() {
   ! grep -qF 'store-lock permission error' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #2490: the full inline linting procedure moved out of the
-# always-rendered prompt and into the harness-owned /auto-lint skill's own
-# SKILL.md, read only when the agent actually reaches this step — the
-# rendered prompt now just points at the skill by name instead of
+# issue #2490: the inline linting procedure moved into the /auto-lint skill's
+# own SKILL.md, so the rendered prompt points at the skill by name instead of
 # explaining it inline.
 @test "AUTO-LINT step points to the skill instead of explaining the linter procedure inline" {
   export AUTO_LINT=1
@@ -759,11 +678,9 @@ setup() {
   ! grep -qF "Apply the linter's safe auto-fix mode" "$DRIVER_PROMPT_FILE"
 }
 
-# issue #463: the conditional prompt steps above (SKILL_PREAMBLE,
-# FILE_ISSUES_DIRECT_STEP/FILE_ISSUES_RELAY_STEP, AUTO_FORMAT_STEP,
-# AUTO_LINT_STEP, CI_FAILURE_STEP) must be read from fragment files under
-# PROMPTS_DIR, not authored as heredocs in the script -- a markdown heading
-# string-literal in entrypoint.sh means prose leaked back into bash.
+# issue #463: the conditional prompt steps must be read from fragment files
+# under PROMPTS_DIR, never authored as heredocs, so a markdown heading string
+# literal in entrypoint.sh means prose leaked back into bash.
 @test "entrypoint source contains no prompt-prose markdown headings" {
   run grep -E '# (FILE ISSUES|AUTO-FORMAT|AUTO-LINT|CI FAILURE)' "$ENTRYPOINT"
   [ "$status" -ne 0 ]
@@ -773,7 +690,7 @@ setup() {
   source "$FRAGMENT_REGISTRY_FILE"
   local row fragment
   for row in "${_FRAGMENT_ROWS[@]}"; do
-    # Row shape is "gate|fragment.md|var" -- middle field, already carries
+    # Row shape is "gate|fragment.md|var": the middle field already carries
     # the .md suffix.
     fragment="${row#*|}"
     fragment="${fragment%%|*}"
@@ -781,11 +698,9 @@ setup() {
   done
 }
 
-# issue #463: `$(_subst ...)` command substitution strips ALL trailing
-# newlines, so a fragment's blank-line separator (which the heredoc-string
-# assignments it replaces carried literally) must be reconstructed after
-# substitution -- otherwise the step glues onto the next heading with no
-# even a newline between them.
+# issue #463: command substitution strips all trailing newlines, so a
+# fragment's blank-line separator must be reconstructed afterwards or the step
+# glues onto the next heading.
 @test "AUTO-FORMAT and AUTO-LINT steps stay separated from each other and from COMMIT" {
   export AUTO_FORMAT=1
   export AUTO_LINT=1
@@ -826,11 +741,9 @@ SKILL
   ! grep -q 'message\.Your text output' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #689: TDD_BAKED had zero test coverage of its gate mechanism before
-# this test -- mirrors the CAVEMAN_STEP case above. Issue #3219 turned the
-# row into an exactly-one-on pair, so both arms are asserted together: the
-# baked arm must SUBTRACT the inline fallback, not stack an anchor line on
-# top of it.
+# issue #3219 turned the TDD row into an exactly-one-on pair, so both arms are
+# asserted together: the baked arm must subtract the inline fallback, not stack
+# an anchor line on top of it (issue #689).
 @test "TDD_BAKED_STEP renders the anchor line alone when the tdd skill is baked" {
   mkdir -p "$HOME/.claude/skills/tdd"
   cat >"$HOME/.claude/skills/tdd/SKILL.md" <<'SKILL'
@@ -853,8 +766,7 @@ SKILL
   ! grep -qF 'Work test-first: run `/tdd` for each slice.' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #689: COMMIT_BAKED had zero test coverage of its gate mechanism
-# before this test -- mirrors the CAVEMAN_STEP case above.
+# issue #689: COMMIT_BAKED uses the same gated-fragment idiom as CAVEMAN_STEP above.
 @test "COMMIT_BAKED_STEP renders when the commit skill is baked" {
   mkdir -p "$HOME/.claude/skills/commit"
   cat >"$HOME/.claude/skills/commit/SKILL.md" <<'SKILL'
@@ -869,15 +781,11 @@ SKILL
   grep -qF 'Use the `/commit` skill to write every commit message' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #788: the reviewer subagent favors the /code-review skill when it is
-# baked at DRIVER_SKILLS_DIR/code-review/SKILL.md, same gated-fragment idiom
-# as CAVEMAN_STEP/TDD_BAKED_STEP/COMMIT_BAKED_STEP above. CODE_REVIEW_BAKED_STEP
-# renders into review-prompt.md, which flows into the reviewer subagent's
-# prompt in the --agents JSON, not $DRIVER_PROMPT_FILE -- so this reads it
-# from $DRIVER_AGENTS_FILE's .reviewer.prompt instead. Issue #3226 moved the
-# hunt dimensions to always-rendered inline text in review-prompt.md, so the
-# gate pair now only picks execution mode: fan out to the baked skill's
-# two axes, or hunt every dimension solo.
+# issue #788: CODE_REVIEW_BAKED_STEP renders into review-prompt.md, which
+# reaches the reviewer through the --agents JSON rather than
+# $DRIVER_PROMPT_FILE, so this reads $DRIVER_AGENTS_FILE's .reviewer.prompt.
+# Issue #3226 moved the hunt dimensions to always-rendered inline text, so the
+# gate pair now only picks execution mode.
 @test "CODE_REVIEW_BAKED_STEP renders when the code-review skill is baked" {
   mkdir -p "$HOME/.claude/skills/code-review"
   cat >"$HOME/.claude/skills/code-review/SKILL.md" <<'SKILL'
@@ -898,10 +806,9 @@ SKILL
   grep -qF 'Hunt every dimension' <<<"$rendered"
 }
 
-# issue #788: the fallback -- no code-review skill baked -- must carry the
-# inline dimensions coaching and still end in the VERDICT contract, with
-# zero trace of the anchor (the same conditional-residue guarantee
-# CAVEMAN_STEP/TDD_BAKED_STEP/COMMIT_BAKED_STEP give).
+# issue #788: with no code-review skill baked the fallback must carry the
+# inline dimensions coaching, still end in the VERDICT contract, and leave no
+# trace of the anchor.
 @test "reviewer prompt has the inline dimensions coaching when the code-review skill is absent" {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
   run bash "$ENTRYPOINT"
@@ -913,32 +820,19 @@ SKILL
   grep -qF 'VERDICT: APPROVE | BLOCK' <<<"$rendered"
 }
 
-# issue #626: driver-exec absorbed the direct-path/devShell-wrapper dual
-# pipeline text (issue #463) entirely -- entrypoint.sh now calls driver-exec
-# exactly once, direct and devShell invocation are the same call path, and
-# driver-exec's own --devshell switch (not a second hand-copied pipeline)
-# tells it which (the direct-path and devShell behavioural tests above
-# already prove both paths still work).
-#
-# issue #1996: the call site itself became the reusable seam the in-box
-# orchestrator drives -- $_driver_invoker picks driver-exec or orchestrator
-# at runtime (ORCHESTRATOR_ENABLED), so the source no longer names
-# driver-exec literally at the call site; it still invokes exactly one
-# binary once.
-#
-# issue #2983: the call site moved from a fixed backslash-continued argv list
-# to a conditionally-built `_driver_argv` array (so `--manifest-path` can be
-# appended only for the orchestrator invoker on a mounted outbox), so the
-# pattern now matches the single-line array-expansion call instead.
+# issue #626/#1996/#2983: entrypoint.sh invokes exactly one driver binary
+# once, but $_driver_invoker picks driver-exec or the orchestrator at runtime
+# and the argv is a conditionally-built `_driver_argv` array (so
+# `--manifest-path` can be appended for the orchestrator), so the pattern
+# matches the single-line array expansion, not a literal driver-exec name.
 @test "the driver invocation is called exactly once in entrypoint.sh source" {
   count=$(grep -c '^  "\$_driver_invoker" "\${_driver_argv\[@\]}"$' "$ENTRYPOINT")
   [ "$count" -eq 1 ]
 }
 
-# issue #463: a SPINDRIFT_PROMPT_DIR-style override supplies its own fragment
-# for a knob it enables, exactly like it already must supply filer-prompt.md
-# when AGENTS_JSON_TEMPLATE carries a filer entry (see "entrypoint does not
-# require filer-prompt.md..." above) -- documented in docs/reference.md.
+# issue #463: a prompt-dir override supplies its own fragment for a knob it
+# enables, exactly as it must supply filer-prompt.md when AGENTS_JSON_TEMPLATE
+# carries a filer entry. Documented in docs/reference.md.
 @test "runtime prompt-dir override supplies its own auto-format fragment" {
   local prompt_dir="$BATS_TEST_TMPDIR/custom-prompts"
   cp -r "$PROMPTS_DIR" "$prompt_dir"
@@ -951,9 +845,8 @@ SKILL
   grep -q 'CUSTOM-FRAGMENT-MARKER' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #2490: parallels "runtime prompt-dir override supplies its own
-# auto-format fragment" above, now that AUTO-LINT is a shrunk skill-invocation
-# fragment too.
+# issue #2490: parallels the auto-format override test above, now that
+# AUTO-LINT is a skill-invocation fragment too.
 @test "runtime prompt-dir override supplies its own auto-lint fragment" {
   local prompt_dir="$BATS_TEST_TMPDIR/custom-prompts"
   cp -r "$PROMPTS_DIR" "$prompt_dir"
@@ -1046,28 +939,16 @@ EOF
   ! grep -q 'status=merged' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #622 used to prove here, by hand-appending one extra row to the
-# real, nix-rendered registry data and re-sourcing entrypoint.sh, that the
-# bash fragment loop was generic over the registry with zero entrypoint
-# edits. Retired by issue #2354: that mechanism (bash reading
-# `_FRAGMENT_ROWS` directly) no longer exists post-flip -- fragment
-# rendering now lives entirely in the Go assemble-prompt verb, which loops
-# over `reg.Rows` read from a nix-baked JSON registry file. Genericity is now
-# proven by construction (the same Go loop, package
-# cmd/launcher/internal/promptassembly) and guarded by the
-# promptassembly-registry-ownership/promptassembly-registry-drift nix checks
-# (nix/checks/promptassembly.nix), both part of `checks-inbox`.
+# Registry genericity is no longer proven here: issue #622's hand-appended row
+# test died with the flip to the Go assemble-prompt verb (issue #2354).
+# nix/checks/promptassembly.nix guards it now, through its registry-ownership
+# and registry-drift checks.
 
-# issue #2019: the filer's write-mechanism gates (FILER_FILE_DIRECT/
-# FILER_FILE_RELAY, agent/entrypoint.sh's phase_prompt_assembly precompute
-# block) pick the host-mediated SPINDRIFT_ISSUE_INTENT relay only on
-# read-only (BOX_WRITE_ENABLED absent) + ORCHESTRATOR_ENABLED -- every other
-# combination keeps today's direct `gh issue create`/`gh label create` path,
-# byte-for-byte unchanged. helper.bash's setup_entrypoint_env already
-# exports BOX_WRITE_ENABLED=1 (read-write); tests below unset it for the
-# read-only cases. DRIVER_AGENTS_FILE (the fake claude driver's own copy of
-# the rendered --agents JSON) is where the filer's own prompt text lands,
-# not DRIVER_PROMPT_FILE (the top-level agent's prompt).
+# issue #2019: the filer's FILER_FILE_DIRECT/FILER_FILE_RELAY gates pick the
+# SPINDRIFT_ISSUE_INTENT relay only when read-only (BOX_WRITE_ENABLED absent)
+# and ORCHESTRATOR_ENABLED coincide; every other combination keeps the direct
+# `gh issue create`/`gh label create` path. The filer's own prompt text lands
+# in DRIVER_AGENTS_FILE, not DRIVER_PROMPT_FILE.
 FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
 @test "filer write step: read-write keeps gh issue create unchanged regardless of ORCHESTRATOR_ENABLED" {
@@ -1085,11 +966,9 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   grep -qF "the filer's returned issue URLs" "$DRIVER_PROMPT_FILE"
 }
 
-# AC2's own wording (issue #2019): read-write with the orchestrator OFF (no
-# ORCHESTRATOR_ENABLED at all, byte-for-byte the pre-#2019 default) must
-# emit no SPINDRIFT_ISSUE_INTENT line either -- distinct from the
-# orchestrator-on case above, which proves ORCHESTRATOR_ENABLED alone can't
-# flip the gate without read-only too.
+# issue #2019: read-write with no ORCHESTRATOR_ENABLED at all must emit no
+# SPINDRIFT_ISSUE_INTENT either, distinct from the orchestrator-on case above,
+# which proves ORCHESTRATOR_ENABLED alone cannot flip the gate.
 @test "filer write step: read-write with orchestrator off emits no SPINDRIFT_ISSUE_INTENT" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
   export BOX_FILER_ENABLED=1
@@ -1131,11 +1010,9 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   ! grep -qF "the filer's returned issue URLs" "$DRIVER_PROMPT_FILE"
 }
 
-# The direct case forks further on ISSUE_TRACKER (issue #1963): fj has no
-# label verb and `fj issue create` has no --label flag, so a forgejo
-# tracker's direct filer writes go through the *-forgejo fragments (fj issue
-# create + a curl fallback for the label) instead of gh label create/gh
-# issue create.
+# issue #1963: fj has no label verb and `fj issue create` has no --label flag,
+# so a forgejo tracker's direct filer writes go through the *-forgejo
+# fragments, `fj issue create` plus a curl fallback for the label.
 @test "filer write step: forgejo direct filer speaks fj issue create, never gh issue create" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
   export BOX_FILER_ENABLED=1
@@ -1161,18 +1038,11 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   ! grep -qF 'fj issue create' "$DRIVER_AGENTS_FILE"
 }
 
-# The REVIEW section fork (issue #2037, ADR 0035): orchestrator off keeps the
-# implementor's own inline "spawn a reviewer subagent, loop until no blocking
-# findings" prose unchanged; orchestrator on replaces it with a deferral to
-# the orchestrator's own code-owned review pass -- never both, and never
-# neither, in the rendered prompt.
-# The coordinator fork (issue #2056): a `worker` subagent provisioned in
-# AGENTS_JSON_TEMPLATE (WORKER_MODEL set, issue #2054) turns the main
-# session's IMPLEMENT section into a coordinator that delegates each slice to
-# the worker; with no worker the section is byte-identical to today's
-# single-implementor prompt (the same conditional-residue guarantee every
-# registry row shares). Gated on worker presence alone, orthogonal to
-# ORCHESTRATOR.
+# issue #2037/ADR 0035: the REVIEW section renders either the inline reviewer
+# loop or the orchestrator deferral, never both and never neither.
+# issue #2056/#2054: a provisioned `worker` turns IMPLEMENT into a coordinator
+# that delegates each slice; with no worker the section is byte-identical to
+# the single-implementor prompt. Worker presence alone gates it.
 WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
 @test "IMPLEMENT section: a provisioned worker turns the section into a coordinator that delegates slices" {
@@ -1191,14 +1061,10 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-no-gitignore"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # The .gitignore/$WORK_DIR paragraph was removed (issue #2058 review):
-  # $WORK_DIR is never exported by entrypoint.sh, never in the envsubst
-  # substitution allowlist, and appears in no env-schema/launcher file, so it
-  # rendered as a literal, broken reference; mutating the consumer repo's
-  # .gitignore in every coordinator PR was also scope creep issue #2058
-  # never asked for. Scoped to the IMPLEMENT section itself, not the whole
-  # rendered prompt -- an unrelated future fragment elsewhere is free to
-  # mention either word without tripping this test.
+  # The issue #2058 review removed the .gitignore/$WORK_DIR paragraph:
+  # $WORK_DIR is never exported and never in the envsubst allowlist, so it
+  # rendered as a broken literal. Scoped to the IMPLEMENT section so an
+  # unrelated fragment elsewhere can mention either word without tripping this.
   implement_section="$(awk '/^# IMPLEMENT/,/^# CHECK/' "$DRIVER_PROMPT_FILE")"
   [[ "$implement_section" != *'gitignore'* ]]
   [[ "$implement_section" != *'WORK_DIR'* ]]
@@ -1209,7 +1075,6 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -qF 'delegate each slice' "$DRIVER_PROMPT_FILE"
-  # The single-implementor test-first rule still leads the section verbatim.
   grep -qF 'Work test-first, one slice at a time. Hard rule:' "$DRIVER_PROMPT_FILE"
 }
 
@@ -1220,7 +1085,6 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q 'commits\.Work test-first' "$DRIVER_PROMPT_FILE"
-  # The coordinator step still renders ahead of the retained Hard rule prose.
   coord_line=$(grep -nF 'coordinator' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)
   rule_line=$(grep -nF 'Work test-first, one slice' "$DRIVER_PROMPT_FILE" | head -1 | cut -d: -f1)
   [ "$coord_line" -lt "$rule_line" ]
