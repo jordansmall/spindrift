@@ -3082,19 +3082,19 @@ func TestMemoryLimitToBytes(t *testing.T) {
 		{in: "5x", wantErr: true},
 	}
 	for _, c := range cases {
-		got, err := memoryLimitToBytes(c.in)
+		got, err := MemoryLimitToBytes(c.in)
 		if c.wantErr {
 			if err == nil {
-				t.Errorf("memoryLimitToBytes(%q): want error, got %d", c.in, got)
+				t.Errorf("MemoryLimitToBytes(%q): want error, got %d", c.in, got)
 			}
 			continue
 		}
 		if err != nil {
-			t.Errorf("memoryLimitToBytes(%q): unexpected error: %v", c.in, err)
+			t.Errorf("MemoryLimitToBytes(%q): unexpected error: %v", c.in, err)
 			continue
 		}
 		if got != c.want {
-			t.Errorf("memoryLimitToBytes(%q) = %d, want %d", c.in, got, c.want)
+			t.Errorf("MemoryLimitToBytes(%q) = %d, want %d", c.in, got, c.want)
 		}
 	}
 }

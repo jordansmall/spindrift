@@ -136,7 +136,7 @@ type bwrapAdapter struct {
 	// memoryLimit is the MEMORY_LIMIT knob (empty disables it). It backs the
 	// per-Box cgroup's memory.max control file (ADR 0042, provisionCgroup)
 	// rather than any bwrap flag, and memory.max takes a raw byte count
-	// (memoryLimitToBytes), unlike podman's --memory which accepts the suffix.
+	// (MemoryLimitToBytes), unlike podman's --memory which accepts the suffix.
 	memoryLimit string
 
 	// syscallFilterPath is the baked store path to the compiled BPF syscall
@@ -656,11 +656,14 @@ func resolvedRunEnv(boxEnv map[string]string) []string {
 	return out
 }
 
-// memoryLimitToBytes converts a podman/docker-style unit-suffixed memory limit
+// MemoryLimitToBytes converts a podman/docker-style unit-suffixed memory limit
 // ("5g", "512m", "1024k"; bare digits are already bytes) to a raw byte count.
-// cgroup v2's memory.max takes only a plain integer or the literal "max", unlike
-// podman's --memory, so this has no OCI-adapter equivalent to reuse.
-func memoryLimitToBytes(limit string) (int64, error) {
+// cgroup v2's memory.max accepts only a plain integer or the literal "max",
+// unlike podman's --memory -- so it is the output side that must be bytes;
+// "max" is not an input shape this parses. The doctor-side podman-machine
+// sizing check needs the same conversion, so this is the one parse both
+// share.
+func MemoryLimitToBytes(limit string) (int64, error) {
 	if limit == "" {
 		return 0, fmt.Errorf("empty memory limit")
 	}
@@ -880,7 +883,7 @@ func (a *bwrapAdapter) provisionCgroup(box Box) (dir string) {
 		}
 	}
 	if a.memoryLimit != "" {
-		bytesLimit, err := memoryLimitToBytes(a.memoryLimit)
+		bytesLimit, err := MemoryLimitToBytes(a.memoryLimit)
 		if err != nil {
 			fmt.Printf("==> bwrap runner: warning: could not parse MEMORY_LIMIT %q (%v); box %q keeps cgroup tracking but runs without a memory limit\n", a.memoryLimit, err, box.Name)
 		} else if err := writeCgroupLimit(filepath.Join(dir, "memory.max"), []byte(strconv.FormatInt(bytesLimit, 10)), 0o644); err != nil {
