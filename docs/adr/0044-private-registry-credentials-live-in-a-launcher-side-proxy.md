@@ -785,6 +785,31 @@ daemon between the launcher and the guest for the socket to fail to cross, so
 its own `RegistryProxyTransport` is a trivial stub that always reports
 socket-capable.
 
+> **Update.** Issue #3466 narrowed the rule stated above — that every
+> non-verdict outcome is an infrastructure error rather than a downgrade to
+> TCP. A no-verdict socket probe now triggers one control probe: a second
+> throwaway container running the same verb, given an empty host socket
+> path (`controlProbeNoSocket`) so that nothing is mounted at the socket's
+> container path. A clean `ExitIncapable` from it reads as an ordinary
+> socket-incapable verdict, falling through to the TCP path described
+> below, so the version-drift hint above no longer rides a lone no-verdict
+> socket probe that the control probe resolves. It still rides the
+> both-probes-no-verdict path — a control probe that produces no verdict
+> either is the same hard error described here, naming both exit codes and
+> the possible drift — and it is unchanged on the tcp-reachability
+> sub-probe's own no-verdict paths. A control probe reporting
+> `ExitCapable` is an error too, but a distinct one carrying no
+> version-drift hint: nothing mounted should be able to produce that
+> answer, so version drift is not the explanation.
+>
+> The fallback this unlocks is not unconditional: `deniesHostLoopback`
+> still rejects it outright under a network mode that denies the
+> host-loopback route, and `probeRegistryTCPReachable` must still confirm
+> the `--add-host host-gateway` route live before the dispatch falls
+> through. The #3467 amendment below records the runtime behavior — a
+> socket mount the runtime rejects before the container starts — that
+> motivated the change.
+
 When the probe finds the socket incapable, the Box instead gets a TCP
 endpoint: the launcher binds `registryproxy.Proxy.ListenAndServeTCP` on
 `0.0.0.0:0` and the Box reaches it over `--add-host <host>:host-gateway`,
@@ -1156,8 +1181,8 @@ a clean incapable answer from it means the image and runtime are healthy
 and the mount itself was rejected. That verdict is not itself the final
 answer, though: unless the network mode already rules out the host-loopback
 route, a second live sub-probe confirms the TCP fallback's own
-`--add-host host-gateway` route actually works (`oci.go:657-662`) before
-the dispatch ever falls through to the TCP transport. Before that change,
-the rule that every non-verdict exit is an infrastructure failure (issue
-#3120) governed the exit-125 shape above, and a dispatch that met it
-aborted rather than falling back to TCP.
+`--add-host host-gateway` route actually works (`probeRegistryTCPReachable`)
+before the dispatch ever falls through to the TCP transport. Before that
+change, the rule that every non-verdict exit is an infrastructure failure
+(issue #3120) governed the exit-125 shape above, and a dispatch that met
+it aborted rather than falling back to TCP.
