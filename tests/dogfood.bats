@@ -108,6 +108,17 @@ setup() {
 
   # Default nix exits 2 on `nix run .# -- dispatch` so tests terminate after one cycle.
   _install_exit_code_nix 2
+  export DETACHED_PID_FILE="$BATS_TEST_TMPDIR/detached.pid"
+}
+
+# The Ctrl-C test's detached child is deliberately spared by `abort`, so the
+# suite owns its lifetime. KILL, not TERM: a TERM would trip the child's own
+# marker trap and outlive the test that asserts that marker's absence.
+teardown() {
+  if [ -f "$DETACHED_PID_FILE" ]; then
+    kill -KILL "$(cat "$DETACHED_PID_FILE")" 2>/dev/null
+  fi
+  true
 }
 
 @test "dogfood resets to the base branch before pulling" {
@@ -151,6 +162,228 @@ setup() {
   [[ "$output" == *"non-converging (host-tainted)"* ]]
   # The loop halts on exit 5 instead of rebuilding and retrying the way exit 4
   # does, so it calls dispatch exactly once.
+  [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 1 ]
+}
+
+@test "dogfood stops cleanly when launcher exits 7 (signalled stop)" {
+  _install_exit_code_nix 7
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stopped on request"* ]]
+  # The loop stops on exit 7 instead of rebuilding and retrying the way exit 4
+  # does, so it calls dispatch exactly once.
+  [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 1 ]
+}
+
+@test "dogfood forwards SIGTERM to the in-flight launcher on stop request" {
+  # Reproduces the operator gesture end to end: dogfood-stop sends USR1 to the
+  # loop's own pid (read from the pid file, same as the devShell alias would),
+  # and the loop must forward SIGTERM to the backgrounded launcher rather than
+  # only latching stop_requested for later.
+  local marker="$BATS_TEST_TMPDIR/forwarded"
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<EOF
+: "\${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "\$*" >>"\$NIX_LOG"
+if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
+  trap 'printf forwarded >"$marker"; exit 7' TERM
+  pid=\$(cat .spindrift/dogfood.pid 2>/dev/null)
+  kill -USR1 "\$pid"
+  for _ in \$(seq 1 50); do
+    sleep 0.05
+  done
+  exit 9
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [ -f "$marker" ]
+  [[ "$output" == *"stopped on request"* ]]
+  [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 1 ]
+}
+
+@test "dogfood does not forward SIGTERM when continuous dispatch is opted out" {
+  # With CONTINUOUS_DISPATCH= the launcher never installs its stop handler
+  # (installStopSignal, cmd/launcher/main.go), so a forwarded SIGTERM would
+  # take Go's default disposition and kill it mid-wave. The operator gesture
+  # must instead leave the launcher alone to finish the wave it is draining.
+  # The fake stands in for that disposition by dying 143 on a TERM it should
+  # never receive.
+  local marker="$BATS_TEST_TMPDIR/signalled"
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<EOF
+: "\${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "\$*" >>"\$NIX_LOG"
+if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
+  trap 'printf signalled >"$marker"; exit 143' TERM
+  pid=\$(cat .spindrift/dogfood.pid 2>/dev/null)
+  kill -USR1 "\$pid"
+  for _ in \$(seq 1 10); do
+    sleep 0.05
+  done
+  exit 0
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+
+  run env BASE_BRANCH=main CONTINUOUS_DISPATCH= bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [ ! -f "$marker" ]
+  [[ "$output" == *"graceful stop"* ]]
+  [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 1 ]
+}
+
+@test "dogfood's Ctrl-C abort reaches the launcher's same-group children" {
+  # A foreground Ctrl-C used to reach the launcher's children as well as the
+  # launcher — and it has to, since `podman run` is started without `--rm`
+  # (cmd/launcher/internal/runner/oci.go), so a client left alive leaves a container
+  # behind. Backgrounding the launcher took that away twice over: the signal
+  # is aimed at one pid, and bash's job-control-off SIG_IGN for SIGINT is
+  # inherited tree-wide. `abort` restores the blast radius by TERMing the
+  # descendants that share this loop's process group, while sparing one in a
+  # group of its own (NixRealizer's Setpgid'd background `nix build`,
+  # docs/reference.md). The fake plays all three parts, and stands in for the
+  # terminal by signalling the loop's own pid, read from the pid file.
+  local launcher_marker="$BATS_TEST_TMPDIR/launcher-hup"
+  local grouped_marker="$BATS_TEST_TMPDIR/grouped-termed"
+  local detached_marker="$BATS_TEST_TMPDIR/detached-termed"
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<EOF
+: "\${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "\$*" >>"\$NIX_LOG"
+if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
+  trap 'printf hup >"$launcher_marker"; exit 130' HUP
+  # Inherits this fake's process group, like a podman client: must be TERMed.
+  # The redirects keep it off the stdout \`run\` reads to EOF, and off bats's
+  # own TAP fd 3, either of which a lingering child would hold open.
+  (
+    trap 'printf termed >"$grouped_marker"; exit 0' TERM
+    while :; do sleep 0.05; done
+  ) </dev/null >/dev/null 2>&1 3>&- &
+  # \`set -m\` gives this one a process group of its own: must be spared.
+  set -m
+  (
+    trap 'printf termed >"$detached_marker"; exit 0' TERM
+    while :; do sleep 0.05; done
+  ) </dev/null >/dev/null 2>&1 3>&- &
+  printf '%s\n' \$! >"$DETACHED_PID_FILE"
+  set +m
+  kill -INT "\$(cat .spindrift/dogfood.pid)"
+  while :; do sleep 0.05; done
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 130 ]
+  # The loop exits without waiting for anything, so every marker lands after
+  # `run` returns. Wait out the two that should land before judging the one
+  # that should not, or the negative assertion would only mean "too early".
+  local i
+  for ((i = 0; i < 200; i++)); do
+    [ -f "$launcher_marker" ] && [ -f "$grouped_marker" ] && break
+    sleep 0.05
+  done
+  [ -f "$launcher_marker" ]
+  [ -f "$grouped_marker" ]
+  sleep 1
+  [ ! -f "$detached_marker" ]
+}
+
+@test "dogfood leaves the launcher's stdin attached to the operator's terminal" {
+  # SPINDRIFT_GH_TOKEN_CMD unlock prompts only reach the operator while the
+  # launcher's stdin is the real terminal (isInteractiveTTY, cmd/launcher/flags.go),
+  # so backgrounding must not silently swap it for /dev/null. Reading from a
+  # regular file (below) only proves the explicit `<&0` redirect; a file can
+  # never raise SIGTTIN the way a real pty read would, so it cannot by itself
+  # prove the launcher stays out of a background process group. The pgid
+  # comparison is what guards that: without job control the launcher shares
+  # the loop's own (foreground) process group, so a vault-unlock prompt's tty
+  # read is a legal foreground read rather than one that raises SIGTTIN.
+  local marker="$BATS_TEST_TMPDIR/launcher-stdin"
+  local pgid_marker="$BATS_TEST_TMPDIR/launcher-pgid-verdict"
+  local stdin_file="$BATS_TEST_TMPDIR/operator-stdin"
+  printf 'operator-typed-this\n' >"$stdin_file"
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<EOF
+: "\${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "\$*" >>"\$NIX_LOG"
+if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
+  loop_pgid=\$(ps -o pgid= -p "\$(cat .spindrift/dogfood.pid)" | tr -d '[:space:]')
+  own_pgid=\$(ps -o pgid= -p \$\$ | tr -d '[:space:]')
+  if [ "\$own_pgid" = "\$loop_pgid" ]; then
+    printf 'same' >"$pgid_marker"
+  else
+    printf 'different' >"$pgid_marker"
+  fi
+  if IFS= read -r line; then
+    printf '%s' "\$line" >"$marker"
+  else
+    printf 'EOF-ON-DEV-NULL' >"$marker"
+  fi
+  exit 2
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh" <"$stdin_file"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$marker")" = "operator-typed-this" ]
+  [ "$(cat "$pgid_marker")" = "same" ]
+}
+
+@test "dogfood latches stop_requested and breaks the loop when a stop signal arrives between iterations" {
+  # Regression guard: a launcher that ignores the forwarded TERM (or a signal
+  # that lands after it already exited on its own) must still stop the loop
+  # via the stop_requested backstop rather than spinning to another wave.
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<'EOF'
+: "${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "$*" >>"$NIX_LOG"
+if printf '%s ' "$@" | grep -q -- '-- dispatch'; then
+  trap '' TERM
+  kill -USR1 "$PPID"
+  sleep 0.05
+  exit 0
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"graceful stop"* ]]
   [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 1 ]
 }
 

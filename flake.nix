@@ -214,11 +214,14 @@
                   pkgs.bubblewrap
                   pkgs.passt
                 ];
-                # `dogfood-stop` asks a running ./dogfood.sh to exit after its
-                # current wave (the USR1/TERM trap in dogfood.sh) instead of
-                # Ctrl-C, which would abort the wave mid-flight.
+                # `dogfood-stop` signals a running ./dogfood.sh to wind down
+                # gracefully, instead of Ctrl-C, which would abort the wave
+                # mid-flight. What that costs depends on state the alias cannot
+                # see (in-flight launcher or not, continuous dispatch or not),
+                # so it reports only the signal it sent and leaves the
+                # consequence to the loop's own output.
                 shellHook = ''
-                  alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.spindrift/dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: will stop after the current wave (pid $pid)" || echo "dogfood: no running loop (.spindrift/dogfood.pid not found)"'
+                  alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.spindrift/dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: stop requested (loop pid $pid) — the loop prints what it does next" || echo "dogfood: no running loop (.spindrift/dogfood.pid not found)"'
                 '';
               };
             }
