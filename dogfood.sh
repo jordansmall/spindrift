@@ -79,6 +79,10 @@ _memory_limit_to_mib() {
 # than the machine has, the VM's OOM-killer fires before any single container's
 # --memory cap bites (#565 killed an in-box `nix build`; #712 took down the whole
 # VM). With no active machine, `podman machine inspect` errors or prints nothing.
+# `spindrift doctor`'s podman-machine-memory row (#3537) runs the same
+# arithmetic; VM_OVERHEAD_MIB below is duplicated in
+# cmd/launcher/podmanmachine_doctor_checks.go because this loop must refuse to
+# start before any launcher binary is built.
 check_podman_machine_memory() {
   # `-` not `:-`: MEMORY_LIMIT= is a deliberate opt-out (env-schema.nix
   # memoryLimit.default disables the limit on an empty string), distinct from unset.
