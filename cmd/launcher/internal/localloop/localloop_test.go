@@ -912,6 +912,108 @@ func TestWire_ComposedLoop_BroadTicketIssueExcludedFromOwnSeams(t *testing.T) {
 	}
 }
 
+// A broad ticket that has a real seam AND was itself dispatched with a
+// landing that goes stuck must still surface: #3439's exclusion drops the
+// broad ticket from its own seams group (the group keeps a real seam, so
+// #3439's drop-none fallback does not apply), so verdictFor's
+// stuck[s.Number] check in the per-seam loop never sees it, even though
+// reconcile — which walks every open issue, exclusion or not — reports it
+// stuck (issue #3440).
+func TestWire_ComposedLoop_StuckBroadTicketLandingSurfacesAnyway(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const parent = "1701"
+	const seamNum = "45"
+	writeLocalIssue(t, issuesDir, parent, "Broad Ticket 1701", "", testLabels.InProgress)
+	writeLocalIssue(t, issuesDir, seamNum, "seam 45", parent, testLabels.InProgress)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(lw.CodeForgeForIssue(seamNum), it, backend.Descriptor{}, backend.Descriptor{}),
+	}
+
+	// The seam lands normally: bundle it, then settle.
+	seamCF := lw.CodeForgeForIssue(seamNum)
+	seamBranch := seamCF.AgentBranch(seamNum)
+	bundleFixtureCommit(t, accumDir, testBaseBranch, seamBranch, seamNum, lw.OutboxDir(seamNum))
+	settle.New(cfg, it, seamCF).Settle(dispatch.NewFake(), seamNum, 0, dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: seamNum, Landing: seamBranch, Status: "ready"},
+		},
+	})
+
+	// The broad ticket's own landing goes stuck: no bundleFixtureCommit call,
+	// so the outbox stays empty and settle's relay fails (mirrors
+	// TestWire_ComposedLoop_MissingBundleBlocksNotFailed).
+	broadCF := lw.CodeForgeForIssue(parent)
+	broadBranch := broadCF.AgentBranch(parent)
+	settle.New(cfg, it, broadCF).Settle(dispatch.NewFake(), parent, 0, dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: parent, Landing: broadBranch, Status: "ready"},
+		},
+	})
+
+	res, err := reconcile.Run(it, seamCF, nil, cfg.Capabilities, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if got, ok := res.Stuck[parent]; !ok || got != broadBranch {
+		t.Fatalf("reconcile.Run Stuck[%s] = %q, %v, want %q, true -- the broad ticket's own stuck landing must be visible to reconcile", parent, got, ok, broadBranch)
+	}
+
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	// Scope both assertions to the broad ticket's own verdict line: a
+	// whole-output grep for "stuck landing" would also trip on some other
+	// group's held verdict, which says nothing about this exclusion.
+	var parentLine string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "surface: "+parent+" ") {
+			parentLine = line
+			break
+		}
+	}
+	wantVerdict := "surface: " + parent + " surfaced → branch " + parent + " (1 seams)"
+	if !strings.Contains(parentLine, wantVerdict) {
+		t.Errorf("Surface verdict line for %s = %q, want it to contain %q -- full output %q", parent, parentLine, wantVerdict, out.String())
+	}
+	if strings.Contains(parentLine, "stuck landing") {
+		t.Errorf("Surface verdict line for %s = %q, must not contain %q -- the broad ticket's own stuck landing is excluded from its seams group", parent, parentLine, "stuck landing")
+	}
+	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent).Run(); err != nil {
+		t.Errorf("refs/heads/%s must exist -- the group's only real seam closed", parent)
+	}
+}
+
 // Two parentless issues whose filenames sanitize to the same token collide
 // into one group the exclusion pass would otherwise empty. Surface's
 // len(kept) > 0 guard keeps both, so the group still gates on an open member
