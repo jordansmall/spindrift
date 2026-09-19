@@ -781,6 +781,9 @@ phase_prompt_assembly() {
   [ -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" ] && _ap_args+=(--check-hygiene-skill-baked)
   [ -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" ] && _ap_args+=(--code-comments-skill-baked)
   [ -f "$DRIVER_SKILLS_DIR/nix-checks/SKILL.md" ] && _ap_args+=(--nix-checks-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/principle-fix-root-causes/SKILL.md" ] && _ap_args+=(--principle-fix-root-causes-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/principle-laziness-protocol/SKILL.md" ] && _ap_args+=(--principle-laziness-protocol-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md" ] && _ap_args+=(--principle-redesign-from-first-principles-skill-baked)
   # END GENERATED SKILL-BAKED PROBES
   # DRIVER_ARGV_MODEL_OMIT_EMPTY is the Driver registry's own model-slot gate,
   # and --devshell mirrors the devShell wrapping run_driver_in_env used to build

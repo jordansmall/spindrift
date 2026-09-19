@@ -20,15 +20,18 @@ const (
 type Env struct {
 	// Each flag is true only when DRIVER_SKILLS_DIR/<name>/SKILL.md exists.
 	// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT
-	CavemanSkillBaked      bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" (CAVEMAN_BAKED)
-	TDDSkillBaked          bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/tdd/SKILL.md" (TDD_BAKED)
-	CommitSkillBaked       bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/commit/SKILL.md" (COMMIT_BAKED)
-	CodeReviewSkillBaked   bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/code-review/SKILL.md" (CODE_REVIEW_BAKED)
-	AutoFormatSkillBaked   bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" (AUTO_FORMAT_BAKED)
-	AutoLintSkillBaked     bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" (AUTO_LINT_BAKED)
-	CheckHygieneSkillBaked bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" (CHECK_HYGIENE_BAKED)
-	CodeCommentsSkillBaked bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" (CODE_COMMENTS_BAKED)
-	NixChecksSkillBaked    bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/nix-checks/SKILL.md" (NIX_CHECKS_BAKED)
+	CavemanSkillBaked                              bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" (CAVEMAN_BAKED)
+	TDDSkillBaked                                  bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/tdd/SKILL.md" (TDD_BAKED)
+	CommitSkillBaked                               bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/commit/SKILL.md" (COMMIT_BAKED)
+	CodeReviewSkillBaked                           bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/code-review/SKILL.md" (CODE_REVIEW_BAKED)
+	AutoFormatSkillBaked                           bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" (AUTO_FORMAT_BAKED)
+	AutoLintSkillBaked                             bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" (AUTO_LINT_BAKED)
+	CheckHygieneSkillBaked                         bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" (CHECK_HYGIENE_BAKED)
+	CodeCommentsSkillBaked                         bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" (CODE_COMMENTS_BAKED)
+	NixChecksSkillBaked                            bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/nix-checks/SKILL.md" (NIX_CHECKS_BAKED)
+	PrincipleFixRootCausesSkillBaked               bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/principle-fix-root-causes/SKILL.md" (PRINCIPLE_FIX_ROOT_CAUSES_BAKED)
+	PrincipleLazinessProtocolSkillBaked            bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/principle-laziness-protocol/SKILL.md" (PRINCIPLE_LAZINESS_PROTOCOL_BAKED)
+	PrincipleRedesignFromFirstPrinciplesSkillBaked bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md" (PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED)
 	// END GENERATED SKILL-BAKED FIELDS
 
 	// OrchestratorEnabled is the master switch every orchestrator-conditioned

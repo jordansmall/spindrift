@@ -89,6 +89,9 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	checkHygieneSkillBaked := fs.Bool("check-hygiene-skill-baked", false, "true when DRIVER_SKILLS_DIR/check-hygiene/SKILL.md was baked")
 	codeCommentsSkillBaked := fs.Bool("code-comments-skill-baked", false, "true when DRIVER_SKILLS_DIR/code-comments/SKILL.md was baked")
 	nixChecksSkillBaked := fs.Bool("nix-checks-skill-baked", false, "true when DRIVER_SKILLS_DIR/nix-checks/SKILL.md was baked")
+	principleFixRootCausesSkillBaked := fs.Bool("principle-fix-root-causes-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-fix-root-causes/SKILL.md was baked")
+	principleLazinessProtocolSkillBaked := fs.Bool("principle-laziness-protocol-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-laziness-protocol/SKILL.md was baked")
+	principleRedesignFromFirstPrinciplesSkillBaked := fs.Bool("principle-redesign-from-first-principles-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md was baked")
 	// END GENERATED SKILL-BAKED FLAGS
 
 	promptsDir := fs.String("prompts-dir", "", "PROMPTS_DIR, default /agent/prompts")
@@ -180,6 +183,9 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	env.CheckHygieneSkillBaked = *checkHygieneSkillBaked
 	env.CodeCommentsSkillBaked = *codeCommentsSkillBaked
 	env.NixChecksSkillBaked = *nixChecksSkillBaked
+	env.PrincipleFixRootCausesSkillBaked = *principleFixRootCausesSkillBaked
+	env.PrincipleLazinessProtocolSkillBaked = *principleLazinessProtocolSkillBaked
+	env.PrincipleRedesignFromFirstPrinciplesSkillBaked = *principleRedesignFromFirstPrinciplesSkillBaked
 	// END GENERATED SKILL-BAKED ENV
 	env.PromptsDir = *promptsDir
 	env.AgentsPromptFiles = *agentsPromptFiles
