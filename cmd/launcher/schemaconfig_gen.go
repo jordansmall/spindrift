@@ -21,6 +21,7 @@ type schemaConfig struct {
 	codeForgeRemoteURL           string
 	completeLabel                string
 	continuousDispatch           bool
+	daemonApp                    string
 	failedLabel                  string
 	forgejoBaseURL               string
 	forgejoToken                 string
@@ -88,6 +89,7 @@ func loadSchemaConfig() schemaConfig {
 		codeForgeRemoteURL:      getenvSchema("CODE_FORGE_REMOTE_URL"),
 		completeLabel:           getenvSchema("COMPLETE_LABEL"),
 		continuousDispatch:      getenvSchema("CONTINUOUS_DISPATCH") != "",
+		daemonApp:               getenvSchema("DAEMON_APP"),
 		failedLabel:             getenvSchema("FAILED_LABEL"),
 		forgejoBaseURL:          getenvSchema("FORGEJO_BASE_URL"),
 		forgejoToken:            os.Getenv("FORGEJO_TOKEN"),

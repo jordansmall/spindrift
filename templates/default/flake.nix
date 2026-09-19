@@ -113,6 +113,8 @@
             #     # when enabled, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see the exit-code table in docs/reference.md's Dogfood loop section, under Termination). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it
             #     enable = false;
             #   };
+            #   # flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision -- the Consumer's own CLI app, e.g. .# or .#dogfood-bwrap; read by the daemon only, the launcher itself ignores it
+            #   daemonApp = ".#";
             #   # caps the wave size; 0 means uncapped
             #   maxJobs = 0;
             #   # maximum concurrent agent containers

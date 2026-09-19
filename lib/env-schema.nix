@@ -615,6 +615,17 @@ in
     flakeOption = true;
     boxEnv = false;
   };
+  daemonApp = {
+    env = "DAEMON_APP";
+    group = "dispatch";
+    default = ".#";
+    doc = "flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision -- the Consumer's own CLI app, e.g. .# or .#dogfood-bwrap; read by the daemon only, the launcher itself ignores it";
+    flakeOption = true;
+    # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
+    # alias to preserve, so no lib/legacy-settings-section.nix row.
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
   mergePollInterval = {
     env = "MERGE_POLL_INTERVAL";
     group = "git";
