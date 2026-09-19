@@ -1,5 +1,14 @@
 # Research is a dispatch kind, advise-only, through the full Box
 
+> **Narrowed by [ADR 0051](0051-the-driving-loop-is-a-shipped-app-above-the-invocation-boundary.md).**
+> "Label families never interact at claim time" still holds exactly as written.
+> ADR 0051's daemon runs both kinds against one pool, which makes it possible to
+> dispatch a worker and a researcher onto the same issue at once, so each kind's
+> *discovery* now skips issues in progress in the other family. That is a
+> scheduling preference at a different seam, not a claim rule: an issue still
+> legitimately wears a label from each family, and claiming still never consults
+> the other.
+
 Issues arrive under-specified: a worker Agent dispatched onto a thin issue
 burns its run rediscovering context a reviewer could have written down, and
 some issues (Filer findings included) are false positives that should never

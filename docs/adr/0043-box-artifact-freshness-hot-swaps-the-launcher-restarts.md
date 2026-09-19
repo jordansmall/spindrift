@@ -1,5 +1,15 @@
 # Box-artifact freshness hot-swaps; only the launcher needs a restart
 
+> **Superseded in part by [ADR 0051](0051-the-driving-loop-is-a-shipped-app-above-the-invocation-boundary.md)
+> on the daemon path.** The hot-swap exists to avoid draining a long-lived
+> multi-Box invocation. ADR 0051 gives dispatch concurrency to the daemon, which
+> runs one Box per rev-pinned invocation, so on that path there is no pool to
+> drain and nothing to swap — each Box is fresh by construction. Everything
+> below still holds for continuous dispatch, which remains for operators who
+> want no daemon and is the Console's engine. The unreclaimed snapshot
+> generations this ADR accepts as a cost stop accumulating under the daemon,
+> since `build` runs between invocations.
+
 [ADR 0019](0019-dispatch-exits-at-the-wave-boundary.md) made the launcher
 invocation the image-freshness boundary: a continuous run that finds itself
 stale stops refilling, lets in-flight Boxes drain, and exits so the driving
