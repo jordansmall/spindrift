@@ -13,11 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
-// TestRegistryRouteChecks_UnreadableRoutesFileReturnsNil verifies
-// registryRouteChecks returns nil when c.registryProxyRoutesFile points at a
-// file that can't be read -- deferring to the existing registry-proxy-routes
-// row (checks.go), which already reports this same read failure, rather
-// than this check surfacing a duplicate error over the identical cause.
+// registryRouteChecks defers to the existing registry-proxy-routes row
+// (checks.go), which already reports this same read failure, rather than
+// reporting a duplicate error over the identical cause.
 func TestRegistryRouteChecks_UnreadableRoutesFileReturnsNil(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
@@ -27,11 +25,9 @@ func TestRegistryRouteChecks_UnreadableRoutesFileReturnsNil(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteChecks_UnparsableRoutesFileReturnsNil verifies
-// registryRouteChecks returns nil when c.registryProxyRoutesFile contains
-// invalid TOML -- deferring to the existing registry-proxy-routes row
+// registryRouteChecks defers to the existing registry-proxy-routes row
 // (checks.go), which already reports this same parse failure, rather than
-// this check surfacing a duplicate error over the identical cause.
+// reporting a duplicate error over the identical cause.
 func TestRegistryRouteChecks_UnparsableRoutesFileReturnsNil(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `not valid toml [[[`)
@@ -41,16 +37,11 @@ func TestRegistryRouteChecks_UnparsableRoutesFileReturnsNil(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteChecks_UpstreamOriginWithUserinfoFailsWithoutLeakingCredential
-// verifies registryroutes.ValidateUpstreamOrigin's userinfo branch, reached
-// through routeChecksFor since registryroutes.Parse itself already rejects a
-// userinfo-bearing upstream-origin at parse time, making this shape of Route
-// unreachable from a real routes file -- see routeChecksFor's doc comment.
-// Pins the AC that a failing row names the route and the field but never a
-// credential value: unlike its two sibling branches, this branch
-// deliberately omits raw from its message, so the error must mention
-// "userinfo" while containing neither the userinfo password nor the raw URL
-// it came from.
+// Built through routeChecksFor because registryroutes.Parse already rejects a
+// userinfo-bearing upstream-origin at parse time, so a real routes file cannot
+// produce this Route. Unlike its two sibling branches, this branch omits raw
+// from its message, so the error must name "userinfo" while carrying neither
+// the password nor the raw URL it came from.
 func TestRegistryRouteChecks_UpstreamOriginWithUserinfoFailsWithoutLeakingCredential(t *testing.T) {
 	const raw = "https://user:s3cr3t@host.example.com"
 	routes := []registryroutes.Route{{
@@ -75,12 +66,9 @@ func TestRegistryRouteChecks_UpstreamOriginWithUserinfoFailsWithoutLeakingCreden
 	}
 }
 
-// TestRegistryRouteChecks_UnsetFileReturnsNil verifies registryRouteChecks
-// returns nil -- not an empty non-nil slice, and no rows at all -- when
-// c.registryProxyRoutesFile is unset (issue #3144 slice 1 gate): the
-// per-route rows are opt-in alongside the routes file, and with none set
-// there's nothing to configure (the scalar REGISTRY_PROXY_* knobs are
-// retired, issue #3145).
+// The per-route rows are opt-in alongside the routes file, so with none set
+// registryRouteChecks must return nil, not an empty non-nil slice (issue #3144
+// slice 1 gate; the scalar REGISTRY_PROXY_* knobs are retired, issue #3145).
 func TestRegistryRouteChecks_UnsetFileReturnsNil(t *testing.T) {
 	c := minimalValidConfig()
 	if got := registryRouteChecks(c); got != nil {
@@ -88,11 +76,9 @@ func TestRegistryRouteChecks_UnsetFileReturnsNil(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteChecks_ValidFileYieldsTwoRowsPerRouteNamedByMatchHost
-// verifies a well-formed two-route file yields exactly four rows -- a
-// credential row and an upstream row per route -- and that every row's Name
-// is derived from its own route's match host, not a shared/generic name
-// (issue #3144 AC: "rows named by the route's match host").
+// Each route yields a credential row and an upstream row, and every row's Name
+// comes from its own route's match host, not a shared generic name (issue #3144
+// AC: "rows named by the route's match host").
 func TestRegistryRouteChecks_ValidFileYieldsTwoRowsPerRouteNamedByMatchHost(t *testing.T) {
 	const envVar = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_VALID"
 	t.Setenv(envVar, "s3cr3t-value")
@@ -130,11 +116,8 @@ credential = { env = "`+envVar+`" }
 	}
 }
 
-// TestRegistryRouteChecks_UnresolvableCredentialFailsNamingRouteAndField
-// verifies a route whose credential env var is unset produces a failing
-// credential row -- Probe's error names the route's match host and the
-// "credential" field, never the (in this case nonexistent) credential
-// value, following the fails-and-passes shape the existing
+// The failing row's error names the route's match host and the "credential"
+// field, never the credential value, following the shape the existing
 // registry-proxy-routes row already uses for its own per-route Peek.
 func TestRegistryRouteChecks_UnresolvableCredentialFailsNamingRouteAndField(t *testing.T) {
 	c := minimalValidConfig()
@@ -158,13 +141,10 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_UNSET" }
 	}
 }
 
-// TestRegistryRouteChecks_InvalidUpstreamOriginFailsNamingRouteAndField
-// verifies a route with a malformed upstream-origin produces a failing
-// origin row naming the route's match host and the "upstream-origin" field.
-// Built directly via routeChecksFor rather than a routes-file fixture:
-// registryroutes.Parse itself already rejects a malformed upstream-origin at
-// parse time, so this shape of Route is unreachable from a real file -- see
-// routeChecksFor's doc comment.
+// Built through routeChecksFor rather than a routes-file fixture because
+// registryroutes.Parse already rejects a malformed upstream-origin at parse
+// time, so a real file cannot produce this Route. See routeChecksFor's doc
+// comment.
 func TestRegistryRouteChecks_InvalidUpstreamOriginFailsNamingRouteAndField(t *testing.T) {
 	routes := []registryroutes.Route{{
 		MatchHost:      "registry.example.com",
@@ -187,10 +167,8 @@ func TestRegistryRouteChecks_InvalidUpstreamOriginFailsNamingRouteAndField(t *te
 	}
 }
 
-// TestRegistryRouteChecks_UpstreamOriginWithPathFails verifies the origin
-// row rejects an upstream-origin carrying a path: a route serves the paths
-// its derived path-set admits, never a declared base path (ADR 0047, issue
-// #3261).
+// A route serves the paths its derived path-set admits, never a declared base
+// path (ADR 0047, issue #3261).
 func TestRegistryRouteChecks_UpstreamOriginWithPathFails(t *testing.T) {
 	routes := []registryroutes.Route{{
 		MatchHost:      "registry.example.com",
@@ -203,10 +181,8 @@ func TestRegistryRouteChecks_UpstreamOriginWithPathFails(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteChecks_DeclaredUpstreamOriginRowReportsIt verifies a
-// route declaring a valid upstream-origin passes and reports that origin as
-// the row's detail, so an operator reading the report can see which origin
-// the route will forward to.
+// The row reports the declared origin as its detail so an operator reading the
+// report can see which origin the route will forward to.
 func TestRegistryRouteChecks_DeclaredUpstreamOriginRowReportsIt(t *testing.T) {
 	routes := []registryroutes.Route{{
 		MatchHost:      "registry.example.com",
@@ -223,9 +199,8 @@ func TestRegistryRouteChecks_DeclaredUpstreamOriginRowReportsIt(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteChecks_DerivedOriginRowPasses verifies a route declaring
-// no upstream-origin (the common case) yields a passing row saying so,
-// rather than routeUpstreamCheck running ValidateUpstreamOrigin against ""
+// Declaring no upstream-origin is the common case, so the row must pass and say
+// so, rather than routeUpstreamCheck running ValidateUpstreamOrigin against ""
 // and reporting a route Parse itself already accepted as broken.
 func TestRegistryRouteChecks_DerivedOriginRowPasses(t *testing.T) {
 	routes := []registryroutes.Route{{
@@ -242,11 +217,8 @@ func TestRegistryRouteChecks_DerivedOriginRowPasses(t *testing.T) {
 	}
 }
 
-// TestDoctorReportChecks_WiresRegistryRouteChecks verifies doctorReportChecks
-// appends registryRouteChecks(c)'s rows: present when
-// c.registryProxyRoutesFile is set, absent when it's unset (issue #3144
-// slice 1 -- "no routes rows, no new output at all" when the routes file
-// isn't configured).
+// Issue #3144 slice 1: "no routes rows, no new output at all" when the routes
+// file isn't configured.
 func TestDoctorReportChecks_WiresRegistryRouteChecks(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -264,16 +236,11 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_WIRING" }
 	}
 }
 
-// TestDoctorReport_ExecCredentialPeekedOncePerInvocation verifies that a full
-// `spindrift doctor` invocation (doctorReport) peeks an exec-sourced route
-// credential exactly once -- not once for validateConfig's classification
-// pass and again for runDoctor's report pass -- since each Peek spawns the
-// credential's subprocess, and a real exec credential may prompt a vault or
-// biometric confirmation per invocation (issue #3144 review finding).
-// doctorReport is the real entry point cmdDoctor calls; the deleted
-// doctorReportChecks-only predecessor of this test exercised the report row
-// set in isolation, a set the real command never runs alone, and so had
-// already certified the double-Peek defect this test guards as fixed.
+// Each Peek spawns the credential's subprocess, and a real exec credential can
+// prompt a vault or biometric confirmation, so a full doctor run must peek once,
+// not once for validateConfig's classification and again for runDoctor's report
+// (issue #3144 review finding). The test drives doctorReport, the entry point
+// cmdDoctor calls, because the report row set alone never runs in real use.
 func TestDoctorReport_ExecCredentialPeekedOncePerInvocation(t *testing.T) {
 	counterFile := filepath.Join(t.TempDir(), "counter")
 
@@ -306,13 +273,11 @@ credential = { exec = ["/bin/sh", "-c", "echo x >> `+counterFile+`; echo tok"] }
 	}
 }
 
-// TestDoctorReportChecks_UnresolvableCredentialFailsOnlyPerRouteRow verifies
-// that when a route's credential can't resolve, doctorReportChecks(c)
-// reports exactly one failing row for that cause -- the per-route
-// registry-route-credential[<host>] row -- while the aggregate
-// registry-proxy-routes row (which no longer peeks credentials in the
-// doctor report path) still passes. Before the fix both rows failed over
-// the identical cause (issue #3144 review finding).
+// Before the fix, an unresolvable route credential failed both the per-route
+// registry-route-credential[<host>] row and the aggregate registry-proxy-routes
+// row over the identical cause (issue #3144 review finding). Now only the
+// per-route row fails, because the aggregate row no longer peeks credentials in
+// the doctor report path.
 func TestDoctorReportChecks_UnresolvableCredentialFailsOnlyPerRouteRow(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -338,14 +303,11 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_DEDUP_UNSET" }
 	}
 }
 
-// TestRegistryProxyRoutesCheck_PeekCredentialsTrueStillFailsOnUnresolvable
-// verifies registryProxyRoutesCheck(c, true) -- the variant
-// launcherCrossKnobChecks wires into validate()'s launch-gate
-// (RunChecksFailFast) and validateConfig's exit-2 classification -- still
-// fails on an unresolvable route credential. Guards against the
-// doctor-report-only substitution (peekCredentials = false) leaking into
-// those paths, which would silently let a launch proceed with a broken
-// route credential (issue #3144 review finding).
+// registryProxyRoutesCheck(c, true) is the variant launcherCrossKnobChecks
+// wires into validate()'s launch gate (RunChecksFailFast) and validateConfig's
+// exit-2 classification. Guards against the doctor-report-only substitution of
+// peekCredentials = false leaking into those paths, which would silently let a
+// launch proceed with a broken route credential (issue #3144 review finding).
 func TestRegistryProxyRoutesCheck_PeekCredentialsTrueStillFailsOnUnresolvable(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -360,14 +322,11 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_LAUNCH_GATE_UN
 	}
 }
 
-// TestRegistryRouteChecks_CredentialDetailDistinguishesPassThroughFromResolved
-// verifies routeCredentialCheck's Probe detail tells apart a route that
-// deliberately omits the credential key (ADR 0045's documented
-// unauthenticated pass-through) from one whose credential key is present and
-// resolves -- before this test, both cases returned the identical "resolves"
-// detail, so a routes file that lost its credential key to a typo looked no
-// different from an intentional pass-through (review finding on issue
-// #3145).
+// Before this test, a route that omits the credential key (ADR 0045's
+// unauthenticated pass-through) and one whose key resolves returned the
+// identical "resolves" detail, so a routes file that lost its credential key to
+// a typo looked no different from an intentional pass-through (review finding
+// on issue #3145).
 func TestRegistryRouteChecks_CredentialDetailDistinguishesPassThroughFromResolved(t *testing.T) {
 	const envVar = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_PASSTHROUGH"
 	t.Setenv(envVar, "s3cr3t-value")

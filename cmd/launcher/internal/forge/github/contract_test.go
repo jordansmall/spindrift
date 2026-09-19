@@ -10,22 +10,18 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// fakeGHState is a stateful stand-in for the gh CLI: a shell script (kept as
-// a real .sh file, not an inline Go string, so it stays covered by the
-// repo's shellcheck sweep) that reads and writes a STATE_DIR/issues/<num>/
-// tree instead of the prependFakeGH helper's single scripted response — the
-// contract calls TransitionState/CompleteVerdict/DepsOf many times across
-// scenarios and needs each call to see the previous ones' effects.
+// fakeGHState is a stateful stand-in for the gh CLI. It stays a real .sh file
+// rather than an inline Go string so the repo's shellcheck sweep keeps
+// covering it.
 //
 //go:embed testdata/fake-gh.sh
 var fakeGHState string
 
-// githubHarness is a forgetest.Harness backed by the fakeGHState script: a
-// STATE_DIR/issues/<num>/ tree the script reads and mutates, so successive
-// gh invocations across a contract run see each other's effects — unlike
-// prependFakeGH's single scripted response, one call to CompleteVerdict's
-// double-dispatch guard needs to observe a label a prior TransitionState
-// call added.
+// githubHarness implements forgetest.Harness over a STATE_DIR/issues/<num>/
+// tree the fakeGHState script reads and mutates, so successive gh calls see
+// each other's effects. prependFakeGH's single scripted response cannot do
+// that: CompleteVerdict's double-dispatch guard has to observe a label an
+// earlier TransitionState call added.
 type githubHarness struct {
 	issuesDir string
 	tr        forge.IssueTracker

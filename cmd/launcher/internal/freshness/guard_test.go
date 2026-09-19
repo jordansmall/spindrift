@@ -2,10 +2,9 @@ package freshness
 
 import "testing"
 
-// TestGuard_Classify_ContentDivergence_RecordsAndRebuilds verifies that a
-// stale Result with no prior recorded rev is treated as content staleness (a
-// new base tip a rebuild will fix): Classify returns Rebuild and records the
-// rev for the next run to compare against.
+// A stale Result with no prior recorded rev is content staleness, a new base
+// tip a rebuild will fix, so Classify records the rev for the next run to
+// compare against.
 func TestGuard_Classify_ContentDivergence_RecordsAndRebuilds(t *testing.T) {
 	g := NewGuard(t.TempDir())
 
@@ -19,10 +18,9 @@ func TestGuard_Classify_ContentDivergence_RecordsAndRebuilds(t *testing.T) {
 	}
 }
 
-// TestGuard_Classify_NonConverging_HostTaintedAndClears verifies that a
-// stale Result at the SAME rev as the prior recorded run — a rebuild already
-// happened and it's still stale — is classified HostTainted, and the
-// persisted prior-stale-rev memory is cleared.
+// A stale Result at the same rev as the prior recorded run means a rebuild
+// already happened and did not help, so the guard classifies it HostTainted
+// and clears the persisted prior-stale-rev memory.
 func TestGuard_Classify_NonConverging_HostTaintedAndClears(t *testing.T) {
 	g := NewGuard(t.TempDir())
 	if got := g.Classify(Result{Rev: "revA", TipTag: "spindrift:hash"}); got != Rebuild {
@@ -39,10 +37,8 @@ func TestGuard_Classify_NonConverging_HostTaintedAndClears(t *testing.T) {
 	}
 }
 
-// TestGuard_Classify_DifferentRevAfterPrior_RecordsAndRebuilds verifies that
-// a stale Result at a DIFFERENT rev than the prior recorded run — a
-// genuinely new base tip — is content staleness, not host taint: Classify
-// returns Rebuild and records the new rev.
+// A stale Result at a different rev than the prior recorded run is a genuinely
+// new base tip, so it stays content staleness rather than host taint.
 func TestGuard_Classify_DifferentRevAfterPrior_RecordsAndRebuilds(t *testing.T) {
 	g := NewGuard(t.TempDir())
 	if got := g.Classify(Result{Rev: "revA", TipTag: "spindrift:hash"}); got != Rebuild {
@@ -59,12 +55,9 @@ func TestGuard_Classify_DifferentRevAfterPrior_RecordsAndRebuilds(t *testing.T) 
 	}
 }
 
-// TestGuard_Classify_SameRevEmptyTipTag_RebuildsNotHostTaint verifies that a
-// stale Result at the SAME rev as the prior recorded run, but with an empty
-// TipTag, is NOT classified HostTainted: it's a stuck eval/tag-derivation
-// failure repeating at the same rev, not a genuine host-taint divergence
-// (which always has a derived tip tag). Classify returns Rebuild and records
-// the rev so the loop keeps rebuilding and retrying.
+// An empty TipTag at the same rev is a stuck eval or tag-derivation failure
+// repeating, not host taint: a genuine host-taint divergence always has a
+// derived tip tag. The loop has to keep rebuilding and retrying.
 func TestGuard_Classify_SameRevEmptyTipTag_RebuildsNotHostTaint(t *testing.T) {
 	g := NewGuard(t.TempDir())
 	if got := g.Classify(Result{Rev: "revA", TipTag: "spindrift:hash"}); got != Rebuild {
@@ -81,15 +74,11 @@ func TestGuard_Classify_SameRevEmptyTipTag_RebuildsNotHostTaint(t *testing.T) {
 	}
 }
 
-// TestGuard_Classify_LauncherOnlyStale_RebuildsNotHostTaint is an end-to-end
-// regression test for the launcher-only-stale bug (issue #1364's research
-// comment): a launcher-only-stale verdict — Applicable, !Fresh, ImageFresh
-// true, LauncherFresh false, Rev set, TipTag == "" — is the exact Result
-// shape Probe now produces when the image matches but the launcher doesn't.
-// Classifying it twice at the SAME rev (two runs stuck at the same
-// launcher-stale tip) must return Rebuild both times, never HostTainted —
-// otherwise the launcher-only case would spuriously masquerade as a
-// non-converging image-tag divergence (exit 5 instead of exit 4).
+// Regression test for the launcher-only-stale bug (issue #1364's research
+// comment). This Result shape is what Probe produces when the image matches
+// but the launcher does not, and two runs stuck at the same launcher-stale tip
+// must both return Rebuild. HostTainted here would report a non-converging
+// image-tag divergence, exit 5 instead of exit 4.
 func TestGuard_Classify_LauncherOnlyStale_RebuildsNotHostTaint(t *testing.T) {
 	g := NewGuard(t.TempDir())
 	res := Result{Applicable: true, Fresh: false, ImageFresh: true, LauncherFresh: false, Rev: "revA", TipTag: ""}
@@ -105,10 +94,9 @@ func TestGuard_Classify_LauncherOnlyStale_RebuildsNotHostTaint(t *testing.T) {
 	}
 }
 
-// TestGuard_Classify_EmptyStaleRev_NeverHostTainted verifies that an empty
-// Rev (a transient fetch failure, not a resolved base-tip rev) is never
-// classified HostTainted, even with an empty prior — NonConverging treats ""
-// as "unknown", not "same as before".
+// An empty Rev is a transient fetch failure, not a resolved base-tip rev, so
+// NonConverging treats it as unknown rather than as the same rev as before,
+// even when the prior is also empty.
 func TestGuard_Classify_EmptyStaleRev_NeverHostTainted(t *testing.T) {
 	g := NewGuard(t.TempDir())
 

@@ -6,9 +6,7 @@ import (
 	"time"
 )
 
-// TestStaleDrainReport_Duration verifies Duration() returns the wall-clock gap
-// between StaleAt and DrainedAt, and returns exactly zero (not near-zero)
-// when the two are the same time.Time value (the zero-length-drain case).
+// A zero-length drain must return exactly zero, not a near-zero duration.
 func TestStaleDrainReport_Duration(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	drained := stale.Add(5 * time.Second)
@@ -24,10 +22,9 @@ func TestStaleDrainReport_Duration(t *testing.T) {
 	}
 }
 
-// TestStaleDrainReport_Console verifies Console()'s exact rendered line -- a
-// substring-only check (e.g. "1" alone) would pass for several wrong
-// renderings (a swapped field, a missing separator), so this pins the whole
-// format the docs and loop scripts depend on, not just its presence.
+// This compares the whole line, because a substring check would still pass for
+// a swapped field or a missing separator. The docs and loop scripts depend on
+// the exact format.
 func TestStaleDrainReport_Console(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	r := StaleDrainReport{
@@ -44,9 +41,8 @@ func TestStaleDrainReport_Console(t *testing.T) {
 	}
 }
 
-// TestStaleDrainReport_HostLog verifies HostLog() starts with "STALE_DRAIN " and
-// contains correctly formatted key=value pairs, parseable by a simple
-// strings.Split/regex a loop script would use.
+// The prefix and key=value shape are what a loop script splits on, so they are
+// part of the contract rather than formatting detail.
 func TestStaleDrainReport_HostLog(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	r := StaleDrainReport{
@@ -70,11 +66,8 @@ func TestStaleDrainReport_HostLog(t *testing.T) {
 	}
 }
 
-// TestStaleDrainReport_Console_HeldBackUnknown verifies Console() renders an
-// explicit "unknown" clause -- not a fabricated "0 issue(s) held back" --
-// when HeldBackUnknown is true, since a transient discover error during the
-// stale-drain report (#2678) means the held-back count was never actually
-// confirmed.
+// A transient discover error (#2678) leaves the held-back count unconfirmed, so
+// Console() must say "unknown" rather than fabricate a zero.
 func TestStaleDrainReport_Console_HeldBackUnknown(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	r := StaleDrainReport{
@@ -99,10 +92,8 @@ func TestStaleDrainReport_Console_HeldBackUnknown(t *testing.T) {
 	}
 }
 
-// TestStaleDrainReport_HostLog_HeldBackUnknown verifies HostLog() renders
-// "heldBack=unknown" -- not "heldBack=0" -- when HeldBackUnknown is true, so
-// an external loop script totaling stale-drain.log across iterations never
-// sums a fabricated zero into its total.
+// A loop script totals stale-drain.log across iterations, so an unconfirmed
+// count must log as unknown and never sum in as a fabricated zero (#2678).
 func TestStaleDrainReport_HostLog_HeldBackUnknown(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	r := StaleDrainReport{
@@ -128,8 +119,6 @@ func TestStaleDrainReport_HostLog_HeldBackUnknown(t *testing.T) {
 	}
 }
 
-// TestStaleDrainReport_ZeroLengthDrain verifies Console() and HostLog() render a
-// zero duration cleanly (not blank/garbage) when StaleAt == DrainedAt.
 func TestStaleDrainReport_ZeroLengthDrain(t *testing.T) {
 	stale := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	r := StaleDrainReport{StaleAt: stale, DrainedAt: stale, FreeSlotSecs: 0, HeldBack: 0}

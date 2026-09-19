@@ -17,24 +17,16 @@ func defaultDoctorConfig() Config {
 		InProgressLabel: "agent-in-progress",
 		FailedLabel:     "agent-failed",
 		CompleteLabel:   "agent-complete",
-		// MergePolicy "manual" keeps the branch-protection row (issue #2570)
-		// Advisory rather than Required for tests that don't care about it —
-		// the forge.Fake instances these existing tests build generally
-		// don't script SetBranchProtected, so an unset BaseBranch would
-		// otherwise report a spurious Required failure unrelated to what
-		// each test actually verifies. Tests that DO exercise
-		// branch-protection still call defaultDoctorConfig() and override
-		// MergePolicy/BaseBranch on the returned Config, rather than
-		// building a separate Config{} literal.
+		// MergePolicy "manual" keeps the branch-protection row Advisory rather
+		// than Required (issue #2570). Most tests here build a forge.Fake that
+		// never scripts SetBranchProtected, so a Required tier would report a
+		// spurious failure. Tests that do exercise branch protection override
+		// MergePolicy and BaseBranch on the returned Config.
 		MergePolicy: "manual",
 		BaseBranch:  "main",
 	}
 }
 
-// TestRun_ConnectivityAndRecoverableIssuesProbesSucceed verifies the two
-// connectivity rows (issue tracker, code forge) and the recoverable-issues
-// repository-state row each print their own success line, in order, when
-// they all pass.
 func TestRun_ConnectivityAndRecoverableIssuesProbesSucceed(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -65,10 +57,6 @@ func TestRun_ConnectivityAndRecoverableIssuesProbesSucceed(t *testing.T) {
 	}
 }
 
-// TestRun_IssueTrackerAuthFailure_CodeForgeProbeDoesNotRun verifies that when
-// the issue-tracker probe fails, Run fails fast — the code-forge probe never
-// runs (no extra live call, no bogus success line) — and Run returns the
-// issue-tracker's wrapped auth-failure error immediately.
 func TestRun_IssueTrackerAuthFailure_CodeForgeProbeDoesNotRun(t *testing.T) {
 	it := forge.NewFake()
 	it.ProbeErr = forge.ErrAuthFailure
@@ -99,10 +87,6 @@ func TestRun_IssueTrackerAuthFailure_CodeForgeProbeDoesNotRun(t *testing.T) {
 	}
 }
 
-// TestRun_IssueTrackerRateLimit_CodeForgeProbeDoesNotRun verifies that when
-// the issue-tracker probe fails with ErrRateLimit, Run fails fast — the
-// code-forge probe never runs (no extra live call, no bogus success line) —
-// and Run returns the issue-tracker's wrapped rate-limit error immediately.
 func TestRun_IssueTrackerRateLimit_CodeForgeProbeDoesNotRun(t *testing.T) {
 	it := forge.NewFake()
 	it.ProbeErr = forge.ErrRateLimit
@@ -133,16 +117,9 @@ func TestRun_IssueTrackerRateLimit_CodeForgeProbeDoesNotRun(t *testing.T) {
 	}
 }
 
-// TestRun_CodeForgeProbeFailure_ReportsMissingLineAndSkipsRecoverableCheck
-// verifies that once the issue-tracker probe succeeds but the code-forge
-// probe fails, the failing row is never written to w as a "MISSING:
-// code-forge: ..." line — only the earlier successful rows are reported via
-// ReportResults, and the failure reaches the caller solely through the
-// returned error. This matches the pre-refactor Run, which returned before
-// any output on a built-in probe failure; writing the failing row to w too
-// would double-report it, since the caller (cmdDoctor) also prints the
-// returned error. The recoverable-issues probe never runs either — no
-// ListIssues(Recoverable) call, and no "ok:" success line for it.
+// A failing code-forge row must not be written to w as a MISSING line: the
+// caller (cmdDoctor) already prints the returned error, so reporting the row
+// too would double-report it. The recoverable-issues probe never runs either.
 func TestRun_CodeForgeProbeFailure_ReportsMissingLineAndSkipsRecoverableCheck(t *testing.T) {
 	it := forge.NewFake()
 	it.ProbeRepo = "owner/repo"
@@ -174,10 +151,8 @@ func TestRun_CodeForgeProbeFailure_ReportsMissingLineAndSkipsRecoverableCheck(t 
 	}
 }
 
-// TestRun_ExtraChecks_FailingRequiredRowIsReportedButDoesNotFailRun verifies
-// a caller-supplied extraChecks Required row that fails is reported via
-// ReportResults (its MISSING line appears in the output) but does NOT fail
-// Run overall — extraChecks are informational only.
+// A caller-supplied extraChecks row that fails is reported but never fails Run,
+// even at the Required tier: extraChecks are informational only.
 func TestRun_ExtraChecks_FailingRequiredRowIsReportedButDoesNotFailRun(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -207,11 +182,6 @@ func TestRun_ExtraChecks_FailingRequiredRowIsReportedButDoesNotFailRun(t *testin
 	}
 }
 
-// TestRun_ExtraChecks_FailingAdvisoryRowDoesNotFailRun verifies a
-// caller-supplied extraChecks Advisory row that fails does NOT fail Run
-// overall — Run proceeds through to the label-tier section and returns nil
-// when everything else passes — and that the failure is still surfaced
-// (informational) in the output rather than silently swallowed.
 func TestRun_ExtraChecks_FailingAdvisoryRowDoesNotFailRun(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -237,10 +207,8 @@ func TestRun_ExtraChecks_FailingAdvisoryRowDoesNotFailRun(t *testing.T) {
 	}
 }
 
-// TestRun_BranchProtection_RequiredTierUnprotectedFailsRun verifies that
-// under a Required merge policy (immediate/auto/empty), an unprotected base
-// branch makes Run return a non-nil error naming the branch (AC1 "fails as
-// required").
+// Merge policies "immediate", "auto" and the empty default all map to the
+// Required tier, so an unprotected base branch fails Run (AC1).
 func TestRun_BranchProtection_RequiredTierUnprotectedFailsRun(t *testing.T) {
 	for _, mergePolicy := range []string{"immediate", "auto", ""} {
 		t.Run(mergePolicy, func(t *testing.T) {
@@ -265,10 +233,8 @@ func TestRun_BranchProtection_RequiredTierUnprotectedFailsRun(t *testing.T) {
 	}
 }
 
-// TestRun_BranchProtection_AdvisoryTierUnprotectedReportsButDoesNotFailRun
-// verifies that under mergePolicy "manual" (Advisory tier), an unprotected
-// base branch does NOT fail Run, but the row's failure is still visible in
-// the output as an advisory line.
+// Merge policy "manual" maps to the Advisory tier, so an unprotected base
+// branch is reported without failing Run.
 func TestRun_BranchProtection_AdvisoryTierUnprotectedReportsButDoesNotFailRun(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -291,9 +257,8 @@ func TestRun_BranchProtection_AdvisoryTierUnprotectedReportsButDoesNotFailRun(t 
 	}
 }
 
-// TestRun_BranchProtection_NotApplicableForForgeWithoutProtectionAPI verifies
-// that a forge shape with no branch-protection API (push-only, local)
-// reports "not applicable" and never fails Run, regardless of merge policy.
+// A forge with no branch-protection API (push-only, local) reports the row as
+// not applicable under every merge policy.
 func TestRun_BranchProtection_NotApplicableForForgeWithoutProtectionAPI(t *testing.T) {
 	for _, mergePolicy := range []string{"immediate", "manual"} {
 		t.Run(mergePolicy, func(t *testing.T) {
@@ -321,10 +286,9 @@ func TestRun_BranchProtection_NotApplicableForForgeWithoutProtectionAPI(t *testi
 	}
 }
 
-// TestRun_BranchProtection_ProbeFailureDegradesAndDoesNotFailRun verifies
-// AC3: even under a Required merge policy, a probe failure (e.g. missing
-// token permission) degrades to non-blocking — Run returns nil — while the
-// failure and its Remedy line are still visible in the output.
+// A probe failure, such as a missing token permission, degrades to
+// non-blocking even under a Required merge policy (AC3), while the failure and
+// its remedy line stay visible in the output.
 func TestRun_BranchProtection_ProbeFailureDegradesAndDoesNotFailRun(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -360,9 +324,6 @@ func TestRun_BranchProtection_ProbeFailureDegradesAndDoesNotFailRun(t *testing.T
 	}
 }
 
-// TestRun_BranchProtection_ProtectedAndRequiredSucceeds verifies that a
-// protected base branch under a Required merge policy reports success and
-// does not fail Run.
 func TestRun_BranchProtection_ProtectedAndRequiredSucceeds(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -385,15 +346,11 @@ func TestRun_BranchProtection_ProtectedAndRequiredSucceeds(t *testing.T) {
 	}
 }
 
-// TestRun_RecoverableIssuesProbeFailure_WrapsErrConnectivity verifies the
-// recoverable-issue-count row also wraps ErrConnectivity (issue #2569
-// exit-code vocabulary) when its ListIssues call fails, the same treatment
-// as the issue-tracker and code-forge probes above.
 func TestRun_RecoverableIssuesProbeFailure_WrapsErrConnectivity(t *testing.T) {
-	// Recoverable must map to a real label for the probe to call ListIssues
-	// at all — see repoStateChecks' recoverable-issues Probe doc comment: an
-	// unmapped Recoverable (the zero-value forge.NewFake() default) skips
-	// the call entirely to avoid false-matching every open issue.
+	// Recoverable must map to a real label or the probe skips ListIssues
+	// entirely to avoid false-matching every open issue, and this test would
+	// never reach the failure it pins. The zero-value forge.NewFake() default
+	// leaves Recoverable unmapped.
 	f := forge.NewFake(forge.DispatchLabels{Recoverable: "needs-recovery"})
 	f.ProbeRepo = "owner/repo"
 	wantErr := errors.New("boom")
@@ -412,10 +369,6 @@ func TestRun_RecoverableIssuesProbeFailure_WrapsErrConnectivity(t *testing.T) {
 	}
 }
 
-// TestRun_ListLabelsFailure_WrapsErrConnectivity verifies checkLabels'
-// ListLabels failure also wraps ErrConnectivity (issue #2569 exit-code
-// vocabulary) — the label-tier probe is a connectivity failure the same way
-// the issue-tracker, code-forge, and recoverable-issues probes above are.
 func TestRun_ListLabelsFailure_WrapsErrConnectivity(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -435,10 +388,8 @@ func TestRun_ListLabelsFailure_WrapsErrConnectivity(t *testing.T) {
 	}
 }
 
-// TestRun_CreateLabelFailure_WrapsErrConnectivity verifies a CreateLabel
-// failure during the interactive label-creation loop also wraps
-// ErrConnectivity (issue #2569 exit-code vocabulary) — creating a label is
-// itself a code-forge/issue-tracker connectivity operation.
+// Creating a label is itself a connectivity operation against the forge, so a
+// CreateLabel failure carries the same classification (issue #2569).
 func TestRun_CreateLabelFailure_WrapsErrConnectivity(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -459,16 +410,15 @@ func TestRun_CreateLabelFailure_WrapsErrConnectivity(t *testing.T) {
 	}
 }
 
-// TestRun_CreateLabelFailure_AdvisoryLabelDoesNotFailRun verifies that a
-// CreateLabel failure on a purely advisory-tier label (here, research) does
-// NOT make Run return an error — accepting the create-labels prompt must
-// never be worse than declining it, which is safe for an advisory-only run
-// (issue #2569). Only a failure on a work-tier label is fatal
-// (TestRun_CreateLabelFailure_WrapsErrConnectivity above).
+// A CreateLabel failure on an advisory-tier label (here, research) must not
+// fail Run: accepting the create-labels prompt must never be worse than
+// declining it (issue #2569). Only a work-tier label failure is fatal, as the
+// test above pins.
 func TestRun_CreateLabelFailure_AdvisoryLabelDoesNotFailRun(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	// All four work labels present; every research label missing.
+	// All four work labels are present and every research label is missing, so
+	// the accepted create-labels prompt only creates advisory-tier labels.
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	wantErr := errors.New("boom")
 	f.CreateLabelErr = wantErr
@@ -483,13 +433,9 @@ func TestRun_CreateLabelFailure_AdvisoryLabelDoesNotFailRun(t *testing.T) {
 	}
 }
 
-// TestRun_NonInteractive_MissingWorkLabels_WrapsErrRequiredLabelsMissing verifies
-// that when work-tier triage labels are missing and Run is non-interactive,
-// the returned error wraps ErrRequiredLabelsMissing (issue #2569 exit-code
-// vocabulary) and names each missing label in its message — not just "one or
-// more" — so a stderr summary can tell an operator exactly which labels to
-// create, and that each missing label's stdout row carries the fatal
-// "MISSING" prefix, not "advisory".
+// The error must name each missing label rather than say "one or more", so a
+// stderr summary tells an operator exactly which labels to create, and each
+// row must carry the fatal MISSING prefix rather than advisory (issue #2569).
 func TestRun_NonInteractive_MissingWorkLabels_WrapsErrRequiredLabelsMissing(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -513,10 +459,6 @@ func TestRun_NonInteractive_MissingWorkLabels_WrapsErrRequiredLabelsMissing(t *t
 	}
 }
 
-// TestRun_TTY_Decline_WrapsErrRequiredLabelsMissing verifies that declining the
-// interactive create-labels prompt also wraps ErrRequiredLabelsMissing (issue #2569
-// exit-code vocabulary) — the same classification as the non-interactive
-// missing-labels path above, since both are "required labels missing" exits.
 func TestRun_TTY_Decline_WrapsErrRequiredLabelsMissing(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -532,10 +474,6 @@ func TestRun_TTY_Decline_WrapsErrRequiredLabelsMissing(t *testing.T) {
 	}
 }
 
-// TestRun_StillMissingAfterCreation_WrapsErrRequiredLabelsMissing verifies that when
-// a work-tier label is still missing on the post-creation re-verify, the
-// returned error wraps ErrRequiredLabelsMissing (issue #2569 exit-code vocabulary)
-// and names the still-missing label.
 func TestRun_StillMissingAfterCreation_WrapsErrRequiredLabelsMissing(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -559,12 +497,10 @@ func TestRun_StillMissingAfterCreation_WrapsErrRequiredLabelsMissing(t *testing.
 	}
 }
 
-// TestRun_BranchProtection_RequiredTierUnprotectedDoesNotSkipLaterRows
-// verifies AC3 (issue #2798): a blocking branch-protection failure must not
-// short-circuit the rest of Run the way a connectivity-phase failure does.
-// The recoverable-issues row, the per-label rows, and the failing row's own
-// MISSING/remedy lines must all still reach the output, and the returned
-// error must still name the branch-protection failure.
+// A blocking branch-protection failure must not short-circuit the rest of Run
+// the way a connectivity-phase failure does (AC3, issue #2798): the later rows
+// and the failing row's own MISSING and remedy lines must all still reach the
+// output.
 func TestRun_BranchProtection_RequiredTierUnprotectedDoesNotSkipLaterRows(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -601,12 +537,9 @@ func TestRun_BranchProtection_RequiredTierUnprotectedDoesNotSkipLaterRows(t *tes
 	}
 }
 
-// TestRun_BranchProtection_RequiredTierUnprotected_StillOffersLabelCreation
-// verifies AC3: an unprotected base under a Required merge policy must not
-// suppress the interactive create-missing-labels offer. The offer is
-// printed, CreateLabel is actually called for the missing labels, and Run
-// still returns the branch-protection error (not nil, and not a label
-// error) — the deferred configuration-phase error wins.
+// An unprotected base under a Required merge policy must not suppress the
+// interactive create-missing-labels offer (AC3, issue #2798), and the deferred
+// configuration-phase error still wins over any label error.
 func TestRun_BranchProtection_RequiredTierUnprotected_StillOffersLabelCreation(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -644,11 +577,9 @@ func TestRun_BranchProtection_RequiredTierUnprotected_StillOffersLabelCreation(t
 	}
 }
 
-// TestRun_BranchProtection_RequiredTierUnprotected_NonInteractivePrecedence
-// pins the precedence rule (issue #2798 coordinator decision): when both an
-// unprotected required base branch and missing work labels are present in
-// non-interactive mode, Run returns the branch-protection error, not
-// ErrRequiredLabelsMissing.
+// The precedence rule (issue #2798 coordinator decision): with both an
+// unprotected required base branch and missing work labels in non-interactive
+// mode, Run returns the branch-protection error, not ErrRequiredLabelsMissing.
 func TestRun_BranchProtection_RequiredTierUnprotected_NonInteractivePrecedence(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -672,11 +603,9 @@ func TestRun_BranchProtection_RequiredTierUnprotected_NonInteractivePrecedence(t
 	}
 }
 
-// TestRun_BranchProtection_RequiredTierUnprotected_ListLabelsErrorReportedNotSwallowed
-// pins what happens to the loser of the #2798 precedence rule: the deferred
-// branch-protection error still wins Run's return value, but the later
-// ListLabels failure it masks must still reach the operator via the report
-// stream rather than vanish from every stream at once.
+// The loser of the #2798 precedence rule must not disappear: the deferred
+// branch-protection error still wins Run's return value, but the ListLabels
+// failure it masks must still reach the operator through the report stream.
 func TestRun_BranchProtection_RequiredTierUnprotected_ListLabelsErrorReportedNotSwallowed(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -706,10 +635,9 @@ func TestRun_BranchProtection_RequiredTierUnprotected_ListLabelsErrorReportedNot
 	}
 }
 
-// TestRun_BranchProtection_RequiredTierUnprotected_CreateLabelErrorReportedNotSwallowed
-// is the create-label-side twin of the ListLabels test above: an
-// interactive, accepted work-tier CreateLabel failure is also masked by the
-// deferred branch-protection error and must still be reported to w.
+// The create-label twin of the ListLabels test above: an interactive, accepted
+// work-tier CreateLabel failure is also masked by the deferred
+// branch-protection error and must still be reported to w.
 func TestRun_BranchProtection_RequiredTierUnprotected_CreateLabelErrorReportedNotSwallowed(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -740,13 +668,11 @@ func TestRun_BranchProtection_RequiredTierUnprotected_CreateLabelErrorReportedNo
 	}
 }
 
-// TestRun_RecoverableIssuesRequiredFailure_PrecedesLaterListLabelsError pins
-// the precedence rule for the *other* repository-state row: a blocking
-// recoverable-issues failure defers the same way a blocking
-// branch-protection failure does (both rows share one FirstRequiredError
-// call), so it must also win over a later ListLabels failure while a
-// passing branch-protection row proves the deferral isn't specific to
-// branch-protection.
+// The precedence rule for the other repository-state row: a blocking
+// recoverable-issues failure defers the same way a blocking branch-protection
+// failure does (both rows share one FirstRequiredError call), so it also wins
+// over a later ListLabels failure. The passing branch-protection row here
+// proves the deferral is not specific to branch-protection.
 func TestRun_RecoverableIssuesRequiredFailure_PrecedesLaterListLabelsError(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Recoverable: "needs-recovery"})
 	f.ProbeRepo = "owner/repo"

@@ -14,7 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// tempLogDir creates a temp dir with a .spindrift/logs subdirectory.
 func tempLogDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -24,10 +23,8 @@ func tempLogDir(t *testing.T) string {
 	return dir
 }
 
-// boxErr is a non-nil error that stands in for a non-zero box exit.
 var boxErr = errors.New("exit 1")
 
-// writeFile writes content to path, creating parent directories as needed.
 func writeFile(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -36,23 +33,17 @@ func writeFile(path, content string) error {
 }
 
 // nonceLine appends d's per-run nonce (issue #1939) to line and a trailing
-// newline, mirroring how a genuine Box echoes RUN_NONCE on its outcome line.
-// line should have no trailing newline.
+// newline, the way a genuine Box echoes RUN_NONCE on its outcome line. line
+// must have no trailing newline.
 func nonceLine(d *Dispatch, line string) []byte {
 	return []byte(line + " nonce=" + d.nonce + "\n")
 }
 
-// writeOutcomeOnFinalCall configures fr to return errs[i] for the i-th Run
-// call (mirroring runner.Fake's own RunErrs semantics: the last element is
-// reused once the sequence is exhausted), writing line to that call's log
-// only when errs[i] is nil. Before issue #2075, dispatchWithRetry never
-// scanned a non-zero exit's log for an outcome, so a hold/backoff retry
-// fixture could get away with a single fr.WriteToOutput echoing the eventual
-// outcome onto every call, including the earlier, still-failing ones. Now
-// that a genuine printed outcome settles a non-zero exit immediately, that
-// shortcut would falsify the scenario under test -- an earlier attempt dying
-// with no verdict at all -- so those fixtures use this helper instead to
-// keep the outcome line on the genuinely successful call only.
+// writeOutcomeOnFinalCall makes fr return errs[i] for the i-th Run call (the
+// last element repeats once the sequence runs out, like runner.Fake's RunErrs)
+// and writes line only on a call whose error is nil. Since issue #2075 a
+// printed outcome settles a non-zero exit immediately, so a retry fixture that
+// echoed the outcome on every call would stop testing a verdict-less attempt.
 func writeOutcomeOnFinalCall(fr *runner.Fake, errs []error, line []byte) {
 	calls := 0
 	fr.RunFunc = func(box runner.Box) error {
@@ -70,10 +61,9 @@ func writeOutcomeOnFinalCall(fr *runner.Fake, errs []error, line []byte) {
 }
 
 // fakeDriver is a test double for driver.Driver. ClassifyFn, when set,
-// overrides the default Terminal/TaskFailed classification. ExtractUsage
-// delegates to the real claude subpackage's log parsing (not faked) so
-// dispatch's UsageReport tests can exercise real claude-format stream-json
-// fixtures through the Driver seam.
+// overrides the default Terminal/TaskFailed classification. ExtractUsage calls
+// the real claude log parsing, so dispatch's UsageReport tests run genuine
+// claude-format stream-json fixtures through the Driver seam.
 type fakeDriver struct {
 	ClassifyFn func(logPath string) (driver.Classification, error)
 }
@@ -99,9 +89,8 @@ func (d fakeDriver) RenderTranscript(logPath string, opts driverkit.RenderOption
 	return driverclaude.RenderTranscriptWithRole(logPath, opts.TopLevelRole)
 }
 
-// ResolveExit trusts the passed exitCode unchanged, mirroring claudeDriver's
-// own behavior (issue #2263) since fakeDriver otherwise stands in for the
-// claude strategy in dispatch's tests.
+// ResolveExit trusts the passed exitCode unchanged, matching claudeDriver
+// (issue #2263), since fakeDriver replaces the claude strategy in these tests.
 func (d fakeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 	return exitCode, nil
 }

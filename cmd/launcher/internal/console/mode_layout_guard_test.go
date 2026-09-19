@@ -9,29 +9,19 @@ import (
 	"testing"
 )
 
-// modeLayoutFuncInfo is one declared function or method this guard's call
-// closure can walk into: its body, and the file:line to blame a violation
-// on if resolveLayout is reached through it.
+// modeLayoutFuncInfo is one declared function or method the guard can walk
+// into, with the file:line to blame a violation on.
 type modeLayoutFuncInfo struct {
 	file string
 	line int
 	body *ast.BlockStmt
 }
 
-// modeLayoutCalleeName resolves a call expression's function name for
-// matching against this package's own declared function/method names — a
-// bare identifier (package-level func) or a selector's final name (method
-// call, e.g. m.sidebarDocked(...)) — mirroring calleeName in
-// gh_error_guard_test.go. This is name-matching, not real type resolution:
-// package console genuinely overloads names (interface marker methods like
-// isConsoleMsg, plus Update/View/Snapshot/Refresh/Discover/String declared
-// on several types), so one name can resolve to several unrelated bodies.
-// The guard deliberately over-approximates rather than picks one: it walks
-// every same-named declaration and flags a violation if any of them reaches
-// resolveLayout. That's the safe direction for a guard test — a false
-// positive here is a loud, immediately fixable failure, while resolving to
-// the wrong single body could produce a false negative that silently loses
-// the invariant this guard exists to hold.
+// modeLayoutCalleeName resolves a call's callee to a bare identifier or a
+// selector's final name, mirroring calleeName in gh_error_guard_test.go. This
+// matches names rather than resolving types, and package console overloads
+// names, so the guard walks every same-named body: a false positive fails
+// loudly, while picking the wrong one would hide a real violation.
 func modeLayoutCalleeName(fun ast.Expr) (string, bool) {
 	switch f := fun.(type) {
 	case *ast.Ident:
@@ -43,21 +33,11 @@ func modeLayoutCalleeName(fun ast.Expr) (string, bool) {
 }
 
 // callsResolveLayout reports whether resolveLayout is reached anywhere in
-// body's transitive in-package call closure — directly, or through any
-// number of intermediate calls to other funcs/methods declared in funcs —
-// and, if so, the position of the direct resolveLayout call itself, which
-// the recursion propagates back up unchanged rather than reporting the
-// intermediate hop. funcs maps a name to every declaration sharing
-// it, since the package overloads several names (see modeLayoutCalleeName);
-// a call is only clean if none of the same-named bodies reach resolveLayout.
-// visited guards the walk against a call cycle: a name already on the
-// current path is never re-entered, so a helper that (directly or
-// indirectly) calls itself — through any of its same-named bodies — cannot
-// hang this walk. The one shape it cannot see is a call that names no
-// function: resolveLayout stored in a function value, passed as a callback,
-// or reached through an interface whose method has no same-named
-// declaration here. None of those exist on this path, and reintroducing the
-// dependency the obvious way — a plain call — is what this guard catches.
+// body's transitive in-package call closure, and returns the position of the
+// direct call rather than the intermediate hop. funcs maps a name to every
+// declaration sharing it; visited stops a call cycle from hanging the walk.
+// The walk cannot see a call made through a function value or an interface, and
+// no such call reaches resolveLayout on this path.
 func callsResolveLayout(body ast.Node, funcs map[string][]*modeLayoutFuncInfo, visited map[string]bool) (token.Pos, bool) {
 	var foundPos token.Pos
 	found := false
@@ -102,24 +82,11 @@ func callsResolveLayout(body ast.Node, funcs map[string][]*modeLayoutFuncInfo, v
 	return foundPos, found
 }
 
-// TestActiveModeDoesNotDependOnResolveLayout guards the mode-authority
-// direction issue #3017 restructured: ActiveMode (and the modeActive helper
-// it drives its precedence loop through) must derive the active Mode from
-// Model's own fields alone, never by asking resolveLayout for the render
-// geometry first. Before #3017, ActiveMode called resolveLayout to learn
-// the sidebar's docked/modal/fullscreen branch, which closed a latent cycle
-// with the render path: ActiveMode -> resolveLayout -> bodyBudget ->
-// renderHeader -> (indirectly) back to Mode-dependent rendering decisions.
-// #2922 established layout as a value View and Update each consume once,
-// derived without needing to know the active Mode first; a mode decision
-// that itself depends on layout inverts that.
-//
-// This can't be a whole-file grep for resolveLayout in model.go: model.go
-// legitimately calls resolveLayout from several Update-path branches (the
-// consumer side #2922 intends) that have nothing to do with mode
-// resolution. Only ActiveMode's and modeActive's own transitive in-package
-// call closures are in scope, which is why this walks the call graph
-// instead of scanning text.
+// TestActiveModeDoesNotDependOnResolveLayout pins issue #3017: ActiveMode and
+// modeActive must derive the active Mode from Model's own fields, not from
+// resolveLayout, whose old call closed a cycle into the render path and broke
+// #2922's rule that layout is derived without knowing the Mode. Other calls to
+// resolveLayout in model.go are legitimate, so this walks call closures, not text.
 func TestActiveModeDoesNotDependOnResolveLayout(t *testing.T) {
 	funcs := make(map[string][]*modeLayoutFuncInfo)
 
@@ -152,9 +119,8 @@ func TestActiveModeDoesNotDependOnResolveLayout(t *testing.T) {
 		if !ok {
 			t.Fatalf("TestActiveModeDoesNotDependOnResolveLayout: %s not found in package console — was it renamed? this guard must track the rename", root)
 		}
-		// root itself isn't among the overloaded names this guard's doc
-		// comment calls out, but check every same-named declaration anyway
-		// rather than assuming that stays true.
+		// root is not an overloaded name today, but check every same-named
+		// declaration rather than assume that holds.
 		for _, info := range infos {
 			pos, found := callsResolveLayout(info.body, funcs, map[string]bool{root: true})
 			if !found {

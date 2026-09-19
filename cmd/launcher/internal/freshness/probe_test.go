@@ -13,13 +13,11 @@ import (
 
 var errEvalBoom = errors.New("nix eval boom")
 
-// TestProbe_Bwrap_NotApplicable_WhenNotAGitRepo verifies that a "bwrap"
-// runnerKind is not special-cased to always report not-applicable — it now
-// flows through the same fetch-base-tip + eval logic as any other
-// runnerKind, and only reports not-applicable for the same underlying
-// reasons (here: pwd isn't inside any git repository at all), naming that
-// reason rather than stale bwrap-specific wording. Mirrors
-// TestProbe_NotAGitRepo but with runnerKind "bwrap".
+// Probe does not special-case a "bwrap" runnerKind into always reporting
+// not-applicable. It runs the same fetch-base-tip and eval logic as any
+// other runnerKind and reports not-applicable only for the same underlying
+// reasons, naming that reason rather than stale bwrap-specific wording.
+// Mirrors TestProbe_NotAGitRepo.
 func TestProbe_Bwrap_NotApplicable_WhenNotAGitRepo(t *testing.T) {
 	pwd := t.TempDir()
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-closure"}
@@ -43,10 +41,9 @@ func TestProbe_Bwrap_NotApplicable_WhenNotAGitRepo(t *testing.T) {
 	}
 }
 
-// TestProbe_Bwrap_FreshWhenClosureOutPathMatches verifies that a "bwrap"
-// runnerKind compares the freshly evaluated outPath directly against
-// imageTag (a bare nix store path for bwrap, not a "repo:tag" string) — an
-// exact match reports fresh with no genuine divergence to name.
+// For bwrap, imageTag is a bare nix store path rather than a "repo:tag"
+// string, so Probe compares the freshly evaluated outPath against it
+// directly.
 func TestProbe_Bwrap_FreshWhenClosureOutPathMatches(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	closurePath := "/nix/store/" + testutil.SameHash + "-agent-closure"
@@ -71,11 +68,9 @@ func TestProbe_Bwrap_FreshWhenClosureOutPathMatches(t *testing.T) {
 	}
 }
 
-// TestProbe_Bwrap_RebuildNeededWhenClosureOutPathDiffers verifies that a
-// "bwrap" runnerKind reports rebuild-needed when the freshly evaluated
-// outPath differs from the loaded one, and that TipTag carries the raw fresh
-// outPath verbatim — never the OCI "<repo>:<hash>" tag format, since a raw
-// nix store path never contains a colon.
+// For bwrap, TipTag carries the raw fresh outPath verbatim, never the OCI
+// "<repo>:<hash>" tag format, since a raw nix store path never contains a
+// colon.
 func TestProbe_Bwrap_RebuildNeededWhenClosureOutPathDiffers(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	freshPath := "/nix/store/" + testutil.DiffHash + "-agent-closure"
@@ -104,11 +99,9 @@ func TestProbe_Bwrap_RebuildNeededWhenClosureOutPathDiffers(t *testing.T) {
 	}
 }
 
-// TestProbe_Bwrap_RebuildNeededMessage_SaysClosureNotImage verifies that a
-// "bwrap" runnerKind's rebuild-needed message calls the loaded value a
-// "closure", never an "image" — the loaded value is a bundled nix store
-// path, not an OCI image, and calling it "the loaded image" is misleading
-// for an operator reading the message.
+// A bwrap runner loads a bundled nix store path, not an OCI image, so the
+// rebuild-needed message must call it a "closure". Calling it "the loaded
+// image" misleads an operator reading the message.
 func TestProbe_Bwrap_RebuildNeededMessage_SaysClosureNotImage(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	freshPath := "/nix/store/" + testutil.DiffHash + "-agent-closure"
@@ -131,11 +124,9 @@ func TestProbe_Bwrap_RebuildNeededMessage_SaysClosureNotImage(t *testing.T) {
 	}
 }
 
-// TestProbe_Bwrap_LauncherStale_ImageFresh_RebuildNeeded verifies that the
-// launcher dimension still composes correctly for a "bwrap" runnerKind: a
-// matching closure outPath but a stale launcher hash drives Fresh to false
-// and LauncherFresh to false while ImageFresh stays true, and Message names
-// the launcher (not "image:") as the cause.
+// The launcher dimension still composes for a bwrap runnerKind: a matching
+// closure outPath with a stale launcher hash leaves ImageFresh true, and
+// Message names the launcher rather than "image:" as the cause.
 func TestProbe_Bwrap_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	closurePath := "/nix/store/" + testutil.SameHash + "-agent-closure"
@@ -173,16 +164,11 @@ func TestProbe_Bwrap_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
 	}
 }
 
-// TestProbe_RunnerKindNotApplicable_KeysOffValueNotRuntimeName is issue
-// #2538's regression test for probe.go:93 (a surviving runtime-name
-// comparison the original AC1 implementation missed): it feeds Probe a
-// runnerKind of "oci" — a value that is not itself any real runtime CLI
-// name (unlike "podman"/"docker" used elsewhere in this file) — and
-// confirms Probe proceeds past the early return exactly as it would for any
-// other non-"bwrap" runnerKind. This proves the comparison keys off the
-// parameter's runnerKind semantics (only the literal string "bwrap" is
-// special), not a coincidental match against a known runtime executable
-// name.
+// Issue #2538's regression test for a surviving runtime-name comparison at
+// probe.go:93. The runnerKind "oci" is not itself any real runtime CLI name
+// (unlike "podman" and "docker" used elsewhere here), so Probe proceeding
+// past the early return proves the comparison keys off the literal string
+// "bwrap", not a coincidental match against a known runtime executable.
 func TestProbe_RunnerKindNotApplicable_KeysOffValueNotRuntimeName(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
@@ -210,9 +196,6 @@ func gitWriteFile(t *testing.T, path, contents string) {
 	}
 }
 
-// TestProbe_FreshWhenImageHashMatches verifies that an outPath evaluated at
-// the fetched base tip whose content-hash tag equals the loaded image's tag
-// reports fresh.
 func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
@@ -239,10 +222,9 @@ func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
 	}
 }
 
-// TestProbe_EvalReceivesFetchedRev verifies that Probe passes the fetched
-// base-tip sha (not the local clone's own checked-out HEAD) to Eval — the
-// wiring that makes the eval hermetic against the fetched tip rather than
-// whatever pwd happens to have checked out.
+// Probe passes Eval the fetched base-tip sha, not the clone's own
+// checked-out HEAD, so the eval is hermetic against the tip rather than
+// against whatever pwd happens to have checked out.
 func TestProbe_EvalReceivesFetchedRev(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	localHead := gitOutput(t, pwd, "rev-parse", "HEAD")
@@ -271,9 +253,6 @@ func TestProbe_EvalReceivesFetchedRev(t *testing.T) {
 	}
 }
 
-// TestProbe_RebuildNeededWhenImageHashDiffers verifies that a base-tip
-// commit which changed image inputs — a different evaluated content-hash
-// tag — reports rebuild-needed, not fresh.
 func TestProbe_RebuildNeededWhenImageHashDiffers(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
@@ -294,10 +273,8 @@ func TestProbe_RebuildNeededWhenImageHashDiffers(t *testing.T) {
 	}
 }
 
-// TestProbe_RebuildNeededSetsTipTag verifies that a rebuild-needed verdict
-// populates Result.TipTag with the freshly evaluated "<repo>:<hash>" tag — the
-// tag a rebuild would load — so the non-convergence diagnostic (issue #2113)
-// can name it alongside the loaded tag.
+// TipTag carries the tag a rebuild would load, so the non-convergence
+// diagnostic (issue #2113) can name it alongside the loaded tag.
 func TestProbe_RebuildNeededSetsTipTag(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
@@ -316,12 +293,11 @@ func TestProbe_RebuildNeededSetsTipTag(t *testing.T) {
 	}
 }
 
-// TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift
-// reproduces the #587 livelock: a loaded image whose output identity
-// (content-hash tag) matches the base tip must report fresh even when the
-// full store path text differs (e.g. a differing derivation name suffix) —
-// the same currency `build`/EnsureReady gates on (the tag), not the raw
-// drvPath a stale baked IMAGE_DRV could desync from with no way to re-sync.
+// Reproduces the #587 livelock: a loaded image whose content-hash tag
+// matches the base tip is fresh even when the full store path text differs,
+// for example a differing derivation name suffix. The tag is what
+// `build` and EnsureReady gate on, not the raw drvPath a stale baked
+// IMAGE_DRV could desync from with no way to re-sync.
 func TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	hash := "abcdefghijklmnopqrstuvwxyz012345"
@@ -344,10 +320,8 @@ func TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift(t *
 	}
 }
 
-// TestProbe_DriverScopedRepo_FreshWhenImageHashMatches verifies that a
-// loaded image tagged under a driver-scoped repo (e.g. "spindrift-opencode",
-// not the default "spindrift") makes Probe derive its tip tag under that
-// SAME repo, so a matching content hash reports fresh — an opencode image
+// An image tagged under a driver-scoped repo such as "spindrift-opencode"
+// makes Probe derive its tip tag under that same repo. An opencode image
 // must never compare against a hardcoded "spindrift:" tip tag (#262).
 func TestProbe_DriverScopedRepo_FreshWhenImageHashMatches(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
@@ -369,11 +343,8 @@ func TestProbe_DriverScopedRepo_FreshWhenImageHashMatches(t *testing.T) {
 	}
 }
 
-// TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers verifies that
-// a driver-scoped loaded tag (e.g. "spindrift-opencode:<hash>") whose hash
-// differs from the tip's evaluated hash reports rebuild-needed, and the
-// message names the repo-matching tip tag (not a hardcoded "spindrift:"
-// tag) so the diagnostic is accurate for the driver in play.
+// The message must name the repo-matching tip tag rather than a hardcoded
+// "spindrift:" tag, so the diagnostic is accurate for the driver in play.
 func TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
@@ -397,11 +368,6 @@ func TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers(t *testing.T) 
 	}
 }
 
-// TestProbe_LauncherStale_ImageFresh_RebuildNeeded verifies that a stale
-// launcher hash (the tip's evaluated launcher store hash differs from the
-// loaded one) drives Fresh to false and LauncherFresh to false even when the
-// image dimension matches — and that Message names the launcher, not the
-// image, as the cause, since the image itself is fresh.
 func TestProbe_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{
@@ -441,10 +407,6 @@ func TestProbe_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
 	}
 }
 
-// TestProbe_ImageStale_LauncherFresh_RebuildNeeded verifies that a stale
-// image hash drives Fresh to false even when the launcher dimension matches
-// (LauncherFresh true) — and that Message names the image, not the
-// launcher, as the cause.
 func TestProbe_ImageStale_LauncherFresh_RebuildNeeded(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{
@@ -478,9 +440,6 @@ func TestProbe_ImageStale_LauncherFresh_RebuildNeeded(t *testing.T) {
 	}
 }
 
-// TestProbe_ImageAndLauncherBothStale_RebuildNeeded verifies that a stale
-// hash on BOTH dimensions drives Fresh and LauncherFresh both to false, and
-// that Message names both the image and the launcher as causes.
 func TestProbe_ImageAndLauncherBothStale_RebuildNeeded(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{
@@ -514,10 +473,6 @@ func TestProbe_ImageAndLauncherBothStale_RebuildNeeded(t *testing.T) {
 	}
 }
 
-// TestProbe_ImageAndLauncherBothFresh verifies that a matching hash on BOTH
-// dimensions reports Fresh and LauncherFresh both true, Message confirms
-// both match, and TipLauncherHash carries the freshly evaluated launcher
-// hash.
 func TestProbe_ImageAndLauncherBothFresh(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{
@@ -551,11 +506,9 @@ func TestProbe_ImageAndLauncherBothFresh(t *testing.T) {
 	}
 }
 
-// TestProbe_LauncherNotConfigured_ImageFresh_Fresh is a regression check for
-// an existing image-only caller (flakeLauncherAttr == ""): the launcher
-// dimension is not configured/not checked at all, so it must never veto an
-// otherwise-fresh image verdict, and Probe must not call Eval a second time
-// for a launcher attr that was never supplied.
+// An image-only caller leaves flakeLauncherAttr empty. An unconfigured
+// launcher dimension must never veto an otherwise-fresh image verdict, and
+// Probe must not call Eval a second time for an attr never supplied.
 func TestProbe_LauncherNotConfigured_ImageFresh_Fresh(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
@@ -582,13 +535,9 @@ func TestProbe_LauncherNotConfigured_ImageFresh_Fresh(t *testing.T) {
 	}
 }
 
-// TestProbe_LauncherEvalFailure_TipTagEmptyImageFresh verifies that a
-// launcher eval failure (the image attr evaluates fine, but the launcher
-// attr's Eval call errors) reports rebuild-needed with Rev set but TipTag
-// left empty — a stuck launcher eval failure repeating at the same rev must
-// stay Rebuild under Guard.Classify, not spuriously look like a genuine
-// image-tag divergence (HostTainted). ImageFresh is true since the image
-// dimension itself succeeded and matched.
+// A launcher eval failure leaves TipTag empty while setting Rev. A stuck
+// failure repeating at the same rev must stay Rebuild under Guard.Classify,
+// not look like a genuine image-tag divergence (HostTainted).
 func TestProbe_LauncherEvalFailure_TipTagEmptyImageFresh(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{
@@ -627,12 +576,10 @@ func TestProbe_LauncherEvalFailure_TipTagEmptyImageFresh(t *testing.T) {
 	}
 }
 
-// TestProbe_LauncherHashDeriveFailure_TipTagEmptyImageFresh verifies that a
-// launcher hash-derive failure (the launcher attr evaluates to an outPath
-// that isn't a valid nix store path, so storeHash errors) reports
-// rebuild-needed with Rev set but TipTag left empty — same "stuck failure,
-// not a genuine divergence" shape as the eval-failure case, so it also stays
-// Rebuild under Guard.Classify on a repeat at the same rev.
+// A launcher outPath that is not a valid nix store path makes storeHash
+// error. That is the same stuck-failure shape as the eval-failure case, so
+// TipTag stays empty and a repeat at the same rev stays Rebuild under
+// Guard.Classify.
 func TestProbe_LauncherHashDeriveFailure_TipTagEmptyImageFresh(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{
@@ -669,11 +616,9 @@ func TestProbe_LauncherHashDeriveFailure_TipTagEmptyImageFresh(t *testing.T) {
 	}
 }
 
-// TestImageRepo_DerivesRepoFromLastColon verifies imageRepo splits an
-// "<repo>:<tag>" reference on the LAST colon (a repo can itself embed a
-// colon, e.g. a "host:port" registry prefix), and falls back to the default
-// "spindrift" repo for a degenerate tag with no colon at all rather than
-// deriving an empty or nonsensical repo.
+// imageRepo splits on the last colon because a repo can itself embed one,
+// for example a "host:port" registry prefix. A tag with no colon falls back
+// to the default "spindrift" repo rather than an empty one.
 func TestImageRepo_DerivesRepoFromLastColon(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -694,11 +639,9 @@ func TestImageRepo_DerivesRepoFromLastColon(t *testing.T) {
 	}
 }
 
-// TestProbe_Rev_MatchesFetchedTip verifies Result.Rev carries the same
-// fetched base-tip sha Eval was hermetically evaluated at — a caller (the
-// Console's in-session rebuild, issue #652) needs the rev itself, not just
-// the tag comparison, to recognize "I already rebuilt this exact tip"
-// without re-parsing Message.
+// The Console's in-session rebuild (issue #652) needs the rev itself, not
+// just the tag comparison, to recognize that it already rebuilt this exact
+// tip without re-parsing Message.
 func TestProbe_Rev_MatchesFetchedTip(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	advancedSha, err := gitAdvanceOrigin(t, pwd, "main")
@@ -720,8 +663,6 @@ func TestProbe_Rev_MatchesFetchedTip(t *testing.T) {
 	}
 }
 
-// TestProbe_EvalFailureFailsClosed verifies that an eval error reports
-// rebuild-needed with a loud message rather than guessing fresh.
 func TestProbe_EvalFailureFailsClosed(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{Err: errEvalBoom}
@@ -745,11 +686,10 @@ func TestProbe_EvalFailureFailsClosed(t *testing.T) {
 	}
 }
 
-// TestProbe_FetchFailureFailsClosed verifies that a git fetch error against a
-// configured, name-resolvable-looking origin (e.g. a transient network
-// failure) reports rebuild-needed with a loud message, without ever calling
-// the evaluator — distinct from the definitive, not-applicable cases
-// (TestProbe_NotAGitRepo, TestProbe_MissingRemoteRefNotApplicable,
+// A fetch error against a configured origin, such as a transient network
+// failure, fails closed without calling the evaluator. That is distinct from
+// the definitive not-applicable cases (TestProbe_NotAGitRepo,
+// TestProbe_MissingRemoteRefNotApplicable, and
 // TestProbe_NoOriginRemoteNotApplicable) where proceeding is safe.
 func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 	pwd := t.TempDir()
@@ -776,11 +716,10 @@ func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 	}
 }
 
-// TestProbe_NotAGitRepo verifies that a pwd which is not inside any git
-// repository at all reports not-applicable — distinct from a transient fetch
-// failure inside a real repo (TestProbe_FetchFailureFailsClosed) — so the
-// console does not hold launches or offer a [b] rebuild that would fail the
-// same way.
+// A pwd outside any git repository is not-applicable, distinct from a
+// transient fetch failure inside a real repo
+// (TestProbe_FetchFailureFailsClosed), so the console does not hold launches
+// or offer a [b] rebuild that would fail the same way.
 func TestProbe_NotAGitRepo(t *testing.T) {
 	pwd := t.TempDir()
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
@@ -807,11 +746,9 @@ func TestProbe_NotAGitRepo(t *testing.T) {
 	}
 }
 
-// TestProbe_MissingRemoteRefNotApplicable verifies that a base branch which
-// simply doesn't exist on origin — git's own "couldn't find remote ref"
-// diagnostic — reports not-applicable rather than fail-closed: this repo's
-// origin has no such branch, so freshness cannot be checked here, and
-// continuous dispatch must not treat it as rebuild-needed (#1753).
+// A base branch missing from origin (git's own "couldn't find remote ref")
+// is not-applicable rather than fail-closed: freshness cannot be checked
+// here, and continuous dispatch must not treat it as rebuild-needed (#1753).
 func TestProbe_MissingRemoteRefNotApplicable(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
@@ -838,11 +775,8 @@ func TestProbe_MissingRemoteRefNotApplicable(t *testing.T) {
 	}
 }
 
-// TestProbe_NoOriginRemoteNotApplicable verifies that a repo with no
-// "origin" remote configured at all — git's own "does not appear to be a
-// git repository" diagnostic — reports not-applicable rather than
-// fail-closed: a fully local repo (e.g. CODE_FORGE=local, no live remote)
-// has nothing to fetch, so freshness cannot be checked here, and continuous
+// A fully local repo with no origin remote (CODE_FORGE=local, say) has
+// nothing to fetch, so freshness cannot be checked here and continuous
 // dispatch must not treat it as rebuild-needed (#2034).
 func TestProbe_NoOriginRemoteNotApplicable(t *testing.T) {
 	pwd := t.TempDir()
@@ -871,12 +805,10 @@ func TestProbe_NoOriginRemoteNotApplicable(t *testing.T) {
 	}
 }
 
-// TestProbe_ImageAttrMissingNotApplicable verifies that an Eval failure
-// because the flake simply does not define flakeImageAttr — nix's own "does
-// not provide attribute" diagnostic — reports not-applicable rather than
-// fail-closed: pwd isn't the spindrift image-source flake, so freshness
-// cannot be checked here, and continuous dispatch must not treat it as
-// rebuild-needed (#1754).
+// A flake that does not define flakeImageAttr (nix's own "does not provide
+// attribute") means pwd is not the spindrift image-source flake, so
+// freshness cannot be checked here and continuous dispatch must not treat
+// it as rebuild-needed (#1754).
 func TestProbe_ImageAttrMissingNotApplicable(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	attrErr := errors.New(`nix eval git+file:///tmp/target#packages.x86_64-linux.agent-image.outPath: exit status 1: error: flake 'git+file:///tmp/target' does not provide attribute 'packages.x86_64-linux.agent-image', 'legacyPackages.x86_64-linux.agent-image' or 'packages.x86_64-linux.default'`)
@@ -901,9 +833,8 @@ func TestProbe_ImageAttrMissingNotApplicable(t *testing.T) {
 	}
 }
 
-// TestProbe_FetchFailure_MessageIncludesGitStderr verifies that the loud
-// fetch-failure message surfaces git's own diagnostic (its stderr), not just
-// the bare exit status, so an operator reading `preview` output can see why.
+// The fetch-failure message carries git's own stderr, not just the bare
+// exit status, so an operator reading `preview` output can see why.
 func TestProbe_FetchFailure_MessageIncludesGitStderr(t *testing.T) {
 	pwd := t.TempDir()
 	testutil.GitRun(t, pwd, "init")
@@ -923,9 +854,7 @@ func TestProbe_FetchFailure_MessageIncludesGitStderr(t *testing.T) {
 	}
 }
 
-// TestProbe_NeverMutatesWorkingCopy verifies that Probe fetches the base tip
-// without checking it out — the local clone's checked-out commit and dirty
-// files are unchanged after the call.
+// Probe fetches the base tip without checking it out.
 func TestProbe_NeverMutatesWorkingCopy(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	before := gitOutput(t, pwd, "rev-parse", "HEAD")
@@ -956,8 +885,6 @@ func TestProbe_NeverMutatesWorkingCopy(t *testing.T) {
 	}
 }
 
-// gitOutput runs git in dir and returns trimmed stdout, failing the test on
-// error.
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
@@ -967,9 +894,9 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// gitAdvanceOrigin commits a new file on baseBranch in a second clone of the
-// same origin as pwd and pushes it, simulating a merge landing on the base
-// branch after pwd's own clone was made — without touching pwd itself.
+// gitAdvanceOrigin pushes a commit on baseBranch from a second clone of the
+// same origin, simulating a merge landing after pwd's own clone was made,
+// without touching pwd itself.
 func gitAdvanceOrigin(t *testing.T, pwd, baseBranch string) (string, error) {
 	t.Helper()
 	origin := gitOutput(t, pwd, "remote", "get-url", "origin")

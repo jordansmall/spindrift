@@ -6,14 +6,11 @@ import (
 	"testing"
 )
 
-// This file pins the low-level mechanics of the unexported host-side
-// selection scanners (lastInLog, lastSelfReportInLog) that Resolve's own
-// tests (outcome_test.go, package outcome_test) don't re-expose: near-miss
-// error propagation, oversized-line handling, and synthetic-line exclusion
-// from a self-report. Resolve's policy-level behavior -- which tier wins --
-// is covered by the exported outcome_test.go tests; this file is a
-// package-internal test (package outcome, not outcome_test) purely because
-// lastInLog and lastSelfReportInLog are unexported (issue #2260).
+// These tests pin the unexported scanners lastInLog and lastSelfReportInLog
+// directly: near-miss error propagation, oversized-line handling, and
+// synthetic-line exclusion from a self-report. The file is package outcome
+// rather than outcome_test only because those two functions are unexported
+// (issue #2260); Resolve's tier policy is covered by outcome_test.go.
 
 func writeLog(t *testing.T, lines ...string) string {
 	t.Helper()
@@ -44,7 +41,6 @@ func writeBigLog(t *testing.T, preLines []string, bigLineSize int, postLines []s
 			t.Fatal(err)
 		}
 	}
-	// Write oversized line
 	big := make([]byte, bigLineSize)
 	for i := range big {
 		big[i] = 'x'
@@ -62,8 +58,6 @@ func writeBigLog(t *testing.T, preLines []string, bigLineSize int, postLines []s
 	}
 	return path
 }
-
-// --- lastInLog tests ---
 
 func TestLastInLog_Found(t *testing.T) {
 	path := writeLog(t,
@@ -137,13 +131,11 @@ func TestLastInLog_NearMiss(t *testing.T) {
 	}
 }
 
-// TestLastInLog_BareMentionIsNotNearMiss, TestLastInLog_FieldBearingMidSentenceMentionIsNotACandidate,
-// and TestLastInLog_ToolResultEchoIsNotFound all pin the same contract: a
-// mention that doesn't lead the line is never a candidate, unconditionally —
-// found=false, err=nil — regardless of whether it carries field markers.
-// Each pins a distinct, realistic input shape (bare prose, mid-sentence
-// with fields, JSON-embedded) that a regression could plausibly break
-// independently even though today's code doesn't branch on field presence.
+// The next three tests pin one contract: a mention that doesn't lead the line
+// is never a candidate, giving found=false and err=nil whether or not it
+// carries field markers. Each uses a different realistic shape (bare prose,
+// mid-sentence with fields, JSON-embedded) that a regression could break
+// independently, even though today's code doesn't branch on field presence.
 
 func TestLastInLog_BareMentionIsNotNearMiss(t *testing.T) {
 	path := writeLog(t,
@@ -174,10 +166,9 @@ func TestLastInLog_FieldBearingMidSentenceMentionIsNotACandidate(t *testing.T) {
 	}
 }
 
-// TestLastInLog_ToolResultEchoIsNotFound pins issue #2973's acceptance
-// criterion: a tool_result echo of issue/comment text that happens to embed
-// the token mid-JSON, with field markers but no leading-token line anywhere
-// in the log, resolves as plain no-outcome rather than a near-miss.
+// Pins issue #2973: a tool_result echo that embeds the token mid-JSON with
+// field markers, and no leading-token line anywhere in the log, resolves as
+// plain no-outcome rather than a near-miss.
 func TestLastInLog_ToolResultEchoIsNotFound(t *testing.T) {
 	path := writeLog(t,
 		`{"type":"tool_result","content":"...text mentioning SPINDRIFT_OUTCOME issue=1 landing=agent/issue-2973 status=ready note=echoed from issue body..."}`,
@@ -270,14 +261,11 @@ func TestLastInLog_OversizedLine_TakesLast(t *testing.T) {
 	}
 }
 
-// --- lastSelfReportInLog tests (issue #2223) ---
-
-// TestLastSelfReportInLog_NearMissThenSynthetic is acceptance criterion (a):
-// a driver near-miss self-report ("SPINDRIFT_OUTCOME: success", paraphrasing
-// the grammar with no fields at all) followed by the backstop's synthetic
-// line. lastSelfReportInLog must surface the driver's own near-miss rather
-// than being shadowed by the synthetic line, while lastInLog (the
-// authoritative outcome) still reports the synthetic, blocked outcome.
+// Issue #2223 acceptance criterion (a): a driver near-miss self-report that
+// paraphrases the grammar with no fields at all, followed by the backstop's
+// synthetic line. lastSelfReportInLog must surface the driver's near-miss
+// instead of being shadowed by the synthetic line, while lastInLog, the
+// authoritative outcome, still reports the synthetic blocked outcome.
 func TestLastSelfReportInLog_NearMissThenSynthetic(t *testing.T) {
 	path := writeLog(t,
 		"SPINDRIFT_OUTCOME: success",
@@ -313,9 +301,8 @@ func TestLastSelfReportInLog_NearMissThenSynthetic(t *testing.T) {
 	}
 }
 
-// TestLastSelfReportInLog_FullGrammarGenuine is acceptance criterion (b): a
-// single genuine, full-grammar, non-synthetic line parses fully and its
-// Outcome is populated.
+// Issue #2223 acceptance criterion (b): a single genuine, full-grammar,
+// non-synthetic line parses fully and populates Outcome.
 func TestLastSelfReportInLog_FullGrammarGenuine(t *testing.T) {
 	path := writeLog(t,
 		"SPINDRIFT_OUTCOME issue=9 landing=https://github.com/o/r/pull/9 status=ready note=all good nonce=abc123",
@@ -342,9 +329,8 @@ func TestLastSelfReportInLog_FullGrammarGenuine(t *testing.T) {
 	}
 }
 
-// TestLastSelfReportInLog_NoOutcome is acceptance criterion (c): a log with
-// only prose lines and no SPINDRIFT_OUTCOME token at all yields found=false,
-// no error.
+// Issue #2223 acceptance criterion (c): a log of prose with no
+// SPINDRIFT_OUTCOME token at all yields found=false and no error.
 func TestLastSelfReportInLog_NoOutcome(t *testing.T) {
 	path := writeLog(t,
 		"some output",
@@ -360,14 +346,10 @@ func TestLastSelfReportInLog_NoOutcome(t *testing.T) {
 	}
 }
 
-// --- lastSelfReportAcrossLogs tests (issue #2343 slice 1) ---
-
-// TestLastSelfReportAcrossLogs_SkipsBadLogButReturnsError pins that a log
-// whose scan hits a genuine I/O error (here: Path pointing at a directory,
-// so os.Open succeeds but the subsequent bufio read fails with "is a
-// directory") is skipped just like before -- the walk still finds the good
-// log's report and never aborts -- but the error is no longer discarded: it
-// comes back to the caller instead of being swallowed.
+// Issue #2343 slice 1: a log whose scan hits a genuine I/O error (here Path
+// points at a directory, so os.Open succeeds but the bufio read fails) is
+// still skipped, so the walk finds the good log's report and never aborts,
+// but the error now comes back to the caller instead of being swallowed.
 func TestLastSelfReportAcrossLogs_SkipsBadLogButReturnsError(t *testing.T) {
 	badDir := t.TempDir()
 	goodPath := writeLog(t,
@@ -390,11 +372,9 @@ func TestLastSelfReportAcrossLogs_SkipsBadLogButReturnsError(t *testing.T) {
 	}
 }
 
-// TestLastSelfReportInLog_SkipsSyntheticOnlyLog verifies that when the ONLY
-// leading-token line in the log is the backstop's own synthetic line, the
-// self-report is genuinely absent — only the backstop spoke, the driver
-// never did — so lastSelfReportInLog must not mistake the synthetic line for
-// a genuine self-report.
+// When the only leading-token line is the backstop's own synthetic line, only
+// the backstop spoke and the driver never did, so lastSelfReportInLog must not
+// mistake that line for a genuine self-report.
 func TestLastSelfReportInLog_SkipsSyntheticOnlyLog(t *testing.T) {
 	path := writeLog(t,
 		"some output",

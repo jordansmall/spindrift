@@ -8,10 +8,8 @@ import (
 	"testing"
 )
 
-// TestLoadHandoffFileRoundTrip covers the write side a later slice's CLI
-// wrapper performs (json.Marshal + os.WriteFile) and LoadHandoffFile's read
-// side, including the nested ArgvShape/Caps structs -- a value round-tripped
-// through both must compare equal field-for-field.
+// The test marshals and writes the file the way the CLI wrapper does, so the
+// nested ArgvShape and Caps structs go through real JSON encoding and decoding.
 func TestLoadHandoffFileRoundTrip(t *testing.T) {
 	want := Handoff{
 		SessionMode:      "resume",
@@ -67,9 +65,6 @@ func TestLoadHandoffFileRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLoadHandoffFileMissing covers a missing handoff file: LoadHandoffFile
-// must return a non-nil, path-mentioning error rather than panicking or
-// returning a zero-value Handoff with a nil error.
 func TestLoadHandoffFileMissing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.json")
 
@@ -79,14 +74,11 @@ func TestLoadHandoffFileMissing(t *testing.T) {
 	}
 }
 
-// TestParseNonnegBudgetTokens guards -max-budget-tokens' graceful-degrade
-// parsing (issue #2694 review finding, moved here from
-// orchestrator/caps_test.go by issue #2975 review finding #1 alongside
-// ParseNonnegBudgetTokens itself): a negative or malformed value collapses
-// to 0 (disabled) instead of erroring, mirroring the host launcher's own
-// atoiNonneg tolerance for the identical MAX_BUDGET_TOKENS env var -- the Box
-// must not be stricter than the host about the same knob now that it's
-// forwarded there unconditionally (boxEnv=true).
+// Pins the graceful degrade of -max-budget-tokens (issue #2694 review finding;
+// moved here from orchestrator/caps_test.go by issue #2975 review finding #1):
+// a negative or malformed value collapses to 0 instead of erroring, matching
+// the host launcher's atoiNonneg tolerance for the same MAX_BUDGET_TOKENS env
+// var, so the Box is never stricter than the host about that knob.
 func TestParseNonnegBudgetTokens(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -115,9 +107,8 @@ func TestParseNonnegBudgetTokens(t *testing.T) {
 	}
 }
 
-// TestParseNonnegBudgetUSD is TestParseNonnegBudgetTokens' -max-budget-usd
-// counterpart, mirroring the host launcher's own floatNonnegSchema tolerance
-// the same way -- including that a fractional value, unlike the tokens case,
+// The -max-budget-usd counterpart, mirroring the host launcher's
+// floatNonnegSchema tolerance. Unlike the tokens case, a fractional value
 // parses normally here.
 func TestParseNonnegBudgetUSD(t *testing.T) {
 	tests := []struct {

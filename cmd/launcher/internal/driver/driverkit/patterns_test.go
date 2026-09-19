@@ -32,11 +32,9 @@ func TestMatchTransientNoMatch(t *testing.T) {
 	}
 }
 
-// TestMatchTransientExtrasBeatBase locks in that a per-Driver extras marker
-// beats a shared BaseTransientPatterns marker when both appear on the same
-// line — extras must be checked before the base table (issue #2149). Under
-// base-first matching "connection refused" (Network) is found first and
-// wins instead.
+// MatchTransient must check extras before the base table (issue #2149). Under
+// base-first matching it finds "connection refused" (Network) first and returns
+// that instead.
 func TestMatchTransientExtrasBeatBase(t *testing.T) {
 	reason, ok := MatchTransient("connection refused after 429 retries", []Pattern{{Substr: "429", Reason: RateLimit}})
 	if !ok {
@@ -47,9 +45,9 @@ func TestMatchTransientExtrasBeatBase(t *testing.T) {
 	}
 }
 
-// TestMatchExtras locks in that MatchExtras scans only the passed patterns
-// and never falls through to BaseTransientPatterns — a caller matching a
-// terminal pattern list must not accidentally pick up a network Reason.
+// MatchExtras scans only the passed patterns and never falls through to
+// BaseTransientPatterns, so a caller matching a terminal pattern list cannot
+// pick up a network Reason by accident.
 func TestMatchExtras(t *testing.T) {
 	patterns := []Pattern{{Substr: "unsupported flag", Reason: UnsupportedFlag}}
 
@@ -79,9 +77,8 @@ func TestMatchExtras(t *testing.T) {
 }
 
 func TestMatchTransientBasePrecedence(t *testing.T) {
-	// "rate_limit_error" appears earlier than "overloaded_error" in the
-	// extras passed here -- a line containing both should classify as the
-	// first (RateLimit), confirming first-match-wins through extras.
+	// "rate_limit_error" comes before "overloaded_error" in these extras, so a
+	// line containing both must classify as RateLimit: first match wins.
 	reason, ok := MatchTransient("rate_limit_error and overloaded_error both present", []Pattern{
 		{Substr: "rate_limit_error", Reason: RateLimit},
 		{Substr: "overloaded_error", Reason: Overloaded},

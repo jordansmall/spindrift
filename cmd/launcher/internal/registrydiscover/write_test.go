@@ -11,18 +11,17 @@ import (
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
-// TestRender_CompanionKeyMatchesKindTable verifies Render's companion
-// rendering is the credresolver kind table's own CompanionKey/CompanionField
-// shape, not a parallel copy: for every kind in the table, a route of that
-// source renders (and round-trips through registryroutes.Parse back to)
-// exactly the companion value the kind's CompanionField selects -- and no
-// companion at all when CompanionKey is "".
+// TestRender_CompanionKeyMatchesKindTable pins Render's companion rendering to
+// the credresolver kind table itself rather than a parallel copy. For every
+// kind, the rendered route carries the value that kind's CompanionField
+// selects and survives registryroutes.Parse, and it carries no companion at
+// all when CompanionKey is "".
 func TestRender_CompanionKeyMatchesKindTable(t *testing.T) {
 	for _, kind := range credresolver.Kinds() {
 		if kind.ArgvValue {
-			// exec's TOML value is an argv array; this fixture's
-			// CredentialValue is a plain string, which registryroutes.Parse
-			// rejects for exec as "must be an array of strings".
+			// exec's TOML value is an argv array, and this fixture's
+			// CredentialValue is a plain string that registryroutes.Parse
+			// rejects for exec.
 			continue
 		}
 		t.Run(kind.SourceKey, func(t *testing.T) {
@@ -67,12 +66,10 @@ func TestRender_CompanionKeyMatchesKindTable(t *testing.T) {
 	}
 }
 
-// TestRender_NetrcRouteRoundTripsThroughParse is the shape-defining case:
-// Render's output for a single netrc-backed route must parse back through
-// registryroutes.Parse into the same match-host,
-// auth-scheme, and credresolver.Config -- Parse is the only authority on
-// what a valid routes file (ADR 0045) looks like, so round-tripping through
-// it is the proof, not a hand-checked TOML string.
+// TestRender_NetrcRouteRoundTripsThroughParse is the shape-defining case.
+// registryroutes.Parse is the only authority on what a valid routes file
+// (ADR 0045) looks like, so round-tripping through it proves the output where
+// a hand-checked TOML string would not.
 func TestRender_NetrcRouteRoundTripsThroughParse(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "crates.acme.example",
@@ -104,11 +101,9 @@ func TestRender_NetrcRouteRoundTripsThroughParse(t *testing.T) {
 	}
 }
 
-// TestWriteFile_RefusesExistingFileWithoutForce checks that WriteFile
-// refuses to clobber a pre-existing routes file unless force is set, and
-// that the refusal error names the offending path (an operator running
-// spindrift registry discover against a populated directory must be able to
-// tell which file it balked at).
+// TestWriteFile_RefusesExistingFileWithoutForce also checks that the refusal
+// error names the offending path, so an operator running spindrift registry
+// discover against a populated directory can tell which file it balked at.
 func TestWriteFile_RefusesExistingFileWithoutForce(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "routes.toml")
@@ -141,9 +136,6 @@ func TestWriteFile_RefusesExistingFileWithoutForce(t *testing.T) {
 	}
 }
 
-// TestRender_NpmrcRouteRoundTrips checks the npmrc credential source, whose
-// FileFormat ("npmrc") registryroutes.Parse must recover from the rendered
-// inline table.
 func TestRender_NpmrcRouteRoundTrips(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "npm.example.com",
@@ -169,9 +161,6 @@ func TestRender_NpmrcRouteRoundTrips(t *testing.T) {
 	}
 }
 
-// TestRender_CargoCredentialsRouteRoundTrips checks that the
-// cargo-credentials source's companion registry-name key is rendered and
-// recovered by Parse into credresolver.Config.RegistryName.
 func TestRender_CargoCredentialsRouteRoundTrips(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "crates.acme.example",
@@ -201,9 +190,6 @@ func TestRender_CargoCredentialsRouteRoundTrips(t *testing.T) {
 	}
 }
 
-// TestRender_GradlePropertiesRouteRoundTrips checks that the
-// gradle-properties source's companion key key is rendered and recovered by
-// Parse into credresolver.Config.PropertyKey.
 func TestRender_GradlePropertiesRouteRoundTrips(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "gradle.example.com",
@@ -233,9 +219,8 @@ func TestRender_GradlePropertiesRouteRoundTrips(t *testing.T) {
 	}
 }
 
-// TestRender_EnvPlaceholderRouteRoundTrips checks the "env" source Discover
-// proposes for an unmatched host: rendered as credential.env, recovered by
-// Parse into credresolver.Config.FromEnv.
+// TestRender_EnvPlaceholderRouteRoundTrips covers the "env" source Discover
+// proposes for a host it could not match to a credential store.
 func TestRender_EnvPlaceholderRouteRoundTrips(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "unmatched.example.com",
@@ -262,10 +247,6 @@ func TestRender_EnvPlaceholderRouteRoundTrips(t *testing.T) {
 	}
 }
 
-// TestRender_TwoRoutesParseInOrder checks that Render's per-route
-// [[routes]] blocks survive concatenation and come back from Parse in the
-// same order they were given -- the multi-route case, not just a single
-// block in isolation.
 func TestRender_TwoRoutesParseInOrder(t *testing.T) {
 	routes := []Route{
 		{
@@ -299,10 +280,9 @@ func TestRender_TwoRoutesParseInOrder(t *testing.T) {
 	}
 }
 
-// TestRender_QuotedCredentialValueEscapesAndRoundTrips checks that a
-// CredentialValue containing a double quote (an unlikely but not impossible
-// store path) is escaped in the rendered TOML rather than corrupting the
-// document, and that Parse recovers the original unescaped value.
+// TestRender_QuotedCredentialValueEscapesAndRoundTrips uses a double quote in
+// the CredentialValue, an unlikely but possible store path, because an
+// unescaped one corrupts the whole TOML document.
 func TestRender_QuotedCredentialValueEscapesAndRoundTrips(t *testing.T) {
 	const tricky = `/home/op/weird"path/.netrc`
 	routes := []Route{{
@@ -330,8 +310,6 @@ func TestRender_QuotedCredentialValueEscapesAndRoundTrips(t *testing.T) {
 	}
 }
 
-// TestWriteFile_ForceOverwritesExistingFile checks that force=true lets
-// WriteFile replace a pre-existing file rather than refusing it.
 func TestWriteFile_ForceOverwritesExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "routes.toml")
@@ -363,9 +341,6 @@ func TestWriteFile_ForceOverwritesExistingFile(t *testing.T) {
 	}
 }
 
-// TestWriteFile_NewFilePermsAndParses checks that WriteFile writes a
-// brand-new file (no existing file to refuse or overwrite) with mode 0600
-// and content that registryroutes.Parse accepts.
 func TestWriteFile_NewFilePermsAndParses(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "routes.toml")
@@ -399,18 +374,11 @@ func TestWriteFile_NewFilePermsAndParses(t *testing.T) {
 	}
 }
 
-// TestRender_RouteCarriesNoCredentialValueField documents the strong
-// guarantee behind the "does Render leak a secret" question: Route itself
-// has no field capable of holding a resolved credential value (a secret) --
-// CredentialValue is always a store reference (a path) or an env var name,
-// never a value read out of a store. There is no code path from a real
-// secret into Render's output because there is no field to carry one.
-//
-// The check below is necessarily indirect: it renders a realistic route set
-// and asserts the output never contains a sample "secret" constant that the
-// test itself defines and never hands to Render or WriteFile -- a trip-wire
-// for a future field addition that starts threading resolved values through,
-// not proof by itself. The doc comment above is the actual guarantee.
+// TestRender_RouteCarriesNoCredentialValueField documents the guarantee behind
+// "does Render leak a secret": Route has no field able to hold a resolved
+// credential value, only a store path or an env var name. The check below is a
+// trip-wire for a future field that starts threading resolved values through,
+// not proof on its own; this comment is the guarantee.
 func TestRender_RouteCarriesNoCredentialValueField(t *testing.T) {
 	const neverProvidedSecret = "sk_live_should_never_appear_in_rendered_output"
 
@@ -450,10 +418,9 @@ func TestRender_RouteCarriesNoCredentialValueField(t *testing.T) {
 }
 
 // TestRender_PlainHTTPSHostOmitsUpstreamOrigin pins the exact bytes for the
-// common case: a discovered upstream on plain https with no port says
-// nothing match-host alone does not already say, so the stanza carries no
-// upstream-origin at all and the derivation supplies the origin (ADR 0047,
-// issue #3261).
+// common case: an upstream on plain https with no port says nothing match-host
+// does not already say, so the stanza carries no upstream-origin and the
+// derivation supplies the origin (ADR 0047, issue #3261).
 func TestRender_PlainHTTPSHostOmitsUpstreamOrigin(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "crates.acme.example",
@@ -479,11 +446,11 @@ credential = { netrc = "/home/op/.netrc" }
 	}
 }
 
-// TestRender_ExplicitPortEmitsOriginWithoutPath checks the port case: a
-// discovered upstream on a non-default port needs upstream-origin, since
-// match-host is port-stripped and could not otherwise reach the registry.
-// The base URL's path is dropped -- a host-rooted route derives the paths it
-// serves rather than joining a base path.
+// TestRender_ExplicitPortEmitsOriginWithoutPath covers the port case:
+// match-host is port-stripped, so an upstream on a non-default port needs
+// upstream-origin to reach the registry. The base URL's path is dropped
+// because a host-rooted route derives the paths it serves rather than joining
+// a base path.
 func TestRender_ExplicitPortEmitsOriginWithoutPath(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "artifactory.example.com",
@@ -513,9 +480,9 @@ func TestRender_ExplicitPortEmitsOriginWithoutPath(t *testing.T) {
 	}
 }
 
-// TestRender_HTTPSchemeEmitsOrigin checks the scheme case: a plaintext http
-// upstream must survive into the file, since a route with no upstream-origin
-// is derived as https.
+// TestRender_HTTPSchemeEmitsOrigin covers the scheme case: a route with no
+// upstream-origin is derived as https, so a plaintext http upstream has to
+// survive into the file.
 func TestRender_HTTPSchemeEmitsOrigin(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "registry.internal",
@@ -542,11 +509,10 @@ func TestRender_HTTPSchemeEmitsOrigin(t *testing.T) {
 	}
 }
 
-// TestRender_MixedOriginRoutesRoundTripThroughParse is the multi-route
-// version of the invariant this writer exists to hold: whatever mix of
-// origin-bearing and origin-less routes discovery proposes, the whole file
-// must come back out of registryroutes.Parse -- Render must never write what
-// Parse would reject.
+// TestRender_MixedOriginRoutesRoundTripThroughParse holds the invariant this
+// writer exists for, across whatever mix of origin-bearing and origin-less
+// routes discovery proposes: Render must never write what
+// registryroutes.Parse would reject.
 func TestRender_MixedOriginRoutesRoundTripThroughParse(t *testing.T) {
 	routes := []Route{
 		{
@@ -589,15 +555,10 @@ func TestRender_MixedOriginRoutesRoundTripThroughParse(t *testing.T) {
 }
 
 // TestRender_BlockGrammarRoundTripsRenderParseRender pins the discovery
-// acceptance criterion (issue #3405): Render's output for a mixed
-// credential-source route set (a) parses through registryroutes.Parse, (b)
-// reconstructed from that parse and rendered again is byte-identical to the
-// first render, and (c) never contains one of the three retired
-// per-ecosystem keys registryroutes now refuses at the launch gate.
-// Discovery has never emitted go-path/gradle-path/cargo-registries -- it has
-// no basis to guess an ecosystem path -- but Render's own output would
-// still parse if a future change started emitting one, so the negative
-// check is the only thing that would catch that regression here.
+// acceptance criterion (issue #3405), including that the output never carries
+// one of the three retired per-ecosystem keys registryroutes now refuses at
+// the launch gate. Discovery has never emitted one, but Render's output would
+// still parse if a future change did, so nothing else would catch that.
 func TestRender_BlockGrammarRoundTripsRenderParseRender(t *testing.T) {
 	routes := []Route{
 		{
@@ -648,9 +609,7 @@ func TestRender_BlockGrammarRoundTripsRenderParseRender(t *testing.T) {
 	}
 }
 
-// routeFromParsedRoute reconstructs the discovery-shaped Route a
-// render->parse->render round trip needs from registryroutes.Parse's
-// output -- the inverse of Render, only as far as
+// routeFromParsedRoute is the inverse of Render, only as far as
 // TestRender_BlockGrammarRoundTripsRenderParseRender needs it to go.
 func routeFromParsedRoute(pr registryroutes.Route) Route {
 	r := Route{

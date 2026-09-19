@@ -7,15 +7,12 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// stubGetenv returns a getenv closure over a fixed map, standing in for
-// os.Getenv without touching real process env -- keeps these table tests
-// hermetic struct-literal tests like ComputeGoBindings's own.
+// stubGetenv stands in for os.Getenv so these tests never read the real
+// process environment.
 func stubGetenv(env map[string]string) func(string) string {
 	return func(key string) string { return env[key] }
 }
 
-// rowByName fails the test on an unknown name -- a helper misuse, not a
-// case worth a table entry of its own.
 func rowByName(t *testing.T, name string) Row {
 	t.Helper()
 	for _, row := range Table {
@@ -27,9 +24,7 @@ func rowByName(t *testing.T, name string) Row {
 	return Row{}
 }
 
-// TestNpmRowEnvExports pins that the npm row's EnvExports renders exactly
-// NpmFamilyBindings' three exports and no warnings -- the row value is a
-// thin adapter, not a reimplementation.
+// The npm row must delegate to NpmFamilyBindings rather than reimplement it.
 func TestNpmRowEnvExports(t *testing.T) {
 	row := rowByName(t, "npm")
 	if row.EnvExports == nil {
@@ -52,9 +47,8 @@ func TestNpmRowEnvExports(t *testing.T) {
 	}
 }
 
-// TestGoRowEnvExports pins that the go row's EnvExports reaches its getenv
-// parameter into ComputeGoBindings's decision logic, so the row value isn't
-// just discarding the snapshot it's handed.
+// The go row must pass its getenv parameter into ComputeGoBindings rather
+// than discard the snapshot it is handed.
 func TestGoRowEnvExports(t *testing.T) {
 	row := rowByName(t, "go")
 	if row.EnvExports == nil {
@@ -77,11 +71,9 @@ func TestGoRowEnvExports(t *testing.T) {
 	}
 }
 
-// TestGoRowEnvExports_ThreadsRoutes pins that the go row's EnvExports
-// reaches its routes parameter into ComputeGoBindings's decision (issue
-// #3260) rather than discarding it as the pre-#3260 row did -- a
-// route declaring a go path renders the full-path GOPROXY
-// this row could only produce by actually passing routes through.
+// The pre-#3260 row discarded its routes parameter. A route declaring a go
+// path renders a full-path GOPROXY the row can only produce by passing
+// routes through to ComputeGoBindings.
 func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
 	row := rowByName(t, "go")
 	routes := []registrymanifest.Route{{
@@ -97,10 +89,8 @@ func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
 	}
 }
 
-// TestTable_EnvExportsPresence pins which rows carry an EnvExports render
-// function and which leave it nil -- a row with exports and no matching
-// entry here, or vice versa, fails loudly instead of silently contributing
-// nothing or panicking a caller.
+// A row that gains or loses EnvExports otherwise fails silently: it
+// contributes nothing to the export file, or panics a caller.
 func TestTable_EnvExportsPresence(t *testing.T) {
 	want := map[string]bool{
 		"cargo":  false,
@@ -122,13 +112,10 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 	}
 }
 
-// TestTable_BindingEnvVarPresence pins which rows carry a non-empty
-// BindingEnvVar and its exact value -- npm/pnpm/yarn/go bind the Forwarder
-// via an env var (pnpm and yarn even though neither renders its own
-// EnvExports: npm's NpmFamilyBindings renders all three vars in one call),
-// while cargo and gradle bind via a file and so leave the field empty --
-// mirrors TestTable_EnvExportsPresence so a row gaining, losing, or
-// mis-typing the value fails loudly here.
+// npm, pnpm, yarn and go bind the Forwarder through an env var; cargo and
+// gradle bind through a file and leave the field empty. pnpm and yarn carry
+// a value despite rendering no EnvExports of their own, because npm's
+// NpmFamilyBindings renders all three family vars in one call.
 func TestTable_BindingEnvVarPresence(t *testing.T) {
 	want := map[string]string{
 		"cargo":  "",
@@ -149,15 +136,10 @@ func TestTable_BindingEnvVarPresence(t *testing.T) {
 	}
 }
 
-// TestTable_BindingEnvVarMatchesRenderedExports guards against BindingEnvVar
-// drifting from the renderer that actually owns the literal: pnpm and yarn
-// carry no EnvExports of their own (npm's renders all three family vars),
-// and go's renderer conditionally emits GOTOOLCHAIN/GONOPROXY/GOSUMDB, so
-// there is no single row whose own EnvExports output BindingEnvVar could be
-// diffed against directly. Instead this walks EnvExportRows() -- the same
-// walk bindings mode uses to build the export file -- renders every row's
-// exports once, and checks each row's non-empty BindingEnvVar named a
-// variable that walk actually produced somewhere in the file.
+// No single row's own EnvExports output can be diffed against its
+// BindingEnvVar: pnpm and yarn render none, and go's renderer emits its vars
+// conditionally. So this checks each BindingEnvVar against the whole export
+// file, walking EnvExportRows() the way bindings mode does.
 func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 	renderedNames := map[string]bool{}
 	for _, row := range EnvExportRows() {
@@ -176,12 +158,9 @@ func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 	}
 }
 
-// TestTable_RepoAwareHomeConfigPresence pins which rows carry a
-// RepoAwareHomeConfig renderer and which leave it nil (issue #3201): only
-// cargo re-renders its home config once the Target repo is on disk, since
-// only cargo binds via source replacement keyed off the repo's own
-// un-rewritten registry declarations -- mirrors TestTable_EnvExportsPresence
-// so a row gaining or losing the renderer fails loudly here.
+// Only cargo re-renders its home config once the Target repo is on disk
+// (issue #3201), because only cargo binds through source replacement keyed
+// off the repo's own un-rewritten registry declarations.
 func TestTable_RepoAwareHomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
 		"cargo":  true,
@@ -203,11 +182,9 @@ func TestTable_RepoAwareHomeConfigPresence(t *testing.T) {
 	}
 }
 
-// TestTable_RepoAwareHomeConfigRequiresHomeConfig pins the pairing invariant
-// Row's own doc states (issue #3201): the renderer re-renders its row's
-// HomeConfig file, and its only caller reaches repo-aware rows by filtering
-// HomeConfigRows(), so a row setting RepoAwareHomeConfig while leaving
-// HomeConfig nil would be silently skipped instead of failing loudly.
+// The only caller reaches repo-aware rows by filtering HomeConfigRows(), so
+// a row setting RepoAwareHomeConfig with a nil HomeConfig never runs at all
+// (issue #3201).
 func TestTable_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
 	for _, row := range Table {
 		if row.RepoAwareHomeConfig != nil && row.HomeConfig == nil {
@@ -216,17 +193,16 @@ func TestTable_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
 	}
 }
 
-// TestEnvExportRows_SortsByEnvExportOrderNotTableOrder proves the sort
-// rather than the literal table: a stub table whose export-carrying rows sit
-// in the exact reverse of their EnvExportOrder still comes back ascending,
-// and the nil-renderer row never appears. A tie keeps table order, so the
-// ordering is total and deterministic for rows that never set the field.
+// The stub table puts its export-carrying rows in the exact reverse of their
+// EnvExportOrder, so passing proves the sort rather than the literal order.
+// The two tied rows pin that a tie keeps table order, which is what makes
+// the ordering deterministic for rows that never set the field.
 func TestEnvExportRows_SortsByEnvExportOrderNotTableOrder(t *testing.T) {
 	renderer := func(int, string, func(string) string, []registrymanifest.Route) ([]EnvExport, []string) {
 		return nil, nil
 	}
-	// Swapping the package-level Table bars t.Parallel here and in every
-	// other test in this package -- a parallel neighbour would observe the stub.
+	// Swapping the package-level Table bars t.Parallel here and in every other
+	// test in this package, since a parallel neighbour would observe the stub.
 	original := Table
 	Table = []Row{
 		{Name: "third", EnvExports: renderer, EnvExportOrder: 9},
@@ -253,9 +229,8 @@ func TestEnvExportRows_SortsByEnvExportOrderNotTableOrder(t *testing.T) {
 	}
 }
 
-// TestEnvExportRows_GoBeforeNpm pins the one historical order the pins exist
-// to preserve: the rendered export file leads with go's exports even though
-// npm precedes go in Table (issue #3181).
+// The rendered export file must lead with go's exports even though npm
+// precedes go in Table (issue #3181).
 func TestEnvExportRows_GoBeforeNpm(t *testing.T) {
 	indexIn := func(rows []Row, name string) int {
 		for i, row := range rows {
@@ -280,8 +255,7 @@ func TestEnvExportRows_GoBeforeNpm(t *testing.T) {
 	}
 }
 
-// TestTable_NamesUnique verifies no two rows share a name, so a lookup by
-// name can never be ambiguous about which row it found.
+// Duplicate names would make every lookup by name ambiguous.
 func TestTable_NamesUnique(t *testing.T) {
 	seen := make(map[string]bool, len(Table))
 	for _, row := range Table {
@@ -292,9 +266,8 @@ func TestTable_NamesUnique(t *testing.T) {
 	}
 }
 
-// TestTable_ClassificationNonEmpty verifies every row resolves to a
-// non-empty classification, so a row added without one fails loudly here
-// rather than silently carrying a blank nudge string.
+// A row added without a classification would silently carry a blank nudge
+// string.
 func TestTable_ClassificationNonEmpty(t *testing.T) {
 	for _, row := range Table {
 		if row.Classification == "" {
@@ -303,10 +276,9 @@ func TestTable_ClassificationNonEmpty(t *testing.T) {
 	}
 }
 
-// TestTable_InTreeConfigPath pins every row's InTreeConfigPath, including the
-// empty ones, so a row added without a decision on its in-tree registry-config
-// path fails here rather than silently being excluded (or included) by
-// accident wherever a consumer filters on it.
+// The want map covers the empty paths too, so a row added without a decision
+// on its in-tree registry-config path fails here rather than being silently
+// excluded or included wherever a consumer filters on the field.
 func TestTable_InTreeConfigPath(t *testing.T) {
 	want := map[string]string{
 		"cargo":  ".cargo/config.toml",
@@ -328,9 +300,8 @@ func TestTable_InTreeConfigPath(t *testing.T) {
 	}
 }
 
-// TestTable_Order pins the row order the nudge's first-hit precedence
-// depends on, so a reorder that would silently change which ecosystem a
-// mixed repo classifies as fails here rather than in the Box.
+// The nudge takes the first matching row, so a reorder changes which
+// ecosystem a mixed repo classifies as. Catch that here, not in the Box.
 func TestTable_Order(t *testing.T) {
 	want := []string{"cargo", "npm", "yarn", "pnpm", "go", "gradle"}
 	if len(Table) != len(want) {
@@ -343,12 +314,9 @@ func TestTable_Order(t *testing.T) {
 	}
 }
 
-// TestResponseRewriteRows_ContainsCargoConfigRow pins that
-// ResponseRewriteRows() actually walks Table and collects cargoRow's
-// declared row -- a future row a new ecosystem declares but this collector
-// forgets to gather would otherwise fail silently (New would just never see
-// it), since nothing else in this package asserts on the collected slice's
-// contents.
+// Nothing else in this package asserts on the collected slice's contents, so
+// a row the collector forgets to gather would fail silently: New would just
+// never see it.
 func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
 	rows := ResponseRewriteRows()
 	if len(rows) == 0 {
@@ -362,9 +330,8 @@ func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
 	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "cargo config.json", "cargo")
 }
 
-// TestResponseRewriteRows_ContainsNpmPackumentRow is the same pin for npmRow:
-// without it, dropping npmRow's RewriteRows would surface only indirectly, as
-// a proxy round-trip failure a package away from the cause.
+// Without this pin, dropping npmRow's RewriteRows shows up only indirectly,
+// as a proxy round-trip failure a package away from the cause.
 func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
 	rows := ResponseRewriteRows()
 	if len(rows) == 0 {
@@ -378,9 +345,8 @@ func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
 	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "npm packument", "npm")
 }
 
-// TestHomeConfigRows_CargoThenGradle pins which rows carry a HomeConfig and
-// their order -- a future row added to Table between them, or a reorder,
-// makes this test speak up rather than silently pass.
+// A row added to Table between cargo and gradle, or a reorder, must fail
+// here rather than pass silently.
 func TestHomeConfigRows_CargoThenGradle(t *testing.T) {
 	var got []string
 	for _, row := range HomeConfigRows() {
@@ -397,8 +363,8 @@ func TestHomeConfigRows_CargoThenGradle(t *testing.T) {
 	}
 }
 
-// TestCargoRowHomeConfig pins the cargo row's HomeConfig facts and that its
-// renderer is CargoConfigTOML itself, not a reimplementation.
+// The cargo row's Render must be CargoConfigTOML itself, not a
+// reimplementation of it.
 func TestCargoRowHomeConfig(t *testing.T) {
 	row := rowByName(t, "cargo")
 	if row.HomeConfig == nil {
@@ -424,8 +390,8 @@ func TestCargoRowHomeConfig(t *testing.T) {
 	}
 }
 
-// TestGradleRowHomeConfig pins the gradle row's HomeConfig facts and that
-// its renderer is GradleInitScript itself, not a reimplementation.
+// The gradle row's Render must be GradleInitScript itself, not a
+// reimplementation of it.
 func TestGradleRowHomeConfig(t *testing.T) {
 	row := rowByName(t, "gradle")
 	if row.HomeConfig == nil {
@@ -451,10 +417,8 @@ func TestGradleRowHomeConfig(t *testing.T) {
 	}
 }
 
-// TestTable_HomeConfigPresence pins which rows carry a HomeConfig and which
-// leave it nil -- npm/yarn/pnpm/go write no home-level config, only cargo
-// and gradle do -- so a row gaining or losing one fails loudly here instead
-// of silently changing HomeConfigRows' count.
+// Only cargo and gradle write a home-level config. A row gaining or losing
+// one otherwise just changes HomeConfigRows' count silently.
 func TestTable_HomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
 		"cargo":  true,
@@ -486,9 +450,10 @@ func TestTable_HomeConfigPresence(t *testing.T) {
 	}
 }
 
-// allDeclaredRoutes is one route declaring a path for every ecosystem a row
-// binds an env var for -- go's in its ecosystems block, the npm family's as
-// tagged paths -- the shape that renders all four bindings at once.
+// allDeclaredRoutes declares a path for every ecosystem a row binds an env
+// var for, so one route renders all four bindings at once. go declares its
+// path in the ecosystems block; the npm family declares theirs as tagged
+// enforced paths.
 func allDeclaredRoutes() []registrymanifest.Route {
 	return []registrymanifest.Route{{
 		Prefix:     "r0",
@@ -502,11 +467,9 @@ func allDeclaredRoutes() []registrymanifest.Route {
 	}}
 }
 
-// TestTable_RetiredRouteKeyPresence pins which rows carry a retired
-// top-level routes-file key (ADR 0047, issue #3261) predating
-// [routes.ecosystems.<name>] (issue #3403) and which never had one -- a row
-// gaining or losing the key fails loudly here, mirroring
-// TestTable_BindingEnvVarPresence.
+// Some rows carry a retired top-level routes-file key (ADR 0047, issue
+// #3261) predating [routes.ecosystems.<name>] (issue #3403). A row gaining
+// or losing the key must fail here.
 func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 	want := map[string]string{
 		"cargo":  "cargo-registries",
@@ -527,10 +490,9 @@ func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 	}
 }
 
-// TestRowByRetiredRouteKey pins RowByRetiredRouteKey resolving each of the
-// three retired keys to the row that declares it, and rejecting a key no
-// row declares -- the seam registryroutes.mergeRetiredRouteEcosystems
-// leans on instead of a hand-listed ecosystem name.
+// registryroutes.mergeRetiredRouteEcosystems resolves keys through this
+// lookup instead of hand-listing ecosystem names, so it must both resolve
+// every declared key and reject one no row declares.
 func TestRowByRetiredRouteKey(t *testing.T) {
 	for key, wantName := range map[string]string{
 		"cargo-registries": "cargo",

@@ -9,13 +9,10 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// TestBreakdownByModel_DedupByMessageID confirms that when two step_finish
-// lines share the same non-empty messageID (an opencode re-emit of one
-// message's part, mirroring claude-code's multi-content-block re-emit), the
-// breakdown counts that message's usage once, not once per line. A third,
-// distinct messageID is always counted. The expected totals are the deduped
-// sum (msg_a once + msg_b once), not the naive inflated sum over all three
-// lines.
+// Two step_finish lines sharing a non-empty messageID are an opencode re-emit
+// of one message's part, mirroring claude-code's multi-content-block re-emit,
+// so the breakdown counts that message once. The wanted totals are the deduped
+// sum (msg_a once plus msg_b once), not the inflated sum over all three lines.
 func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
 	lines := []string{
 		`{"type":"step_finish","part":{"messageID":"msg_a","modelID":"gpt-5","tokens":{"input":100,"output":50,"reasoning":10,"cache":{"write":20,"read":200}}}}`,
@@ -53,8 +50,8 @@ func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_UnknownModel confirms a step_finish with no modelID
-// buckets under "unknown" rather than being dropped or panicking.
+// A step_finish with no modelID buckets under "unknown" rather than being
+// dropped or panicking.
 func TestBreakdownByModel_UnknownModel(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_1","tokens":{"input":5,"output":2}}}`
 	path := WriteLog(t, line)
@@ -74,11 +71,8 @@ func TestBreakdownByModel_UnknownModel(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_EmptyMessageIDAlwaysCounted confirms that two
-// step_finish lines carrying an empty messageID are both counted, not
-// deduped against each other — there is nothing to dedup an empty id
-// against, unlike the non-empty-id case in
-// TestBreakdownByModel_DedupByMessageID.
+// An empty messageID has nothing to dedup against, so both lines count. The
+// non-empty case is TestBreakdownByModel_DedupByMessageID.
 func TestBreakdownByModel_EmptyMessageIDAlwaysCounted(t *testing.T) {
 	lines := []string{
 		`{"type":"step_finish","part":{"messageID":"","modelID":"gpt-5","tokens":{"input":10,"output":5}}}`,
@@ -106,9 +100,9 @@ func TestBreakdownByModel_EmptyMessageIDAlwaysCounted(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_CacheWriteTo5m confirms tokens.cache.write lands in
-// CacheWrite5mTokens and CacheWrite1hTokens stays 0 — opencode reports no
-// TTL split, unlike claude-code's ephemeral_5m/1h cache_creation.
+// opencode reports no TTL split, unlike claude-code's ephemeral_5m/1h
+// cache_creation, so tokens.cache.write all lands in CacheWrite5mTokens and
+// CacheWrite1hTokens stays 0.
 func TestBreakdownByModel_CacheWriteTo5m(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":1,"output":1,"cache":{"write":77,"read":0}}}}`
 	path := WriteLog(t, line)
@@ -128,9 +122,8 @@ func TestBreakdownByModel_CacheWriteTo5m(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_TwoModels confirms two distinct modelIDs yield two
-// rows, ordered by ascending raw model id — opencode models are not claude
-// families, so there is no family-rank pass, unlike claude's breakdown.
+// Rows come back ordered by ascending raw model id. opencode models are not
+// claude families, so there is no family-rank pass, unlike claude's breakdown.
 func TestBreakdownByModel_TwoModels(t *testing.T) {
 	lines := []string{
 		`{"type":"step_finish","part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":100,"output":50}}}`,
@@ -154,8 +147,8 @@ func TestBreakdownByModel_TwoModels(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_FileNotFound confirms a missing log file degrades to
-// (nil, nil), matching ExtractUsage's own missing-log contract.
+// A missing log file degrades to (nil, nil), matching ExtractUsage's own
+// missing-log contract.
 func TestBreakdownByModel_FileNotFound(t *testing.T) {
 	got, err := breakdownByModel("/nonexistent/x.log")
 	if err != nil {
@@ -166,10 +159,9 @@ func TestBreakdownByModel_FileNotFound(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_BreakdownByModelError confirms ExtractUsage still returns
-// the aggregate totals it already summed from step_finish events when
-// breakdownByModel fails with a real I/O error, rather than discarding them
-// (issue #674, mirroring claude's ExtractUsage).
+// ExtractUsage still returns the aggregate totals it already summed from
+// step_finish events when breakdownByModel fails with a real I/O error, rather
+// than discarding them (issue #674, mirroring claude's ExtractUsage).
 func TestExtractUsage_BreakdownByModelError(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_a","modelID":"gpt-5","tokens":{"input":100,"output":50,"reasoning":0,"cache":{"write":0,"read":0}}}}`
 	path := WriteLog(t, line)

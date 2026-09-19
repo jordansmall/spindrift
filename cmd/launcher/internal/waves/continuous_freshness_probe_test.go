@@ -12,19 +12,11 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestRunContinuous_RealProbe_LauncherStaleImageFresh is issue #1364 slice
-// 5's AC4 coverage: a --continuous-dispatch wave stops for rebuild via the
-// existing ErrImageStale / exit-4 path when the launcher is stale but the
-// image is fresh. Unlike TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish,
-// which wires RunContinuous to a synthetic closure that hand-returns
-// (applicable, fresh, message) tuples, this test builds the FreshnessChecker
-// by calling the REAL freshness.Probe — wired to a freshness.Fake evaluator
-// whose image-attr outpath matches the loaded image tag (image fresh) but
-// whose launcher-attr outpath differs from the loaded launcher hash
-// (launcher stale) — and hands that closure to RunContinuous. This proves
-// the Probe -> FreshnessChecker -> RunContinuous plumbing is wired for real,
-// not just that RunContinuous reacts correctly to a hand-rolled stale
-// signal (already covered above).
+// Issue #1364 slice 5, AC4: a --continuous-dispatch wave stops for rebuild via
+// the ErrImageStale / exit-4 path when the launcher is stale but the image is
+// fresh. This test builds the FreshnessChecker from the real freshness.Probe
+// rather than a hand-rolled stale closure, so it covers the Probe to
+// FreshnessChecker to RunContinuous plumbing itself.
 func TestRunContinuous_RealProbe_LauncherStaleImageFresh(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 
@@ -61,11 +53,8 @@ func TestRunContinuous_RealProbe_LauncherStaleImageFresh(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
-	// The probe is stale from the very first refill call (this fixture never
-	// flips fresh->stale mid-run the way
-	// TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish's synthetic
-	// closure does), so no Box ever launches at all — the strongest form of
-	// "no further Box launched".
+	// The probe is stale from the very first refill call, so no Box ever
+	// launches at all. That is the strongest form of "no further Box launched".
 	fr := runner.NewFake()
 
 	dir := tempLogDir(t)

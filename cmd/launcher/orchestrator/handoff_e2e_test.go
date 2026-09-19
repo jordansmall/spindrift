@@ -10,32 +10,26 @@ import (
 	"testing"
 )
 
-// e2eDriverExecPackage is the import path go build compiles for the real
-// driver-exec binary this test spawns.
 const e2eDriverExecPackage = "spindrift.dev/launcher/driver-exec"
 
-// moduleRootForTest resolves cmd/launcher (the driver-exec module root) from
-// this source file's own location via runtime.Caller, rather than a
-// CWD-relative "../.." -- a subprocess's go build Dir and the assemble-prompt
-// asset paths must resolve the same whatever working directory `go test`
-// happens to run the binary from.
+// moduleRootForTest resolves cmd/launcher from this file's own location rather
+// than a CWD-relative path, because the subprocess go build Dir and the
+// assemble-prompt asset paths must resolve the same whatever working directory
+// `go test` runs the binary from.
 func moduleRootForTest(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller(0) failed, cannot locate the module root")
 	}
-	// thisFile is cmd/launcher/orchestrator/handoff_e2e_test.go; two dirs up
-	// is cmd/launcher.
 	return filepath.Dir(filepath.Dir(thisFile))
 }
 
-// buildDriverExec compiles the REAL driver-exec binary into dir under the
-// exact name "driver-exec" (so orchestrator's own exec.LookPath("driver-exec")
-// resolves it once dir is on PATH) and returns its path. It fails loudly
-// rather than skipping when `go build` is unavailable: under nix develop / CI
-// it always is, and a silent skip would hide the one integration this test
-// exists to prove.
+// buildDriverExec compiles the real driver-exec binary under the exact name
+// "driver-exec" so orchestrator's own exec.LookPath resolves it once dir is on
+// PATH. It fails rather than skips when `go build` is missing: under nix
+// develop and CI the toolchain is always there, and a skip would hide the one
+// integration this test exists to prove.
 func buildDriverExec(t *testing.T, dir, moduleRoot string) string {
 	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
@@ -50,15 +44,11 @@ func buildDriverExec(t *testing.T, dir, moduleRoot string) string {
 	return bin
 }
 
-// writeFakeClaudeDriver writes an executable bash script standing in for the
-// Driver ("claude") that the REAL driver-exec spawns and tees stdout from --
-// one layer deeper than writeFakeDriverExec's fakes, which stand in for
-// driver-exec itself. It prints real claude-shaped stream-json to its OWN
-// stdout (the real driver-exec, not this script, does the log teeing), keyed
-// off an invocation count kept in callLog: call 1 (implement pass) narrates
-// without an outcome so the loop proceeds into a review pass, call 2 (review
-// pass) issues an APPROVE verdict, and call 3 (land pass) prints the terminal
-// SPINDRIFT_OUTCOME line.
+// writeFakeClaudeDriver fakes the Driver ("claude") that the real driver-exec
+// spawns, one layer deeper than writeFakeDriverExec's fakes. It keys its
+// stream-json off an invocation count in callLog: call 1 narrates without an
+// outcome so the loop proceeds into a review pass, call 2 approves, and call 3
+// prints the terminal SPINDRIFT_OUTCOME line.
 func writeFakeClaudeDriver(t *testing.T, dir, callLog string) string {
 	t.Helper()
 	script := "#!/bin/sh\n" +
@@ -77,20 +67,15 @@ func writeFakeClaudeDriver(t *testing.T, dir, callLog string) string {
 	return path
 }
 
-// TestHandoffEndToEnd is the first end-to-end turn test (issue #2975): the
-// real assemble-prompt verb produces a real handoff file that feeds the real
-// orchestrator loop, which spawns the real driver-exec binary as an actual
-// subprocess across an implement pass and a review pass to an outcome -- only
-// the Driver ("claude") underneath driver-exec is faked. It proves the whole
-// handoff interface hangs together: assemble-prompt writes it, orchestrator
-// forwards -handoff-file, and driver-exec loads it and sources the driver/
-// model/effort/argv-shape facts from it rather than from per-pass flags.
+// TestHandoffEndToEnd is the first end-to-end turn test (issue #2975). Only
+// the Driver ("claude") is faked: the real assemble-prompt writes a real
+// handoff file, the real orchestrator forwards -handoff-file, and the real
+// driver-exec subprocess reads the driver, model, effort and argv shape from
+// that file instead of from per-pass flags.
 func TestHandoffEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	moduleRoot := moduleRootForTest(t)
 
-	// The real driver-exec binary, named exactly "driver-exec" and placed on
-	// PATH so orchestrator's own exec.LookPath finds it.
 	driverExecBin := buildDriverExec(t, dir, moduleRoot)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -102,24 +87,11 @@ func TestHandoffEndToEnd(t *testing.T) {
 	handoffOutput := filepath.Join(dir, "handoff.json")
 	reviewPromptOutput := filepath.Join(dir, "review-prompt.txt")
 
-	// The real assemble-prompt verb, invoked as a subprocess exactly the way
-	// entrypoint.sh's phase_prompt_assembly does. Since issue #2979, the 29
-	// Box-env-sourced Env fields (promptassembly.EnvFromEnviron) reach it via
-	// the process environment rather than a CLI flag; this subprocess is
-	// exec'd with no explicit .Env, so it inherits this test process's
-	// environment and the t.Setenv calls below reach it exactly like a flag
-	// would have. ORCHESTRATOR_ENABLED=1 (plus the review-loop env vars) puts
-	// the render on the one cell that emits a review prompt, and
-	// --review-prompt-output makes Handoff.ReviewPromptFile non-empty -- the
-	// master switch that dispatches the orchestrator into its
-	// implement/review/land loop. The registry/prompts paths are still passed
-	// as CLI flags (not the PROMPTASSEMBLY_* env vars entrypoint.sh reads),
-	// per assembleprompt_cmd_test.go's own convention.
-	// This test process may itself run inside a spindrift Box, so the
-	// ambient environment can already carry real values for the 14
-	// Box-env vars below that this test doesn't otherwise pin -- clear
-	// them first so the subprocess sees only what this test sets,
-	// matching boxenv_test.go's TestEnvFromEnviron guard.
+	// Issue #2979 moved assemble-prompt's Box env fields from a flag to the
+	// process environment, which the subprocess below inherits from this test.
+	// The test can itself run inside a spindrift Box, so clear the vars it
+	// does not pin before setting the ones it does, matching boxenv_test.go's
+	// TestEnvFromEnviron guard.
 	for _, envVar := range []string{
 		"AGENTS_JSON_TEMPLATE",
 		"BOX_FILER_ENABLED",
@@ -138,6 +110,10 @@ func TestHandoffEndToEnd(t *testing.T) {
 	} {
 		t.Setenv(envVar, "")
 	}
+	// ORCHESTRATOR_ENABLED and the review-loop vars put the render on the one
+	// cell that emits a review prompt, and --review-prompt-output below makes
+	// Handoff.ReviewPromptFile non-empty, which dispatches the orchestrator
+	// into its implement, review and land loop.
 	t.Setenv("ORCHESTRATOR_ENABLED", "1")
 	t.Setenv("BOX_REVIEW_LOOP_INLINE", "")
 	t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "1")
@@ -189,8 +165,7 @@ func TestHandoffEndToEnd(t *testing.T) {
 		t.Fatalf("assemble-prompt wrote no handoff file: %v", err)
 	}
 
-	// -prompt-file needs a real file with some content: the implement pass's
-	// own seed prompt, which every pass reseeds from.
+	// -prompt-file needs a real file with content: every pass reseeds from it.
 	promptFile := filepath.Join(dir, "seed-prompt.txt")
 	if err := os.WriteFile(promptFile, []byte("Implement the change for issue #7."), 0o644); err != nil {
 		t.Fatal(err)
@@ -208,8 +183,8 @@ func TestHandoffEndToEnd(t *testing.T) {
 	}
 
 	out := stdout.String()
-	// Both an implement pass and a review pass must actually have run -- not
-	// just one -- proving the loop drove a full implement -> review -> land
+	// Both an implement pass and a review pass must have run, not just one,
+	// which is what proves the loop drove a full implement, review and land
 	// turn through the real driver-exec subprocess.
 	if !strings.Contains(out, `"pass_start"`) || !strings.Contains(out, `"role":"implement"`) {
 		t.Errorf("stdout missing the implement pass_start op, want an implement pass to have run (stdout=%q)", out)

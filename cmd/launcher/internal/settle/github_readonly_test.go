@@ -8,13 +8,11 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// TestSettle_GithubReadOnly_BlockedPostsNoteAsComment mirrors
-// TestSettle_LocalForge_BlockedPostsNoteAsComment for a github-shaped
+// Mirrors TestSettle_LocalForge_BlockedPostsNoteAsComment for a github-shaped
 // tracker (AsNoLandingRecorder) under BOX_FORGE_AND_ISSUE_ACCESS=read-only
-// (issue #1917): the Box holds no write token in read-only mode, so its
-// blocked-note travels via the outcome note= field the same way local's
-// always has — driven by Config.ReadOnly, not by the LandingRecorder type
-// assertion TestSettle_PostsUsageComment_Blocked exercises for read-write.
+// (issue #1917): the Box holds no write token, so it reports its blocked note
+// in the outcome note= field, as the local path always has. Config.ReadOnly
+// drives that, not the LandingRecorder type assertion the read-write path uses.
 func TestSettle_GithubReadOnly_BlockedPostsNoteAsComment(t *testing.T) {
 	const issNum = "42"
 	fc := forge.NewFake(testDispatchLabels)

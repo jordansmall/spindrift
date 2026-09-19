@@ -14,9 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestView_ListsVisibleIssuesWithNumberTitleLabels verifies View renders
-// each visible issue's number, title, and labels — the backlog line the
-// operator reads to decide what to pick in a later issue.
 func TestView_ListsVisibleIssuesWithNumberTitleLabels(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -31,11 +28,9 @@ func TestView_ListsVisibleIssuesWithNumberTitleLabels(t *testing.T) {
 	}
 }
 
-// TestViewWithLayout_MatchesView verifies View's split (issue #3018 slice 3)
-// is behaviour-preserving: viewWithLayout(m, resolveLayout(m)) renders
-// exactly what View(m) does, across the branch-picking layout fields View
-// itself reads (plain list, docked sidebar, floating detail modal box,
-// fullscreen fallback).
+// viewWithLayout(m, resolveLayout(m)) must render exactly what View(m) does:
+// issue #3018 slice 3 split View, and the split has to be behaviour-preserving
+// across every layout branch View itself reads.
 func TestViewWithLayout_MatchesView(t *testing.T) {
 	docked := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	docked = Update(docked, SidebarLoadedMsg{Number: "1", Activity: []ActivityLine{{Text: "hi"}}})
@@ -67,11 +62,8 @@ func TestViewWithLayout_MatchesView(t *testing.T) {
 	}
 }
 
-// TestView_ModeList_ShowsPinnedFooter verifies the main list view renders a
-// pinned keystroke-hint footer via the shared renderer (issue #1791), the
-// same "shortcuts pinned to the bottom" treatment the zoomed log view
-// already has, closing the one Console view issue #1792 called out as
-// lacking it.
+// The main list view was the one Console view issue #1792 called out as lacking
+// a pinned keystroke footer; issue #1791 gave it the shared renderer.
 func TestView_ModeList_ShowsPinnedFooter(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "one"}}})
@@ -84,10 +76,8 @@ func TestView_ModeList_ShowsPinnedFooter(t *testing.T) {
 	}
 }
 
-// TestView_ModeList_NarrowWidth_FooterClipsWithoutOverflow verifies the main
-// list view's pinned footer degrades gracefully on a narrow terminal —
-// width-clipped via the shared renderer's own clip-with-ellipsis behaviour,
-// never wrapped or left to overflow the terminal width (issue #1792 AC3).
+// Issue #1792 AC3: on a narrow terminal the footer clips with an ellipsis,
+// never wrapping or overflowing the terminal width.
 func TestView_ModeList_NarrowWidth_FooterClipsWithoutOverflow(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
@@ -115,10 +105,8 @@ func TestView_ModeList_NarrowWidth_FooterClipsWithoutOverflow(t *testing.T) {
 	}
 }
 
-// TestView_ModeList_FooterSurvivesScrollClamp verifies the pinned footer
-// still renders — and the whole frame still fits the terminal — after
-// scrolling a long backlog to its clamped last page, not just on a short,
-// unscrolled list (issue #1792 AC2).
+// Issue #1792 AC2: the footer has to survive a scroll to the clamped last page,
+// not just a short unscrolled list.
 func TestView_ModeList_FooterSurvivesScrollClamp(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -138,9 +126,6 @@ func TestView_ModeList_FooterSurvivesScrollClamp(t *testing.T) {
 	}
 }
 
-// TestView_DogfoodNotice_ShownWhenLiveSilentOtherwise verifies the
-// informational dogfood-competition notice renders only when a live
-// pid-file was found at startup — absence renders nothing extra.
 func TestView_DogfoodNotice_ShownWhenLiveSilentOtherwise(t *testing.T) {
 	absent := View(NewModel())
 	if strings.Contains(absent, "dogfood") {
@@ -153,10 +138,8 @@ func TestView_DogfoodNotice_ShownWhenLiveSilentOtherwise(t *testing.T) {
 	}
 }
 
-// TestView_Backlog_TruncatedLabelsShowPlusN verifies a backlog row whose
-// labels don't all fit the label column shows as many labels as fit followed
-// by a "+N" count for the remainder, rather than the ellipsis-clipped joined
-// string title/other cells use (issue #1631).
+// Issue #1631: the label cell counts the labels that do not fit as "+N" instead
+// of the ellipsis clip the title and other cells use.
 func TestView_Backlog_TruncatedLabelsShowPlusN(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -172,30 +155,25 @@ func TestView_Backlog_TruncatedLabelsShowPlusN(t *testing.T) {
 	}
 }
 
-// TestView_Backlog_FittingLabelsShowNoPlusN verifies a backlog row whose
-// labels all fit the label column renders the plain joined list with no
-// "+N" suffix (issue #1631).
+// Issue #1631: labels that all fit render as a plain joined list, no "+N" suffix.
 func TestView_Backlog_FittingLabelsShowNoPlusN(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
 		{Number: "1", Title: "x", Labels: []string{"ready-for-agent", "bug"}},
 	}})
 
-	// The exact "[ready-for-agent, bug]" match already proves clipLabels
-	// didn't truncate — a truncated cell would read "[ready-for-agent, +1]"
-	// instead. A bare strings.Contains(out, "+") check would also trip on
-	// the header's own bordered panel (issue #1756) rendering ASCII "+"
-	// corners under this test's ambient (unset) TERM.
+	// The exact "[ready-for-agent, bug]" match already proves clipLabels did
+	// not truncate; a truncated cell would read "[ready-for-agent, +1]". A bare
+	// strings.Contains(out, "+") check would trip on the header panel's own
+	// ASCII "+" corners (issue #1756) under this test's unset TERM.
 	out := View(m)
 	if !strings.Contains(out, "[ready-for-agent, bug]") {
 		t.Errorf("View() = %q, want the label cell rendered as \"[ready-for-agent, bug]\" with no +N suffix", out)
 	}
 }
 
-// TestView_Backlog_LabelCellNeverOverflowsWidth verifies the "+N" suffix
-// itself counts against the label column's width budget — even on a
-// terminal too narrow to fit any label plus its count, the cell is clipped
-// rather than left to overflow (issue #1631).
+// Issue #1631: the "+N" suffix counts against the label column's width budget, so
+// the cell clips rather than overflowing even where no label plus its count fits.
 func TestView_Backlog_LabelCellNeverOverflowsWidth(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -217,10 +195,8 @@ func TestView_Backlog_LabelCellNeverOverflowsWidth(t *testing.T) {
 	}
 }
 
-// TestView_Backlog_OrphanLabelCountsTowardPlusN verifies the synthetic
-// "orphan" label (issue #1619) is just another entry in the label list for
-// truncation purposes — it counts toward both the shown labels and the "+N"
-// remainder like any tracker-supplied label (issue #1631).
+// The synthetic orphan label (issue #1619) is just another entry for truncation:
+// it counts toward both the shown labels and the "+N" remainder (issue #1631).
 func TestView_Backlog_OrphanLabelCountsTowardPlusN(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -234,10 +210,8 @@ func TestView_Backlog_OrphanLabelCountsTowardPlusN(t *testing.T) {
 	}
 }
 
-// TestView_Backlog_TitleStillEllipsisClippedNotPlusN verifies an
-// over-width title still clips with a trailing ellipsis — the "+N" scheme
-// this issue adds is scoped to the label cell, not the title column (issue
-// #1631, acceptance criterion 4).
+// Issue #1631 acceptance criterion 4: "+N" is scoped to the label cell, so an
+// over-width title still clips with a trailing ellipsis.
 func TestView_Backlog_TitleStillEllipsisClippedNotPlusN(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -259,10 +233,8 @@ func TestView_Backlog_TitleStillEllipsisClippedNotPlusN(t *testing.T) {
 	}
 }
 
-// TestView_CapAndLive_Shown verifies View renders the session's live
-// parallelism cap and current live count (issue #653) in the header status
-// line — visible without a separate command, the same way the queue rows
-// already are.
+// Issue #653: the header status line shows the session's parallelism cap and live
+// count without the operator running a separate command.
 func TestView_CapAndLive_Shown(t *testing.T) {
 	m := NewModel()
 	m = Update(m, CapMsg{Cap: 3, Live: 1})
@@ -273,14 +245,10 @@ func TestView_CapAndLive_Shown(t *testing.T) {
 	}
 }
 
-// TestView_Header_StatusLine_ShowsRunningWaitingHeldSettledFailed verifies
-// the header's status line reports running/cap, waiting, held, settled, and
-// failed counts derived from Cap/Live and the Picks slice's PickState tags —
-// no new stored counters (issue #843, ADR 0025). Each count segment is
-// asserted individually rather than as one contiguous line: per-role styling
-// (ADR 0031) wraps each segment in its own ANSI escape codes, so content
-// survives styling as separate substrings, not as one unbroken string
-// (issue #1499 AC).
+// Issue #843 and ADR 0025: the counts derive from Cap/Live and the Picks' PickState
+// tags, with no new stored counters. Each segment is asserted on its own because
+// per-role styling (ADR 0031) wraps each one in its own ANSI escape codes, so the
+// line is not one unbroken string (issue #1499).
 func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettledFailed(t *testing.T) {
 	m := NewModel()
 	m = Update(m, CapMsg{Cap: 3, Live: 1})
@@ -300,10 +268,8 @@ func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettledFailed(t *testing.
 	}
 }
 
-// TestView_Header_StatusLine_ShowsRecoverable verifies the header's status
-// line reports RecoverableCount as its own "recoverable N" segment —
-// pre-existing terminal state from a prior run, distinct from the
-// Picks-derived failed count above (issue #2255, ADR 0039 slice S4).
+// Issue #2255, ADR 0039 slice S4: RecoverableCount is pre-existing terminal state
+// from a prior run, its own segment distinct from the Picks-derived failed count.
 func TestView_Header_StatusLine_ShowsRecoverable(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{RecoverableCount: 2})
@@ -314,11 +280,8 @@ func TestView_Header_StatusLine_ShowsRecoverable(t *testing.T) {
 	}
 }
 
-// TestView_Header_StatusLine_RecoverableStyledDistinctFromHeld verifies the
-// "recoverable N" segment renders with RoleRecoverable's cyan ANSI slot
-// (\x1b[36m), not RoleHeld's yellow (\x1b[33m) — held and recoverable are
-// distinct session axes (issue #2255) and must be visually distinguishable
-// (issue #2314).
+// Held and recoverable are distinct session axes (issue #2255) and must be visually
+// distinguishable (issue #2314): cyan RoleRecoverable, not RoleHeld's yellow.
 func TestView_Header_StatusLine_RecoverableStyledDistinctFromHeld(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -336,9 +299,8 @@ func TestView_Header_StatusLine_RecoverableStyledDistinctFromHeld(t *testing.T) 
 	}
 }
 
-// TestView_Header_StatusLine_StyledByRole verifies the status line renders
-// with ANSI color codes on a color-capable terminal — colour applied by
-// semantic role, per ADR 0031 — rather than as bare text.
+// ADR 0031: the status line colors by semantic role on a color-capable terminal
+// rather than rendering as bare text.
 func TestView_Header_StatusLine_StyledByRole(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -353,9 +315,8 @@ func TestView_Header_StatusLine_StyledByRole(t *testing.T) {
 	}
 }
 
-// TestView_Header_StaleAlert_StyledWithGlyph verifies the stale-image alert
-// carries the plain-Unicode warning glyph and renders styled by role
-// (ADR 0031), while keeping its existing content.
+// ADR 0031: the stale-image alert carries the plain-Unicode warning glyph and
+// styles by role, keeping its existing content.
 func TestView_Header_StaleAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -374,10 +335,8 @@ func TestView_Header_StaleAlert_StyledWithGlyph(t *testing.T) {
 	}
 }
 
-// TestView_Header_RebuildingAlert_StyledWithGlyph verifies the
-// rebuilding-in-progress alert carries the plain-Unicode rebuilding glyph
-// and renders styled by role (ADR 0031), while keeping its existing
-// content.
+// ADR 0031: the rebuilding alert carries the plain-Unicode rebuilding glyph and
+// styles by role, keeping its existing content.
 func TestView_Header_RebuildingAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -396,13 +355,10 @@ func TestView_Header_RebuildingAlert_StyledWithGlyph(t *testing.T) {
 	}
 }
 
-// TestView_Header_Title_FoldedInBorder_CollapsesWhenTooShortToBox verifies
-// the "spindrift" wordmark folds into the header panel's top border rule
-// (issue #1798) rather than rendering as a separate interior banner: the
-// literal "====" rule is gone, and the title only disappears once the
-// terminal is too short to afford the bordered header at all — the same
-// unboxed fallback renderBoxedHeader already applies for an oversized boxed
-// render (issue #1035 AC1/AC2) — not a banner-specific collapse rule.
+// Issue #1798 folded the "spindrift" wordmark into the header panel's top border,
+// so the literal "====" rule is gone. The title disappears only once the terminal
+// is too short to afford the bordered header at all, the same unboxed fallback
+// renderBoxedHeader already applies (issue #1035 AC1/AC2), not a banner-specific rule.
 func TestView_Header_Title_FoldedInBorder_CollapsesWhenTooShortToBox(t *testing.T) {
 	tall := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	out := View(tall)
@@ -413,9 +369,8 @@ func TestView_Header_Title_FoldedInBorder_CollapsesWhenTooShortToBox(t *testing.
 		t.Errorf("View() on a tall terminal = %q, want no literal ==== banner rule", out)
 	}
 
-	// The boxed header's minimum render is 3 rows (top border, one status
-	// line, bottom border) — a height of 2 is one row short of affording it,
-	// so renderBoxedHeader falls back to the unboxed header entirely,
+	// The boxed header's minimum render is 3 rows (top border, status line,
+	// bottom border), so a height of 2 falls back to the unboxed header,
 	// dropping the border and the title folded into it.
 	short := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 2})
 	out = View(short)
@@ -427,10 +382,8 @@ func TestView_Header_Title_FoldedInBorder_CollapsesWhenTooShortToBox(t *testing.
 	}
 }
 
-// TestView_Header_RendersBordered verifies the header/status block renders
-// inside a muted rounded border — the same renderBoxedColumn look the docked
-// list/sidebar panels already use — so the header reads as its own panel
-// rather than running straight into the Section tabs below it (issue #1756).
+// Issue #1756: the header renders as its own bordered panel rather than running
+// straight into the Section tabs below it.
 func TestView_Header_RendersBordered(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -442,13 +395,10 @@ func TestView_Header_RendersBordered(t *testing.T) {
 	}
 }
 
-// TestView_Header_AlertsRenderBeforeEphemeralPrompts verifies the
-// stale-image and competing-dogfood alert lines render as part of the
-// header — grouped with the status line, ahead of ephemeral operator
-// prompts like an in-progress filter edit — rather than interleaved with
-// them (issue #843, ADR 0025). Rebuilding/RebuildErr are the other two
-// header alerts and share this same grouping; they're covered separately by
-// TestView_Rebuilding_ShowsProgress and TestView_RebuildErr_Surfaced below.
+// Issue #843 and ADR 0025: alert lines group with the header status line, ahead of
+// ephemeral operator prompts like an in-progress filter edit. Rebuilding and
+// RebuildErr share the grouping and are covered by TestView_Rebuilding_ShowsProgress
+// and TestView_RebuildErr_Surfaced.
 func TestView_Header_AlertsRenderBeforeEphemeralPrompts(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed"}})
@@ -470,11 +420,8 @@ func TestView_Header_AlertsRenderBeforeEphemeralPrompts(t *testing.T) {
 	}
 }
 
-// TestView_Header_LaunchLessSession_RendersCleanly verifies a launch-less
-// session (no CapMsg, no picks, no size event ever delivered) renders a
-// clean header — zero/zero counts, no stale/dogfood alert text, no panic —
-// rather than requiring a Launcher round-trip before the header is usable
-// (issue #843 AC5).
+// Issue #843 AC5: a session with no CapMsg, no picks and no size event must render a
+// clean header rather than needing a Launcher round-trip first.
 func TestView_Header_LaunchLessSession_RendersCleanly(t *testing.T) {
 	out := View(NewModel())
 	// Per-segment, not one contiguous line: per-role styling (ADR 0031)
@@ -491,10 +438,8 @@ func TestView_Header_LaunchLessSession_RendersCleanly(t *testing.T) {
 	}
 }
 
-// TestView_ListsPicksWithNumberTitleState verifies View renders a work
-// Section's rows with number, title, and state — the queue overview the
-// operator reads without a separate command (#646, ADR 0030 moved this from
-// the two-column queue to whichever Section the pick's state maps into).
+// Issue #646; ADR 0030 moved this from the two-column queue to whichever Section the
+// pick's state maps into.
 func TestView_ListsPicksWithNumberTitleState(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -510,9 +455,8 @@ func TestView_ListsPicksWithNumberTitleState(t *testing.T) {
 	}
 }
 
-// TestView_DissolvedPick_ShowsReason verifies a dissolved row in the Failed
-// Section also carries its reason, so the operator sees why a pick never
-// launched (#646, ADR 0030's fold of PickDissolved into SectionFailed).
+// Issue #646: a dissolved row carries its reason so the operator sees why a pick never
+// launched. ADR 0030 folds PickDissolved into SectionFailed.
 func TestView_DissolvedPick_ShowsReason(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -528,9 +472,8 @@ func TestView_DissolvedPick_ShowsReason(t *testing.T) {
 	}
 }
 
-// TestView_RunningPick_ShowsHeartbeat verifies a running row renders its
-// latest heartbeat line alongside number/title/state, so the overview is
-// scannable without drilling in (#647 AC2).
+// Issue #647 AC2: a running row shows its latest heartbeat, so the overview is
+// scannable without drilling in.
 func TestView_RunningPick_ShowsHeartbeat(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -544,9 +487,8 @@ func TestView_RunningPick_ShowsHeartbeat(t *testing.T) {
 	}
 }
 
-// TestView_RunningPick_ShowsPassState verifies a running row renders its
-// latest pass-manifest summary alongside number/title/state, mirroring
-// TestView_RunningPick_ShowsHeartbeat (issue #2983).
+// Issue #2983: a running row shows its latest pass-manifest summary, mirroring
+// TestView_RunningPick_ShowsHeartbeat.
 func TestView_RunningPick_ShowsPassState(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -560,10 +502,8 @@ func TestView_RunningPick_ShowsPassState(t *testing.T) {
 	}
 }
 
-// TestView_RunningPick_SanitizesHeartbeatControlSequences verifies a running
-// pick's Heartbeat — box-log-derived, untrusted content (issue #1639) — is
-// stripped of control sequences the same way Title/Reason already are,
-// mirroring TestView_Queue_SanitizesTitleAndReasonControlSequences.
+// Heartbeat is box-log-derived, untrusted content (issue #1639), so it is stripped of
+// control sequences the same way Title and Reason already are.
 func TestView_RunningPick_SanitizesHeartbeatControlSequences(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
@@ -584,10 +524,8 @@ func TestView_RunningPick_SanitizesHeartbeatControlSequences(t *testing.T) {
 	}
 }
 
-// TestView_StaleBanner_ShownWhenStaleSilentOtherwise verifies the stale
-// banner (with the probe's message and the rebuild-key hint) renders only
-// while Stale is true — a fresh session shows no mention of it (issue
-// #652).
+// Issue #652: the stale banner carries the probe's message and the rebuild-key hint,
+// and renders only while Stale is true.
 func TestView_StaleBanner_ShownWhenStaleSilentOtherwise(t *testing.T) {
 	fresh := View(NewModel())
 	if strings.Contains(fresh, "stale") {
@@ -607,8 +545,8 @@ func TestView_StaleBanner_ShownWhenStaleSilentOtherwise(t *testing.T) {
 	}
 }
 
-// TestView_Rebuilding_ShowsProgress verifies an in-flight rebuild renders a
-// progress line so the operator sees the confirm key took effect.
+// An in-flight rebuild renders a progress line so the operator sees the confirm key
+// took effect.
 func TestView_Rebuilding_ShowsProgress(t *testing.T) {
 	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Rebuilding: true}})
 	out := View(m)
@@ -617,8 +555,7 @@ func TestView_Rebuilding_ShowsProgress(t *testing.T) {
 	}
 }
 
-// TestView_RebuildErr_Surfaced verifies a failed rebuild's error text
-// appears, and launches stay noted as held (Stale remains true).
+// A failed rebuild surfaces its error text, and launches stay held (Stale stays true).
 func TestView_RebuildErr_Surfaced(t *testing.T) {
 	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Err: "nix build failed"}})
 	out := View(m)
@@ -627,9 +564,8 @@ func TestView_RebuildErr_Surfaced(t *testing.T) {
 	}
 }
 
-// TestView_Header_RebuildFailedAlert_StyledWithGlyph verifies the
-// rebuild-failed alert carries the plain-Unicode warning glyph and renders
-// styled by role (ADR 0031), while keeping its existing content.
+// ADR 0031: the rebuild-failed alert carries the plain-Unicode warning glyph and
+// styles by role, keeping its existing content.
 func TestView_Header_RebuildFailedAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -658,12 +594,12 @@ func TestView_Header_RebuildFailedAlert_StyledWithGlyph(t *testing.T) {
 	}
 }
 
-// TestView_RebuildErr_Truncated verifies a long, multi-line RebuildErr (the
-// merged nix stdout+stderr RunNixBuild wraps into one error, issue #1131)
-// renders as a single bounded banner line instead of blowing out the header.
+// Issue #1131: RunNixBuild wraps merged nix stdout and stderr into one long
+// multi-line error, which has to render as a single bounded banner line instead of
+// blowing out the header.
 func TestView_RebuildErr_Truncated(t *testing.T) {
 	// Pinned rather than inherited: the rebuild-failed banner is styled
-	// (ADR 0031), and the width bound below must hold whether or not this
+	// (ADR 0031), and the width bound below has to hold whether or not this
 	// process's ambient TERM happens to be color-capable.
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -697,8 +633,7 @@ func TestView_RebuildErr_Truncated(t *testing.T) {
 	}
 }
 
-// TestView_OrphanRecoveryErr_Surfaced verifies a startup orphan recovery
-// failure's error text appears in the rendered header (issue #1218).
+// Issue #1218: a startup orphan recovery failure's error text reaches the header.
 func TestView_OrphanRecoveryErr_Surfaced(t *testing.T) {
 	m := Update(NewModel(), OrphanRecoveryMsg{Err: "failed to adopt orphan #42: boom"})
 	out := View(m)
@@ -707,9 +642,8 @@ func TestView_OrphanRecoveryErr_Surfaced(t *testing.T) {
 	}
 }
 
-// TestView_Header_OrphanRecoveryAlert_StyledWithGlyph verifies the
-// orphan-adopt-failed alert carries the plain-Unicode warning glyph and
-// renders styled by role (ADR 0031), while keeping its existing content.
+// ADR 0031: the orphan-adopt-failed alert carries the plain-Unicode warning glyph
+// and styles by role, keeping its existing content.
 func TestView_Header_OrphanRecoveryAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -735,10 +669,8 @@ func TestView_Header_OrphanRecoveryAlert_StyledWithGlyph(t *testing.T) {
 	}
 }
 
-// TestView_BranchSwitchNotice_Surfaced verifies a rebuild's branch-switch
-// notice appears in the rendered header — the silent-switch gap issue #1141
-// closes: an operator whose pwd got moved off a branch during rebuild needs
-// to see it, not discover it cold.
+// Issue #1141 closed the silent-switch gap: an operator whose pwd got moved off a
+// branch during a rebuild has to see it, not discover it cold.
 func TestView_BranchSwitchNotice_Surfaced(t *testing.T) {
 	fresh := View(NewModel())
 	if strings.Contains(fresh, "switched") {
@@ -752,12 +684,10 @@ func TestView_BranchSwitchNotice_Surfaced(t *testing.T) {
 	}
 }
 
-// TestView_StaleDrainSummary_Surfaced verifies a stale-drain report's
-// summary (#2678) appears in the rendered header — the TUI-reachable
-// counterpart to RunContinuous's stdout/stale-drain.log emission, which a
-// Console session running under tea.WithAltScreen() never renders. A
-// zero-value RebuildStatus (every pre-#2678 Model) must render
-// byte-identical to before this change: no new blank line, no stray banner.
+// Issue #2678: a Console session running under tea.WithAltScreen() never renders
+// RunContinuous's stdout stale-drain report, so the summary needs a header banner. A
+// zero-value RebuildStatus (every pre-#2678 Model) must still render byte-identical
+// to before the change: no new blank line, no stray banner.
 func TestView_StaleDrainSummary_Surfaced(t *testing.T) {
 	before := View(NewModel())
 	fresh := View(NewModel())
@@ -777,19 +707,14 @@ func TestView_StaleDrainSummary_Surfaced(t *testing.T) {
 		t.Errorf("View() = %q, want the drain summary surfaced with the sibling lines' \"notice: \" prefix", out)
 	}
 
-	// Empty StaleDrainSummary (the zero value) must render byte-identical to
-	// the pre-#2678 baseline captured above — no new blank line, no stray
-	// banner.
 	unchanged := View(Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{}}))
 	if unchanged != before {
 		t.Errorf("View() with empty StaleDrainSummary regressed the pre-#2678 rendering:\ngot:  %q\nwant: %q", unchanged, before)
 	}
 }
 
-// TestView_Header_BranchSwitchAndDogfoodNotices_StyledWithGlyph verifies the
-// branch-switch and competing-dogfood notice lines carry the plain-Unicode
-// notice glyph and render styled by role (ADR 0031), while keeping their
-// existing content.
+// ADR 0031: the branch-switch and competing-dogfood notice lines carry the
+// plain-Unicode notice glyph and style by role, keeping their existing content.
 func TestView_Header_BranchSwitchAndDogfoodNotices_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -823,8 +748,7 @@ func TestView_Header_BranchSwitchAndDogfoodNotices_StyledWithGlyph(t *testing.T)
 	}
 }
 
-// TestView_RefreshError_Surfaced verifies a failed refresh's error text
-// appears in View so the operator sees why the list went stale.
+// A failed refresh surfaces its error text so the operator sees why the list went stale.
 func TestView_RefreshError_Surfaced(t *testing.T) {
 	m := Update(NewModel(), IssuesLoadedMsg{Err: errBoom})
 
@@ -834,9 +758,8 @@ func TestView_RefreshError_Surfaced(t *testing.T) {
 	}
 }
 
-// TestView_Cursor_MarksHighlightedRow verifies the row at m.Cursor is
-// visually marked so the operator can see which issue j/down or the up
-// arrow will act on (issue #784).
+// Issue #784: the row at m.Cursor is marked so the operator can see which issue the
+// cursor keys will act on.
 func TestView_Cursor_MarksHighlightedRow(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
@@ -861,11 +784,8 @@ func TestView_Cursor_MarksHighlightedRow(t *testing.T) {
 	}
 }
 
-// TestView_ModeFilterEdit_NarrowWidth_FooterFitsWidth verifies the
-// filter-edit prompt's "/filter  " prefix plus its enter/esc hint clips to
-// the terminal's own width — accounting for the prefix's own columns, not
-// just the hint text — rather than wrapping past bodyBudget's single
-// reserved row for it on a narrow terminal (issue #1818).
+// Issue #1818: the prompt's "/filter" prefix counts toward the clip width, so the
+// footer stays inside bodyBudget's single reserved row on a narrow terminal.
 func TestView_ModeFilterEdit_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	const width, height = 20, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -883,11 +803,8 @@ func TestView_ModeFilterEdit_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	}
 }
 
-// TestView_ModeTerminateConfirm_NarrowWidth_FooterFitsWidth verifies the
-// terminate-confirm prompt's "terminate #N? " prefix plus its y hint clips
-// to the terminal's own width — accounting for the prefix's own columns,
-// not just the hint text — rather than wrapping past bodyBudget's single
-// reserved row for it on a narrow terminal (issue #1818).
+// Issue #1818: the "terminate #N? " prefix counts toward the clip width, so the
+// footer stays inside bodyBudget's single reserved row on a narrow terminal.
 func TestView_ModeTerminateConfirm_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	const width, height = 20, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -904,11 +821,8 @@ func TestView_ModeTerminateConfirm_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	}
 }
 
-// TestView_ModeQuitConfirm_NarrowWidth_FooterFitsWidth verifies the
-// quit-confirm footer hint — long enough to wrap past one row when rendered
-// unclipped — is clipped to the terminal's own width like every other footer
-// in this file, so bodyBudget's single reserved row for it is never
-// exceeded on a narrow terminal (issue #1818).
+// Issue #1818: the quit-confirm hint wraps past one row when rendered unclipped, so
+// it clips to the terminal's own width like every other footer in this file.
 func TestView_ModeQuitConfirm_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	const width, height = 20, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -925,8 +839,7 @@ func TestView_ModeQuitConfirm_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	}
 }
 
-// TestView_ModeFilterEdit_ShowsInputLine verifies an in-progress filter edit
-// renders a visible input line with the text typed so far (issue #784).
+// Issue #784: an in-progress filter edit shows the text typed so far.
 func TestView_ModeFilterEdit_ShowsInputLine(t *testing.T) {
 	m := NewModel()
 	m = Update(m, FilterEditStartMsg{})
@@ -938,10 +851,8 @@ func TestView_ModeFilterEdit_ShowsInputLine(t *testing.T) {
 	}
 }
 
-// TestView_ModeFilterEdit_FooterStyledDim verifies the filter-edit prompt's
-// enter/esc hints render dim (RoleDim, "\x1b[90m") via the shared footer
-// renderer, the same treatment the other migrated footers already got
-// (issue #1793).
+// Issue #1793: the filter-edit hints render dim (RoleDim) through the shared footer
+// renderer, the same treatment the other migrated footers got.
 func TestView_ModeFilterEdit_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -956,8 +867,8 @@ func TestView_ModeFilterEdit_FooterStyledDim(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsBoundKeys verifies the help overlay lists every key
-// the tea layer binds, replacing the normal backlog rendering (issue #784).
+// Issue #784: the help overlay lists every key the tea layer binds, and replaces the
+// normal backlog rendering while it is open.
 func TestView_ModeHelp_ListsBoundKeys(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
@@ -977,10 +888,8 @@ func TestView_ModeHelp_ListsBoundKeys(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsSectionKeys verifies the help overlay describes
-// H/L (previous/next Section) and 1-5 (direct jump) — the section-switched
-// list's navigation, replacing the retired "tab" focus-switch binding (ADR
-// 0030, issue #1500).
+// ADR 0030, issue #1500: H/L and 1-5 are the section-switched list's navigation,
+// replacing the retired tab focus-switch binding.
 func TestView_ModeHelp_ListsSectionKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -999,13 +908,9 @@ func TestView_ModeHelp_ListsSectionKeys(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_DescribesContextSensitiveEnter verifies the help
-// overlay's "enter" entry documents both context-sensitive behaviors —
-// opening the highlighted Backlog row's ticket detail modal and opening a
-// work Section pick's live-tail sidebar — not just the bare word "enter"
-// (issue #995, reworded for ADR 0030's Section-switched body by issue #1500,
-// then for the sidebar by #1501, then for the detail modal by #1632 — Enter
-// no longer picks; picking moved to "p").
+// Issue #995, reworded by #1500 for ADR 0030's Section body, then by #1501 for the
+// sidebar and #1632 for the detail modal: enter no longer picks (picking moved to
+// "p"), so its help entry has to document both context-sensitive behaviours.
 func TestView_ModeHelp_DescribesContextSensitiveEnter(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1021,9 +926,8 @@ func TestView_ModeHelp_DescribesContextSensitiveEnter(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsNewKeybindings verifies the help overlay lists the
-// picks/queue-driving keys wired in issue #785, and documents "X" as the
-// Terminate key now that "k" reverted to vim's cursor-up (issue #1500).
+// Issue #785's picks/queue keys, plus "X" as Terminate now that "k" reverted to
+// vim's cursor-up (issue #1500).
 func TestView_ModeHelp_ListsNewKeybindings(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1038,10 +942,8 @@ func TestView_ModeHelp_ListsNewKeybindings(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsAdoptOrphanKey verifies the help overlay documents
-// "A", the explicit adopt gesture on an orphan-flagged Backlog row (issue
-// #1619) — startup only ever detects an orphan now, so the operator needs a
-// discoverable way to learn how to adopt one.
+// Issue #1619: startup only detects an orphan now, so the operator needs a
+// discoverable "A" adopt gesture in the help overlay.
 func TestView_ModeHelp_ListsAdoptOrphanKey(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1054,8 +956,7 @@ func TestView_ModeHelp_ListsAdoptOrphanKey(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsRebuildOutputKey verifies the help overlay lists
-// "o", the rebuild-output pane's open key added by issue #1128.
+// Issue #1128 added the rebuild-output pane's "o" open key.
 func TestView_ModeHelp_ListsRebuildOutputKey(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1068,10 +969,8 @@ func TestView_ModeHelp_ListsRebuildOutputKey(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsBodyScrollKeys verifies the help overlay lists
-// pgup/pgdown as the backlog/queue viewport's own line-scroll keys,
-// distinct from the sidebar's identically-named scroll keys
-// (issue #1036 AC — help overlay documents the new scroll keys).
+// Issue #1036 AC: pgup/pgdown are the backlog and queue viewport's own scroll keys,
+// distinct from the sidebar's identically named ones.
 func TestView_ModeHelp_ListsBodyScrollKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1081,9 +980,8 @@ func TestView_ModeHelp_ListsBodyScrollKeys(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsJumpKeys verifies the help overlay documents "G"
-// and "gg" — the list body's jump-to-bottom/top motions — alongside the
-// existing j/k and pgup/pgdown entries (issue #1628 AC7).
+// Issue #1628 AC7: "G" and "gg" are the list body's jump-to-bottom and
+// jump-to-top motions.
 func TestView_ModeHelp_ListsJumpKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1102,9 +1000,8 @@ func TestView_ModeHelp_ListsJumpKeys(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsSidebarJumpToTop verifies the help overlay documents
-// the sidebar's own "gg" — detach follow and jump to the sidebar's top —
-// alongside its existing "G / end" jump-to-bottom entry (issue #1629 AC4).
+// Issue #1629 AC4: the sidebar has its own "gg", detach follow and jump to its top,
+// alongside the existing "G / end" jump to the bottom.
 func TestView_ModeHelp_ListsSidebarJumpToTop(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1117,10 +1014,8 @@ func TestView_ModeHelp_ListsSidebarJumpToTop(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ContrastsSidebarFixedPage verifies the help overlay's
-// sidebar pgup/pgdown line calls out that its page jump is a fixed size,
-// unlike the backlog/queue's live-viewport-derived one — the two keys share
-// a name but not a page size (issue #1059).
+// Issue #1059: the sidebar's page jump is a fixed size, unlike the backlog and
+// queue's viewport-derived one. The two keys share a name but not a page size.
 func TestView_ModeHelp_ContrastsSidebarFixedPage(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1131,10 +1026,7 @@ func TestView_ModeHelp_ContrastsSidebarFixedPage(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsCtrlFCtrlBAlongsidePageKeys verifies the help
-// overlay lists the vim page chords ctrl+f/ctrl+b next to each pane's
-// existing pgup/pgdown entry — the list body, the sidebar, and the
-// rebuild-output pane (issue #1647 AC).
+// Issue #1647 AC: the vim page chords sit next to each pane's pgup/pgdown entry.
 func TestView_ModeHelp_ListsCtrlFCtrlBAlongsidePageKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1150,9 +1042,7 @@ func TestView_ModeHelp_ListsCtrlFCtrlBAlongsidePageKeys(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsCtrlDCtrlUAlongsideHalfPageKeys verifies the help
-// overlay lists the vim half-page chords ctrl+d/ctrl+u for each pane — the
-// list body, the sidebar, and the rebuild-output pane (issue #1648 AC).
+// Issue #1648 AC: the vim half-page chords are listed for each pane.
 func TestView_ModeHelp_ListsCtrlDCtrlUAlongsideHalfPageKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1168,9 +1058,7 @@ func TestView_ModeHelp_ListsCtrlDCtrlUAlongsideHalfPageKeys(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsRebuildOutputJumpKeys verifies the help overlay
-// documents "G" and "gg" for the rebuild-output pane, alongside the existing
-// "o"/j/k/pgup/pgdown entry (issue #1630 AC).
+// Issue #1630 AC: "G" and "gg" are documented for the rebuild-output pane.
 func TestView_ModeHelp_ListsRebuildOutputJumpKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1183,10 +1071,8 @@ func TestView_ModeHelp_ListsRebuildOutputJumpKeys(t *testing.T) {
 	}
 }
 
-// TestView_RebuildOutputOpen_RendersOutputInsteadOfBacklog verifies an open
-// rebuild-output pane replaces the backlog/queue rendering with the captured
-// nix output, plus a close-key hint — RebuildOutput's only consumer (issue
-// #1128).
+// Issue #1128: the rebuild-output pane is RebuildOutput's only consumer. Open, it
+// replaces the backlog rendering and carries a close-key hint.
 func TestView_RebuildOutputOpen_RendersOutputInsteadOfBacklog(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
@@ -1205,16 +1091,13 @@ func TestView_RebuildOutputOpen_RendersOutputInsteadOfBacklog(t *testing.T) {
 	}
 }
 
-// TestView_RebuildOutputOpen_ScrollOffsetWindowsContent verifies scrolling
-// the rebuild-output pane slides the visible window instead of always
-// showing from the top — an off-by-one in the offset/end clamp would either
-// repeat or skip a line at the boundary.
+// An off-by-one in the offset/end clamp would either repeat or skip a line at the
+// window boundary.
 func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
-	// Height 5 leaves a 2-line content budget (headerFooterLines, plus the
+	// Height 5 leaves a 2-line content budget (headerFooterLines plus the
 	// trailing-"\n" reservation issue #1827 added), too small to show all 5
-	// lines at once — so a scroll actually slides the window instead of
-	// clamping straight back to the top like a short transcript that already
-	// fits (mirrored from DrillIn's own clamp, model.go).
+	// lines at once, so a scroll actually slides the window instead of clamping
+	// back to the top like a short transcript that already fits.
 	m := Update(NewModel(), SizeChangedMsg{Height: 5})
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
 	m = Update(m, RebuildOutputOpenMsg{})
@@ -1229,13 +1112,9 @@ func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
 	}
 }
 
-// TestView_RebuildOutputExactFit_FitsHeightWithFooterPinned verifies the
-// rebuild-output pane never renders more physical lines than m.Height, even
-// when the captured output exactly fills or overflows the old (unreserved)
-// budget — the same trailing-"\n" off-by-one issue #1825 fixed for the list
-// view (issue #1827). Split, not TrimRight-then-count: View()'s output
-// always ends in exactly one trailing "\n" (its own documented convention),
-// and that trailing "\n" costs the terminal a physical row of its own.
+// Issue #1827, the same trailing-"\n" off-by-one #1825 fixed for the list view:
+// View()'s output always ends in exactly one "\n", and that costs the terminal a
+// physical row, so count with Split rather than TrimRight-then-count.
 func TestView_RebuildOutputExactFit_FitsHeightWithFooterPinned(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 10})
 	lines := make([]string, 20)
@@ -1257,10 +1136,8 @@ func TestView_RebuildOutputExactFit_FitsHeightWithFooterPinned(t *testing.T) {
 	}
 }
 
-// TestView_RebuildOutputOpen_FooterStyledDim verifies the rebuild-output
-// pane's close-key hint renders dim (RoleDim, "\x1b[90m") via the shared
-// footer renderer, the same treatment the other three migrated footers
-// already got (issue #1791).
+// Issue #1791: the close-key hint renders dim (RoleDim) through the shared footer
+// renderer, like the other migrated footers.
 func TestView_RebuildOutputOpen_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1275,10 +1152,8 @@ func TestView_RebuildOutputOpen_FooterStyledDim(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_FloatsOverList_BannerStillVisible verifies the ticket
-// detail modal renders as a box floating over the still-rendered list rather
-// than a fullscreen takeover: the header banner above the box's top edge
-// stays visible instead of being replaced entirely (issue #1758).
+// Issue #1758: the detail modal is a box floating over the still-rendered list, not a
+// fullscreen takeover, so the header banner above it stays visible.
 func TestView_DetailModal_FloatsOverList_BannerStillVisible(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
@@ -1289,11 +1164,9 @@ func TestView_DetailModal_FloatsOverList_BannerStillVisible(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_TinyTerminal_FallsBackToFullscreen verifies a
-// terminal too narrow or short for a legible floating box (below
-// detailModalFits' threshold) renders the detail modal via the existing
-// fullscreen renderer instead of a cramped floating box — mirroring the
-// sidebar's sidebarFits degradation (issue #1759 AC).
+// Issue #1759 AC: below detailModalFits' threshold the modal renders through the
+// fullscreen renderer instead of a cramped floating box, mirroring the sidebar's own
+// sidebarFits degradation.
 func TestView_DetailModal_TinyTerminal_FallsBackToFullscreen(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -1321,11 +1194,8 @@ func TestView_DetailModal_TinyTerminal_FallsBackToFullscreen(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_FullscreenFallback_FooterStyledDim verifies the
-// tiny-terminal fullscreen fallback's keystroke-hint footer renders dim
-// (RoleDim, "\x1b[90m") via the shared footer renderer, the same treatment
-// the fullscreen sidebar and docked-sidebar footers already got (issue
-// #1791).
+// Issue #1791: the tiny-terminal fallback's footer renders dim (RoleDim) like the
+// fullscreen and docked sidebar footers.
 func TestView_DetailModal_FullscreenFallback_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1339,11 +1209,8 @@ func TestView_DetailModal_FullscreenFallback_FooterStyledDim(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_FullscreenFallback_LabelsStyledDim verifies the
-// tiny-terminal fullscreen fallback's pinned label row gets the identical
-// bracketed, dim-styled treatment (RoleDim, "\x1b[90m") the floating box
-// gets — the backlog row's own `[bug, console]` idiom — so the two
-// renderings stay in parity (issue #1832).
+// Issue #1832: the fallback's pinned label row gets the same bracketed, dim-styled
+// treatment as the floating box, so the two renderings stay in parity.
 func TestView_DetailModal_FullscreenFallback_LabelsStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1357,12 +1224,9 @@ func TestView_DetailModal_FullscreenFallback_LabelsStyledDim(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_FullscreenFallback_NarrowWidth_FooterFitsWidth
-// verifies the tiny-terminal fullscreen fallback's "[esc] close" footer
-// clips to the terminal's own width like every other footer in this file
-// (issue #1818). The title is kept short so the width picked here (narrower
-// than "[esc] close" itself) exercises the footer's own clip path rather
-// than tripping on an unrelated, longer line first.
+// Issue #1818. The title is kept short so the width picked here, narrower than
+// "[esc] close" itself, exercises the footer's own clip path rather than tripping on
+// an unrelated longer line first.
 func TestView_DetailModal_FullscreenFallback_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	const width, height = 10, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -1379,19 +1243,11 @@ func TestView_DetailModal_FullscreenFallback_NarrowWidth_FooterFitsWidth(t *test
 	}
 }
 
-// detailModalBoxTopBorderLine returns out's floating detail modal box's own
-// top border row, identified by title — the same "╭" plus "#number title"
-// combination TestView_DetailModal_BorderShowsNumberAndTitle already keys
-// on — rather than the first line containing a bare "╭". A bare-"╭" search
-// is ambiguous once the header/sidebar panels grow their own RoleDim
-// rounded border (issue #1756): renderBoxedColumn degrades to ASCII glyphs
-// under termenv.Ascii, so a bare "╭" search only happened to find the
-// modal's box by accident on terminals where that degradation kicks in —
-// and reliably found the header's border instead, wherever the environment
-// resolves a non-Ascii profile (nix's sandboxed test runner, real color
-// terminals). detailModalBoxTopBorder always renders "#number title" into
-// its own border line and nowhere else, so pairing it with "╭" pins the
-// match to the modal's border regardless of what other boxes are on screen.
+// detailModalBoxTopBorderLine returns out's floating detail modal box's top border
+// row. It keys on "╭" plus the title rather than a bare "╭" search: once the header
+// and sidebar panels grew their own rounded border (issue #1756), a bare search finds
+// whichever box comes first, which depends on whether termenv degrades to ASCII.
+// detailModalBoxTopBorder renders "#number title" into its border line and nowhere else.
 func detailModalBoxTopBorderLine(t *testing.T, out, title string) string {
 	t.Helper()
 	for _, line := range strings.Split(out, "\n") {
@@ -1403,14 +1259,10 @@ func detailModalBoxTopBorderLine(t *testing.T, out, title string) string {
 	return ""
 }
 
-// detailModalBoxBorderWidth returns the display width of out's floating
-// detail modal box itself — just the "╭...╮" span of its top border row,
-// not the full composited terminal row around it (compositeOverlay splices
-// the box into a still-visible base row, so the row as a whole is always
-// terminal-width; the box's own width is the corner-to-corner span) — the
-// box's actual rendered outer width, independent of detailModalBoxSize's own
-// math, so tests can check the box View() produced without recomputing the
-// expected value the same way the code does.
+// detailModalBoxBorderWidth returns the display width of the box itself, the "╭...╮"
+// span, not the whole composited row: compositeOverlay splices the box into a
+// still-visible base row, so the row is always terminal-width. Measuring the render
+// keeps the check independent of detailModalBoxSize's own math.
 func detailModalBoxBorderWidth(t *testing.T, out, title string) int {
 	t.Helper()
 	line := detailModalBoxTopBorderLine(t, out, title)
@@ -1422,20 +1274,17 @@ func detailModalBoxBorderWidth(t *testing.T, out, title string) int {
 	return ansi.StringWidth(line[start : start+end+len("╮")])
 }
 
-// detailModalBoxOriginX returns the display column out's floating detail
-// modal box's top-left corner ("╭") lands at — the leading prefix on that
-// row measured with ansi.StringWidth so any styled base content (e.g. a
-// colored Section tab sharing the same physical row) doesn't skew the
-// count, unlike a plain byte or rune index into the line.
+// detailModalBoxOriginX returns the display column the box's top-left corner lands at,
+// measured with ansi.StringWidth so styled base content sharing the row (a colored
+// Section tab, say) does not skew the count the way a byte or rune index would.
 func detailModalBoxOriginX(t *testing.T, out, title string) int {
 	t.Helper()
 	line := detailModalBoxTopBorderLine(t, out, title)
 	return ansi.StringWidth(line[:strings.Index(line, "╭")])
 }
 
-// TestView_DetailModal_Resize_RecentersAndResizesBox verifies a resize while
-// the detail modal is open re-sizes and re-centers the floating box rather
-// than leaving it pinned at whatever size it opened at (issue #1759 AC).
+// Issue #1759 AC: a resize while the modal is open re-sizes and re-centers the box
+// instead of leaving it pinned at whatever size it opened at.
 func TestView_DetailModal_Resize_RecentersAndResizesBox(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1472,10 +1321,8 @@ func TestView_DetailModal_Resize_RecentersAndResizesBox(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_BorderShowsNumberAndTitle verifies the floating
-// detail modal box has a visible border, with the ticket's "#number title"
-// set in the box's top border line rather than as its own interior content
-// row (issue #1758 AC).
+// Issue #1758 AC: the ticket's "#number title" is set in the box's top border line,
+// not on an interior content row.
 func TestView_DetailModal_BorderShowsNumberAndTitle(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1498,12 +1345,9 @@ func TestView_DetailModal_BorderShowsNumberAndTitle(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_NoColor_BorderDegradesToAscii verifies the floating
-// detail modal's border — including its titled top rule — degrades to plain
-// ASCII glyphs under NO_COLOR, closing the gap its old hand-rolled
-// Unicode-only top/bottom border left: every other panel in the package
-// already degrades this way (issue #1755), but the modal never did until it
-// moved onto the shared titled-border helper (issue #1797 AC).
+// Issue #1797 AC: the modal's old hand-rolled Unicode-only border never degraded under
+// NO_COLOR, unlike every other panel in the package (issue #1755). Moving it onto the
+// shared titled-border helper closed that gap.
 func TestView_DetailModal_NoColor_BorderDegradesToAscii(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("TERM", "xterm-256color")
@@ -1529,12 +1373,8 @@ func TestView_DetailModal_NoColor_BorderDegradesToAscii(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_FloatingBox_FooterStyledDim verifies the floating
-// detail-modal box's own footer line — the primary path View actually
-// renders once detailModalFits (issue #1758), not just the tiny-terminal
-// fullscreen fallback — renders dim (RoleDim, "\x1b[90m") via the shared
-// footer renderer too, so the same modal doesn't show its footer dim on a
-// tiny terminal but plain on a normal one (issue #1791).
+// Issue #1791: the floating box is the path View actually renders once detailModalFits
+// (issue #1758), so its footer must be dim too, not just the tiny-terminal fallback's.
 func TestView_DetailModal_FloatingBox_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1548,10 +1388,8 @@ func TestView_DetailModal_FloatingBox_FooterStyledDim(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_ShowsBlockedByAndBlocksSections verifies the ticket
-// detail modal renders both its Blocked-by and Blocks sections, each entry
-// as number + source + open/closed state + title (issue #1632 AC), e.g.
-// `✗ #1540 (native) open "Waves core"`.
+// Issue #1632 AC: both sections render, each entry as number, source, open or closed
+// state, and title.
 func TestView_DetailModal_ShowsBlockedByAndBlocksSections(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
@@ -1581,11 +1419,9 @@ func TestView_DetailModal_ShowsBlockedByAndBlocksSections(t *testing.T) {
 	}
 }
 
-// TestFormatBlockerRef_UnresolvedTitleAndState_RendersUnknown verifies a
-// BlockerRef whose title/state couldn't be resolved (resolveBlockerRef's
-// fallback: neither the backlog nor an Issue fetch found it) renders
-// "unknown" in place of the blank state/title, rather than a bare double
-// space and an empty quoted string (issue #1632 review finding).
+// Issue #1632 review finding: when resolveBlockerRef finds the ref in neither the
+// backlog nor an Issue fetch, it renders "unknown" rather than a bare double space
+// and an empty quoted string.
 func TestFormatBlockerRef_UnresolvedTitleAndState_RendersUnknown(t *testing.T) {
 	got := formatBlockerRef(BlockerRef{Number: "123", Source: forge.DepSourceNative})
 	want := `✗ #123 (native) unknown "unknown"`
@@ -1594,11 +1430,8 @@ func TestFormatBlockerRef_UnresolvedTitleAndState_RendersUnknown(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_Err_ShowsFailedToLoad verifies a body fetch that
-// failed (openDetailModalCmd's tracker.Issue call erred) surfaces the error
-// in place of a blank or stuck-loading modal, instead of silently rendering
-// nothing (issue #1632 review finding — the error render path had no test
-// coverage).
+// Issue #1632 review finding: the error render path had no coverage, and a failed body
+// fetch has to surface the error instead of a blank or stuck-loading modal.
 func TestView_DetailModal_Err_ShowsFailedToLoad(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
@@ -1613,11 +1446,8 @@ func TestView_DetailModal_Err_ShowsFailedToLoad(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_SanitizesErr verifies a body-fetch error carrying
-// CSI/OSC escape sequences (an untrusted tracker error message, e.g. from a
-// forge API response echoed back) renders with the escapes stripped, the
-// same trust boundary every other piece of tracker-derived text in the
-// modal already crosses (issue #1632 review finding).
+// Issue #1632 review finding: a tracker error message is untrusted text and crosses
+// the same sanitization boundary as everything else the modal renders.
 func TestView_DetailModal_SanitizesErr(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
@@ -1625,10 +1455,9 @@ func TestView_DetailModal_SanitizesErr(t *testing.T) {
 
 	out := View(m)
 	// Checked as specific injected byte sequences rather than "no \x1b
-	// anywhere on this line": the floating box (issue #1758) can now share
-	// a physical row with styled base UI (e.g. colored Section tabs), whose
-	// own legitimate SGR escapes must not trip a check meant to catch the
-	// untrusted error text's own control sequences surviving sanitization.
+	// anywhere on this line": the floating box (issue #1758) shares a physical
+	// row with styled base UI, whose legitimate SGR escapes must not trip a
+	// check meant to catch the untrusted error text's own sequences.
 	for _, escape := range []string{"\x1b[2J", "\x1b]0;pwned\x07"} {
 		if strings.Contains(out, escape) {
 			t.Errorf("View() = %q, want the injected escape sequence %q stripped by sanitization", out, escape)
@@ -1639,11 +1468,8 @@ func TestView_DetailModal_SanitizesErr(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_DimsListBehind verifies the base layer the floating
-// detail modal composites over renders in RoleDim's foreground while the
-// modal is open (issue #1760's scrim) — a running Pick's own RoleRunning
-// escape is replaced by RoleDim's — and closing the modal restores the row's
-// normal RoleRunning styling.
+// Issue #1760's scrim: while the modal is open the base layer renders in RoleDim,
+// replacing a running Pick's own RoleRunning escape, and closing it restores that.
 func TestView_DetailModal_DimsListBehind(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1678,10 +1504,8 @@ func TestView_DetailModal_DimsListBehind(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter verifies a
-// ticket with nothing declared in either direction doesn't grow empty
-// "Blocked by"/"Blocks" section headers with nothing under them (issue
-// #1632).
+// Issue #1632: a ticket with nothing declared in either direction must not grow empty
+// "Blocked by" and "Blocks" headers with nothing under them.
 func TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
@@ -1696,17 +1520,10 @@ func TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter(t *testing.T)
 	}
 }
 
-// TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset verifies the
-// detail modal's body scrolls: once its content overflows the viewport,
-// DetailModalScrollMsg moves which lines are visible, hiding everything
-// before the new offset (issue #1632 AC — "the body scrolls with j/k and
-// the arrow keys"). Height is pinned to detailModalBoxMinHeight, the
-// smallest terminal still on the floating path (issue #1759) — its interior
-// body budget (2 border rows, the no-labels case's 1 label line, and 1
-// footer line subtracted, issue #1772) leaves bodyBudget rows, short of the
-// 8-line body so the scroll actually clips something, the same "content
-// overflows the viewport" setup the fullscreen renderer's version of this
-// test uses against its own dynamic title/label/footer budget.
+// Issue #1632 AC, the body scrolls with j/k and the arrow keys. Height is pinned to
+// detailModalBoxMinHeight, the smallest terminal still on the floating path (issue
+// #1759), because its interior budget (2 border rows, 1 label line, 1 footer line,
+// issue #1772) falls short of the 8-line body, so the scroll actually clips something.
 func TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset(t *testing.T) {
 	const labelLines = 1 // no Labels set below, so the bracketed "[]" is 1 line
 	const bodyBudget = detailModalBoxMinHeight - 2 - labelLines - detailModalFooterLines
@@ -1728,16 +1545,8 @@ func TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset(t *testing.T) {
 	}
 }
 
-// TestDetailModalBoxSize_WideTerminal_ClampsToMax verifies the floating
-// detail modal box never grows edge-to-edge on a large terminal: its width
-// and height are capped at detailModalBoxMax{Width,Height} rather than
-// scaling without bound (issue #1759 AC), and pins the width cap's actual
-// value at 100 columns, not the old 84 (issue #1796 AC1/AC2).
-// TestSidebarModalFits_BelowMinDimension_ReturnsFalse verifies
-// sidebarModalFits — the log modal's floating-vs-fullscreen gate, mirroring
-// detailModalFits — rejects a terminal narrower or shorter than the box's
-// own legibility floor, and accepts one that meets both floors (issue
-// #1845).
+// Issue #1845: sidebarModalFits is the log modal's floating-versus-fullscreen gate,
+// mirroring detailModalFits, and rejects a terminal below either legibility floor.
 func TestSidebarModalFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -1759,12 +1568,8 @@ func TestSidebarModalFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
 	}
 }
 
-// TestView_SidebarModal_FloatsOverList_BannerStillVisible verifies opening
-// the sidebar on a terminal too narrow to dock (issue #1845's modal path,
-// not the tiny-terminal fullscreen fallback) floats the log modal over the
-// queue instead of replacing the whole screen — the banner above stays
-// visible, DetailModal_FloatsOverList_BannerStillVisible's log-modal
-// analogue (AC1).
+// Issue #1845 AC1: opening the sidebar on a terminal too narrow to dock floats the log
+// modal over the queue instead of replacing the whole screen.
 func TestView_SidebarModal_FloatsOverList_BannerStillVisible(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Title: "fix the thing", Activity: []ActivityLine{{Text: "hi"}}})
@@ -1775,11 +1580,8 @@ func TestView_SidebarModal_FloatsOverList_BannerStillVisible(t *testing.T) {
 	}
 }
 
-// TestView_SidebarModal_DimsListBehind verifies the floating log modal dims
-// the queue behind it exactly like the detail modal does — the queue's own
-// styling (e.g. a running row's colored escape) is replaced by the dim
-// style while the modal is open and restored once it closes,
-// DetailModal_DimsListBehind's log-modal analogue (issue #1845 AC2).
+// Issue #1845 AC2: the floating log modal dims the queue behind it exactly like the
+// detail modal does, and restores the queue's own styling once it closes.
 func TestView_SidebarModal_DimsListBehind(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1814,10 +1616,8 @@ func TestView_SidebarModal_DimsListBehind(t *testing.T) {
 	}
 }
 
-// TestView_SidebarModal_BorderShowsNumberAndTitle verifies the floating log
-// modal's border carries the row's "#<num> <title>" in its top edge,
-// matching the detail modal's own aesthetic — DetailModal_BorderShowsNumberAndTitle's
-// log-modal analogue (issue #1845 AC3).
+// Issue #1845 AC3: the log modal's border carries the row's "#<num> <title>", matching
+// the detail modal's own aesthetic.
 func TestView_SidebarModal_BorderShowsNumberAndTitle(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1840,6 +1640,9 @@ func TestView_SidebarModal_BorderShowsNumberAndTitle(t *testing.T) {
 	}
 }
 
+// Issue #1759 AC: the floating box is capped at detailModalBoxMax{Width,Height} rather
+// than scaling without bound, and issue #1796 AC1/AC2 raised the width cap to 100
+// columns from the old 84.
 func TestDetailModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
 	width, height := detailModalBoxSize(300, 100)
 	if width != 100 {
@@ -1850,10 +1653,8 @@ func TestDetailModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
 	}
 }
 
-// TestDetailModalBoxSize_MidTerminal_SizedToFraction verifies the floating
-// detail modal box scales with the terminal rather than shrinking by a fixed
-// margin: on a terminal well under the max clamp, the box width/height are a
-// fraction of the terminal's own dimensions (issue #1759 AC).
+// Issue #1759 AC: the box scales with the terminal rather than shrinking by a fixed
+// margin, so well under the max clamp its size is a fraction of the terminal's own.
 func TestDetailModalBoxSize_MidTerminal_SizedToFraction(t *testing.T) {
 	width, height := detailModalBoxSize(60, 30)
 	wantWidth := 60 * detailModalBoxWidthPercent / 100
@@ -1866,11 +1667,8 @@ func TestDetailModalBoxSize_MidTerminal_SizedToFraction(t *testing.T) {
 	}
 }
 
-// TestDetailModalBoxSize_NearFloorTerminal_ClampsToMin verifies a terminal
-// just above detailModalFits' own threshold — where the width/height
-// fraction would otherwise fall short of the floor — clamps the box up to
-// detailModalBoxMin{Width,Height} rather than the smaller fraction (issue
-// #1759 AC's "clamped to a minimum").
+// Issue #1759 AC, "clamped to a minimum": just above detailModalFits' threshold the
+// width and height fraction would fall short of the floor, so the box clamps up.
 func TestDetailModalBoxSize_NearFloorTerminal_ClampsToMin(t *testing.T) {
 	width, height := detailModalBoxSize(detailModalBoxMinWidth, detailModalBoxMinHeight)
 	if width != detailModalBoxMinWidth {
@@ -1881,11 +1679,8 @@ func TestDetailModalBoxSize_NearFloorTerminal_ClampsToMin(t *testing.T) {
 	}
 }
 
-// TestSidebarModalBoxSize_LargeTerminal_ExceedsDetailModal verifies the
-// zoomed log modal renders visibly larger than the issue detail modal on a
-// large terminal (e.g. 165x50) instead of clamping to the same footprint —
-// the log modal's own, larger max caps must actually take effect once 80%
-// of the terminal exceeds the detail modal's 100x30 cap (issue #1875 AC1).
+// Issue #1875 AC1: the log modal's own larger caps have to take effect once 80% of the
+// terminal exceeds the detail modal's 100x30 cap, instead of clamping to that footprint.
 func TestSidebarModalBoxSize_LargeTerminal_ExceedsDetailModal(t *testing.T) {
 	sidebarWidth, sidebarHeight := sidebarModalBoxSize(165, 50)
 	detailWidth, detailHeight := detailModalBoxSize(165, 50)
@@ -1897,10 +1692,8 @@ func TestSidebarModalBoxSize_LargeTerminal_ExceedsDetailModal(t *testing.T) {
 	}
 }
 
-// TestSidebarModalBoxSize_VeryLargeTerminal_PinsToMax verifies the zoomed log
-// modal stays bounded on a very large monitor (>=225 cols, >=68 rows) rather
-// than stretching corner to corner: it pins to sidebarModalBoxMax{Width,
-// Height} (180x54), the log modal's own cap (issue #1875 AC2).
+// Issue #1875 AC2: on a very large monitor the log modal pins to its own 180x54 cap
+// rather than stretching corner to corner.
 func TestSidebarModalBoxSize_VeryLargeTerminal_PinsToMax(t *testing.T) {
 	width, height := sidebarModalBoxSize(300, 100)
 	if width != sidebarModalBoxMaxWidth {
@@ -1911,11 +1704,8 @@ func TestSidebarModalBoxSize_VeryLargeTerminal_PinsToMax(t *testing.T) {
 	}
 }
 
-// TestDetailModalFits_BelowMinDimension_ReturnsFalse verifies detailModalFits
-// — the single predicate gating floating-vs-fullscreen (issue #1759 AC),
-// sidebarFits' detail-modal analogue — rejects a terminal narrower or
-// shorter than the box's own legibility floor, and accepts one that meets
-// both floors.
+// Issue #1759 AC: detailModalFits is the single predicate gating floating versus
+// fullscreen, sidebarFits' analogue, and rejects a terminal below either floor.
 func TestDetailModalFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -1937,14 +1727,10 @@ func TestDetailModalFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_SingleLabel_VisuallyDistinctFromBody is the issue
-// #1832 regression test: a single short label pinned atop the modal used to
-// render as bare comma-joined text — indistinguishable from a stranded line
-// of body text at a glance. It must now read as labels: bracketed like the
-// backlog row's own `[bug]` idiom, and dim-styled (RoleDim) on a
-// color-capable terminal so it visually recedes from the plain body text
-// beneath it, while degrading to plain bracketed text (no escape bytes)
-// under NO_COLOR per ADR 0031.
+// Issue #1832 regression test: a single short label pinned atop the modal used to render
+// as bare comma-joined text, indistinguishable at a glance from a stranded line of body
+// text. It must read as labels, bracketed and dim-styled on a color terminal, degrading
+// to plain bracketed text under NO_COLOR per ADR 0031.
 func TestView_DetailModal_SingleLabel_VisuallyDistinctFromBody(t *testing.T) {
 	t.Run("color terminal: bracketed and dim-styled, distinct from body", func(t *testing.T) {
 		t.Setenv("NO_COLOR", "")
@@ -1981,20 +1767,17 @@ func TestView_DetailModal_SingleLabel_VisuallyDistinctFromBody(t *testing.T) {
 	})
 }
 
-// TestView_DetailModal_LabelsUnclipped verifies the detail modal shows every
-// label in full, unlike the backlog row's clipLabels "+N" truncation (issue
-// #1631) — the modal exists precisely so an operator can see what a clipped
-// backlog row hides (issue #1632 AC).
+// Issue #1632 AC: the modal exists so an operator can see what a clipped backlog row
+// hides, so it shows every label in full, unlike clipLabels' "+N" truncation (issue #1631).
 func TestView_DetailModal_LabelsUnclipped(t *testing.T) {
 	labels := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"}
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: labels})
 
-	// Every label present unclipped (the loop below) already proves
-	// clipLabels-style "+N" truncation didn't happen. A bare
-	// strings.Contains(out, "+") check would also trip on the header's own
-	// bordered panel (issue #1756) rendering ASCII "+" corners under this
-	// test's ambient (unset) TERM.
+	// Every label present unclipped already proves clipLabels-style "+N"
+	// truncation did not happen. A bare strings.Contains(out, "+") check would
+	// trip on the header panel's own ASCII "+" corners (issue #1756) under
+	// this test's unset TERM.
 	out := View(m)
 	for _, label := range labels {
 		if !strings.Contains(out, label) {
@@ -2003,16 +1786,10 @@ func TestView_DetailModal_LabelsUnclipped(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_LabelsWrapOnOverflow verifies the floating detail
-// modal wraps a labels line that overflows the box's interior width onto
-// further interior rows instead of silently truncating it (issue #1772):
-// TestView_DetailModal_LabelsUnclipped's 8 short labels never exceed even
-// an 80-col terminal's 74-col interior (detailModalInnerSize), so it never
-// exercised the overflow path padDisplay's runewidth.Truncate hits once the
-// joined labels line runs past innerWidth. This test uses a terminal wide
-// enough to cap the box at detailModalBoxMaxWidth (issue #1772 AC2's "the
-// box's default max width"), a 98-col interior, rather than a narrower
-// uncapped box.
+// Issue #1772: a labels line overflowing the box interior wraps onto further rows
+// instead of being truncated. TestView_DetailModal_LabelsUnclipped's 8 short labels
+// never exceed even an 80-column interior, so they never reach padDisplay's truncate.
+// The width here caps the box at detailModalBoxMaxWidth (AC2), a 98-column interior.
 func TestView_DetailModal_LabelsWrapOnOverflow(t *testing.T) {
 	labels := []string{
 		"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf",
@@ -2031,13 +1808,9 @@ func TestView_DetailModal_LabelsWrapOnOverflow(t *testing.T) {
 	}
 }
 
-// TestDetailModalLabelLinesCapped_OverflowIndicatorSharesBracket verifies
-// the "+N more labels" overflow indicator (issue #1631's multi-row analogue,
-// issue #1778) is folded into the same bracketed, dim-styled block the
-// retained labels render in — "[alpha, +3 more labels]" — rather than
-// appended as a separate unbracketed, unstyled line after the closing
-// bracket (issue #1832): the indicator is still part of the same "these are
-// labels" row, not a stray second line.
+// Issue #1832: the "+N more labels" indicator (issue #1778) folds into the same
+// bracketed, dim-styled block as the retained labels, rather than trailing after the
+// closing bracket as its own unbracketed, unstyled line.
 func TestDetailModalLabelLinesCapped_OverflowIndicatorSharesBracket(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -2049,11 +1822,9 @@ func TestDetailModalLabelLinesCapped_OverflowIndicatorSharesBracket(t *testing.T
 	}
 }
 
-// TestDetailModalLabelLinesCapped_ZeroBudget_FallsBackToBareIndicator
-// verifies the maxLines <= 0 degenerate case — no room for even one label
-// inside a bracket — falls back to the bare, unbracketed, unstyled "+N more
-// labels" indicator documented on detailModalLabelLinesCapped, rather than
-// an empty bracket or a styled line the zero-row budget has no room to show.
+// The maxLines <= 0 case has no room for even one label inside a bracket, so it falls
+// back to the bare indicator documented on detailModalLabelLinesCapped rather than an
+// empty bracket or a styled line the zero-row budget cannot show.
 func TestDetailModalLabelLinesCapped_ZeroBudget_FallsBackToBareIndicator(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -2065,16 +1836,11 @@ func TestDetailModalLabelLinesCapped_ZeroBudget_FallsBackToBareIndicator(t *test
 	}
 }
 
-// TestView_DetailModal_LabelOverflowShowsIndicator verifies that when
-// wrapped label lines alone would consume the box's entire interior height,
-// renderDetailModalContent caps them and appends a "+N more labels"
-// indicator instead of letting the tail-truncate at the end of the function
-// silently drop trailing label lines and/or the footer (issue #1778 — a gap
-// left by #1772/#1780's wrap-instead-of-truncate fix). Each label here is
-// longer than the box's interior width, so wrapText places exactly one
-// label per rendered line, making the overflow point (innerHeight -
-// detailModalFooterLines lines) deterministic regardless of wrapText's
-// internals.
+// Issue #1778, a gap left by #1772/#1780's wrap-instead-of-truncate fix: when wrapped
+// label lines alone would consume the box's whole interior height,
+// renderDetailModalContent caps them and appends an indicator instead of silently
+// dropping trailing label lines or the footer. Each label here is wider than the
+// interior, so wrapText puts one per line and the overflow point is deterministic.
 func TestView_DetailModal_LabelOverflowShowsIndicator(t *testing.T) {
 	labels := make([]string, 40)
 	for i := range labels {
@@ -2091,25 +1857,19 @@ func TestView_DetailModal_LabelOverflowShowsIndicator(t *testing.T) {
 		t.Errorf("View() = %q, want the footer never dropped by label overflow", out)
 	}
 	// Each label is 99 columns, wider than the 98-column interior padDisplay
-	// truncates every row to — so checking for the full label string would
-	// pass whether or not it was capped (it never fits a row intact either
-	// way). The short "label-NN-" prefix does fit a row intact, so its
-	// absence actually distinguishes "dropped by the cap" from "rendered and
-	// merely wrapped/truncated".
+	// truncates every row to, so checking for the full label string would pass
+	// whether or not it was capped. The short "label-NN-" prefix does fit a row
+	// intact, so its absence distinguishes "dropped by the cap" from "rendered
+	// and merely truncated".
 	lastPrefix := fmt.Sprintf("label-%02d-", len(labels)-1)
 	if strings.Contains(out, lastPrefix) {
 		t.Errorf("View() = %q, want the last label (prefix %q) dropped behind the overflow indicator, not rendered", out, lastPrefix)
 	}
 }
 
-// TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles verifies the
-// ticket detail modal strips CSI/OSC escape sequences from every piece of
-// untrusted tracker text it renders — title, labels, body, and each
-// Blocked-by/Blocks entry's title — the same trust boundary the backlog row
-// and sidebar transcript already enforce (issue #862, extended to the
-// detail modal by issue #1632 review finding): a tracker title/body/label is
-// untrusted input, and Bubble Tea does not filter arbitrary control
-// sequences before writing to the operator's terminal.
+// Issue #862, extended to the detail modal by an issue #1632 review finding: tracker
+// title, labels, body and blocker titles are untrusted input, and Bubble Tea does not
+// filter arbitrary control sequences before writing to the operator's terminal.
 func TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, DetailModalOpenMsg{
@@ -2127,11 +1887,9 @@ func TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles(t *testing.T)
 
 	out := View(m)
 	// Checked as specific injected byte sequences rather than "no \x1b
-	// anywhere on this line": the floating box (issue #1758) can now share
-	// a physical row with styled base UI (e.g. colored Section tabs), whose
-	// own legitimate SGR escapes must not trip a check meant to catch the
-	// untrusted title/label/body/blocker text's own control sequences
-	// surviving sanitization.
+	// anywhere on this line": the floating box (issue #1758) shares a physical
+	// row with styled base UI, whose legitimate SGR escapes must not trip a
+	// check meant to catch the untrusted text's own control sequences.
 	for _, escape := range []string{"\x1b[2J", "\x1b]0;pwned\x07"} {
 		if strings.Contains(out, escape) {
 			t.Errorf("View() = %q, want the injected escape sequence %q stripped by sanitization", out, escape)
@@ -2144,11 +1902,8 @@ func TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles(t *testing.T)
 	}
 }
 
-// TestView_SidebarOpen_RendersActivityInsteadOfBacklog verifies an open
-// sidebar, on a terminal too narrow to dock it, replaces the backlog/queue
-// rendering with the sidebar's Activity feed — the default view, not the
-// Transcript — the operator's view of the work, not just liveness (#648,
-// #1501).
+// Issues #648 and #1501: on a terminal too narrow to dock, the open sidebar replaces
+// the backlog with the Activity feed, the default view rather than the Transcript.
 func TestView_SidebarOpen_RendersActivityInsteadOfBacklog(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
@@ -2169,9 +1924,6 @@ func TestView_SidebarOpen_RendersActivityInsteadOfBacklog(t *testing.T) {
 	}
 }
 
-// TestView_SidebarToggle_RendersTranscriptThenRaw verifies advancing the
-// toggle swaps the sidebar from the Activity feed to the rendered Transcript,
-// then to the raw byte-exact form.
 func TestView_SidebarToggle_RendersTranscriptThenRaw(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
@@ -2192,13 +1944,9 @@ func TestView_SidebarToggle_RendersTranscriptThenRaw(t *testing.T) {
 	}
 }
 
-// TestView_SidebarOffset_HidesLinesBeforeOffset verifies scrolling (a
-// non-zero Offset) drops the leading lines from the sidebar instead of
-// always showing its start (issue #786, inherited). Height is small enough
-// that the content outruns the viewport budget, or the viewport clamp (issue
-// #829) would pin Offset at 0 since the whole thing already fits. The
-// Transcript (rendered) view is toggled on so the content matches the plain
-// "l0".."l3" lines the old drill-in test exercised.
+// Issue #786: Height is small enough that the content outruns the viewport budget, or
+// the viewport clamp (issue #829) would pin Offset at 0. The Transcript view is toggled
+// on so the content matches the plain lines the old drill-in test exercised.
 func TestView_SidebarOffset_HidesLinesBeforeOffset(t *testing.T) {
 	// Height 5, not 4: headerFooterLines(2) plus the trailing-newline
 	// reservation (issue #1841) leave a 2-line content budget here, the same
@@ -2217,8 +1965,6 @@ func TestView_SidebarOffset_HidesLinesBeforeOffset(t *testing.T) {
 	}
 }
 
-// TestView_SidebarErr_Surfaced verifies a sidebar that failed to load
-// surfaces its error text instead of blank content.
 func TestView_SidebarErr_Surfaced(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Err: errBoom})
@@ -2229,11 +1975,9 @@ func TestView_SidebarErr_Surfaced(t *testing.T) {
 	}
 }
 
-// TestView_SidebarTranscriptErr_HiddenBehindActivity verifies a Transcript-
-// only load failure (DrillIn's error, surfaced as TranscriptErr) never blanks
-// out an independently-loaded, otherwise-good Activity feed — the error only
-// shows once the operator actually toggles to the Transcript (#1501 review
-// finding).
+// Issue #1501 review finding: a Transcript-only load failure must not blank an
+// independently loaded, otherwise-good Activity feed. The error shows only once the
+// operator toggles to the Transcript.
 func TestView_SidebarTranscriptErr_HiddenBehindActivity(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, TranscriptErr: errBoom})
@@ -2253,13 +1997,9 @@ func TestView_SidebarTranscriptErr_HiddenBehindActivity(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_WindowsToViewportHeight verifies the fullscreen
-// sidebar joins only as many lines as the viewport can show, instead of the
-// whole tail from Offset to the end of a (potentially multi-MB) transcript,
-// so scrolling near the top of a huge transcript doesn't re-serialize
-// content nowhere near the screen (issue #722, inherited). The Transcript
-// (rendered) view is toggled on so the content matches the head/tail markers
-// the old drill-in test exercised.
+// Issue #722: the fullscreen sidebar joins only as many lines as the viewport can show,
+// so scrolling near the top of a multi-MB transcript does not re-serialize content
+// nowhere near the screen.
 func TestView_SidebarFullscreen_WindowsToViewportHeight(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 5})
 	content := "HEAD-MARKER\n" + strings.Repeat("x\n", 100) + "TAIL-MARKER"
@@ -2275,10 +2015,8 @@ func TestView_SidebarFullscreen_WindowsToViewportHeight(t *testing.T) {
 	}
 }
 
-// TestView_SidebarOpen_WideTerminal_DocksBesideList verifies a terminal wide
-// enough for sidebarFits shows the sidebar docked beside the still-visible
-// list, rather than the list disappearing behind a fullscreen takeover — the
-// core of ADR 0030's docked layout (#1501).
+// Issue #1501, the core of ADR 0030's docked layout: a terminal wide enough for
+// sidebarFits keeps the list visible beside the sidebar instead of hiding it.
 func TestView_SidebarOpen_WideTerminal_DocksBesideList(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
@@ -2293,12 +2031,8 @@ func TestView_SidebarOpen_WideTerminal_DocksBesideList(t *testing.T) {
 	}
 }
 
-// TestView_SidebarOpen_WideTerminal_PanelsRenderBordered verifies the docked
-// list and the docked sidebar each render inside a muted rounded border
-// once the sidebar is open — the bordered-panel look that replaces the bare
-// column divider, so the split reads as two distinct boxes rather than one
-// continuous surface (issue #1755) — alongside the header's own bordered
-// panel (issue #1756), for 3 boxes total.
+// Issue #1755 replaced the bare column divider with bordered panels, so the split reads
+// as two boxes. With the header's own panel (issue #1756) that is 3 boxes.
 func TestView_SidebarOpen_WideTerminal_PanelsRenderBordered(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -2313,11 +2047,8 @@ func TestView_SidebarOpen_WideTerminal_PanelsRenderBordered(t *testing.T) {
 	}
 }
 
-// TestView_SidebarOpen_NoColor_PanelsRenderAsciiBorder verifies the docked
-// panels' border degrades to plain ASCII glyphs (no rounded Unicode
-// box-drawing characters, no stray escape bytes) under NO_COLOR, the same
-// degradation colorProfile() already applies to role coloring elsewhere in
-// the package (issue #1755).
+// Issue #1755: the docked panels' border degrades to plain ASCII under NO_COLOR, the
+// same degradation colorProfile() already applies to role coloring.
 func TestView_SidebarOpen_NoColor_PanelsRenderAsciiBorder(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("TERM", "xterm-256color")
@@ -2338,10 +2069,7 @@ func TestView_SidebarOpen_NoColor_PanelsRenderAsciiBorder(t *testing.T) {
 	}
 }
 
-// TestView_SidebarOpen_DumbTerminal_PanelsRenderAsciiBorder verifies the
-// docked panels' border also degrades to plain ASCII glyphs on a non-color
-// terminal (TERM=dumb) — the other half of colorProfile()'s degradation the
-// NO_COLOR border test covers (issue #1755).
+// Issue #1755: the other half of colorProfile()'s degradation, a non-color terminal.
 func TestView_SidebarOpen_DumbTerminal_PanelsRenderAsciiBorder(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "dumb")
@@ -2362,12 +2090,9 @@ func TestView_SidebarOpen_DumbTerminal_PanelsRenderAsciiBorder(t *testing.T) {
 	}
 }
 
-// TestView_SidebarOpen_QueueEnterNotice_DockedPanelsRespectHeight verifies
-// that a docked sidebar with the QueueEnterNotice line also showing never
-// renders more than Height total lines — bodyBudget must reserve exactly the
-// same lines View itself reserves, or the bordered panels' row budget comes
-// out too generous and the render spills a line past the terminal (issue
-// #1755, the #1035/#1500 "never overflow Height" invariant).
+// Issue #1755: bodyBudget has to reserve exactly the lines View itself reserves, or the
+// bordered panels' row budget comes out too generous and the render spills past the
+// terminal, breaking the #1035/#1500 never-overflow-Height invariant.
 func TestView_SidebarOpen_QueueEnterNotice_DockedPanelsRespectHeight(t *testing.T) {
 	const height = 10
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: height})
@@ -2381,11 +2106,8 @@ func TestView_SidebarOpen_QueueEnterNotice_DockedPanelsRespectHeight(t *testing.
 	}
 }
 
-// TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth verifies
-// that at the narrowest width sidebarFits allows docking, the two bordered
-// panels' combined rendered width — border overhead included — never
-// exceeds the terminal's actual width, so nothing overflows and wraps at
-// the threshold (issue #1755).
+// Issue #1755: at the narrowest width sidebarFits allows docking, the two panels plus
+// their border overhead must still fit the terminal, with nothing wrapping.
 func TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth(t *testing.T) {
 	width := sidebarMinListWidth + sidebarWidth + dockedBorderCols
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
@@ -2394,10 +2116,8 @@ func TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth(t *testing.
 
 	out := View(m)
 	// lipgloss.Width, not runewidth.StringWidth: on a color-capable ambient
-	// TERM the panel border carries ANSI codes (ADR 0031), which
-	// runewidth.StringWidth counts as display width and lipgloss's
-	// ANSI-aware measurement does not (mirrors the rebuild-banner width
-	// check above).
+	// TERM the panel border carries ANSI codes (ADR 0031), which runewidth
+	// counts as display width and lipgloss's ANSI-aware measurement does not.
 	for i, line := range strings.Split(out, "\n") {
 		if got := lipgloss.Width(line); got > width {
 			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
@@ -2405,12 +2125,8 @@ func TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth(t *testing.
 	}
 }
 
-// TestView_SidebarOpen_UnevenContent_PanelBottomsAlign verifies that when
-// the list and sidebar panels render a different number of content lines,
-// their bordered boxes still close at the same row — the shorter panel's
-// content pads out to the taller one's height before the border wraps it —
-// so the two boxes read as aligned panels instead of one panel's bottom
-// edge floating above a gap while the other continues (issue #1755).
+// Issue #1755: the shorter panel's content pads out to the taller one's height before
+// the border wraps it, so both boxes close on the same row.
 func TestView_SidebarOpen_UnevenContent_PanelBottomsAlign(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -2431,11 +2147,9 @@ func TestView_SidebarOpen_UnevenContent_PanelBottomsAlign(t *testing.T) {
 	}
 }
 
-// TestView_SidebarOpen_ShortContent_DividerDoesNotFillWholeBudget verifies
-// the divider between the docked list and sidebar spans only as many rows
-// as the taller of the two actually rendered, not the whole body budget —
-// one Backlog issue and a one-line Activity feed must not force blank
-// divider rows down to the bottom of a tall terminal (#1501 review finding).
+// Issue #1501 review finding: the divider spans only as many rows as the taller panel
+// actually rendered, so short content does not force blank divider rows down to the
+// bottom of a tall terminal.
 func TestView_SidebarOpen_ShortContent_DividerDoesNotFillWholeBudget(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "only issue"}}})
@@ -2443,18 +2157,15 @@ func TestView_SidebarOpen_ShortContent_DividerDoesNotFillWholeBudget(t *testing.
 
 	out := View(m)
 	got := strings.Count(out, "\n")
-	// header (banner + status line) + tabs + a couple of content rows —
-	// nowhere near the full Height: 24 budget the pre-fix divider always
-	// forced the joined body up to.
+	// Header, tabs and a couple of content rows, nowhere near the Height 24
+	// budget the pre-fix divider always forced the joined body up to.
 	if got > 15 {
 		t.Errorf("View() rendered %d lines, want well under Height (24) — the divider must not pad the body out to the full budget for short content", got)
 	}
 }
 
-// TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen verifies a
-// terminal one column short of sidebarFits' threshold falls back to the
-// fullscreen takeover — the list disappears entirely rather than squeezing
-// both columns illegibly (ADR 0030's narrow-terminal degradation, #1501).
+// ADR 0030's narrow-terminal degradation (issue #1501): one column short of sidebarFits
+// the list disappears entirely rather than squeezing both columns illegibly.
 func TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols - 1, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
@@ -2469,11 +2180,8 @@ func TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_NarrowWidth_FooterFitsWidth verifies the
-// fullscreen sidebar's "[t] cycle activity/transcript · [x] close · [z]
-// ..." footer — long enough to wrap past one row when rendered unclipped —
-// clips to the terminal's own width like every other footer in this file
-// (issue #1818).
+// Issue #1818: the fullscreen sidebar's footer wraps past one row when rendered
+// unclipped, so it clips to the terminal's own width like every other footer here.
 func TestView_SidebarFullscreen_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	// Wide enough that the sidebar's own label line (not this issue's
 	// concern) already fits, narrow enough that the footer's 52-column
@@ -2493,12 +2201,9 @@ func TestView_SidebarFullscreen_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_LongTranscriptLine_ClipsToWidth verifies a
-// rendered-transcript line longer than the pane width clips to exactly one
-// physical row, mirroring renderSidebarDocked's own per-line clip — an
-// unclipped line soft-wraps past windowSidebarLines' logical-line height
-// budget and pushes the modal's top border (and footer) off the viewport
-// (issue #1841).
+// Issue #1841: an unclipped long line soft-wraps past windowSidebarLines' logical-line
+// budget and pushes the modal's top border and footer off the viewport, so each line
+// clips to one physical row the way renderSidebarDocked already does.
 func TestView_SidebarFullscreen_LongTranscriptLine_ClipsToWidth(t *testing.T) {
 	const width, height = 40, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -2516,10 +2221,8 @@ func TestView_SidebarFullscreen_LongTranscriptLine_ClipsToWidth(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_RawViewLongLine_ClipsToWidth verifies the clip
-// fix holds for the raw JSONL `[t]` view too, not just the rendered one —
-// windowSidebarLines and the clip loop it feeds don't care which of the
-// three views populated Sidebar.Lines (issue #1841 AC3).
+// Issue #1841 AC3: the clip holds for the raw JSONL view too. windowSidebarLines and
+// the clip loop it feeds do not care which of the three views populated Sidebar.Lines.
 func TestView_SidebarFullscreen_RawViewLongLine_ClipsToWidth(t *testing.T) {
 	const width, height = 40, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -2535,12 +2238,9 @@ func TestView_SidebarFullscreen_RawViewLongLine_ClipsToWidth(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_ZoomedLongLine_ClipsToWidth verifies the clip
-// fix holds on the [z]-zoom trigger too, not only the too-narrow-to-dock
-// fallback (issue #1841 AC3) — on a terminal this wide, zoom now renders the
-// floating log modal box (issue #1845) rather than the old
-// renderSidebarFullscreen takeover, so this also guards that the modal's own
-// clip never lets a composited line spill past the terminal's actual width.
+// Issue #1841 AC3 on the [z] zoom trigger. At this width zoom renders the floating log
+// modal (issue #1845) rather than the old fullscreen takeover, so this also guards that
+// the modal's own clip never lets a composited line spill past the terminal width.
 func TestView_SidebarFullscreen_ZoomedLongLine_ClipsToWidth(t *testing.T) {
 	const width, height = sidebarMinListWidth + sidebarWidth + dockedBorderCols, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -2556,13 +2256,9 @@ func TestView_SidebarFullscreen_ZoomedLongLine_ClipsToWidth(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_ExactFitContent_FitsHeightWithFooterPinned
-// verifies a fullscreen sidebar whose content exactly fills its windowed
-// budget still renders no more physical lines than m.Height: View()'s own
-// guaranteed trailing "\n" (the same class of off-by-one #1825/#1827 fixed
-// for the list body and rebuild-output pane) costs the terminal a physical
-// row of its own, and renderSidebarFullscreen never reserved one — unlike
-// renderSidebarDocked, which inherits it via bodyBudget (issue #1841).
+// Issue #1841: View()'s guaranteed trailing "\n" costs the terminal a physical row, the
+// off-by-one class #1825/#1827 fixed elsewhere, and renderSidebarFullscreen never
+// reserved one, unlike renderSidebarDocked which inherits it through bodyBudget.
 func TestView_SidebarFullscreen_ExactFitContent_FitsHeightWithFooterPinned(t *testing.T) {
 	const width, height = 80, 10
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -2589,18 +2285,11 @@ func TestView_SidebarFullscreen_ExactFitContent_FitsHeightWithFooterPinned(t *te
 	}
 }
 
-// assertSidebarFitsHeightBudget is #1842's shared regression guard, reused by
-// both the fullscreen and docked sidebar tests below so a future sidebar view
-// is covered by construction instead of a copy-pasted assertion per case: no
-// rendered row may exceed width, and the total physical (post-wrap) row count
-// may not exceed height. Checking both together matters because a renderer
-// that satisfies only one half — clips every line but forgets a chrome row,
-// or reserves the right row count but joins one unclipped wide line — still
-// overflows the viewport the same way #1841 did. The height check counts
-// "\n"-split rows rather than re-wrapping the output itself, so it only
-// proves what it claims — no logical line silently ballooned into more than
-// one physical row — alongside the per-row width check right above it,
-// never on its own.
+// assertSidebarFitsHeightBudget is issue #1842's shared guard, reused by the fullscreen
+// and docked sidebar tests. Checking width and row count together matters: a renderer
+// that clips every line but forgets a chrome row, or reserves the right row count but
+// joins one unclipped wide line, still overflows the way #1841 did. The height check
+// counts "\n"-split rows rather than re-wrapping, so it only holds beside the width check.
 func assertSidebarFitsHeightBudget(t *testing.T, out string, width, height int) {
 	t.Helper()
 	rows := strings.Split(out, "\n")
@@ -2614,11 +2303,9 @@ func assertSidebarFitsHeightBudget(t *testing.T, out string, width, height int) 
 	}
 }
 
-// sidebarWideLinesFixture returns count deliberately over-wide (width*3
-// rune) lines, as both an Activity feed and a joined transcript string, for
-// the two tests below — the shared setup half of #1842's guard, so the
-// fullscreen and docked cases differ only in the width/height/Update
-// sequence each renderer actually needs.
+// sidebarWideLinesFixture is the shared setup half of issue #1842's guard, so the
+// fullscreen and docked cases differ only in the width, height and Update sequence each
+// renderer needs.
 func sidebarWideLinesFixture(width, count int) (activity []ActivityLine, content string) {
 	wide := strings.Repeat("w", width*3)
 	lines := make([]string, count)
@@ -2630,17 +2317,10 @@ func sidebarWideLinesFixture(width, count int) (activity []ActivityLine, content
 	return activity, strings.Join(lines, "\n")
 }
 
-// TestView_SidebarFullscreen_WideLines_FitHeightBudgetAcrossAllViews is
-// #1842's fullscreen regression guard: enough deliberately over-wide lines to
-// fill the renderer's whole viewport, in each of the three [t] views, checked
-// through the one assertSidebarFitsHeightBudget helper its docked
-// counterpart below also uses. The existing *_ClipsToWidth tests (issue
-// #1841) already catch an unclipped renderer on their own per-row width
-// check, but each uses only a single wide line — never enough to fill a
-// renderer's whole logical-line budget at once, and never shared with a
-// docked-renderer test. This is what actually covers "no sidebar view, in
-// any renderer" per the issue's AC, rather than one more per-renderer
-// one-off.
+// Issue #1842's fullscreen guard. The #1841 *_ClipsToWidth tests each use a single wide
+// line, never enough to fill a renderer's whole logical-line budget and never shared
+// with a docked-renderer test, so this is what covers "no sidebar view, in any
+// renderer" per the AC.
 func TestView_SidebarFullscreen_WideLines_FitHeightBudgetAcrossAllViews(t *testing.T) {
 	const width, height = 40, 24
 	activity, content := sidebarWideLinesFixture(width, height)
@@ -2657,14 +2337,9 @@ func TestView_SidebarFullscreen_WideLines_FitHeightBudgetAcrossAllViews(t *testi
 	assertSidebarFitsHeightBudget(t, View(m), width, height) // transcript (raw)
 }
 
-// TestView_SidebarDocked_WideLines_FitHeightBudgetAcrossAllViews is #1842's
-// docked-renderer counterpart to the fullscreen test above, sharing both
-// sidebarWideLinesFixture and assertSidebarFitsHeightBudget so the same
-// invariant covers both render paths by construction rather than a second
-// copy-pasted test. renderSidebarDocked already clips (issue #1799,
-// predating #1841's fullscreen fix), so this is expected to pass without
-// further changes — its value is guarding the docked path against ever
-// regressing the same way.
+// Issue #1842's docked counterpart, sharing the same fixture and helper.
+// renderSidebarDocked already clips (issue #1799, predating #1841's fullscreen fix), so
+// this is expected to pass unchanged; its value is guarding against a later regression.
 func TestView_SidebarDocked_WideLines_FitHeightBudgetAcrossAllViews(t *testing.T) {
 	const width, height = sidebarMinListWidth + sidebarWidth + dockedBorderCols, 24
 	activity, content := sidebarWideLinesFixture(sidebarWidth, height)
@@ -2682,9 +2357,8 @@ func TestView_SidebarDocked_WideLines_FitHeightBudgetAcrossAllViews(t *testing.T
 	assertSidebarFitsHeightBudget(t, View(m), width, height) // transcript (raw)
 }
 
-// TestQueueNarrowed_SidebarDocked_ReportsTrue verifies queueNarrowed reports
-// true once the sidebar is open and docked beside the list — the trigger for
-// the compact/wrapped queue-row form (issue #1752).
+// Issue #1752: a sidebar docked beside the list is the trigger for the compact/wrapped
+// queue-row form.
 func TestQueueNarrowed_SidebarDocked_ReportsTrue(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -2694,9 +2368,7 @@ func TestQueueNarrowed_SidebarDocked_ReportsTrue(t *testing.T) {
 	}
 }
 
-// TestQueueNarrowed_SidebarClosed_ReportsFalse verifies queueNarrowed reports
-// false with no sidebar open — the list renders at full width, unchanged from
-// today (issue #1752 AC).
+// Issue #1752 AC: with no sidebar open the list renders at full width, unchanged.
 func TestQueueNarrowed_SidebarClosed_ReportsFalse(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 
@@ -2705,10 +2377,8 @@ func TestQueueNarrowed_SidebarClosed_ReportsFalse(t *testing.T) {
 	}
 }
 
-// TestQueueNarrowed_SidebarFullscreen_ReportsFalse verifies queueNarrowed
-// reports false when the sidebar takes over fullscreen (narrow terminal) —
-// the list isn't rendered at all in that layout, so it has no queue column to
-// narrow (issue #1752).
+// Issue #1752: a fullscreen sidebar renders no list at all, so there is no queue column
+// to narrow.
 func TestQueueNarrowed_SidebarFullscreen_ReportsFalse(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -2718,11 +2388,9 @@ func TestQueueNarrowed_SidebarFullscreen_ReportsFalse(t *testing.T) {
 	}
 }
 
-// TestQueueNarrowed_SidebarZoomed_ReportsFalse verifies queueNarrowed
-// reports false once the operator zooms the sidebar to fullscreen, even on a
-// terminal wide enough to dock — View forces the fullscreen takeover on zoom
-// regardless of sidebarFits (issue #1502), hiding the list the same way the
-// too-narrow-to-dock case does, so this must never disagree (issue #1752).
+// Issue #1752: View forces the fullscreen takeover on zoom regardless of sidebarFits
+// (issue #1502), hiding the list the same way the too-narrow case does, so queueNarrowed
+// must never disagree.
 func TestQueueNarrowed_SidebarZoomed_ReportsFalse(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -2733,43 +2401,33 @@ func TestQueueNarrowed_SidebarZoomed_ReportsFalse(t *testing.T) {
 	}
 }
 
-// TestCompactColumnItemBudget_ExactFit_ReturnsWholeItems verifies
-// compactColumnItemBudget returns exactly as many compact entries as fit
-// with no wasted budget: a column budget of 6 (1 header row + 5 available)
-// fits exactly 2 entries — 2*compactRowLines (4) plus 1 separator between
-// them — with none left over (issue #1752).
+// Issue #1752: a column budget of 6 (1 header row plus 5 available) fits exactly 2
+// entries, 2*compactRowLines plus 1 separator, with nothing left over.
 func TestCompactColumnItemBudget_ExactFit_ReturnsWholeItems(t *testing.T) {
 	if got := compactColumnItemBudget(6); got != 2 {
 		t.Errorf("compactColumnItemBudget(6) = %d, want 2", got)
 	}
 }
 
-// TestCompactColumnItemBudget_TooSmallForOneEntry_ReturnsZero verifies a
-// column budget too small to fit even one compact entry's header+title
-// block returns zero rather than a negative or fractional count (issue
-// #1752).
+// Issue #1752: a budget too small for one entry's header and title block returns zero,
+// not a negative or fractional count.
 func TestCompactColumnItemBudget_TooSmallForOneEntry_ReturnsZero(t *testing.T) {
 	if got := compactColumnItemBudget(1); got != 0 {
 		t.Errorf("compactColumnItemBudget(1) = %d, want 0", got)
 	}
 }
 
-// TestCompactColumnItemBudget_NonPositive_ReturnsZero verifies a
-// non-positive column budget (a terminal too short to show anything past
-// the header) yields zero compact entries, matching columnItemBudget's own
-// guard (issue #1752).
+// Issue #1752: matches columnItemBudget's own guard for a terminal too short to show
+// anything past the header.
 func TestCompactColumnItemBudget_NonPositive_ReturnsZero(t *testing.T) {
 	if got := compactColumnItemBudget(0); got != 0 {
 		t.Errorf("compactColumnItemBudget(0) = %d, want 0", got)
 	}
 }
 
-// TestSectionPageSize_Compact_SmallerThanClassic verifies a pgup/pgdown page
-// jump (sectionPageSize) shrinks once the sidebar docks and the compact form
-// takes over — each entry now spends more than one screen line, so a page
-// holds fewer of them — proving sectionPageSize actually picks up
-// queueItemBudget's compact branch rather than reusing the classic
-// one-line-per-item budget regardless of layout (issue #1752).
+// Issue #1752: sectionPageSize has to pick up queueItemBudget's compact branch rather
+// than reusing the classic one-line-per-item budget, so a page holds fewer entries once
+// the sidebar docks and each entry spends more than one line.
 func TestSectionPageSize_Compact_SmallerThanClassic(t *testing.T) {
 	base := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	picks := make([]Pick, 20)
@@ -2788,11 +2446,8 @@ func TestSectionPageSize_Compact_SmallerThanClassic(t *testing.T) {
 	}
 }
 
-// TestComputeSidebarWidth_MinimumFittingWidth_ReturnsFloor verifies that at
-// the narrowest width sidebarFits still allows docking (sidebarMinListWidth +
-// sidebarWidth + 1), the computed sidebar width is exactly the sidebarWidth
-// floor — there's no room to grow past it without violating the queue list's
-// own sidebarMinListWidth floor (issue #1751).
+// Issue #1751: at the narrowest docking width there is no room to grow past the
+// sidebarWidth floor without breaking the queue list's own sidebarMinListWidth floor.
 func TestComputeSidebarWidth_MinimumFittingWidth_ReturnsFloor(t *testing.T) {
 	got := computeSidebarWidth(sidebarMinListWidth + sidebarWidth + dockedBorderCols)
 	if got != sidebarWidth {
@@ -2800,11 +2455,8 @@ func TestComputeSidebarWidth_MinimumFittingWidth_ReturnsFloor(t *testing.T) {
 	}
 }
 
-// TestComputeSidebarWidth_WideTerminal_TargetsFortyFivePercent verifies a
-// 160-column terminal — the issue's own worked example, where the sidebar
-// used to be pinned at 42 and the queue absorbed the other ~117 — grows the
-// sidebar to 45% of the window (72) with plenty of room left for the queue's
-// own sidebarMinListWidth floor (issue #1751).
+// Issue #1751's worked example: at 160 columns the sidebar used to be pinned at 42
+// while the queue absorbed the other ~117.
 func TestComputeSidebarWidth_WideTerminal_TargetsFortyFivePercent(t *testing.T) {
 	got := computeSidebarWidth(160)
 	if want := 72; got != want {
@@ -2812,11 +2464,8 @@ func TestComputeSidebarWidth_WideTerminal_TargetsFortyFivePercent(t *testing.T) 
 	}
 }
 
-// TestComputeSidebarWidth_ModeratelyWideTerminal_ClampsToQueueFloor verifies
-// a terminal too narrow for a full 45% share to leave the queue list its
-// sidebarMinListWidth floor clamps the sidebar down instead — the queue must
-// never shrink below its floor even though there's room to dock at all
-// (issue #1751).
+// Issue #1751: the queue must never shrink below its floor even where there is room to
+// dock at all, so a terminal too narrow for a full 45% share clamps the sidebar down.
 func TestComputeSidebarWidth_ModeratelyWideTerminal_ClampsToQueueFloor(t *testing.T) {
 	// 140 columns: 45% would be 63, but that only leaves the queue
 	// 140-63-4 = 73, under its 80-column floor (the 4 is dockedBorderCols,
@@ -2828,11 +2477,9 @@ func TestComputeSidebarWidth_ModeratelyWideTerminal_ClampsToQueueFloor(t *testin
 	}
 }
 
-// TestView_SidebarOpen_WideTerminal_SidebarGrowsPastFloor verifies the
-// docked sidebar's actual rendered content clips to computeSidebarWidth's
-// wider column, not the old fixed 42-column floor, once the terminal is wide
-// enough to grow it (issue #1751). A long Activity line makes the clip
-// boundary observable: it truncates to exactly the computed width.
+// Issue #1751: the docked sidebar's content clips to computeSidebarWidth's wider column,
+// not the old fixed 42-column floor. A long Activity line makes the clip boundary
+// observable: it truncates to exactly the computed width.
 func TestView_SidebarOpen_WideTerminal_SidebarGrowsPastFloor(t *testing.T) {
 	const width = 160
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
@@ -2846,12 +2493,8 @@ func TestView_SidebarOpen_WideTerminal_SidebarGrowsPastFloor(t *testing.T) {
 	}
 }
 
-// TestView_SidebarOpen_CompactQueueRows_SidebarKeepsComputedWidth verifies
-// the compact/wrapped queue form doesn't claw back the width #1751's
-// rebalance granted the docked sidebar: with compact rows rendering (a work
-// pick present, log open), the sidebar's own content still clips to exactly
-// computeSidebarWidth, the same as with an empty queue (issue #1752 AC: "the
-// activity stream retains the extra width granted by the rebalanced split").
+// Issue #1752 AC, the activity stream retains the extra width granted by the rebalanced
+// split: compact queue rows must not claw back what issue #1751 gave the docked sidebar.
 func TestView_SidebarOpen_CompactQueueRows_SidebarKeepsComputedWidth(t *testing.T) {
 	const width = 160
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
@@ -2869,12 +2512,9 @@ func TestView_SidebarOpen_CompactQueueRows_SidebarKeepsComputedWidth(t *testing.
 	}
 }
 
-// TestView_SidebarOpen_WideTerminal_QueueNarrowsForWiderSidebar verifies the
-// docked queue list's title column shrinks to make room for the wider
-// sidebar computeSidebarWidth grants it, rather than staying pinned at the
-// width it had when the sidebar was a fixed 42 columns (issue #1751). A long
-// Backlog title makes the clip boundary observable the same way the sidebar
-// content test does.
+// Issue #1751: the docked queue's title column shrinks to make room for the wider
+// sidebar rather than staying pinned at its old fixed-42-column width. A long Backlog
+// title makes the clip boundary observable.
 func TestView_SidebarOpen_WideTerminal_QueueNarrowsForWiderSidebar(t *testing.T) {
 	const width = 160
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
@@ -2891,11 +2531,8 @@ func TestView_SidebarOpen_WideTerminal_QueueNarrowsForWiderSidebar(t *testing.T)
 	}
 }
 
-// TestView_SidebarClose_WideTerminal_QueueRestoresFullWidth verifies closing
-// the docked sidebar on a wide terminal restores the queue list's title
-// column to the width it would have with no sidebar at all — the rebalanced
-// split must not leave a stale narrower list behind once the log closes
-// (issue #1751).
+// Issue #1751: the rebalanced split must not leave a stale narrower list behind once the
+// log closes.
 func TestView_SidebarClose_WideTerminal_QueueRestoresFullWidth(t *testing.T) {
 	const width = 160
 	long := strings.Repeat("x", 300)
@@ -2912,10 +2549,9 @@ func TestView_SidebarClose_WideTerminal_QueueRestoresFullWidth(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFooter_WideTerminal_RendersFullHintsUnclipped verifies the
-// docked footer's fixed, tight-spaced hint text — hand-tuned to survive
-// clipping at the 42-column floor — still renders in full, unclipped, once
-// computeSidebarWidth grows the sidebar past that floor (issue #1751).
+// Issue #1751: the docked footer's hint text is hand-tuned to survive clipping at the
+// 42-column floor, and must still render in full once computeSidebarWidth grows the
+// sidebar past that floor.
 func TestView_SidebarFooter_WideTerminal_RendersFullHintsUnclipped(t *testing.T) {
 	const width = 160
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
@@ -2927,12 +2563,9 @@ func TestView_SidebarFooter_WideTerminal_RendersFullHintsUnclipped(t *testing.T)
 	}
 }
 
-// TestView_SidebarDocked_FooterStyledDim verifies the docked sidebar's
-// keystroke-hint footer renders dim (RoleDim, ANSI slot 8 — "\x1b[90m",
-// confirmed against the panel border's own existing golden fixture) via the
-// shared footer renderer, without disturbing the tight "·" separators and
-// footerHintCompact wording the 42-column docked budget already needs
-// (issue #1791).
+// Issue #1791: dim (RoleDim, ANSI slot 8) through the shared footer renderer, without
+// disturbing the tight "·" separators and footerHintCompact wording the 42-column
+// docked budget needs.
 func TestView_SidebarDocked_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -2946,10 +2579,8 @@ func TestView_SidebarDocked_FooterStyledDim(t *testing.T) {
 	}
 }
 
-// TestView_SidebarDocked_FooterAdvertisesHL verifies the docked (log view)
-// footer, even at the tight 42-column floor, includes the "H/L" hint — H/L
-// closing the log and switching Section is discoverable there too, not just
-// in the fullscreen layout (issue #1846).
+// Issue #1846: H/L closes the log and switches Section, so it has to be discoverable in
+// the docked footer too, even at the tight 42-column floor.
 func TestView_SidebarDocked_FooterAdvertisesHL(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -2960,12 +2591,9 @@ func TestView_SidebarDocked_FooterAdvertisesHL(t *testing.T) {
 	}
 }
 
-// TestRenderFooterHints_NarrowWidth_ClipsWithEllipsis verifies
-// renderFooterHints' own width param actually truncates an over-wide hint
-// line — no caller today ever hands it a width narrower than its hints
-// (the docked sidebar's 42-column floor comfortably fits its 40-column
-// compact footer), so this exercises the clip branch directly rather than
-// leaving it uncovered (issue #1791 review).
+// Issue #1791 review: no caller hands renderFooterHints a width narrower than its hints
+// (the docked sidebar's 42-column floor fits its 40-column footer), so the clip branch
+// needs exercising directly rather than being left uncovered.
 func TestRenderFooterHints_NarrowWidth_ClipsWithEllipsis(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -2976,10 +2604,8 @@ func TestRenderFooterHints_NarrowWidth_ClipsWithEllipsis(t *testing.T) {
 	}
 }
 
-// TestView_SidebarLabel_ShowsFollowIndicator verifies the sidebar's label
-// names whether the Activity feed is following the newest line or paused
-// after a scroll-up — the operator's only render-level signal for Follow
-// state (issue #1502, ADR 0030).
+// Issue #1502, ADR 0030: the label is the operator's only render-level signal for
+// Follow state.
 func TestView_SidebarLabel_ShowsFollowIndicator(t *testing.T) {
 	m := Update(NewModel(), SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
 	if !strings.Contains(View(m), "[follow]") {
@@ -2992,10 +2618,8 @@ func TestView_SidebarLabel_ShowsFollowIndicator(t *testing.T) {
 	}
 }
 
-// TestView_SidebarDocked_LabelFoldedIntoTopBorder verifies the docked
-// sidebar's label rides in its panel's top border rule, not as a separate
-// interior row above the content — the same move the header and detail
-// modal make with their own titles (issue #1799).
+// Issue #1799: the docked sidebar's label rides in its panel's top border rule, the same
+// move the header and detail modal make with their own titles.
 func TestView_SidebarDocked_LabelFoldedIntoTopBorder(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	m := NewModel()
@@ -3013,10 +2637,8 @@ func TestView_SidebarDocked_LabelFoldedIntoTopBorder(t *testing.T) {
 	}
 }
 
-// TestView_SidebarDocked_TranscriptRawLabelFoldedIntoTopBorder verifies the
-// border-fold covers every sidebarLabel mode, not just the Activity feed's
-// default "[follow]" form — here the Transcript view's "(raw)" tag (issue
-// #1799).
+// Issue #1799: the border fold covers every sidebarLabel mode, not just the Activity
+// feed's default "[follow]" form.
 func TestView_SidebarDocked_TranscriptRawLabelFoldedIntoTopBorder(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	m := NewModel()
@@ -3036,10 +2658,8 @@ func TestView_SidebarDocked_TranscriptRawLabelFoldedIntoTopBorder(t *testing.T) 
 	}
 }
 
-// TestView_SidebarDocked_BorderTitleColoredByFocus verifies the docked
-// sidebar's border title carries the same focus signal the old interior
-// label row did: accent when the sidebar is focused, dim otherwise (issue
-// #1799).
+// Issue #1799: the border title carries the focus signal the old interior label row did,
+// accent when the sidebar is focused and dim otherwise.
 func TestView_SidebarDocked_BorderTitleColoredByFocus(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -3059,11 +2679,8 @@ func TestView_SidebarDocked_BorderTitleColoredByFocus(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFooter_ShowsZoomHint verifies both the docked and
-// fullscreen sidebar footers advertise the "z" zoom key — "[z]" in the
-// docked footer's compact wording (shortened from "[z] zoom" to make room
-// for the "H/L" hint within the 42-column floor, issue #1846), "[z] zoom"
-// in fullscreen's uncompacted one (issue #1502).
+// Issue #1502's "z" zoom key, shortened to "[z]" in the docked footer to make room for
+// the "H/L" hint within the 42-column floor (issue #1846).
 func TestView_SidebarFooter_ShowsZoomHint(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -3077,10 +2694,8 @@ func TestView_SidebarFooter_ShowsZoomHint(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_FooterStyledDim verifies the fullscreen
-// sidebar's keystroke-hint footer renders dim, the same RoleDim treatment
-// every other hint/border in the module already gets, via the shared
-// footer renderer (issue #1791).
+// Issue #1791: the fullscreen sidebar's footer gets the same RoleDim treatment through
+// the shared footer renderer.
 func TestView_SidebarFullscreen_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -3099,13 +2714,10 @@ func TestView_SidebarFullscreen_FooterStyledDim(t *testing.T) {
 	}
 }
 
-// TestView_SidebarZoom_WideTerminal_RendersModal verifies SidebarZoom takes
-// effect even on a terminal wide enough to dock — the "deep reading" zoom is
-// an operator choice independent of sidebarFits' own narrow-terminal
-// fallback (issue #1502, ADR 0030) — but since issue #1845, zoomed no longer
-// means a fullscreen takeover: on a terminal this size it renders the same
-// floating log modal box the narrow-terminal path does, dimming the list
-// behind it rather than replacing it outright.
+// Issue #1502, ADR 0030: zoom is an operator choice independent of sidebarFits' own
+// narrow-terminal fallback. Since issue #1845 zoomed no longer means a fullscreen
+// takeover; at this size it renders the same floating log modal, dimming the list behind
+// it rather than replacing it outright.
 func TestView_SidebarZoom_WideTerminal_RendersModal(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -3129,10 +2741,8 @@ func TestView_SidebarZoom_WideTerminal_RendersModal(t *testing.T) {
 	}
 }
 
-// TestView_BacklogSection_HasColumnHeader verifies the Backlog Section
-// renders under its own column-header row (issue #844, moved from the
-// two-column body's "backlog" label to ADR 0030's single-Section table by
-// issue #1500).
+// Issue #844, moved from the two-column body's "backlog" label to ADR 0030's
+// single-Section table by issue #1500.
 func TestView_BacklogSection_HasColumnHeader(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
@@ -3150,10 +2760,8 @@ func TestView_BacklogSection_HasColumnHeader(t *testing.T) {
 	}
 }
 
-// TestView_BacklogSection_FlagsOrphanRow verifies a Backlog row for an issue
-// startup detection flagged an orphan renders distinguishable from an
-// ordinary row — the operator's only signal that a running sandbox exists
-// with no Dispatch this session launched to account for it (issue #1619).
+// Issue #1619: the flag is the operator's only signal that a running sandbox exists with
+// no Dispatch this session launched to account for it.
 func TestView_BacklogSection_FlagsOrphanRow(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -3181,10 +2789,8 @@ func TestView_BacklogSection_FlagsOrphanRow(t *testing.T) {
 	}
 }
 
-// TestView_WorkSection_RendersEvenWhenEmpty verifies a work Section renders
-// its column-header row even with no picks in it yet — a labeled empty
-// table, not one that appears only once something lands there (issue #844,
-// adapted to ADR 0030's single active Section by issue #1500).
+// Issue #844, adapted to ADR 0030's single active Section by issue #1500: a labeled
+// empty table, not one that appears only once something lands there.
 func TestView_WorkSection_RendersEvenWhenEmpty(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, SectionJumpMsg{Section: SectionRunning})
@@ -3205,11 +2811,8 @@ func TestView_WorkSection_RendersEvenWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestView_Section_RowsTaggedWithState verifies each work Section row
-// carries its PickState as its state cell — running, queued distinguishable
-// at a glance in the Running Section, held naming its blocker in the Held
-// Section (issue #844 AC3/AC4, moved from the two-column queue to
-// Section-partitioned tables by ADR 0030/issue #1500).
+// Issue #844 AC3/AC4, moved from the two-column queue to Section-partitioned tables by
+// ADR 0030 and issue #1500.
 func TestView_Section_RowsTaggedWithState(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3226,10 +2829,8 @@ func TestView_Section_RowsTaggedWithState(t *testing.T) {
 	}
 }
 
-// TestView_Section_RowsShowAge verifies a work-Section row renders its
-// precomputed Age (syncQueue's formatAge output, same as Heartbeat) in the
-// age column — the column is otherwise only proven present via the header
-// word, not an actual value (issue #1500 review).
+// Issue #1500 review: the age column was otherwise only proven present through its
+// header word, never an actual value.
 func TestView_Section_RowsShowAge(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3243,11 +2844,9 @@ func TestView_Section_RowsShowAge(t *testing.T) {
 	}
 }
 
-// TestView_WorkSection_Compact_ShowsTwoLineRowWithFullTitle verifies a work
-// row renders in the compact/wrapped two-line form — a "#num · state · age"
-// header line, the title unclipped on its own line — once the queue column
-// is narrowed by a docked sidebar, instead of the classic single-line
-// table's aggressive clip() truncation (issue #1752).
+// Issue #1752: once a docked sidebar narrows the queue column, a work row renders as a
+// "#num · state · age" header line plus an unclipped title line, instead of the classic
+// single-line table's aggressive clip().
 func TestView_WorkSection_Compact_ShowsTwoLineRowWithFullTitle(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	long := strings.Repeat("x", 60)
@@ -3283,12 +2882,9 @@ func TestView_WorkSection_Compact_ShowsTwoLineRowWithFullTitle(t *testing.T) {
 	}
 }
 
-// TestRenderWorkSection_Compact_LongExtrasClippedToWidth verifies a compact
-// row's header line — cursor marker, number, state, age, and any trailing
-// extras (blocker/reason/heartbeat) — never exceeds the column's width, the
-// same extrasBudget discipline the classic single-line row applies (issue
-// #1500), even though the compact header carries the extras unclipped in raw
-// Sprintf form before this fix (issue #1752).
+// Issue #1752: the compact header carries blocker, reason and heartbeat extras in raw
+// Sprintf form, so it needs the same extrasBudget discipline the classic single-line row
+// applies (issue #1500).
 func TestRenderWorkSection_Compact_LongExtrasClippedToWidth(t *testing.T) {
 	const listWidth = 80
 	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
@@ -3307,11 +2903,8 @@ func TestRenderWorkSection_Compact_LongExtrasClippedToWidth(t *testing.T) {
 	}
 }
 
-// TestRenderWorkSection_Compact_LongNumberAndAgeClippedToWidth verifies a
-// compact row's header line stays within the column's width even given a
-// pathologically long Number or Age — the classic form clips both to their
-// own column widths, so the compact header applies the same defensive cap
-// rather than leaving them unbounded (issue #1752 review).
+// Issue #1752 review: the classic form clips Number and Age to their own column widths,
+// so the compact header applies the same defensive cap rather than leaving them unbounded.
 func TestRenderWorkSection_Compact_LongNumberAndAgeClippedToWidth(t *testing.T) {
 	const listWidth = 80
 	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
@@ -3330,13 +2923,9 @@ func TestRenderWorkSection_Compact_LongNumberAndAgeClippedToWidth(t *testing.T) 
 	}
 }
 
-// TestView_SidebarOpen_AtMinimumFittingWidth_CompactRowRendersCleanly pins
-// compact-form behavior right at sidebarFits' own minimum fitting width —
-// the narrowest the queue column ever renders at while docked
-// (sidebarMinListWidth, the floor computeSidebarWidth clamps down to) — with
-// a realistic pick, not a pathological one: the row must still show its
-// number, state, age, and title with no line exceeding the column's width
-// (issue #1752 review).
+// Issue #1752 review: pins compact behaviour right at sidebarFits' minimum fitting width,
+// the narrowest the queue column ever renders at while docked, with a realistic pick
+// rather than a pathological one.
 func TestView_SidebarOpen_AtMinimumFittingWidth_CompactRowRendersCleanly(t *testing.T) {
 	const width = sidebarMinListWidth + sidebarWidth + dockedBorderCols
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
@@ -3360,11 +2949,8 @@ func TestView_SidebarOpen_AtMinimumFittingWidth_CompactRowRendersCleanly(t *test
 	}
 }
 
-// TestRenderBacklogSection_Compact_LongLabelsClippedToWidth verifies a
-// compact Backlog row's header line — cursor marker, number, and labels —
-// never exceeds the column's width, accounting for every literal character
-// ("#", the brackets, and their surrounding spaces) the "%s #%s [%s]\n"
-// format spends outside marker/number/labels (issue #1752).
+// Issue #1752: the width budget has to account for every literal character the
+// "%s #%s [%s]\n" format spends outside the marker, number and labels.
 func TestRenderBacklogSection_Compact_LongLabelsClippedToWidth(t *testing.T) {
 	const listWidth = 80
 	longLabels := make([]string, 20)
@@ -3384,11 +2970,8 @@ func TestRenderBacklogSection_Compact_LongLabelsClippedToWidth(t *testing.T) {
 	}
 }
 
-// TestRenderBacklogSection_Compact_LongNumberClippedToWidth verifies a
-// compact Backlog row's header line stays within the column's width even
-// given a pathologically long issue number — parity with compactWorkRow's
-// own number clip and the classic row's numberColWidth clip (issue #1752
-// review).
+// Issue #1752 review: parity with compactWorkRow's own number clip and the classic row's
+// numberColWidth clip.
 func TestRenderBacklogSection_Compact_LongNumberClippedToWidth(t *testing.T) {
 	const listWidth = 80
 	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
@@ -3404,9 +2987,8 @@ func TestRenderBacklogSection_Compact_LongNumberClippedToWidth(t *testing.T) {
 	}
 }
 
-// TestCompactQueueSeparator_ZeroWidth_ClampsToOne verifies a non-positive
-// width still renders a one-glyph rule rather than an empty or negative
-// strings.Repeat count, which would panic (issue #1752).
+// Issue #1752: a non-positive width must still render one glyph. An empty or negative
+// strings.Repeat count panics.
 func TestCompactQueueSeparator_ZeroWidth_ClampsToOne(t *testing.T) {
 	got := strings.TrimSuffix(compactQueueSeparator(0), "\n")
 	// Styled through the same roleStyle call, not a bare literal: on a
@@ -3417,10 +2999,8 @@ func TestCompactQueueSeparator_ZeroWidth_ClampsToOne(t *testing.T) {
 	}
 }
 
-// TestCompactWorkRow_ZeroWidth_DoesNotPanic verifies compactWorkRow clamps
-// its title column to at least one, rather than panicking or emitting a
-// pathological clip() call, at a width too small for any real column (issue
-// #1752).
+// Issue #1752: compactWorkRow clamps its title column to at least one rather than
+// panicking or emitting a pathological clip() call at a width too small for any column.
 func TestCompactWorkRow_ZeroWidth_DoesNotPanic(t *testing.T) {
 	got := compactWorkRow(0, ">", Pick{Number: "1", State: PickRunning, Age: "1m"}, "title", RoleRunning, "")
 	if !strings.Contains(got, "\n") {
@@ -3428,9 +3008,7 @@ func TestCompactWorkRow_ZeroWidth_DoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestCompactBacklogRow_ZeroWidth_DoesNotPanic verifies compactBacklogRow
-// clamps its title column to at least one at a width too small for any real
-// column (issue #1752).
+// Issue #1752: the same clamp for compactBacklogRow.
 func TestCompactBacklogRow_ZeroWidth_DoesNotPanic(t *testing.T) {
 	got := compactBacklogRow(0, ">", "1", "title", nil)
 	if !strings.Contains(got, "\n") {
@@ -3438,10 +3016,8 @@ func TestCompactBacklogRow_ZeroWidth_DoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestView_WorkSection_Compact_SeparatorBetweenAdjacentIssues verifies the
-// compact/wrapped form separates two adjacent issues with exactly one faint
-// delimiter row — the subtle rule the two-line stacked entries need so they
-// don't run together (issue #1752).
+// Issue #1752: the two-line stacked entries need exactly one faint rule between them so
+// they do not run together.
 func TestView_WorkSection_Compact_SeparatorBetweenAdjacentIssues(t *testing.T) {
 	const width = sidebarMinListWidth + sidebarWidth + dockedBorderCols
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
@@ -3456,16 +3032,14 @@ func TestView_WorkSection_Compact_SeparatorBetweenAdjacentIssues(t *testing.T) {
 	listWidth := width - computeSidebarWidth(width) - dockedBorderCols
 	// lipgloss.JoinHorizontal rejoins the docked sidebar onto the same line
 	// as the separator, so its own trailing "\n" no longer directly follows
-	// the rule in the joined output — match the rule's content only.
+	// the rule in the joined output. Match the rule's content only.
 	sep := strings.TrimSuffix(compactQueueSeparator(listWidth), "\n")
 	if got := strings.Count(out, sep); got != 1 {
 		t.Errorf("View() = %q, want exactly one separator %q between the two issues, got %d", out, sep, got)
 	}
 }
 
-// TestView_WorkSection_Compact_CursorMarksHighlightedRow verifies the
-// compact/wrapped form still marks the row at m.Cursor — selection and
-// highlight keep working once the queue column narrows (issue #1752 AC).
+// Issue #1752 AC: selection and highlight keep working once the queue column narrows.
 func TestView_WorkSection_Compact_CursorMarksHighlightedRow(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3494,12 +3068,9 @@ func TestView_WorkSection_Compact_CursorMarksHighlightedRow(t *testing.T) {
 	}
 }
 
-// TestRenderWorkSection_Compact_ItemBudgetNeverOverflowsColumnBudget verifies
-// the compact/wrapped form's item budget accounts for its own multi-line,
-// separator-bearing rows rather than reusing the classic form's
-// one-line-per-item assumption — otherwise a handful of picks blows well
-// past the column's row budget instead of windowing down to what fits
-// (issue #1752).
+// Issue #1752: the compact form's item budget has to account for its own multi-line,
+// separator-bearing rows. Reusing the classic one-line-per-item assumption blows well
+// past the column's row budget instead of windowing down to what fits.
 func TestRenderWorkSection_Compact_ItemBudgetNeverOverflowsColumnBudget(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	picks := make([]Pick, 5)
@@ -3517,11 +3088,8 @@ func TestRenderWorkSection_Compact_ItemBudgetNeverOverflowsColumnBudget(t *testi
 	}
 }
 
-// TestView_WorkSection_SidebarClosed_RendersClassicSingleLineForm verifies
-// that with no sidebar open — full window width — a work row renders exactly
-// as the classic single-line clip()ped table, never the compact/wrapped form
-// (issue #1752 AC: "at full window width, queue rows render unchanged from
-// today").
+// Issue #1752 AC, at full window width queue rows render unchanged from today: a work
+// row must be the classic single-line clip()ped table, never the compact form.
 func TestView_WorkSection_SidebarClosed_RendersClassicSingleLineForm(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	long := strings.Repeat("x", 300)
@@ -3539,10 +3107,7 @@ func TestView_WorkSection_SidebarClosed_RendersClassicSingleLineForm(t *testing.
 	}
 }
 
-// TestView_BacklogSection_SidebarClosed_RendersClassicSingleLineForm verifies
-// that with no sidebar open — full window width — a Backlog row renders
-// exactly as the classic single-line clip()ped table, never the
-// compact/wrapped form (issue #1752 AC), the Backlog counterpart to
+// Issue #1752 AC: the Backlog counterpart to
 // TestView_WorkSection_SidebarClosed_RendersClassicSingleLineForm.
 func TestView_BacklogSection_SidebarClosed_RendersClassicSingleLineForm(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
@@ -3555,11 +3120,8 @@ func TestView_BacklogSection_SidebarClosed_RendersClassicSingleLineForm(t *testi
 	}
 }
 
-// TestView_BacklogSection_Compact_ShowsTwoLineRowWithFullTitle verifies a
-// Backlog row renders in the compact/wrapped two-line form — a "#num"
-// header line, the title unclipped on its own line — once the queue column
-// is narrowed by a docked sidebar, instead of the classic single-line
-// table's aggressive clip() truncation (issue #1752).
+// Issue #1752: the Backlog row's compact form, a "#num" header line plus the title
+// unclipped on its own line, once a docked sidebar narrows the queue column.
 func TestView_BacklogSection_Compact_ShowsTwoLineRowWithFullTitle(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	long := strings.Repeat("x", 60)
@@ -3581,9 +3143,8 @@ func TestView_BacklogSection_Compact_ShowsTwoLineRowWithFullTitle(t *testing.T) 
 	}
 }
 
-// TestView_BacklogSection_Compact_SeparatorBetweenAdjacentIssues verifies
-// the Backlog Section's compact/wrapped form also separates two adjacent
-// issues with exactly one faint delimiter row (issue #1752).
+// Issue #1752: the Backlog Section's compact form also separates adjacent issues with
+// exactly one faint rule.
 func TestView_BacklogSection_Compact_SeparatorBetweenAdjacentIssues(t *testing.T) {
 	const width = sidebarMinListWidth + sidebarWidth + dockedBorderCols
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
@@ -3601,10 +3162,8 @@ func TestView_BacklogSection_Compact_SeparatorBetweenAdjacentIssues(t *testing.T
 	}
 }
 
-// TestView_ResearchPick_ShowsMarker verifies a research-kind pick's row
-// carries a marker distinct from a work pick's row, driven off Pick.Kind
-// (issue #1710) — the console needs a way to tell an operator, at a glance,
-// which queued/in-flight picks are research-only versus real work.
+// Issue #1710: the console needs a way to tell an operator at a glance which queued or
+// in-flight picks are research-only rather than real work, driven off Pick.Kind.
 func TestView_ResearchPick_ShowsMarker(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3618,9 +3177,7 @@ func TestView_ResearchPick_ShowsMarker(t *testing.T) {
 	}
 }
 
-// TestView_WorkPick_HasNoResearchMarker verifies a work-kind pick's row
-// stays free of the research marker — the marker tags research picks only,
-// leaving a work pick's row unchanged (issue #1710).
+// Issue #1710: the marker tags research picks only, leaving a work pick's row unchanged.
 func TestView_WorkPick_HasNoResearchMarker(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3634,8 +3191,6 @@ func TestView_WorkPick_HasNoResearchMarker(t *testing.T) {
 	}
 }
 
-// TestView_HeldSection_ShowsBlocker verifies a held row in the Held Section
-// carries its state and blocker badge.
 func TestView_HeldSection_ShowsBlocker(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3652,10 +3207,8 @@ func TestView_HeldSection_ShowsBlocker(t *testing.T) {
 	}
 }
 
-// TestView_HeldSection_SuppressesRedundantFailedBlockerReason verifies a
-// held pick whose Reason merely restates the blocker BlockedBy already names
-// renders only the "held by" badge, not both — a held pick with a failed
-// blocker previously named the same blocker twice on one row (issue #755).
+// Issue #755: a held pick whose Reason merely restates the blocker BlockedBy already
+// names used to name the same blocker twice on one row.
 func TestView_HeldSection_SuppressesRedundantFailedBlockerReason(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3672,11 +3225,9 @@ func TestView_HeldSection_SuppressesRedundantFailedBlockerReason(t *testing.T) {
 	}
 }
 
-// TestView_HeldSection_BlockerVisibleDespiteLongTitle verifies a held row's
-// blocker badge survives even when paired with a long title — the row's
-// fixed number/title/state/age columns clip the title in place, so the
-// trailing blocker annotation (issue #858) is never pushed off by a long
-// title the way an unbounded natural-order row once could be.
+// The row's fixed number, title, state and age columns clip the title in place, so the
+// trailing blocker annotation (issue #858) is never pushed off by a long title the way
+// an unbounded natural-order row once could be.
 func TestView_HeldSection_BlockerVisibleDespiteLongTitle(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3690,12 +3241,9 @@ func TestView_HeldSection_BlockerVisibleDespiteLongTitle(t *testing.T) {
 	}
 }
 
-// TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates verifies a
-// budget comfortably larger than the row count renders every Backlog row
-// with no "more below" affordance (issue #1540 — the render pipeline's
-// budget is always a real, finite figure; Viewport's own height==0 covers
-// "unbounded" for callers who actually want that, exercised directly in
-// viewport_test.go).
+// Issue #1540: the render pipeline's budget is always a real, finite figure. Viewport's
+// own height==0 covers "unbounded" for callers who want that, exercised directly in
+// viewport_test.go.
 func TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	issues := make([]forge.Issue, 500)
@@ -3713,9 +3261,8 @@ func TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T)
 	}
 }
 
-// TestRenderWorkSection_BudgetExceedsRowCount_NeverTruncates is
-// TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates mirrored for
-// a work Section.
+// TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates mirrored for a work
+// Section (issue #1540).
 func TestRenderWorkSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	picks := make([]Pick, 500)
@@ -3734,10 +3281,8 @@ func TestRenderWorkSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T) {
 	}
 }
 
-// TestView_SectionTabs_HighlightsActiveSection verifies the Section tabs
-// line renders differently depending on which Section is active — the
-// operator's cue for which Section H/L/1-5 currently target (ADR 0030/0031,
-// issue #1500).
+// ADR 0030/0031, issue #1500: the tabs are the operator's cue for which Section H/L and
+// 1-5 currently target.
 func TestView_SectionTabs_HighlightsActiveSection(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -3753,10 +3298,7 @@ func TestView_SectionTabs_HighlightsActiveSection(t *testing.T) {
 	}
 }
 
-// TestView_Cursor_MarksHighlightedRowInWorkSection verifies Cursor marks the
-// highlighted row within a work Section the same way it already does in the
-// Backlog Section (issue #845, generalized from FocusedColumn to
-// ActiveSection by issue #1500).
+// Issue #845, generalized from FocusedColumn to ActiveSection by issue #1500.
 func TestView_Cursor_MarksHighlightedRowInWorkSection(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{{Number: "1", State: PickQueued}, {Number: "2", State: PickQueued}}})
@@ -3772,12 +3314,9 @@ func TestView_Cursor_MarksHighlightedRowInWorkSection(t *testing.T) {
 	t.Errorf("View() = %q, want row #2 marked with the cursor", out)
 }
 
-// TestView_SidebarFullscreen_RespectsTinyBudget verifies the fullscreen
-// sidebar's total output never exceeds m.Height at the smallest possible
-// budget — renderDrillIn (its predecessor) wrote the header line and then
-// always appended the footer with no height check at all, so at Height: 1 it
-// overflowed to 2 lines. Mirrors the docked/floating tiny-budget fix from
-// #1380, applied to renderSidebarFullscreen (issue #1534, inherited).
+// Issue #1534: renderDrillIn, its predecessor, wrote the header line and then always
+// appended the footer with no height check, so at Height 1 it overflowed to 2 lines.
+// Mirrors the docked and floating tiny-budget fix from issue #1380.
 func TestView_SidebarFullscreen_RespectsTinyBudget(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 1})
 	lines := make([]string, 100)
@@ -3794,10 +3333,8 @@ func TestView_SidebarFullscreen_RespectsTinyBudget(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_RetainsFooterAtBoundary verifies the label and
-// footer both render, and stay within budget, at Height: 2 — the boundary
-// where label+footer exactly fills the budget, one above the Height: 1 case
-// that drops the footer (issue #1534, inherited).
+// Issue #1534: Height 2 is the boundary where label plus footer exactly fills the budget,
+// one above the Height 1 case that drops the footer.
 func TestView_SidebarFullscreen_RetainsFooterAtBoundary(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 2})
 	lines := make([]string, 100)
@@ -3817,11 +3354,8 @@ func TestView_SidebarFullscreen_RetainsFooterAtBoundary(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_FooterAdvertisesHL verifies the fullscreen
-// sidebar's (log view's) footer includes the "H/L" hint, so H/L closing the
-// log and switching Section — previously a silent no-op there — is
-// discoverable the same way the list's own H/L hint already is (issue
-// #1846).
+// Issue #1846: H/L closing the log and switching Section was a silent no-op here, so the
+// fullscreen footer advertises it the way the list's own hint already does.
 func TestView_SidebarFullscreen_FooterAdvertisesHL(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -3832,10 +3366,8 @@ func TestView_SidebarFullscreen_FooterAdvertisesHL(t *testing.T) {
 	}
 }
 
-// TestView_SidebarFullscreen_ErrRespectsTinyBudget verifies a sidebar that
-// failed to load also respects the tiny-budget guard — the label+error combo
-// is two lines, same as label+footer, so it must be dropped at Height: 1
-// same as the footer is (issue #1534, inherited).
+// Issue #1534: label plus error is two lines, same as label plus footer, so it has to be
+// dropped at Height 1 the same way the footer is.
 func TestView_SidebarFullscreen_ErrRespectsTinyBudget(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 1})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Err: errBoom})
@@ -3847,10 +3379,8 @@ func TestView_SidebarFullscreen_ErrRespectsTinyBudget(t *testing.T) {
 	}
 }
 
-// TestView_LongBacklog_HeaderStaysPinned verifies the header's status line
-// stays visible, and the backlog column stops short of the last loaded
-// issue, when the backlog has more rows than the terminal has height for —
-// the header must never scroll off the top (issue #1035 AC1/AC2).
+// Issue #1035 AC1/AC2: the header must never scroll off the top when the backlog has
+// more rows than the terminal has height for.
 func TestView_LongBacklog_HeaderStaysPinned(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -3868,10 +3398,8 @@ func TestView_LongBacklog_HeaderStaysPinned(t *testing.T) {
 	}
 }
 
-// TestView_LongBacklog_ShowsMoreBelowAffordance verifies a truncated backlog
-// column ends with an "N more below" line naming how many rows were clipped,
-// so the operator knows the list is incomplete rather than reading a short
-// backlog as the whole one (issue #1035 AC4).
+// Issue #1035 AC4: the operator has to know the list is incomplete rather than reading a
+// truncated backlog as the whole one.
 func TestView_LongBacklog_ShowsMoreBelowAffordance(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -3886,10 +3414,8 @@ func TestView_LongBacklog_ShowsMoreBelowAffordance(t *testing.T) {
 	}
 }
 
-// TestView_LongPicksQueue_HeaderStaysPinnedAndShowsMoreBelow verifies the
-// picks column is height-budgeted the same way the backlog column is — a
-// long work queue can't push the header off-screen either, and it gets its
-// own truncation affordance (issue #1035 AC1/AC2/AC4).
+// Issue #1035 AC1/AC2/AC4: the picks column is height-budgeted the same way the backlog
+// column is, and gets its own truncation affordance.
 func TestView_LongPicksQueue_HeaderStaysPinnedAndShowsMoreBelow(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	picks := make([]Pick, 50)
@@ -3911,12 +3437,9 @@ func TestView_LongPicksQueue_HeaderStaysPinnedAndShowsMoreBelow(t *testing.T) {
 	}
 }
 
-// TestView_LongBacklog_FitsHeightWithBannerAndFooterPinned verifies the
-// top banner and bottom footer both survive at full budget: a Backlog long
-// enough to show "… N more below" must still render no more physical lines
-// than m.Height, counted without trimming the trailing newline (issue
-// #1794) — the existing height tests' own strings.TrimRight(out, "\n")
-// before counting is exactly why this regression slipped through.
+// Issue #1794: the banner and footer both have to survive at full budget. The existing
+// height tests trimmed the trailing newline before counting, which is exactly why this
+// regression slipped through.
 func TestView_LongBacklog_FitsHeightWithBannerAndFooterPinned(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -3929,13 +3452,11 @@ func TestView_LongBacklog_FitsHeightWithBannerAndFooterPinned(t *testing.T) {
 	if !strings.Contains(out, "more below") {
 		t.Fatalf("View() = %q, want a \"more below\" affordance line", out)
 	}
-	// Split, not TrimRight-then-count: View()'s output always ends in
-	// exactly one trailing "\n" (its own documented convention), and that
-	// trailing "\n" costs the terminal a physical row of its own — printing
-	// it at the very bottom of an already-full m.Height budget is what
-	// scrolls the pinned top banner off-screen. Trimming first (the
-	// existing height tests' approach) throws away exactly the row this
-	// regression turns on.
+	// Split, not TrimRight-then-count: View() always ends in exactly one
+	// trailing "\n", which costs the terminal a physical row of its own.
+	// Printing it at the bottom of an already-full m.Height budget is what
+	// scrolls the pinned top banner off-screen, and trimming first throws away
+	// exactly the row this regression turns on.
 	if got := len(strings.Split(out, "\n")); got > m.Height {
 		t.Errorf("View() rendered %d physical lines, want <= m.Height (%d): %q", got, m.Height, out)
 	}
@@ -3947,17 +3468,10 @@ func TestView_LongBacklog_FitsHeightWithBannerAndFooterPinned(t *testing.T) {
 	}
 }
 
-// TestView_ExactFitBacklog_FitsHeightWithBannerAndFooterPinned verifies a
-// Backlog sized to land exactly on the pre-reservation item budget — total
-// == itemBudget, the one case #1794's own fix left unreserved since its
-// condition (total > itemBudget) only fires once total spills past the
-// budget, not when it just fills it — still never renders more physical
-// lines than m.Height (issue #1825). Split, not TrimRight-then-count:
-// View()'s output always ends in exactly one trailing "\n" (its own
-// documented convention), and that trailing "\n" costs the terminal a
-// physical row of its own — reserving it here converts what would have been
-// an invisible, unreserved exact-fit into a correctly-labeled "… N more
-// below" instead of silently overrunning Height.
+// Issue #1825: a Backlog whose total lands exactly on itemBudget was left unreserved by
+// #1794's fix, whose condition (total > itemBudget) only fires once the total spills past
+// the budget. Reserving the trailing-"\n" row turns that invisible exact-fit into a
+// correctly labeled "… N more below" instead of a silent overrun of Height.
 func TestView_ExactFitBacklog_FitsHeightWithBannerAndFooterPinned(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 4)
@@ -3978,26 +3492,18 @@ func TestView_ExactFitBacklog_FitsHeightWithBannerAndFooterPinned(t *testing.T) 
 	}
 }
 
-// TestView_VeryShortTerminal_FitsHeightWithBannerPinned verifies a Backlog
-// on a terminal too short to show any item row at all (m.Height <= ~6)
-// still never renders more physical lines than m.Height, and the top
-// banner survives regardless — even at the very bottom of that range,
-// where the header alone (unboxed, with the Section tabs line also
-// collapsed) is all that fits. The bottom footer joins it once Height
-// leaves room for it. Split, not TrimRight-then-count, for the same reason
-// TestView_ExactFitBacklog_FitsHeightWithBannerAndFooterPinned uses it:
-// View()'s own guaranteed trailing "\n" costs the terminal a physical row
-// that trimming would hide (issue #1825).
+// Issue #1825: on a terminal too short to show any item row the top banner still
+// survives, and the output never exceeds Height once View()'s own guaranteed trailing
+// "\n" row is counted. The footer joins once Height leaves room for it.
 func TestView_VeryShortTerminal_FitsHeightWithBannerPinned(t *testing.T) {
 	issues := make([]forge.Issue, 20)
 	for i := range issues {
 		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
 	}
 
-	// wantFooter only turns true at height 6: below that, the header (and,
-	// once there's room, the Section tabs line) already consume the whole
-	// budget, leaving no row for the footer to claim — its absence there
-	// isn't a regression, just this range's own collapse order.
+	// wantFooter only turns true at height 6: below that the header, and the
+	// Section tabs line once there is room, already consume the whole budget.
+	// The footer's absence there is this range's collapse order, not a bug.
 	for _, tc := range []struct {
 		height     int
 		wantFooter bool
@@ -4024,10 +3530,8 @@ func TestView_VeryShortTerminal_FitsHeightWithBannerPinned(t *testing.T) {
 	}
 }
 
-// TestView_ScrolledBacklog_ReachesLastRow verifies scrolling the backlog
-// column all the way (BacklogOffset clamped to its maximum) surfaces the
-// last loaded issue — every row in the (filtered) backlog is reachable by
-// scrolling, not just the leading window (issue #1036 AC3).
+// Issue #1036 AC3: every row in the filtered backlog is reachable by scrolling, not just
+// the leading window.
 func TestView_ScrolledBacklog_ReachesLastRow(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -4044,9 +3548,7 @@ func TestView_ScrolledBacklog_ReachesLastRow(t *testing.T) {
 	}
 }
 
-// TestView_ScrolledQueue_ReachesLastRow verifies the same reachability for
-// a work Section once it's active and scrolled all the way — issue #1036
-// AC3 covers every Section, generalized from Tab-toggled focus to
+// Issue #1036 AC3 covers every Section, generalized from Tab-toggled focus to
 // ActiveSection by issue #1500.
 func TestView_ScrolledQueue_ReachesLastRow(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
@@ -4065,21 +3567,14 @@ func TestView_ScrolledQueue_ReachesLastRow(t *testing.T) {
 	}
 }
 
-// TestView_BacklogSection_ShowsPositionIndicator verifies the Backlog
-// Section's column header carries a compact "X-Y of N" position indicator
-// reflecting the visible row range and total, so the operator can see where
-// they are in a long backlog without counting rows (issue #1037 AC3).
+// Issue #1037 AC3: the operator can see where they are in a long backlog without
+// counting rows.
 func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	// Height 10 plus boxBorderRows pays for the header's own bordered panel
-	// (issue #1756); the header itself now costs only 3 rows — the
-	// "spindrift" wordmark folds into its top border rule rather than a
-	// separate banner (issue #1798) — preserving the item budget (and so
-	// the exact position ranges below) this test was written against. Plus
-	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
-	// that reservation doesn't eat into the item budget this test pins.
-	// viewBody's own budget holds one further row back for View()'s
-	// guaranteed trailing "\n" (issue #1825), so this stays "5"/"10" rather
-	// than "6"/"11".
+	// (issue #1756); the header itself costs only 3 rows, since the wordmark
+	// folds into its top border rule (issue #1798). listFooterLines pays for
+	// ModeList's pinned footer row (issue #1792), and viewBody holds one more
+	// row back for View()'s trailing "\n" (issue #1825), so the ranges stay 1-5 and 6-10.
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
@@ -4099,21 +3594,14 @@ func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	}
 }
 
-// TestView_WorkSection_ShowsPositionIndicator verifies a work Section's
-// column header carries the same position indicator as the Backlog Section,
-// and that it is absent when the Section is empty rather than reading
-// "(1-0 of 0)" (issue #1037 AC3/AC4).
+// Issue #1037 AC3/AC4: the same indicator as the Backlog Section, and absent on an empty
+// Section rather than reading "(1-0 of 0)".
 func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	// Height 10 plus boxBorderRows pays for the header's own bordered panel
-	// (issue #1756); the header itself now costs only 3 rows — the
-	// "spindrift" wordmark folds into its top border rule rather than a
-	// separate banner (issue #1798) — preserving the item budget (and so
-	// the exact position range below) this test was written against. Plus
-	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
-	// that reservation doesn't eat into the item budget this test pins.
-	// viewBody's own budget holds one further row back for View()'s
-	// guaranteed trailing "\n" (issue #1825), so this stays "(1-5 of 50)"
-	// rather than "(1-6 of 50)".
+	// (issue #1756); the header itself costs only 3 rows, since the wordmark
+	// folds into its top border rule (issue #1798). listFooterLines pays for
+	// ModeList's pinned footer row (issue #1792), and viewBody holds one more
+	// row back for View()'s trailing "\n" (issue #1825), so the range stays (1-5 of 50).
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	picks := make([]Pick, 50)
 	for i := range picks {
@@ -4135,11 +3623,9 @@ func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	}
 }
 
-// TestView_LongBacklog_WithRefreshError_HeaderStaysPinned verifies the
-// trailing "refresh failed" line is budgeted the same way prompt lines are —
-// a long backlog plus a refresh error must not together push the header off
-// the top, or push the body's own budget past what actually renders (issue
-// #1035 AC1/AC2 review finding).
+// Issue #1035 AC1/AC2 review finding: the trailing "refresh failed" line is budgeted the
+// same way prompt lines are, so a long backlog plus a refresh error cannot together push
+// the header off the top.
 func TestView_LongBacklog_WithRefreshError_HeaderStaysPinned(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 20)
@@ -4159,11 +3645,8 @@ func TestView_LongBacklog_WithRefreshError_HeaderStaysPinned(t *testing.T) {
 	}
 }
 
-// TestView_ExtremelyShortTerminal_NeverExceedsHeight verifies a terminal too
-// short even for a labeled empty column never renders more lines than
-// Height, in both the wide (side-by-side) and narrow (stacked) layouts — a
-// column's label line is part of the body budget too, not an unconditional
-// floor on top of it (issue #1035 AC1/AC2 review finding).
+// Issue #1035 AC1/AC2 review finding: a column's label line is part of the body budget
+// too, not an unconditional floor on top of it.
 func TestView_ExtremelyShortTerminal_NeverExceedsHeight(t *testing.T) {
 	issues := make([]forge.Issue, 20)
 	for i := range issues {
@@ -4195,10 +3678,8 @@ func TestView_ExtremelyShortTerminal_NeverExceedsHeight(t *testing.T) {
 	}
 }
 
-// TestView_HeaderHeight_AdaptsToAlertLines verifies the body's row budget
-// shrinks as alert lines (stale/rebuilding/dogfood) are added to the header,
-// so a longer header always leaves proportionally less room for the body
-// instead of a stale, hardcoded header-height assumption (issue #1035 AC3).
+// Issue #1035 AC3: the body's row budget shrinks as alert lines are added to the header,
+// instead of a stale hardcoded header-height assumption.
 func TestView_HeaderHeight_AdaptsToAlertLines(t *testing.T) {
 	issues := make([]forge.Issue, 20)
 	for i := range issues {
@@ -4221,18 +3702,11 @@ func TestView_HeaderHeight_AdaptsToAlertLines(t *testing.T) {
 	}
 }
 
-// TestView_HeaderHeight_TooShortToBox_StillBudgetsBody verifies the body
-// windowing still leaves the status line visible and never overruns Height
-// on a terminal too short to afford the titled-border header at all — the
-// unboxed header's own (smaller) height, not the boxed one, must drive the
-// budget (issue #1035 AC3, extended to the titled border by issue #1798). At
-// Height 2, renderBoxedHeader's own fitness check (its minimum boxed render
-// is 3 rows) falls back to the unboxed header, leaving no room for any
-// backlog row at all. sectionTabsReserved now also collapses the Section
-// tabs line here: showing it (unboxed header's 1 row plus the tabs line's
-// own 1 row) would land right on Height, leaving no row over for View()'s
-// own guaranteed trailing "\n" (issue #1825) — so the header alone renders,
-// under Height rather than exactly filling it.
+// Issue #1035 AC3, extended to the titled border by issue #1798: the unboxed header's
+// smaller height has to drive the budget. At Height 2 renderBoxedHeader falls back to
+// unboxed (its minimum boxed render is 3 rows), and sectionTabsReserved collapses the
+// tabs line too, since showing it would land right on Height with no row left for
+// View()'s own guaranteed trailing "\n" (issue #1825).
 func TestView_HeaderHeight_TooShortToBox_StillBudgetsBody(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 2})
 	issues := make([]forge.Issue, 20)
@@ -4259,11 +3733,8 @@ func TestView_HeaderHeight_TooShortToBox_StillBudgetsBody(t *testing.T) {
 	}
 }
 
-// TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount verifies clip
-// measures visual display width, not rune count, when deciding whether to
-// truncate or pad — a CJK string can be well under a rune-count budget while
-// its display width (2 columns per wide rune) already overflows the
-// terminal (issue #859).
+// Issue #859: a CJK string can sit well under a rune-count budget while its display
+// width, 2 columns per wide rune, already overflows the terminal.
 func TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount(t *testing.T) {
 	s := "中文标题超长测试文字" // 10 runes, 20 display columns
 	got := clip(s, 10, false)
@@ -4275,11 +3746,9 @@ func TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount(t *testing.T) {
 	}
 }
 
-// TestClip_Pad_WideCharacterStraddlesBoundary_LandsExactlyOnWidth verifies
-// clip(..., pad: true) — the shape Backlog/Work fixed-width table columns
-// use — lands on exactly the requested width even when a wide (2-column)
-// rune straddles the truncation boundary (issue #1785), not one column
-// short, so a fixed-width column never drifts by a space.
+// Issue #1785: clip with pad true is the shape the fixed-width table columns use, so it
+// has to land on exactly the requested width even when a wide rune straddles the
+// truncation boundary, or a column drifts by a space.
 func TestClip_Pad_WideCharacterStraddlesBoundary_LandsExactlyOnWidth(t *testing.T) {
 	got := clip("ab中文", 4, true)
 	if w := runewidth.StringWidth(got); w != 4 {
@@ -4287,9 +3756,8 @@ func TestClip_Pad_WideCharacterStraddlesBoundary_LandsExactlyOnWidth(t *testing.
 	}
 }
 
-// TestPadDisplay_TruncatesWithEllipsis verifies padDisplay marks a
-// truncated overflow with a trailing "…", mirroring clip's ellipsis
-// (issue #1779) instead of silently dropping the cut content.
+// Issue #1779: padDisplay marks a truncated overflow with a trailing ellipsis, mirroring
+// clip, instead of silently dropping the cut content.
 func TestPadDisplay_TruncatesWithEllipsis(t *testing.T) {
 	got := padDisplay("supercalifragilisticexpialidocious", 10)
 	if !strings.HasSuffix(got, "…") {
@@ -4300,10 +3768,8 @@ func TestPadDisplay_TruncatesWithEllipsis(t *testing.T) {
 	}
 }
 
-// TestPadDisplay_WideCharacterStraddlesBoundary_LandsExactlyOnWidth verifies
-// padDisplay's truncation lands on exactly the requested width even when a
-// wide (2-column) rune straddles the boundary (issue #1785) — the detail
-// modal box's right border drifts out of column otherwise (issue #1758).
+// Issue #1785: otherwise the detail modal box's right border drifts out of column
+// (issue #1758).
 func TestPadDisplay_WideCharacterStraddlesBoundary_LandsExactlyOnWidth(t *testing.T) {
 	s := "中文标题超长测试文字" // 10 runes, 20 display columns
 	got := padDisplay(s, 10)
@@ -4312,10 +3778,8 @@ func TestPadDisplay_WideCharacterStraddlesBoundary_LandsExactlyOnWidth(t *testin
 	}
 }
 
-// TestPadDisplay_WidthOne_TruncatesWithoutEllipsis verifies padDisplay
-// falls back to a plain truncate, without the ellipsis, when width is too
-// narrow to fit even one cut character plus the ellipsis itself — the same
-// width<=1 edge case clip guards against.
+// The width<=1 edge case clip guards against too: too narrow to fit even one cut
+// character plus the ellipsis itself.
 func TestPadDisplay_WidthOne_TruncatesWithoutEllipsis(t *testing.T) {
 	got := padDisplay("overflow", 1)
 	if w := runewidth.StringWidth(got); w != 1 {
@@ -4326,20 +3790,11 @@ func TestPadDisplay_WidthOne_TruncatesWithoutEllipsis(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_OverWideLabel_ShowsEllipsis verifies the floating
-// detail modal marks an over-wide label with a trailing ellipsis rather
-// than silently cutting it (issue #1779): a single unbroken label wider
-// than the box's interior stands alone on its own wrapText line (issue
-// #1772's TestWrapText_WordWiderThanWidth_StandsAlone), which then hits
-// the label row's own clip-before-style truncation (issue #1832). The
-// pinned row's leading "[" is part of that same wrapText word — brackets
-// count toward the width budget rather than sitting on top of it — so the
-// cut lands one column earlier than the label's own text alone would.
-// Forces a color-capable terminal (rather than trusting whatever TERM the
-// test happens to inherit) so this actually exercises the styled path: a
-// dumb/unset TERM makes roleStyle a no-op, which would hide a regression
-// where the label is clipped after — not before — RoleDim wraps it in SGR
-// bytes that a runewidth-based truncate would then miscount and mangle.
+// Issue #1779: an over-wide label is marked with a trailing ellipsis rather than silently
+// cut. A single unbroken label wider than the interior stands alone on its wrapText line
+// (issue #1772), then hits the label row's clip-before-style truncation (issue #1832);
+// the leading "[" is part of that same word, so the cut lands one column earlier than
+// the label text alone would. TERM is forced color-capable so the styled path runs.
 func TestView_DetailModal_OverWideLabel_ShowsEllipsis(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -4359,14 +3814,10 @@ func TestView_DetailModal_OverWideLabel_ShowsEllipsis(t *testing.T) {
 	}
 }
 
-// TestView_DetailModal_WideCharacterLabel_BorderStaysAligned verifies the
-// floating detail modal's right-hand border rune stays in column even when
-// an over-wide CJK label straddles the truncation boundary (issue #1785):
-// every "│...│" row must measure exactly innerWidth display columns between
-// its borders, or the right border drifts (issue #1758's invariant). Forces
-// a color-capable terminal so the label row's own RoleDim styling (issue
-// #1832) is actually in play — ansi.StringWidth must still measure the
-// styled row's plain-text width correctly, escape bytes excluded.
+// Issue #1785: every "│...│" row has to measure exactly innerWidth display columns
+// between its borders or the right border drifts, breaking issue #1758's invariant. TERM
+// is forced color-capable so the label row's RoleDim styling (issue #1832) is in play and
+// ansi.StringWidth has escape bytes to exclude.
 func TestView_DetailModal_WideCharacterLabel_BorderStaysAligned(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -4393,11 +3844,8 @@ func TestView_DetailModal_WideCharacterLabel_BorderStaysAligned(t *testing.T) {
 	}
 }
 
-// TestWrapText_GreedilyFillsLinesToWidth verifies wrapText packs words onto
-// each line up to width display columns, wrapping to a new line only once
-// the next word would overflow it — the detail modal body's own word-wrap
-// (issue #1632; no markdown renderer in the dependency tree, so this is
-// hand-rolled rather than glamour).
+// The detail modal body's own word wrap (issue #1632). No markdown renderer in the
+// dependency tree, so this is hand-rolled rather than glamour.
 func TestWrapText_GreedilyFillsLinesToWidth(t *testing.T) {
 	got := wrapText("the quick brown fox jumps", 10)
 	want := []string{"the quick", "brown fox", "jumps"}
@@ -4406,9 +3854,6 @@ func TestWrapText_GreedilyFillsLinesToWidth(t *testing.T) {
 	}
 }
 
-// TestWrapText_PreservesBlankLines verifies wrapText keeps paragraph breaks
-// (blank lines) in the source text as blank lines in the output, rather than
-// collapsing them into the surrounding wrapped text.
 func TestWrapText_PreservesBlankLines(t *testing.T) {
 	got := wrapText("first paragraph\n\nsecond paragraph", 40)
 	want := []string{"first paragraph", "", "second paragraph"}
@@ -4417,9 +3862,6 @@ func TestWrapText_PreservesBlankLines(t *testing.T) {
 	}
 }
 
-// TestWrapText_WordWiderThanWidth_StandsAlone verifies a single word wider
-// than the wrap width is placed alone on its own line rather than broken
-// mid-word.
 func TestWrapText_WordWiderThanWidth_StandsAlone(t *testing.T) {
 	got := wrapText("a supercalifragilisticexpialidocious word", 10)
 	want := []string{"a", "supercalifragilisticexpialidocious", "word"}
@@ -4428,14 +3870,10 @@ func TestWrapText_WordWiderThanWidth_StandsAlone(t *testing.T) {
 	}
 }
 
-// TestDetailModalLabelLines_WrapsOntoMultipleLines verifies the labels line
-// wraps across further interior rows once it overflows width, rather than
-// staying a single unwrapped string for padDisplay to silently truncate
-// (issue #1772), and that the wrapped block reads as labels at a glance: the
-// backlog row's own bracketed idiom (issue #1832), dim-styled (RoleDim,
-// "\x1b[90m") the same way the footer hints already are, with the bracket
-// characters themselves counted toward the width budget rather than added on
-// top of it.
+// Issue #1772: the labels line wraps across further interior rows once it overflows
+// width, instead of staying one unwrapped string for padDisplay to truncate. Issue #1832
+// makes the wrapped block read as labels: bracketed and dim-styled, with the bracket
+// characters counted toward the width budget rather than added on top of it.
 func TestDetailModalLabelLines_WrapsOntoMultipleLines(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -4447,10 +3885,8 @@ func TestDetailModalLabelLines_WrapsOntoMultipleLines(t *testing.T) {
 	}
 }
 
-// TestDetailModalLabelLines_SanitizesControlSequences verifies a label
-// carrying CSI/OSC escape sequences is stripped before wrapping — a tracker
-// label is untrusted input (issue #862) — and that the bracketed, dim-styled
-// treatment (issue #1832) still applies once sanitized.
+// A tracker label is untrusted input (issue #862), so it is stripped before wrapping, and
+// the bracketed dim-styled treatment (issue #1832) still applies once sanitized.
 func TestDetailModalLabelLines_SanitizesControlSequences(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -4462,17 +3898,11 @@ func TestDetailModalLabelLines_SanitizesControlSequences(t *testing.T) {
 	}
 }
 
-// TestDetailModalLabelLinesWith_PlainText_MatchesStyledStripped verifies
-// plainText is a faithful unstyled twin of styledText for
-// detailModalLabelLinesWith — the same seam renderHeaderWith uses (issue
-// #3019) — so detailModalScrollBudget can predict the wrapped line count
-// through plainText instead of paying for detailModalLabelLines' real
-// lipgloss render: detailModalLabelLinesWith(labels, width, plainText) must
-// equal detailModalLabelLines(labels, width) with every ANSI escape
-// stripped, line for line, across widths and label shapes that also drive
-// the capped fold (no labels, one short label, many labels wrapping several
-// rows, a single label wider than width, and wide CJK runes), and under
-// both NO_COLOR and a color-capable TERM.
+// Issue #3019: plainText has to be a faithful unstyled twin of styledText so
+// detailModalScrollBudget can predict the wrapped line count without paying for a real
+// lipgloss render. The corpus crosses the shapes that also drive the capped fold (no
+// labels, one short label, many labels wrapping several rows, one label wider than width,
+// wide CJK runes) under both NO_COLOR and a color-capable TERM.
 func TestDetailModalLabelLinesWith_PlainText_MatchesStyledStripped(t *testing.T) {
 	corpus := [][]string{
 		nil,
@@ -4519,13 +3949,9 @@ func TestDetailModalLabelLinesWith_PlainText_MatchesStyledStripped(t *testing.T)
 	}
 }
 
-// TestDetailModalLabelLinesCappedWith_PlainText_MatchesStyledLineCount
-// verifies detailModalLabelLinesCappedWith's own trial call threads the
-// same style through as detailModalLabelLinesCapped, so the plain and
-// styled variants fold into the "+N more labels" indicator at the same
-// point rather than capping at different label counts (issue #3019): with
-// maxLines small enough to force the fold, the two must agree on line
-// count.
+// Issue #3019: the capped variant's own trial call has to thread the same style through,
+// or the plain and styled forms fold into the "+N more labels" indicator at different
+// label counts.
 func TestDetailModalLabelLinesCappedWith_PlainText_MatchesStyledLineCount(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -4543,11 +3969,8 @@ func TestDetailModalLabelLinesCappedWith_PlainText_MatchesStyledLineCount(t *tes
 	}
 }
 
-// TestView_Backlog_SanitizesTitleAndLabelControlSequences verifies a backlog title
-// carrying CSI/OSC escape sequences renders with the escapes stripped and
-// the surrounding text intact — a tracker title is untrusted input, and
-// Bubble Tea does not filter arbitrary control sequences before writing to
-// the operator's terminal (issue #862).
+// Issue #862: a tracker title is untrusted input, and Bubble Tea does not filter
+// arbitrary control sequences before writing to the operator's terminal.
 func TestView_Backlog_SanitizesTitleAndLabelControlSequences(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -4555,11 +3978,10 @@ func TestView_Backlog_SanitizesTitleAndLabelControlSequences(t *testing.T) {
 	}})
 
 	out := View(m)
-	// The header carries legitimate styling escapes of its own (ADR 0031),
-	// so the check below scopes "no raw ESC byte" to the row rendering the
-	// untrusted title/label rather than the whole output — anything past
-	// the sanitizer trust boundary in that row is still caught, styled
-	// header lines elsewhere are not a false positive.
+	// The header carries legitimate styling escapes of its own (ADR 0031), so
+	// the check below scopes "no raw ESC byte" to the row rendering the
+	// untrusted title and label. Anything past the sanitizer trust boundary in
+	// that row is still caught, and styled header lines are not a false positive.
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "eviltitlehere") || strings.Contains(line, "evillabel") {
 			if strings.Contains(line, "\x1b") {
@@ -4575,15 +3997,12 @@ func TestView_Backlog_SanitizesTitleAndLabelControlSequences(t *testing.T) {
 	}
 }
 
-// TestView_Queue_SanitizesTitleAndReasonControlSequences verifies a pick's
-// Title and Reason — both tracker/dispatch-derived free text — render with
-// CSI/OSC escape sequences stripped and surrounding text intact (issue #862).
+// Issue #862: a pick's Title and Reason are both tracker- and dispatch-derived free text.
 func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
-	// A work-Section row's state cell carries its own legitimate role
-	// styling (ADR 0031) on the same line as the sanitized title/reason —
-	// unlike the Backlog row, which has no per-row styling at all. NO_COLOR
-	// keeps that legitimate styling from ever emitting an escape byte, so
-	// the check below stays an unambiguous test of sanitization alone.
+	// A work-Section row's state cell carries its own legitimate role styling
+	// (ADR 0031) on the same line as the sanitized title and reason, unlike the
+	// Backlog row. NO_COLOR keeps that styling from ever emitting an escape
+	// byte, so the check below stays a test of sanitization alone.
 	t.Setenv("NO_COLOR", "1")
 
 	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
@@ -4593,11 +4012,10 @@ func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
 	m = Update(m, SectionJumpMsg{Section: SectionHeld})
 
 	out := View(m)
-	// The header carries legitimate styling escapes of its own (ADR 0031)
-	// on a color-capable terminal, so the check below scopes "no raw ESC
-	// byte" to the row rendering the untrusted title/reason rather than the
-	// whole output — anything past the sanitizer trust boundary in that row
-	// is still caught.
+	// The header carries legitimate styling escapes of its own (ADR 0031), so
+	// the check below scopes "no raw ESC byte" to the row rendering the
+	// untrusted title and reason. Anything past the sanitizer trust boundary
+	// in that row is still caught.
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "eviltitle") || strings.Contains(line, "badreason") {
 			if strings.Contains(line, "\x1b") {
@@ -4613,12 +4031,9 @@ func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
 	}
 }
 
-// TestRenderTable_NonPositiveItemBudgetRendersHeaderOnly verifies renderTable,
-// the helper renderBacklogSection and renderWorkSection share, writes the
-// header and nothing else when itemBudget leaves no room for any row — the
-// guard lives in the shared helper (issue #1040, ADR 0030), and Viewport is
-// never asked to represent a non-positive item budget itself (issue #1540:
-// SetHeight(0) means unbounded, not zero rows).
+// Issue #1040, ADR 0030: the guard lives in the shared helper renderBacklogSection and
+// renderWorkSection both use. Viewport is never asked to represent a non-positive item
+// budget itself (issue #1540: SetHeight(0) means unbounded, not zero rows).
 func TestRenderTable_NonPositiveItemBudgetRendersHeaderOnly(t *testing.T) {
 	got := renderTable("header\n", []string{"row1\n"}, Viewport{}, 1, 0, "")
 	if want := "header\n"; got != want {
@@ -4626,10 +4041,8 @@ func TestRenderTable_NonPositiveItemBudgetRendersHeaderOnly(t *testing.T) {
 	}
 }
 
-// TestRenderTable_RendersHeaderAndWindowedRows verifies renderTable writes
-// the header line followed by every row when they all fit within itemBudget,
-// matching the convention renderBacklogSection/renderWorkSection applied
-// inline before extraction.
+// Matches the convention renderBacklogSection and renderWorkSection applied inline
+// before the helper was extracted.
 func TestRenderTable_RendersHeaderAndWindowedRows(t *testing.T) {
 	got := renderTable("header\n", []string{"row1\n", "row2\n"}, Viewport{}, 2, 2, "")
 	want := "header\nrow1\nrow2\n"
@@ -4638,9 +4051,8 @@ func TestRenderTable_RendersHeaderAndWindowedRows(t *testing.T) {
 	}
 }
 
-// TestRenderTable_PassesOffsetThroughToWindow verifies renderTable windows
-// through vp's own offset rather than always starting at row 0 — the
-// Section's own scroll position (m.Offset) both callers pass through.
+// renderTable windows through vp's own offset rather than always starting at row 0, so
+// the Section's scroll position both callers pass through actually takes effect.
 func TestRenderTable_PassesOffsetThroughToWindow(t *testing.T) {
 	vp := Viewport{offset: 1}
 	got := renderTable("header\n", []string{"row1\n", "row2\n", "row3\n"}, vp, 3, 2, "")
@@ -4650,11 +4062,8 @@ func TestRenderTable_PassesOffsetThroughToWindow(t *testing.T) {
 	}
 }
 
-// TestRenderTable_TruncatedWindow_HoldsBackOneRowForMoreBelow verifies an
-// itemBudget too small for every row holds one row back so the "… N more
-// below" affordance itself fits within itemBudget rather than overflowing it
-// by one line (issue #1061, inherited): itemBudget 4 against 50 rows shows
-// 3 rows plus the affordance, not 4 rows with no room left to name it.
+// Issue #1061: the "… N more below" affordance itself has to fit within itemBudget, so a
+// budget too small for every row holds one row back rather than overflowing by a line.
 func TestRenderTable_TruncatedWindow_HoldsBackOneRowForMoreBelow(t *testing.T) {
 	rows := make([]string, 50)
 	for i := range rows {
@@ -4667,9 +4076,8 @@ func TestRenderTable_TruncatedWindow_HoldsBackOneRowForMoreBelow(t *testing.T) {
 	}
 }
 
-// TestRenderBoxedColumn_TitleFoldedIntoTopBorder verifies a titled panel's
-// top border reads "╭─ <title> ─…─╮" — the title folded into the rule
-// itself rather than sitting on an interior content row (issue #1797).
+// Issue #1797: a titled panel's top border reads "╭─ <title> ─…─╮", the title folded
+// into the rule itself rather than sitting on an interior content row.
 func TestRenderBoxedColumn_TitleFoldedIntoTopBorder(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -4690,11 +4098,8 @@ func TestRenderBoxedColumn_TitleFoldedIntoTopBorder(t *testing.T) {
 	}
 }
 
-// TestRenderBoxedColumn_Titled_NoColor_DegradesToAscii verifies a titled
-// panel's border degrades to the plain ASCII glyph set under NO_COLOR — the
-// gap the detail modal's old hand-rolled Unicode-only top border left
-// (issue #1797): previously the modal never degraded at all, unlike every
-// other border in the package.
+// Issue #1797: the detail modal's old hand-rolled Unicode-only top border never degraded
+// at all, unlike every other border in the package.
 func TestRenderBoxedColumn_Titled_NoColor_DegradesToAscii(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
@@ -4714,10 +4119,8 @@ func TestRenderBoxedColumn_Titled_NoColor_DegradesToAscii(t *testing.T) {
 	}
 }
 
-// TestRenderBoxedColumn_TitleWiderThanPanel_TruncatesWithEllipsis verifies a
-// title too wide for the panel truncates with a trailing ellipsis and the
-// top rule still lands on exactly the panel's width (issue #1797 AC) —
-// never overflowing past width regardless of how long the title is.
+// Issue #1797 AC: the top rule lands on exactly the panel's width however long the title
+// is, and the cut is marked with a trailing ellipsis.
 func TestRenderBoxedColumn_TitleWiderThanPanel_TruncatesWithEllipsis(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
@@ -4731,10 +4134,8 @@ func TestRenderBoxedColumn_TitleWiderThanPanel_TruncatesWithEllipsis(t *testing.
 	}
 }
 
-// TestRenderBoxedColumn_NoTitle_PlainRule verifies an untitled panel's top
-// border is the plain rounded rule, with no title-folding machinery
-// engaged — the header/docked-list/docked-sidebar call sites' shape,
-// unchanged by title support landing in the same helper (issue #1797 AC).
+// Issue #1797 AC: the header, docked list and docked sidebar call sites' shape, unchanged
+// by title support landing in the same helper.
 func TestRenderBoxedColumn_NoTitle_PlainRule(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
@@ -4746,11 +4147,8 @@ func TestRenderBoxedColumn_NoTitle_PlainRule(t *testing.T) {
 	}
 }
 
-// TestRenderBoxedColumn_TitledNarrowPanel_TopRuleStaysExactWidth verifies a
-// titled panel too narrow even for the dash lead-in still lands the top
-// rule on exactly the requested width columns — a panel narrower than the
-// title's own structural "─ " lead-in and trailing space must clamp the
-// whole rule together rather than overflow it (issue #1797 review).
+// Issue #1797 review: a panel narrower than the title's own structural "─ " lead-in and
+// trailing space has to clamp the whole rule together rather than overflow it.
 func TestRenderBoxedColumn_TitledNarrowPanel_TopRuleStaysExactWidth(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
@@ -4763,16 +4161,10 @@ func TestRenderBoxedColumn_TitledNarrowPanel_TopRuleStaysExactWidth(t *testing.T
 	}
 }
 
-// referenceBoxedHeader is a test-only reproduction of renderBoxedHeader's
-// pre-#3019 body: it really renders through renderBoxedColumn and counts the
-// result, rather than asking headerGeometry for the boxed verdict the way
-// renderBoxedHeader does today. TestHeaderGeometry_MirrorsRenderBoxedHeader
-// asserts headerGeometry against this independent reference instead of
-// against renderBoxedHeader directly — renderBoxedHeader now takes its
-// boxed-or-not verdict from headerGeometry, so comparing headerGeometry to
-// renderBoxedHeader's own output would be circular: a boxed/unboxed
-// disagreement at the fitness boundary could no longer make either side
-// fail (issue #3019 review).
+// referenceBoxedHeader is a test-only reproduction of renderBoxedHeader's pre-#3019 body:
+// it renders through renderBoxedColumn and counts the result instead of asking
+// headerGeometry. renderBoxedHeader now takes its boxed-or-not verdict from
+// headerGeometry, so comparing the two directly would be circular (issue #3019 review).
 func referenceBoxedHeader(m Model) (lines int, boxed bool) {
 	header := renderHeader(m)
 	if headerWidth := m.Width - boxBorderCols; headerWidth > 0 {
@@ -4783,26 +4175,11 @@ func referenceBoxedHeader(m Model) (lines int, boxed bool) {
 	return strings.Count(header, "\n"), false
 }
 
-// TestHeaderGeometry_MirrorsRenderBoxedHeader pins headerGeometry as an
-// exact, cheaper stand-in for "render renderBoxedHeader and count its
-// newlines" — the equivalence bodyBudget now relies on instead of paying
-// for the real render (issue #3019). It checks both directions: headerGeometry
-// against the independent referenceBoxedHeader (so a boxed/unboxed
-// disagreement at the fitness boundary can't hide behind the fact that
-// renderBoxedHeader now defers to headerGeometry itself), and
-// renderBoxedHeader's own line count against that same headerGeometry
-// result, so the real renderer stays pinned too. The corpus crosses every
-// axis the two could plausibly disagree on: widths spanning the
-// box-affording boundary (0, 1, 2, 3) and further out (20, 40, 80, 200);
-// heights spanning the boxed-fitness boundary (0, 1, 2, 3, 5) and further
-// out (24, 100); no alerts, one alert, and every alert at once; a message
-// long enough to wrap several times; a message with wide CJK runes and an
-// emoji; a message with a tab (lipgloss expands tabs to 4 spaces before
-// wrapping — issue #3019 review); a message with an embedded "\r\n"
-// (lipgloss normalizes to "\n" before wrapping); a message with fullwidth
-// runes; a message with an emoji ZWJ family cluster; run twice, under
-// NO_COLOR and under a color terminal, since the border glyph set (rounded
-// vs ASCII) differs between them.
+// Issue #3019: headerGeometry is an exact, cheaper stand-in for rendering
+// renderBoxedHeader and counting its newlines, the equivalence bodyBudget now relies on.
+// Checked in both directions, against the independent referenceBoxedHeader and against
+// renderBoxedHeader's own line count, so a boxed/unboxed disagreement at the fitness
+// boundary cannot hide behind renderBoxedHeader deferring to headerGeometry.
 func TestHeaderGeometry_MirrorsRenderBoxedHeader(t *testing.T) {
 	longMsg := strings.Repeat("wrap this message across many columns ", 6)
 	wideRuneMsg := "宽度测试 emoji 😀 more plain text so the line has to wrap across several rows"
@@ -4836,13 +4213,11 @@ func TestHeaderGeometry_MirrorsRenderBoxedHeader(t *testing.T) {
 		{"fullwidth-rune-message", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: "ｗｉｄｅ　ｒｕｎｅｓ here too"}}},
 		{"emoji-zwj-message", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: "emoji 👨‍👩‍👧‍👦 family cluster wrap"}}},
 	}
-	// Width 9 and height 130 look arbitrary next to the round numbers, but
-	// they are where the wrap variants above actually bite: the
-	// tab/fullwidth-rune divergence only surfaces once headerWidth (width -
-	// boxBorderCols) lands mid-word around 7 columns, and the emoji ZWJ
-	// cluster's one-column miscount only changes the answer once the boxed
-	// line count clears 126 rows. Drop either and those three variants stay
-	// green against a wrap that is measurably wrong.
+	// Width 9 and height 130 look arbitrary beside the round numbers, but they
+	// are where the wrap variants above bite: the tab and fullwidth-rune
+	// divergence only surfaces once headerWidth lands mid-word around 7
+	// columns, and the emoji ZWJ cluster's one-column miscount only changes
+	// the answer past 126 boxed rows. Drop either and those variants stay green.
 	widths := []int{0, 1, 2, 3, 9, 20, 40, 80, 200}
 	heights := []int{0, 1, 2, 3, 5, 24, 100, 130}
 

@@ -16,15 +16,13 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestGitClient_ImplementsCodeForge asserts that GitClient satisfies forge.CodeForge.
 func TestGitClient_ImplementsCodeForge(t *testing.T) {
 	var _ forge.CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
 }
 
-// TestGitClient_NoPRForgeConcept verifies that the git Code Forge implements
-// no PR/CI/auto-merge surface at all — a type assertion against forge.PRForge
-// reports absence, the mechanism callers use instead of a removed PushOnly()
-// flag.
+// The git Code Forge deliberately implements no PR, CI, or auto-merge calls.
+// A failed type assertion against forge.PRForge is what callers check for, in
+// place of the removed PushOnly() flag.
 func TestGitClient_NoPRForgeConcept(t *testing.T) {
 	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if _, ok := g.(forge.PRForge); ok {
@@ -32,7 +30,6 @@ func TestGitClient_NoPRForgeConcept(t *testing.T) {
 	}
 }
 
-// gitRun runs git in dir, failing the test on error.
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -48,10 +45,9 @@ func gitWriteFile(t *testing.T, path, contents string) {
 	}
 }
 
-// newBareRemoteWithBranches sets up a bare repo with a "main" branch (one
-// commit) and a feature branch "agent/issue-1" (one additional commit on top
-// of main), matching the shape a Box leaves behind: base branch plus a pushed
-// per-issue branch. Returns the bare repo path.
+// newBareRemoteWithBranches builds the shape a Box leaves behind: a base
+// branch plus a pushed per-issue branch one commit ahead of it. It returns the
+// bare repo path.
 func newBareRemoteWithBranches(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -77,9 +73,7 @@ func newBareRemoteWithBranches(t *testing.T) string {
 	return bare
 }
 
-// TestGitClient_Merge_PushOnlyLanding verifies that Merge lands the feature
-// branch onto baseBranch and pushes the result — the MERGE_MODE=immediate
-// mapping for a push-only forge.
+// Merge is how MERGE_MODE=immediate lands work on a push-only forge.
 func TestGitClient_Merge_PushOnlyLanding(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
@@ -96,9 +90,6 @@ func TestGitClient_Merge_PushOnlyLanding(t *testing.T) {
 	}
 }
 
-// TestGitClient_Merge_ConflictReturnsErrMergeConflict verifies that Merge
-// reports forge.ErrMergeConflict when the feature branch conflicts with base,
-// leaving base unpushed.
 func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "origin.git")
@@ -133,8 +124,6 @@ func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 	}
 }
 
-// TestGitClient_Rebase_ForcePushesRebasedBranch verifies that Rebase rebases
-// the feature branch onto the latest base and force-pushes it back.
 func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "origin.git")
@@ -179,12 +168,10 @@ func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 	}
 }
 
-// TestGitClient_Merge_RejectsFlagLikeRef verifies that Merge refuses a landing
-// ref starting with "-" instead of passing it to git, where it would be
-// parsed as an option (e.g. a maliciously crafted outcome line's landing=
-// field — the outcome line is untrusted input per CLAUDE.md's
-// comment-injection trust boundary). Regression test for argument-injection
-// RCE via `git fetch origin <branch>`.
+// Regression test for argument-injection RCE via `git fetch origin <branch>`:
+// a ref starting with "-" reaches git as an option. The landing= field of an
+// outcome line is untrusted input under CLAUDE.md's comment-injection trust
+// boundary, so Merge must reject the ref rather than pass it on.
 func TestGitClient_Merge_RejectsFlagLikeRef(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
@@ -199,8 +186,8 @@ func TestGitClient_Merge_RejectsFlagLikeRef(t *testing.T) {
 	}
 }
 
-// TestGitClient_Rebase_RejectsFlagLikeRef is Rebase's counterpart to
-// TestGitClient_Merge_RejectsFlagLikeRef.
+// This is Rebase's counterpart to TestGitClient_Merge_RejectsFlagLikeRef,
+// which carries the full rationale.
 func TestGitClient_Rebase_RejectsFlagLikeRef(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
@@ -210,10 +197,9 @@ func TestGitClient_Rebase_RejectsFlagLikeRef(t *testing.T) {
 	}
 }
 
-// TestGitClient_Merge_SetsCommitIdentityOnTempClone verifies that Merge
-// configures the launcher-supplied commit identity on its throwaway clone
-// rather than depending on ambient host git config, which may be unset on a
-// bare CI runner (a real merge commit needs a committer identity).
+// A merge commit needs a committer identity, and ambient host git config may
+// have none on a bare CI runner, so Merge sets the launcher-supplied identity
+// on its throwaway clone.
 func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	g := NewGitClient(bare, "main", "Spindrift Bot", "bot@example.com", "agent/issue-")
@@ -235,10 +221,10 @@ func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 	}
 }
 
-// unreachableRemoteURL returns a credential-bearing https URL whose port is
-// guaranteed unreachable: an ephemeral port the OS just freed, rather than a
-// hardcoded privileged port (e.g. 127.0.0.1:1) whose bindability depends on
-// process privileges and the host environment.
+// unreachableRemoteURL returns a credential-bearing https URL on an ephemeral
+// port the OS just freed. A hardcoded privileged port such as 127.0.0.1:1 is
+// not a safe substitute: whether anything can bind it depends on process
+// privileges and the host.
 func unreachableRemoteURL(t *testing.T, secret string) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -252,10 +238,8 @@ func unreachableRemoteURL(t *testing.T, secret string) string {
 	return "https://oauth2:" + secret + "@" + addr + "/does-not-exist.git"
 }
 
-// TestUnreachableRemoteURL_PointsToClosedPort verifies that the URL returned
-// by unreachableRemoteURL names a port nothing is listening on, so tests
-// relying on it to force a clone/probe failure don't depend on a privileged
-// port (e.g. 127.0.0.1:1) staying unbindable in every environment.
+// This test pins the precondition every test that forces a clone or probe
+// failure depends on: nothing is listening on the helper's port.
 func TestUnreachableRemoteURL_PointsToClosedPort(t *testing.T) {
 	remote := unreachableRemoteURL(t, "sometoken123")
 
@@ -271,12 +255,10 @@ func TestUnreachableRemoteURL_PointsToClosedPort(t *testing.T) {
 	}
 }
 
-// TestGitClient_Merge_CloneFailureDoesNotLeakCredentials verifies that a
-// clone failure against a credential-bearing remote URL (the
-// oauth2:<token>@host form CODE_FORGE_REMOTE_URL uses for hosts without a
-// credential helper, docs/reference.md) never echoes the credential back
-// into the returned error — that error flows unmodified into a public
-// GitHub issue comment (settle.mergeImmediate).
+// Merge's error flows unmodified into a public GitHub issue comment
+// (settle.mergeImmediate), so it must never echo back the credential from the
+// oauth2:<token>@host remote URL that CODE_FORGE_REMOTE_URL uses for hosts
+// without a credential helper (docs/reference.md).
 func TestGitClient_Merge_CloneFailureDoesNotLeakCredentials(t *testing.T) {
 	const secret = "sometoken123"
 	g := NewGitClient(unreachableRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-")
@@ -290,22 +272,18 @@ func TestGitClient_Merge_CloneFailureDoesNotLeakCredentials(t *testing.T) {
 	}
 }
 
-// TestGitClient_Merge_HookOutputDoesNotLeakCredentials verifies that a
-// non-conflict merge failure (a pre-commit hook rejecting the merge commit)
-// never echoes credential text embedded in the hook's own output back into
-// the returned error — that error flows unmodified into a public GitHub
-// issue comment (settle.mergeImmediate), same trust boundary as the
-// clone/probe paths above, but exercised via the merge output path at
-// git.go's non-conflict branch.
+// This test crosses the same public-comment trust boundary as the clone and
+// probe tests above, but reaches it through git.go's non-conflict merge
+// branch: the credential text comes from a rejecting hook's own output rather
+// than from the remote URL.
 func TestGitClient_Merge_HookOutputDoesNotLeakCredentials(t *testing.T) {
 	const secret = "sometoken123"
 	bare := newBareRemoteWithBranches(t)
 
-	// A pre-merge-commit hook installed via init.templateDir so cloneToTemp's
-	// `git clone` picks it up in the fresh temp clone. The hook always
-	// rejects the merge commit and echoes a credential-bearing message to
-	// stderr, which mergeCmd captures into `out` — a stand-in for a real
-	// merge driver or hook leaking a credential-bearing URL.
+	// init.templateDir is how the hook reaches the fresh clone cloneToTemp
+	// makes. The hook stands in for a merge driver that leaks a
+	// credential-bearing URL: it rejects the merge and writes the credential
+	// to stderr, which mergeCmd captures.
 	home := t.TempDir()
 	templateDir := filepath.Join(home, "template")
 	hooksDir := filepath.Join(templateDir, "hooks")
@@ -334,8 +312,6 @@ func TestGitClient_Merge_HookOutputDoesNotLeakCredentials(t *testing.T) {
 	}
 }
 
-// TestGitClient_Probe verifies Probe succeeds against a reachable remote and
-// fails against an unreachable one.
 func TestGitClient_Probe(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 
@@ -350,8 +326,6 @@ func TestGitClient_Probe(t *testing.T) {
 	}
 }
 
-// TestGitClient_BranchExists verifies BranchExists reports true for a
-// branch pushed to the remote, false for one that was never pushed.
 func TestGitClient_BranchExists(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
@@ -373,10 +347,8 @@ func TestGitClient_BranchExists(t *testing.T) {
 	}
 }
 
-// TestGitClient_Probe_DoesNotLeakCredentials verifies that Probe's error
-// against a credential-bearing remote URL never echoes the credential back
-// — Probe's error can reach `doctor` output, and any error text derived
-// from remoteURL must stay redacted the same way Merge/Rebase's do.
+// Probe's error can reach `doctor` output, so error text derived from
+// remoteURL stays redacted the same way Merge's and Rebase's do.
 func TestGitClient_Probe_DoesNotLeakCredentials(t *testing.T) {
 	const secret = "sometoken123"
 	g := NewGitClient(unreachableRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-")
@@ -390,10 +362,9 @@ func TestGitClient_Probe_DoesNotLeakCredentials(t *testing.T) {
 	}
 }
 
-// hangingRemoteURL returns a credential-bearing http URL backed by a
-// listener that accepts every connection but never writes a response,
-// simulating a remote that hangs mid-handshake instead of refusing the
-// connection outright (unlike unreachableRemoteURL, which fails fast).
+// hangingRemoteURL returns a credential-bearing http URL whose listener
+// accepts every connection and never answers, so the remote hangs
+// mid-handshake. unreachableRemoteURL covers the fail-fast case.
 func hangingRemoteURL(t *testing.T, secret string) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -426,11 +397,9 @@ func hangingRemoteURL(t *testing.T, secret string) string {
 	return "http://oauth2:" + secret + "@" + ln.Addr().String() + "/does-not-exist.git"
 }
 
-// TestGitClient_Merge_CloneTimesOutOnHangingRemote verifies that cloneToTemp
-// bounds the git clone invocation with a timeout: against a remote that
-// accepts the connection and then hangs (rather than refusing it, which
-// unreachableRemoteURL already covers), Merge must still return in bounded
-// time with a distinguishable timeout error, not block indefinitely.
+// cloneToTemp's timeout has to bound the `git clone` invocation itself: a
+// remote that accepts the connection and then hangs never fails on its own,
+// so without the timeout Merge blocks forever.
 func TestGitClient_Merge_CloneTimesOutOnHangingRemote(t *testing.T) {
 	const secret = "sometoken123"
 	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-",
@@ -454,9 +423,9 @@ func TestGitClient_Merge_CloneTimesOutOnHangingRemote(t *testing.T) {
 	}
 }
 
-// TestGitClient_Rebase_CloneTimesOutOnHangingRemote is
-// TestGitClient_Merge_CloneTimesOutOnHangingRemote's counterpart for Rebase,
-// which calls the same cloneToTemp scaffold.
+// This is Rebase's counterpart to
+// TestGitClient_Merge_CloneTimesOutOnHangingRemote, since Rebase calls the
+// same cloneToTemp helper.
 func TestGitClient_Rebase_CloneTimesOutOnHangingRemote(t *testing.T) {
 	const secret = "sometoken123"
 	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-",
@@ -480,10 +449,8 @@ func TestGitClient_Rebase_CloneTimesOutOnHangingRemote(t *testing.T) {
 	}
 }
 
-// TestGitClient_Probe_TimesOutOnHangingRemote verifies that Probe bounds its
-// `git ls-remote` invocation with a timeout: against a remote that accepts
-// the connection and then hangs, Probe must still return in bounded time
-// with a distinguishable timeout error, not block indefinitely.
+// Probe bounds its `git ls-remote` invocation with the op timeout, so the
+// same hanging remote must not block it forever.
 func TestGitClient_Probe_TimesOutOnHangingRemote(t *testing.T) {
 	const secret = "sometoken123"
 	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-",
@@ -508,11 +475,9 @@ func TestGitClient_Probe_TimesOutOnHangingRemote(t *testing.T) {
 }
 
 // newBareRemoteWithHangingPush is newBareRemoteWithBranches plus a
-// pre-receive hook that accepts the push connection and then sleeps
-// forever, simulating a remote that hangs partway through a push instead of
-// a hung clone (hangingRemoteURL's scenario) or a hung pre-connect handshake.
-// Local pushes still run server-side hooks, so this reproduces a hang on any
-// gitClient operation that pushes without needing a real network listener.
+// pre-receive hook that sleeps forever, so the remote hangs partway through a
+// push rather than during the clone hangingRemoteURL covers. Local pushes
+// still run server-side hooks, so this needs no network listener.
 func newBareRemoteWithHangingPush(t *testing.T) string {
 	t.Helper()
 	bare := newBareRemoteWithBranches(t)
@@ -524,11 +489,8 @@ func newBareRemoteWithHangingPush(t *testing.T) string {
 	return bare
 }
 
-// TestGitClient_Merge_TimesOutOnHangingPush verifies that Merge bounds its
-// post-clone git subprocesses (checkout, fetch, merge, push) with a timeout:
-// against a remote whose push hangs server-side, Merge must still return in
-// bounded time with a distinguishable timeout error instead of blocking on
-// the push forever.
+// The op timeout has to cover Merge's post-clone subprocesses (checkout,
+// fetch, merge, push) too, not just the clone.
 func TestGitClient_Merge_TimesOutOnHangingPush(t *testing.T) {
 	bare := newBareRemoteWithHangingPush(t)
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
@@ -553,12 +515,10 @@ func TestGitClient_Merge_TimesOutOnHangingPush(t *testing.T) {
 }
 
 // installHangingGitRebaseShim puts a "git" shim ahead of the real one on
-// PATH that sleeps forever on a non-abort `git ... rebase <ref>` invocation
-// and delegates every other subcommand (clone, checkout, config, config,
-// rebase --abort, ...) to the real git binary unchanged. Rebase's checkout
-// and rebase steps are local (no network round trip to hang mid-handshake
-// the way hangingRemoteURL or a pre-receive hook can), so this is the only
-// deterministic way to exercise their timeout wrapping.
+// PATH. It sleeps forever on a non-abort `git ... rebase <ref>` and passes
+// every other subcommand through. Rebase's checkout and rebase steps run
+// locally, with no network round trip that hangingRemoteURL or a pre-receive
+// hook could hang, so the shim is the only deterministic way to stall them.
 func installHangingGitRebaseShim(t *testing.T) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
@@ -579,10 +539,8 @@ func installHangingGitRebaseShim(t *testing.T) {
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// TestGitClient_Rebase_TimesOutOnHangingRebase verifies that Rebase bounds
-// its post-clone git subprocesses (checkout, rebase) with a timeout: against
-// a `git rebase` invocation that hangs, Rebase must still return in bounded
-// time with a distinguishable timeout error instead of blocking forever.
+// The op timeout has to cover Rebase's post-clone subprocesses (checkout,
+// rebase) too, not just the clone.
 func TestGitClient_Rebase_TimesOutOnHangingRebase(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	installHangingGitRebaseShim(t)
@@ -607,18 +565,13 @@ func TestGitClient_Rebase_TimesOutOnHangingRebase(t *testing.T) {
 	}
 }
 
-// TestGitClient_Rebase_TimesOutOnHangingPush verifies that Rebase bounds its
-// trailing force-push (gitplumbing.GitForcePush) with a timeout: against a
-// remote whose push hangs server-side, Rebase must still return in bounded
-// time with a distinguishable timeout error instead of blocking on the push
-// forever. A same-ref push never reaches the pre-receive hook (git treats it
-// as "Everything up-to-date" and skips the connection), so main must be
-// advanced past the feature branch's base first — mirroring
-// TestGitClient_Rebase_ForcePushesRebasedBranch — to force the rebase to
-// produce a new commit the remote doesn't already have.
+// The op timeout also has to cover Rebase's trailing force-push
+// (gitplumbing.GitForcePush). Git skips the connection on a same-ref push and
+// reports everything up to date, so the hook never runs unless main is
+// advanced past the feature branch's base first, making the rebase produce a
+// commit the remote lacks.
 func TestGitClient_Rebase_TimesOutOnHangingPush(t *testing.T) {
-	// Advance main before the hook goes in — pushing this needs a working
-	// pre-receive hook, since the hanging one (installed below) would block
+	// Advance main before installing the hanging hook below, which would block
 	// this setup push forever too.
 	bare := newBareRemoteWithBranches(t)
 	advance := t.TempDir()

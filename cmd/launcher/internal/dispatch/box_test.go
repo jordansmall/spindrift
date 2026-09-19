@@ -95,9 +95,8 @@ func TestRunOnce_PreservesPriorAttemptLogOnRetry(t *testing.T) {
 }
 
 // TestRunOnce_RotatesPreExistingLogFromDuplicateLaunch verifies that a fresh
-// dispatch does not truncate a log file already sitting at logPath -- the
-// scenario the issue calls out explicitly: a duplicate/collided launch
-// finding another attempt's log already there.
+// dispatch does not truncate a log file already sitting at logPath: a
+// duplicate or collided launch finding another attempt's log already there.
 func TestRunOnce_RotatesPreExistingLogFromDuplicateLaunch(t *testing.T) {
 	fr := runner.NewFake()
 
@@ -147,16 +146,10 @@ func TestRunOnce_RotatesPreExistingLogFromDuplicateLaunch(t *testing.T) {
 }
 
 // TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt verifies that a fresh
-// Run() call does not charge this run for a wholly unrelated EARLIER run's
-// spend left on disk at the same log paths -- the scenario a re-dispatch of
-// the same issue in a persistent pwd produces (agent-failed -> re-label,
-// waves/continuous): the earlier run's bare initial log, its own rotated
-// retry sibling, and a leftover fix-pass log all pre-date this Run() call
-// entirely. AllAttemptLogPaths (and so CumulativeUsage/UsageReport) must
-// reflect only the usage this fresh attempt itself produced, not the prior
-// run's, even though the prior run's content still survives on disk
-// afterward (issue #561's preserve intent) under a different name (issue
-// #2575).
+// Run() is not charged for an earlier run's spend left at the same log
+// paths, the way a re-dispatch of the same issue in a persistent pwd
+// produces. CumulativeUsage counts only this attempt, though the prior
+// content still survives on disk under a different name (issues #561, #2575).
 func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 	fr := runner.NewFake()
 
@@ -200,8 +193,6 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 		t.Errorf("CumulativeUsage.TotalCostUSD = %v, want 0 (prior run's spend must not be charged to this run)", got.TotalCostUSD)
 	}
 
-	// The prior content must still be on disk somewhere -- quarantined, not
-	// destroyed.
 	dir := filepath.Dir(d.logPath())
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -231,15 +222,10 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 }
 
 // TestRun_QuarantineFailureDoesNotSettleOnStaleLog verifies that when
-// quarantinePriorRunLogs itself fails (e.g. a filesystem permission
-// problem renaming a prior run's log aside), Run() does not fall through to
-// settledOutcome and parse whatever content is still sitting at logPath --
-// content this run never produced, left over from the exact prior run
-// quarantine was trying to move aside -- as if it were this run's own
-// verdict (issue #2575). It must instead retry (this fixture's permission
-// problem never clears, so every retry fails the same way) up to
-// Policy.Max attempts, then report a definite failure with no resolved
-// outcome at all, having never dispatched a box.
+// quarantinePriorRunLogs fails, Run() does not fall through to
+// settledOutcome and parse the prior run's leftover content at logPath as
+// this run's own verdict (issue #2575). This fixture's permission problem
+// never clears, so every retry fails the same way and no box is dispatched.
 func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
 	fr := runner.NewFake()
 
@@ -273,13 +259,11 @@ func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
 	}
 }
 
-// TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp verifies the
-// degrade posture finding for issue #2575's quarantine step: a quarantine
-// failure is a local filesystem hiccup, not a terminal give-up, so it must
-// retry with the same linear backoff any other transient failure uses --
-// Policy.Max attempts, each sleeping through the injected Clock --
-// before finally giving up, rather than failing the whole dispatch outright
-// on the very first failure.
+// TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp verifies that a
+// quarantine failure is a local filesystem hiccup, not a terminal give-up:
+// it retries with the same linear backoff any other transient failure uses,
+// Policy.Max attempts each sleeping through the injected Clock, rather than
+// failing the whole dispatch on the first failure (issue #2575).
 func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
 	fr := runner.NewFake()
 	var sleeps []time.Duration
@@ -310,14 +294,11 @@ func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
 	}
 }
 
-// TestQuarantinePriorRunLogs_BoundedOnNonNotExistStatError verifies
-// quarantinePriorRunLogs' free-suffix probe returns a real error instead of
-// looping forever when os.Stat(dest) fails with something other than "not
-// found" (issue #2575). A self-referential symlink at the very first
-// candidate destination (<path>.prior-run.1) makes os.Stat on it fail with
-// ELOOP, which os.IsNotExist never reports as true, so a probe that treated
-// anything but that specific case as "free slot, rename here" would spin
-// n++ forever with no timeout or cap.
+// TestQuarantinePriorRunLogs_BoundedOnNonNotExistStatError verifies the
+// free-suffix probe returns a real error instead of looping forever when
+// os.Stat(dest) fails with something other than "not found" (issue #2575).
+// A self-referential symlink at the first candidate makes os.Stat fail with
+// ELOOP, which os.IsNotExist never reports as true.
 func TestQuarantinePriorRunLogs_BoundedOnNonNotExistStatError(t *testing.T) {
 	fr := runner.NewFake()
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
@@ -346,10 +327,9 @@ func TestQuarantinePriorRunLogs_BoundedOnNonNotExistStatError(t *testing.T) {
 
 // TestQuarantinePriorRunLogs_NoOpWhenAlreadyRunning verifies the safe
 // direction of the IsRunning guard: when the runner reports this issue's Box
-// name is already running, quarantinePriorRunLogs must be a complete no-op
-// -- it must not rename, or otherwise touch, any pre-existing log or its
-// rotated .N sibling (issue #562 territory, mirrored by quarantine per its
-// own doc comment).
+// name is already running, quarantinePriorRunLogs must not rename or
+// otherwise touch any pre-existing log or its rotated .N sibling (issue
+// #562).
 func TestQuarantinePriorRunLogs_NoOpWhenAlreadyRunning(t *testing.T) {
 	fr := runner.NewFake()
 	fr.IsRunningRet = true
@@ -399,22 +379,11 @@ func TestQuarantinePriorRunLogs_NoOpWhenAlreadyRunning(t *testing.T) {
 	}
 }
 
-// TestQuarantinePriorRunLogs_HoldSleepBlindSpot pins a known, currently
-// unfixed limitation rather than asserting it is correct: IsRunning only
-// reports whether a container is running RIGHT NOW, so it cannot tell "no
-// run in progress for this issue" apart from "a run for this same issue is
-// between attempts (e.g. mid dispatchWithRetry hold-sleep after a 429, see
-// retry.go) with no container currently running." fr.IsRunningRet=false
-// here stands in for that mid-hold-sleep window. In that window a second,
-// genuinely colliding Run() for the SAME issue number would call
-// quarantinePriorRunLogs and -- exactly as this test verifies -- it
-// proceeds to rename the first, still-live run's own logs aside as if they
-// belonged to a wholly unrelated stale prior run. That is not correct
-// behaviour, but it is the current behaviour, inherited from the same
-// IsRunning blind spot runOnce already has (issue #562) and out of scope to
-// close here (it needs a real cross-process lock, a separate piece of
-// work). This test exists so a future change to this behaviour is a
-// deliberate decision, not an accidental regression nobody noticed.
+// TestQuarantinePriorRunLogs_HoldSleepBlindSpot pins a known, unfixed
+// limitation rather than correct behaviour: IsRunning cannot tell "no run in
+// progress" apart from "a run for this issue is mid hold-sleep with no
+// container up", so a colliding Run() renames the still-live run's logs aside.
+// runOnce has the same blind spot (issue #562); closing it needs a real lock.
 func TestQuarantinePriorRunLogs_HoldSleepBlindSpot(t *testing.T) {
 	fr := runner.NewFake()
 	fr.IsRunningRet = false
@@ -459,26 +428,15 @@ func TestQuarantinePriorRunLogs_HoldSleepBlindSpot(t *testing.T) {
 
 // TestEnsureRunLineage_QuarantinesWhenMarkerAbsent verifies the fix for the
 // recover/adopt entry point's own quarantine gap (issue #2575):
-// quarantinePriorRunLogs only ever ran from Run's own very first attempt
-// (box.go), so a Dispatch built the way main.go's recoverByNumber builds one
-// -- via Factory.New, then straight into CumulativeUsage/UsageReport/Fix
-// through settle's SettleAdopted, with Run never called at all -- used to
-// never quarantine anything. This seeds a rotated ".1" sibling directly to
-// disk BEFORE constructing the Dispatch at all (simulating a leftover from
-// an earlier, unrelated attempt sequence that no Run() call in this process
-// ever quarantined) with no run-lineage marker present either, then shows
-// that calling EnsureRunLineage -- exactly as recoverByNumber now does
-// before touching CumulativeUsage/UsageReport/Fix -- quarantines that
-// leftover aside before it can be folded into this cycle's usage, leaving
-// CumulativeUsage at zero rather than silently inheriting someone else's
-// spend.
+// quarantinePriorRunLogs only ever ran from Run's first attempt, so a
+// Dispatch built the way main.go's recoverByNumber builds one inherited an
+// unmarked leftover's spend. EnsureRunLineage quarantines it first.
 func TestEnsureRunLineage_QuarantinesWhenMarkerAbsent(t *testing.T) {
 	dir := tempLogDir(t)
 
-	// A leftover from an earlier, unrelated attempt sequence -- written
-	// straight to disk, before any Dispatch for this issue exists in this
-	// process, so nothing has had a chance to quarantine it, and with no
-	// run-lineage marker either.
+	// This leftover lands on disk before any Dispatch for this issue exists in
+	// the process, so nothing has had a chance to quarantine it, and it carries
+	// no run-lineage marker either.
 	leftover := `{"type":"result","num_turns":1,"total_cost_usd":7.00,"usage":{"input_tokens":70000,"output_tokens":7000}}` + "\n"
 	if err := writeFile(logPathFor(dir, "20")+".1", leftover); err != nil {
 		t.Fatalf("seed leftover rotated log: %v", err)
@@ -490,7 +448,7 @@ func TestEnsureRunLineage_QuarantinesWhenMarkerAbsent(t *testing.T) {
 	}
 	defer f.Cleanup()
 	// Mirrors main.go's recoverByNumber: Factory.New, then EnsureRunLineage,
-	// then straight to CumulativeUsage -- Run is never called.
+	// then straight to CumulativeUsage, with Run never called.
 	d := f.New("20", "test issue")
 
 	if err := d.EnsureRunLineage(); err != nil {
@@ -511,12 +469,10 @@ func TestEnsureRunLineage_QuarantinesWhenMarkerAbsent(t *testing.T) {
 }
 
 // TestEnsureRunLineage_TrustsExistingLogsWhenMarkerPresent verifies the
-// common recover/adopt case: an open PR can only exist because some earlier
-// Run(), in some earlier launcher process, already quarantined-then-marked
-// this issue's log lineage (box.go's Run). When that marker is already on
-// disk, EnsureRunLineage must be a complete no-op -- it must not touch any
-// pass log -- so CumulativeUsage still sums this run's own genuine history
-// across the process restart recover exists to survive.
+// common recover/adopt case: an open PR can only exist because an earlier
+// Run(), in an earlier launcher process, already quarantined then marked
+// this issue's log lineage. With that marker on disk, EnsureRunLineage must
+// touch no pass log, so CumulativeUsage still sums this run's own history.
 func TestEnsureRunLineage_TrustsExistingLogsWhenMarkerPresent(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -595,7 +551,7 @@ func TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog(t *testing.T) {
 }
 
 // TestRotateStaleLog_UsesFirstAvailableSuffix verifies that repeated
-// rotations of the same logPath do not clobber each other -- each rotation
+// rotations of the same logPath do not clobber each other: each rotation
 // picks the next unused .N suffix.
 func TestRotateStaleLog_UsesFirstAvailableSuffix(t *testing.T) {
 	dir := t.TempDir()
@@ -630,8 +586,6 @@ func TestRotateStaleLog_UsesFirstAvailableSuffix(t *testing.T) {
 	}
 }
 
-// TestRotateStaleLog_NoOpWhenMissing verifies that rotating a path with no
-// existing file is a no-op, not an error.
 func TestRotateStaleLog_NoOpWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")
@@ -666,12 +620,9 @@ func TestResetOutboxDir_CreatesOtherWritableDirectory(t *testing.T) {
 
 // TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket verifies that
 // a non-empty Config.RegistryProxyRoutes (ADR 0044, issue #2849) starts a
-// per-Box registry proxy before Run and hands the Box a unix
-// RegistryProxy.Endpoint pointing at a real, listening unix socket that
-// forwards through to the configured upstream -- and that the TCP-fallback
-// env keys (issue #3111) stay entirely absent from box.Env on this
-// socket-capable branch, mirroring the "empty/absent means off" convention
-// RegistryProxySocketPath itself follows when the whole feature is off.
+// per-Box proxy and hands the Box a listening unix socket that forwards to
+// the configured upstream, and that the TCP-fallback env keys (issue #3111)
+// stay absent from box.Env on this socket-capable branch.
 func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("hello from upstream")) //nolint:errcheck
@@ -749,13 +700,11 @@ func stubRegistryProxyMkdirTemp(t *testing.T, fn func(base, pattern string) (str
 	registryProxyMkdirTemp = fn
 }
 
-// TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks pins the
-// issue #3077 acceptance criterion end-to-end: a $TMPDIR long enough to
-// overflow AF_UNIX's sun_path limit once the generated proxy dir name and
-// "proxy.sock" are appended -- the shape nix develop's own
-// nix-shell.XXXXXX/ prefix nested under macOS's per-user $TMPDIR produces in
-// practice -- must not break the registry proxy: Run still succeeds and the
-// proxied request still round-trips through the mounted socket.
+// TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks pins issue
+// #3077 end-to-end: a $TMPDIR long enough to overflow AF_UNIX's sun_path
+// limit once the generated proxy dir name and "proxy.sock" are appended, the
+// shape nix develop's nix-shell.XXXXXX/ prefix under macOS's per-user
+// $TMPDIR produces, must still let the request round-trip.
 func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T) {
 	setLongTMPDir(t)
 
@@ -807,11 +756,9 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 
 // TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader verifies
 // that a route Credential in Config.RegistryProxyRoutes (ADR 0044, issue
-// #2850) reaches the outbound leg through the real wiring -- Run through the
-// Box's mounted socket to a local upstream that echoes back the
-// Authorization header it received -- proving the credential travels from
-// Config all the way to the request the proxy sends upstream, not just
-// through registryproxy.New's own unit tests.
+// #2850) reaches the outbound leg through the real wiring: Run through the
+// Box's mounted socket to a local upstream that echoes the Authorization
+// header back, not just through registryproxy.New's own unit tests.
 func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testing.T) {
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -865,14 +812,10 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 }
 
 // TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy verifies that an
-// empty (zero-length) Config.RegistryProxyRoutes leaves the Box's
-// RegistryProxy.Endpoint zero (no unix path, IsUnix() false) and starts no
-// proxy -- registryProxySocketDir never runs at all, so no
-// spindrift-registry-proxy-* temp dir is ever created, pinned hermetically
-// via a seam call count rather than by diffing os.TempDir() globs -- and
-// that the transport probe (issue #3111) never runs at all: it costs a live
-// exec against the configured runtime, so it must be skipped entirely
-// rather than merely discarded when the feature is off.
+// empty Config.RegistryProxyRoutes leaves the Box's RegistryProxy.Endpoint
+// zero and starts no proxy, pinned by a seam call count rather than by
+// diffing os.TempDir() globs, and that the transport probe (issue #3111)
+// never runs: it costs a live exec, so it must be skipped, not discarded.
 func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 	var mkdirTempCalls int
 	stubRegistryProxyMkdirTemp(t, func(base, pattern string) (string, error) {
@@ -908,12 +851,10 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 }
 
 // TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch verifies that when
-// the runner's transport probe itself fails (issue #3111) -- a live-exec
-// infrastructure failure against the configured runtime, distinct from
-// either transport branch it would otherwise choose between -- runOnce
-// aborts the dispatch immediately with a wrapped error instead of falling
-// through to some default transport: the Box's Run must never be invoked
-// with a transport nobody actually confirmed works.
+// the runner's transport probe itself fails (issue #3111), runOnce aborts
+// the dispatch with a wrapped error instead of falling through to some
+// default transport: the Box must never run with a transport nobody
+// confirmed works.
 func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("hello from upstream")) //nolint:errcheck
@@ -947,14 +888,10 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 }
 
 // TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation verifies
-// that when the runner reports it cannot carry a connectable unix socket into
-// the Box (issue #3111), runOnce falls back to the TCP transport: the Box's
-// RegistryProxy carries the probe's tcpHost, a non-zero bound port, and a
-// non-empty per-run secret, with no socket path at all. The host and port
-// reach a guest-side reader through REGISTRY_PROXY_MANIFEST's endpoint field
-// (ADR 0045), not their own env vars -- REGISTRY_PROXY_TCP_HOST/_PORT stay
-// absent from box.Env, while REGISTRY_PROXY_TCP_SECRET is still forwarded on
-// its own, since ADR 0045 keeps the secret out of the manifest entirely.
+// that when the runner cannot carry a connectable unix socket into the Box
+// (issue #3111), runOnce falls back to TCP. Host and port reach the guest
+// through REGISTRY_PROXY_MANIFEST (ADR 0045), so REGISTRY_PROXY_TCP_HOST and
+// _PORT stay absent from box.Env while the secret is forwarded on its own.
 func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("hello from upstream")) //nolint:errcheck
@@ -1038,8 +975,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 
 // TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun
 // verifies the minted TCP secret (issue #3111) is genuinely per-run, not a
-// fixed or reused value: two separate runOnce dispatches never see the same
-// secret.
+// fixed or reused value.
 func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1078,14 +1014,10 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *te
 }
 
 // TestRunOnce_RegistryProxyManifest_UnixEndpoint verifies runOnce mints
-// REGISTRY_PROXY_MANIFEST (ADR 0045) on the unix-socket transport branch: it
-// decodes to a Manifest whose Endpoint names the fixed in-box mount target
-// (runner.RegistryProxySocketTarget) -- NOT box.RegistryProxy.Endpoint's own
-// host-side mount-source path, which a Box-side reader of the manifest could
-// never dial (issue #3141) -- and whose Routes carries one entry per
-// Config.RegistryProxyRoutes, each projected with that route's own Prefix
-// (minted upstream by registryproxy.AssignPrefixes, the same prefix the
-// proxy itself routes by) -- for a route with no MatchHost that's "r0".
+// REGISTRY_PROXY_MANIFEST (ADR 0045) on the unix branch: its Endpoint names
+// the fixed in-box mount target, not the host-side mount-source path a
+// Box-side reader could never dial (issue #3141), and its Routes carry each
+// route's own Prefix from registryproxy.AssignPrefixes.
 func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1143,12 +1075,10 @@ func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 }
 
 // TestRegistryManifestRoutes_ProjectsPrefixAndEcosystems verifies that
-// registryManifestRoutes carries each route's own Prefix and its whole
-// Ecosystems declaration block straight into the manifest Route (issue
-// #3404), the single carrier a Box-side renderer reads its ecosystem's
-// declaration back out of -- a two-route table with distinct prefixes and
-// cargo names each land on the matching manifest entry, not swapped or
-// collapsed onto one shared value.
+// registryManifestRoutes carries each route's own Prefix and whole Ecosystems
+// declaration block into the manifest Route (issue #3404): two routes with
+// distinct prefixes and cargo names each land on the matching entry, not
+// swapped or collapsed onto one shared value.
 func TestRegistryManifestRoutes_ProjectsPrefixAndEcosystems(t *testing.T) {
 	routes := []registryproxy.Route{
 		{
@@ -1185,10 +1115,8 @@ func TestRegistryManifestRoutes_ProjectsPrefixAndEcosystems(t *testing.T) {
 // TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths verifies
 // that registryManifestRoutes converts registryproxy.Route's EnforcedSubtrees
 // one-to-one into registrymanifest.Route's tagged EnforcedPaths (issue
-// #3259) -- carrying the ecosystem-tagged path-set through to the manifest
-// unchanged, distinct from and alongside the untagged EnforcedPaths
-// registryproxy.Route also carries for the Forwarder's own admission check
-// (which this function never copies into the manifest at all).
+// #3259), distinct from the untagged EnforcedPaths registryproxy.Route also
+// carries for the Forwarder's admission check and never copies here.
 func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testing.T) {
 	routes := []registryproxy.Route{
 		{
@@ -1235,11 +1163,10 @@ func TestRegistryProxySocketDir_ReturnsUsableDir(t *testing.T) {
 }
 
 // TestRegistryProxySocketDir_LongTMPDIR_FallsBackToTmp verifies the reported
-// bug (issue #3077): a $TMPDIR long enough that os.TempDir()-based candidate
-// would overflow AF_UNIX's sun_path limit once "spindrift-registry-proxy-*/
-// proxy.sock" is appended -- the case nix develop's own
-// nix-shell.XXXXXX/ prefix nested under macOS's per-user $TMPDIR triggers in
-// practice -- is rescued by falling back to /tmp instead of failing.
+// bug (issue #3077): a $TMPDIR long enough that the os.TempDir() candidate
+// would overflow AF_UNIX's sun_path limit once the proxy dir and proxy.sock
+// are appended, the case nix develop's nix-shell.XXXXXX/ prefix under macOS's
+// per-user $TMPDIR triggers, is rescued by falling back to /tmp.
 func TestRegistryProxySocketDir_LongTMPDIR_FallsBackToTmp(t *testing.T) {
 	setLongTMPDir(t)
 
@@ -1259,12 +1186,9 @@ func TestRegistryProxySocketDir_LongTMPDIR_FallsBackToTmp(t *testing.T) {
 
 // TestRegistryProxySocketDir_NonexistentTMPDIR_ReturnsError verifies that a
 // $TMPDIR whose os.MkdirTemp fails for a reason other than the issue #3077
-// length overflow (here: the base directory does not exist) surfaces that
-// error to the caller instead of being silently rerouted to a fresh /tmp
-// fallback -- only the length check should ever fall back to /tmp. A seam
-// records every base mkProxyDir is called with, so the "never rerouted"
-// half is pinned hermetically instead of by inspecting shared,
-// world-writable /tmp for stray spindrift-registry-proxy-* dirs.
+// length overflow reaches the caller instead of being rerouted to a /tmp
+// fallback; only the length check falls back. A seam records every base
+// mkProxyDir sees, so nothing has to inspect shared, world-writable /tmp.
 func TestRegistryProxySocketDir_NonexistentTMPDIR_ReturnsError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	t.Setenv("TMPDIR", missing)
@@ -1287,12 +1211,10 @@ func TestRegistryProxySocketDir_NonexistentTMPDIR_ReturnsError(t *testing.T) {
 }
 
 // TestRegistryProxySocketDir_RemoveOverlongDirFails_ReturnsError verifies
-// that when the over-long primary dir's cleanup itself fails,
-// registryProxySocketDir wraps and surfaces that removal error instead of
-// falling through to the /tmp fallback (issue #3103) -- a real os.RemoveAll
-// fails on this freshly created dir only under an EACCES/EROFS/EBUSY-class
-// filesystem error, which no test can provoke deterministically, so the
-// branch needs a seam to inject one.
+// that when the over-long primary dir's cleanup fails, registryProxySocketDir
+// wraps and surfaces that removal error instead of falling through to the
+// /tmp fallback (issue #3103). Only an EACCES/EROFS/EBUSY-class error fails
+// os.RemoveAll on a fresh dir, so the branch needs an injected seam.
 func TestRegistryProxySocketDir_RemoveOverlongDirFails_ReturnsError(t *testing.T) {
 	setLongTMPDir(t)
 
@@ -1315,12 +1237,10 @@ func TestRegistryProxySocketDir_RemoveOverlongDirFails_ReturnsError(t *testing.T
 }
 
 // TestRegistryProxySocketDir_TmpFallbackMkdirFails_ReturnsError verifies
-// that the fallback mkProxyDir("/tmp") leg's own error surfaces to the
-// caller (issue #3103). Go line coverage cannot distinguish the two
-// mkProxyDir call sites -- primary mkProxyDir("") and fallback
-// mkProxyDir("/tmp") both run the same source line -- so exercising only
-// the primary leg let this fallback leg read as "covered" while never
-// actually running.
+// that the fallback mkProxyDir("/tmp") leg's own error reaches the caller
+// (issue #3103). Go line coverage cannot tell the two mkProxyDir call sites
+// apart, both on the same source line, so exercising only the primary leg
+// let this fallback leg read as covered while never actually running.
 func TestRegistryProxySocketDir_TmpFallbackMkdirFails_ReturnsError(t *testing.T) {
 	setLongTMPDir(t)
 
@@ -1346,13 +1266,10 @@ func TestRegistryProxySocketDir_TmpFallbackMkdirFails_ReturnsError(t *testing.T)
 }
 
 // TestRun_IssueTextForErrorFailsDispatch verifies that a Config.IssueTextFor
-// error reaches Run's Result as a failure instead of being warned-and-
-// dropped (issue #3445, blocking review finding on dispatch.go:168): every
-// *-prompt.md tells the Box its body is in the injected ISSUE_TEXT section
-// and not to fetch it from the tracker, so a Box launched without it (the
-// old warn-and-continue behavior) would have no recourse. The box never
-// launches at all here (fr.RunCalls stays empty), matching buildBoxEnv
-// failing before runOnce ever starts a container.
+// error reaches Run's Result as a failure instead of being warned and dropped
+// (issue #3445, blocking review finding on dispatch.go:168): every
+// *-prompt.md tells the Box its body is in the injected ISSUE_TEXT section,
+// so a Box launched without it would have no recourse.
 func TestRun_IssueTextForErrorFailsDispatch(t *testing.T) {
 	fr := runner.NewFake()
 	sentinel := errors.New("boom: rate limited")

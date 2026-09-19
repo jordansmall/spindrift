@@ -12,12 +12,9 @@ import (
 	"testing"
 )
 
-// ghFuncInfo is what ghExecGuardViolations needs to know about one top-level
-// function or method declared in a file under scan: its own body (to walk
-// for gh exec call sites) and its parameter names in declaration order, so a
-// routed error passed as an argument to this function can be traced to the
-// correspondingly-positioned parameter when tracking whether some other call
-// site's error reaches a helper through it.
+// ghFuncInfo describes one top-level function or method under scan. It records
+// params in declaration order so an error passed as an argument traces to the
+// correspondingly-positioned parameter.
 type ghFuncInfo struct {
 	name   string
 	line   int
@@ -25,17 +22,11 @@ type ghFuncInfo struct {
 	body   *ast.BlockStmt
 }
 
-// ghCallSite is one recognized gh exec call — cmd.Output()/cmd.Run()/
-// cmd.CombinedOutput() on a variable assigned from exec.Command("gh", ...),
-// or that chain inlined — found while walking a function's body. checkBody
-// is the block ghExecGuardViolations searches to decide whether *this
-// call's own* error value routes through ghCommandErr/ghCommandErrText:
-// either the enclosing if's body (`if _, err := cmd.Output(); err != nil {
-// checkBody }`) or the body of an `if errVar != nil { checkBody }` that
-// immediately follows the call's own assignment statement. checkBody is nil
-// when the call's result was produced but no recognizable if-check
-// immediately followed it — that shape is always a violation, never
-// something silently skipped.
+// ghCallSite is one recognized gh exec call found while walking a function's
+// body. checkBody is the block searched for this call's own error routing:
+// the enclosing if's body, or the body of an `if errVar != nil` that
+// immediately follows the assignment. A nil checkBody means no recognizable
+// check followed the call, which is always a violation, never a silent skip.
 type ghCallSite struct {
 	pos       token.Pos
 	errVar    string
@@ -43,8 +34,8 @@ type ghCallSite struct {
 }
 
 // isGhExecCommandCall reports whether expr is exec.Command("gh", ...) or
-// exec.CommandContext(ctx, "gh", ...) — the latter's "gh" literal sits at
-// Args[1], since Args[0] is the context argument.
+// exec.CommandContext(ctx, "gh", ...), whose "gh" literal sits at Args[1]
+// because Args[0] is the context argument.
 func isGhExecCommandCall(expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
@@ -78,10 +69,6 @@ func isGhExecCommandCall(expr ast.Expr) bool {
 	return err == nil && v == "gh"
 }
 
-// isGhResultCall reports whether call is cmd.Output()/cmd.Run()/
-// cmd.CombinedOutput() where cmd is a variable previously assigned from
-// exec.Command("gh", ...) (tracked in ghVars), or the exec.Command("gh",
-// ...) chain is inlined directly into the call.
 func isGhResultCall(call *ast.CallExpr, ghVars map[string]bool) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
@@ -101,10 +88,9 @@ func isGhResultCall(call *ast.CallExpr, ghVars map[string]bool) bool {
 	return false
 }
 
-// lastIdent returns the name of the last identifier in exprs (an
-// assignment's LHS) — the error variable's own name, since .Output()/
-// .CombinedOutput() return (out, err) and .Run() returns just err, always
-// last.
+// lastIdent returns the name of the last identifier in an assignment's LHS.
+// That is the error variable: Output and CombinedOutput return (out, err) and
+// Run returns just err, so err is always last.
 func lastIdent(exprs []ast.Expr) (string, bool) {
 	if len(exprs) == 0 {
 		return "", false
@@ -116,8 +102,6 @@ func lastIdent(exprs []ast.Expr) (string, bool) {
 	return id.Name, true
 }
 
-// condChecksErrVar reports whether cond is (syntactically) `errVar != nil`
-// or `nil != errVar`.
 func condChecksErrVar(cond ast.Expr, errVar string) bool {
 	bin, ok := cond.(*ast.BinaryExpr)
 	if !ok || bin.Op != token.NEQ {
@@ -134,14 +118,11 @@ func condChecksErrVar(cond ast.Expr, errVar string) bool {
 	return (isErrVar(bin.X) && isNil(bin.Y)) || (isErrVar(bin.Y) && isNil(bin.X))
 }
 
-// collectFuncLits finds every function-literal expression directly reachable
-// from n without crossing into a nested block-bearing statement's own body
-// (those are walked separately, by collectGhCallSites' own recursion, so
-// finding their func-lits from here too would just double-process them).
-// This exists to reach a gh exec call site written inside a closure argument
-// — e.g. relay.go's RelayBundle/CommitSubjects, which each pass a
-// func(dir string) error literal containing their own `gh repo clone` call
-// straight to bundlerelay.Relay/CommitSubjects.
+// collectFuncLits finds function literals directly reachable from n without
+// crossing into a nested block-bearing statement's body, which
+// collectGhCallSites walks itself. It reaches gh exec calls written inside a
+// closure argument, such as relay.go's RelayBundle passing a
+// func(dir string) error literal that runs gh repo clone.
 func collectFuncLits(n ast.Node) []*ast.FuncLit {
 	var lits []*ast.FuncLit
 	ast.Inspect(n, func(x ast.Node) bool {
@@ -157,22 +138,11 @@ func collectFuncLits(n ast.Node) []*ast.FuncLit {
 	return lits
 }
 
-// collectGhCallSites walks body's statement list — recursing into nested
-// if/for/range/switch/select bodies and into function-literal bodies found
-// along the way — and returns one ghCallSite per gh exec call recognized
-// there, in the two shapes this package's real source uses:
-//
-//   - (a) `if _, err := cmd.Output(); err != nil { ... }` (or the
-//     exec.Command("gh", ...) chain inlined into the Init) — the error
-//     variable and check-body both come from the IfStmt itself.
-//   - (b) `out, err := cmd.Output()` (or inlined) as its own statement,
-//     immediately followed in the same statement list by `if err != nil {
-//     ... }` — the check-body is that following if's body.
-//
-// A gh exec result produced in neither shape (e.g. the assignment's very
-// next statement isn't a matching if) still yields a ghCallSite, just one
-// with a nil checkBody — the caller treats that as an automatic violation,
-// so an unrecognized shape can never silently pass.
+// collectGhCallSites returns one ghCallSite per gh exec call in body,
+// recursing into nested blocks and function-literal bodies. It recognizes the
+// two shapes this package's source uses: `if _, err := cmd.Output(); err !=
+// nil`, and an assignment immediately followed by `if err != nil`. Any other
+// shape still yields a site with a nil checkBody, so it cannot pass silently.
 func collectGhCallSites(body *ast.BlockStmt) []ghCallSite {
 	var sites []ghCallSite
 	ghVars := make(map[string]bool)
@@ -189,9 +159,8 @@ func collectGhCallSites(body *ast.BlockStmt) []ghCallSite {
 					continue
 				}
 				if isGhExecCommandCall(s.Rhs[0]) {
-					// cmd := exec.Command("gh", ...) — remember cmd as a gh
-					// exec variable for a later cmd.Output()/.Run() to find;
-					// this statement produces no error of its own yet.
+					// cmd is only bound here; the error arrives at a later
+					// Output or Run on it.
 					if len(s.Lhs) == 1 {
 						if id, ok := s.Lhs[0].(*ast.Ident); ok {
 							ghVars[id.Name] = true
@@ -216,8 +185,7 @@ func collectGhCallSites(body *ast.BlockStmt) []ghCallSite {
 				sites = append(sites, ghCallSite{pos: call.Pos(), errVar: errVar, checkBody: checkBody})
 			case *ast.ExprStmt:
 				if call, ok := s.X.(*ast.CallExpr); ok && isGhResultCall(call, ghVars) {
-					// A gh exec result whose error isn't even captured —
-					// definitely not routed anywhere.
+					// The error is never captured, so it routes nowhere.
 					sites = append(sites, ghCallSite{pos: call.Pos()})
 				}
 			case *ast.DeferStmt:
@@ -276,11 +244,9 @@ func collectGhCallSites(body *ast.BlockStmt) []ghCallSite {
 	return sites
 }
 
-// calleeName resolves a call expression's function name for name-matching
-// against the package's own declared function/method names — a bare
-// identifier (package-level func) or a selector's final name (method call,
-// e.g. e.classifyMergeFailure(...)) — without real type resolution, which is
-// sufficient for this package's own single-package call graph.
+// calleeName resolves a call's function name for matching against the
+// package's own declarations, without real type resolution. Name matching is
+// enough for this package's single-package call graph.
 func calleeName(fun ast.Expr) (string, bool) {
 	switch f := fun.(type) {
 	case *ast.Ident:
@@ -291,8 +257,6 @@ func calleeName(fun ast.Expr) (string, bool) {
 	return "", false
 }
 
-// argIndexOfIdent returns the position of the first argument in args that is
-// the bare identifier name, or -1 if none matches.
 func argIndexOfIdent(args []ast.Expr, name string) int {
 	for i, a := range args {
 		if id, ok := a.(*ast.Ident); ok && id.Name == name {
@@ -302,13 +266,11 @@ func argIndexOfIdent(args []ast.Expr, name string) int {
 	return -1
 }
 
-// routesErr reports whether errVar's value, somewhere within body
-// (recursively, including nested statements), reaches a ghCommandErr/
-// ghCommandErrText call — directly, as one of that call's own arguments, or
-// by being passed as an argument to another locally-declared function/method
-// (funcs) whose correspondingly-positioned parameter is itself, recursively,
-// routed the same way. visited guards against infinite recursion around a
-// call cycle: a function already on the path is never re-entered.
+// routesErr reports whether errVar reaches a ghCommandErr or
+// ghCommandErrText call within body, either directly or by being passed to a
+// locally-declared function whose correspondingly-positioned parameter routes
+// it in turn. visited stops the recursion from re-entering a function already
+// on the path, so a call cycle cannot loop forever.
 func routesErr(body ast.Node, errVar string, funcs map[string]*ghFuncInfo, visited map[string]bool) bool {
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -355,37 +317,11 @@ func routesErr(body ast.Node, errVar string, funcs map[string]*ghFuncInfo, visit
 	return found
 }
 
-// ghExecGuardViolations parses source (the contents of filename) and returns
-// one message per genuine violation of the gh-error adoption guard
-// TestGhExecSitesUseSharedErrorHelper polices:
-//
-//   - a violation is reported for each individual gh exec call site —
-//     cmd.Output()/cmd.Run()/cmd.CombinedOutput() on a variable assigned
-//     from exec.Command("gh", ...), or that chain inlined — whose own error
-//     value does not route through ghCommandErr/ghCommandErrText, either
-//     directly at the call site or by being passed as an argument to a
-//     locally-declared function/method whose correspondingly-positioned
-//     parameter is (recursively) itself routed the same way (e.g. Merge's
-//     own gh exec error, passed to classifyMergeFailure's mergeErr
-//     parameter, which classifyMergeFailure itself passes to
-//     ghCommandErrText). This is real per-call-site taint tracking, not a
-//     per-function or per-file boolean: a function with two gh exec calls,
-//     only one of which routes, is flagged for the other one; a function
-//     that merely calls some unrelated locally-declared function that
-//     happens to route a *different* gh error is not credited for its own,
-//     separate bare-wrapped call.
-//   - a violation is reported for every .CombinedOutput() call anywhere in
-//     the file: CombinedOutput can't have its stderr auto-extracted by
-//     ghCommandErr, and manually wiring stderr back in reintroduces the
-//     double-report risk issue #2864 eliminated.
-//
-// This is a per-call-site check, not a per-function or per-file one: adding
-// a brand-new, bare-wrapped gh exec call anywhere — a second call in a
-// function that already has one correctly-routed call, or a call in a
-// function that merely calls something else that happens to route a
-// different error — is still caught, because each call site's own error is
-// traced independently rather than folded into one function-wide "does this
-// function route *something*" flag.
+// ghExecGuardViolations returns one message per violation of the gh-error
+// adoption guard (issue #2864): a gh exec call site whose own error does not
+// route through ghCommandErr or ghCommandErrText, and any .CombinedOutput()
+// call, whose stderr ghCommandErr cannot extract. Tracking is per call site,
+// so a second bare call in an otherwise-routed function is still caught.
 func ghExecGuardViolations(filename, source string) []string {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, source, 0)
@@ -451,35 +387,11 @@ func ghExecGuardViolations(filename, source string) []string {
 	return violations
 }
 
-// TestGhExecSitesUseSharedErrorHelper walks every non-test .go file directly
-// in this package (the gh-exec adapter, package github) and, for each,
-// parses it and fails on every gh exec call site whose own error does not
-// route — directly, or by being passed to a locally-declared function/method
-// that itself routes it — through ghCommandErr( or ghCommandErrText( — the
-// shared helpers that fold gh's own stderr into the returned error. It also
-// forbids .CombinedOutput() anywhere in the package's non-test source: after
-// issue #2864's adoption, no gh exec site here should need it, since
-// CombinedOutput can't have its stderr auto-extracted by ghCommandErr and
-// manually wiring it back in reintroduces the double-report risk that ticket
-// eliminated.
-//
-// This check is deliberately per-call-site (via ghExecGuardViolations'
-// statement-by-statement AST walk and per-site error taint tracking), not
-// per-function or per-file — a coarser check that credits a whole function
-// (or file) as soon as it contains one correctly-routed call anywhere can
-// miss a second, separate bare-wrapped call in the same function, or a bare
-// call in a function that merely calls something else that happens to
-// route a different error. That's a materially different (finer)
-// granularity than cmd/launcher/pins_test.go's seam guards
-// (TestNoGhExecOutsideForge, TestNoRunnerExecOutsidePackage), which check
-// for *zero occurrences* of a pattern across a file or package — an exact,
-// file-level guard that this one's per-call-site, locally-transitive design
-// does not attempt to match.
-//
-// exec.go is not excluded from the walk even though it's where
-// ghCommandErr/ghCommandErrText are defined: neither helper's own body
-// contains an exec.Command("gh", ...) call, so exec.go has nothing for the
-// first half of the check to flag regardless.
+// TestGhExecSitesUseSharedErrorHelper parses every non-test .go file in this
+// package and fails on any gh exec call site whose error skips ghCommandErr
+// or ghCommandErrText, and on any .CombinedOutput() (issue #2864). exec.go
+// stays in the walk even though it defines those helpers: neither helper body
+// runs gh, so it has nothing to flag.
 func TestGhExecSitesUseSharedErrorHelper(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -503,51 +415,11 @@ func TestGhExecSitesUseSharedErrorHelper(t *testing.T) {
 	}
 }
 
-// TestGhExecGuardViolation_HasTeeth proves ghExecGuardViolations can actually
-// fail a file, not just pass this package's already-fully-converted source
-// vacuously (the same failure mode
-// TestDispatchLabels_ClaimRemoveLabels_MatchesWorkflowFiles's "would parity
-// check pass vacuously" guard at
-// cmd/launcher/internal/forge/claim_strip_parity_test.go avoids): it runs
-// the checker against small inline fixtures, one pattern at a time, and
-// asserts each is flagged (or not) as expected.
-//
-// Four cases in particular exercise the per-call-site design directly, since
-// they're exactly what a coarser, per-function or per-file "some call in
-// here routes" check would get wrong:
-//
-//   - "second unrouted gh exec site in an otherwise-routed file" models a
-//     file with one correctly-routed call site in one function and a
-//     second, separate function with its own bare-wrapped gh exec call —
-//     the file-level blind spot this checker replaces a file-scoped design
-//     specifically to close. A whole-file Contains check would pass this
-//     fixture vacuously, because the file does contain "ghCommandErr(" —
-//     just not anywhere near the offending call.
-//   - "gh exec routed transitively through a locally-declared helper
-//     function" models this package's real Merge/classifyMergeFailure
-//     shape: Merge's own body has the bare exec.Command("gh", "pr",
-//     "merge", ...) call and, on error, calls the separate local method
-//     classifyMergeFailure, which is the one that actually calls
-//     ghCommandErrText with that same error value. A naive per-function
-//     (non-transitive) count would false-positive on this shape, since
-//     Merge itself never calls a helper directly — but it's a genuine
-//     same-error-flows-through-a-parameter case, so this must still pass.
-//   - "two gh exec sites in the same function, only one routed" models the
-//     NeedsUpdate-shaped regression a per-function boolean design misses:
-//     a single function with two separate gh exec call sites, one of which
-//     routes and one of which doesn't. A design that tracks "does this
-//     function route *something*" as one bool passes this vacuously, since
-//     the first site's route flips the whole function's flag; per-call-site
-//     tracking must flag the second site on its own.
-//   - "bare gh exec in a function that also calls an unrelated routed
-//     helper" models the CloseMergedIssue-shaped regression a transitive,
-//     any-locally-called-function closure misses: a function whose own gh
-//     exec call is bare-wrapped, but which also calls a separate,
-//     unrelated locally-declared method that happens to route a
-//     *different* gh error. A closure that credits a function as soon as
-//     it calls anything that routes, regardless of relevance, would pass
-//     this vacuously; per-call-site taint tracking must not credit an
-//     unrelated call.
+// TestGhExecGuardViolation_HasTeeth proves ghExecGuardViolations can fail a
+// file, so the guard above cannot pass vacuously against this package's
+// already-converted source. The fixtures pin shapes a coarser per-function or
+// per-file check gets wrong, including the real Merge/classifyMergeFailure
+// case, where the error routes through a helper's parameter and must pass.
 func TestGhExecGuardViolation_HasTeeth(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -679,11 +551,9 @@ func (e *execClient) classifyMergeFailure(url string, mergeErr error) error {
 			wantFail: false,
 		},
 		{
-			// Models NeedsUpdate (exec_pr.go): a single function with two
-			// separate gh exec call sites, one correctly routed and one
-			// bare-wrapped. A per-function "routes something" boolean would
-			// pass this vacuously since the first site flips it; per-call-
-			// site tracking must flag the second site on its own.
+			// Models NeedsUpdate (exec_pr.go). A per-function "routes
+			// something" boolean passes this vacuously, because the first
+			// site flips the flag for the whole function.
 			name: "two gh exec sites in the same function, only one routed",
 			source: `package github
 
@@ -705,10 +575,9 @@ func run() error {
 			wantFail: true,
 		},
 		{
-			// Models a gh exec call site wrapped via exec.CommandContext
-			// instead of exec.Command — the "gh" literal sits at Args[1]
-			// (Args[0] is the context), which isGhExecCommandCall must also
-			// recognize.
+			// Under exec.CommandContext the "gh" literal sits at Args[1]
+			// because Args[0] is the context. isGhExecCommandCall must
+			// recognize that shape too.
 			name: "bare-wrapped exec.CommandContext(ctx, \"gh\", ...) with no helper call",
 			source: `package github
 
@@ -726,10 +595,9 @@ func run(ctx context.Context) error {
 			wantFail: true,
 		},
 		{
-			// Models a gh exec call site reached only via defer/go, never a
-			// wrapping function literal (collectFuncLits already handles
-			// those) — a bare, uncaptured gh exec result here is still
-			// always a violation.
+			// A site reached only via defer or go, not through a function
+			// literal that collectFuncLits already handles. The result is
+			// never captured, so it is always a violation.
 			name: "bare gh exec reached only via defer",
 			source: `package github
 
@@ -743,13 +611,10 @@ func run() {
 			wantFail: true,
 		},
 		{
-			// Models CloseMergedIssue (exec_issues.go): a helper method with
-			// its own routed gh call, and a second method that calls the
-			// helper first for an unrelated reason (a precondition check)
-			// and then makes its own bare-wrapped gh call. The old
-			// transitive closure exempted the second method because it
-			// calls *something* that routes, regardless of relevance;
-			// per-call-site tracking must not credit that unrelated call.
+			// Models CloseMergedIssue (exec_issues.go): a method whose own gh
+			// call is bare-wrapped, but which first calls a helper that
+			// routes a different error. The old transitive closure exempted
+			// it for calling something that routes, regardless of relevance.
 			name: "bare gh exec in a function that also calls an unrelated routed helper",
 			source: `package github
 

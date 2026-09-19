@@ -10,12 +10,10 @@ import (
 	"testing"
 )
 
-// TestRunNixBuild_InvokesNixRunBuildInPwd verifies RunNixBuild shells out to
-// `nix run .# -- build` (the same command dogfood.sh runs after pulling a
-// merged change) through the package's execCommand seam, with Dir set to
-// pwd so it reads the just-updated tree — the Console's in-session rebuild
-// action (issue #652) needs a fresh nix invocation, not a call into
-// EnsureReady, since IMAGE_DRV/IMAGE_TAG are fixed at process start.
+// The Console's in-session rebuild action (issue #652) needs a fresh nix
+// invocation rather than a call into EnsureReady, because IMAGE_DRV and
+// IMAGE_TAG are fixed at process start. The argv matches what dogfood.sh
+// runs after a pull, and Dir is pwd so the build reads the updated tree.
 func TestRunNixBuild_InvokesNixRunBuildInPwd(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0, stdout: ""})
 	orig := execCommand
@@ -46,9 +44,8 @@ func TestRunNixBuild_InvokesNixRunBuildInPwd(t *testing.T) {
 	}
 }
 
-// TestRunNixBuild_ScriptedFailure_SurfacesStderr verifies a failing build
-// returns an error including the subprocess's stderr, not just a bare exit
-// status — mirroring EnsureReady's own build-failure messages.
+// A failing build must return the subprocess's stderr, not just a bare exit
+// status, matching EnsureReady's own build-failure messages.
 func TestRunNixBuild_ScriptedFailure_SurfacesStderr(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-nix")
@@ -70,12 +67,10 @@ func TestRunNixBuild_ScriptedFailure_SurfacesStderr(t *testing.T) {
 	}
 }
 
-// TestRunNixBuild_CapturesOutput_NeverTouchesRealStdio verifies a
-// background Console rebuild (issue #765) never writes nix's build output
-// to the process's real os.Stdout or os.Stderr — a live Bubble Tea
-// alt-screen program owns those fds, and a concurrent direct writer would
-// corrupt the display — and instead returns the captured text to the
-// caller.
+// A background Console rebuild (issue #765) must return its output to the
+// caller and never write to the process's real os.Stdout or os.Stderr: a
+// live Bubble Tea alt-screen program owns those fds, and a concurrent
+// direct writer would corrupt the display.
 func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdio(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-nix")
@@ -138,12 +133,10 @@ func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdio(t *testing.T) {
 	}
 }
 
-// TestRunNixBuild_CapsOutputSize verifies a verbose build's captured output
-// is bounded rather than retained in full (issue #1130): a cold-store `nix
-// run .# -- build` can emit a multi-MB transcript, and
-// Launcher.rebuildOutput holds whatever RunNixBuild returns until the next
-// rebuild attempt — an unbounded capture here is unbounded retention there.
-// The tail, not the head, must survive: the failure or final status an
+// A cold-store build emits a multi-MB transcript, and Launcher.rebuildOutput
+// holds whatever RunNixBuild returns until the next rebuild attempt, so an
+// unbounded capture here is unbounded retention there (issue #1130). The
+// tail must survive rather than the head: the failure or final status an
 // operator needs is at the end of the log.
 func TestRunNixBuild_CapsOutputSize(t *testing.T) {
 	dir := t.TempDir()

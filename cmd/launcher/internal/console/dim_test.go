@@ -7,12 +7,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// TestDimBase_RestylesAlreadyStyledLineToRoleDim verifies dimBase replaces an
-// already-styled base line's own SGR escapes with RoleDim's, rather than
-// wrapping the existing style: the scrim behind a floating detail modal
-// (issue #1760) must read as uniformly dimmed, not as whatever mix of colors
-// the list happened to render that frame, and leaving the old escapes in
-// place risks a stray reset splitting the new dim style mid-line.
+// dimBase replaces an already-styled line's own SGR escapes with RoleDim's
+// instead of wrapping them, so the scrim behind a floating detail modal
+// (issue #1760) reads as uniformly dimmed and no leftover reset splits the
+// new dim style mid-line.
 func TestDimBase_RestylesAlreadyStyledLineToRoleDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -27,13 +25,9 @@ func TestDimBase_RestylesAlreadyStyledLineToRoleDim(t *testing.T) {
 	}
 }
 
-// TestDimBase_PreservesBlankPaddedRowWidth verifies a base row padded out to
-// the terminal frame with trailing spaces (padBaseForOverlay's blank rows,
-// and the space-padded tail of a short row) keeps its full display width
-// after dimBase styles it: compositeOverlay depends on every base row
-// already reaching the box's column span, so a style that trimmed a
-// space-only or space-tailed line would misalign the box on the very rows
-// most likely to sit fully behind it.
+// compositeOverlay depends on every base row already reaching the box's
+// column span, so a style that trimmed a space-only or space-tailed row
+// would misalign the box on the very rows most likely to sit behind it.
 func TestDimBase_PreservesBlankPaddedRowWidth(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")

@@ -6,9 +6,9 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 )
 
-// TestResolveCapabilities_CodeForgeShapes drives ResolveCapabilities against
-// the fake CodeForge shapes in fake_shapes.go, asserting the optional-seam
-// fields come back nil/non-nil to match each shape's real-adapter analogue.
+// Each fake CodeForge shape in fake_shapes.go stands in for a real adapter,
+// so the optional-seam fields must come back nil or non-nil to match that
+// adapter.
 func TestResolveCapabilities_CodeForgeShapes(t *testing.T) {
 	it := NewFake()
 
@@ -46,11 +46,10 @@ func TestResolveCapabilities_CodeForgeShapes(t *testing.T) {
 	t.Run("github-read-only", func(t *testing.T) {
 		cf := NewFake().AsGithubReadOnly()
 		// AsNoLandingRecorder wraps the tracker behind the IssueTracker
-		// interface, so the wrapper's method set stops at IssueTracker's own
-		// methods and does not promote *Fake's embedded BranchProtectionForge
-		// -- unlike a bare NewFake(), which does and would let a
-		// c.BranchProtectionForge, _ = it.(BranchProtectionForge) bug pass
-		// this assertion too.
+		// interface, so the wrapper's method set does not promote *Fake's
+		// embedded BranchProtectionForge. A bare NewFake() does promote it,
+		// and would let a c.BranchProtectionForge, _ = it.(BranchProtectionForge)
+		// bug pass this assertion.
 		it := NewFake().AsNoLandingRecorder()
 		c := ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 		if c.PRForge == nil {
@@ -74,8 +73,6 @@ func TestResolveCapabilities_CodeForgeShapes(t *testing.T) {
 	})
 }
 
-// TestResolveCapabilities_IssueTrackerShapes mirrors the CodeForge-shapes
-// test above for the IssueTracker-side optional seams.
 func TestResolveCapabilities_IssueTrackerShapes(t *testing.T) {
 	cf := NewFake().AsPushOnly()
 
@@ -136,12 +133,10 @@ func TestResolveCapabilities_IssueTrackerShapes(t *testing.T) {
 	})
 }
 
-// TestResolveCapabilities_BareTrackerSurfaces asserts the five
-// IssueTracker-side seams a bare *IssueTrackerFake implements directly
-// (BlocksOf, Comment, FlagAbandoned, PriorClaimState, StateLabels) resolve
-// against `it`, not `cf` — cf is AsPushOnly(), a shape with none of these
-// five methods, so a resolution line that read cf.(X) instead of it.(X)
-// would leave the field nil and fail here.
+// A bare *IssueTrackerFake implements BlocksOf, Comment, FlagAbandoned,
+// PriorClaimState and StateLabels directly. cf is AsPushOnly(), which has
+// none of them, so a resolution line reading cf.(X) instead of it.(X) leaves
+// the field nil and fails here.
 func TestResolveCapabilities_BareTrackerSurfaces(t *testing.T) {
 	it := NewFake()
 	cf := NewFake().AsPushOnly()
@@ -164,11 +159,9 @@ func TestResolveCapabilities_BareTrackerSurfaces(t *testing.T) {
 	}
 }
 
-// TestResolveCapabilities_SeamListerAndFullyPaginated covers the two
-// IssueTracker-side seams no bare Fake shape implements (SeamLister,
-// FullyPaginated), each paired against cf = AsPushOnly(), which implements
-// neither — so a resolution line that read cf.(X) instead of it.(X) would
-// leave the field nil and fail here.
+// No bare Fake shape implements SeamLister or FullyPaginated. Each is paired
+// against cf = AsPushOnly(), which implements neither, so a resolution line
+// reading cf.(X) instead of it.(X) leaves the field nil and fails here.
 func TestResolveCapabilities_SeamListerAndFullyPaginated(t *testing.T) {
 	cf := NewFake().AsPushOnly()
 
@@ -189,11 +182,9 @@ func TestResolveCapabilities_SeamListerAndFullyPaginated(t *testing.T) {
 	})
 }
 
-// TestResolveCapabilities_DescriptorPassthrough asserts ForgeDescriptor and
-// TrackerDescriptor on the returned Capabilities equal exactly the two
-// descriptors passed in — a plain passthrough, independently selected per
-// role, mirroring main.go's resolveCapabilitySignals pattern of looking up
-// two separate backend.Descriptor rows rather than one merged one.
+// The two descriptors pass through independently, one per role, mirroring
+// main.go's resolveCapabilitySignals, which looks up two separate
+// backend.Descriptor rows rather than one merged row.
 func TestResolveCapabilities_DescriptorPassthrough(t *testing.T) {
 	forgeDesc := backend.Descriptor{Name: "github", ValidAsCodeForge: true}
 	trackerDesc := backend.Descriptor{Name: "jira", ValidAsTracker: true}

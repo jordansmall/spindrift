@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// TestLogPaths_InitialOnly verifies LogPaths returns just the initial run's
-// log, labeled "initial", when no fix or conflict-resolve pass ever ran.
 func TestLogPaths_InitialOnly(t *testing.T) {
 	dir := tempLogDir(t)
 	if err := os.WriteFile(filepath.Join(HostLogDirFor(dir), "issue-1.log"), []byte("x"), 0o644); err != nil {
@@ -26,9 +24,8 @@ func TestLogPaths_InitialOnly(t *testing.T) {
 	}
 }
 
-// TestLogPaths_OrdersInitialFixesAndConflictResolve verifies LogPaths
-// concatenates every pass that exists on disk in chronological order:
-// initial, each fix pass by number, then conflict-resolve.
+// The wanted order is chronological, not alphabetical: initial, each fix pass
+// by number, then conflict-resolve.
 func TestLogPaths_OrdersInitialFixesAndConflictResolve(t *testing.T) {
 	dir := tempLogDir(t)
 	logsDir := HostLogDirFor(dir)
@@ -55,9 +52,8 @@ func TestLogPaths_OrdersInitialFixesAndConflictResolve(t *testing.T) {
 	}
 }
 
-// TestLogPaths_StopsAtFirstMissingFixPass verifies a gap in fix-pass
-// numbering (fix-1 present, fix-2 missing, fix-3 present) truncates the
-// probe at the gap rather than skipping over it — fix-3 never appears.
+// The fixture deliberately leaves a hole at fix-2. LogPaths probes
+// consecutively, so it stops at the hole and never reports fix-3.
 func TestLogPaths_StopsAtFirstMissingFixPass(t *testing.T) {
 	dir := tempLogDir(t)
 	logsDir := HostLogDirFor(dir)
@@ -74,8 +70,6 @@ func TestLogPaths_StopsAtFirstMissingFixPass(t *testing.T) {
 	}
 }
 
-// TestLogPaths_NoLogsOnDisk_ReturnsEmpty verifies an issue with no Dispatch
-// history yet returns an empty slice, not an error.
 func TestLogPaths_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	dir := tempLogDir(t)
 	got := LogPaths(dir, "999")
@@ -84,9 +78,6 @@ func TestLogPaths_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestAllAttemptLogPaths_NoRetries_MatchesLogPaths verifies a pass with only
-// its bare log on disk (no rotated attempts) behaves like LogPaths for that
-// pass -- a single entry with the bare label.
 func TestAllAttemptLogPaths_NoRetries_MatchesLogPaths(t *testing.T) {
 	dir := tempLogDir(t)
 	if err := os.WriteFile(filepath.Join(HostLogDirFor(dir), "issue-1.log"), []byte("x"), 0o644); err != nil {
@@ -105,9 +96,8 @@ func TestAllAttemptLogPaths_NoRetries_MatchesLogPaths(t *testing.T) {
 	}
 }
 
-// TestAllAttemptLogPaths_RotatedAttemptsThenCurrent verifies a pass with two
-// rotated-aside attempts (issue-1.log.1, issue-1.log.2) plus its current
-// bare log all appear, oldest first, labeled initial.1, initial.2, initial.
+// Rotated attempts come before the current bare log, so the wanted order is
+// oldest first and the unsuffixed label comes last.
 func TestAllAttemptLogPaths_RotatedAttemptsThenCurrent(t *testing.T) {
 	dir := tempLogDir(t)
 	logsDir := HostLogDirFor(dir)
@@ -139,11 +129,8 @@ func TestAllAttemptLogPaths_RotatedAttemptsThenCurrent(t *testing.T) {
 	}
 }
 
-// TestAllAttemptLogPaths_RotatedAttemptWithNoCurrentLog verifies a pass
-// mid-retry -- a rotated-aside attempt on disk but no fresh bare log yet
-// (the rotate happened but a new attempt hasn't started, or the run crashed
-// before creating one) -- still surfaces the rotated attempt rather than
-// dropping it because the bare log is missing.
+// A rotated attempt with no bare log is what sits on disk between a rotate and
+// the next attempt, or after a crash. AllAttemptLogPaths must still report it.
 func TestAllAttemptLogPaths_RotatedAttemptWithNoCurrentLog(t *testing.T) {
 	dir := tempLogDir(t)
 	logsDir := HostLogDirFor(dir)
@@ -163,10 +150,8 @@ func TestAllAttemptLogPaths_RotatedAttemptWithNoCurrentLog(t *testing.T) {
 	}
 }
 
-// TestAllAttemptLogPaths_MultiplePassesIndependentRotationHistory verifies
-// each pass's rotated attempts and current log stay grouped together in
-// order, even when only some passes were retried: initial has one rotated
-// attempt plus its current log, fix-1 has only its current log.
+// Only the initial pass was retried, so the fixture checks that one pass's
+// rotated attempts stay with that pass instead of appearing under the next.
 func TestAllAttemptLogPaths_MultiplePassesIndependentRotationHistory(t *testing.T) {
 	dir := tempLogDir(t)
 	logsDir := HostLogDirFor(dir)
@@ -188,8 +173,6 @@ func TestAllAttemptLogPaths_MultiplePassesIndependentRotationHistory(t *testing.
 	}
 }
 
-// TestAllAttemptLogPaths_NoLogsOnDisk_ReturnsEmpty verifies an issue with no
-// Dispatch history yet returns an empty slice, not an error.
 func TestAllAttemptLogPaths_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	dir := tempLogDir(t)
 	got := AllAttemptLogPaths(dir, "999")
@@ -198,11 +181,9 @@ func TestAllAttemptLogPaths_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestHostLogDirFor verifies HostLogDirFor is the single source of truth for
-// a pwd's log directory, and that logPathFor, fixLogPathFor, and
-// conflictLogPathFor all place their files inside it — so the directory can
-// never drift between the naming functions and any other host-side site
-// that reads or creates it.
+// HostLogDirFor is the single source of truth for a pwd's log directory. The
+// table pins every naming function to it so the directory cannot drift from
+// the host-side code that reads or creates it.
 func TestHostLogDirFor(t *testing.T) {
 	pwd := filepath.Join(string(filepath.Separator), "tmp", "x")
 	number := "42"
@@ -227,10 +208,9 @@ func TestHostLogDirFor(t *testing.T) {
 	}
 }
 
-// TestFactory_Driver_ReturnsConfiguredDriver verifies Factory exposes the
-// Driver strategy it was constructed with, so a Console drill-in can render
-// a Dispatch's logs without the Factory growing a second rendering path
-// (#648).
+// Factory must expose the Driver it was constructed with so a Console drill-in
+// renders a Dispatch's logs without the Factory growing a second rendering
+// path (#648).
 func TestFactory_Driver_ReturnsConfiguredDriver(t *testing.T) {
 	drv := fakeDriver{}
 	f, err := NewFactory(Config{}, tempLogDir(t), nil, drv, RealClock())

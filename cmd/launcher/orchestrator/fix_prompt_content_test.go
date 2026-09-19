@@ -2,15 +2,11 @@ package main
 
 import "testing"
 
-// TestFixPromptWarmFixContract is a content-invariant guard (issue #3225) for
-// fix-prompt.md's warm-fix obligations: the no-re-scout posture, the
-// smallest-change rule, and the two override bullets that replace COMMIT's
-// multi-commit guidance and the REVIEW/OPEN A PULL REQUEST steps for a fix
-// pass. Issue #3225 cut the override bullets' design-history rationale (why
-// COMMIT's "several small commits" guidance doesn't fit, and how the
-// branch's history gets overwritten under read-write vs read-only) while
-// keeping every operative rule; pinning each rule here first means that cut
-// can't silently take a rule with it.
+// This test pins fix-prompt.md's warm-fix obligations: the no-re-scout rule,
+// the smallest-change rule, and the two override bullets that replace COMMIT's
+// multi-commit guidance and the REVIEW/OPEN A PULL REQUEST steps. Issue #3225
+// cut those bullets' design-history rationale, so every operative rule is
+// pinned here to catch that cut taking a rule with it.
 func TestFixPromptWarmFixContract(t *testing.T) {
 	assertPromptClauses(t, "fix-prompt.md", []promptClause{
 		{

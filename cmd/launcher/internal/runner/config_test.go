@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// TestNewOCI_UsesConfigFields verifies NewOCI builds its adapter fields from
-// a single Config struct instead of a long positional-argument list (issue
-// #445): every OCI-relevant Config field must reach the constructed adapter.
+// Issue #445 replaced a long positional-argument list with a single Config
+// struct, so every OCI-relevant Config field must reach the adapter.
 func TestNewOCI_UsesConfigFields(t *testing.T) {
 	cfg := Config{
 		Runtime:         "podman",
@@ -71,9 +70,8 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 	}
 }
 
-// TestNewOCI_RancherAliasesToNerdctl verifies runtime = "rancher" drives the
-// OCI adapter's CLI binary as "nerdctl" — the first runtime value that
-// differs from the binary it invokes (issue #1274).
+// Issue #1274: "rancher" is the first runtime value that differs from the
+// binary it invokes, "nerdctl".
 func TestNewOCI_RancherAliasesToNerdctl(t *testing.T) {
 	r := NewOCI(Config{Runtime: "rancher"}, "/pwd")
 	a, ok := r.(*ociAdapter)
@@ -85,8 +83,7 @@ func TestNewOCI_RancherAliasesToNerdctl(t *testing.T) {
 	}
 }
 
-// TestNewBwrap_UsesConfigFields verifies NewBwrap builds its adapter fields
-// from Config instead of a positional-argument list.
+// The bwrap counterpart to the Config-struct constructor above (issue #445).
 func TestNewBwrap_UsesConfigFields(t *testing.T) {
 	cfg := Config{
 		AgentFiles:      "/agent-files",
@@ -121,18 +118,15 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		nixVarSnapshotDir:  nixVarSnapshotDir("/pwd", closureGeneration(cfg.ImageTag)),
 		nixVarSnapshotRoot: nixVarSnapshotRoot("/pwd"),
 	}
-	// reflect.DeepEqual over pointers, not !=: bwrapAdapter now also carries
-	// the mu/running process-tracking fields Kill (issue #649) uses, which a
-	// plain struct comparison can't handle (map[string]*os.Process is not
-	// comparable) — comparing pointers instead of dereferenced values avoids
-	// copying the embedded sync.Mutex.
+	// Compare with reflect.DeepEqual over pointers, not !=: the mu/running
+	// fields Kill uses (issue #649) are not comparable, and dereferencing
+	// would copy the embedded sync.Mutex.
 	if !reflect.DeepEqual(a, &want) {
 		t.Errorf("NewBwrap(cfg) fields = %+v, want %+v", a, &want)
 	}
 }
 
-// TestNewBwrapBuild_UsesConfigFields verifies NewBwrapBuild builds its
-// adapter fields from Config instead of a positional-argument list.
+// The bwrap build counterpart to the Config-struct constructor (issue #445).
 func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 	cfg := Config{
 		AgentFilesDrv:    "/files.drv",
@@ -161,12 +155,9 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 	}
 }
 
-// TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration verifies that a
-// real closure ImageTag (as lib/preambles.nix's bwrap branch renders it — a
-// nix store path like /nix/store/<hash>-agent-closure) scopes the run
-// adapter's nixVarSnapshotDir to a generation subdir named after that
-// closure's basename, rather than the shared flat path every closure used
-// to collide on.
+// The ImageTag fixture is a nix store path because lib/preambles.nix's bwrap
+// branch renders it that way. Each closure gets a generation subdir named
+// after its basename, replacing the flat path every closure collided on.
 func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 	cfg := Config{ImageTag: "/nix/store/abc123-agent-closure"}
 	r := NewBwrap(cfg, "/pwd")
@@ -180,10 +171,8 @@ func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 	}
 }
 
-// TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration is the build
-// adapter's counterpart to TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration
-// — the build side writes the snapshot the run side above mounts, so both
-// must resolve to the same generation-scoped path for a given ImageTag.
+// The build side writes the snapshot the run side above mounts, so both must
+// resolve to the same generation-scoped path for a given ImageTag.
 func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 	cfg := Config{ImageTag: "/nix/store/abc123-agent-closure"}
 	r := NewBwrapBuild(cfg, "/pwd")

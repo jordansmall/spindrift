@@ -2,14 +2,11 @@ package main
 
 import "testing"
 
-// TestReviewAxisPromptOperativeContract is a content-invariant guard (issue
-// #3447) for review-axis-prompt.md's contract: the fan-out spawns two of
-// these per review, and each one must stay a single-axis reporter that never
-// emits a verdict of its own -- the reviewer above it owns that, and an axis
-// agent that drifts into verdict grammar would collide with ADR 0035's
-// scanPassLog parse. The read-only-what-the-brief-names and targeted-diff
-// rules are the other half: an axis agent that reads the whole diff or the
-// whole standards document is the cost the roster entry exists to bound.
+// TestReviewAxisPromptOperativeContract guards review-axis-prompt.md's content
+// (issue #3447): each axis agent must stay a single-axis reporter that never
+// emits a verdict, because verdict grammar here would collide with ADR 0035's
+// scanPassLog parse. The read-only-what-the-brief-names and targeted-diff rules
+// keep an axis agent from reading the whole diff or the whole standards document.
 func TestReviewAxisPromptOperativeContract(t *testing.T) {
 	assertPromptClauses(t, "review-axis-prompt.md", []promptClause{
 		{

@@ -9,10 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestOpenPRForBranch_PRListFailureSurfacesStderr verifies that when `gh pr
-// list` fails, the error OpenPRForBranch returns includes gh's actual
-// stderr — not just "exit status 1" — so isTransientForgeError has a real
-// marker to pattern-match against (issue #2323).
+// The error must carry gh's stderr, not just "exit status 1", so that
+// isTransientForgeError has a real marker to pattern-match against (issue
+// #2323).
 func TestOpenPRForBranch_PRListFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf 'HTTP 502: Bad Gateway\n' >&2
@@ -30,13 +29,9 @@ fi
 	}
 }
 
-// TestOpenPRForBranch_ErrorEmptyStderrNoTrailingColon verifies that when `gh
-// pr list` exits non-zero without writing to stderr, the returned error has
-// no dangling "exit status 1: " trailing colon-space. OpenPRForBranch used to
-// wire its own bytes.Buffer to cmd.Stderr and unconditionally append it;
-// switching to ghCommandErr (which relies on cmd.Output's automatic
-// *exec.ExitError.Stderr population) must preserve the same clean-degrade
-// behavior on an empty stderr (issue #2864).
+// An empty stderr must not leave a dangling "exit status 1: " colon-space.
+// ghCommandErr relies on cmd.Output populating *exec.ExitError.Stderr, and it
+// has to degrade as cleanly as the old hand-wired buffer did (issue #2864).
 func TestOpenPRForBranch_ErrorEmptyStderrNoTrailingColon(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   exit 1
@@ -53,9 +48,8 @@ fi
 	}
 }
 
-// TestBranchExists_APIFailureSurfacesStderr verifies that when `gh api
-// matching-refs` fails, the error BranchExists returns includes gh's actual
-// stderr text, not just the bare exit status (issue #2864).
+// The error must carry gh's stderr text, not just the bare exit status
+// (issue #2864).
 func TestBranchExists_APIFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "api" ]; then
   printf 'HTTP 404: Not Found\n' >&2
@@ -73,9 +67,7 @@ fi
 	}
 }
 
-// TestPRForBranch_PRListFailureSurfacesStderr verifies that when `gh pr
-// list` fails, the error PRForBranch returns includes gh's actual stderr
-// text (issue #2864).
+// The error must carry gh's stderr text (issue #2864).
 func TestPRForBranch_PRListFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf 'HTTP 502: Bad Gateway\n' >&2
@@ -93,10 +85,8 @@ fi
 	}
 }
 
-// TestCheckState_GraphQLFailureSurfacesStderr verifies that when `gh api
-// graphql` fails, the error CheckState returns includes gh's actual stderr
-// text — covers the GraphQL-shaped call sites alongside the REST- and `gh
-// pr`-shaped ones above (issue #2864).
+// The error must carry gh's stderr text. This covers the GraphQL-shaped call
+// sites alongside the REST- and `gh pr`-shaped ones above (issue #2864).
 func TestCheckState_GraphQLFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
   printf 'HTTP 403: Forbidden\n' >&2
@@ -114,11 +104,10 @@ fi
 	}
 }
 
-// TestMerge_TransientFailureSurfacesStderr verifies that when `gh pr merge`
-// fails with a transient-looking stderr (not a genuine conflict), the
-// returned error is still errors.Is-detectable as forge.ErrMergeTransient
-// and includes gh's stderr text, now routed through ghCommandErrText rather
-// than a hand-rolled format string (issue #2864).
+// A transient-looking stderr (not a genuine conflict) must stay
+// errors.Is-detectable as forge.ErrMergeTransient now that the error text
+// comes from ghCommandErrText rather than a hand-rolled format string (issue
+// #2864).
 func TestMerge_TransientFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
   printf 'HTTP 503: Service Unavailable\n' >&2
@@ -139,10 +128,8 @@ fi
 	}
 }
 
-// TestMerge_GenericFailureSurfacesStderr verifies that when `gh pr merge`
-// fails with a non-conflict, non-transient stderr, the returned error still
-// includes gh's actual stderr text, routed through ghCommandErrText (issue
-// #2864).
+// A non-conflict, non-transient stderr must still reach the returned error
+// through ghCommandErrText (issue #2864).
 func TestMerge_GenericFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
   printf 'HTTP 403: permission denied\n' >&2
@@ -163,11 +150,9 @@ fi
 	}
 }
 
-// TestProbe_AuthFailureSurfacesStderr verifies that when `gh auth status`
-// fails, the error Probe returns is still errors.Is-detectable as
-// forge.ErrAuthFailure and now also includes gh's actual stderr text — a
-// real diagnostic gap before ghCommandErr's adoption here, since the old
-// code path never captured `gh auth status`'s stderr at all (issue #2864).
+// The error must stay errors.Is-detectable as forge.ErrAuthFailure and also
+// carry gh's stderr: before ghCommandErr, this path never captured `gh auth
+// status`'s stderr at all (issue #2864).
 func TestProbe_AuthFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
   printf 'You are not logged into any GitHub hosts\n' >&2
@@ -191,10 +176,8 @@ fi
 	}
 }
 
-// TestEnqueueAutoMerge_FailureSurfacesStderr verifies that when `gh pr merge
-// --auto` fails, the returned error includes gh's actual stderr text — the
-// old code path never captured stderr at all (cmd.Run with no Stderr wired),
-// so it degraded to the bare "exit status 1" (issue #2864).
+// The error must carry gh's stderr text. The old path called cmd.Run with no
+// Stderr wired, so it degraded to a bare "exit status 1" (issue #2864).
 func TestEnqueueAutoMerge_FailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
   printf 'HTTP 422: Unprocessable Entity\n' >&2
@@ -212,10 +195,8 @@ fi
 	}
 }
 
-// TestMarkReady_FailureSurfacesStderr verifies that when `gh pr ready` fails,
-// the error runGHReadyToggle produces (via MarkReady) includes gh's actual
-// stderr text, now routed through ghCommandErr instead of a hand-rolled
-// suffix (issue #2864).
+// runGHReadyToggle's error must carry gh's stderr text now that it routes
+// through ghCommandErr instead of a hand-rolled suffix (issue #2864).
 func TestMarkReady_FailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
   printf 'HTTP 404: Not Found\n' >&2
@@ -233,11 +214,9 @@ fi
 	}
 }
 
-// TestCreateLabel_FailureSurfacesStderr verifies that when `gh label create`
-// fails, the returned error includes gh's actual stderr text — CreateLabel
-// used to merge stdout+stderr via CombinedOutput; it now leaves Stderr nil
-// for cmd.Output to auto-populate, same as every other ghCommandErr site
-// (issue #2864).
+// CreateLabel used to merge stdout and stderr through CombinedOutput. It now
+// leaves Stderr nil for cmd.Output to populate, like every other
+// ghCommandErr site (issue #2864).
 func TestCreateLabel_FailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "label" ] && [ "$2" = "create" ]; then
   printf 'HTTP 422: label already exists\n' >&2
@@ -255,8 +234,7 @@ fi
 	}
 }
 
-// TestListLabels_FailureSurfacesStderr verifies that when `gh label list`
-// fails, the returned error includes gh's actual stderr text (issue #2864).
+// The error must carry gh's stderr text (issue #2864).
 func TestListLabels_FailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "label" ] && [ "$2" = "list" ]; then
   printf 'HTTP 502: Bad Gateway\n' >&2
@@ -274,10 +252,10 @@ fi
 	}
 }
 
-// TestRebase_CloneFailureSurfacesStderr verifies that when `gh repo clone`
-// fails, the returned error includes gh's actual stderr text — the old code
-// path never captured stderr at all (cmd.Run with no Stderr wired), so it
-// degraded to the bare "exit status 1" (issue #2864).
+// The error must carry gh's stderr text. The old path called cmd.Run with no
+// Stderr wired, so a clone failure degraded to a bare "exit status 1" (issue
+// #2864). The fake gh must answer `pr view` first, because Rebase reads the
+// branch names before it clones.
 func TestRebase_CloneFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
   printf 'feature\tmain\n'
@@ -299,11 +277,9 @@ fi
 	}
 }
 
-// TestOpenPRForBranch_SingleGHCall verifies OpenPRForBranch resolves a found
-// PR with exactly one `gh` invocation. It used to make a second `gh pr view
-// --json isDraft` call solely to populate the (now-removed) draft field;
-// that call is gone, so a single `gh pr list` must be enough to report the
-// PR as found.
+// OpenPRForBranch used to make a second `gh pr view --json isDraft` call
+// solely to populate the now-removed draft field. That call is gone, so one
+// `gh pr list` must be enough to report the PR as found.
 func TestOpenPRForBranch_SingleGHCall(t *testing.T) {
 	dir := prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   echo "https://github.com/owner/repo/pull/42"
@@ -333,14 +309,12 @@ exit 1
 	}
 }
 
-// TestProbe_RateLimitedSurfacesErrRateLimit verifies that when `gh repo
-// view` fails with rate-limit-shaped stderr, Probe's returned error is
-// errors.Is-detectable as forge.ErrRateLimit — proving the central
-// ghCommandErrText classification (issue #2865) reaches a real adapter
-// method end-to-end, not just the exec.go helper in isolation.
+// Rate-limit-shaped stderr from `gh repo view` must reach Probe's caller as
+// forge.ErrRateLimit, proving the central ghCommandErrText classification
+// (issue #2865) reaches a real adapter method, not just the exec.go helper.
 func TestProbe_RateLimitedSurfacesErrRateLimit(t *testing.T) {
-	// Call 0: gh auth status — succeed.
-	// Call 1: gh repo view — fail with rate-limit stderr.
+	// The fake only branches on `repo`, so `gh auth status` succeeds first and
+	// Probe gets as far as the rate-limited call.
 	prependFakeGH(t, `if [ "$1" = "repo" ]; then
   printf 'API rate limit exceeded for installation ID 12345678.\n' >&2
   exit 1
@@ -360,15 +334,11 @@ fi
 	}
 }
 
-// TestProbe_AuthRateLimitedSurfacesErrRateLimit verifies that when `gh auth
-// status` itself fails with rate-limit-shaped stderr (GitHub's token
-// validation call getting throttled), Probe's returned error is
-// errors.Is-detectable as forge.ErrRateLimit and NOT as forge.ErrAuthFailure
-// — the two sentinels must stay mutually exclusive so a caller (e.g. doctor)
-// checking ErrAuthFailure first doesn't misreport a throttled operator's
-// real cause (issue #2865, round 2: the round-1 fix only covered the `gh
-// repo view` branch, missing this identical bug in the `gh auth status`
-// branch).
+// A throttled `gh auth status` must classify as forge.ErrRateLimit and not
+// forge.ErrAuthFailure: the two sentinels stay mutually exclusive so a caller
+// that checks ErrAuthFailure first (doctor, for one) does not misreport the
+// cause. Issue #2865 round 1 fixed only the `gh repo view` branch and left
+// the same bug here.
 func TestProbe_AuthRateLimitedSurfacesErrRateLimit(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "auth" ]; then
   printf 'error validating token: HTTP 403: API rate limit exceeded for user ID 1.\n' >&2

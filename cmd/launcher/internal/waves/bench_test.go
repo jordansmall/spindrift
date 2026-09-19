@@ -10,13 +10,10 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 )
 
-// silenceStdout redirects os.Stdout to /dev/null for the duration of a
-// benchmark run, restoring it via b.Cleanup. Unlike testutil.CaptureStdout's
-// pipe-plus-draining-goroutine approach, writing to /dev/null is a cheap,
-// ~constant-cost syscall that won't itself dominate the measurement -- the
-// goal here is only to stop fmt.Print output from interleaving with go
-// test's own benchmark result line and from being the dominant cost, not to
-// capture or assert on the emitted text.
+// silenceStdout points os.Stdout at /dev/null for the benchmark's duration.
+// testutil.CaptureStdout's pipe and draining goroutine would cost enough to
+// dominate the measurement. These benchmarks never assert on the text; they
+// only need fmt.Print output kept out of go test's own result lines.
 func silenceStdout(b *testing.B) {
 	b.Helper()
 	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
@@ -31,10 +28,9 @@ func silenceStdout(b *testing.B) {
 	})
 }
 
-// staleDrainReportBenchFixture builds the dir/queue/report
-// BenchmarkReportStaleDrain and BenchmarkReportStaleDrainReleasingMu both
-// loop against, and silences stdout for the benchmark's duration -- shared
-// setup so the pair stays in lockstep instead of copy-pasted.
+// staleDrainReportBenchFixture is shared setup so BenchmarkReportStaleDrain
+// and BenchmarkReportStaleDrainReleasingMu keep measuring the same dir, queue
+// and report instead of drifting apart as two copy-pasted blocks.
 func staleDrainReportBenchFixture(b *testing.B) (dir string, queue Queue, report StaleDrainReport) {
 	b.Helper()
 	dir = tempLogDir(b)
@@ -49,10 +45,9 @@ func staleDrainReportBenchFixture(b *testing.B) (dir string, queue Queue, report
 	return dir, queue, report
 }
 
-// truncateEvery truncates path back to empty every step iterations, with
-// the truncation itself excluded from the timer -- stale-drain.log is opened
-// O_APPEND (continuous.go), so an unbounded b.N would otherwise grow the
-// file without bound and drift the measured append cost across the run.
+// truncateEvery empties path every step iterations with the timer stopped.
+// continuous.go opens stale-drain.log O_APPEND, so an unbounded b.N would
+// otherwise grow the file without bound and drift the measured append cost.
 func truncateEvery(b *testing.B, path string, step, i int) {
 	if i%step != 0 {
 		return
@@ -64,18 +59,11 @@ func truncateEvery(b *testing.B, path string, step, i int) {
 	b.StartTimer()
 }
 
-// BenchmarkReportStaleDrain measures headlessQueue.ReportStaleDrain's own
-// I/O cost (stdout print, stale-drain.log open/append/write/close) in
-// isolation from reportStaleDrainReleasingMu's locking -- a baseline for
-// #2775's claim that moving this I/O outside mu is worth it, and a guard
-// against a future change silently making the I/O path itself much more
-// expensive.
-//
-// Recorded on the #2775 fix (I/O-only baseline, no mutex involved):
-// ~21.6µs/op, 793 B/op, 19 allocs/op -- ns/op and B/op vary by machine and Go
-// version, but this is the cost
-// BenchmarkReportStaleDrainReleasingMu's unlock/lock overhead is negligible
-// relative to.
+// BenchmarkReportStaleDrain measures ReportStaleDrain's I/O cost alone (stdout
+// print, stale-drain.log open/append/write/close), as the baseline for #2775's
+// claim that moving this I/O outside mu is worth it. Recorded on the #2775
+// fix, with no mutex involved: ~21.6µs/op, 793 B/op, 19 allocs/op, which vary
+// by machine and Go version.
 func BenchmarkReportStaleDrain(b *testing.B) {
 	dir, queue, report := staleDrainReportBenchFixture(b)
 	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
@@ -88,18 +76,11 @@ func BenchmarkReportStaleDrain(b *testing.B) {
 	}
 }
 
-// BenchmarkReportStaleDrainReleasingMu measures the actual path #2775
-// changed: reportStaleDrainReleasingMu's unlock-I/O-relock cycle, modeled on
-// how both real call sites in continuous.go use it -- mu already held on
-// entry, held again on exit. Compared against BenchmarkReportStaleDrain's
-// I/O-only baseline, this isolates the unlock/lock overhead #2775 added
-// around that same I/O.
-//
-// Recorded on the #2775 fix: ~21.1µs/op, 809 B/op, 19 allocs/op -- within
-// noise of BenchmarkReportStaleDrain's baseline, confirming the unlock/lock
-// overhead is negligible relative to the I/O cost. ns/op and B/op vary by
-// machine and Go version; that shape of comparison is the invariant worth
-// recording.
+// BenchmarkReportStaleDrainReleasingMu measures the path #2775 changed, with
+// mu held on entry and exit as both call sites in continuous.go hold it, so
+// the gap against BenchmarkReportStaleDrain is the added unlock/lock overhead.
+// Recorded on the #2775 fix: ~21.1µs/op, 809 B/op, 19 allocs/op, within noise
+// of that baseline. Compare the two rather than reading either number alone.
 func BenchmarkReportStaleDrainReleasingMu(b *testing.B) {
 	dir, queue, report := staleDrainReportBenchFixture(b)
 	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)

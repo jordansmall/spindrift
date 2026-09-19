@@ -12,8 +12,6 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestDrainMaxJobs_SkipsBlockedDispatchesNext verifies that when MAX_JOBS=1
-// the oldest blocked issue is skipped and the next unblocked issue is dispatched.
 func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -24,7 +22,7 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	// Issue #1 is blocked by #3 (open, no complete label).
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // blocker, not complete
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	fr := runner.NewFake()
 
@@ -41,7 +39,6 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
-	// Only the unblocked issue #2 must have been dispatched.
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
 	}
@@ -50,10 +47,9 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext verifies that MAX_JOBS
-// drain skips a Dispatchable issue whose declared ## Touches overlaps an
-// InProgress issue's, without waiting, and dispatches the next candidate —
-// matching how it already treats an unmet declared blocker.
+// Drain treats a ## Touches overlap with an InProgress issue the same way it
+// treats an unmet declared blocker: skip without waiting, dispatch the next
+// candidate.
 func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -96,11 +92,9 @@ func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_HoldsDependentWhenBlockerFails verifies that drain mode
-// holds (rather than cascade-fails) an issue whose in-batch blocker has
-// already reached the failed label: agent-failed is recoverable
-// (agent-recover retries it), so the dependent must wait across retries
-// instead of being mislabeled failed itself (#1984, incident #1972).
+// agent-failed is recoverable (agent-recover retries it), so an issue whose
+// in-batch blocker failed must wait across retries rather than be
+// cascade-failed itself (#1984, incident #1972).
 func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -108,7 +102,6 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 	c.MaxJobs = 2
 
 	fc := forge.NewFake(dispatchLabels(c, label))
-	// Issue #1 is blocked by #3 which has already reached the failed label.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
@@ -130,7 +123,6 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 		}
 	})
 
-	// Issue #1 must be held, not transitioned to failed.
 	iss1, err := fc.Issue("1")
 	if err != nil {
 		t.Fatalf("Issue(1): %v", err)
@@ -145,7 +137,6 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 		t.Errorf("output must hold with the standard blocked-skip line; got:\n%s", out)
 	}
 
-	// Issue #2 (unblocked) must still be dispatched.
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
 	}
@@ -154,13 +145,9 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker verifies that a
-// priority-sorted Issues slice — where a Critical-priority dependent leads a
-// Low-priority blocker, as NewPlan's forge.SortByPriority call would produce (#2281) —
-// still holds the dependent back: drainMaxJobs' own blocker gate is blind to
-// list position, so the still-unready dependent is skipped regardless of
-// where the priority sort placed it, and the ready blocker dispatches on its
-// own turn.
+// NewPlan's forge.SortByPriority call can put a Critical dependent ahead of
+// its Low blocker (#2281). The blocker gate is blind to list position, so the
+// dependent is still skipped and the blocker dispatches on its own turn.
 func TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -168,8 +155,6 @@ func TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker(t *testing.T) {
 	c.MaxJobs = 0
 
 	fc := forge.NewFake(dispatchLabels(c, label))
-	// Issue #1 is the (Low-priority) blocker; issue #2 is the
-	// (Critical-priority) dependent, blocked by #1, which is not complete.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
@@ -181,8 +166,8 @@ func TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker(t *testing.T) {
 	s := newSettle(fc, fc)
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	out := testutil.CaptureStdout(t, func() {
-		// Issue order mirrors what NewPlan's priority sort would produce:
-		// the Critical dependent (#2) ahead of its Low blocker (#1).
+		// This order mirrors the priority sort: the Critical dependent (#2)
+		// ahead of its Low blocker (#1).
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "2", Title: "dependent", Priority: forge.PriorityCritical},
 			{Number: "1", Title: "blocker", Priority: forge.PriorityLow},
@@ -202,9 +187,8 @@ func TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_MaxJobsCapHonored verifies that the maxJobs cap is
-// respected even when more unblocked issues follow the cap-trigger in the
-// batch — i.e. the labeled-break exits the for loop, not just the switch.
+// More unblocked issues follow the one that trips the cap, so this pins the
+// labeled break exiting the for loop and not just the switch.
 func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -235,10 +219,9 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked verifies
-// that when MAX_JOBS caps a wave short of the full ready set, the remaining
-// count message does not claim the leftover issues are "blocked or
-// deferred" — they are simply past the cap, ready for the next invocation.
+// Issues left over when MAX_JOBS caps a wave are past the cap and ready for
+// the next invocation, so the remaining-count message must not call them
+// blocked or deferred.
 func TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -275,10 +258,8 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked(t *testing.T
 	}
 }
 
-// TestDrainMaxJobs_ZeroMeansUncapped verifies that cfg.MaxJobs == 0 drains
-// every unblocked issue in the batch in one wave — the cap does not apply at
-// zero (ADR 0019: MAX_JOBS=0 is an uncapped drain batch, not "dispatch
-// nothing").
+// ADR 0019: MAX_JOBS=0 is an uncapped drain batch, not "dispatch nothing", so
+// zero must drain every unblocked issue in one wave.
 func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -309,11 +290,9 @@ func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave verifies that when a
-// wave dispatches some issues but others stay blocked or deferred, the
-// launcher says how many remain and names re-running dispatch as the way to
-// continue — a bare `dispatch` caller must never be left believing the queue
-// drained (ADR 0019).
+// Someone running a bare dispatch must never be left believing the queue
+// drained, so a partial wave reports how many issues remain and names
+// re-running dispatch as the way to continue (ADR 0019).
 func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -351,9 +330,8 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable verifies that drainMaxJobs
-// returns ErrOpenNoneDispatchable when open dispatchable issues exist but none
-// can be selected (all blocked), so a driving loop stops instead of hot-looping.
+// Open dispatchable issues that are all blocked return
+// ErrOpenNoneDispatchable so a driving loop stops instead of hot-looping.
 func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -363,7 +341,7 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	fc := forge.NewFake()
 	// Issue #1 is blocked by #3 (open, not yet complete).
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // blocker
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	fr := runner.NewFake()
 
@@ -385,12 +363,10 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand is
-// the regression test for #524's acceptance criterion: `dispatch 12 15`
-// where #15 is blocked by in-list, unmerged #12 dispatches #12 only in one
-// invocation; #15 is not claimed; the output names #15 and the exact re-run
-// command so the operator can carry the remainder themselves (selective
-// dispatch bypasses the label gate, so re-discovery can't).
+// Regression test for #524: dispatch 12 15, where #15 is blocked by in-list,
+// unmerged #12, dispatches only #12 and leaves #15 unclaimed. Selective
+// dispatch bypasses the label gate, so re-discovery cannot pick up the
+// remainder and the output must print the exact re-run command instead.
 func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *testing.T) {
 	c := baseConfig()
 	label := "ready-for-agent"
@@ -438,10 +414,9 @@ func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *te
 	}
 }
 
-// TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint is the
-// regression test for #524's acceptance criterion: zero selected with
-// issues held (everything overlap-deferred) exits 3 (ErrOpenNoneDispatchable)
-// and still prints the re-run hint, rather than waiting in-process.
+// Regression test for #524: with everything overlap-deferred, selective
+// dispatch exits 3 (ErrOpenNoneDispatchable) and still prints the re-run hint
+// rather than waiting in-process.
 func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -486,9 +461,8 @@ func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_BlockedLineNamesBlockers verifies that the blocked-skip
-// line names the specific unready blocker issue number(s), comma-joined,
-// rather than the generic "a blocker is not 'agent-complete'" message.
+// The blocked-skip line names the unready blockers, comma-joined, instead of
+// the generic "a blocker is not 'agent-complete'" message.
 func TestDrainMaxJobs_BlockedLineNamesBlockers(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -524,11 +498,10 @@ func TestDrainMaxJobs_BlockedLineNamesBlockers(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries reproduces the #1972
-// incident on the batch drain path: a blocker fails, gets retried via
-// agent-recover, and fails again before finally recovering. The dependent
-// must stay held (never gain FailedLabel) through every failed round, then
-// dispatch cleanly the moment the blocker reaches a satisfied state.
+// Reproduces the #1972 incident on the batch drain path: a blocker fails, is
+// retried via agent-recover, fails again, then recovers. The dependent must
+// stay held through every failed round and dispatch once the blocker reaches
+// a satisfied state.
 func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -548,9 +521,9 @@ func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	s := newSettle(fc, fc)
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
-	// Round 1 and round 2 (agent-recover retried #3, failed again): #1 must
-	// never be cascade-failed, only held (ErrOpenNoneDispatchable signals
-	// the whole batch is held, not an error worth failing the test on).
+	// Round 2 stands for agent-recover retrying #3 and failing again.
+	// ErrOpenNoneDispatchable here means the whole batch is held, not a
+	// failure.
 	for round := 1; round <= 2; round++ {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "dependent"},
@@ -570,7 +543,7 @@ func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 		t.Fatalf("RunCalls: got %d, want 0 before the blocker recovers", len(fr.RunCalls))
 	}
 
-	// Round 3: #3 finally recovers and completes -- close it out.
+	// Round 3: #3 recovers, so closing it satisfies the blocker.
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}, State: "CLOSED"})
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "dependent"},
@@ -582,11 +555,10 @@ func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource verifies that the
-// blocked-claim marker drainMaxJobs writes for the OriginClaimed path
-// carries the same source annotation (native relationship vs body-text
-// parsing) as preview and the blocked-skip notice, since the release
-// workflow interpolates this file's contents verbatim into its comment.
+// The release workflow interpolates the blocked-claim marker verbatim into
+// its comment, so the OriginClaimed path must annotate the blocker source
+// (native relationship vs body-text parsing) like preview and the
+// blocked-skip notice do.
 func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -594,7 +566,7 @@ func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
-	// Issue #1 is claimed (in-progress); its blocker #3 is open (unmet, native-sourced).
+	// Issue #1 is claimed; its blocker #3 is open, so unmet.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
@@ -621,10 +593,9 @@ func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade verifies that
-// when Origin is OriginClaimed (the single-issue path), an in-batch blocker
-// reaching failed state does NOT cascade-fail the claimed issue. The issue is
-// already on in-progress, so cascading would produce a double-labeled state.
+// On the OriginClaimed single-issue path, a failed in-batch blocker must not
+// cascade-fail the claimed issue: it already carries in-progress, so
+// cascading would leave it double-labeled.
 func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -632,7 +603,6 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	c.MaxJobs = 1
 
 	fc := forge.NewFake()
-	// Issue #1 is on in-progress (claimed); its blocker #3 has failed.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
 
@@ -644,15 +614,14 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
-	// The claimed path returns nil (writes blocked marker path internally),
-	// not ErrOpenNoneDispatchable and not a cascade-fail.
+	// The claimed path writes the blocked marker and returns nil, not
+	// ErrOpenNoneDispatchable and not a cascade-fail.
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
 	}, edges, nil, nil, OriginClaimed, claimer); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
-	// Issue #1 must NOT have been failed — it's on in-progress, not dispatchable.
 	iss1, err := fc.Issue("1")
 	if err != nil {
 		t.Fatalf("Issue(1): %v", err)
@@ -665,11 +634,10 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue verifies that an issue named
-// in NewReadiness's failed set (#1103) — its own DepsOf call errored, a
-// transient tracker hiccup indistinguishable from "confirmed zero blockers"
-// in edges alone — is held for a later invocation rather than dispatched or
-// cascade-failed, mirroring the console's Queue.Discover hold (#752).
+// An issue in NewReadiness's failed set had its own DepsOf call error, which
+// in edges alone looks identical to confirmed zero blockers, so drain holds it
+// for a later invocation instead of dispatching or cascade-failing it (#1103,
+// mirroring the console's Queue.Discover hold in #752).
 func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -715,12 +683,10 @@ func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker verifies that
-// when the OriginClaimed single-issue path's own DepsOf call failed (#1103),
-// drainMaxJobs writes .spindrift/logs/blocked.txt so the release workflow reverts the
-// claim and retries later, instead of silently doing nothing (edges[num]
-// being empty from the failed lookup must never read as "confirmed zero
-// blockers").
+// When the OriginClaimed path's own DepsOf call failed (#1103), an empty
+// edges[num] must never read as confirmed zero blockers, so drain writes
+// .spindrift/logs/blocked.txt and the release workflow reverts the claim and
+// retries later.
 func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"

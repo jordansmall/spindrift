@@ -6,12 +6,10 @@ import (
 	"testing"
 )
 
-// TestLoadRegistryParsesAllRows loads testdata/registry.json — the hand
-// transcription of every row in lib/fragments.nix — and spot-checks a
-// handful of known rows rather than asserting the full payload verbatim, so
-// this test doesn't itself become the thing that silently drifts from
-// fragments.nix. On a wantRows mismatch, reconcile against fragments.nix
-// itself (`git log --oneline -- lib/fragments.nix` for what moved).
+// testdata/registry.json is a hand transcription of lib/fragments.nix. This
+// test spot-checks known rows rather than the whole payload, so the test itself
+// does not become the thing that silently drifts from fragments.nix. On a
+// wantRows mismatch, reconcile against fragments.nix and its history.
 func TestLoadRegistryParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/registry.json")
 	if err != nil {
@@ -53,9 +51,8 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Errorf("reg.Rows[1].ExtraSubstVars = %v, want empty", caveman.ExtraSubstVars)
 	}
 
-	// Another extraSubstVars row (ci-failure.md), per fragments.nix's
-	// header comment naming exactly these three as the only ones that
-	// interpolate a variable inside their own body.
+	// fragments.nix's header comment names exactly three rows that interpolate
+	// a variable inside their own body. This is the second of them.
 	var ciFailure *FragmentRow
 	for i := range reg.Rows {
 		if reg.Rows[i].Fragment == "ci-failure.md" {
@@ -73,8 +70,8 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Errorf("ci-failure.md row ExtraSubstVars = %v, want [CI_FAILURE_SUMMARY]", ciFailure.ExtraSubstVars)
 	}
 
-	// The third (code-review-baked.md, issue #3447): its anchor interpolates
-	// the fan-out agent type this run provisions.
+	// The third row that interpolates a variable. Its anchor holds the fan-out
+	// agent type this run provisions (issue #3447).
 	var codeReviewBaked *FragmentRow
 	for i := range reg.Rows {
 		if reg.Rows[i].Fragment == "code-review-baked.md" {
@@ -89,8 +86,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Errorf("code-review-baked.md row ExtraSubstVars = %v, want [REVIEW_FANOUT_AGENT]", codeReviewBaked.ExtraSubstVars)
 	}
 
-	// Exactly three rows carry extraSubstVars, matching fragments.nix's header
-	// comment.
+	// fragments.nix's header comment fixes the count at three.
 	withExtra := 0
 	for _, r := range reg.Rows {
 		if len(r.ExtraSubstVars) > 0 {
@@ -102,8 +98,6 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 	}
 }
 
-// TestLoadRegistryMalformed covers the error path: invalid JSON must return
-// a non-nil, wrapped error, never panic.
 func TestLoadRegistryMalformed(t *testing.T) {
 	f, err := os.Open("testdata/malformed.json")
 	if err != nil {
@@ -116,24 +110,20 @@ func TestLoadRegistryMalformed(t *testing.T) {
 	}
 }
 
-// TestLoadRegistryFileMalformed exercises LoadRegistryFile's own error path
-// alongside LoadRegistry's.
 func TestLoadRegistryFileMalformed(t *testing.T) {
 	if _, err := LoadRegistryFile("testdata/malformed.json"); err == nil {
 		t.Fatal("LoadRegistryFile(malformed) = nil error, want non-nil")
 	}
 }
 
-// TestLoadRegistryFileNonexistent covers a nonexistent path: a wrapped,
-// non-nil error, never a panic.
 func TestLoadRegistryFileNonexistent(t *testing.T) {
 	if _, err := LoadRegistryFile("testdata/does-not-exist.json"); err == nil {
 		t.Fatal("LoadRegistryFile(nonexistent) = nil error, want non-nil")
 	}
 }
 
-// TestLoadRegistryEmptyReader covers an empty reader (io.EOF from the JSON
-// decoder before any token is read): a non-nil error, never a panic.
+// An empty reader hands the JSON decoder io.EOF before any token, which must
+// come back as an error rather than an empty registry.
 func TestLoadRegistryEmptyReader(t *testing.T) {
 	if _, err := LoadRegistry(strings.NewReader("")); err == nil {
 		t.Fatal("LoadRegistry(empty reader) = nil error, want non-nil")

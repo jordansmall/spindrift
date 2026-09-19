@@ -9,15 +9,11 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgejo"
 )
 
-// TestForgejoClient_Priority_ResolvedFromLabels is a wiring smoke test, not
-// the exhaustive label-matching matrix — that lives in
-// forge.ResolvePriority's own TestResolvePriority (priority_test.go in the
-// forge package), which every IssueTracker adapter shares instead of
-// re-deriving the same switch (mirrors DispatchLabels.ClaimRemoveLabels's
-// shared-helper precedent, and github's own exec_issues.go wiring covered by
-// github/priority_test.go). This just confirms toForgeIssue — the single
-// conversion function behind Issue, ListIssues, and ListOpenIssues — resolves
-// Priority from the issue's labels.
+// TestForgejoClient_Priority_ResolvedFromLabels is a wiring smoke test, not the
+// exhaustive label-matching matrix. That matrix lives in forge.ResolvePriority's
+// own TestResolvePriority, which every IssueTracker adapter shares. This only
+// confirms that toForgeIssue, the single conversion behind Issue, ListIssues and
+// ListOpenIssues, resolves Priority from the issue's labels.
 const (
 	issue1JSON = `{"number":1,"title":"critical bug","state":"open","labels":[{"name":"ready-for-agent"},{"name":"agent-priority-critical"}]}`
 	issue2JSON = `{"number":2,"title":"unlabeled","state":"open","labels":[]}`

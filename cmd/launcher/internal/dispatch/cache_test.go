@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// TestCache_DirForCreatesPerIssueDir verifies dirFor creates and returns a
-// writable directory keyed strictly <cache>/<issue>.
 func TestCache_DirForCreatesPerIssueDir(t *testing.T) {
 	c, err := newCache()
 	if err != nil {
@@ -28,9 +26,6 @@ func TestCache_DirForCreatesPerIssueDir(t *testing.T) {
 	}
 }
 
-// TestCache_EvictRemovesOnlyThatIssue verifies evict removes just the named
-// issue's entry, leaving sibling issue directories under the same cache root
-// untouched.
 func TestCache_EvictRemovesOnlyThatIssue(t *testing.T) {
 	c, err := newCache()
 	if err != nil {
@@ -51,8 +46,6 @@ func TestCache_EvictRemovesOnlyThatIssue(t *testing.T) {
 	}
 }
 
-// TestCache_CleanupRemovesWholeRoot verifies cleanup removes every issue's
-// entry along with the cache root itself.
 func TestCache_CleanupRemovesWholeRoot(t *testing.T) {
 	c, err := newCache()
 	if err != nil {
@@ -69,8 +62,8 @@ func TestCache_CleanupRemovesWholeRoot(t *testing.T) {
 	}
 }
 
-// TestCache_NilReceiverIsNoop verifies a nil *cache (e.g. a Factory whose
-// cache creation failed) degrades to "no cache" without panicking.
+// A Factory whose cache creation failed holds a nil *cache, so every method
+// must degrade to "no cache" instead of panicking.
 func TestCache_NilReceiverIsNoop(t *testing.T) {
 	var c *cache
 	if got := c.dirFor("1"); got != "" {

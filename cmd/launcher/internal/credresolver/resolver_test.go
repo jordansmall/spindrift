@@ -9,13 +9,9 @@ import (
 	"time"
 )
 
-// killBackgroundChildOnCleanup schedules t.Cleanup to kill the process whose
-// PID is written to pidFile -- the exec tests below deliberately leave a
-// background child (e.g. `sleep 60`) holding the command's stdout pipe open
-// well past WaitDelay so they can prove Peek doesn't hang on it; without this
-// cleanup, that child would otherwise run for a full minute per test, and a
-// stress run stacking many iterations would strand a growing pile of
-// orphaned sleeps.
+// The exec tests deliberately leave a background child holding the command's
+// stdout pipe open past WaitDelay. Without this cleanup each one runs for a
+// full minute, and a stress run strands a pile of orphaned sleeps.
 func killBackgroundChildOnCleanup(t *testing.T, pidFile string) {
 	t.Cleanup(func() {
 		data, err := os.ReadFile(pidFile)
@@ -34,10 +30,8 @@ func killBackgroundChildOnCleanup(t *testing.T, pidFile string) {
 	})
 }
 
-// TestNew_EnvPeekDoesNotUnset verifies that New's env-var adapter resolves
-// the value via Peek without unsetting the source variable -- doctor's
-// non-destructive read must not consume the credential ahead of the real
-// resolution that still has to run later.
+// Doctor's non-destructive read must not consume the credential ahead of the
+// real resolution that still has to run later.
 func TestNew_EnvPeekDoesNotUnset(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_CREDRESOLVER_PEEK", "s3kr3t")
 
@@ -53,9 +47,7 @@ func TestNew_EnvPeekDoesNotUnset(t *testing.T) {
 	}
 }
 
-// TestNew_EnvResolveUnsets verifies that New's env-var adapter resolves the
-// value via Resolve and unsets the source variable before returning -- the
-// load-bearing distinction from Peek.
+// Unsetting the source variable is the load-bearing distinction from Peek.
 func TestNew_EnvResolveUnsets(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_CREDRESOLVER_RESOLVE", "s3kr3t")
 
@@ -71,8 +63,6 @@ func TestNew_EnvResolveUnsets(t *testing.T) {
 	}
 }
 
-// TestNew_EnvUnsetOrEmptyIsError verifies that both Peek and Resolve fail
-// closed when the named env var is unset or set to empty.
 func TestNew_EnvUnsetOrEmptyIsError(t *testing.T) {
 	const unset = "SPINDRIFT_TEST_CREDRESOLVER_UNSET"
 	if _, ok := os.LookupEnv(unset); ok {
@@ -93,9 +83,8 @@ func TestNew_EnvUnsetOrEmptyIsError(t *testing.T) {
 	}
 }
 
-// TestNew_NeitherSetReturnsEmpty verifies that with no credential source
-// configured, both Peek and Resolve return an empty credential and no
-// error -- the one case where empty is not a failure.
+// With no credential source configured, empty is not a failure. This is the
+// only case where that holds.
 func TestNew_NeitherSetReturnsEmpty(t *testing.T) {
 	r := New(Config{FileFormat: "raw"})
 	if got, err := r.Peek(); err != nil || got != "" {
@@ -106,9 +95,6 @@ func TestNew_NeitherSetReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestNew_RawFileTrimsWhitespaceAndDefaultsFormat verifies that New's raw
-// file adapter trims leading/trailing whitespace, and that fileFormat=""
-// resolves the same way as fileFormat="raw".
 func TestNew_RawFileTrimsWhitespaceAndDefaultsFormat(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cred")
@@ -138,9 +124,6 @@ func TestNew_RawFileTrimsWhitespaceAndDefaultsFormat(t *testing.T) {
 	}
 }
 
-// TestNew_RawFileEmptyContentIsError verifies that a raw credential file
-// whose contents trim to empty fails closed, across an empty file, a
-// newline-only file, and a CRLF-only file.
 func TestNew_RawFileEmptyContentIsError(t *testing.T) {
 	for name, contents := range map[string]string{
 		"empty":       "",
@@ -161,9 +144,6 @@ func TestNew_RawFileEmptyContentIsError(t *testing.T) {
 	}
 }
 
-// TestNew_RawFileEmbeddedNewlineIsError verifies that a raw credential
-// file whose trimmed contents still contain an embedded newline or
-// carriage return fails closed, naming the path and the newline.
 func TestNew_RawFileEmbeddedNewlineIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cred")
@@ -183,8 +163,6 @@ func TestNew_RawFileEmbeddedNewlineIsError(t *testing.T) {
 	}
 }
 
-// TestNew_RawFileMissingIsError verifies that a raw fromFile reference
-// naming a nonexistent path errors, naming the path.
 func TestNew_RawFileMissingIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "does-not-exist")
@@ -198,10 +176,8 @@ func TestNew_RawFileMissingIsError(t *testing.T) {
 	}
 }
 
-// TestNew_UnrecognizedFileFormatIsError proves an unrecognized fileFormat
-// value fails closed and names both the credential file and the bad format
-// string -- New's "default" branch (unrecognizedFormatResolver), kept as
-// defense in depth here too.
+// Covers New's default branch (unrecognizedFormatResolver) as defense in
+// depth, on top of that resolver's own tests.
 func TestNew_UnrecognizedFileFormatIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cred")
@@ -221,9 +197,8 @@ func TestNew_UnrecognizedFileFormatIsError(t *testing.T) {
 	}
 }
 
-// multiTableCargoCredentials is a cargo credentials.toml with several
-// registry tables, used to prove registryName-matching picks the right
-// table rather than always the first.
+// Several registry tables, so the tests prove registryName-matching picks the
+// right table rather than always the first.
 const multiTableCargoCredentials = `[registries.other]
 token = "wrong-token"
 
@@ -234,9 +209,6 @@ token = "s3cr3t"
 token = "also-wrong"
 `
 
-// TestNew_CargoFormatResolvesMatchingRegistry proves New's cargo-credentials
-// adapter resolves the table named by registryName, through both Peek and
-// Resolve.
 func TestNew_CargoFormatResolvesMatchingRegistry(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.toml")
@@ -262,10 +234,8 @@ func TestNew_CargoFormatResolvesMatchingRegistry(t *testing.T) {
 	}
 }
 
-// TestNew_CargoFormatEmptyRegistryNameIsError proves that
-// fileFormat=cargo-credentials with an empty registryName fails closed and
-// names the missing route key, and that the file must still be readable
-// first (cargoFileResolver reads before it checks registryName).
+// The file must still be readable: cargoFileResolver reads it before it
+// checks registryName.
 func TestNew_CargoFormatEmptyRegistryNameIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.toml")
@@ -282,10 +252,8 @@ func TestNew_CargoFormatEmptyRegistryNameIsError(t *testing.T) {
 	}
 }
 
-// TestNew_CargoFormatFileMissingIsError verifies that a cargo-credentials
-// fromFile reference naming a nonexistent path errors and names the path,
-// even when registryName is also unset -- the file read fails before the
-// registryName check runs.
+// registryName is also unset here, so this pins the ordering: the file read
+// fails before the registryName check runs.
 func TestNew_CargoFormatFileMissingIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "does-not-exist")
@@ -302,10 +270,8 @@ func TestNew_CargoFormatFileMissingIsError(t *testing.T) {
 	}
 }
 
-// TestNew_CargoFormatNoMatchingTableIsError proves a credentials.toml with
-// no table for registryName fails closed through New's wired path and
-// surfaces the underlying cargoCredentialsToken error -- detail coverage of
-// that error's exact shape lives in cargocredentials_test.go.
+// This covers New's wired path only. Detail coverage of the
+// cargoCredentialsToken error's exact shape lives in cargocredentials_test.go.
 func TestNew_CargoFormatNoMatchingTableIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.toml")
@@ -322,8 +288,6 @@ func TestNew_CargoFormatNoMatchingTableIsError(t *testing.T) {
 	}
 }
 
-// TestNew_CargoFormatNoTokenIsError proves a credentials.toml whose matching
-// table has no token field fails closed through New's wired path.
 func TestNew_CargoFormatNoTokenIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.toml")
@@ -343,10 +307,7 @@ other-key = "value"
 	}
 }
 
-// TestNew_CargoFormatNeverEchoesSecret proves that a Peek resolution error on
-// the cargo-credentials path never contains a real secret value that happens
-// to be in scope elsewhere in the same test -- the cargo-credentials
-// analogue of TestNew_NeverEchoesSecret above.
+// The cargo-credentials analogue of TestNew_NeverEchoesSecret below.
 func TestNew_CargoFormatNeverEchoesSecret(t *testing.T) {
 	const secret = "s3kr3t-do-not-echo"
 
@@ -365,11 +326,9 @@ func TestNew_CargoFormatNeverEchoesSecret(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, secret)
 	}
 
-	// The missing-table error path is the meaningful case for this format --
-	// registryName is looked up against the same file whose bytes hold the
-	// real secret in scope right up to the point the function errors out, so
-	// this is where an accidental interpolation of the file's contents into
-	// the error message would actually leak it.
+	// The missing-table path is the meaningful case: registryName is looked up
+	// against the same file whose bytes hold the real secret, so an accidental
+	// interpolation of the contents into the error would leak it here.
 	_, err = New(Config{FromFile: path, FileFormat: "cargo-credentials", RegistryName: "no-such-registry"}).Peek()
 	if err == nil {
 		t.Fatal("expected error for registry name with no matching table, got nil")
@@ -379,9 +338,9 @@ func TestNew_CargoFormatNeverEchoesSecret(t *testing.T) {
 	}
 }
 
-// TestNew_BothSetPrefersEnv verifies the unreachable-under-normal-use
-// fallback: if a caller skips validation and both fromFile and fromEnv are
-// set anyway, New's dispatch deterministically prefers fromEnv.
+// Validation normally rejects this config, so the case is unreachable in
+// normal use. If a caller skips validation, New's dispatch must still pick
+// fromEnv deterministically.
 func TestNew_BothSetPrefersEnv(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cred")
@@ -399,10 +358,8 @@ func TestNew_BothSetPrefersEnv(t *testing.T) {
 	}
 }
 
-// TestNew_NeverEchoesSecret proves that a Peek resolution error never
-// contains a real secret value that happens to be in scope elsewhere in
-// the same test -- guards against a future adapter change accidentally
-// interpolating the resolved value into an error message.
+// Guards against a future adapter change interpolating the resolved value
+// into an error message.
 func TestNew_NeverEchoesSecret(t *testing.T) {
 	const secret = "s3kr3t-do-not-echo"
 
@@ -420,10 +377,9 @@ func TestNew_NeverEchoesSecret(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, secret)
 	}
 
-	// The embedded-newline error path is the meaningful case: v (the
-	// trimmed file content) holds the real secret in scope right up to the
-	// point the function errors out, so this is where an accidental
-	// interpolation of v into the error message would actually leak it.
+	// The embedded-newline path is the meaningful case: v, the trimmed file
+	// content, holds the real secret right up to the point the function errors
+	// out, so an accidental interpolation of v into the error would leak it.
 	newlinePath := filepath.Join(dir, "cred-with-newline")
 	if err := os.WriteFile(newlinePath, []byte(secret+"\nextra-line"), 0o600); err != nil {
 		t.Fatalf("failed to write temp cred file: %v", err)
@@ -437,8 +393,8 @@ func TestNew_NeverEchoesSecret(t *testing.T) {
 	}
 }
 
-// multiEntryNetrc is a netrc file with several machine entries, used to
-// prove host-matching picks the right entry rather than always the first.
+// Several machine entries, so the tests prove host-matching picks the right
+// entry rather than always the first.
 const multiEntryNetrc = `machine other.example.com
 login someone
 password wrong-entry
@@ -452,9 +408,6 @@ login someone
 password also-wrong
 `
 
-// TestNew_NetrcFormatResolvesMatchingHost proves New's netrc adapter
-// resolves the entry whose machine matches upstreamURL's host, through
-// both Peek and Resolve.
 func TestNew_NetrcFormatResolvesMatchingHost(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "netrc")
@@ -480,8 +433,6 @@ func TestNew_NetrcFormatResolvesMatchingHost(t *testing.T) {
 	}
 }
 
-// TestNew_NetrcFormatNoMatchingHostIsError proves a netrc file with no
-// entry for upstreamURL's host fails closed and names the host.
 func TestNew_NetrcFormatNoMatchingHostIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "netrc")
@@ -498,8 +449,8 @@ func TestNew_NetrcFormatNoMatchingHostIsError(t *testing.T) {
 	}
 }
 
-// TestNew_NetrcFormatMalformedUpstreamURLIsError proves a malformed
-// upstreamURL fails closed, naming the bad URL, rather than panicking.
+// A bare host parses as a URL with no Host, so it belongs in this table even
+// though it looks well formed.
 func TestNew_NetrcFormatMalformedUpstreamURLIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "netrc")
@@ -524,9 +475,8 @@ func TestNew_NetrcFormatMalformedUpstreamURLIsError(t *testing.T) {
 	}
 }
 
-// TestNew_NetrcFormatFileMissingIsError verifies that a netrc fromFile
-// reference naming a nonexistent path errors and names the path -- the
-// file read happens before the netrc-specific host-parse step.
+// Pins the ordering: the file read happens before the netrc-specific
+// host-parse step.
 func TestNew_NetrcFormatFileMissingIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "does-not-exist")
@@ -540,8 +490,6 @@ func TestNew_NetrcFormatFileMissingIsError(t *testing.T) {
 	}
 }
 
-// TestNew_ExecResolvesFromTrimmedStdout proves New's exec adapter runs the
-// argv and resolves to its stdout, trimmed, through both Peek and Resolve.
 func TestNew_ExecResolvesFromTrimmedStdout(t *testing.T) {
 	r := New(Config{ExecArgv: []string{"/bin/sh", "-c", "echo tok"}, MatchHost: "registry.example.com"})
 	for _, call := range []struct {
@@ -561,16 +509,11 @@ func TestNew_ExecResolvesFromTrimmedStdout(t *testing.T) {
 	}
 }
 
-// TestNew_ExecNonZeroExitIsErrorNamingRouteAndCommandNeverStdout proves that
-// a failing exec command fails resolution with an error naming the route
-// and the command (argv[0] only, never the rest of argv), and never echoes
-// the command's stdout -- even when that stdout happens to contain what
-// looks like a secret. The stdout secret lives in the script file's body,
-// not in argv, so it can only reach the error via an accidental
-// stdout/stderr interpolation, never via the argv rendering. The argv
-// secret is passed as an argument to the script, so it can only reach the
-// error via an accidental full-argv interpolation, never via the argv[0]
-// rendering.
+// The two secrets sit where each can only leak one way. The stdout secret
+// lives in the script body, not argv, so it reaches the error only through a
+// stdout or stderr interpolation. The argv secret is an argument to the
+// script, so it reaches the error only through a full-argv interpolation
+// rather than the argv[0] rendering.
 func TestNew_ExecNonZeroExitIsErrorNamingRouteAndCommandNeverStdout(t *testing.T) {
 	const stdoutSecret = "s3kr3t-do-not-echo"
 	const argvSecret = "--token=sekrit-arg"
@@ -603,10 +546,9 @@ func TestNew_ExecNonZeroExitIsErrorNamingRouteAndCommandNeverStdout(t *testing.T
 	}
 }
 
-// TestExecResolver_PeekTimesOut proves that a credential helper that blocks
-// (e.g. `op read` waiting on biometric confirmation) does not hang doctor's
-// route Peek forever -- Peek must bound the run and fail closed with a
-// timeout error well before the helper would ever return on its own.
+// A credential helper can block indefinitely, for example `op read` waiting
+// on biometric confirmation. Peek must bound the run and fail closed well
+// before the helper would return on its own.
 func TestExecResolver_PeekTimesOut(t *testing.T) {
 	r := execResolver{argv: []string{"sleep", "5"}, matchHost: "x", timeout: 100 * time.Millisecond}
 
@@ -631,10 +573,8 @@ func TestExecResolver_PeekTimesOut(t *testing.T) {
 	}
 }
 
-// TestExecResolver_PeekSucceedsWithBackgroundChildHoldingStdout proves that a
-// helper which exits 0 quickly but leaves a background process inheriting
-// its stdout (e.g. `pass` spawning gpg-agent, `op read` spawning its daemon)
-// still resolves promptly instead of hanging on the inherited pipe.
+// Real helpers leave background processes inheriting stdout: `pass` spawns
+// gpg-agent, `op read` spawns its daemon. Peek must not hang on that pipe.
 func TestExecResolver_PeekSucceedsWithBackgroundChildHoldingStdout(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "bg.pid")
 	killBackgroundChildOnCleanup(t, pidFile)
@@ -668,10 +608,8 @@ func TestExecResolver_PeekSucceedsWithBackgroundChildHoldingStdout(t *testing.T)
 	}
 }
 
-// TestExecResolver_PeekTimesOutWithBackgroundChildHoldingStdout proves that
-// when the helper itself blocks past the deadline AND a background child
-// also inherits its stdout, Peek still returns the timeout error promptly --
-// the background child must not keep the pipe open past WaitDelay.
+// The helper blocks past the deadline and a background child also inherits
+// its stdout. The child must not keep the pipe open past WaitDelay.
 func TestExecResolver_PeekTimesOutWithBackgroundChildHoldingStdout(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "bg.pid")
 	killBackgroundChildOnCleanup(t, pidFile)
@@ -705,9 +643,6 @@ func TestExecResolver_PeekTimesOutWithBackgroundChildHoldingStdout(t *testing.T)
 	}
 }
 
-// TestNew_ExecEmptyOutputIsError proves that an exec command exiting zero
-// but producing only whitespace stdout fails closed, naming the route and
-// command.
 func TestNew_ExecEmptyOutputIsError(t *testing.T) {
 	r := New(Config{ExecArgv: []string{"/bin/sh", "-c", "echo   "}, MatchHost: "registry.example.com"})
 
@@ -723,9 +658,7 @@ func TestNew_ExecEmptyOutputIsError(t *testing.T) {
 	}
 }
 
-// TestNew_ExecEmbeddedNewlineIsError proves that an exec command whose
-// trimmed stdout still contains an embedded newline fails closed -- a
-// single-line credential is expected, same rule as the raw file source.
+// A credential must be a single line, the same rule as the raw file source.
 func TestNew_ExecEmbeddedNewlineIsError(t *testing.T) {
 	r := New(Config{ExecArgv: []string{"/bin/sh", "-c", "printf 'tok\\n123\\n'"}, MatchHost: "registry.example.com"})
 
@@ -738,8 +671,8 @@ func TestNew_ExecEmbeddedNewlineIsError(t *testing.T) {
 	}
 }
 
-// TestConfig_NamesNoSource covers every branch New itself dispatches on, so
-// this stays the one place that rule is asserted.
+// The cases cover every branch New dispatches on, so this stays the one place
+// that rule is asserted.
 func TestConfig_NamesNoSource(t *testing.T) {
 	cases := []struct {
 		name string

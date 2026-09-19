@@ -2,9 +2,6 @@ package ecosystem
 
 import "testing"
 
-// TestParseYarnRegistryConfig_NpmRegistryServerQuoted verifies that
-// .yarnrc.yml's top-level and per-scope npmRegistryServer values parse
-// correctly whether double- or single-quoted.
 func TestParseYarnRegistryConfig_NpmRegistryServerQuoted(t *testing.T) {
 	content := `
 npmRegistryServer: "https://yarn.example.com/registry"
@@ -33,8 +30,6 @@ npmScopes:
 	}
 }
 
-// TestParseYarnRegistryConfig_RepeatedURLDeduped verifies that the same
-// registry URL declared twice yields only one Declaration.
 func TestParseYarnRegistryConfig_RepeatedURLDeduped(t *testing.T) {
 	content := `
 npmRegistryServer: https://yarn.example.com
@@ -51,9 +46,6 @@ npmScopes:
 	}
 }
 
-// TestParseYarnRegistryConfig_NonHTTPRegistryIsSkippedButNamed verifies
-// that a npmRegistryServer value that is a local path, not an http(s) URL,
-// is skipped but still reports namedAny true.
 func TestParseYarnRegistryConfig_NonHTTPRegistryIsSkippedButNamed(t *testing.T) {
 	decls, namedAny, err := yarnRow.ConfigParser("npmRegistryServer: /local/path\n")
 	if err != nil {
@@ -67,9 +59,6 @@ func TestParseYarnRegistryConfig_NonHTTPRegistryIsSkippedButNamed(t *testing.T) 
 	}
 }
 
-// TestParseYarnRegistryConfig_FullLineCommentYieldsNoDeclaration verifies
-// that a line that is entirely a "#" comment is never mistaken for a
-// registry declaration.
 func TestParseYarnRegistryConfig_FullLineCommentYieldsNoDeclaration(t *testing.T) {
 	decls, namedAny, err := yarnRow.ConfigParser("# npmRegistryServer: https://commented-out.example.com/\n")
 	if err != nil {
@@ -83,9 +72,6 @@ func TestParseYarnRegistryConfig_FullLineCommentYieldsNoDeclaration(t *testing.T
 	}
 }
 
-// TestParseYarnRegistryConfig_TrailingInlineCommentStripped verifies that a
-// space-then-"#" trailing comment after a registry value is stripped from
-// the extracted URL.
 func TestParseYarnRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
 	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com # our mirror\n")
 	if err != nil {
@@ -100,8 +86,6 @@ func TestParseYarnRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
 	}
 }
 
-// TestParseYarnRegistryConfig_TabBeforeTrailingInlineCommentStripped is the
-// tab-separator variant of TestParseYarnRegistryConfig_TrailingInlineCommentStripped.
 func TestParseYarnRegistryConfig_TabBeforeTrailingInlineCommentStripped(t *testing.T) {
 	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com\t# our mirror\n")
 	if err != nil {
@@ -116,9 +100,6 @@ func TestParseYarnRegistryConfig_TabBeforeTrailingInlineCommentStripped(t *testi
 	}
 }
 
-// TestParseYarnRegistryConfig_QuotedValueHashFragmentNotTreatedAsComment
-// verifies that a "#" inside a quoted value (a URL fragment) is preserved,
-// not mistaken for a comment marker.
 func TestParseYarnRegistryConfig_QuotedValueHashFragmentNotTreatedAsComment(t *testing.T) {
 	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: \"https://yarn.example.com/#frag\"\n")
 	if err != nil {
@@ -133,9 +114,8 @@ func TestParseYarnRegistryConfig_QuotedValueHashFragmentNotTreatedAsComment(t *t
 	}
 }
 
-// TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTrailingCommentStripped
-// covers a value with a "#" URL fragment (no preceding whitespace, so not a
-// comment itself) followed by a whitespace-then-"#" trailing comment.
+// The fixture's first "#" has no whitespace before it, so it is part of the
+// URL and not a comment marker. Only a whitespace-then-"#" starts a comment.
 func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTrailingCommentStripped(t *testing.T) {
 	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com/#frag # our mirror\n")
 	if err != nil {
@@ -150,9 +130,6 @@ func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTrailingCommentStripped
 	}
 }
 
-// TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTabTrailingCommentStripped
-// is the tab-separator variant of
-// TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTrailingCommentStripped.
 func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTabTrailingCommentStripped(t *testing.T) {
 	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com/#frag\t# our mirror\n")
 	if err != nil {
@@ -167,8 +144,8 @@ func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTabTrailingCommentStrip
 	}
 }
 
-// TestParseYarnRegistryConfig_NeverStampsEcosystemOrConfigPath verifies the
-// pure-hook contract directly.
+// ConfigParser is a pure hook: its caller stamps Ecosystem and ConfigPath, so
+// the hook itself must leave both unset.
 func TestParseYarnRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
 	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com\n")
 	if err != nil {

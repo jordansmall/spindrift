@@ -15,7 +15,6 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 )
 
-// jiraIssueRecord is one scripted issue in jiraHarness's in-memory backend.
 type jiraIssueRecord struct {
 	title, body string
 	labels      []string
@@ -23,12 +22,11 @@ type jiraIssueRecord struct {
 	failGET     bool // simulates the native-API error the issue's GET returns
 }
 
-// jiraHarness is a forgetest.Harness backed by an httptest server that
-// stands in for the Jira REST API. Jira's DepsOf and Issue share one
-// underlying GET request (unlike github's separate dependencies/blocked_by
+// jiraHarness stands in for the Jira REST API. Jira's DepsOf and Issue share
+// one underlying GET request (unlike github's separate dependencies/blocked_by
 // call), so this harness implements forgetest.NativeCapable but not
-// NativeFailureIsolatable — the contract's native-error-fallback scenario
-// (AC2, issue #1544) is scoped to the Fake and github adapters only.
+// NativeFailureIsolatable: the contract's native-error-fallback scenario
+// (AC2, issue #1544) covers only the Fake and github adapters.
 type jiraHarness struct {
 	mu     sync.Mutex
 	order  []string
@@ -133,11 +131,10 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 			out = append(out, h.payload(num, rec))
 		}
 
-		// Genuinely paginate on startAt/maxResults (issue #2265), matching
-		// the real Jira search response shape jiraSearchPayload decodes:
-		// {"issues": <window>, "startAt", "maxResults", "total"} — total is
-		// the full matching count, which is what doSearch's
-		// startAt+len(issues) >= total "done" check relies on.
+		// Genuinely paginate on startAt/maxResults (issue #2265), matching the
+		// real Jira search response shape jiraSearchPayload decodes. total is
+		// the full matching count, which doSearch's startAt+len(issues) >= total
+		// "done" check relies on.
 		startAt := 0
 		if s := r.URL.Query().Get("startAt"); s != "" {
 			if v, err := strconv.Atoi(s); err == nil && v >= 0 {
@@ -246,12 +243,9 @@ func TestJiraClient_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newJiraHarness(t))
 }
 
-// TestJiraClient_ListIssues_PaginatesAcrossMultipleRealPages seeds more than
-// forge.ResultPageLimit issues so doSearch (issue #2265) must walk at least
-// two real pages of the harness's now-genuinely-paginating search endpoint
-// to see them all, then asserts every seeded issue comes back, preserving
-// the creation order they were seeded in (h.order's append sequence stands
-// in for Jira's created-time ordering).
+// Seeding more than forge.ResultPageLimit issues forces doSearch (issue #2265)
+// to walk at least two real pages. The order assertion holds because h.order's
+// append sequence stands in for Jira's created-time ordering.
 func TestJiraClient_ListIssues_PaginatesAcrossMultipleRealPages(t *testing.T) {
 	h := newJiraHarness(t)
 	const seeded = forge.ResultPageLimit + 30

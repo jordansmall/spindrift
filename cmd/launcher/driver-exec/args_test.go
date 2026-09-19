@@ -7,10 +7,9 @@ import (
 	"testing"
 )
 
-// claudeShape is the claude Driver's argv shape (issue #262 slice 4): -p
-// <prompt>, --model <model> (always present, even empty), --agents <json>
-// only when non-empty, then session/driverFlags word-split, then --effort
-// <value> last, omitted entirely when empty.
+// claudeShape is the claude Driver's argv shape from issue #262 slice 4.
+// --model is always present, even empty; --agents and --effort drop out
+// when empty.
 var claudeShape = argvShape{
 	promptStyle:    "flag",
 	promptFlag:     "-p",
@@ -21,11 +20,9 @@ var claudeShape = argvShape{
 	order:          []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
 }
 
-// opencodeShape is the opencode Driver's argv shape (issue #262 slice 4):
-// driverFlags word-split first (its own `run` subcommand leads), then -m
-// <model> only when non-empty, then --variant <effort> only when non-empty,
-// then session word-split, and finally the prompt as one trailing
-// positional argument.
+// opencodeShape is the opencode Driver's argv shape from issue #262 slice 4.
+// driverFlags leads because opencode's own `run` subcommand arrives that way,
+// and the prompt is one trailing positional argument.
 var opencodeShape = argvShape{
 	promptStyle:    "positional",
 	modelFlag:      "-m",
@@ -35,9 +32,6 @@ var opencodeShape = argvShape{
 	order:          []string{"driverFlags", "model", "effort", "session", "prompt"},
 }
 
-// TestBuildDriverArgsMinimal verifies the prompt file's content is spliced in
-// as -p's value and --model is always present, even with no agents/session
-// file, matching the Driver invocation's pre-driver-exec shape.
 func TestBuildDriverArgsMinimal(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -59,8 +53,6 @@ func TestBuildDriverArgsMinimal(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsWithAgents verifies a non-empty agents file's content is
-// spliced in as --agents' value.
 func TestBuildDriverArgsWithAgents(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -87,9 +79,8 @@ func TestBuildDriverArgsWithAgents(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsEmptyAgentsFileOmitsFlag verifies an empty (or unset)
-// agents file omits --agents entirely, matching the pre-driver-exec pipeline
-// which only set agents_args when agents_json was non-empty.
+// The shell pipeline this replaced only set agents_args when agents_json was
+// non-empty, so an empty agents file must still drop --agents.
 func TestBuildDriverArgsEmptyAgentsFileOmitsFlag(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -116,11 +107,7 @@ func TestBuildDriverArgsEmptyAgentsFileOmitsFlag(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsOpencodeShapeIsRunLeadingPromptTrailing verifies
-// opencodeShape builds opencode's own argv shape (issue #262 slice 4): the
-// `run` subcommand from driverFlags leads, followed by -m <model> when model
-// is non-empty, then any session-file content, with the prompt spliced in as
-// one positional argument last -- never -p, never --agents.
+// Opencode never takes -p and never takes --agents (issue #262 slice 4).
 func TestBuildDriverArgsOpencodeShapeIsRunLeadingPromptTrailing(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -143,9 +130,8 @@ func TestBuildDriverArgsOpencodeShapeIsRunLeadingPromptTrailing(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsOpencodeEmptyModelOmitsDashM verifies an empty model
-// omits -m entirely for opencode -- unlike claude's --model, which is always
-// present even empty.
+// Opencode drops -m on an empty model, unlike claude's --model, which stays
+// in argv even when empty.
 func TestBuildDriverArgsOpencodeEmptyModelOmitsDashM(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -168,9 +154,6 @@ func TestBuildDriverArgsOpencodeEmptyModelOmitsDashM(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsClaudeEffort verifies a non-empty effort is spliced in
-// as a trailing --effort <value> pair, after model/agents/session/
-// driverFlags, for the claude shape.
 func TestBuildDriverArgsClaudeEffort(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -193,9 +176,8 @@ func TestBuildDriverArgsClaudeEffort(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsClaudeEffortOmittedWhenEmpty verifies an empty effort
-// omits --effort entirely for the claude shape -- unlike --model, which is
-// always present even empty.
+// An empty effort drops --effort, unlike --model, which stays in argv even
+// when empty.
 func TestBuildDriverArgsClaudeEffortOmittedWhenEmpty(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -223,9 +205,6 @@ func TestBuildDriverArgsClaudeEffortOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsOpencodeEffort verifies a non-empty effort is spliced
-// in as --variant <value>, in the same position as -m <model>, before the
-// trailing prompt positional argument, for the opencode shape.
 func TestBuildDriverArgsOpencodeEffort(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -249,8 +228,6 @@ func TestBuildDriverArgsOpencodeEffort(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsOpencodeEffortOmittedWhenEmpty verifies an empty effort
-// omits --variant entirely for the opencode shape.
 func TestBuildDriverArgsOpencodeEffortOmittedWhenEmpty(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -279,11 +256,8 @@ func TestBuildDriverArgsOpencodeEffortOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsClaudeEffortWithSessionAndFlags verifies the claude
-// shape's full relative ordering from the buildDriverArgs doc comment when
-// session, driverFlags, and effort are all set together: session-file
-// content word-split first, then driverFlags word-split, then --effort
-// <value> last.
+// Session, driverFlags, and effort are set together here to pin their
+// relative ordering, which no single-slot test can catch.
 func TestBuildDriverArgsClaudeEffortWithSessionAndFlags(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -317,10 +291,8 @@ func TestBuildDriverArgsClaudeEffortWithSessionAndFlags(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsSessionAndFlagsAreWordSplit verifies the session file's
-// content is word-split into separate argv elements (matching the shell's
-// prior `read -ra` behaviour) and driverFlags (a space-separated common-flags
-// string) is spliced in the same way, appended after the session args.
+// The session file and driverFlags both hold space-separated strings that
+// must become separate argv elements, matching the shell's prior `read -ra`.
 func TestBuildDriverArgsSessionAndFlagsAreWordSplit(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -352,9 +324,9 @@ func TestBuildDriverArgsSessionAndFlagsAreWordSplit(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsUnknownSlotErrors verifies an unrecognised slot name in
-// shape.order (e.g. from a mis-set DRIVER_ARGV_ORDER) errors instead of being
-// silently dropped from argv (issue #2534 follow-up).
+// Without this check an unrecognised slot name in shape.order, for example
+// from a mis-set DRIVER_ARGV_ORDER, drops out of argv silently (issue #2534
+// follow-up).
 func TestBuildDriverArgsUnknownSlotErrors(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -373,10 +345,8 @@ func TestBuildDriverArgsUnknownSlotErrors(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsInvalidPromptStyleErrors verifies a promptStyle that is
-// neither "flag" nor "positional" (e.g. a typo) errors instead of silently
-// falling through to the positional branch and producing the wrong argv
-// shape (issue #2534 follow-up).
+// Without this check a typo'd promptStyle falls through to the positional
+// branch and builds the wrong argv shape (issue #2534 follow-up).
 func TestBuildDriverArgsInvalidPromptStyleErrors(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -395,12 +365,9 @@ func TestBuildDriverArgsInvalidPromptStyleErrors(t *testing.T) {
 	}
 }
 
-// TestBuildDriverArgsSyntheticShapeIsDataDriven verifies buildDriverArgs
-// assembles argv purely from shape data by exercising a third, synthetic
-// shape that shares no order/flag values with claudeShape or opencodeShape:
-// agents leads, then model, then driverFlags, then session, then effort,
-// then a flag-style prompt trails. A hypothetical new Driver with this shape
-// needs zero args.go changes to work.
+// synthShape deliberately shares no order or flag value with claudeShape or
+// opencodeShape. Reusing either one would let a hardcoded flag name in args.go
+// pass, which is what this test catches.
 func TestBuildDriverArgsSyntheticShapeIsDataDriven(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")

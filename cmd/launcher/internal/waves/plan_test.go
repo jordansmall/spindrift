@@ -7,9 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestNewPlan_Discovered_NoEdges_SelectsDrainMode verifies a label-discovered
-// batch always selects ModeDrain, even with MaxJobs unset (0) — MAX_JOBS=0 is
-// the uncapped drain case (ADR 0019).
+// MaxJobs unset (0) is the uncapped drain case, not a disabled one (ADR 0019).
 func TestNewPlan_Discovered_NoEdges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -25,10 +23,9 @@ func TestNewPlan_Discovered_NoEdges_SelectsDrainMode(t *testing.T) {
 	}
 }
 
-// TestNewPlan_Discovered_Edges_SelectsDrainMode verifies a batch with
-// in-batch blocker edges also selects ModeDrain for OriginDiscovered — the
-// per-issue readiness gate in drainMaxJobs holds a blocked dependent for the
-// next invocation instead of looping waves in-process.
+// In-batch blocker edges do not change the mode. The per-issue readiness gate
+// in drainMaxJobs holds a blocked dependent for the next invocation instead of
+// looping waves in-process.
 func TestNewPlan_Discovered_Edges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -47,10 +44,9 @@ func TestNewPlan_Discovered_Edges_SelectsDrainMode(t *testing.T) {
 	}
 }
 
-// TestNewPlan_Selective_NoEdges_SelectsDrainMode verifies OriginSelective
-// selects ModeDrain regardless of MaxJobs — #524 reroutes selective-list
-// dispatch off the old multi-wave loop onto the same at-most-one-wave drain
-// shape as the queue path (ADR 0019).
+// #524 reroutes selective-list dispatch off the old multi-wave loop onto the
+// same at-most-one-wave drain shape as the queue path, regardless of MaxJobs
+// (ADR 0019).
 func TestNewPlan_Selective_NoEdges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -66,10 +62,8 @@ func TestNewPlan_Selective_NoEdges_SelectsDrainMode(t *testing.T) {
 	}
 }
 
-// TestNewPlan_Cycle_ReturnsError verifies a cyclic in-batch dependency graph
-// is reported as an error rather than a Plan — this is the one place the
-// cycle check happens; Run, selective dispatch, and preview all rely on it
-// instead of repeating the check themselves.
+// NewPlan is the one place the cycle check happens. Run, selective dispatch,
+// and preview all rely on it instead of repeating the check themselves.
 func TestNewPlan_Cycle_ReturnsError(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -82,10 +76,8 @@ func TestNewPlan_Cycle_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestNewPlan_Cycle_ReturnsError_EvenWithMaxJobs verifies the cycle check
-// runs before mode selection: a drain-eligible batch (MaxJobs > 0) with a
-// cyclic dependency graph still errors rather than producing a ModeDrain
-// Plan — no path dispatches a single issue out of a cyclic batch.
+// The cycle check runs before mode selection, so no path dispatches a single
+// issue out of a cyclic batch.
 func TestNewPlan_Cycle_ReturnsError_EvenWithMaxJobs(t *testing.T) {
 	cfg := Config{MaxJobs: 1}
 	in := Input{
@@ -98,8 +90,6 @@ func TestNewPlan_Cycle_ReturnsError_EvenWithMaxJobs(t *testing.T) {
 	}
 }
 
-// TestNewPlan_MaxJobs_SelectsDrainMode verifies cfg.MaxJobs > 0 selects
-// ModeDrain regardless of edges.
 func TestNewPlan_MaxJobs_SelectsDrainMode(t *testing.T) {
 	cfg := Config{MaxJobs: 2}
 	in := Input{
@@ -115,9 +105,8 @@ func TestNewPlan_MaxJobs_SelectsDrainMode(t *testing.T) {
 	}
 }
 
-// TestNewPlan_OriginPropagates verifies Plan.Origin carries through every
-// Origin value unchanged — the explicit replacement for the old
-// issueNumber != "" sentinel.
+// Plan.Origin is the explicit replacement for the old issueNumber != ""
+// sentinel, so every Origin value has to survive NewPlan unchanged.
 func TestNewPlan_OriginPropagates(t *testing.T) {
 	for _, origin := range []Origin{OriginDiscovered, OriginClaimed, OriginSelective} {
 		in := Input{Origin: origin, Batch: Batch{Issues: []Issue{{Number: "1"}}}}
@@ -131,10 +120,9 @@ func TestNewPlan_OriginPropagates(t *testing.T) {
 	}
 }
 
-// TestNewPlan_FailedPropagates verifies NewPlan carries Input.Failed through
-// to Plan.Failed unchanged — drainMaxJobs (#1103) reads it off the Plan to
-// hold an issue whose own NewReadiness/DepsOf call errored, rather than
-// treating the missing Edges entry as a confirmed zero-blocker issue.
+// drainMaxJobs (#1103) reads Plan.Failed to hold an issue whose own
+// NewReadiness/DepsOf call errored, rather than treating the missing Edges
+// entry as a confirmed zero-blocker issue.
 func TestNewPlan_FailedPropagates(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -150,13 +138,10 @@ func TestNewPlan_FailedPropagates(t *testing.T) {
 	}
 }
 
-// planIssueNumber extracts an Issue's Number field, passed to
-// forge.Numbers below for concise ordering assertions.
 func planIssueNumber(i Issue) string { return i.Number }
 
-// TestNewPlan_SortsByPriorityDescending verifies a mixed-priority
-// OriginDiscovered batch sorts to Critical, High, Normal, Low regardless of
-// input order (ADR 0040).
+// ADR 0040 orders a discovered batch Critical, High, Normal, Low regardless of
+// the input order.
 func TestNewPlan_SortsByPriorityDescending(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -185,9 +170,8 @@ func TestNewPlan_SortsByPriorityDescending(t *testing.T) {
 	}
 }
 
-// TestNewPlan_SortIsStableWithinTier verifies equal-priority issues keep
-// their original relative (oldest-first, since every Issue Tracker adapter
-// returns issues oldest-first) order after the priority sort.
+// A stable sort preserves oldest-first order within a tier, because every
+// Issue Tracker adapter hands NewPlan its issues oldest-first.
 func TestNewPlan_SortIsStableWithinTier(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -212,8 +196,6 @@ func TestNewPlan_SortIsStableWithinTier(t *testing.T) {
 	}
 }
 
-// TestNewPlan_LowSortsLast verifies every Low-priority issue sorts after
-// every Normal-priority issue, no matter how the input interleaves them.
 func TestNewPlan_LowSortsLast(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -240,10 +222,9 @@ func TestNewPlan_LowSortsLast(t *testing.T) {
 	}
 }
 
-// TestNewPlan_PriorityNeverInherited verifies a blocked Low-priority issue's
-// own Priority field is unchanged after NewPlan even though its dependent is
-// Critical — priority sort never derives or mutates a Priority value from
-// Edges, it only reorders the slice using each issue's own field.
+// The sort only reorders the slice using each issue's own field. It never
+// derives or mutates a Priority from Edges, so a Critical dependent does not
+// lift its Low blocker.
 func TestNewPlan_PriorityNeverInherited(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -264,15 +245,9 @@ func TestNewPlan_PriorityNeverInherited(t *testing.T) {
 	}
 }
 
-// TestNewPlan_EdgesCarriedThroughUnchangedByPrioritySort verifies that, even
-// though a Critical-priority dependent sorts ahead of its Low-priority
-// blocker in plan.Issues (sort is blind to edges — that's expected), Edges
-// itself is carried through unchanged so a downstream drainMaxJobs readiness
-// check still holds the dependent back regardless of its position in the
-// sorted slice. Actual dependency enforcement happens in drainMaxJobs, not
-// in NewPlan's sort; NewPlan's job here is only to prove priority sorting
-// never corrupts or overrides the edges data blocking still relies on
-// downstream.
+// The sort is blind to edges, so a Critical dependent sorting ahead of its Low
+// blocker is expected. drainMaxJobs enforces the dependency later off Edges,
+// which is why Edges must survive the sort unchanged.
 func TestNewPlan_EdgesCarriedThroughUnchangedByPrioritySort(t *testing.T) {
 	cfg := Config{}
 	edges := map[string][]string{"2": {"1"}}
@@ -296,11 +271,9 @@ func TestNewPlan_EdgesCarriedThroughUnchangedByPrioritySort(t *testing.T) {
 	}
 }
 
-// TestNewPlan_UnlabeledBatchByteIdenticalOrder verifies an all-PriorityNormal
-// (zero value; issues constructed without setting Priority at all) batch in
-// an arbitrary Number order sorts to the exact same order as the input —
-// zero behaviour change for the common case (no agent-priority-* labels in
-// use).
+// The issues deliberately leave Priority unset, so this is the common case
+// where no agent-priority-* label is in use. That batch must come out in the
+// input order, unchanged by the sort.
 func TestNewPlan_UnlabeledBatchByteIdenticalOrder(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -326,9 +299,8 @@ func TestNewPlan_UnlabeledBatchByteIdenticalOrder(t *testing.T) {
 	}
 }
 
-// TestNewPlan_SelectiveNeverReordersByPriority verifies OriginSelective —
-// the operator's hand-picked list — is never reordered by priority (ADR
-// 0040: a selective list keeps the operator's typed order).
+// ADR 0040: a selective list keeps the operator's typed order, so priority
+// never reorders it.
 func TestNewPlan_SelectiveNeverReordersByPriority(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -353,11 +325,7 @@ func TestNewPlan_SelectiveNeverReordersByPriority(t *testing.T) {
 	}
 }
 
-// TestNewInput_AssemblesBatchFromReadiness verifies NewInput assembles an
-// Input whose Origin is the passed origin, whose Batch.Issues is the passed
-// issues slice, and whose Batch.Edges/Sources/Failed come from the passed
-// Readiness — covering two distinct Origin values so the field can't be
-// silently hardcoded.
+// The loop runs two distinct Origin values so a hardcoded Origin cannot pass.
 func TestNewInput_AssemblesBatchFromReadiness(t *testing.T) {
 	issues := []Issue{{Number: "1", Title: "a"}, {Number: "2", Title: "b"}}
 	readiness := Readiness{

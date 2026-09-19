@@ -13,16 +13,11 @@ import (
 
 var errBoomFreshness = errors.New("pull failed")
 
-// TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip
-// verifies the checker recognizes a tip it just rebuilt against as fresh —
-// the fix for the static imageTag comparand baked at process start never
-// updating in-process (issue #652). Without this, a successful rebuild
-// would leave the very next freshness check reporting stale forever, since
-// Probe's comparand (c.imageTag) can't be recomputed without a fresh
-// process. probe is scripted directly (no real git/nix) since the
-// checker's own caching logic, not freshness.Probe's plumbing, is under
-// test here — Probe's own git/eval seam is exercised by internal/freshness's
-// tests instead.
+// The checker must recognize a tip it just rebuilt against as fresh: the
+// imageTag comparand baked at process start never updated in-process (issue
+// #652), so a successful rebuild left the next check reporting stale forever.
+// probe is scripted directly because the checker's own caching logic is under
+// test here, not freshness.Probe's git/eval plumbing.
 func TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip(t *testing.T) {
 	rev := "abc123"
 	stale := freshness.Result{Applicable: true, Fresh: false, Rev: rev, Message: "rebuild needed"}
@@ -51,11 +46,10 @@ func TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip(t *te
 	}
 }
 
-// TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain
-// verifies the rev-based fresh cache doesn't paper over a genuine second
-// staleness: once the underlying probe reports a different rev than the one
-// rebuild last rebuilt, the checker must report stale again rather than
-// treating any prior rebuild as permanently sufficient.
+// The rev-based fresh cache must not paper over a genuine second staleness:
+// once the probe reports a different rev than the one rebuild last built, the
+// checker reports stale again rather than treating any prior rebuild as
+// permanently sufficient.
 func TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain(t *testing.T) {
 	res := freshness.Result{Applicable: true, Fresh: false, Rev: "abc123", Message: "rebuild needed"}
 	probe := func() freshness.Result { return res }
@@ -68,8 +62,8 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain(t *tes
 		t.Fatalf("fresh() after the first rebuild reported stale, want fresh")
 	}
 
-	// The base branch advanced further after the rebuild — the probe now
-	// reports a newer rev the checker never rebuilt against.
+	// The base branch advanced past the rebuild, so the probe now reports a
+	// rev the checker never built.
 	res = freshness.Result{Applicable: true, Fresh: false, Rev: "def456", Message: "rebuild needed again"}
 
 	if applicable, isFresh, msg := fresh(); !applicable || isFresh {
@@ -77,10 +71,8 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain(t *tes
 	}
 }
 
-// TestNewConsoleFreshnessChecker_AlreadyFresh_PassesThroughUnchanged
-// verifies a probe result that is already fresh is returned as-is, with no
-// rev-cache override applied — the caching path only ever matters for a
-// stale verdict.
+// A probe result that is already fresh passes through unchanged, with no
+// rev-cache override: the caching path only ever matters for a stale verdict.
 func TestNewConsoleFreshnessChecker_AlreadyFresh_PassesThroughUnchanged(t *testing.T) {
 	res := freshness.Result{Applicable: true, Fresh: true, Rev: "abc123", Message: "fresh"}
 	probe := func() freshness.Result { return res }
@@ -93,14 +85,11 @@ func TestNewConsoleFreshnessChecker_AlreadyFresh_PassesThroughUnchanged(t *testi
 	}
 }
 
-// TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulledRev
-// verifies the TOCTOU fix (issue #767): builtRev must be the rev pull()
-// actually checked out (and build() actually built), not whatever rev a
-// post-build probe() happens to see. probe() re-fetches origin
-// independently on every call, so if origin advances while build() is
-// running, a rebuild() that derived builtRev from its own trailing probe()
-// call would cache the advanced rev — one nobody ever built — and the next
-// fresh() would false-positive at that rev.
+// This test pins the TOCTOU fix (issue #767): builtRev must be the rev pull()
+// checked out and build() built, not whatever rev a post-build probe() sees.
+// probe() re-fetches origin on every call, so if origin advances while build()
+// runs, a builtRev derived from a trailing probe() would cache a rev nobody
+// built and the next fresh() would false-positive there.
 func TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulledRev(t *testing.T) {
 	const pulledRev = "abc123"   // what pull() checked out and build() built
 	const advancedRev = "def456" // origin's tip by the time probe() next runs
@@ -122,10 +111,9 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulled
 	}
 }
 
-// TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors
-// verifies rebuild returns pull's or build's error without probing again or
-// updating the cached rev — a failed rebuild must never look like a
-// successful one on the next check.
+// rebuild returns pull's or build's error without probing again or updating
+// the cached rev: a failed rebuild must never look like a successful one on
+// the next check.
 func TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors(t *testing.T) {
 	probeCalls := 0
 	probe := func() freshness.Result {
@@ -145,11 +133,9 @@ func TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors(t *testi
 	}
 }
 
-// TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice verifies
-// rebuild's return threads pull's branch-switch notice through alongside
-// build's output — the seam consoleGitSync's notice (issue #1141) needs to
-// reach the console's rendered status through, without rebuild re-deriving
-// it itself.
+// rebuild returns pull's branch-switch notice alongside build's output instead
+// of re-deriving it, so consoleGitSync's notice (issue #1141) reaches the
+// console's rendered status.
 func TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice(t *testing.T) {
 	const wantNotice = "switched off-branch tree from feature to main"
 	probe := func() freshness.Result { return freshness.Result{} }
@@ -167,25 +153,11 @@ func TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice(t *testing.T) {
 	}
 }
 
-// TestNewConsoleFreshness_UsesRunnerKindNotRuntime proves newConsoleFreshness
-// wires config.runnerKind, not config.runtime, into freshness.Probe (issue
-// #2538 AC1/AC2): runtime is set to "podman" — a real OCI runtime name a
-// runtime-name comparison would read as "not bwrap" — while runnerKind is
-// "bwrap". Since probe.go no longer special-cases bwrap before the
-// fetch+eval, both a bwrap and an OCI read reach the same comparison point;
-// the two arms only diverge in HOW they compare the freshly evaluated
-// outPath against c.imageTag. c.imageTag is set to a bare store path with no
-// colon at all, and the fake Evaluator is scripted to return that exact same
-// path. The bwrap arm compares outPath to imageTag byte-for-byte, so a
-// correct runnerKind read reports Fresh=true with no "spindrift:" in the
-// message. A wrong c.runtime read would instead take the OCI arm, which
-// derives a "<repo>:<hash>" tip tag via imageTagFromOutPath — since imageTag
-// has no colon, imageRepo falls back to the default "spindrift" repo,
-// producing a tip tag like "spindrift:<hash>" that can never equal the
-// colon-less imageTag, so that arm would report Fresh=false with a message
-// naming "spindrift:". Asserting Fresh=true and the absence of "spindrift:"
-// is what discriminates a c.runtime regression from the correct c.runnerKind
-// read.
+// newConsoleFreshness must wire config.runnerKind, not config.runtime, into
+// freshness.Probe (issue #2538 AC1/AC2). The bwrap arm compares outPath to
+// imageTag byte-for-byte, while a runtime-name read takes the OCI arm and
+// derives a "spindrift:<hash>" tag that can never equal this colon-less
+// imageTag, so Fresh=true with no "spindrift:" tells the two reads apart.
 func TestNewConsoleFreshness_UsesRunnerKindNotRuntime(t *testing.T) {
 	const outPath = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-agent-closure"
 
@@ -193,7 +165,7 @@ func TestNewConsoleFreshness_UsesRunnerKindNotRuntime(t *testing.T) {
 	c.runnerKind = "bwrap"
 	c.runtime = "podman"
 	c.baseBranch = "main"
-	c.imageTag = outPath // bare store path, no colon — bwrap's own tag shape
+	c.imageTag = outPath // bare store path with no colon, bwrap's own tag shape
 	eval := &freshness.Fake{OutPath: outPath}
 
 	pwd := newConsoleGitRepo(t, "main")
@@ -208,25 +180,11 @@ func TestNewConsoleFreshness_UsesRunnerKindNotRuntime(t *testing.T) {
 	}
 }
 
-// TestNewConsoleFreshness_NeverWiresLauncherDimension proves newConsoleFreshness
-// omits the launcher-freshness dimension from its freshness.Probe call
-// entirely — a blocking review finding on issue #1364, which scopes the
-// host-launcher-staleness dimension strictly to the headless
-// --continuous-dispatch wave path (main.go's runContinuousDispatch), not the
-// Console. The Console's own Rebuild only pulls the repo and rebuilds the
-// OCI image (consoleNixBuild -> runner.RunNixBuild) — it never rebuilds or
-// restarts the host launcher binary — so if the launcher dimension were
-// wired in here, a launcher-stale verdict could never actually be resolved
-// by the Console's rebuild action.
-//
-// c.flakeLauncherAttr/c.loadedLauncherHash are set to values that would
-// report launcher-stale under a real Probe call (the fake Evaluator returns
-// a launcher outPath hash that mismatches loadedLauncherHash, while the
-// image attr's outPath hash matches imageTag). If newConsoleFreshness wired
-// those two config fields into Probe, fresh() would report Applicable=true,
-// Fresh=false, with a message naming "launcher" as the stale dimension.
-// Asserting fresh() instead reports the plain image-fresh verdict proves the
-// launcher dimension was never configured on this call.
+// newConsoleFreshness must omit the launcher-freshness dimension from its
+// freshness.Probe call (blocking review finding on issue #1364): the Console's
+// Rebuild only pulls and rebuilds the image, never the host launcher binary,
+// so a launcher-stale verdict could never be resolved here. flakeLauncherAttr
+// and loadedLauncherHash are set to values that would report launcher-stale.
 func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
 	const imageHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const launcherHashOnDisk = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // mismatches loadedLauncherHash below
@@ -263,13 +221,10 @@ func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
 	}
 }
 
-// TestConsoleGitSync_DirtyOffBranch_RefusesCheckout verifies that when pwd is
-// on a branch other than baseBranch and has uncommitted changes,
-// consoleGitSync refuses the checkout instead of silently carrying those
-// changes onto baseBranch (issue #769) — the exact "unexpected branch
-// switch" the README's "non-destructive" claim glossed over: git itself
-// only blocks a checkout that would overwrite a *conflicting* file, so a
-// non-conflicting dirty change rides along in silence.
+// consoleGitSync must refuse the checkout when pwd is off baseBranch and
+// dirty, rather than carry those changes onto baseBranch (issue #769). git
+// itself only blocks a checkout that would overwrite a conflicting file, so it
+// carries a non-conflicting dirty change across silently.
 func TestConsoleGitSync_DirtyOffBranch_RefusesCheckout(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 	gitRun(t, pwd, "checkout", "-b", "feature")
@@ -288,12 +243,9 @@ func TestConsoleGitSync_DirtyOffBranch_RefusesCheckout(t *testing.T) {
 	}
 }
 
-// TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs verifies that a dirty tree
-// already on baseBranch is not blocked — checking out the branch pwd is
-// already on carries nothing across, so the precondition in
-// TestConsoleGitSync_DirtyOffBranch_RefusesCheckout must key off "off
-// baseBranch AND dirty", not "dirty" alone, or every routine rebuild with
-// scratch files present would wrongly refuse to sync.
+// A dirty tree already on baseBranch must still sync: the refusal keys off
+// "off baseBranch AND dirty", not "dirty" alone, or every routine rebuild
+// with scratch files present would wrongly refuse.
 func TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 	gitWriteFile(t, filepath.Join(pwd, "scratch.txt"), "untracked\n")
@@ -303,14 +255,10 @@ func TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs(t *testing.T) {
 	}
 }
 
-// TestHeadRevAndProbeRev_SameCommit_IdenticalFormat verifies headRev and
-// freshness.Probe's Result.Rev — both backed by a plain `git rev-parse` with
-// no --short/--abbrev flag — return identically formatted full SHAs for the
-// same commit, not just equal-looking strings. This is the format guarantee
-// newConsoleFreshnessChecker's res.Rev == builtRev comparison relies on: a
-// future --short added to either call site would silently break that match,
-// and this test would catch it since a shortened Rev wouldn't equal a
-// full-length headRev output.
+// headRev and freshness.Probe's Result.Rev must return identically formatted
+// full SHAs for the same commit. newConsoleFreshnessChecker's res.Rev ==
+// builtRev comparison relies on that format, so a --short added to either call
+// site would silently break the match.
 func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 
@@ -336,12 +284,10 @@ func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
 	}
 }
 
-// TestConsoleGitSync_CleanOffBranch_ReturnsSwitchNotice verifies that a
-// clean tree on a branch other than baseBranch gets a notice describing the
-// switch, naming both branches — the silent-switch gap issue #1141 closes:
-// checkCheckoutSafe lets this checkout proceed (nothing dirty to carry
-// across), but until now nothing told the operator their pwd moved off the
-// branch they had checked out.
+// A clean tree off baseBranch gets a notice naming both branches, which closes
+// the silent-switch gap of issue #1141: checkCheckoutSafe lets the checkout
+// proceed because there is nothing dirty to carry across, but before the notice
+// nothing told the operator their pwd had moved off the branch.
 func TestConsoleGitSync_CleanOffBranch_ReturnsSwitchNotice(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 	gitRun(t, pwd, "checkout", "-b", "feature")
@@ -355,9 +301,8 @@ func TestConsoleGitSync_CleanOffBranch_ReturnsSwitchNotice(t *testing.T) {
 	}
 }
 
-// TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice verifies that
-// syncing while already on baseBranch returns no notice — no real switch
-// occurred, so there's nothing to tell the operator.
+// Syncing while already on baseBranch returns no notice, since no switch
+// happened.
 func TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 
@@ -370,9 +315,9 @@ func TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice(t *testing.T) {
 	}
 }
 
-// TestHeadRev_ReturnsReposCurrentCommit verifies headRev reports the same
-// commit hash git itself reports for pwd's checked-out HEAD — the seam
-// headRev shares with gitOutput once headRev delegates to it (issue #1133).
+// headRev reports the same commit hash git itself reports for pwd's HEAD. This
+// pins the seam headRev shares with gitOutput once headRev delegates to it
+// (issue #1133).
 func TestHeadRev_ReturnsReposCurrentCommit(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 
@@ -390,10 +335,9 @@ func TestHeadRev_ReturnsReposCurrentCommit(t *testing.T) {
 	}
 }
 
-// TestRunGit_ExecutesCommandAndSurfacesError verifies runGit both runs the
-// command it's given (checked independently via git itself) and surfaces
-// git's own stderr in its error on failure — the seam runGit shares with
-// gitOutput once runGit delegates to it (issue #1133).
+// runGit runs the command it is given and includes git's own stderr in its
+// error on failure. This pins the seam runGit shares with gitOutput once runGit
+// delegates to it (issue #1133).
 func TestRunGit_ExecutesCommandAndSurfacesError(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 
@@ -417,7 +361,6 @@ func TestRunGit_ExecutesCommandAndSurfacesError(t *testing.T) {
 	}
 }
 
-// gitRun runs git in dir, failing the test on error.
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -433,9 +376,9 @@ func gitWriteFile(t *testing.T, path, contents string) {
 	}
 }
 
-// newConsoleGitRepo sets up a bare "origin" repo with a single commit on
-// baseBranch and a local clone of it, matching the shape the launcher's own
-// pwd has in production: a checkout with an "origin" remote.
+// newConsoleGitRepo builds a bare "origin" plus a local clone of it, matching
+// the shape the launcher's own pwd has in production: a checkout with an
+// "origin" remote.
 func newConsoleGitRepo(t *testing.T, baseBranch string) string {
 	t.Helper()
 	dir := t.TempDir()

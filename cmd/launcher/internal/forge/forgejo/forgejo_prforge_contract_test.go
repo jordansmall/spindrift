@@ -36,18 +36,11 @@ func TestForgejoCodeForge_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
 }
 
-// TestFakeForgejo_SeedDraftPR_DraftDerivedFromTitle verifies the fake
-// derives the served "draft" field from the pull's title, mirroring real
-// Forgejo (services/convert/pull.go: Draft is pr.IsWorkInProgress(ctx),
-// never an independently-settable flag) rather than an independent
-// fakePull.Draft bool disconnected from the title. SeedDraftPR must seed a
-// WIP-prefixed title so IsDraftTitle reports true, and MarkReady — which
-// PATCHes the title with the WIP prefix stripped — must flip a subsequent
-// read's draft field to false. Read via fakeForgejo.IsDraftTitle rather
-// than the adapter's OpenPRForBranch, which no longer surfaces draft status
-// on the returned forge.PR; the adoption behavior itself (found regardless
-// of draft) is covered separately by the PRForge contract and
-// TestOpenPRForBranch_AdoptsDraftPR.
+// Real Forgejo derives a pull's draft field from its title
+// (services/convert/pull.go: Draft is pr.IsWorkInProgress(ctx)), so the fake
+// must derive it too rather than carry an independent flag. The test reads
+// IsDraftTitle because OpenPRForBranch no longer reports draft status on the
+// forge.PR it returns.
 func TestFakeForgejo_SeedDraftPR_DraftDerivedFromTitle(t *testing.T) {
 	h := newPRForgeHarness(t)
 	url := h.SeedDraftPR("300")

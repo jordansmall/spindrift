@@ -22,9 +22,6 @@ func validAnswers() answers {
 	}
 }
 
-// TestQuickstartCheckConfig_MapsFields proves quickstartCheckConfig copies
-// every answers field the launcherchecks rows read, plus the codeForge
-// parameter, into the shared Config.
 func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 	a := validAnswers()
 	c := quickstartCheckConfig(a, "github")
@@ -45,10 +42,9 @@ func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 	}
 }
 
-// TestQuickstartCheckDeps_BackendAxisMembership proves the Backend closure
-// still reports ValidAsTracker/ValidAsCodeForge accurately, so the
-// issue-tracker-config/code-forge-config rows' axis-membership check still
-// works even with no validators wired.
+// The issue-tracker-config and code-forge-config rows fall back to an
+// axis-membership check when no validator is wired, so the Backend closure
+// must still report these flags accurately.
 func TestQuickstartCheckDeps_BackendAxisMembership(t *testing.T) {
 	a := validAnswers()
 	deps := quickstartCheckDeps(a)
@@ -64,8 +60,8 @@ func TestQuickstartCheckDeps_BackendAxisMembership(t *testing.T) {
 	}
 }
 
-// TestQuickstartCheckDeps_ExtraCrossKnobIsNil proves Quickstart passes no
-// extra cross-knob rows — it has no REGISTRY_PROXY_ROUTES_FILE knob.
+// Quickstart passes no extra cross-knob rows because it has no
+// REGISTRY_PROXY_ROUTES_FILE knob.
 func TestQuickstartCheckDeps_ExtraCrossKnobIsNil(t *testing.T) {
 	a := validAnswers()
 	deps := quickstartCheckDeps(a)
@@ -74,8 +70,8 @@ func TestQuickstartCheckDeps_ExtraCrossKnobIsNil(t *testing.T) {
 	}
 }
 
-// TestQuickstartCheckDeps_TrackerAndCodeForgeNames proves the name lists
-// mirror backend.Registry's own ValidAsTracker/ValidAsCodeForge flags.
+// The expected names come from backend.Registry's own
+// ValidAsTracker/ValidAsCodeForge flags.
 func TestQuickstartCheckDeps_TrackerAndCodeForgeNames(t *testing.T) {
 	a := validAnswers()
 	deps := quickstartCheckDeps(a)
@@ -95,13 +91,9 @@ func TestQuickstartCheckDeps_TrackerAndCodeForgeNames(t *testing.T) {
 	}
 }
 
-// TestQuickstartLauncherRows_RuntimeRowStripped proves the row set
-// Quickstart builds for doctor.Run's extraChecks never carries the
-// "runtime" row: doctor.Config.Runtime already reports it, and handing
-// doctor.Run the unstripped set would double-report (doctor.RuntimeCheck's
-// own doc comment). A future edit to the call site that drops
-// WithoutRuntime must fail this test rather than silently reintroducing
-// the double-report.
+// doctor.Config.Runtime already reports the runtime, so handing doctor.Run
+// an unstripped row set double-reports it. This test fails if a call site
+// edit drops WithoutRuntime.
 func TestQuickstartLauncherRows_RuntimeRowStripped(t *testing.T) {
 	a := validAnswers()
 	rows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, "github"), quickstartCheckDeps(a)))
@@ -112,12 +104,9 @@ func TestQuickstartLauncherRows_RuntimeRowStripped(t *testing.T) {
 	}
 }
 
-// TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput mirrors
-// cmd/launcher's own TestRunDoctor_WiresLauncherChecksIntoOutput (issue
-// #2725): drives the wizard's finish-line doctor step with an otherwise-
-// valid answer set whose git user name is blank (both the ambient
-// env.GitConfig default and the prompted line are empty), and asserts the
-// transcript reports the launcherchecks "git-user-name" row — the one
+// This test mirrors cmd/launcher's own TestRunDoctor_WiresLauncherChecksIntoOutput
+// (issue #2725). The answer set leaves the git user name blank so the
+// transcript must report the launcherchecks "git-user-name" row, the one
 // assertion that proves the doctor.Run call site is no longer handed nil.
 func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
 	dir := t.TempDir()
@@ -125,7 +114,7 @@ func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
 	stdin := strings.NewReader(strings.Join([]string{
 		"jordansmall/spindrift", // repoSlug
 		"podman",                // runtime
-		"",                      // git user name — left blank
+		"",                      // git user name, left blank
 		"ada@example.com",       // git user email
 		"ghp_faketoken",         // GH_TOKEN
 	}, "\n") + "\n")
@@ -138,21 +127,20 @@ func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
 	if !strings.Contains(out.String(), "MISSING: git-user-name") {
 		t.Errorf("want transcript to report the launcherchecks git-user-name row, got:\n%s", out.String())
 	}
-	// doctor.Config.Runtime always reports one runtime line (its exact
-	// wording depends on whether "podman" is actually on this test host's
-	// PATH); an unstripped launcherchecks row set would report a second
-	// one through extraChecks (doctor.RuntimeCheck's own doc comment).
+	// doctor.Config.Runtime always reports one runtime line, and its exact
+	// wording depends on whether "podman" is on this test host's PATH, so
+	// this counts occurrences: an unstripped row set would report a second
+	// line through extraChecks.
 	const runtimeSubstr = `runtime "podman"`
 	if n := strings.Count(out.String(), runtimeSubstr); n != 1 {
 		t.Errorf("want %q to appear exactly once in the transcript (proves the runtime row stays stripped), appeared %d times:\n%s", runtimeSubstr, n, out.String())
 	}
 }
 
-// TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob proves the wizard's
-// doctor step reaches the same gh-token verdict `spindrift doctor` reaches
-// against the harness.env that same wizard wrote. The shared row is
-// GH_TOKEN-specific, so the token belongs in Config.GHToken only when the
-// scaffold writes it under that name — a forgejo scaffold writes
+// The wizard's doctor step must reach the same gh-token verdict `spindrift
+// doctor` reaches against the harness.env the wizard wrote. The shared row
+// is GH_TOKEN-specific, so the token belongs in Config.GHToken only when the
+// scaffold writes it under that name: a forgejo scaffold writes
 // FORGEJO_TOKEN, leaving GH_TOKEN unset for both binaries to report.
 func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 	for _, tc := range []struct {
@@ -187,11 +175,9 @@ func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 	}
 }
 
-// TestHarnessEnvTokenEnvVar_MatchesRenderedFile is the drift guard between
-// the two callers of harnessEnvTokenEnvVar: for every backend the wizard can
-// scaffold as an ISSUE_TRACKER, the name the helper reports (and hence the
-// knob quickstartCheckConfig mirrors) is the name renderHarnessEnv actually
-// writes into harness.env.
+// This test guards drift between the two callers of harnessEnvTokenEnvVar:
+// the name the helper reports, and hence the knob quickstartCheckConfig
+// mirrors, is the name renderHarnessEnv writes into harness.env.
 func TestHarnessEnvTokenEnvVar_MatchesRenderedFile(t *testing.T) {
 	for _, name := range launcherchecks.TrackerNamesFromRegistry() {
 		t.Run(name, func(t *testing.T) {
@@ -203,13 +189,11 @@ func TestHarnessEnvTokenEnvVar_MatchesRenderedFile(t *testing.T) {
 	}
 }
 
-// TestQuickstartCheckDeps_NonForgejoValidatorsStayNil proves Quickstart's
-// Backend closure never fabricates a ValidateTracker/ValidateCodeForge for a
-// backend whose cmd/launcher validator reads a knob the wizard never
+// These backends' cmd/launcher validators read knobs the wizard never
 // collects: local's reads MERGE_MODE, git's reads CODE_FORGE_REMOTE_URL,
-// jira's reads the JIRA_* knobs, and github declares no validator at all.
-// Binding those would mean validating invented values, so they stay nil and
-// their rows check axis membership only.
+// jira's reads the JIRA_* knobs, and github declares no validator. Binding
+// them would validate invented values, so they stay nil and their rows check
+// axis membership only.
 func TestQuickstartCheckDeps_NonForgejoValidatorsStayNil(t *testing.T) {
 	a := validAnswers()
 	deps := quickstartCheckDeps(a)
@@ -227,8 +211,8 @@ func TestQuickstartCheckDeps_NonForgejoValidatorsStayNil(t *testing.T) {
 	}
 }
 
-// forgejoAnswers is a wizard answer set that selected the forgejo backend,
-// with both inputs forgejo.ValidateForgejoEnv reads filled in.
+// forgejoAnswers fills in both inputs forgejo.ValidateForgejoEnv reads, so a
+// test can blank one at a time.
 func forgejoAnswers() answers {
 	a := validAnswers()
 	a.tracker = trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://codeberg.org"}
@@ -236,8 +220,6 @@ func forgejoAnswers() answers {
 	return a
 }
 
-// launcherRow returns the named row from the launcherchecks row set
-// Quickstart builds for a, failing the test when the row is absent.
 func launcherRow(t *testing.T, a answers, codeForge, name string) doctor.Check {
 	t.Helper()
 	for _, ch := range launcherchecks.All(quickstartCheckConfig(a, codeForge), quickstartCheckDeps(a)) {
@@ -249,13 +231,11 @@ func launcherRow(t *testing.T, a answers, codeForge, name string) doctor.Check {
 	return doctor.Check{}
 }
 
-// TestQuickstartCheckDeps_ForgejoBindsValidator proves the wizard's
-// issue-tracker-config/code-forge-config rows reach the same verdict
-// `spindrift doctor` reaches for ISSUE_TRACKER=CODE_FORGE=forgejo: the
-// wizard holds both inputs cmd/launcher's forgejo row validates
+// Forgejo is the one backend whose validator inputs the wizard already holds
 // (FORGEJO_BASE_URL as a prompted tracker setting, FORGEJO_TOKEN as the
-// acquired credential), so it binds forgejo.ValidateForgejoEnv over them
-// rather than leaving those rows at axis-membership only.
+// acquired credential), so it binds forgejo.ValidateForgejoEnv and its rows
+// must reach the same verdict `spindrift doctor` reaches, not the weaker
+// axis-membership check.
 func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

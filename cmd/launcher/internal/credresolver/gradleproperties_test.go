@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// TestGradlePropertiesValue_ResolvesConfiguredKey verifies that a
-// gradle.properties file with a "key=value" line for the requested key
-// resolves the value.
 func TestGradlePropertiesValue_ResolvesConfiguredKey(t *testing.T) {
 	content := []byte("myRepoPassword=s3kr3t\n")
 
@@ -22,10 +19,8 @@ func TestGradlePropertiesValue_ResolvesConfiguredKey(t *testing.T) {
 	}
 }
 
-// TestGradlePropertiesValue_MissingKeyIsError verifies that a properties
-// file with no line for the requested key fails closed with an error naming
-// both the file path and the key that was looked for -- distinguishable
-// from a missing file (a "reading ... file" error).
+// The error names both the path and the key so a reader can tell a missing
+// key from a missing file, which reports a "reading ... file" error instead.
 func TestGradlePropertiesValue_MissingKeyIsError(t *testing.T) {
 	content := []byte("otherKey=s3kr3t\n")
 	const path = "/some/gradle.properties"
@@ -43,11 +38,9 @@ func TestGradlePropertiesValue_MissingKeyIsError(t *testing.T) {
 	}
 }
 
-// TestNew_GradlePropertiesFormatMissingFileReportsReadingError verifies that
-// New's "gradle-properties" dispatch reports a "reading ... file" error for
-// a missing file -- like every other file adapter, the file-existence check
-// must run before any format-specific parsing or the missing-key guard,
-// distinguishing a missing file from a missing key.
+// Like every other file adapter, the "gradle-properties" dispatch must check
+// that the file exists before it parses or runs the missing-key guard, so a
+// missing file and a missing key stay distinguishable.
 func TestNew_GradlePropertiesFormatMissingFileReportsReadingError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.properties")
 
@@ -64,11 +57,8 @@ func TestNew_GradlePropertiesFormatMissingFileReportsReadingError(t *testing.T) 
 	}
 }
 
-// TestNew_GradlePropertiesFormatEmptyPropertyKeyIsError verifies that New's
-// "gradle-properties" dispatch fails closed, naming the route-flavored
-// reason ("key" is unset), when the credential's key is unset -- this
-// format is only reachable from the routes file, so the error must not
-// mention a scalar REGISTRY_PROXY_* knob name.
+// Only the routes file can reach this format, so the error has to name the
+// unset key and must not blame a scalar REGISTRY_PROXY_* knob.
 func TestNew_GradlePropertiesFormatEmptyPropertyKeyIsError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gradle.properties")
 	if err := os.WriteFile(path, []byte("myRepoPassword=s3kr3t\n"), 0o600); err != nil {
@@ -88,10 +78,8 @@ func TestNew_GradlePropertiesFormatEmptyPropertyKeyIsError(t *testing.T) {
 	}
 }
 
-// TestGradlePropertiesValue_CommentsBlankLinesAndSeparatorsAreTolerated
-// verifies that "#" and "!"-prefixed comment lines and blank lines are
-// skipped, and that a ":" separator with surrounding whitespace resolves
-// the same as "=" -- java.util.Properties accepts both.
+// java.util.Properties skips "#" and "!" comment lines and blank lines, and
+// accepts ":" as a separator alongside "=", so the parser must match it.
 func TestGradlePropertiesValue_CommentsBlankLinesAndSeparatorsAreTolerated(t *testing.T) {
 	content := []byte(
 		"# a comment\n" +
@@ -109,9 +97,8 @@ func TestGradlePropertiesValue_CommentsBlankLinesAndSeparatorsAreTolerated(t *te
 	}
 }
 
-// TestGradlePropertiesValue_EmptyValueIsError verifies that a matching key
-// whose value is empty fails closed with an error naming the file and key,
-// rather than resolving to an empty credential.
+// A matching key with an empty value must fail closed rather than resolve to
+// an empty credential.
 func TestGradlePropertiesValue_EmptyValueIsError(t *testing.T) {
 	content := []byte("myRepoPassword=\n")
 	const path = "/some/gradle.properties"
@@ -129,11 +116,9 @@ func TestGradlePropertiesValue_EmptyValueIsError(t *testing.T) {
 	}
 }
 
-// TestGradlePropertiesValue_EmbeddedCRIsError verifies that a resolved value
-// containing a mid-line "\r" fails closed -- strings.TrimSpace only strips a
-// leading/trailing "\r", so a "\r" embedded earlier in the value survives
-// into the returned token and would reach the HTTP proxy's header-write
-// path. The error must name the file, never the value itself.
+// strings.TrimSpace strips only a leading or trailing "\r", so a "\r" in the
+// middle of a value survives into the token and reaches the HTTP proxy's
+// header-write path. The error must name the file, never the value.
 func TestGradlePropertiesValue_EmbeddedCRIsError(t *testing.T) {
 	content := []byte("myRepoPassword=s3kr3t\rX-Injected: evil\n")
 	const path = "/some/gradle.properties"
@@ -151,8 +136,6 @@ func TestGradlePropertiesValue_EmbeddedCRIsError(t *testing.T) {
 	}
 }
 
-// TestGradlePropertiesValue_FirstMatchWins verifies that when a key appears
-// more than once, the value from the first matching line is returned.
 func TestGradlePropertiesValue_FirstMatchWins(t *testing.T) {
 	content := []byte(
 		"myRepoPassword=first\n" +
@@ -168,9 +151,8 @@ func TestGradlePropertiesValue_FirstMatchWins(t *testing.T) {
 	}
 }
 
-// TestGradlePropertiesValue_WhitespaceSeparatorIsTolerated verifies that a
-// line with no "=" or ":" separator at all, just "key value" divided by
-// whitespace, still resolves -- java.util.Properties accepts this form too.
+// java.util.Properties also accepts a bare "key value" line with no "=" or
+// ":" at all, so the parser must resolve that form.
 func TestGradlePropertiesValue_WhitespaceSeparatorIsTolerated(t *testing.T) {
 	content := []byte("myRepoPassword s3kr3t\n")
 
@@ -183,12 +165,9 @@ func TestGradlePropertiesValue_WhitespaceSeparatorIsTolerated(t *testing.T) {
 	}
 }
 
-// TestSplitGradleProperty_ColonInsideWhitespaceSeparatedValueIsNotTheSplit
-// verifies that when a line's key and value are divided by whitespace (no
-// "=" or ":" immediately after the key), a "=" or ":" appearing later,
-// inside the value itself, is not mistaken for the key/value separator --
-// java.util.Properties splits at the *earliest* of "=", ":", or whitespace,
-// not whichever of "=" or ":" occurs first in the whole line.
+// java.util.Properties splits at the earliest of "=", ":", or whitespace, not
+// at the first "=" or ":" anywhere in the line. A whitespace-separated line
+// whose value contains ":" would otherwise split in the wrong place.
 func TestSplitGradleProperty_ColonInsideWhitespaceSeparatedValueIsNotTheSplit(t *testing.T) {
 	k, v, ok := splitGradleProperty("myRepoPassword abc:def")
 	if !ok {
@@ -202,12 +181,9 @@ func TestSplitGradleProperty_ColonInsideWhitespaceSeparatedValueIsNotTheSplit(t 
 	}
 }
 
-// TestSplitGradleProperty_SeparatorForms verifies the remaining
-// java.util.Properties key/value split shapes: "=" and ":" with surrounding
-// whitespace, whitespace alone, a "="/":"-in-value case parallel to the
-// colon-in-value bug this file also covers, and that when "=" and ":" both
-// appear (with no whitespace before either), the earliest one splits the
-// key -- not whichever of the two happens to be "=" or ":".
+// These cases cover the remaining java.util.Properties split shapes. The last
+// one pins that when "=" and ":" both appear with no whitespace before either,
+// the earliest one splits the key.
 func TestSplitGradleProperty_SeparatorForms(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -231,9 +207,8 @@ func TestSplitGradleProperty_SeparatorForms(t *testing.T) {
 			if k != tt.wantKey {
 				t.Errorf("got key %q, want %q", k, tt.wantKey)
 			}
-			// splitGradleProperty's value is raw (not-yet-trimmed) --
-			// gradlePropertiesValue trims it, so trim here too to assert
-			// the effective value a caller sees.
+			// splitGradleProperty returns the raw value; gradlePropertiesValue
+			// trims it, so trim here to assert what a caller actually sees.
 			if got := strings.TrimSpace(v); got != tt.wantValue {
 				t.Errorf("got value %q, want %q", got, tt.wantValue)
 			}
@@ -241,12 +216,9 @@ func TestSplitGradleProperty_SeparatorForms(t *testing.T) {
 	}
 }
 
-// TestGradlePropertiesValue_NoSeparatorLineIsSkipped verifies that a
-// non-comment, non-blank line with no separator of any kind (neither "="/":"
-// nor whitespace between a key and a value) is not treated as a key=value
-// entry -- splitGradleProperty reports ok=false for it, so the line is
-// skipped and the requested key is reported missing rather than matching
-// the whole line as a bare key.
+// A line with no separator of any kind must not match as a bare key.
+// splitGradleProperty reports ok=false, so the parser skips the line and
+// reports the requested key missing.
 func TestGradlePropertiesValue_NoSeparatorLineIsSkipped(t *testing.T) {
 	content := []byte("myRepoPassword\n")
 	const path = "/some/gradle.properties"

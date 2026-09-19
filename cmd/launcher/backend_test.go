@@ -6,9 +6,8 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 )
 
-// TestBackendRowsShape asserts the backendRows registry reproduces today's
-// hardcoded per-axis switch behavior for each of the 5 backends (issue
-// #2267 slice 1: purely additive, nothing calls into this registry yet).
+// Slice 1 of issue #2267 is purely additive: nothing calls backendRows yet, so
+// this pins it against main.go's hardcoded per-axis switch for all 5 backends.
 func TestBackendRowsShape(t *testing.T) {
 	if len(backendRows) != 5 {
 		t.Fatalf("len(backendRows) = %d, want 5", len(backendRows))
@@ -149,17 +148,14 @@ func TestBackendRowsShape(t *testing.T) {
 	}
 }
 
-// TestBackendByNameUnknown asserts an unregistered name returns ok=false.
 func TestBackendByNameUnknown(t *testing.T) {
 	if _, ok := backendByName("nonexistent"); ok {
 		t.Fatalf("backendByName(%q) ok=true, want false", "nonexistent")
 	}
 }
 
-// TestJiraNewIssueTrackerMalformedStatusMapping mirrors the existing
-// fallback-to-empty-map behavior main.go's newIssueTracker "jira" case has
-// today: a malformed JIRA_STATUS_MAPPING must not panic, and must still
-// yield a non-nil tracker.
+// A malformed JIRA_STATUS_MAPPING must fall back to an empty map and still
+// yield a non-nil tracker, matching main.go's newIssueTracker "jira" case.
 func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 	row, ok := backendByName("jira")
 	if !ok {
@@ -185,13 +181,11 @@ func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 	}
 }
 
-// TestBackendRowsCoverRegistry closes the drift gap named in dispatchConfig's
-// doc comment (main.go): backendRows and internal/backend's ByName are two
-// registry-fallback paths over the same generated descriptors, and a row
-// reaching one but not the other would split them silently rather than fail a
-// build (issue #3062). Descriptor is a plain struct of strings and bools, so
-// comparing whole values also catches a row that stops embedding the generated
-// package variable and carries a stale copy.
+// backendRows and internal/backend's ByName are two registry-fallback paths over
+// the same generated descriptors, so a row reaching one but not the other splits
+// them silently rather than failing a build (issue #3062). Descriptor holds only
+// strings and bools, so comparing whole values also catches a row that carries a
+// stale copy instead of embedding the generated package variable.
 func TestBackendRowsCoverRegistry(t *testing.T) {
 	for _, d := range backend.Registry {
 		row, ok := backendByName(d.Name)

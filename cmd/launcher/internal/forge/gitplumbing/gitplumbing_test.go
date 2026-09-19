@@ -60,9 +60,9 @@ func TestMatchesAnyMarker(t *testing.T) {
 	}
 }
 
-// TestMarkerVars_AreLowercase verifies the MatchesAnyMarker precondition —
-// markers must already be lowercase — for every package-level marker slice
-// fed to it, since a mixed-case marker would silently never match.
+// MatchesAnyMarker requires its markers to be lowercase already, because a
+// mixed-case marker would silently never match. This checks every
+// package-level marker slice fed to it.
 func TestMarkerVars_AreLowercase(t *testing.T) {
 	// Register every package-level marker slice here as it is added.
 	sets := map[string][]string{
@@ -131,15 +131,10 @@ func TestIsMergeTransient(t *testing.T) {
 	}
 }
 
-// TestGitForcePush_StaleLeaseIsNotTransient verifies that a genuine
-// stale-lease rejection — the branch moved since the last fetch, so the
-// rebase really is out of date — is NOT classified as transient: retrying it
-// would be pointless, so callers must treat it as terminal.
-//
-// This also subsumes the former TestGitForcePush_CapturesStderr (previously
-// in cmd/launcher/internal/forge/github/exec_test.go, removed in b1d0489 /
-// #684): the stderr-substring assertion below is that test's check, merged
-// into this one alongside the non-transient classification.
+// A genuine stale-lease rejection, where the branch moved since the last
+// fetch, must be terminal rather than transient, because retrying it would be
+// pointless. The stderr-substring assertion also subsumes the removed
+// TestGitForcePush_CapturesStderr (b1d0489 / #684).
 func TestGitForcePush_StaleLeaseIsNotTransient(t *testing.T) {
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "origin.git")
@@ -194,9 +189,8 @@ func TestGitForcePush_StaleLeaseIsNotTransient(t *testing.T) {
 	}
 }
 
-// TestGitForcePush_TransientFailureIsRetryable verifies that a push failure
-// with no ref-rejection markers in its stderr — e.g. a network or forge
-// outage — is classified as transient so callers can retry it.
+// A push failure with no ref-rejection markers in its stderr, such as a
+// network or forge outage, is transient so that callers can retry it.
 func TestGitForcePush_TransientFailureIsRetryable(t *testing.T) {
 	dir := t.TempDir()
 	work := filepath.Join(dir, "work")
@@ -231,17 +225,11 @@ func TestGitForcePush_TransientFailureIsRetryable(t *testing.T) {
 	}
 }
 
-// TestWrapForcePushError_RedactsCredentialsFromStderr verifies that
-// wrapForcePushError never echoes a credential embedded in git's stderr
-// into the returned error. Exercised directly against a crafted stderr
-// string rather than a real subprocess: modern git already anonymizes URLs
-// in its own connect/access diagnostics, which would make a subprocess-level
-// test pass regardless of whether our own formatting redacts — this proves
-// the code path itself redacts, independent of that git-version behavior.
-// git's stderr for a credential-bearing remote CAN echo the full URL for
-// other failure shapes (e.g. server-side auth rejection messages), and this
-// error flows unmodified into a public GitHub issue comment
-// (settle.mergeImmediate).
+// wrapForcePushError must never echo a credential from git's stderr, because
+// the error flows unmodified into a public GitHub issue comment
+// (settle.mergeImmediate). Git anonymizes URLs in its own connect diagnostics,
+// so a subprocess test would pass either way, but it still echoes the full URL
+// for other failure shapes like the 403 below, which is why this crafts one.
 func TestWrapForcePushError_RedactsCredentialsFromStderr(t *testing.T) {
 	const secret = "sometoken123"
 	stderr := "fatal: unable to access 'https://oauth2:" + secret + "@git.example.com/org/repo.git/': The requested URL returned error: 403"

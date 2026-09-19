@@ -9,7 +9,7 @@ import (
 )
 
 // checkoutFixture is a plain (non-bare) git checkout standing in for the
-// operator's local working repo — deliberately created with no remote, so
+// operator's local working repo. It deliberately configures no remote, so
 // tests exercise SeedAccumulationRepo's no-remote-required contract.
 type checkoutFixture struct {
 	t   *testing.T
@@ -50,7 +50,6 @@ func (c *checkoutFixture) headRev() string {
 	return strings.TrimSpace(string(out))
 }
 
-// revParse returns the commit ref resolves to inside the repo at dir.
 func revParse(t *testing.T, dir, ref string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).CombinedOutput()
@@ -60,10 +59,9 @@ func revParse(t *testing.T, dir, ref string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestSeedAccumulationRepo_CreatesBareRepoWhenAbsent also stands in for the
-// "no remote at all" acceptance criterion (ADR 0033): newCheckoutFixture
-// never configures one, and SeedAccumulationRepo reads only pwd's own
-// baseBranch ref, never `origin`.
+// This test also covers the "no remote at all" acceptance criterion
+// (ADR 0033): newCheckoutFixture never configures one, and
+// SeedAccumulationRepo reads only pwd's own baseBranch ref, never `origin`.
 func TestSeedAccumulationRepo_CreatesBareRepoWhenAbsent(t *testing.T) {
 	checkout := newCheckoutFixture(t, "main")
 	repoPath := filepath.Join(t.TempDir(), "repo.git")
@@ -84,12 +82,10 @@ func TestSeedAccumulationRepo_CreatesBareRepoWhenAbsent(t *testing.T) {
 	}
 }
 
-// TestSeedAccumulationRepo_SetsHEADToBaseBranch asserts the bare repo's HEAD
-// symref points at baseBranch, not whatever `git init --bare` picked from
-// init.defaultBranch — baseBranch here ("trunk") is deliberately atypical
-// so the test fails if SeedAccumulationRepo merely inherits git's own
-// default rather than setting it. A wrong HEAD leaves later `git clone` of
-// the Accumulation repo checking out nothing (issue #1697's mount ticket).
+// baseBranch here ("trunk") is deliberately atypical, so the test fails if
+// SeedAccumulationRepo inherits git's own init.defaultBranch rather than
+// setting HEAD itself. A wrong HEAD leaves a later `git clone` of the
+// Accumulation repo checking out nothing (issue #1697's mount ticket).
 func TestSeedAccumulationRepo_SetsHEADToBaseBranch(t *testing.T) {
 	checkout := newCheckoutFixture(t, "trunk")
 	repoPath := filepath.Join(t.TempDir(), "repo.git")
@@ -107,11 +103,9 @@ func TestSeedAccumulationRepo_SetsHEADToBaseBranch(t *testing.T) {
 	}
 }
 
-// TestSeedAccumulationRepo_PreservesOtherRefs asserts re-running seeding
-// against an already-seeded repo is idempotent: it neither fails nor
-// disturbs refs other tickets already wrote into the Accumulation repo —
-// agent branches and Integration branches (ADR 0033) — it only touches
-// baseBranch's own ref.
+// Re-seeding must not disturb refs other tickets already wrote into the
+// Accumulation repo, meaning agent branches and Integration branches
+// (ADR 0033). Seeding touches baseBranch's own ref and nothing else.
 func TestSeedAccumulationRepo_PreservesOtherRefs(t *testing.T) {
 	checkout := newCheckoutFixture(t, "main")
 	repoPath := filepath.Join(t.TempDir(), "repo.git")
@@ -120,8 +114,8 @@ func TestSeedAccumulationRepo_PreservesOtherRefs(t *testing.T) {
 		t.Fatalf("SeedAccumulationRepo (first run): %v", err)
 	}
 
-	// Simulate a landed agent branch already sitting in the Accumulation
-	// repo from prior seam work.
+	// Stand in for a landed agent branch left in the Accumulation repo by
+	// prior seam work.
 	work := t.TempDir()
 	run(t, work, "clone", repoPath, ".")
 	run(t, work, "checkout", "-b", "agent/1696")
@@ -144,10 +138,9 @@ func TestSeedAccumulationRepo_PreservesOtherRefs(t *testing.T) {
 	}
 }
 
-// TestSeedAccumulationRepo_UpdatesBaseWhenCheckoutAdvances asserts a second
-// seeding run picks up new commits the operator's local checkout has since
-// made on baseBranch — the "sync" half of ADR 0033's seed contract, not
-// just first-creation.
+// A second seeding run must pick up new commits the operator's local
+// checkout has since made on baseBranch. This is the "sync" half of
+// ADR 0033's seed contract, not just first creation.
 func TestSeedAccumulationRepo_UpdatesBaseWhenCheckoutAdvances(t *testing.T) {
 	checkout := newCheckoutFixture(t, "main")
 	repoPath := filepath.Join(t.TempDir(), "repo.git")
@@ -167,11 +160,9 @@ func TestSeedAccumulationRepo_UpdatesBaseWhenCheckoutAdvances(t *testing.T) {
 	}
 }
 
-// TestSeedAccumulationRepo_MirrorsCheckoutRewind asserts a second seeding
-// run mirrors the local checkout even when it moved backwards (`git reset
-// --hard` to an earlier commit) — the base ref is a pure mirror of local
-// truth, not a monotonically-advancing fast-forward, so the force refspec
-// must carry a rewind through too.
+// The base ref mirrors the local checkout rather than only fast-forwarding,
+// so a `git reset --hard` to an earlier commit must carry through the force
+// refspec as well.
 func TestSeedAccumulationRepo_MirrorsCheckoutRewind(t *testing.T) {
 	checkout := newCheckoutFixture(t, "main")
 	checkout.commit("later.txt", "later")
@@ -192,9 +183,8 @@ func TestSeedAccumulationRepo_MirrorsCheckoutRewind(t *testing.T) {
 	}
 }
 
-// run runs `git -C dir args...`, failing t on error — a package-level
-// helper (rather than a checkoutFixture method) for tests that operate
-// against a plain clone of the Accumulation repo itself.
+// run is package-level rather than a checkoutFixture method because some
+// tests drive a plain clone of the Accumulation repo, not the fixture.
 func run(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

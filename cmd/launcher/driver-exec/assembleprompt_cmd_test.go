@@ -11,34 +11,20 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// promptsDirForTest is the real templates/default/prompts tree, resolved
-// relative to this package directory (cmd/launcher/driver-exec), the same
-// convention promptassembly's own assemble_test.go uses for its
-// package-relative path.
+// The real prompt tree, not a fixture, so these tests render what ships.
 const promptsDirForTest = "../../../templates/default/prompts"
 
-// registryPathForTest reuses promptassembly's own testdata registry fixture
-// rather than duplicating it by hand.
+// Reuses promptassembly's own testdata registry rather than duplicating it.
 const registryPathForTest = "../internal/promptassembly/testdata/registry.json"
 
-// validateMarkersRegistryPathForTest reuses promptassembly's own testdata
-// validateMarkers registry fixture (slice A, issue #2356) rather than
-// duplicating it by hand.
+// Reuses promptassembly's own validateMarkers registry (issue #2356).
 const validateMarkersRegistryPathForTest = "../internal/promptassembly/testdata/validate-markers.json"
 
-// coveredCellArgs puts runAssemblePrompt's Env squarely in
-// promptassembly.Assemble's covered cell (see promptassembly's
-// checkCoveredCell, which as of issue #2540 checks only dispatch kind
-// "work"): github tracker, github forge, a read-write box, dispatch kind
-// "work", a fresh box (fix-pass 0), the orchestrator off, and every skill
-// baked. Since issue #2979, the Box-env-sourced Env fields
-// (promptassembly.EnvFromEnviron, boxenv_gen.go) reach runAssemblePrompt via
-// t.Setenv rather than a CLI flag -- every field is set explicitly here
-// (even to "" for a false/empty default) so a leftover value in the test
-// process's own environment can never leak into a covered-cell run. The
-// remaining flag set (skill-baked bools, prompts-dir, skills-found, and the
-// required registry/output paths) is still a genuine CLI flag and is
-// returned for the caller to pass to runAssemblePrompt.
+// coveredCellArgs puts runAssemblePrompt's Env in promptassembly.Assemble's
+// covered cell (issue #2540: checkCoveredCell checks only dispatch kind
+// "work"). Since issue #2979 the Box-env-sourced fields arrive via t.Setenv,
+// so every one is set explicitly, even to "", or a leftover value in the test
+// process's own environment leaks into the run.
 func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 	t.Helper()
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
@@ -87,9 +73,8 @@ func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput
 	}
 }
 
-// TestRunAssemblePrompt_CoveredCellWritesOutputs verifies the assemble-prompt
-// subcommand's flag parsing reaches promptassembly.Assemble with the right
-// Env/Registry and writes all three output files (issue #2349).
+// Pins that flag parsing reaches promptassembly.Assemble with the right Env
+// and Registry, and that the run writes all three output files (issue #2349).
 func TestRunAssemblePrompt_CoveredCellWritesOutputs(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -132,12 +117,10 @@ func TestRunAssemblePrompt_CoveredCellWritesOutputs(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_UnsupportedCellReturnsNonZero verifies an Env
-// outside promptassembly.Assemble's covered cell (here, a dispatch kind
-// value that is neither "work" nor "research" -- the one axis
-// checkCoveredCell still validates as of issue #2540, since it has no
-// eval-time or launcher-side guard the way IssueTracker/CodeForge do) is
-// reported as a CLI failure, not a panic.
+// The dispatch kind is the one axis checkCoveredCell still validates as of
+// issue #2540, because it has no eval-time or launcher-side guard the way
+// IssueTracker and CodeForge do. An unsupported value must come back as a
+// CLI failure, not a panic.
 func TestRunAssemblePrompt_UnsupportedCellReturnsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -157,9 +140,8 @@ func TestRunAssemblePrompt_UnsupportedCellReturnsNonZero(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_MissingRequiredFlagReturnsNonZero verifies a missing
-// -handoff-output fails loudly (exit 1) instead of running Assemble against
-// a zero-value output path.
+// A missing -handoff-output must fail loudly instead of running Assemble
+// against a zero-value output path.
 func TestRunAssemblePrompt_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	var stdout bytes.Buffer
@@ -173,9 +155,8 @@ func TestRunAssemblePrompt_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_ValidateMarkersRegistryRequired verifies a missing
-// -validate-markers-registry flag fails loudly (exit 1) instead of running
-// Assemble/Validate against a zero-value registry path (issue #2356).
+// A missing -validate-markers-registry must fail loudly instead of running
+// Assemble and Validate against a zero-value registry path (issue #2356).
 func TestRunAssemblePrompt_ValidateMarkersRegistryRequired(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -202,11 +183,9 @@ func TestRunAssemblePrompt_ValidateMarkersRegistryRequired(t *testing.T) {
 	}
 }
 
-// researchPromptDirLackingSpindriftComment builds a temp prompts dir whose
-// research-prompt.md renders without any SPINDRIFT_COMMENT marker (and
-// without a fragments subdir at all -- Assemble swallows a missing fragment
-// file as an empty render, see assemble.go's fragment loop), so the
-// readOnlyResearch validate row's marker is guaranteed missing.
+// The dir deliberately has no fragments subdir: Assemble swallows a missing
+// fragment file as an empty render (see assemble.go's fragment loop), so the
+// readOnlyResearch validate row's SPINDRIFT_COMMENT marker cannot creep back in.
 func researchPromptDirLackingSpindriftComment(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -217,10 +196,8 @@ func researchPromptDirLackingSpindriftComment(t *testing.T) string {
 	return dir
 }
 
-// issuePromptDirLackingSpindriftPRIntent builds a temp prompts dir whose
-// issue-prompt.md renders without any SPINDRIFT_PR_INTENT marker (and
-// without a fragments subdir at all), so the boxAccessReadOnly validate
-// row's marker is guaranteed missing.
+// This dir omits the fragments subdir for the same reason as the one above: the
+// boxAccessReadOnly validate row's SPINDRIFT_PR_INTENT marker must stay missing.
 func issuePromptDirLackingSpindriftPRIntent(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -231,16 +208,11 @@ func issuePromptDirLackingSpindriftPRIntent(t *testing.T) string {
 	return dir
 }
 
-// replaceArg overwrites, or appends, flag's value in args, returning the new
-// slice -- a small test helper so each Validate-wiring test can start from
-// coveredCellArgs and move only the axes it needs off the covered cell. It
-// drops any existing occurrence of flag, in either the two-token
-// ("--flag", "value") or single-token ("--flag=value") form
-// coveredCellArgs mixes (string flags use the former, bool flags the
-// latter -- Go's flag package requires "=" for an explicit bool value,
-// since a bare "--flag next-token" reads next-token as a positional
-// argument and halts flag parsing entirely), and always re-adds it as a
-// single "--flag=value" token, which both flag kinds accept.
+// replaceArg drops flag in either the two-token or the "--flag=value" form
+// coveredCellArgs mixes, then re-adds it as one "--flag=value" token, which
+// both flag kinds accept. Go's flag package requires the "=" for an explicit
+// bool value: a bare "--flag next-token" reads next-token as a positional
+// argument and halts flag parsing entirely.
 func replaceArg(args []string, flag, value string) []string {
 	out := make([]string, 0, len(args)+1)
 	for i := 0; i < len(args); i++ {
@@ -257,12 +229,9 @@ func replaceArg(args []string, flag, value string) []string {
 	return out
 }
 
-// TestRunAssemblePrompt_ValidatorRejectBlocksOutputs verifies a reject-severity
-// validate row whose gate is active and marker missing (readOnlyResearch: a
-// research, read-only cell whose rendered prompt lacks SPINDRIFT_COMMENT)
-// makes runAssemblePrompt return non-zero and write none of the three
-// output files -- the Driver must never run against an unmet contract
-// (issue #2356).
+// A reject-severity validate row with its gate active and its marker missing
+// must exit non-zero and write none of the three output files: the Driver
+// must never run against an unmet contract (issue #2356).
 func TestRunAssemblePrompt_ValidatorRejectBlocksOutputs(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -292,12 +261,8 @@ func TestRunAssemblePrompt_ValidatorRejectBlocksOutputs(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs verifies a
-// warn-severity validate row whose gate is active and marker missing
-// (boxAccessReadOnly: a read-only, non-research work cell whose rendered
-// prompt lacks SPINDRIFT_PR_INTENT) still lets runAssemblePrompt succeed and
-// write all three output files -- a warn is advisory, never blocks the
-// Driver (issue #2356).
+// The warn counterpart: a warn-severity row is advisory, so the run still
+// succeeds and writes all three output files (issue #2356).
 func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -318,10 +283,8 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 	}
 
 	// agentsJSONOutput is only Stat-checked, not size-checked: with no
-	// AGENTS_JSON_TEMPLATE configured (as here) Assemble's own AgentsJSON
-	// legitimately renders empty -- TestRunAssemblePrompt_CoveredCellWritesOutputs
-	// makes the same distinction. promptOutput/handoffOutput are always
-	// non-empty in the covered cell.
+	// AGENTS_JSON_TEMPLATE configured, Assemble's AgentsJSON legitimately
+	// renders empty.
 	if _, err := os.Stat(agentsJSONOutput); err != nil {
 		t.Fatalf("agents json output not written: %v", err)
 	}
@@ -336,17 +299,11 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates verifies the
-// BOX_TRACKER_AXIS_READ/BOX_TRACKER_AXIS_WRITE/BOX_TRACKER_AXIS_FILER env
-// vars reach promptassembly.Env's
-// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler fields (issue #2533
-// slice 2): setting BOX_TRACKER_AXIS_READ=FORGEJO fires the
-// ISSUE_TRACKER_FORGEJO gate (gates_tracker.go reads the axis fields
-// directly, no longer re-deriving them from ISSUE_TRACKER), rendering
-// issue-read-forgejo.md's distinctive "via Forgejo" text instead of
-// issue-read-github.md's "via GitHub" -- even though ISSUE_TRACKER
-// itself is left at "github", since checkCoveredCell no longer re-validates
-// IssueTracker (issue #2540) and the axis fields are the sole gate input.
+// The BOX_TRACKER_AXIS_* env vars must reach Env's TrackerAxis* fields
+// (issue #2533 slice 2). ISSUE_TRACKER stays "github" on purpose:
+// gates_tracker.go reads the axis fields directly instead of re-deriving
+// them, and checkCoveredCell no longer re-validates IssueTracker (issue
+// #2540), so the axis fields are the sole gate input.
 func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -377,12 +334,10 @@ func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_ForgeBackendEnvVarReachesGates verifies the
-// BOX_FORGE_BACKEND env var reaches promptassembly.Env.ForgeBackend
-// (gates_access_forge.go reads it directly, no longer re-deriving it from
-// CODE_FORGE, issue #2533 slice 2): setting BOX_FORGE_BACKEND=FORGEJO fires
-// FIX_CI_READ_FORGEJO instead of FIX_CI_READ_GH, even with CODE_FORGE
-// left at "github".
+// BOX_FORGE_BACKEND must reach Env.ForgeBackend: gates_access_forge.go reads
+// it directly rather than re-deriving it from CODE_FORGE (issue #2533 slice
+// 2), so FORGEJO fires FIX_CI_READ_FORGEJO even with CODE_FORGE left at
+// "github".
 func TestRunAssemblePrompt_ForgeBackendEnvVarReachesGates(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -412,24 +367,11 @@ func TestRunAssemblePrompt_ForgeBackendEnvVarReachesGates(t *testing.T) {
 	}
 }
 
-// Distinctive, present-in-source literal strings used to prove each of the
-// four roster/review-loop flags reaches its own fragment and no other --
-// picked by reading the actual fragment files under
-// templates/default/prompts/fragments/ rather than guessed, and confirmed
-// (via a grep sweep across templates/default/prompts/) to appear nowhere
-// else in the prompt template tree, so a Contains/! Contains check on the
-// rendered prompt is unambiguous:
-//   - filerEnabledMarker is file-issues-direct.md's/file-issues-relay.md's
-//     shared heading (both render only when FILER_ENABLED gates a direct or
-//     relay write mechanism in gates_tracker.go -- either fork requires
-//     e.FilerEnabled, so the heading's presence pins FilerEnabled true
-//     regardless of which fork the covered cell's BOX_WRITE_ENABLED/
-//     ORCHESTRATOR combination picks).
-//   - workerProvisionedMarker is coordinator.md's (WORKER_PROVISIONED gate).
-//   - reviewLoopInlineMarker is review-loop-inline.md's (REVIEW_LOOP_INLINE
-//     gate).
-//   - reviewLoopOrchestratorMarker is review-loop-orchestrator.md's
-//     (REVIEW_LOOP_ORCHESTRATOR gate).
+// Marker strings copied from the fragment files under
+// templates/default/prompts/fragments/ and grep-confirmed to appear nowhere
+// else under templates/default/prompts/, so a Contains check on the rendered
+// prompt is unambiguous. file-issues-direct.md and file-issues-relay.md share
+// filerEnabledMarker, and both forks require e.FilerEnabled.
 const (
 	filerEnabledMarker           = "# FILE ISSUES"
 	workerProvisionedMarker      = "rather than editing the source yourself"
@@ -437,10 +379,6 @@ const (
 	reviewLoopOrchestratorMarker = "Review is handled by the orchestrator as a separate"
 )
 
-// assemblePromptForTest runs runAssemblePrompt against args (built from
-// coveredCellArgs and mutated via replaceArg by callers) and returns the
-// rendered prompt output's content as a string, failing the test on a
-// non-zero exit or an unreadable output file.
 func assemblePromptForTest(t *testing.T, dir string, args []string) string {
 	t.Helper()
 	var stdout bytes.Buffer
@@ -455,11 +393,8 @@ func assemblePromptForTest(t *testing.T, dir string, args []string) string {
 	return string(promptBytes)
 }
 
-// TestRunAssemblePrompt_FilerEnabledEnvVarReachesPrompt verifies
-// BOX_FILER_ENABLED reaches promptassembly.Env.FilerEnabled and, through it,
-// the FILER_ENABLED gate: on, the rendered prompt carries the filer's FILE
-// ISSUES heading; off (coveredCellArgs' default -- unset there), it does not
-// (issue #2533 slice 2).
+// BOX_FILER_ENABLED must reach Env.FilerEnabled and, through it, the
+// FILER_ENABLED gate (issue #2533 slice 2).
 func TestRunAssemblePrompt_FilerEnabledEnvVarReachesPrompt(t *testing.T) {
 	for _, enabled := range []bool{true, false} {
 		name := "disabled"
@@ -484,10 +419,8 @@ func TestRunAssemblePrompt_FilerEnabledEnvVarReachesPrompt(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_WorkerProvisionedEnvVarReachesPrompt verifies
-// BOX_WORKER_PROVISIONED reaches promptassembly.Env.WorkerProvisioned and,
-// through it, the WORKER_PROVISIONED gate: on, the rendered prompt carries
-// coordinator.md's marker text; off, it does not (issue #2533 slice 2).
+// BOX_WORKER_PROVISIONED must reach Env.WorkerProvisioned and, through it,
+// the WORKER_PROVISIONED gate (issue #2533 slice 2).
 func TestRunAssemblePrompt_WorkerProvisionedEnvVarReachesPrompt(t *testing.T) {
 	for _, provisioned := range []bool{true, false} {
 		name := "unprovisioned"
@@ -512,13 +445,9 @@ func TestRunAssemblePrompt_WorkerProvisionedEnvVarReachesPrompt(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_ReviewLoopEnvVarsReachPrompt verifies
-// BOX_REVIEW_LOOP_INLINE/BOX_REVIEW_LOOP_ORCHESTRATOR reach
-// promptassembly.Env.ReviewLoopInline/Env.ReviewLoopOrchestrator and, through
-// them, the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR gates: each
-// combination renders exactly its own fragment's marker and never the
-// other's, proving the two env vars aren't swapped or aliased (issue #2533
-// slice 2).
+// Each combination must render exactly its own fragment's marker and never
+// the other's, which proves the two review-loop env vars are neither swapped
+// nor aliased (issue #2533 slice 2).
 func TestRunAssemblePrompt_ReviewLoopEnvVarsReachPrompt(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -550,14 +479,10 @@ func TestRunAssemblePrompt_ReviewLoopEnvVarsReachPrompt(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_FilerAndWorkerEnvVarsNotCrossWired proves
-// BOX_FILER_ENABLED and BOX_WORKER_PROVISIONED reach their own, distinct Env
-// fields rather than being crossed (e.g. BOX_FILER_ENABLED accidentally
-// wired to Env.WorkerProvisioned, or vice versa): with exactly one of the
-// two env vars on, only that one's own marker appears in the rendered
-// prompt, never the other's -- a wiring bug that swapped the two
-// destinations would show both markers together or neither, failing this
-// test (issue #2533 slice 2, the review finding this pins closed).
+// Turning on exactly one of BOX_FILER_ENABLED and BOX_WORKER_PROVISIONED must
+// render only that one's marker. A bug that swapped the two Env destinations
+// would show both markers together or neither (issue #2533 slice 2, the
+// review finding this pins closed).
 func TestRunAssemblePrompt_FilerAndWorkerEnvVarsNotCrossWired(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -591,9 +516,8 @@ func TestRunAssemblePrompt_FilerAndWorkerEnvVarsNotCrossWired(t *testing.T) {
 	}
 }
 
-// presenceEnvValue renders b the way a presence-kind Env field
-// (os.Getenv(k) != "") expects: "1" when set, "" (unset) when not -- the
-// env-var analog of the old bool flag's "true"/"false" token (issue #2979).
+// A presence-kind Env field tests os.Getenv(k) != "", so false must be the
+// empty string, not "false" (issue #2979).
 func presenceEnvValue(b bool) string {
 	if b {
 		return "1"
@@ -601,10 +525,8 @@ func presenceEnvValue(b bool) string {
 	return ""
 }
 
-// TestIsAssemblePromptInvocation verifies the assemble-prompt subcommand's
-// dispatch guard: a bare "assemble-prompt" first arg selects it, while every
-// other invocation shape falls through to the default Driver-invocation path
-// (or, for the other subcommands, to those).
+// Only a bare "assemble-prompt" first arg selects the subcommand; every other
+// shape must fall through to the Driver path or to another subcommand.
 func TestIsAssemblePromptInvocation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -624,12 +546,9 @@ func TestIsAssemblePromptInvocation(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_PopulatesPassthroughHandoffFields verifies the pure
-// passthrough flags (--model, --effort, --driver*, --devshell*, --argv-*,
-// --max-*, --heartbeat-log) reach result.Handoff untouched by Assemble
-// itself, and that PromptFile/AgentsFile/Issue are populated from the
-// existing --prompt-output/--agents-json-output/--issue-number flags this
-// command already parsed (issue #2975).
+// The passthrough flags must reach result.Handoff untouched by Assemble, and
+// PromptFile, AgentsFile and Issue must come from the output and issue flags
+// this command already parsed (issue #2975).
 func TestRunAssemblePrompt_PopulatesPassthroughHandoffFields(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -738,10 +657,8 @@ func TestRunAssemblePrompt_PopulatesPassthroughHandoffFields(t *testing.T) {
 	}
 }
 
-// reflectStringSlicesEqual compares two string slices element-by-element --
-// a small helper so TestRunAssemblePrompt_PopulatesPassthroughHandoffFields
-// doesn't need to pull in reflect.DeepEqual or the slices package just for
-// this one comparison.
+// This is hand-rolled so the package needs neither reflect nor slices for a
+// single comparison.
 func reflectStringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -754,15 +671,11 @@ func reflectStringSlicesEqual(a, b []string) bool {
 	return true
 }
 
-// TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero pins the
-// graceful-degrade contract for --max-budget-tokens/--max-budget-usd end to
-// end (issue #2975 review finding #1, restoring coverage dropped when
-// TestMainRunToleratesMalformedOrNegativeBudgetCaps was deleted with no
-// replacement): entrypoint.sh forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD
-// verbatim, so an operator typo or stray negative value must degrade to 0
-// here -- the layer that now actually parses the strings -- rather than
-// making fs.Parse fail and killing the whole box run under entrypoint.sh's
-// set -euo pipefail (issue #2694's original rationale, still binding).
+// Pins the graceful-degrade contract for the budget caps (issue #2975 review
+// finding #1, restoring coverage dropped when
+// TestMainRunToleratesMalformedOrNegativeBudgetCaps was deleted). entrypoint.sh
+// forwards the values verbatim, so an operator typo must degrade to 0 here
+// rather than fail fs.Parse and kill the box run under set -euo pipefail (#2694).
 func TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -811,14 +724,10 @@ func TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_ReviewPromptOutput verifies --review-prompt-output
-// writes Result.ReviewPromptText to disk and sets Handoff.ReviewPromptFile
-// to that path on an orchestrator-on, default-work, FixPass==0 cell (the one
-// cell that renders a review prompt at all, mirroring
-// TestAssembleOrchestratorReviewerDrop's Env setup) -- and that omitting the
-// flag entirely on that same cell leaves Handoff.ReviewPromptFile empty and
-// still exits 0, since a rendered-but-unrequested review prompt is not an
-// error (issue #2975).
+// The orchestrator-on, default-work, FixPass==0 cell is the only one that
+// renders a review prompt at all, so both subtests set it up. Omitting the
+// flag on that same cell must still exit 0: a rendered but unrequested review
+// prompt is not an error (issue #2975).
 func TestRunAssemblePrompt_ReviewPromptOutput(t *testing.T) {
 	orchestratorOnArgs := func(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 		args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
@@ -893,12 +802,10 @@ func TestRunAssemblePrompt_ReviewPromptOutput(t *testing.T) {
 	})
 }
 
-// newOrchestratorOnArgs puts the covered cell on the orchestrator-on,
-// default-work, FixPass==0 path (mirrors
-// TestRunAssemblePrompt_ReviewPromptOutput's own helper) -- the one cell
-// Compose reports five passes for (implement/fix/land share the base body,
-// review/deltaReview share the review body), so composition tests exercise
-// more than the single-pass "legacy" default.
+// The orchestrator-on, default-work, FixPass==0 path is the one cell Compose
+// reports five passes for (implement, fix and land share the base body;
+// review and deltaReview share the review body), so the composition tests
+// exercise more than the single-pass legacy default.
 func newOrchestratorOnArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
 	t.Setenv("ORCHESTRATOR_ENABLED", "1")
@@ -907,9 +814,8 @@ func newOrchestratorOnArgs(t *testing.T, promptOutput, agentsJSONOutput, handoff
 	return args
 }
 
-// TestRunAssemblePrompt_CompositionOutputOmittedIsANoop verifies omitting
-// --composition-output leaves the run's existing outputs exactly as before
-// and writes no composition report at all (issue #3444 slice 3).
+// Omitting --composition-output must leave the existing outputs untouched and
+// write no composition report at all (issue #3444 slice 3).
 func TestRunAssemblePrompt_CompositionOutputOmittedIsANoop(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -935,11 +841,8 @@ func TestRunAssemblePrompt_CompositionOutputOmittedIsANoop(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_CompositionOutputFile verifies --composition-output
-// <file> writes promptassembly.Compose's report as valid JSON: a non-empty
-// Passes list, every pass's Remainder zero (per-source totals reconcile),
-// and Diffs populated for the orchestrator-on cell's five reported passes
-// (issue #3444 slice 3).
+// A zero Remainder on every pass is how the report says the per-source totals
+// reconcile (issue #3444 slice 3).
 func TestRunAssemblePrompt_CompositionOutputFile(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -977,9 +880,8 @@ func TestRunAssemblePrompt_CompositionOutputFile(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_CompositionOutputStdout verifies
-// --composition-output - writes the same JSON to the command's own stdout
-// writer, and no file named "-" is ever written (issue #3444 slice 3).
+// "-" must write the JSON to the command's own stdout writer, and no file
+// literally named "-" may appear (issue #3444 slice 3).
 func TestRunAssemblePrompt_CompositionOutputStdout(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -1007,10 +909,8 @@ func TestRunAssemblePrompt_CompositionOutputStdout(t *testing.T) {
 	}
 }
 
-// TestCarriedTextFlag_SetColonInPath verifies a ":" inside <path> is never
-// mistaken for the pass separator, with and without a pass prefix -- the
-// case carriedTextFlag.Set's doc comment exists to justify (issue #3444
-// slice 3 review finding).
+// A ":" inside <path> must never be mistaken for the pass separator, with or
+// without a pass prefix (issue #3444 slice 3 review finding).
 func TestCarriedTextFlag_SetColonInPath(t *testing.T) {
 	var f carriedTextFlag
 	if err := f.Set("name=/tmp/a:b/c.md"); err != nil {
@@ -1033,8 +933,7 @@ func TestCarriedTextFlag_SetColonInPath(t *testing.T) {
 	}
 }
 
-// TestCarriedTextFlag_SetEqualsInPath verifies Set splits on the FIRST "="
-// only, so an "=" inside <path> stays part of the path.
+// Set splits on the first "=" only, so an "=" inside <path> stays in the path.
 func TestCarriedTextFlag_SetEqualsInPath(t *testing.T) {
 	var f carriedTextFlag
 	if err := f.Set("name=/tmp/a=b.md"); err != nil {
@@ -1046,8 +945,7 @@ func TestCarriedTextFlag_SetEqualsInPath(t *testing.T) {
 	}
 }
 
-// TestCarriedTextFlag_SetAccumulates verifies repeated Set calls accumulate
-// specs in call order, matching how flag.Value handles a repeatable flag.
+// Repeated Set calls accumulate in call order, as a repeatable flag.Value must.
 func TestCarriedTextFlag_SetAccumulates(t *testing.T) {
 	var f carriedTextFlag
 	for _, v := range []string{"a=/x", "b=/y", "review:c=/z"} {
@@ -1070,9 +968,8 @@ func TestCarriedTextFlag_SetAccumulates(t *testing.T) {
 	}
 }
 
-// TestCarriedTextFlag_SetEmptyNameRejected verifies a value with an empty
-// <name> -- "=path" or "pass:=path" -- is rejected rather than silently
-// accepted with a blank name (issue #3444 slice 3 non-blocking finding).
+// An empty <name> must be rejected rather than silently accepted as a blank
+// name (issue #3444 slice 3 non-blocking finding).
 func TestCarriedTextFlag_SetEmptyNameRejected(t *testing.T) {
 	for _, v := range []string{"=/tmp/a.md", "review:=/tmp/a.md"} {
 		var f carriedTextFlag
@@ -1086,10 +983,8 @@ func TestCarriedTextFlag_SetEmptyNameRejected(t *testing.T) {
 	}
 }
 
-// TestCarriedTextFlag_SetEmptyPassRejected verifies a value with an empty
-// pass prefix -- ":name=path" -- is rejected: an empty pass can't match any
-// pass kind, so it's treated the same as a malformed value rather than
-// silently falling back to "every pass".
+// An empty pass prefix matches no pass kind, so Set must reject it rather than
+// fall back to "every pass".
 func TestCarriedTextFlag_SetEmptyPassRejected(t *testing.T) {
 	var f carriedTextFlag
 	v := ":name=/tmp/a.md"
@@ -1102,9 +997,8 @@ func TestCarriedTextFlag_SetEmptyPassRejected(t *testing.T) {
 	}
 }
 
-// TestCarriedTextFlag_String verifies the round-trip format on an empty
-// flag, a flag holding several specs, and a nil *carriedTextFlag (the
-// method's own nil guard).
+// The nil *carriedTextFlag case covers String's own nil guard, which the flag
+// package hits when it prints defaults for an unset value.
 func TestCarriedTextFlag_String(t *testing.T) {
 	var empty carriedTextFlag
 	if got := empty.String(); got != "" {
@@ -1126,10 +1020,9 @@ func TestCarriedTextFlag_String(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_CompositionCarried verifies --composition-carried
-// lands its named block on the right pass(es) -- with a pass prefix, only
-// that pass; without one, every pass -- and that the block is counted in
-// that pass's own Bytes total (issue #3444 slice 3).
+// --composition-carried must land its named block on the right passes, only
+// the named pass with a prefix and every pass without one, and count the block
+// in that pass's own Bytes total (issue #3444 slice 3).
 func TestRunAssemblePrompt_CompositionCarried(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -1199,10 +1092,8 @@ func TestRunAssemblePrompt_CompositionCarried(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_CompositionCarriedMalformedValue verifies a
-// --composition-carried value missing "=" fails loudly (exit 1) with a
-// message on the output writer, instead of silently dropping the block
-// (issue #3444 slice 3).
+// A --composition-carried value missing "=" must fail loudly instead of
+// silently dropping the block (issue #3444 slice 3).
 func TestRunAssemblePrompt_CompositionCarriedMalformedValue(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -1223,10 +1114,8 @@ func TestRunAssemblePrompt_CompositionCarriedMalformedValue(t *testing.T) {
 	}
 }
 
-// TestRunAssemblePrompt_CompositionCarriedUnreadableFile verifies a
-// --composition-carried value naming a file that cannot be read fails
-// loudly (exit 1) with a message on the output writer (issue #3444 slice
-// 3).
+// An unreadable --composition-carried file must fail loudly, naming the file
+// on the output writer (issue #3444 slice 3).
 func TestRunAssemblePrompt_CompositionCarriedUnreadableFile(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")

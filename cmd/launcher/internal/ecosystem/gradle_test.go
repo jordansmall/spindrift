@@ -104,13 +104,9 @@ gradle.projectsEvaluated {
 	}
 }
 
-// TestGradleInitScript_PortInterpolated proves only the port digits vary
-// across renders, without restating the ~85-line golden a second time (see
-// TestGradleInitScript_ExactContent for the full-content check): it derives
-// each port's expected output from a known-good render by substituting the
-// port substring, so a broken/misplaced/mistyped %d verb would surface as a
-// mismatch here even though a defect in the surrounding template (wrong
-// redirect, wrong lifecycle hook, ...) is already caught above.
+// TestGradleInitScript_PortInterpolated derives want from a known-good render
+// rather than restating the golden, which TestGradleInitScript_ExactContent
+// already pins. A misplaced or mistyped %d verb still shows as a mismatch here.
 func TestGradleInitScript_PortInterpolated(t *testing.T) {
 	base := GradleInitScript(27182, "r0", gradleDeclaredRoutes())
 	for _, port := range []int{9999, 12345} {
@@ -122,11 +118,9 @@ func TestGradleInitScript_PortInterpolated(t *testing.T) {
 	}
 }
 
-// TestGradleInitScript_PrefixInterpolated mirrors
-// TestGradleInitScript_PortInterpolated but varies the route prefix instead
-// of the port (issue #3142), proving the prefix -- not just the port --
-// lands in the rendered spindriftMavenUrl without restating the full golden
-// a third time.
+// TestGradleInitScript_PrefixInterpolated mirrors the port test for the route
+// prefix (issue #3142), proving the prefix, not just the port, reaches the
+// rendered spindriftMavenUrl.
 func TestGradleInitScript_PrefixInterpolated(t *testing.T) {
 	base := GradleInitScript(27182, "r0", gradleDeclaredRoutes())
 	for _, prefix := range []string{"artifactory-gradle", "r1"} {
@@ -138,12 +132,11 @@ func TestGradleInitScript_PrefixInterpolated(t *testing.T) {
 	}
 }
 
-// TestGradleInitScript_NoGradlePathIsInert pins the fallback (issue #3259):
-// gradle can never derive a real per-registry path (no InTreeConfigPath,
-// registrypathset.Derive never tags "gradle"), so a route with no declared
-// gradle-path renders an inert script -- no repository redirection at all --
-// rather than a bare-route-root redirect, which would 404 every request
-// against the Forwarder's path-set enforcement.
+// TestGradleInitScript_NoGradlePathIsInert pins the fallback (issue #3259).
+// Gradle has no InTreeConfigPath and registrypathset.Derive never tags
+// "gradle", so a route with no declared gradle path renders an inert script
+// rather than a bare-route-root redirect, which would 404 against the
+// Forwarder's path-set enforcement.
 func TestGradleInitScript_NoGradlePathIsInert(t *testing.T) {
 	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0"}})
 	for _, marker := range []string{"allprojects", "gradle.beforeSettings", "gradle.settingsEvaluated", "gradle.projectsEvaluated", "spindriftMavenUrl", "repos.clear", "repos.maven"} {
@@ -156,11 +149,9 @@ func TestGradleInitScript_NoGradlePathIsInert(t *testing.T) {
 	}
 }
 
-// TestGradleInitScript_GradlePathIsFullRedirect proves that a route whose
-// ecosystems block declares a gradle path (issue #3259, an
-// operator-declared gradle-path) renders the real redirect script -- not
-// the inert fallback -- with spindriftMavenUrl carrying the full declared
-// path, not the bare route root.
+// TestGradleInitScript_GradlePathIsFullRedirect pins the other half of issue
+// #3259: an operator-declared gradle path renders the real redirect script,
+// with spindriftMavenUrl carrying the full declared path, not the route root.
 func TestGradleInitScript_GradlePathIsFullRedirect(t *testing.T) {
 	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{
 		Prefix: "r0",
@@ -183,10 +174,8 @@ func TestGradleInitScript_GradlePathIsFullRedirect(t *testing.T) {
 	}
 }
 
-// TestGradleInitScript_OtherEcosystemBlockIsInert pins that a block naming
-// an ecosystem this renderer has no notion of is ignored rather than being
-// an error: gradle reads a route declaring nothing for it, and renders the
-// same inert script as a route declaring nothing at all.
+// TestGradleInitScript_OtherEcosystemBlockIsInert pins that the renderer
+// ignores a block naming an ecosystem it does not know rather than failing.
 func TestGradleInitScript_OtherEcosystemBlockIsInert(t *testing.T) {
 	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{
 		Prefix:     "r0",
@@ -197,9 +186,8 @@ func TestGradleInitScript_OtherEcosystemBlockIsInert(t *testing.T) {
 	}
 }
 
-// gradleDeclaredRoutes is one route whose ecosystems block declares an
-// operator-supplied gradle path, the only shape that renders the real
-// redirect script.
+// gradleDeclaredRoutes is the only route shape that renders the real redirect
+// script: an ecosystems block with an operator-supplied gradle path.
 func gradleDeclaredRoutes() []registrymanifest.Route {
 	return []registrymanifest.Route{{
 		Prefix:     "r0",

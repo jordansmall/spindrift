@@ -11,12 +11,11 @@ import (
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
-// testSocketDir returns a directory to bind a real unix socket under for a
-// test, preferring t.TempDir() but falling back to a fresh dir directly
+// testSocketDir prefers t.TempDir() but falls back to a fresh dir directly
 // under /tmp when that path would already overflow AF_UNIX's sun_path cap
-// once a filename is joined onto it (issue #3077) -- a nix build sandbox's
-// own working directory can nest deep enough to trigger this, unlike an
-// ordinary `go test` invocation from a shell.
+// once a filename is joined onto it (issue #3077). A nix build sandbox's own
+// working directory can nest deep enough to trigger this, unlike an ordinary
+// `go test` invocation from a shell.
 func testSocketDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -31,8 +30,6 @@ func testSocketDir(t *testing.T) string {
 	return fallback
 }
 
-// TestProbeRegistrySocketVisible_MissingPath verifies a path that doesn't
-// exist at all is never visible.
 func TestProbeRegistrySocketVisible_MissingPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.sock")
 	if probeRegistrySocketVisible(path) {
@@ -40,9 +37,8 @@ func TestProbeRegistrySocketVisible_MissingPath(t *testing.T) {
 	}
 }
 
-// TestProbeRegistrySocketVisible_RegularFile verifies a regular file at the
-// path (not a socket) is never visible -- this is the "wrong bind target"
-// case, distinct from "nothing there at all".
+// A regular file at the path is the "wrong bind target" case, distinct from
+// the "nothing there at all" case above.
 func TestProbeRegistrySocketVisible_RegularFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "not-a-socket")
 	writeTestFile(t, path, "hello\n")
@@ -51,9 +47,7 @@ func TestProbeRegistrySocketVisible_RegularFile(t *testing.T) {
 	}
 }
 
-// TestProbeRegistrySocketVisibleAndConnect_RealListener verifies a real
-// unix listener bound at path is both visible and connectable -- the happy
-// path issue #3111's probe is meant to confirm.
+// This is the happy path that issue #3111's probe is meant to confirm.
 func TestProbeRegistrySocketVisibleAndConnect_RealListener(t *testing.T) {
 	path := filepath.Join(testSocketDir(t), "probe.sock")
 	ln, err := net.Listen("unix", path)
@@ -70,20 +64,18 @@ func TestProbeRegistrySocketVisibleAndConnect_RealListener(t *testing.T) {
 	}
 }
 
-// TestProbeRegistrySocketConnect_StaleSocketFile verifies a socket file
-// that's still visible (the inode survives) but has nothing listening
-// behind it anymore fails to connect -- the visible-but-unconnectable case
-// issue #3111's probe exists to catch (e.g. a passthrough sharing layer
-// that projects the inode without a live kernel endpoint).
+// This pins the visible-but-unconnectable case that issue #3111's probe exists
+// to catch, such as a passthrough sharing layer that projects the inode
+// without a live kernel endpoint behind it.
 func TestProbeRegistrySocketConnect_StaleSocketFile(t *testing.T) {
 	path := filepath.Join(testSocketDir(t), "stale.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("net.Listen(unix, %q): %v", path, err)
 	}
-	// net.UnixListener unlinks its socket file on Close by default; disable
-	// that so the file survives Close and this test actually exercises the
-	// "visible but nothing listening" case rather than "file gone too".
+	// net.UnixListener unlinks its socket file on Close by default. Without
+	// this the file would vanish too, and the test would exercise "file gone"
+	// instead of "visible but nothing listening".
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -95,9 +87,6 @@ func TestProbeRegistrySocketConnect_StaleSocketFile(t *testing.T) {
 	}
 }
 
-// TestRunProbeRegistrySocket_ConnectableSocket verifies the CLI wrapper
-// exits registryprobe.ExitCapable and prints an "ok" line when the socket is
-// visible and connectable.
 func TestRunProbeRegistrySocket_ConnectableSocket(t *testing.T) {
 	path := filepath.Join(testSocketDir(t), "probe.sock")
 	ln, err := net.Listen("unix", path)
@@ -113,10 +102,9 @@ func TestRunProbeRegistrySocket_ConnectableSocket(t *testing.T) {
 	}
 }
 
-// TestRunProbeRegistrySocket_StaleSocketFile verifies the CLI wrapper exits
-// registryprobe.ExitIncapable -- not plain 1 -- for the clean "no" verdict,
-// since 1 is also what an old driver-exec's default verb produces and the
-// two must stay distinguishable (issue #3120).
+// The clean "no" verdict exits ExitIncapable, not plain 1: an old
+// driver-exec's default verb also exits 1, and the two must stay
+// distinguishable (issue #3120).
 func TestRunProbeRegistrySocket_StaleSocketFile(t *testing.T) {
 	path := filepath.Join(testSocketDir(t), "stale.sock")
 	ln, err := net.Listen("unix", path)
@@ -133,11 +121,9 @@ func TestRunProbeRegistrySocket_StaleSocketFile(t *testing.T) {
 	}
 }
 
-// TestRunProbeRegistrySocket_MissingPathFlag verifies the CLI wrapper
-// rejects an empty/unset -path flag rather than silently probing "", and
-// that this usage error stays at plain 1 rather than the reserved
-// ExitIncapable verdict code -- a missing flag was never tested, so it must
-// not read as a tested-and-answered "no" (issue #3120).
+// A usage error stays at plain 1 rather than the reserved ExitIncapable
+// verdict code: a missing flag means nothing was ever probed, so it must not
+// read as a tested-and-answered "no" (issue #3120).
 func TestRunProbeRegistrySocket_MissingPathFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runProbeRegistrySocket(nil, &stdout)
@@ -149,8 +135,6 @@ func TestRunProbeRegistrySocket_MissingPathFlag(t *testing.T) {
 	}
 }
 
-// TestIsProbeRegistrySocketInvocation verifies the verb dispatch predicate
-// matches only on the "probe-registry-socket" verb.
 func TestIsProbeRegistrySocketInvocation(t *testing.T) {
 	if isProbeRegistrySocketInvocation(nil) {
 		t.Fatalf("isProbeRegistrySocketInvocation(nil) = true, want false")

@@ -12,10 +12,7 @@ import (
 
 // testLabels is the conventional lifecycle-label set, mirrored from
 // lib/env-schema.nix and pinned against the agent workflows by
-// nix/checks/dispatch-labels.nix (issue #460). NewFake and the production
-// adapters (Exec, Local, Jira) take labels as an explicit constructor
-// argument rather than baking in a copy, so this package's tests share this
-// one value instead of each restating the four label strings.
+// nix/checks/dispatch-labels.nix (issue #460).
 var testLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -23,8 +20,6 @@ var testLabels = forge.DispatchLabels{
 	Failed:       "agent-failed",
 }
 
-// writeLocalIssue writes an issue file named slug+".md" under dir, using
-// testLabels' native marker for state.
 func writeLocalIssue(t *testing.T, dir, slug string, li localIssue) {
 	t.Helper()
 	path := filepath.Join(dir, slug+".md")
@@ -99,9 +94,6 @@ func TestLocalIssue_RenderParseRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLocalIssue_RenderParseRoundTrip_Closed verifies closed: survives a
-// parse/render round trip alongside the other frontmatter fields, mirroring
-// TestLocalIssue_RenderParseRoundTrip's open-issue case.
 func TestLocalIssue_RenderParseRoundTrip_Closed(t *testing.T) {
 	li := localIssue{
 		frontmatter: localFrontmatter{
@@ -123,9 +115,7 @@ func TestLocalIssue_RenderParseRoundTrip_Closed(t *testing.T) {
 	}
 }
 
-// TestLocalIssue_RenderParseRoundTrip_Landing verifies landing: survives a
-// parse/render round trip alongside the other frontmatter fields — the
-// immutable landing ref RecordLanding writes (ADR 0029).
+// landing: holds the immutable landing ref RecordLanding writes (ADR 0029).
 func TestLocalIssue_RenderParseRoundTrip_Landing(t *testing.T) {
 	li := localIssue{
 		frontmatter: localFrontmatter{
@@ -145,9 +135,8 @@ func TestLocalIssue_RenderParseRoundTrip_Landing(t *testing.T) {
 	}
 }
 
-// TestLocalIssue_RenderParseRoundTrip_Abandoned verifies abandoned: survives
-// a parse/render round trip alongside the other frontmatter fields — set by
-// FlagAbandoned when a landing PR closes without merging (ADR 0029).
+// FlagAbandoned sets abandoned: when a landing PR closes without merging
+// (ADR 0029).
 func TestLocalIssue_RenderParseRoundTrip_Abandoned(t *testing.T) {
 	li := localIssue{
 		frontmatter: localFrontmatter{
@@ -168,11 +157,9 @@ func TestLocalIssue_RenderParseRoundTrip_Abandoned(t *testing.T) {
 	}
 }
 
-// TestLocalIssue_RenderParseRoundTrip_ScalarEscaping covers the remaining
-// scalarNeedsQuoting/renderScalar/unquote escaping vectors — a tab, a
-// carriage return, a leading double-quote, an embedded double-quote, and an
-// embedded colon-space — each carried through render() then parseLocalIssue
-// as the Title field.
+// Each case pins an escaping rule scalarNeedsQuoting, renderScalar and
+// unquote must agree on, carried through render() then parseLocalIssue as
+// the Title field.
 func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -205,10 +192,10 @@ func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
 			if !reflect.DeepEqual(got, li) {
 				t.Errorf("round trip = %+v, want %+v", got, li)
 			}
-			// A colon-space is a YAML mapping separator; a title containing
-			// one must render quoted or the frontmatter is invalid YAML even
-			// though this package's own tolerant first-colon-split parser
-			// happens to round-trip it anyway.
+			// A colon-space is a YAML mapping separator, so a title holding
+			// one must render quoted or the frontmatter is invalid YAML,
+			// even though this package's own tolerant first-colon-split
+			// parser round-trips it either way.
 			if strings.Contains(tc.title, ": ") {
 				for _, line := range strings.Split(li.render(), "\n") {
 					if rest, ok := strings.CutPrefix(line, "title: "); ok {
@@ -223,12 +210,8 @@ func TestLocalIssue_RenderParseRoundTrip_ScalarEscaping(t *testing.T) {
 	}
 }
 
-// TestLocalIssue_Render_QuotesColonBearingFields pins that scalarNeedsQuoting's
-// colon check (widened in the frontmatter-colon-escaping fix) applies to every
-// scalar frontmatter field rendered through renderScalar, not just Title: an
-// RFC3339 Created timestamp and colon-bearing Landing/Parent values must all
-// render as quoted "key: value" lines, and round-trip back through
-// parseLocalIssue unchanged.
+// scalarNeedsQuoting's colon check, widened in the frontmatter-colon-escaping
+// fix, applies to every scalar field renderScalar writes, not just Title.
 func TestLocalIssue_Render_QuotesColonBearingFields(t *testing.T) {
 	li := localIssue{
 		frontmatter: localFrontmatter{
@@ -290,10 +273,8 @@ func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_ListOpenIssues_AllStatesOrderedByCreated verifies
-// ListOpenIssues returns every issue regardless of its frontmatter state
-// marker, ordered by created ascending — unlike ListIssues, which filters
-// to a single state.
+// ListOpenIssues ignores the frontmatter state marker, unlike ListIssues,
+// which filters to a single state.
 func TestLocalTracker_ListOpenIssues_AllStatesOrderedByCreated(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -322,8 +303,7 @@ func TestLocalTracker_ListOpenIssues_AllStatesOrderedByCreated(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_ListOpenIssues_ExcludesClosed verifies ListOpenIssues
-// drops a closed: true issue from the backlog, matching forge.Fake's own
+// Dropping a closed: true issue from the backlog matches forge.Fake's own
 // closed-exclusion behavior (ADR 0029).
 func TestLocalTracker_ListOpenIssues_ExcludesClosed(t *testing.T) {
 	dir := t.TempDir()
@@ -346,9 +326,8 @@ func TestLocalTracker_ListOpenIssues_ExcludesClosed(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_ListIssues_ExcludesClosed verifies ListIssues drops a
-// closed: true issue even when its dispatch state marker still matches the
-// requested state.
+// The closed issue here still carries the requested state marker, so closed:
+// has to win on its own (ADR 0029).
 func TestLocalTracker_ListIssues_ExcludesClosed(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -370,10 +349,9 @@ func TestLocalTracker_ListIssues_ExcludesClosed(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_AllIssues_ReturnsEveryIssueOpenAndClosed verifies
-// AllIssues returns every issue file in dir regardless of parent, state, or
-// dispatch marker (ADR 0033, issue #1734) — the auto-surface sweep's basis
-// for discovering every distinct resolved parent across a mixed batch.
+// The auto-surface sweep discovers every distinct resolved parent across a
+// mixed batch from AllIssues, so it must ignore parent, state, and dispatch
+// marker alike (ADR 0033, issue #1734).
 func TestLocalTracker_AllIssues_ReturnsEveryIssueOpenAndClosed(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -417,8 +395,8 @@ func TestLocalTracker_TransitionState_RewritesFrontmatterInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	// State isn't part of the launcher-facing Issue; re-list under the new
-	// state to confirm the on-disk frontmatter actually moved.
+	// State is not part of the launcher-facing Issue, so the re-list below is
+	// the only way to confirm the on-disk frontmatter actually moved.
 	if iss.Title != "Fix thing" {
 		t.Fatalf("Title changed unexpectedly: %q", iss.Title)
 	}
@@ -438,11 +416,9 @@ func TestLocalTracker_TransitionState_RewritesFrontmatterInPlace(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_CompleteVerdict_UnconfiguredErrorsWithoutWriting verifies
-// that CompleteVerdict on a tracker constructed with no VerdictLabels (the
-// work-kind construction path) errors instead of overwriting the frontmatter
-// state field with an empty string — matching the github/jira adapters'
-// guard against silently corrupting the state marker.
+// A tracker built the work-kind way has no VerdictLabels, so CompleteVerdict
+// must error rather than write an empty state marker. The github and jira
+// adapters guard the same way.
 func TestLocalTracker_CompleteVerdict_UnconfiguredErrorsWithoutWriting(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -464,10 +440,6 @@ func TestLocalTracker_CompleteVerdict_UnconfiguredErrorsWithoutWriting(t *testin
 	}
 }
 
-// TestLocalTracker_CompleteVerdict_RewritesFrontmatterToVerdictLabel verifies
-// that CompleteVerdict rewrites a research-kind issue's frontmatter state
-// field from InProgress to each of the three verdict terminals, mirroring
-// TransitionState_RewritesFrontmatterInPlace's file-rewrite assertion.
 func TestLocalTracker_CompleteVerdict_RewritesFrontmatterToVerdictLabel(t *testing.T) {
 	labels := forge.ResearchDispatchLabels()
 	verdictLabels := forge.ResearchVerdictLabels()
@@ -505,10 +477,9 @@ func TestLocalTracker_CompleteVerdict_RewritesFrontmatterToVerdictLabel(t *testi
 	}
 }
 
-// TestLocalTracker_CompleteVerdict_ThenRetryResearchable verifies that after
-// a verdict terminal lands, re-marking the issue researchable (the retry
-// gesture, TransitionState(Untriaged, Dispatchable)) still works — the
-// verdict state must not wedge the file against a fresh research pass.
+// A verdict terminal must not block the retry gesture,
+// TransitionState(Untriaged, Dispatchable), from starting a fresh research
+// pass on the same file.
 func TestLocalTracker_CompleteVerdict_ThenRetryResearchable(t *testing.T) {
 	labels := forge.ResearchDispatchLabels()
 	verdictLabels := forge.ResearchVerdictLabels()
@@ -535,12 +506,9 @@ func TestLocalTracker_CompleteVerdict_ThenRetryResearchable(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_ResearchDispatch_InProgressAndFailedUseResearchLabels
-// verifies the research kind's InProgress and Failed transitions (plain
-// TransitionState, not CompleteVerdict) rewrite the frontmatter state field
-// to the research label family, distinct from every verdict terminal —
-// Failed strictly means the Box crashed or produced no verdict (ADR 0022),
-// never a concluded verdict.
+// Research InProgress and Failed go through plain TransitionState, not
+// CompleteVerdict, and Failed must stay distinct from every verdict terminal:
+// it means the Box crashed or produced no verdict (ADR 0022).
 func TestLocalTracker_ResearchDispatch_InProgressAndFailedUseResearchLabels(t *testing.T) {
 	labels := forge.ResearchDispatchLabels()
 	verdictLabels := forge.ResearchVerdictLabels()
@@ -627,10 +595,10 @@ func TestLocalTracker_DepsOf_StripsBackticksFromSlug(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_DepsOf_SkipsSentinelBullet mirrors the GitHub parser's
-// sentinel case (forge.TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef
-// in seams_test.go): a "- None" bullet under "## Blocked by" means zero
-// blockers, not a literal slug named "None — can start immediately".
+// A "- None" bullet means zero blockers, not a literal slug. This mirrors the
+// GitHub parser's sentinel case,
+// forge.TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef in
+// seams_test.go.
 func TestLocalTracker_DepsOf_SkipsSentinelBullet(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -650,10 +618,9 @@ func TestLocalTracker_DepsOf_SkipsSentinelBullet(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_DepsOf_SkipsBacktickQuotedSentinel locks in the local
-// adapter's widened sentinel recognition: the sentinel check runs after
-// backtick-stripping, so a backtick-quoted "`None`" bullet is skipped too,
-// unlike ParseBlockerRefs which checks raw bullet content.
+// This adapter runs the sentinel check after backtick-stripping, so it skips
+// a backtick-quoted sentinel that ParseBlockerRefs, which checks raw bullet
+// content, would keep.
 func TestLocalTracker_DepsOf_SkipsBacktickQuotedSentinel(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -673,8 +640,7 @@ func TestLocalTracker_DepsOf_SkipsBacktickQuotedSentinel(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_DepsOf_SkipsSentinelBulletNA covers the "N/A" spelling
-// of the sentinel (AC names it explicitly, alongside "None").
+// The AC names "N/A" as a sentinel spelling alongside "None".
 func TestLocalTracker_DepsOf_SkipsSentinelBulletNA(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -694,9 +660,7 @@ func TestLocalTracker_DepsOf_SkipsSentinelBulletNA(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_DepsOf_SentinelBulletDoesNotSuppressRealSlug confirms a
-// sentinel bullet only cancels itself — a real slug bullet in the same
-// section still surfaces as a dependency.
+// A sentinel bullet cancels only itself, not the rest of the section.
 func TestLocalTracker_DepsOf_SentinelBulletDoesNotSuppressRealSlug(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -737,10 +701,8 @@ func TestLocalTracker_DepsOf_NoBlockedBySection(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_DepsOf_EmptyBlockedBySection confirms an explicit
-// "## Blocked by" section with no bullets parses to zero blockers, same
-// as omitting the section entirely (AC: "behavior stays identical for
-// issues that already omit the section or leave it empty").
+// The AC requires behavior identical for issues that omit the section and
+// issues that leave it empty.
 func TestLocalTracker_DepsOf_EmptyBlockedBySection(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -760,14 +722,10 @@ func TestLocalTracker_DepsOf_EmptyBlockedBySection(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_Issue_LabelsIncludeDispatchState verifies that the
-// dispatch-state marker is included in the returned Issue's Labels, matching
-// the GitHub adapter's behavior (a GitHub issue's Labels always include
-// whichever label represents its current dispatch state). main.go's
-// cross-backend blocker logic (Readiness.Status) checks
-// containsLabel(fi.Labels, c.failedLabel) generically across adapters, so the
-// state marker must appear in Labels even though the frontmatter keeps state
-// and labels as separate fields on disk.
+// The frontmatter keeps state and labels as separate fields on disk, but
+// main.go's Readiness.Status checks containsLabel(fi.Labels, c.failedLabel)
+// generically across adapters, so Issue has to fold the state marker into
+// Labels the way the GitHub adapter does.
 func TestLocalTracker_Issue_LabelsIncludeDispatchState(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -786,9 +744,7 @@ func TestLocalTracker_Issue_LabelsIncludeDispatchState(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_Issue_ReportsClosedState verifies Issue() reports
-// forge.IssueClosed for a closed: true issue and forge.IssueOpen otherwise
-// (absent or false), matching ADR 0029's local-only open/closed axis.
+// closed: is ADR 0029's local-only open/closed axis; absent counts as open.
 func TestLocalTracker_Issue_ReportsClosedState(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -816,9 +772,7 @@ func TestLocalTracker_Issue_ReportsClosedState(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_Issue_ReportsLandingRef verifies Issue() surfaces the
-// frontmatter landing: ref on forge.Issue.Landing — reconcile's read side of
-// RecordLanding's write (ADR 0029).
+// This is reconcile's read side of RecordLanding's write (ADR 0029).
 func TestLocalTracker_Issue_ReportsLandingRef(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -837,9 +791,8 @@ func TestLocalTracker_Issue_ReportsLandingRef(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_Issue_ReportsParent verifies Issue() surfaces the
-// frontmatter parent: field on forge.Issue.Parent (ADR 0033, issue #1734) —
-// the per-issue key newCodeForge resolves the Integration branch from.
+// parent: is the per-issue key newCodeForge resolves the Integration branch
+// from (ADR 0033, issue #1734).
 func TestLocalTracker_Issue_ReportsParent(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -858,9 +811,7 @@ func TestLocalTracker_Issue_ReportsParent(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_Issue_ReportsAbandonedFlag verifies Issue() surfaces the
-// frontmatter abandoned: flag on forge.Issue.Abandoned — reconcile's read
-// side of FlagAbandoned's write (ADR 0029).
+// This is reconcile's read side of FlagAbandoned's write (ADR 0029).
 func TestLocalTracker_Issue_ReportsAbandonedFlag(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -879,15 +830,12 @@ func TestLocalTracker_Issue_ReportsAbandonedFlag(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_ImplementsLandingRecorder asserts *LocalTracker satisfies
-// the optional forge.LandingRecorder surface (ADR 0029) — only the local
-// adapter records a landing ref; github/jira don't implement it.
+// forge.LandingRecorder is optional (ADR 0029): only the local adapter
+// records a landing ref, and github and jira do not implement it.
 func TestLocalTracker_ImplementsLandingRecorder(t *testing.T) {
 	var _ forge.LandingRecorder = NewLocalTracker(t.TempDir(), testLabels)
 }
 
-// TestLocalTracker_RecordLanding_WritesLandingField verifies RecordLanding
-// persists the given ref as the issue's landing: frontmatter field.
 func TestLocalTracker_RecordLanding_WritesLandingField(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -913,17 +861,13 @@ func TestLocalTracker_RecordLanding_WritesLandingField(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_ImplementsLandingPassRecorder asserts *LocalTracker
-// satisfies the optional forge.LandingPassRecorder surface (issue #2983) —
-// only the local adapter has a per-issue-file record to annotate with which
-// pass produced a landing's outcome.
+// forge.LandingPassRecorder is optional (issue #2983): only the local adapter
+// has a per-issue file to annotate with the pass that produced the outcome.
 func TestLocalTracker_ImplementsLandingPassRecorder(t *testing.T) {
 	var _ forge.LandingPassRecorder = NewLocalTracker(t.TempDir(), testLabels)
 }
 
-// TestLocalTracker_RecordLandingPass_WritesLandingPassFields verifies
-// RecordLandingPass persists the given pass number and kind as the issue's
-// landingpass:/landingpasskind: frontmatter fields (issue #2983).
+// Issue #2983 added the landingpass: and landingpasskind: fields.
 func TestLocalTracker_RecordLandingPass_WritesLandingPassFields(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -952,11 +896,8 @@ func TestLocalTracker_RecordLandingPass_WritesLandingPassFields(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_RecordLandingPass_EmptyKindOmitsLandingPassKindLine
-// verifies render (issue #2983) degrades an empty Kind — e.g. from a
-// stale/older manifest.json — by omitting the landingpasskind: line
-// entirely, rather than writing a garbled "landingpasskind:" with nothing
-// after it. The landingpass: ordinal is still written on its own.
+// An older manifest.json can leave Kind empty, and render (issue #2983) must
+// then drop the landingpasskind: line rather than write a dangling key.
 func TestLocalTracker_RecordLandingPass_EmptyKindOmitsLandingPassKindLine(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -992,18 +933,15 @@ func TestLocalTracker_RecordLandingPass_EmptyKindOmitsLandingPassKindLine(t *tes
 	}
 }
 
-// TestLocalTracker_ImplementsIssueCloser asserts *LocalTracker satisfies the
-// optional forge.IssueCloser surface (ADR 0029) — only the local adapter has
-// a native closed: axis for reconcile to flip.
+// forge.IssueCloser is optional (ADR 0029): only the local adapter has a
+// native closed: axis for reconcile to flip.
 func TestLocalTracker_ImplementsIssueCloser(t *testing.T) {
 	var _ forge.IssueCloser = NewLocalTracker(t.TempDir(), testLabels)
 }
 
-// TestLocalTracker_DoesNotImplementBlockersLister asserts *LocalTracker does
-// not satisfy the optional forge.BlockersLister surface (issue #1744): its
-// only blocker concept is one-directional body-text parsing ("## Blocked
-// by"), with no native relationship to query in reverse short of scanning
-// every issue file.
+// Issue #1744: the local adapter's only blocker concept is one-directional
+// body-text parsing, with no relationship to query in reverse short of
+// scanning every issue file.
 func TestLocalTracker_DoesNotImplementBlockersLister(t *testing.T) {
 	var it forge.IssueTracker = NewLocalTracker(t.TempDir(), testLabels)
 	if _, ok := it.(forge.BlockersLister); ok {
@@ -1011,8 +949,6 @@ func TestLocalTracker_DoesNotImplementBlockersLister(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_CloseIssue_SetsClosedTrue verifies CloseIssue flips the
-// closed: frontmatter field without touching state/labels/landing.
 func TestLocalTracker_CloseIssue_SetsClosedTrue(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -1038,15 +974,12 @@ func TestLocalTracker_CloseIssue_SetsClosedTrue(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_ImplementsAbandonedFlagger asserts *LocalTracker satisfies
-// the optional forge.AbandonedFlagger surface (ADR 0029) — only the local
-// adapter has a native abandoned: axis for reconcile to flip.
+// forge.AbandonedFlagger is optional (ADR 0029): only the local adapter has a
+// native abandoned: axis for reconcile to flip.
 func TestLocalTracker_ImplementsAbandonedFlagger(t *testing.T) {
 	var _ forge.AbandonedFlagger = NewLocalTracker(t.TempDir(), testLabels)
 }
 
-// TestLocalTracker_FlagAbandoned_SetsAbandonedTrue verifies FlagAbandoned
-// flips the abandoned: frontmatter field without touching state/landing.
 func TestLocalTracker_FlagAbandoned_SetsAbandonedTrue(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -1123,9 +1056,6 @@ func TestLocalTracker_Comment_MultilineUsageReportRendersAsBlock(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_PostIssue_WritesFileWithFrontmatterAndBody verifies
-// PostIssue writes a new Markdown+frontmatter file, slugified from title,
-// with the given body and labels, and returns a "local:<slug>" reference.
 func TestLocalTracker_PostIssue_WritesFileWithFrontmatterAndBody(t *testing.T) {
 	dir := t.TempDir()
 	lt := NewLocalTracker(dir, testLabels)
@@ -1160,16 +1090,13 @@ func TestLocalTracker_PostIssue_WritesFileWithFrontmatterAndBody(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_ImplementsHostPostedIssueFiler asserts *LocalTracker
-// satisfies the optional forge.HostPostedIssueFiler surface (issue #2018).
+// forge.HostPostedIssueFiler is optional (issue #2018).
 func TestLocalTracker_ImplementsHostPostedIssueFiler(t *testing.T) {
 	var _ forge.HostPostedIssueFiler = NewLocalTracker(t.TempDir(), testLabels)
 }
 
-// TestLocalTracker_PostIssue_ReadBack_NoEmptyLabel verifies a PostIssue'd
-// issue reads back with exactly the labels it was filed with: State is left
-// empty (untriaged) by PostIssue, and toIssue must not append that empty
-// marker as a stray "" element in Labels.
+// PostIssue leaves State empty (untriaged), so toIssue must not append that
+// empty marker as a stray "" element in Labels.
 func TestLocalTracker_PostIssue_ReadBack_NoEmptyLabel(t *testing.T) {
 	dir := t.TempDir()
 	lt := NewLocalTracker(dir, testLabels)
@@ -1189,9 +1116,8 @@ func TestLocalTracker_PostIssue_ReadBack_NoEmptyLabel(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix verifies PostIssue
-// never overwrites an existing issue file: when the derived slug already
-// exists, it retries with a "-2" (then "-3", ...) suffix.
+// PostIssue must never overwrite an existing issue file, so a taken slug
+// retries with a "-2" suffix, then "-3", and so on.
 func TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix(t *testing.T) {
 	dir := t.TempDir()
 	writeLocalIssue(t, dir, "fix-the-thing", localIssue{frontmatter: localFrontmatter{
@@ -1207,7 +1133,6 @@ func TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix(t *testing.T) {
 		t.Errorf("ref = %q, want %q", ref, "local:fix-the-thing-2")
 	}
 
-	// The original file must be untouched.
 	orig, err := lt.Issue("fix-the-thing")
 	if err != nil {
 		t.Fatalf("Issue(fix-the-thing): %v", err)
@@ -1225,10 +1150,8 @@ func TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_PostIssue_MkdirAllFails_ReturnsError verifies PostIssue
-// surfaces os.MkdirAll's error rather than panicking or swallowing it when
-// lt.dir can't be created — here because a path component (parent) already
-// exists as a regular file, so MkdirAll fails with ENOTDIR.
+// The fixture forces os.MkdirAll to fail with ENOTDIR by planting a regular
+// file where a path component belongs.
 func TestLocalTracker_PostIssue_MkdirAllFails_ReturnsError(t *testing.T) {
 	parent := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(parent, []byte("x"), 0o644); err != nil {
@@ -1242,12 +1165,9 @@ func TestLocalTracker_PostIssue_MkdirAllFails_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_PostIssue_WriteFileFails_ReturnsError verifies PostIssue
-// surfaces os.WriteFile's error rather than swallowing it when the issues
-// dir exists but rejects writes — here because it's read-only (0o500: owner
-// can still traverse/stat it, satisfying uniqueSlug's stat, but not create
-// a file in it). Skipped when running as root, which bypasses permission
-// checks entirely.
+// 0o500 is the mode that isolates the WriteFile failure: the owner can still
+// traverse and stat the dir, so uniqueSlug's stat succeeds and only the
+// create fails. Root bypasses permission checks, hence the skip.
 func TestLocalTracker_PostIssue_WriteFileFails_ReturnsError(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: permission checks are bypassed, so this test can't force a write failure")
@@ -1268,13 +1188,10 @@ func TestLocalTracker_PostIssue_WriteFileFails_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_PostIssue_UniqueSlugStatFails_ReturnsError verifies
-// PostIssue propagates a non-IsNotExist stat error from uniqueSlug's
-// collision check rather than looping past it or succeeding — here because
-// the issues dir itself is unsearchable (0o000: no read, no execute), so
-// stat-ing the candidate slug path inside it fails with a permission error
-// rather than the IsNotExist that signals "no collision, use this slug".
-// Skipped when running as root, which bypasses permission checks entirely.
+// 0o000 makes the dir unsearchable, so uniqueSlug's stat fails with a
+// permission error instead of the IsNotExist that means "no collision".
+// PostIssue must propagate it rather than loop past it. Root bypasses
+// permission checks, hence the skip.
 func TestLocalTracker_PostIssue_UniqueSlugStatFails_ReturnsError(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: permission checks are bypassed, so this test can't force a stat failure")
@@ -1299,12 +1216,9 @@ func TestLocalTracker_PostIssue_UniqueSlugStatFails_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_PostIssue_NewlineTitle_NoFrontmatterInjection verifies a
-// host-posted title containing embedded frontmatter-shaped lines (e.g. a
-// closing delimiter plus closed:/labels: overrides) round-trips as a single
-// literal title rather than being re-parsed as frontmatter — the injection
-// this adapter must resist since PostIssue's title/body come verbatim from
-// an attacker-influenceable SPINDRIFT_ISSUE_INTENT payload.
+// PostIssue's title and body come verbatim from an attacker-influenceable
+// SPINDRIFT_ISSUE_INTENT payload, so a title holding frontmatter-shaped lines
+// must round-trip as one literal title, never be re-parsed as frontmatter.
 func TestLocalTracker_PostIssue_NewlineTitle_NoFrontmatterInjection(t *testing.T) {
 	dir := t.TempDir()
 	lt := NewLocalTracker(dir, testLabels)
@@ -1342,11 +1256,9 @@ func TestLocalTracker_PostIssue_NewlineTitle_NoFrontmatterInjection(t *testing.T
 	}
 }
 
-// TestLocalTracker_PostIssue_LabelInjection_RoundTripsExactLabels verifies a
-// host-posted label containing a comma, bracket, or newline round-trips as a
-// single literal label rather than fragmenting the frontmatter "labels: [...]"
-// flow-list — the injection this adapter must resist since PostIssue's labels
-// arg is now caller-supplied (issue #2018) rather than hard-coded.
+// PostIssue's labels argument is caller-supplied since issue #2018, so a
+// label holding a comma, bracket, or newline must round-trip whole rather
+// than fragment the frontmatter flow-list.
 func TestLocalTracker_PostIssue_LabelInjection_RoundTripsExactLabels(t *testing.T) {
 	dir := t.TempDir()
 	lt := NewLocalTracker(dir, testLabels)
@@ -1366,9 +1278,8 @@ func TestLocalTracker_PostIssue_LabelInjection_RoundTripsExactLabels(t *testing.
 	}
 }
 
-// TestLocalTracker_PostIssue_PunctuationTitle_FallsBackToIssueSlug verifies a
-// title with no [a-z0-9] characters slugifies to a usable "issue" slug rather
-// than a bare ".md" file.
+// A title with no [a-z0-9] characters must fall back to a usable slug rather
+// than produce a bare ".md" file.
 func TestLocalTracker_PostIssue_PunctuationTitle_FallsBackToIssueSlug(t *testing.T) {
 	dir := t.TempDir()
 	lt := NewLocalTracker(dir, testLabels)
@@ -1424,13 +1335,11 @@ func TestLocalTracker_CreateLabel_NoOp(t *testing.T) {
 	}
 }
 
-// pathTraversalCases enumerates ids slugPath must reject: not just ids that
-// resolve outside the tracker's dir, but ids that resolve *inside* it under
-// a different filename than the id itself (e.g. "a/../b" rewriting to
-// "b.md") and the empty/"."/".." ids that would otherwise collide with a
-// literal ".md"/"..md"/"...md" file. "../issues/x" is planted against a dir
-// itself named "issues" so the traversal happens to land back inside it —
-// proving the guard rejects the rewrite even when it doesn't escape.
+// slugPath must reject more than ids that escape the tracker dir: also ids
+// that land back inside it under a different filename ("a/../b" rewriting to
+// "b.md"), and the empty, "." and ".." ids that would collide with a literal
+// ".md", "..md" or "...md" file. The "../issues/x" case runs against a dir
+// named "issues" so the traversal re-enters without ever escaping.
 var pathTraversalCases = []struct {
 	name string
 	id   string
@@ -1449,9 +1358,8 @@ var pathTraversalCases = []struct {
 	{"dotdot id", ".."},
 }
 
-// issuesDir returns a fresh, empty issues directory nested inside a temp
-// root, so a test can exercise ids that resolve above it without escaping
-// into the wider filesystem.
+// The issues dir is nested inside a temp root so a test can exercise ids that
+// resolve above it without reaching the wider filesystem.
 func issuesDir(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "issues")
@@ -1461,9 +1369,8 @@ func issuesDir(t *testing.T) string {
 	return dir
 }
 
-// plantEscapeFile writes a readable issue file at the path id would resolve
-// to absent the containment guard, so a test fails on a leak rather than
-// passing on a merely-missing file.
+// Planting a real file where id would resolve without the containment guard
+// makes a test fail on a leak instead of passing on a missing file.
 func plantEscapeFile(t *testing.T, dir, id string) string {
 	t.Helper()
 	escapePath := filepath.Clean(filepath.Join(dir, id+".md"))
@@ -1477,9 +1384,6 @@ func plantEscapeFile(t *testing.T, dir, id string) string {
 	return escapePath
 }
 
-// TestLocalTracker_Issue_RejectsPathTraversal verifies Issue refuses any id
-// that would resolve outside the tracker's issues directory, rather than
-// reading a file elsewhere on disk.
 func TestLocalTracker_Issue_RejectsPathTraversal(t *testing.T) {
 	for _, c := range pathTraversalCases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1495,12 +1399,9 @@ func TestLocalTracker_Issue_RejectsPathTraversal(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_Issue_RejectsRewriteToExistingSibling pins the blocking
-// finding directly: an id like "a/../b" must not silently resolve to the
-// real "b" issue under another name. A real b.md exists here (not merely a
-// planted decoy), so a guard that only checked "does the resolved path stay
-// under dir" — without also checking the resolved filename matches the id —
-// would pass this id straight through to Issue "b".
+// The fixture uses a real b.md, not a decoy: a guard that only checked that
+// the resolved path stays under dir, without also checking the filename
+// matches the id, would pass "a/../b" straight through to issue "b".
 func TestLocalTracker_Issue_RejectsRewriteToExistingSibling(t *testing.T) {
 	dir := t.TempDir()
 	writeLocalIssue(t, dir, "b", localIssue{
@@ -1514,9 +1415,7 @@ func TestLocalTracker_Issue_RejectsRewriteToExistingSibling(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_Comment_RejectsPathTraversal verifies a write-side method
-// (Comment) refuses a traversal id and never creates or modifies a file
-// outside the tracker's issues directory.
+// Comment is the write-side reachability path into the same guard.
 func TestLocalTracker_Comment_RejectsPathTraversal(t *testing.T) {
 	for _, c := range pathTraversalCases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1542,9 +1441,7 @@ func TestLocalTracker_Comment_RejectsPathTraversal(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_PostIssue_ThenIssue_OrdinarySlugRoundTrips pins that the
-// containment guard added for traversal rejection does not also reject the
-// ordinary slugs PostIssue generates via slugify.
+// The containment guard must not reject the ordinary slugs slugify generates.
 func TestLocalTracker_PostIssue_ThenIssue_OrdinarySlugRoundTrips(t *testing.T) {
 	lt := NewLocalTracker(t.TempDir(), testLabels)
 	ref, err := lt.PostIssue("Fix the Thing", "body", nil)
@@ -1561,12 +1458,9 @@ func TestLocalTracker_PostIssue_ThenIssue_OrdinarySlugRoundTrips(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_DepsOf_ThenIssue_RejectsPathTraversalBlocker pins the
-// second reachability path into slugPath's containment guard: a blocker
-// slug parsed out of an issue body (DepsOf, untrusted input) rather than a
-// CLI-positional id. DepsOf itself must keep returning the slug verbatim —
-// parsing is not where the guard lives — but resolving that same slug back
-// through Issue must still error instead of leaking the planted file.
+// A blocker slug parsed out of an issue body is untrusted input reaching
+// slugPath by a second route. DepsOf still returns the slug verbatim, because
+// the guard lives in resolution, not parsing.
 func TestLocalTracker_DepsOf_ThenIssue_RejectsPathTraversalBlocker(t *testing.T) {
 	dir := issuesDir(t)
 
@@ -1594,9 +1488,8 @@ func TestLocalTracker_DepsOf_ThenIssue_RejectsPathTraversalBlocker(t *testing.T)
 	}
 }
 
-// TestLocalTracker_ListIssues_SkipsDotOnlyNames pins that a stray file whose
-// name is nothing but dots plus ".md" -- an id slugPath rejects -- is skipped
-// rather than failing the whole listing.
+// A stray file named nothing but dots plus ".md" is an id slugPath rejects,
+// and skipping it must not fail the whole listing.
 func TestLocalTracker_ListIssues_SkipsDotOnlyNames(t *testing.T) {
 	dir := issuesDir(t)
 	writeLocalIssue(t, dir, "real-issue", localIssue{

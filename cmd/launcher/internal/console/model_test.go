@@ -11,9 +11,6 @@ import (
 
 var errBoom = errors.New("boom")
 
-// TestNewModel_Empty verifies a freshly constructed Model starts with no
-// issues, no filter, and is not quitting — the zero state before the first
-// IssuesLoadedMsg or dogfood-notice check arrives.
 func TestNewModel_Empty(t *testing.T) {
 	m := NewModel()
 	if len(m.Visible()) != 0 {
@@ -24,9 +21,8 @@ func TestNewModel_Empty(t *testing.T) {
 	}
 }
 
-// TestUpdate_IssuesLoadedMsg_ReplacesAll verifies Update installs the
-// refreshed backlog verbatim, in the order the adapter supplied it (oldest
-// first per dispatch order is the adapter's responsibility, not Update's).
+// Update installs the backlog in whatever order the adapter supplied. The
+// ordering is the adapter's responsibility, not Update's.
 func TestUpdate_IssuesLoadedMsg_ReplacesAll(t *testing.T) {
 	m := NewModel()
 	issues := []forge.Issue{{Number: "1", Title: "first"}, {Number: "2", Title: "second"}}
@@ -38,10 +34,8 @@ func TestUpdate_IssuesLoadedMsg_ReplacesAll(t *testing.T) {
 	}
 }
 
-// TestUpdate_IssuesLoadedMsg_ErrKeepsStaleListAndRecordsErr verifies a
-// failed refresh (Err set) leaves the last-good backlog on screen instead of
-// blanking it, and records Err for View to surface — a failed refresh must
-// never look like an empty backlog.
+// A failed refresh must never look like an empty backlog, so Update keeps the
+// last-good list on screen and records Err for View to surface.
 func TestUpdate_IssuesLoadedMsg_ErrKeepsStaleListAndRecordsErr(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}}})
@@ -57,10 +51,8 @@ func TestUpdate_IssuesLoadedMsg_ErrKeepsStaleListAndRecordsErr(t *testing.T) {
 	}
 }
 
-// TestUpdate_IssuesLoadedMsg_SetsRecoverableCount verifies Update applies the
-// adapter-computed RecoverableCount straight onto Model — Update stays pure
-// and doesn't recompute it from Issues itself (issue #2255, ADR 0039 slice
-// S4).
+// Update stays pure: it applies the adapter-computed RecoverableCount and
+// never recomputes it from Issues (issue #2255, ADR 0039 slice S4).
 func TestUpdate_IssuesLoadedMsg_SetsRecoverableCount(t *testing.T) {
 	m := NewModel()
 
@@ -71,11 +63,8 @@ func TestUpdate_IssuesLoadedMsg_SetsRecoverableCount(t *testing.T) {
 	}
 }
 
-// TestUpdate_FilterChangedMsg_NarrowsAndClearingRestores verifies a label
-// filter narrows Visible() to issues carrying a matching label, and setting
-// the filter back to "" restores the full backlog — the two acceptance
-// criteria ("narrows the list interactively" / "clearing it restores the
-// full list") in one round trip.
+// One round trip covers both acceptance criteria: the filter narrows the list
+// interactively, and clearing it restores the full list.
 func TestUpdate_FilterChangedMsg_NarrowsAndClearingRestores(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -94,9 +83,7 @@ func TestUpdate_FilterChangedMsg_NarrowsAndClearingRestores(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorMoveMsg_MovesWithinVisibleBounds verifies a positive
-// Delta moves the cursor down the visible list and clamps at the last row —
-// the backlog cursor never walks past what's on screen (issue #784).
+// The backlog cursor never walks past what is on screen (issue #784).
 func TestUpdate_CursorMoveMsg_MovesWithinVisibleBounds(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
@@ -112,8 +99,6 @@ func TestUpdate_CursorMoveMsg_MovesWithinVisibleBounds(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorMoveMsg_ClampsAtZero verifies a negative Delta never
-// drives the cursor below the first row.
 func TestUpdate_CursorMoveMsg_ClampsAtZero(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
@@ -124,8 +109,6 @@ func TestUpdate_CursorMoveMsg_ClampsAtZero(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorMoveMsg_EmptyVisible_StaysZero verifies an empty backlog
-// never leaves the cursor pointing past the (nonexistent) end.
 func TestUpdate_CursorMoveMsg_EmptyVisible_StaysZero(t *testing.T) {
 	m := NewModel()
 	m = Update(m, CursorMoveMsg{Delta: 1})
@@ -134,9 +117,6 @@ func TestUpdate_CursorMoveMsg_EmptyVisible_StaysZero(t *testing.T) {
 	}
 }
 
-// TestUpdate_FilterChangedMsg_NarrowingClampsCursor verifies narrowing the
-// visible list via a filter pulls a cursor that was pointing past the new,
-// shorter list back to its last row.
 func TestUpdate_FilterChangedMsg_NarrowingClampsCursor(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -151,8 +131,7 @@ func TestUpdate_FilterChangedMsg_NarrowingClampsCursor(t *testing.T) {
 	}
 }
 
-// TestModel_ActiveMode_DefaultsToList verifies a fresh Model's ActiveMode is
-// ModeList, modePrecedence's last resort (issue #1543).
+// ModeList is modePrecedence's last resort (issue #1543).
 func TestModel_ActiveMode_DefaultsToList(t *testing.T) {
 	m := NewModel()
 	if got := m.ActiveMode(); got != ModeList {
@@ -160,13 +139,9 @@ func TestModel_ActiveMode_DefaultsToList(t *testing.T) {
 	}
 }
 
-// TestModel_ActiveMode_SidebarBeatsEveryOtherMode verifies a focused sidebar
-// owns the keyboard ahead of any Mode value — mirroring the old handleKey
-// cascade's own sidebar-first check. Sidebar's ownership is a condition
-// derived from Sidebar/Focus/SidebarZoom rather than folded into Mode
-// itself (Mode's own doc comment), so a Model can still carry a stale Mode
-// alongside an active Sidebar; ActiveMode must still resolve to ModeSidebar
-// regardless (issue #1543).
+// Sidebar ownership derives from Sidebar/Focus/SidebarZoom rather than from
+// Mode, so a Model can carry a stale Mode alongside an active Sidebar.
+// ActiveMode must still resolve to ModeSidebar (issue #1543).
 func TestModel_ActiveMode_SidebarBeatsEveryOtherMode(t *testing.T) {
 	m := NewModel()
 	m.Sidebar = &SidebarState{Number: "42"}
@@ -178,10 +153,9 @@ func TestModel_ActiveMode_SidebarBeatsEveryOtherMode(t *testing.T) {
 	}
 }
 
-// TestModel_ActiveMode_DockedSidebarDoesNotOwnKeyboard verifies a docked
-// (fits, not zoomed, list-focused) sidebar leaves Mode in charge — only a
-// focused, fullscreen-fallback, or zoomed sidebar competes for ownership
-// (ADR 0030's own sidebarFits/Focus contract, unchanged by issue #1543).
+// Only a focused, fullscreen-fallback, or zoomed sidebar competes for keyboard
+// ownership, so a docked one leaves Mode in charge (ADR 0030's
+// sidebarFits/Focus contract, unchanged by issue #1543).
 func TestModel_ActiveMode_DockedSidebarDoesNotOwnKeyboard(t *testing.T) {
 	m := NewModel()
 	m.Width, m.Height = 200, 40
@@ -194,9 +168,7 @@ func TestModel_ActiveMode_DockedSidebarDoesNotOwnKeyboard(t *testing.T) {
 	}
 }
 
-// TestModel_ActiveMode_ZoomedSidebarOwnsKeyboard verifies a zoomed sidebar
-// competes for ownership even at a width where it would otherwise dock —
-// SidebarZoom, not just a narrow terminal, is enough to take Sidebar out of
+// SidebarZoom alone, not just a narrow terminal, takes Sidebar out of
 // arrangementSidebarDocked (issue #3017's sidebarDocked helper).
 func TestModel_ActiveMode_ZoomedSidebarOwnsKeyboard(t *testing.T) {
 	m := NewModel()
@@ -211,8 +183,7 @@ func TestModel_ActiveMode_ZoomedSidebarOwnsKeyboard(t *testing.T) {
 	}
 }
 
-// TestUpdate_HelpToggleMsg_TogglesModeHelp verifies "?" opens the help overlay
-// and a second "?" closes it (issue #784).
+// The same message both opens and closes the help overlay (issue #784).
 func TestUpdate_HelpToggleMsg_TogglesModeHelp(t *testing.T) {
 	m := NewModel()
 	m = Update(m, HelpToggleMsg{})
@@ -226,9 +197,8 @@ func TestUpdate_HelpToggleMsg_TogglesModeHelp(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputOpenMsg_OpensPaneWhenOutputPresent verifies "o"
-// opens the rebuild-output pane once a rebuild has captured output — the
-// field's only consumer (issue #1128).
+// The rebuild-output pane is the captured output field's only consumer (issue
+// #1128).
 func TestUpdate_RebuildOutputOpenMsg_OpensPaneWhenOutputPresent(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "building...\ndone"}})
@@ -238,8 +208,6 @@ func TestUpdate_RebuildOutputOpenMsg_OpensPaneWhenOutputPresent(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputOpenMsg_NoOpWhenOutputEmpty verifies the pane never
-// opens with nothing to show — no rebuild has run yet.
 func TestUpdate_RebuildOutputOpenMsg_NoOpWhenOutputEmpty(t *testing.T) {
 	m := NewModel()
 	m = Update(m, RebuildOutputOpenMsg{})
@@ -248,8 +216,6 @@ func TestUpdate_RebuildOutputOpenMsg_NoOpWhenOutputEmpty(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed verifies scrolling
-// with the pane closed does not move RebuildOutputOffset or open it.
 func TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2"}})
@@ -262,9 +228,8 @@ func TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputScrollMsg_MovesOffset verifies a scroll message
-// moves RebuildOutputOffset by Delta, clamped into the captured output's
-// line bounds the same way SidebarScrollMsg clamps Sidebar.Offset.
+// RebuildOutputOffset clamps into the captured output's line bounds the same
+// way SidebarScrollMsg clamps Sidebar.Offset.
 func TestUpdate_RebuildOutputScrollMsg_MovesOffset(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
@@ -286,11 +251,9 @@ func TestUpdate_RebuildOutputScrollMsg_MovesOffset(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed verifies both jump
-// messages leave RebuildOutputOffset untouched while the pane is closed —
-// RebuildOutputOpenMsg (case above) already refuses to open the pane while
-// RebuildStatus.Output is "", so this is the reachable form of the "no-op
-// on empty output" AC for a pane that was never opened (issue #1630 AC4).
+// RebuildOutputOpenMsg already refuses to open the pane on empty output, so a
+// closed pane is the reachable form of the "no-op on empty output" acceptance
+// criterion (issue #1630 AC4).
 func TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed(t *testing.T) {
 	m := NewModel()
 	m = Update(m, RebuildOutputJumpToLastMsg{})
@@ -307,9 +270,7 @@ func TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputJumpToFirstMsg_ResetsOffsetToZero verifies "gg"
-// resets RebuildOutputOffset to 0 from a scrolled-down position, mirroring
-// CursorJumpToFirstMsg's own reset for the list body (issue #1630 AC2).
+// Mirrors CursorJumpToFirstMsg's reset for the list body (issue #1630 AC2).
 func TestUpdate_RebuildOutputJumpToFirstMsg_ResetsOffsetToZero(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
@@ -322,13 +283,12 @@ func TestUpdate_RebuildOutputJumpToFirstMsg_ResetsOffsetToZero(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage verifies "G" moves
-// RebuildOutputOffset to the last page that still fills the viewport — not
-// just the last line — the same page-capped clamp the ModeRebuildOutput
-// clamp block already applies on every Update (issue #1630 AC1).
+// "G" lands on the last page that still fills the viewport, not on the last
+// line: the same page-capped clamp the ModeRebuildOutput block applies on
+// every Update (issue #1630 AC1).
 func TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage(t *testing.T) {
 	m := NewModel()
-	m = Update(m, SizeChangedMsg{Height: 7}) // minus headerFooterLines(2) and the issue #1827 trailing-"\n" reservation(1) = a 4-row viewport
+	m = Update(m, SizeChangedMsg{Height: 7}) // headerFooterLines(2) plus the issue #1827 trailing-"\n" reservation(1) leave a 4-row viewport
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 
@@ -338,8 +298,6 @@ func TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputCloseMsg_ClosesPane verifies close returns Mode to
-// ModeList so View falls back to rendering the backlog/queue.
 func TestUpdate_RebuildOutputCloseMsg_ClosesPane(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1"}})
@@ -350,11 +308,8 @@ func TestUpdate_RebuildOutputCloseMsg_ClosesPane(t *testing.T) {
 	}
 }
 
-// TestUpdate_StaleStatusMsg_ClosesOpenPaneWhenOutputEmpties verifies a later
-// StaleStatusMsg that empties RebuildStatus.Output out from under an
-// already-open pane also closes it, rather than leaving Mode at
-// ModeRebuildOutput over blank content — the documented rough edge issue
-// #1543 retires.
+// A later StaleStatusMsg can empty Output out from under an open pane, which
+// used to leave Mode at ModeRebuildOutput over blank content (issue #1543).
 func TestUpdate_StaleStatusMsg_ClosesOpenPaneWhenOutputEmpties(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2"}})
@@ -366,9 +321,8 @@ func TestUpdate_StaleStatusMsg_ClosesOpenPaneWhenOutputEmpties(t *testing.T) {
 	}
 }
 
-// TestUpdate_FilterEditStartMsg_EntersEditingMode verifies "/" arms
-// ModeFilterEdit so the tea layer routes further keystrokes as filter text
-// instead of navigation (issue #784).
+// ModeFilterEdit tells the tea layer to route further keystrokes as filter
+// text instead of navigation (issue #784).
 func TestUpdate_FilterEditStartMsg_EntersEditingMode(t *testing.T) {
 	m := NewModel()
 	m = Update(m, FilterEditStartMsg{})
@@ -377,9 +331,8 @@ func TestUpdate_FilterEditStartMsg_EntersEditingMode(t *testing.T) {
 	}
 }
 
-// TestUpdate_FilterEditConfirmMsg_KeepsFilterExitsEditing verifies Enter
-// leaves the already-live-narrowed Filter untouched and just exits editing
-// mode.
+// The Filter has already narrowed the list live, so Enter only exits editing
+// mode and leaves it untouched.
 func TestUpdate_FilterEditConfirmMsg_KeepsFilterExitsEditing(t *testing.T) {
 	m := NewModel()
 	m = Update(m, FilterEditStartMsg{})
@@ -394,9 +347,7 @@ func TestUpdate_FilterEditConfirmMsg_KeepsFilterExitsEditing(t *testing.T) {
 	}
 }
 
-// TestUpdate_FilterEditCancelMsg_RevertsFilterExitsEditing verifies Esc
-// restores whatever Filter was active before "/" was pressed, discarding
-// the in-progress edit.
+// Esc restores whatever Filter was active before "/" was pressed.
 func TestUpdate_FilterEditCancelMsg_RevertsFilterExitsEditing(t *testing.T) {
 	m := NewModel()
 	m = Update(m, FilterChangedMsg{Filter: "bug"})
@@ -412,8 +363,8 @@ func TestUpdate_FilterEditCancelMsg_RevertsFilterExitsEditing(t *testing.T) {
 	}
 }
 
-// TestUpdate_QuitMsg_SetsQuitting verifies QuitMsg is the sole way Quitting
-// flips true — the run loop's signal to exit its read loop cleanly.
+// QuitMsg is the only thing that flips Quitting, the run loop's signal to exit
+// its read loop cleanly.
 func TestUpdate_QuitMsg_SetsQuitting(t *testing.T) {
 	m := NewModel()
 	m = Update(m, QuitMsg{})
@@ -422,10 +373,9 @@ func TestUpdate_QuitMsg_SetsQuitting(t *testing.T) {
 	}
 }
 
-// TestUpdate_DogfoodNoticeMsg_SetsLive verifies DogfoodNoticeMsg{Live: true}
-// records that a competing headless loop's pid-file is present, and
-// {Live: false} clears it — the startup notice is informational only and
-// must never block, so it is just a bit on Model that View can render.
+// The message records that a competing headless loop's pid-file is present.
+// The startup notice is informational and must never block, so it stays a
+// single bit on Model that View can render.
 func TestUpdate_DogfoodNoticeMsg_SetsLive(t *testing.T) {
 	m := NewModel()
 	if m.DogfoodLive {
@@ -443,11 +393,9 @@ func TestUpdate_DogfoodNoticeMsg_SetsLive(t *testing.T) {
 	}
 }
 
-// TestFormatActivityLine_RendersTextOnly verifies the Activity feed no
-// longer prefixes a record with a rendered timestamp: ActivityFeed's only
-// per-record clock is the pass log's on-disk mtime, which advances to ~now
-// on every refresh rather than reflecting when the record actually
-// happened, so a precise-looking HH:MM:SS prefix would be misleading (#1584).
+// ActivityFeed's only per-record clock is the pass log's on-disk mtime, which
+// advances to roughly now on every refresh rather than recording when the
+// record happened, so a precise-looking HH:MM:SS prefix would mislead (#1584).
 func TestFormatActivityLine_RendersTextOnly(t *testing.T) {
 	got := formatActivityLine(ActivityLine{Text: "#42 · hi"})
 	want := "#42 · hi"
@@ -456,11 +404,8 @@ func TestFormatActivityLine_RendersTextOnly(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarLoadedMsg_OpensSidebar_ActivityDefault verifies a
-// SidebarLoadedMsg installs the loaded Activity feed and Transcript content
-// on Model and focuses the sidebar, with the Activity feed as the default
-// view (not the Transcript) — the queue row's live-tail sidebar gesture
-// (#648, #1501).
+// The queue row's live-tail sidebar gesture opens on the Activity feed, not
+// the Transcript (#648, #1501).
 func TestUpdate_SidebarLoadedMsg_OpensSidebar_ActivityDefault(t *testing.T) {
 	m := NewModel()
 	activity := []ActivityLine{{Text: "#42 · hi"}}
@@ -483,11 +428,8 @@ func TestUpdate_SidebarLoadedMsg_OpensSidebar_ActivityDefault(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarLoadedMsg_CarriesTitle verifies SidebarLoadedMsg's Title
-// lands on SidebarState.Title — the row identifier the floating log modal's
-// border needs (`#<num> <title>`, matching the detail modal's own aesthetic,
-// issue #1845), captured at open time the same way DetailModalOpenMsg
-// already carries its Title through to DetailModalState.
+// The floating log modal's border needs the row identifier, captured at open
+// time the way DetailModalOpenMsg carries its own Title (issue #1845).
 func TestUpdate_SidebarLoadedMsg_CarriesTitle(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Title: "fix the thing", Activity: []ActivityLine{{Text: "hi"}}})
@@ -500,10 +442,8 @@ func TestUpdate_SidebarLoadedMsg_CarriesTitle(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarLoadedMsg_FollowDefaultsTrueOnOpen verifies a freshly
-// opened sidebar (no retained position for this Dispatch yet) starts with
-// Follow true — live-tailing is the default the moment a feed opens, not an
-// opt-in the operator has to reach for (issue #1502, ADR 0030).
+// Live-tailing is the default the moment a feed opens, not an opt-in the
+// operator has to reach for (issue #1502, ADR 0030).
 func TestUpdate_SidebarLoadedMsg_FollowDefaultsTrueOnOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -513,12 +453,8 @@ func TestUpdate_SidebarLoadedMsg_FollowDefaultsTrueOnOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarLoadedMsg_FreshOpenWhileFollowing_StartsAtBottom
-// verifies a brand new selection (no retained position at all), still
-// following by default, opens at the bottom of the loaded feed rather than
-// its top — ADR 0030's "follows the newest line by default" describes any
-// opened feed, not only a reopen after a close (review finding on issue
-// #1502).
+// ADR 0030's "follows the newest line by default" describes any opened feed,
+// not only a reopen after a close (review finding on issue #1502).
 func TestUpdate_SidebarLoadedMsg_FreshOpenWhileFollowing_StartsAtBottom(t *testing.T) {
 	activity := make([]ActivityLine, 50)
 	for i := range activity {
@@ -535,11 +471,9 @@ func TestUpdate_SidebarLoadedMsg_FreshOpenWhileFollowing_StartsAtBottom(t *testi
 	}
 }
 
-// TestUpdate_SidebarLoadedMsg_CachesLineSplit verifies SidebarLoadedMsg
-// pre-splits the active (Activity, by default) form into Sidebar.Lines once,
-// so clampSidebarOffset and the render functions consume the cache instead
-// of each re-splitting the full content on every Update/View call (issue
-// #722, inherited from DrillInState.Lines).
+// Pre-splitting into Sidebar.Lines once keeps clampSidebarOffset and the
+// render functions from re-splitting the full content on every Update and View
+// call (issue #722, inherited from DrillInState.Lines).
 func TestUpdate_SidebarLoadedMsg_CachesLineSplit(t *testing.T) {
 	m := NewModel()
 	activity := []ActivityLine{{Text: "l0"}, {Text: "l1"}, {Text: "l2"}}
@@ -555,10 +489,8 @@ func TestUpdate_SidebarLoadedMsg_CachesLineSplit(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarToggleMsg_CyclesActivityTranscriptRaw verifies "t"
-// advances the sidebar around its three-step cycle — Activity feed ->
-// Transcript (rendered) -> Transcript (raw) -> Activity feed — so the
-// byte-exact raw form stays reachable without a second key (#1501).
+// "t" cycles Activity, rendered Transcript, raw Transcript, Activity again, so
+// the byte-exact raw form stays reachable without a second key (#1501).
 func TestUpdate_SidebarToggleMsg_CyclesActivityTranscriptRaw(t *testing.T) {
 	m := NewModel()
 	activity := []ActivityLine{{Text: "activity line"}}
@@ -593,12 +525,9 @@ func TestUpdate_SidebarToggleMsg_CyclesActivityTranscriptRaw(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarToggleMsg_BackToActivityWhileFollowing_SnapsToBottom
-// verifies cycling the sidebar back to the Activity feed (the third "t") re-
-// snaps Offset to the bottom when Follow is true — the Transcript view's own
-// Offset (wherever that view's own scrolling or clamp left it) must not leak
-// into the Activity view and read as "following" while showing non-bottom
-// content (review finding on issue #1502).
+// The Transcript view's Offset must not leak into the Activity view and read
+// as "following" while showing non-bottom content (review finding on issue
+// #1502).
 func TestUpdate_SidebarToggleMsg_BackToActivityWhileFollowing_SnapsToBottom(t *testing.T) {
 	activity := make([]ActivityLine, 50)
 	for i := range activity {
@@ -611,9 +540,9 @@ func TestUpdate_SidebarToggleMsg_BackToActivityWhileFollowing_SnapsToBottom(t *t
 		t.Fatal("test setup: Follow must start true")
 	}
 
-	m = Update(m, SidebarToggleMsg{}) // -> Transcript (rendered), Offset clamps to 0 (short content)
-	m = Update(m, SidebarToggleMsg{}) // -> Transcript (raw)
-	m = Update(m, SidebarToggleMsg{}) // -> back to Activity
+	m = Update(m, SidebarToggleMsg{}) // rendered Transcript; Offset clamps to 0 on the short content
+	m = Update(m, SidebarToggleMsg{}) // raw Transcript
+	m = Update(m, SidebarToggleMsg{}) // back to Activity
 
 	if m.Sidebar.ShowTranscript {
 		t.Fatal("test setup: three toggles must land back on the Activity feed")
@@ -624,8 +553,6 @@ func TestUpdate_SidebarToggleMsg_BackToActivityWhileFollowing_SnapsToBottom(t *t
 	}
 }
 
-// TestUpdate_SidebarToggleMsg_NoOpWhenNoSidebarOpen verifies toggling with no
-// sidebar open does not panic or fabricate a Sidebar state.
 func TestUpdate_SidebarToggleMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarToggleMsg{})
@@ -634,9 +561,6 @@ func TestUpdate_SidebarToggleMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarCloseMsg_ReturnsToBacklog verifies close clears the
-// sidebar state and returns focus to the list, so View falls back to
-// rendering the backlog/queue alone.
 func TestUpdate_SidebarCloseMsg_ReturnsToBacklog(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "rendered"})
@@ -649,16 +573,11 @@ func TestUpdate_SidebarCloseMsg_ReturnsToBacklog(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_MovesOffset verifies a scroll message moves
-// Sidebar.Offset by Delta, clamped into the loaded content's line bounds so
-// paging past either end leaves the pane showing its first or last line
-// instead of an invalid Offset (issue #786, inherited). No SizeChangedMsg is
-// sent, so Height stays 0 and the final pgdown assertion below exercises the
-// degenerate-height fallback, not the viewport-aware clamp added in #829 —
-// see TestUpdate_SidebarScrollMsg_ClampsToViewportHeight and
-// TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop for that. The
-// Transcript (rendered) view is toggled on so Lines matches the plain
-// "l0".."l4" content the old drill-in test exercised.
+// Paging past either end must leave the pane on its first or last line rather
+// than an invalid Offset (issue #786, inherited). No SizeChangedMsg is sent,
+// so Height stays 0 and the final pgdown exercises the degenerate-height
+// fallback, not the viewport-aware clamp added in #829. The rendered
+// Transcript is toggled on so Lines holds the plain l0 through l4 content.
 func TestUpdate_SidebarScrollMsg_MovesOffset(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
@@ -686,11 +605,9 @@ func TestUpdate_SidebarScrollMsg_MovesOffset(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_ClampsToViewportHeight verifies a pgdown past
-// the end of a transcript longer than the fullscreen viewport lands Offset
-// at the last full page, not len(Lines)-1 — a large Delta must never leave
-// the pane showing a single line with the rest of the viewport blank
-// (issue #829, inherited).
+// A large Delta must never leave the pane showing a single line with the rest
+// of the viewport blank, so the clamp lands on the last full page rather than
+// len(Lines)-1 (issue #829, inherited).
 func TestUpdate_SidebarScrollMsg_ClampsToViewportHeight(t *testing.T) {
 	lines := make([]string, 100)
 	for i := range lines {
@@ -709,12 +626,9 @@ func TestUpdate_SidebarScrollMsg_ClampsToViewportHeight(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_DockedClampsToBodyBudgetNotFullHeight verifies
-// a pgdown past the end of a transcript, docked beside the list (wide
-// enough for sidebarFits), lands Offset against bodyBudget(m) — the same
-// row budget renderSidebarDocked actually renders into — rather than the
-// whole terminal Height, which the header/banner/tabs eat into (#1501
-// review finding).
+// Docked, the clamp must use bodyBudget(m), the row budget
+// renderSidebarDocked actually renders into, not the whole terminal Height
+// that the header, banner and tabs eat into (#1501 review finding).
 func TestUpdate_SidebarScrollMsg_DockedClampsToBodyBudgetNotFullHeight(t *testing.T) {
 	lines := make([]string, 100)
 	for i := range lines {
@@ -737,12 +651,9 @@ func TestUpdate_SidebarScrollMsg_DockedClampsToBodyBudgetNotFullHeight(t *testin
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_Docked_LastLineReachable verifies a pgdown
-// past the end of a transcript, docked beside the list, actually renders
-// the transcript's last line — not just that Offset lands on some clamp
-// formula, but that the clamp and the docked panel's real (bordered) row
-// budget agree, or the last two lines end up permanently unreachable behind
-// the panel border (issue #1755).
+// Asserting through View, not the clamp formula: unless the clamp and the
+// docked panel's real bordered row budget agree, the last two lines stay
+// permanently unreachable behind the panel border (issue #1755).
 func TestUpdate_SidebarScrollMsg_Docked_LastLineReachable(t *testing.T) {
 	lines := make([]string, 100)
 	for i := range lines {
@@ -762,14 +673,10 @@ func TestUpdate_SidebarScrollMsg_Docked_LastLineReachable(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_ZoomedClampsToModalBudgetNotBodyBudget verifies
-// a pgdown past the end of a transcript, zoomed on a terminal wide enough to
-// dock (and comfortably past sidebarModalFits' own floor), lands Offset
-// against the floating log modal's own content budget — the row budget
-// renderSidebarModalContent actually renders into once SidebarZoom forces
-// the modal open (issue #1845) — not bodyBudget(m), which only applies to
-// the docked render the operator zoomed away from (review finding on issue
-// #1502).
+// Zoomed on a terminal wide enough to dock, the clamp must use the row budget
+// renderSidebarModalContent renders into once SidebarZoom forces the modal
+// open (issue #1845), not bodyBudget(m), which only applies to the docked
+// render the operator zoomed away from (review finding on issue #1502).
 func TestUpdate_SidebarScrollMsg_ZoomedClampsToModalBudgetNotBodyBudget(t *testing.T) {
 	lines := make([]string, 100)
 	for i := range lines {
@@ -794,11 +701,9 @@ func TestUpdate_SidebarScrollMsg_ZoomedClampsToModalBudgetNotBodyBudget(t *testi
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop verifies a pgdown
-// past the end of a transcript shorter than the fullscreen viewport lands
-// Offset at 0, not len(Lines)-1 — content that already fits the viewport in
-// full at Offset 0 must never get pushed to a higher Offset that shows only
-// its last line over an otherwise-blank pane (issue #829, inherited).
+// Content that already fits the viewport at Offset 0 must never get pushed to
+// a higher Offset showing only its last line over a blank pane (issue #829,
+// inherited).
 func TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
@@ -812,10 +717,9 @@ func TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_ScrollUpDetachesFollow verifies scrolling up
-// (a negative Delta) detaches Follow, so the operator can review frozen
-// history while the Dispatch keeps working without the feed yanking them
-// back to the bottom (issue #1502, ADR 0030).
+// Detaching Follow lets the operator review frozen history while the Dispatch
+// keeps working, without the feed yanking them back to the bottom (issue
+// #1502, ADR 0030).
 func TestUpdate_SidebarScrollMsg_ScrollUpDetachesFollow(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
@@ -831,9 +735,8 @@ func TestUpdate_SidebarScrollMsg_ScrollUpDetachesFollow(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_ScrollDownDoesNotDetachFollow verifies
-// scrolling down (a positive Delta) leaves Follow untouched — only scrolling
-// up (reviewing history) detaches it (issue #1502, ADR 0030).
+// Only scrolling up, which means reviewing history, detaches Follow (issue
+// #1502, ADR 0030).
 func TestUpdate_SidebarScrollMsg_ScrollDownDoesNotDetachFollow(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
@@ -846,8 +749,6 @@ func TestUpdate_SidebarScrollMsg_ScrollDownDoesNotDetachFollow(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen verifies scrolling with
-// no sidebar open does not panic or fabricate a Sidebar state.
 func TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarScrollMsg{Delta: 1})
@@ -856,10 +757,8 @@ func TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarJumpToEndMsg_ReattachesFollowAndJumpsToBottom verifies
-// G/End re-attaches Follow and moves Offset to the last line, the operator's
-// way back to live-tailing after scrolling up to review history (issue
-// #1502, ADR 0030).
+// G and End are the operator's way back to live-tailing after scrolling up to
+// review history (issue #1502, ADR 0030).
 func TestUpdate_SidebarJumpToEndMsg_ReattachesFollowAndJumpsToBottom(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
@@ -879,8 +778,6 @@ func TestUpdate_SidebarJumpToEndMsg_ReattachesFollowAndJumpsToBottom(t *testing.
 	}
 }
 
-// TestUpdate_SidebarJumpToEndMsg_NoOpWhenNoSidebarOpen verifies G/End with no
-// sidebar open does not panic or fabricate a Sidebar state.
 func TestUpdate_SidebarJumpToEndMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarJumpToEndMsg{})
@@ -889,9 +786,8 @@ func TestUpdate_SidebarJumpToEndMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarJumpToBeginningMsg_DetachesFollowAndJumpsToTop verifies
-// gg moves Offset to 0 and detaches Follow, the same way scrolling up with
-// "k" does — the operator parks at the start of the buffer (issue #1629).
+// gg parks the operator at the start of the buffer and detaches Follow the
+// same way scrolling up with "k" does (issue #1629).
 func TestUpdate_SidebarJumpToBeginningMsg_DetachesFollowAndJumpsToTop(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
@@ -910,8 +806,6 @@ func TestUpdate_SidebarJumpToBeginningMsg_DetachesFollowAndJumpsToTop(t *testing
 	}
 }
 
-// TestUpdate_SidebarJumpToBeginningMsg_NoOpWhenNoSidebarOpen verifies gg with
-// no sidebar open does not panic or fabricate a Sidebar state.
 func TestUpdate_SidebarJumpToBeginningMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarJumpToBeginningMsg{})
@@ -920,10 +814,7 @@ func TestUpdate_SidebarJumpToBeginningMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarActivityMsg_UpdatesActivityAndLines verifies a
-// SidebarActivityMsg for the open sidebar's own Number installs the
-// refreshed Activity feed and recomputes Lines — syncQueue's per-Msg live
-// advance (issue #1502, ADR 0030).
+// This is syncQueue's per-message live advance (issue #1502, ADR 0030).
 func TestUpdate_SidebarActivityMsg_UpdatesActivityAndLines(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "first"}}})
@@ -938,9 +829,8 @@ func TestUpdate_SidebarActivityMsg_UpdatesActivityAndLines(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarActivityMsg_FollowSnapsToBottom verifies growth of the
-// Activity feed, while Follow is true, moves Offset to show the newest
-// line — the live-tail default (issue #1502, ADR 0030).
+// Live-tailing is the default, so growth while Follow is true moves Offset to
+// the newest line (issue #1502, ADR 0030).
 func TestUpdate_SidebarActivityMsg_FollowSnapsToBottom(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
@@ -961,10 +851,8 @@ func TestUpdate_SidebarActivityMsg_FollowSnapsToBottom(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarActivityMsg_PreservesOffsetWhenNotFollowing verifies
-// growth of the Activity feed, while Follow is false (detached by an earlier
-// scroll-up), leaves Offset where the operator left it instead of yanking
-// them back to the bottom (issue #1502, ADR 0030).
+// Once an earlier scroll-up has detached Follow, growth must leave Offset
+// where the operator left it (issue #1502, ADR 0030).
 func TestUpdate_SidebarActivityMsg_PreservesOffsetWhenNotFollowing(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}, {Text: "l1"}, {Text: "l2"}}})
@@ -978,13 +866,9 @@ func TestUpdate_SidebarActivityMsg_PreservesOffsetWhenNotFollowing(t *testing.T)
 	}
 }
 
-// TestUpdate_SidebarActivityMsg_UnchangedContentPreservesManualOffset
-// verifies a refresh that carries the exact same Activity feed as before
-// (syncQueue's per-Msg re-derive against an unchanged on-disk log — most
-// calls, between actual writes) leaves Offset alone even while Follow is
-// still true — a positive-Delta scroll (pgdown) moves Offset without
-// detaching Follow, and a same-content refresh right afterward must not
-// yank it back to the bottom (issue #1502).
+// Most syncQueue refreshes re-derive an unchanged on-disk log. A pgdown moves
+// Offset without detaching Follow, so a same-content refresh right afterward
+// must not yank it back to the bottom (issue #1502).
 func TestUpdate_SidebarActivityMsg_UnchangedContentPreservesManualOffset(t *testing.T) {
 	activity := make([]ActivityLine, 50)
 	for i := range activity {
@@ -1009,14 +893,10 @@ func TestUpdate_SidebarActivityMsg_UnchangedContentPreservesManualOffset(t *test
 	}
 }
 
-// TestUpdate_SidebarActivityMsg_PassRolloverUpdatesLinesEvenWhenShorter
-// verifies a refresh whose feed is SHORTER than what's currently shown still
-// updates Lines and (while Follow is true) snaps to the new bottom — a
-// Dispatch rolling from its initial run onto a fix pass gets a fresh,
-// shorter pass log (LogPaths/ActivityFeed key on only the latest pass), so
-// gating the refresh on "grew" alone would leave the sidebar frozen on the
-// finished pass's stale lines while still labeled following (review finding
-// on issue #1502).
+// A Dispatch rolling from its initial run onto a fix pass gets a fresh,
+// shorter pass log, since LogPaths and ActivityFeed key on the latest pass
+// alone. Gating the refresh on "grew" would freeze the sidebar on the finished
+// pass's stale lines while still labeled following (review finding on #1502).
 func TestUpdate_SidebarActivityMsg_PassRolloverUpdatesLinesEvenWhenShorter(t *testing.T) {
 	initial := make([]ActivityLine, 20)
 	for i := range initial {
@@ -1026,8 +906,8 @@ func TestUpdate_SidebarActivityMsg_PassRolloverUpdatesLinesEvenWhenShorter(t *te
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: initial})
 
-	// A fresh fix-pass log starts over — shorter than the finished initial
-	// pass, and with entirely different content.
+	// A fresh fix-pass log starts over: shorter than the finished initial pass,
+	// and with entirely different content.
 	nextPass := []ActivityLine{{Text: "pass1-l0"}}
 	m = Update(m, SidebarActivityMsg{Number: "42", Activity: nextPass})
 
@@ -1039,10 +919,8 @@ func TestUpdate_SidebarActivityMsg_PassRolloverUpdatesLinesEvenWhenShorter(t *te
 	}
 }
 
-// TestUpdate_SidebarActivityMsg_NoOpWhenNumberMismatch verifies a
-// SidebarActivityMsg for a Dispatch other than the one the sidebar has open
-// is dropped — a stale in-flight refresh racing a Dispatch switch must never
-// clobber the newly selected Dispatch's feed (issue #1502).
+// A stale in-flight refresh racing a Dispatch switch must never clobber the
+// newly selected Dispatch's feed (issue #1502).
 func TestUpdate_SidebarActivityMsg_NoOpWhenNumberMismatch(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}}})
@@ -1054,9 +932,6 @@ func TestUpdate_SidebarActivityMsg_NoOpWhenNumberMismatch(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarActivityMsg_NoOpWhenNoSidebarOpen verifies a
-// SidebarActivityMsg with no sidebar open does not panic or fabricate a
-// Sidebar state.
 func TestUpdate_SidebarActivityMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarActivityMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}}})
@@ -1065,11 +940,8 @@ func TestUpdate_SidebarActivityMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarActivityMsg_DoesNotOverwriteTranscriptLines verifies a
-// SidebarActivityMsg arriving while the sidebar shows the Transcript updates
-// the stored Activity feed (so toggling back to it later reflects the
-// growth) but leaves Lines showing the Transcript untouched — the refresh
-// must never yank the operator's Transcript view back to Activity content
+// The refresh must never yank the operator's Transcript view back to Activity
+// content, yet it still stores the feed so toggling back reflects the growth
 // (issue #1502).
 func TestUpdate_SidebarActivityMsg_DoesNotOverwriteTranscriptLines(t *testing.T) {
 	m := NewModel()
@@ -1086,10 +958,7 @@ func TestUpdate_SidebarActivityMsg_DoesNotOverwriteTranscriptLines(t *testing.T)
 	}
 }
 
-// TestUpdate_SidebarTranscriptMsg_UpdatesTranscriptAndLinesWhileShowing
-// verifies a SidebarTranscriptMsg for the open sidebar's own Number installs
-// the refreshed Transcript render and recomputes Lines while ShowTranscript
-// is true — the Transcript's own live-tail advance, the counterpart to
+// The Transcript's own live-tail advance, the counterpart to
 // SidebarActivityMsg's Activity refresh (issue #1736).
 func TestUpdate_SidebarTranscriptMsg_UpdatesTranscriptAndLinesWhileShowing(t *testing.T) {
 	m := NewModel()
@@ -1106,11 +975,8 @@ func TestUpdate_SidebarTranscriptMsg_UpdatesTranscriptAndLinesWhileShowing(t *te
 	}
 }
 
-// TestUpdate_SidebarTranscriptMsg_FollowSnapsToBottom verifies growth of the
-// Transcript, while Follow is true and ShowTranscript is active, moves
-// Offset to show the newest line — the live-tail default already true of
-// the Activity feed (issue #1502), extended to the Transcript view (#1736
-// AC2: "honours follow").
+// The Activity feed's live-tail default (issue #1502), extended to the
+// Transcript view (#1736 AC2, "honours follow").
 func TestUpdate_SidebarTranscriptMsg_FollowSnapsToBottom(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
@@ -1133,11 +999,9 @@ func TestUpdate_SidebarTranscriptMsg_FollowSnapsToBottom(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarTranscriptMsg_NoOpWhenNumberMismatch verifies a
-// SidebarTranscriptMsg for a Dispatch other than the one the sidebar has
-// open is dropped — a stale in-flight refresh racing a Dispatch switch must
-// never clobber the newly selected Dispatch's Transcript (mirrors
-// SidebarActivityMsg's own guard, issue #1736).
+// A stale in-flight refresh racing a Dispatch switch must never clobber the
+// newly selected Dispatch's Transcript, mirroring SidebarActivityMsg's own
+// guard (issue #1736).
 func TestUpdate_SidebarTranscriptMsg_NoOpWhenNumberMismatch(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0"})
@@ -1150,8 +1014,8 @@ func TestUpdate_SidebarTranscriptMsg_NoOpWhenNumberMismatch(t *testing.T) {
 	}
 }
 
-// TestUpdate_FocusSidebarMsg_MovesFocus verifies "l"/right moves focus to an
-// open sidebar (#1501, ADR 0030).
+// An open sidebar takes the keyboard only once focus moves to it (#1501, ADR
+// 0030).
 func TestUpdate_FocusSidebarMsg_MovesFocus(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42"})
@@ -1162,8 +1026,6 @@ func TestUpdate_FocusSidebarMsg_MovesFocus(t *testing.T) {
 	}
 }
 
-// TestUpdate_FocusSidebarMsg_NoOpWhenNoSidebarOpen verifies "l"/right does
-// not move focus into a sidebar that isn't open.
 func TestUpdate_FocusSidebarMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, FocusSidebarMsg{})
@@ -1172,8 +1034,7 @@ func TestUpdate_FocusSidebarMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_FocusListMsg_MovesFocus verifies "h"/left returns focus to the
-// list while a sidebar is open and focused (#1501, ADR 0030).
+// Moving focus away must not close the sidebar (#1501, ADR 0030).
 func TestUpdate_FocusListMsg_MovesFocus(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42"})
@@ -1190,10 +1051,8 @@ func TestUpdate_FocusListMsg_MovesFocus(t *testing.T) {
 	}
 }
 
-// TestUpdate_ScrollMsg_MovesOffset verifies a scroll message moves
-// Model.Offset by Delta while the Backlog Section is active, clamped into
-// the visible list's line bounds the same way SidebarScrollMsg clamps
-// Sidebar.Offset (issue #1036, ADR 0030).
+// Model.Offset clamps into the visible list's bounds the same way
+// SidebarScrollMsg clamps Sidebar.Offset (issue #1036, ADR 0030).
 func TestUpdate_ScrollMsg_MovesOffset(t *testing.T) {
 	m := NewModel()
 	issues := make([]forge.Issue, 5)
@@ -1223,9 +1082,7 @@ func TestUpdate_ScrollMsg_MovesOffset(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorJumpToFirstMsg_ResetsCursorAndOffset verifies "gg" moves
-// the cursor back to the first row and resets the scroll offset to 0, even
-// when both had scrolled well past the top (issue #1628 AC2).
+// "gg" resets the scroll offset too, not just the cursor (issue #1628 AC2).
 func TestUpdate_CursorJumpToFirstMsg_ResetsCursorAndOffset(t *testing.T) {
 	m := NewModel()
 	issues := make([]forge.Issue, 5)
@@ -1246,9 +1103,8 @@ func TestUpdate_CursorJumpToFirstMsg_ResetsCursorAndOffset(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorJumpToLastMsg_MovesCursorAndDragsOffsetIntoView verifies
-// "G" moves the cursor straight to the active Section's last row and drags
-// the scroll offset just far enough to keep it on screen (issue #1628 AC1).
+// "G" drags the scroll offset just far enough to keep the last row on screen
+// (issue #1628 AC1).
 func TestUpdate_CursorJumpToLastMsg_MovesCursorAndDragsOffsetIntoView(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -1267,17 +1123,14 @@ func TestUpdate_CursorJumpToLastMsg_MovesCursorAndDragsOffsetIntoView(t *testing
 	}
 }
 
-// TestUpdate_CursorJumpToLastMsg_Docked_LastRowReachable verifies "G" on a
-// docked (bordered) list actually renders the last row — not just that
-// Offset lands on some clamp formula, but that the clamp agrees with the
-// bordered panel's real row budget, or the last row ends up permanently
-// unreachable behind the panel border (issue #1755, the list-side
-// counterpart of the sidebar's own docked scroll-clamp fix).
+// Asserting through View, not the clamp formula: unless the clamp agrees with
+// the bordered panel's real row budget, the last row stays unreachable behind
+// the panel border (issue #1755, the list-side counterpart of the sidebar's
+// own docked scroll-clamp fix).
 func TestUpdate_CursorJumpToLastMsg_Docked_LastRowReachable(t *testing.T) {
-	// Height accounts for the header's own bordered panel (issue #1756) on
-	// top of the docked list/sidebar panel border #1755 already budgeted
-	// for — without it there's no row left for any data (just the column
-	// header).
+	// Height also covers the header's own bordered panel (issue #1756) on top
+	// of the docked list/sidebar panel border #1755 budgeted for. Without it no
+	// row is left for data, only the column header.
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 10 + boxBorderRows})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
@@ -1293,13 +1146,9 @@ func TestUpdate_CursorJumpToLastMsg_Docked_LastRowReachable(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorJumpToLastMsg_LastRowReachable_WithListFooter verifies "G"
-// on the plain (undocked) list view actually renders the last row now that
-// ModeList's own pinned footer (issue #1792) reserves a row too — not just
-// that Offset lands on some clamp formula, but that the clamp
-// (listContentBudget) agrees with what renderBody actually has room to show,
-// or the last row ends up permanently unreachable behind the new footer
-// (the same class of bug issue #1755 fixed for the docked sidebar).
+// ModeList's pinned footer (issue #1792) reserves a row, so listContentBudget
+// must agree with what renderBody has room to show or the last row stays
+// unreachable behind the footer (the bug class #1755 fixed for the sidebar).
 func TestUpdate_CursorJumpToLastMsg_LastRowReachable_WithListFooter(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -1315,8 +1164,8 @@ func TestUpdate_CursorJumpToLastMsg_LastRowReachable_WithListFooter(t *testing.T
 	}
 }
 
-// TestUpdate_GPendingMsg_ArmsPendingG verifies a lone "g" arms the pending-g
-// leader on the Model (issue #1628 AC3).
+// The pending-g leader lives on the Model, so the chord survives between
+// Update calls (issue #1628 AC3).
 func TestUpdate_GPendingMsg_ArmsPendingG(t *testing.T) {
 	m := NewModel()
 
@@ -1327,8 +1176,7 @@ func TestUpdate_GPendingMsg_ArmsPendingG(t *testing.T) {
 	}
 }
 
-// TestUpdate_GResolvedMsg_ClearsPendingG verifies GResolvedMsg — sent when
-// the chord completes, cancels, or times out — clears the pending-g leader
+// The chord sends GResolvedMsg when it completes, cancels, or times out
 // (issue #1628 AC4).
 func TestUpdate_GResolvedMsg_ClearsPendingG(t *testing.T) {
 	m := NewModel()
@@ -1341,9 +1189,8 @@ func TestUpdate_GResolvedMsg_ClearsPendingG(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorJump_EmptySection_NoOp verifies both "G" and "gg" are
-// no-ops against an empty active Section — neither leaves Cursor/Offset
-// pointing past the (nonexistent) end (issue #1628 AC6).
+// Neither jump may leave Cursor or Offset pointing past a nonexistent end
+// (issue #1628 AC6).
 func TestUpdate_CursorJump_EmptySection_NoOp(t *testing.T) {
 	m := NewModel()
 
@@ -1358,11 +1205,8 @@ func TestUpdate_CursorJump_EmptySection_NoOp(t *testing.T) {
 	}
 }
 
-// TestUpdate_ScrollMsg_MovesOffsetWithinActiveWorkSection verifies a scroll
-// message moves Model.Offset against whichever work Section is active, not
-// the Backlog — switching Sections resets Offset to 0 (issue #1500), so a
-// scroll sent afterward must move that fresh 0, not a stale Backlog offset
-// (ADR 0030).
+// Switching Sections resets Offset to 0 (issue #1500), so a scroll sent
+// afterward must move that fresh 0, not a stale Backlog offset (ADR 0030).
 func TestUpdate_ScrollMsg_MovesOffsetWithinActiveWorkSection(t *testing.T) {
 	m := NewModel()
 	picks := make([]Pick, 5)
@@ -1378,11 +1222,9 @@ func TestUpdate_ScrollMsg_MovesOffsetWithinActiveWorkSection(t *testing.T) {
 	}
 }
 
-// TestUpdate_ScrollMsg_OffsetScrollsPastEndWhenContentFitsOnScreen verifies
-// pgdown's behavior when the active Section's whole content already fits
-// within one screen (issue #1060): the offset still advances to the last row
-// instead of no-op'ing, scrolling the earlier, already-fully-visible rows
-// off screen.
+// When the Section's content already fits one screen, pgdown still advances to
+// the last row instead of doing nothing, scrolling the already-visible rows off
+// screen (issue #1060).
 func TestUpdate_ScrollMsg_OffsetScrollsPastEndWhenContentFitsOnScreen(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	issues := make([]forge.Issue, 3)
@@ -1402,14 +1244,11 @@ func TestUpdate_ScrollMsg_OffsetScrollsPastEndWhenContentFitsOnScreen(t *testing
 	}
 }
 
-// TestUpdate_CursorMoveMsg_OffsetFollowsCursor verifies the active Section's
-// viewport advances/rewinds by one as the cursor crosses its bottom/top
-// visible row, keeping the highlighted row always on screen (issue #1036
-// AC1). visibleRows is derived from sectionPageSize, the same
-// bodyBudget/columnItemBudget/Viewport.Window composition renderBody uses
-// (issue #1056), so a future geometry change doesn't require re-deriving a
-// hand-computed constant — this test drives the cursor across two screens'
-// worth of rows and back to exercise both directions.
+// The viewport advances and rewinds by one as the cursor crosses its bottom
+// and top rows, keeping the highlighted row on screen (issue #1036 AC1).
+// visibleRows comes from sectionPageSize, the same composition renderBody uses
+// (issue #1056), so a geometry change does not need a hand-computed constant
+// re-derived here.
 func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -1420,8 +1259,8 @@ func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 
 	visibleRows := sectionPageSize(m, resolveLayout(m))
 
-	// Rows 0..visibleRows-1 are visible at offset 0; moving down within that
-	// window must not scroll.
+	// Rows 0 through visibleRows-1 are visible at offset 0, so moving down
+	// within that window must not scroll.
 	for step := 1; step <= visibleRows-1; step++ {
 		m = Update(m, CursorMoveMsg{Delta: 1})
 		if m.Offset != 0 {
@@ -1429,8 +1268,8 @@ func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 		}
 	}
 
-	// Cursor now at the last visible row; one more down-move pushes it past
-	// the bottom, advancing the offset by exactly one.
+	// The cursor sits on the last visible row, so one more down-move pushes it
+	// past the bottom and advances the offset by exactly one.
 	m = Update(m, CursorMoveMsg{Delta: 1})
 	if m.Cursor != visibleRows || m.Offset != 1 {
 		t.Fatalf("Cursor = %d, Offset = %d, want Cursor %d, Offset 1 (scrolled to keep the cursor visible)", m.Cursor, m.Offset, visibleRows)
@@ -1441,25 +1280,24 @@ func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 		t.Fatalf("Cursor = %d, Offset = %d, want Cursor %d, Offset 2 (offset advances one more)", m.Cursor, m.Offset, visibleRows+1)
 	}
 
-	// Moving back up: the offset must not rewind while the cursor is still
-	// within the current window (offset 2, visibleRows rows tall), including
-	// its own top row.
+	// Moving back up, the offset must not rewind while the cursor is still
+	// inside the current window (offset 2, visibleRows tall), its top row
+	// included.
 	for step := 1; step <= visibleRows-1; step++ {
 		m = Update(m, CursorMoveMsg{Delta: -1})
 		if m.Offset != 2 {
 			t.Fatalf("after %d up-moves: Offset = %d, want 2 (cursor %d still on screen)", step, m.Offset, m.Cursor)
 		}
 	}
-	// The 2 here (and the 1s below) count how many times the window has
-	// crossed a boundary, not a row position derived from visibleRows — they
-	// hold regardless of geometry, unlike the visibleRows-derived values
-	// above.
+	// The 2 here, and the 1s below, count how many times the window crossed a
+	// boundary rather than a row position derived from visibleRows, so they
+	// hold whatever the geometry.
 	if m.Cursor != 2 {
 		t.Fatalf("Cursor = %d, want 2", m.Cursor)
 	}
 
-	// Cursor now at row 2, the window's top row; one more up-move pushes it
-	// above the top, rewinding the offset by exactly one.
+	// The cursor sits on row 2, the window's top row, so one more up-move
+	// pushes it above the top and rewinds the offset by exactly one.
 	m = Update(m, CursorMoveMsg{Delta: -1})
 	if m.Cursor != 1 || m.Offset != 1 {
 		t.Fatalf("Cursor = %d, Offset = %d, want Cursor 1, Offset 1 (scrolled up to keep the cursor visible)", m.Cursor, m.Offset)
@@ -1471,12 +1309,9 @@ func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorMoveMsg_DoesNotRecapOffsetLeftPastFoldByScroll verifies a
-// CursorMoveMsg never re-applies the sidebar/rebuild-output panes'
-// last-page-fills-the-viewport cap to the backlog/queue Offset. pgup/pgdown
-// deliberately leaves Offset non-page-capped (issue #1060, tracked
-// separately as #1053); a later cursor move that doesn't itself need to
-// scroll must not silently pull a scroll-inflated Offset back toward
+// pgup and pgdown deliberately leave Offset non-page-capped (issue #1060,
+// tracked separately as #1053). A later cursor move that does not itself need
+// to scroll must not pull that inflated Offset back toward
 // Viewport.SetHeight's clamp-on-shrink (issue #1540 review finding).
 func TestUpdate_CursorMoveMsg_DoesNotRecapOffsetLeftPastFoldByScroll(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
@@ -1486,35 +1321,34 @@ func TestUpdate_CursorMoveMsg_DoesNotRecapOffsetLeftPastFoldByScroll(t *testing.
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	// Drive the cursor to the end so follow settles Offset at its own
-	// natural resting point.
+	// Drive the cursor to the end so follow settles Offset at its own natural
+	// resting point.
 	m = Update(m, CursorMoveMsg{Delta: 1000})
 	settled := m.Offset
 	if settled <= 0 || settled >= 99 {
 		t.Fatalf("test setup: Offset settled at %d, want a real intermediate resting point", settled)
 	}
 
-	// pgdown past that resting point — issue #1060's deliberately
-	// non-page-capped scroll — landing one row further than follow alone
-	// ever would.
+	// pgdown past that resting point, issue #1060's deliberately
+	// non-page-capped scroll, lands one row further than follow alone ever
+	// would.
 	m = Update(m, ScrollMsg{Delta: 1})
 	if m.Offset != settled+1 {
 		t.Fatalf("test setup: Offset = %d, want %d after nudging one row past the follow rest point", m.Offset, settled+1)
 	}
 
-	// The cursor (still at the end, still comfortably inside the nudged
-	// window) doesn't need to move; the resulting CursorMoveMsg must leave
-	// Offset alone rather than re-capping it back to the follow rest point.
+	// The cursor stays at the end, inside the nudged window, so the resulting
+	// CursorMoveMsg must leave Offset alone rather than re-capping it back to
+	// the follow rest point.
 	m = Update(m, CursorMoveMsg{Delta: 0})
 	if m.Offset != settled+1 {
 		t.Errorf("Offset = %d, want %d (unchanged — pgdown's uncapped overshoot must survive a cursor move that doesn't need to scroll)", m.Offset, settled+1)
 	}
 }
 
-// TestUpdate_FilterChangedMsg_ClampsOffsetOnShrink verifies a filter that
-// narrows the backlog pulls a scroll offset now past the shrunken list's end
-// back into range, so a subsequent render never windows past what Visible()
-// actually holds (issue #1036 AC — offset clamped when the list shrinks).
+// A later render must never window past what Visible() holds, so a narrowing
+// filter pulls the offset back into range (issue #1036 AC on offset clamping
+// when the list shrinks).
 func TestUpdate_FilterChangedMsg_ClampsOffsetOnShrink(t *testing.T) {
 	m := NewModel()
 	issues := make([]forge.Issue, 10)
@@ -1538,9 +1372,8 @@ func TestUpdate_FilterChangedMsg_ClampsOffsetOnShrink(t *testing.T) {
 	}
 }
 
-// TestUpdate_StaleStatusMsg_SetsFields verifies StaleStatusMsg installs the
-// launcher's live freshness/rebuild state onto Model verbatim — the
-// per-render sync View's stale banner reads from (issue #652).
+// View's stale banner reads this per-render sync of the launcher's freshness
+// and rebuild state (issue #652).
 func TestUpdate_StaleStatusMsg_SetsFields(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed", Rebuilding: true, Err: "boom"}})
@@ -1559,9 +1392,7 @@ func TestUpdate_StaleStatusMsg_SetsFields(t *testing.T) {
 	}
 }
 
-// TestUpdate_OrphanRecoveryMsg_SetsErr verifies OrphanRecoveryMsg installs
-// its Err onto Model.OrphanRecoveryErr verbatim — the per-render sync View's
-// orphan-recovery banner reads from (issue #1218).
+// View's orphan-recovery banner reads this per-render sync (issue #1218).
 func TestUpdate_OrphanRecoveryMsg_SetsErr(t *testing.T) {
 	m := NewModel()
 	m = Update(m, OrphanRecoveryMsg{Err: "failed to adopt orphan #42: boom"})
@@ -1571,10 +1402,8 @@ func TestUpdate_OrphanRecoveryMsg_SetsErr(t *testing.T) {
 	}
 }
 
-// TestUpdate_OrphanDetectedMsg_FlagsIsOrphan verifies OrphanDetectedMsg
-// installs the reported issue numbers so IsOrphan reports them flagged,
-// leaving every other number unflagged — Update's detect-only half of
-// #1619's demotion (startup only ever detects now, never adopts).
+// Update's detect-only half of #1619's demotion: startup only detects now,
+// never adopts.
 func TestUpdate_OrphanDetectedMsg_FlagsIsOrphan(t *testing.T) {
 	m := NewModel()
 	m = Update(m, OrphanDetectedMsg{Numbers: []string{"42"}})
@@ -1587,11 +1416,9 @@ func TestUpdate_OrphanDetectedMsg_FlagsIsOrphan(t *testing.T) {
 	}
 }
 
-// TestUpdate_OrphanAdoptedMsg_ClearsIsOrphan verifies a successful adopt
-// clears the issue's orphan flag — leaving it set would let a second press
-// of the adopt gesture on the same, now-adopted row fire RecoverFn again,
-// racing a second same-process settle over the one PR the first adopt
-// already claimed (issue #1619 review finding).
+// Leaving the flag set would let a second press of the adopt gesture on the
+// now-adopted row fire RecoverFn again, racing a second same-process settle
+// over the one PR the first adopt claimed (issue #1619 review finding).
 func TestUpdate_OrphanAdoptedMsg_ClearsIsOrphan(t *testing.T) {
 	m := NewModel()
 	m = Update(m, OrphanDetectedMsg{Numbers: []string{"42", "7"}})
@@ -1606,11 +1433,8 @@ func TestUpdate_OrphanAdoptedMsg_ClearsIsOrphan(t *testing.T) {
 	}
 }
 
-// TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput verifies a
-// non-empty StaleStatusMsg.RebuildStatus.Output lands on
-// Model.RebuildStatus.Output verbatim — the sibling
-// TestUpdate_StaleStatusMsg_SetsFields only ever threads the zero value,
-// which never exercised this leg (issue #1129).
+// The sibling TestUpdate_StaleStatusMsg_SetsFields only threads the zero
+// value, so it never exercised a non-empty Output (issue #1129).
 func TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput(t *testing.T) {
 	m := NewModel()
 	const wantOutput = "nix: building '/nix/store/abc-spindrift-1.2.3.drv'...\n"
@@ -1621,11 +1445,8 @@ func TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarLoadedMsg_RefreshSameNumber_PreservesToggleState verifies
-// a second SidebarLoadedMsg for the same pick (a refresh while live-tailing)
-// keeps the operator's Activity/Transcript/raw toggle instead of resetting
-// to the Activity feed, and does not re-yank focus away from wherever the
-// operator moved it.
+// A refresh while live-tailing must keep the operator's view toggle and leave
+// focus wherever they moved it.
 func TestUpdate_SidebarLoadedMsg_RefreshSameNumber_PreservesToggleState(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "first"})
@@ -1644,11 +1465,8 @@ func TestUpdate_SidebarLoadedMsg_RefreshSameNumber_PreservesToggleState(t *testi
 	}
 }
 
-// TestUpdate_SidebarLoadedMsg_RetainsPositionAcrossDispatchSwitch verifies
-// scrolling and detaching Follow on one Dispatch's sidebar, then switching to
-// another Dispatch and back, restores exactly where the operator left the
-// first one — hopping between running Dispatches never loses their place
-// (issue #1502, ADR 0030).
+// Hopping between running Dispatches never loses the operator's place (issue
+// #1502, ADR 0030).
 func TestUpdate_SidebarLoadedMsg_RetainsPositionAcrossDispatchSwitch(t *testing.T) {
 	activity := make([]ActivityLine, 50)
 	for i := range activity {
@@ -1680,12 +1498,9 @@ func TestUpdate_SidebarLoadedMsg_RetainsPositionAcrossDispatchSwitch(t *testing.
 	}
 }
 
-// TestUpdate_SidebarLoadedMsg_ReopenWhileFollowing_SnapsToNewBottom verifies
-// reopening a Dispatch that was closed while still Follow-ing lands at the
-// freshly loaded content's actual bottom, not the stale Offset saved before
-// close — the Dispatch kept working while the sidebar was shut, so "still
-// following" must mean "at today's bottom," not "wherever it happened to be
-// last time" (review finding on issue #1502).
+// The Dispatch kept working while the sidebar was shut, so reopening while
+// still following must land at the fresh content's bottom, not the stale
+// Offset saved before close (review finding on issue #1502).
 func TestUpdate_SidebarLoadedMsg_ReopenWhileFollowing_SnapsToNewBottom(t *testing.T) {
 	initial := make([]ActivityLine, 20)
 	for i := range initial {
@@ -1715,9 +1530,7 @@ func TestUpdate_SidebarLoadedMsg_ReopenWhileFollowing_SnapsToNewBottom(t *testin
 	}
 }
 
-// TestUpdate_SidebarCloseMsg_RetainsPositionForReopen verifies closing the
-// sidebar after scrolling and detaching Follow, then reopening the same
-// Dispatch, restores that position rather than resetting to the top with
+// A reopen restores the saved position rather than resetting to the top with
 // Follow re-armed (issue #1502, ADR 0030).
 func TestUpdate_SidebarCloseMsg_RetainsPositionForReopen(t *testing.T) {
 	activity := make([]ActivityLine, 50)
@@ -1743,10 +1556,8 @@ func TestUpdate_SidebarCloseMsg_RetainsPositionForReopen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarZoomToggleMsg_TogglesZoom verifies "z" flips
-// Model.SidebarZoom on and back off — the fullscreen zoom toggle for deep
-// reading, independent of the narrow-terminal fallback (issue #1502, ADR
-// 0030).
+// The fullscreen zoom toggle for deep reading is independent of the
+// narrow-terminal fallback (issue #1502, ADR 0030).
 func TestUpdate_SidebarZoomToggleMsg_TogglesZoom(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -1762,10 +1573,8 @@ func TestUpdate_SidebarZoomToggleMsg_TogglesZoom(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarCloseMsg_ResetsZoom verifies closing the sidebar clears
-// SidebarZoom, so reopening a different (or the same) Dispatch on a wide
-// terminal starts docked rather than still forced fullscreen from a prior
-// session (issue #1502).
+// Clearing SidebarZoom on close means a later reopen on a wide terminal starts
+// docked rather than still forced fullscreen from a prior session (#1502).
 func TestUpdate_SidebarCloseMsg_ResetsZoom(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -1781,11 +1590,9 @@ func TestUpdate_SidebarCloseMsg_ResetsZoom(t *testing.T) {
 	}
 }
 
-// TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen verifies switching Sections
-// with SectionNextMsg while a sidebar is docked and focus already back on
-// the list (the common state after "h") dismisses the sidebar instead of
-// leaving it pinned to the old Dispatch under the new Section's list (issue
-// #1581).
+// The fixture is the common state after "h": docked sidebar, focus back on the
+// list. Switching Sections must dismiss the sidebar instead of leaving it
+// pinned to the old Dispatch under the new Section's list (issue #1581).
 func TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -1801,9 +1608,8 @@ func TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SectionPrevMsg_ClosesSidebarWhenOpen mirrors
-// TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen for the "H" direction
-// (issue #1581).
+// Mirrors TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen for the "H"
+// direction (issue #1581).
 func TestUpdate_SectionPrevMsg_ClosesSidebarWhenOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -1819,10 +1625,9 @@ func TestUpdate_SectionPrevMsg_ClosesSidebarWhenOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SectionJumpMsg_ClosesSidebarWhenOpen mirrors
-// TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen for a direct "1"-"5" jump,
-// and additionally verifies SidebarZoom resets and the position is saved so
-// a later reopen restores scroll/follow (issue #1581).
+// Mirrors TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen for a direct "1" to
+// "5" jump, and also pins that SidebarZoom resets and the position is saved so
+// a later reopen restores scroll and follow (issue #1581).
 func TestUpdate_SectionJumpMsg_ClosesSidebarWhenOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -1848,10 +1653,8 @@ func TestUpdate_SectionJumpMsg_ClosesSidebarWhenOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SectionJumpMsg_SameSectionLeavesSidebarOpen verifies jumping to
-// the Section that's already active does not close a Sidebar the operator
-// just opened, consistent with switchSection's existing same-section guard
-// on Cursor/Offset (issue #1581).
+// Consistent with switchSection's existing same-section guard on Cursor and
+// Offset (issue #1581).
 func TestUpdate_SectionJumpMsg_SameSectionLeavesSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
@@ -1864,8 +1667,8 @@ func TestUpdate_SectionJumpMsg_SameSectionLeavesSidebarOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SizeChangedMsg_AppliesWidthHeight verifies a SizeChangedMsg
-// lands its Width/Height straight onto Model (issue #842).
+// The sibling test covers the clamp; this one pins the plain pass-through
+// (issue #842).
 func TestUpdate_SizeChangedMsg_AppliesWidthHeight(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 100, Height: 40})
@@ -1878,9 +1681,8 @@ func TestUpdate_SizeChangedMsg_AppliesWidthHeight(t *testing.T) {
 	}
 }
 
-// TestUpdate_SizeChangedMsg_ClampsNonPositive verifies a zero or negative
-// width/height clamps to the safe floor instead of landing on Model
-// unchanged (issue #842).
+// A zero or negative dimension clamps to the safe floor instead of landing on
+// Model unchanged (issue #842).
 func TestUpdate_SizeChangedMsg_ClampsNonPositive(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 0, Height: -5})
@@ -1893,10 +1695,8 @@ func TestUpdate_SizeChangedMsg_ClampsNonPositive(t *testing.T) {
 	}
 }
 
-// TestUpdate_DetailModalLoadedMsg_FillsBodyAndClearsLoading verifies the
-// async body fetch's result lands on the still-open modal: Loading drops to
-// false and Body is filled in, once DetailModalOpenMsg has already opened it
-// with just the number/title/labels a Backlog row has in hand (issue #1632).
+// DetailModalOpenMsg opens the modal with only the number, title and labels a
+// Backlog row has in hand; the async body fetch fills in the rest (#1632).
 func TestUpdate_DetailModalLoadedMsg_FillsBodyAndClearsLoading(t *testing.T) {
 	m := NewModel()
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: []string{"bug"}})
@@ -1914,11 +1714,9 @@ func TestUpdate_DetailModalLoadedMsg_FillsBodyAndClearsLoading(t *testing.T) {
 	}
 }
 
-// TestUpdate_DetailModalLoadedMsg_StaleNumberIgnored verifies a
-// DetailModalLoadedMsg for a ticket the operator has since closed (or
-// switched away from, to a different ticket) never overwrites whatever the
-// modal shows now — the same same-number guard SidebarLoadedMsg's handling
-// applies (issue #1632).
+// A load for a ticket the operator has since closed or switched away from must
+// never overwrite what the modal shows now, the same same-number guard
+// SidebarLoadedMsg applies (issue #1632).
 func TestUpdate_DetailModalLoadedMsg_StaleNumberIgnored(t *testing.T) {
 	m := NewModel()
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
@@ -1931,10 +1729,8 @@ func TestUpdate_DetailModalLoadedMsg_StaleNumberIgnored(t *testing.T) {
 	}
 }
 
-// TestUpdate_DetailCacheInvalidatedMsg_ClearsCache verifies "r"
-// (DetailCacheInvalidatedMsg) drops the per-ticket detail cache, so the
-// next modal open re-fetches rather than replaying data that may now be
-// stale (issue #1632).
+// Dropping the per-ticket cache makes the next modal open re-fetch rather than
+// replay data that may now be stale (issue #1632).
 func TestUpdate_DetailCacheInvalidatedMsg_ClearsCache(t *testing.T) {
 	m := NewModel()
 	m.DetailCache = map[string]DetailModalCache{"42": {Body: "stale"}}
@@ -1946,13 +1742,10 @@ func TestUpdate_DetailCacheInvalidatedMsg_ClearsCache(t *testing.T) {
 	}
 }
 
-// TestUpdateLayout_ReturnedLayoutMatchesResolveLayoutOnReturnedModel verifies
-// updateLayout's second return value is always exactly what resolveLayout
-// would compute from its own first return value — the invariant the rest of
-// #3018's threading (later slices) leans on to hand a layout back instead of
-// re-resolving it. It holds because the tail resolve inside updateLayout
-// runs after every mutation resolveLayout's inputs can undergo; only fields
-// resolveLayout never reads (Cursor, Offset, Sidebar.Offset,
+// The rest of #3018's threading depends on updateLayout's returned layout
+// matching resolveLayout on its returned model. That holds because the tail
+// resolve runs after every mutation resolveLayout's inputs can undergo; only
+// fields resolveLayout never reads (Cursor, Offset, Sidebar.Offset,
 // RebuildOutputOffset, DetailModal.Offset) change afterward.
 func TestUpdateLayout_ReturnedLayoutMatchesResolveLayoutOnReturnedModel(t *testing.T) {
 	base := Update(NewModel(), IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
@@ -1974,13 +1767,9 @@ func TestUpdateLayout_ReturnedLayoutMatchesResolveLayoutOnReturnedModel(t *testi
 	}
 }
 
-// TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal verifies a terminal
-// resize while the ticket detail modal is open re-wraps its body against
-// the new width — Lines is width-dependent (unlike SidebarState.Lines,
-// which never wraps), so a stale narrower-width wrap left in place would
-// either overflow the new, wider viewport's unused columns or, worse, still
-// carry line breaks sized for a width the modal no longer has (issue
-// #1632 review finding).
+// DetailModal.Lines is width-dependent, unlike SidebarState.Lines, which never
+// wraps. A stale narrower wrap left in place would carry line breaks sized for
+// a width the modal no longer has (issue #1632 review finding).
 func TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 10, Height: 24})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
@@ -1997,12 +1786,9 @@ func TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal(t *testing.T) {
 	}
 }
 
-// TestUpdate_SizeChangedMsg_RewrapsFloatingModal_ToNewBoxInteriorWidth
-// verifies a resize that stays within the floating regime (both the old and
-// new terminal size clear detailModalFits) still re-wraps the body against
-// the box's new, wider interior — the box itself grows with the terminal
-// (issue #1759 AC), not just the fullscreen-to-floating crossing
-// TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal covers.
+// Both sizes clear detailModalFits, so this covers a resize inside the
+// floating regime: the box itself grows with the terminal (issue #1759 AC),
+// not just the fullscreen-to-floating crossing the sibling test covers.
 func TestUpdate_SizeChangedMsg_RewrapsFloatingModal_ToNewBoxInteriorWidth(t *testing.T) {
 	if !detailModalFits(Model{Width: 60, Height: 30}) || !detailModalFits(Model{Width: 200, Height: 30}) {
 		t.Fatalf("test setup invalid: both sizes must stay in the floating regime")
@@ -2021,11 +1807,8 @@ func TestUpdate_SizeChangedMsg_RewrapsFloatingModal_ToNewBoxInteriorWidth(t *tes
 	}
 }
 
-// TestUpdate_DetailModalLoadedMsg_WrapsToBoxInteriorNotTerminalWidth
-// verifies the modal's body wraps against the floating box's (much
-// narrower) interior width, not the raw terminal width — issue #1758
-// rewires every width-dependent piece of the old fullscreen renderer to key
-// off the box interior instead of Model.Width.
+// Issue #1758 rewires every width-dependent piece of the old fullscreen
+// renderer to key off the box interior instead of Model.Width.
 func TestUpdate_DetailModalLoadedMsg_WrapsToBoxInteriorNotTerminalWidth(t *testing.T) {
 	body := strings.TrimSpace(strings.Repeat("ab ", 40)) // 119 display columns unwrapped
 	m := Update(NewModel(), SizeChangedMsg{Width: 200, Height: 40})
@@ -2038,10 +1821,7 @@ func TestUpdate_DetailModalLoadedMsg_WrapsToBoxInteriorNotTerminalWidth(t *testi
 	}
 }
 
-// TestUpdate_DetailModalScroll_ClampsToBoxInteriorHeightNotTerminalHeight
-// verifies a scroll past the end of a long body clamps against the floating
-// box's own (much shorter) interior row budget, not against
-// Model.Height — the same box-interior rewiring
+// The height half of the box-interior rewiring that
 // TestUpdate_DetailModalLoadedMsg_WrapsToBoxInteriorNotTerminalWidth checks
 // for width (issue #1758).
 func TestUpdate_DetailModalScroll_ClampsToBoxInteriorHeightNotTerminalHeight(t *testing.T) {
@@ -2056,31 +1836,27 @@ func TestUpdate_DetailModalScroll_ClampsToBoxInteriorHeightNotTerminalHeight(t *
 	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
 	m = Update(m, DetailModalScrollMsg{Delta: 1000})
 
-	// The box's interior height at a 40-row terminal (detailModalBoxSize
-	// caps the box at 30 rows, minus 2 border rows, minus the no-labels
-	// case's 1 label line + 1 footer line) is well short of Model.Height -
-	// the fullscreen renderer's own title/footer budget — so the two
-	// clamps disagree unless the offset clamp was actually rewired.
+	// The box interior at a 40-row terminal (detailModalBoxSize caps the box at
+	// 30 rows, less 2 border rows, less the no-labels case's 1 label line and 1
+	// footer line) falls well short of the fullscreen renderer's own budget, so
+	// the two clamps disagree unless the offset clamp was actually rewired.
 	if want := len(lines) - 26; m.DetailModal.Offset != want {
 		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the box interior's row budget)", m.DetailModal.Offset, want)
 	}
 }
 
-// TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines verifies the
-// Offset clamp folds in the labels line's own wrapped row count, not a
-// fixed one-row assumption — a ticket whose labels wrap onto further
-// interior rows leaves less room for the body than a ticket with no labels,
-// and the clamp must shrink its budget to match or it targets a body
-// budget the render doesn't actually have room to show (issue #1772).
+// Labels that wrap onto further interior rows leave less room for the body, so
+// the Offset clamp must fold in their real row count instead of assuming one
+// row, or it targets a budget the render has no room to show (issue #1772).
 func TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines(t *testing.T) {
 	lines := make([]string, 40)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("l%d", i)
 	}
 	body := strings.Join(lines, "\n")
-	// Each label is 45 display columns — under the 82-column box interior
-	// alone, but two plus their ", " separator (92) overflow it, so
-	// wrapText places exactly one label per line: 3 label lines.
+	// Each label is 45 display columns, under the 82-column box interior on its
+	// own, but two plus their ", " separator (92) overflow it, so wrapText
+	// places exactly one label per line, giving 3 label lines.
 	labels := []string{strings.Repeat("a", 45), strings.Repeat("b", 45), strings.Repeat("c", 45)}
 
 	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
@@ -2088,28 +1864,25 @@ func TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines(t *testing.T) {
 	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
 	m = Update(m, DetailModalScrollMsg{Delta: 1000})
 
-	// Box interior height 28 (see the sibling test above), minus 3 label
-	// lines, minus 1 footer line, leaves a body budget of 24.
+	// Box interior height 28 (see the sibling test above), less 3 label lines
+	// and 1 footer line, leaves a body budget of 24.
 	if want := len(lines) - 24; m.DetailModal.Offset != want {
 		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the box interior's row budget with 3 wrapped label lines)", m.DetailModal.Offset, want)
 	}
 }
 
-// TestUpdate_DetailModalScroll_Fullscreen_ClampsForWrappedLabelLines mirrors
-// TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines for the
-// small-terminal fullscreen fallback (issue #1832): the pinned label row now
-// gets the same bracketed, wrapped treatment there as the floating box, so
-// the Offset clamp must fold in the fullscreen renderer's own wrapped label
-// line count too rather than a fixed one-row assumption.
+// Mirrors TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines for the
+// small-terminal fullscreen fallback, where the pinned label row now gets the
+// same bracketed, wrapped treatment as the floating box (issue #1832).
 func TestUpdate_DetailModalScroll_Fullscreen_ClampsForWrappedLabelLines(t *testing.T) {
 	lines := make([]string, 40)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("l%d", i)
 	}
 	body := strings.Join(lines, "\n")
-	// Each label plus its bracket/comma is 32 display columns — under the
-	// 39-column fullscreen width alone, but two together (64) overflow it,
-	// so wrapText places exactly one label per line: 3 label lines.
+	// Each label plus its bracket and comma is 32 display columns, under the
+	// 39-column fullscreen width on its own, but two together (64) overflow it,
+	// so wrapText places exactly one label per line, giving 3 label lines.
 	labels := []string{strings.Repeat("a", 30), strings.Repeat("b", 30), strings.Repeat("c", 30)}
 
 	m := Update(NewModel(), SizeChangedMsg{Width: detailModalBoxMinWidth - 1, Height: 40})
@@ -2117,17 +1890,15 @@ func TestUpdate_DetailModalScroll_Fullscreen_ClampsForWrappedLabelLines(t *testi
 	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
 	m = Update(m, DetailModalScrollMsg{Delta: 1000})
 
-	// Content budget (height 40, minus 1 title line, minus 1 footer line) is
-	// 38, minus 3 wrapped label lines, leaves a body budget of 35.
+	// The content budget (height 40, less 1 title line and 1 footer line) is 38,
+	// and less 3 wrapped label lines leaves a body budget of 35.
 	if want := len(lines) - 35; m.DetailModal.Offset != want {
 		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the fullscreen row budget with 3 wrapped label lines)", m.DetailModal.Offset, want)
 	}
 }
 
-// TestUpdate_DetailModalJumpToFirstMsg_ResetsOffsetToZero verifies "gg"
-// resets DetailModal.Offset to 0 from a scrolled-down position, mirroring
-// RebuildOutputJumpToFirstMsg's own reset for the rebuild-output pane (issue
-// #1795).
+// Mirrors RebuildOutputJumpToFirstMsg's reset for the rebuild-output pane
+// (issue #1795).
 func TestUpdate_DetailModalJumpToFirstMsg_ResetsOffsetToZero(t *testing.T) {
 	lines := make([]string, 40)
 	for i := range lines {
@@ -2146,12 +1917,9 @@ func TestUpdate_DetailModalJumpToFirstMsg_ResetsOffsetToZero(t *testing.T) {
 	}
 }
 
-// TestUpdate_DetailModalJumpToLastMsg_JumpsToLastPage verifies "G" moves
-// DetailModal.Offset to the last page that still fills the box's scroll
-// budget — not just the last line — the same page-capped clamp the
-// DetailModal clamp block already applies on every Update, mirroring
-// TestUpdate_DetailModalScroll_ClampsToBoxInteriorHeightNotTerminalHeight
-// (issue #1795).
+// "G" lands on the last page that still fills the box's scroll budget, not on
+// the last line: the same page-capped clamp the DetailModal block applies on
+// every Update (issue #1795).
 func TestUpdate_DetailModalJumpToLastMsg_JumpsToLastPage(t *testing.T) {
 	lines := make([]string, 40)
 	for i := range lines {
@@ -2166,16 +1934,13 @@ func TestUpdate_DetailModalJumpToLastMsg_JumpsToLastPage(t *testing.T) {
 	m = Update(m, DetailModalJumpToLastMsg{})
 
 	// Same box-interior budget as TestUpdate_DetailModalScroll_
-	// ClampsToBoxInteriorHeightNotTerminalHeight: 40 lines, 26-row budget.
+	// ClampsToBoxInteriorHeightNotTerminalHeight, 40 lines over 26 rows.
 	if want := len(lines) - 26; m.DetailModal.Offset != want {
 		t.Errorf("Offset = %d after \"G\", want %d (clamped to the box interior's row budget)", m.DetailModal.Offset, want)
 	}
 }
 
-// TestUpdate_DetailModalJumpMsgs_NoOpWhenNoModalOpen verifies both jump
-// messages do not panic or fabricate a DetailModal state while no modal is
-// open, mirroring TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed (issue
-// #1795).
+// Mirrors TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed (issue #1795).
 func TestUpdate_DetailModalJumpMsgs_NoOpWhenNoModalOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, DetailModalJumpToFirstMsg{})

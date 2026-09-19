@@ -15,11 +15,10 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestDiscoverQueue_Pending_ReturnsError verifies QueueFromDiscoverer's
-// Pending() errors rather than fabricating a confirmed-looking 0 (#2939
-// review finding): a caller that reaches Pending despite
-// QueueFromDiscoverer being documented as Discover-only must be routed to
-// RunContinuous's heldBackUnknown path, not handed a fake confirmed count.
+// Pending() errors rather than fabricating a confirmed-looking 0 (#2939 review
+// finding). A caller that reaches Pending despite QueueFromDiscoverer being
+// documented as Discover-only must be routed to RunContinuous's heldBackUnknown
+// path, not handed a fake confirmed count.
 func TestDiscoverQueue_Pending_ReturnsError(t *testing.T) {
 	q := QueueFromDiscoverer(func() (Batch, error) { return Batch{}, nil })
 
@@ -29,9 +28,8 @@ func TestDiscoverQueue_Pending_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestHeadlessQueue_Pending_DelegatesToClosure verifies Pending() forwards
-// straight to the injected closure (#2939) -- discover/claimer stay nil
-// since this test never calls Discover or Claim.
+// Pending() forwards straight to the injected closure (#2939). The discover and
+// claimer arguments stay nil because this test never calls Discover or Claim.
 func TestHeadlessQueue_Pending_DelegatesToClosure(t *testing.T) {
 	q := NewHeadlessQueue(nil, nil, func(map[string]bool) (int, error) { return 5, nil }, "")
 
@@ -44,9 +42,6 @@ func TestHeadlessQueue_Pending_DelegatesToClosure(t *testing.T) {
 	}
 }
 
-// TestHeadlessQueue_Pending_PropagatesError verifies a Pending closure error
-// round-trips unchanged through headlessQueue, rather than being swallowed
-// or wrapped.
 func TestHeadlessQueue_Pending_PropagatesError(t *testing.T) {
 	wantErr := errors.New("transient query failure")
 	q := NewHeadlessQueue(nil, nil, func(map[string]bool) (int, error) { return 0, wantErr }, "")
@@ -57,10 +52,9 @@ func TestHeadlessQueue_Pending_PropagatesError(t *testing.T) {
 	}
 }
 
-// TestHeadlessQueue_Pending_ForwardsCallersClaimedSet verifies
-// headlessQueue.Pending forwards whatever claimed map its caller hands it
-// straight to the pending closure, verbatim -- headlessQueue keeps no
-// claimed set of its own to merge in (issue #3035).
+// headlessQueue.Pending forwards its caller's claimed map to the pending
+// closure verbatim. headlessQueue keeps no claimed set of its own to merge in
+// (issue #3035).
 func TestHeadlessQueue_Pending_ForwardsCallersClaimedSet(t *testing.T) {
 	var observed map[string]bool
 	pending := func(claimed map[string]bool) (int, error) {
@@ -79,10 +73,9 @@ func TestHeadlessQueue_Pending_ForwardsCallersClaimedSet(t *testing.T) {
 	}
 }
 
-// TestHeadlessQueue_ReportStaleDrain_PrintsAndAppendsLog verifies
 // ReportStaleDrain prints report.Console() to stdout and appends
-// report.HostLog() to pwd's stale-drain.log (#2939, mirroring
-// continuous.go's emitStaleDrainReport).
+// report.HostLog() to pwd's stale-drain.log (#2939), mirroring continuous.go's
+// emitStaleDrainReport.
 func TestHeadlessQueue_ReportStaleDrain_PrintsAndAppendsLog(t *testing.T) {
 	dir := tempLogDir(t)
 	q := NewHeadlessQueue(nil, nil, noopPending, dir)
@@ -110,14 +103,11 @@ func TestHeadlessQueue_ReportStaleDrain_PrintsAndAppendsLog(t *testing.T) {
 	}
 }
 
-// TestHeadlessQueue_ReportStaleDrain_OpenFailureLogsToStderr verifies a
-// review finding on #2678: ReportStaleDrain's stale-drain.log open failure
-// is swallowed to stderr rather than failing the run, and does not crash or
-// panic. dir is a directory whose .spindrift/logs subdirectory was never
-// created (unlike every real RunContinuous call, which always
-// os.MkdirAll's it first), so dispatch.HostLogDirFor(dir) names a path with
-// no such directory and os.OpenFile's O_CREATE cannot create the file
-// inside a missing parent.
+// This pins a review finding on #2678: ReportStaleDrain's stale-drain.log open
+// failure goes to stderr rather than failing the run. dir is a bare t.TempDir()
+// whose .spindrift/logs subdirectory was never created, unlike every real
+// RunContinuous call, so os.OpenFile's O_CREATE cannot create the file inside a
+// missing parent.
 func TestHeadlessQueue_ReportStaleDrain_OpenFailureLogsToStderr(t *testing.T) {
 	dir := t.TempDir()
 	q := NewHeadlessQueue(nil, nil, func(map[string]bool) (int, error) { return 0, nil }, dir)
@@ -137,11 +127,9 @@ func TestHeadlessQueue_ReportStaleDrain_OpenFailureLogsToStderr(t *testing.T) {
 	}
 }
 
-// TestHeadlessQueue_EnsureLogDirExists_CreatesLogDir verifies
-// EnsureLogDirExists actually creates dispatch.HostLogDirFor(pwd) under a
-// fresh temp dir that does not have it yet (issue #3036) -- unlike
-// tempLogDir(t), dir here is a bare t.TempDir() whose .spindrift/logs
-// subdirectory was never pre-created.
+// EnsureLogDirExists creates dispatch.HostLogDirFor(pwd) under a fresh temp dir
+// that does not have it yet (issue #3036). Unlike tempLogDir(t), dir here is a
+// bare t.TempDir() whose .spindrift/logs subdirectory was never pre-created.
 func TestHeadlessQueue_EnsureLogDirExists_CreatesLogDir(t *testing.T) {
 	dir := t.TempDir()
 	logDir := dispatch.HostLogDirFor(dir)
@@ -163,9 +151,6 @@ func TestHeadlessQueue_EnsureLogDirExists_CreatesLogDir(t *testing.T) {
 	}
 }
 
-// TestHeadlessQueue_EnsureLogDirExists_Idempotent verifies a second call
-// against an already-existing log dir still succeeds, mirroring
-// os.MkdirAll's own idempotence.
 func TestHeadlessQueue_EnsureLogDirExists_Idempotent(t *testing.T) {
 	dir := tempLogDir(t)
 	q := NewHeadlessQueue(nil, nil, noopPending, dir)
@@ -175,16 +160,11 @@ func TestHeadlessQueue_EnsureLogDirExists_Idempotent(t *testing.T) {
 	}
 }
 
-// TestRunContinuous_HeadlessQueue_CreatesLogDirBeforeDispatch pins the
-// consolidated log-directory ownership this issue (#3036) sets up:
-// RunContinuous no longer MkdirAlls dispatch.HostLogDirFor(pwd) itself --
-// it relies entirely on queue.EnsureLogDirExists, called before any Box's
-// dispatch.runOnce opens its log file (box.go's os.Create has no fallback
-// when the parent is missing). Driving through NewHeadlessQueue's real,
-// non-no-op EnsureLogDirExists over a bare t.TempDir() -- deliberately not
-// tempLogDir(t)'s pre-created variant every other RunContinuous scenario in
-// this package uses -- proves RunContinuous has exactly one source of
-// truth for this directory: the Queue it was handed.
+// RunContinuous no longer MkdirAlls dispatch.HostLogDirFor(pwd) itself (#3036).
+// It relies entirely on queue.EnsureLogDirExists, called before any Box's
+// dispatch.runOnce opens its log file (box.go's os.Create has no fallback when
+// the parent is missing). Driving a bare t.TempDir() through the real
+// EnsureLogDirExists, not tempLogDir(t), pins the Queue as the one owner.
 func TestRunContinuous_HeadlessQueue_CreatesLogDirBeforeDispatch(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -221,11 +201,10 @@ func TestRunContinuous_HeadlessQueue_CreatesLogDirBeforeDispatch(t *testing.T) {
 	}
 }
 
-// TestDiscoverQueue_EnsureLogDirExists_ReturnsNil verifies
-// QueueFromDiscoverer's EnsureLogDirExists is a plain no-op: it returns nil
-// without ever deriving or creating a directory (issue #3036) -- this
-// adapter has no pwd of its own and its ReportStaleDrain never writes to
-// disk either, so it has no log directory to create.
+// QueueFromDiscoverer's EnsureLogDirExists is a plain no-op, returning nil
+// without deriving or creating a directory (issue #3036). This adapter has no
+// pwd of its own and its ReportStaleDrain never writes to disk, so it has no
+// log directory to create.
 func TestDiscoverQueue_EnsureLogDirExists_ReturnsNil(t *testing.T) {
 	q := QueueFromDiscoverer(func() (Batch, error) { return Batch{}, nil })
 

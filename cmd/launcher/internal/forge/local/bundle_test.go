@@ -11,9 +11,8 @@ import (
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
-// setGitIdentityEnv gives ambient git commands (forgetest.NewGitRepoFixture's
-// own commits, and seedBundleBranch's) a commit identity — this package's
-// tests otherwise run with none, since production code always sets identity
+// setGitIdentityEnv gives ambient git commands a commit identity. The tests
+// here otherwise run with none, since production code always sets identity
 // explicitly (setCommitIdentity in the git adapter) on the clones it drives.
 func setGitIdentityEnv(t *testing.T) {
 	t.Helper()
@@ -23,11 +22,10 @@ func setGitIdentityEnv(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 }
 
-// seedBundleBranch clones bare, creates branch one commit ahead of base
-// carrying a marker file unique to num, and writes a git bundle of
-// base..branch to outboxDir/seambundle.FileName — standing in for the Box's
-// code-out (ADR 0033), never pushing branch to bare directly. Returns
-// branch's HEAD sha.
+// seedBundleBranch clones bare, creates branch one commit ahead of base with a
+// marker file unique to num, and writes a bundle of base..branch to
+// outboxDir/seambundle.FileName. It stands in for the Box's code-out (ADR
+// 0033) and never pushes branch to bare directly. Returns branch's HEAD sha.
 func seedBundleBranch(t *testing.T, bare, base, outboxDir, branch, num string) string {
 	t.Helper()
 	work := t.TempDir()
@@ -45,10 +43,9 @@ func seedBundleBranch(t *testing.T, bare, base, outboxDir, branch, num string) s
 	return revParse(t, work, branch)
 }
 
-// TestLocalCodeForge_RelayBundle_ImportsBranchIntoRepo asserts RelayBundle
-// imports a Box's code-out bundle into the Accumulation repo as branch's own
-// ref, so a subsequent Merge(branch) — which fetches "origin" branch from
-// the same repo — finds it (ADR 0033: bundle in, no direct push).
+// RelayBundle imports a Box's code-out bundle into the Accumulation repo as
+// branch's own ref, so a later Merge(branch), which fetches "origin" branch
+// from the same repo, finds it (ADR 0033: bundle in, no direct push).
 func TestLocalCodeForge_RelayBundle_ImportsBranchIntoRepo(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -73,10 +70,9 @@ func TestLocalCodeForge_RelayBundle_ImportsBranchIntoRepo(t *testing.T) {
 	}
 }
 
-// TestLocalCodeForge_RelayBundle_MissingBundleErrors asserts an empty outbox
-// (the Box never wrote a bundle — a crash, or a code-out that never ran)
-// leaves the seam unlanded via an error rather than a nil-error no-op (ADR
-// 0033's "missing bundle... leaves the seam unlanded and flagged blocked").
+// An empty outbox (the Box crashed, or its code-out never ran) leaves the seam
+// unlanded via an error rather than a nil-error no-op (ADR 0033, "missing
+// bundle... leaves the seam unlanded and flagged blocked").
 func TestLocalCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 	setGitIdentityEnv(t)
 	parent := ResolveParent("1694", "")
@@ -95,10 +91,9 @@ func TestLocalCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 	}
 }
 
-// TestLocalCodeForge_RelayBundle_MalformedBundleErrors asserts a corrupt
-// bundle file (truncated transfer, disk corruption) is rejected by `git
-// bundle verify` rather than fed to fetch, which could behave unpredictably
-// on garbage input.
+// A corrupt bundle file (truncated transfer, disk corruption) is rejected by
+// `git bundle verify` rather than fed to fetch, which could behave
+// unpredictably on garbage input.
 func TestLocalCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	setGitIdentityEnv(t)
 	parent := ResolveParent("1694", "")
@@ -120,21 +115,17 @@ func TestLocalCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	}
 }
 
-// TestLocalCodeForge_RelayBundle_UnreadableBundleErrors asserts a stat
-// failure that is NOT os.IsNotExist (here, ENOTDIR from a path component
-// that's a regular file rather than a directory — standing in for
-// permission-denied or any other stat error a present-but-unreadable outbox
-// could produce) is reported as a generic error, not conflated with the
-// benign "nothing to relay" ErrBundleNotFound case reserved for a genuinely
-// absent bundle/outbox.
+// RelayBundle reports a stat failure that is not os.IsNotExist (here ENOTDIR,
+// standing in for permission-denied or any other error an unreadable outbox
+// produces) as a generic error, never as the ErrBundleNotFound reserved for a
+// genuinely absent bundle or outbox.
 func TestLocalCodeForge_RelayBundle_UnreadableBundleErrors(t *testing.T) {
 	setGitIdentityEnv(t)
 	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 
-	// A regular file standing in for what should be a directory: any path
-	// that walks through it (outbox itself, here) makes os.Stat fail with
-	// ENOTDIR rather than ENOENT.
+	// A regular file where a directory belongs: any path that walks through it
+	// makes os.Stat fail with ENOTDIR rather than ENOENT.
 	blocker := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(blocker, []byte("blocker"), 0o644); err != nil {
 		t.Fatal(err)
@@ -153,12 +144,11 @@ func TestLocalCodeForge_RelayBundle_UnreadableBundleErrors(t *testing.T) {
 	}
 }
 
-// TestLocalCodeForge_RelayBundle_ReRelayOverwritesDivergedRef asserts a retry
-// (the Box crashed, re-dispatched, and rebuilt its bundle from a rebased
-// branch) can relay again even though the new bundle's branch tip diverged
-// from what's already sitting in the Accumulation repo from the failed
-// attempt — a non-force fetch would reject that as non-fast-forward, but a
-// retried seam must win over its own abandoned prior attempt.
+// A retry (the Box crashed, was re-dispatched, and rebuilt its bundle from a
+// rebased branch) can relay again even though the new tip diverged from the
+// failed attempt's ref already in the Accumulation repo. A non-force fetch
+// would reject that as non-fast-forward, but a retried seam must win over its
+// own abandoned prior attempt.
 func TestLocalCodeForge_RelayBundle_ReRelayOverwritesDivergedRef(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -174,9 +164,9 @@ func TestLocalCodeForge_RelayBundle_ReRelayOverwritesDivergedRef(t *testing.T) {
 		t.Fatalf("RelayBundle (first attempt): %v", err)
 	}
 
-	// Rebuild branch from a diverged history (a different marker file, same
-	// name) — a fresh clone of bare's base, not of the already-relayed ref,
-	// so the new commit shares no ancestry with the one already relayed in.
+	// Rebuild branch from a diverged history: a fresh clone of bare's base, not
+	// of the already-relayed ref, so the new commit shares no ancestry with the
+	// one already relayed in.
 	work := t.TempDir()
 	run(t, "", "clone", repo.Bare, work)
 	run(t, work, "checkout", IntegrationBranch(parent))
@@ -200,13 +190,11 @@ func TestLocalCodeForge_RelayBundle_ReRelayOverwritesDivergedRef(t *testing.T) {
 	}
 }
 
-// TestLocalCodeForge_FirstSeam_CreatesIntegrationBranchFromBase asserts the
-// very first seam of a broad ticket lands even though integration/<parent>
-// doesn't exist yet — only baseBranch does, exactly what SeedAccumulationRepo
-// produces (ADR 0033's parent tickets seed no Integration branch, only the
-// operator's base). Landing must create integration/<parent> from baseBranch
-// on demand rather than assume it already exists, the way a second seam's
-// land legitimately can.
+// The first seam of a broad ticket lands even though integration/<parent> does
+// not exist yet, only baseBranch, exactly what SeedAccumulationRepo produces
+// (ADR 0033: parent tickets seed no Integration branch). Landing must create
+// integration/<parent> from baseBranch on demand rather than assume it exists,
+// the way a second seam's land legitimately can.
 func TestLocalCodeForge_FirstSeam_CreatesIntegrationBranchFromBase(t *testing.T) {
 	setGitIdentityEnv(t)
 
@@ -219,8 +207,8 @@ func TestLocalCodeForge_FirstSeam_CreatesIntegrationBranchFromBase(t *testing.T)
 	parent := ResolveParent("1694", "")
 	outbox := t.TempDir()
 	branch := "agent/issue-1698"
-	// The bundle is built off baseBranch ("main"), not off integration/1694 —
-	// no seam has ever landed for this parent yet, so that ref can't exist.
+	// The bundle is built off baseBranch ("main"), not integration/1694: no
+	// seam has landed for this parent yet, so that ref cannot exist.
 	seedBundleBranch(t, repoPath, "main", outbox, branch, "1698")
 
 	cf := NewLocalCodeForge(repoPath, "main", parent, "Test Bot", "bot@example.com", "agent/issue-")
@@ -238,11 +226,11 @@ func TestLocalCodeForge_FirstSeam_CreatesIntegrationBranchFromBase(t *testing.T)
 	}
 }
 
-// TestLocalCodeForge_LandBundle_EndToEnd asserts the full single-seam land:
-// relaying the bundle in, merging it onto the Integration branch, and
-// resolving the landing: reference — the Integration branch name plus the
-// commit sha the merge produced (ADR 0029/0033), so it changes on every land
-// rather than pointing at a stale prior merge.
+// The full single-seam land: relay the bundle in, merge it onto the
+// Integration branch, and resolve the landing: reference, which is the
+// Integration branch name plus the commit sha the merge produced (ADR
+// 0029/0033), so it changes on every land rather than pointing at a stale
+// prior merge.
 func TestLocalCodeForge_LandBundle_EndToEnd(t *testing.T) {
 	setGitIdentityEnv(t)
 

@@ -14,11 +14,9 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// TestNew_HostRootedRejectsUpstreamWithPath verifies New refuses a
-// host-rooted route whose Upstream carries a path: the join a host-rooted
-// route relies on (see the Rewrite hook) only forwards the verbatim
-// remainder when Upstream has none, so a path there would silently prefix
-// every forwarded request.
+// A host-rooted route forwards the verbatim remainder only when Upstream
+// carries no path of its own (see the Rewrite hook), so New refuses one that
+// does: the path would silently prefix every forwarded request.
 func TestNew_HostRootedRejectsUpstreamWithPath(t *testing.T) {
 	_, err := New(AssignPrefixes([]Route{{
 		Upstream: "https://example.com/artifactory",
@@ -30,10 +28,9 @@ func TestNew_HostRootedRejectsUpstreamWithPath(t *testing.T) {
 	}
 }
 
-// TestNew_ThreadsEnforcedSubtreesWithoutError verifies New accepts a
-// host-rooted Route carrying EnforcedSubtrees and forwards an ordinary
-// request normally -- a request that never touches config.json doesn't
-// exercise the field at all (see findResponseRewriteRow for where it does).
+// A request that never touches config.json does not exercise EnforcedSubtrees
+// at all (findResponseRewriteRow is where it does), so this pins only that New
+// accepts the field and still forwards normally.
 func TestNew_ThreadsEnforcedSubtreesWithoutError(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -55,11 +52,9 @@ func TestNew_ThreadsEnforcedSubtreesWithoutError(t *testing.T) {
 	}
 }
 
-// TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree covers
-// issue #3256 AC 1: a host-rooted route with two enforced cargo index
-// subtrees on one host forwards a request under either subtree to the
-// upstream origin at the verbatim remaining path, with the route credential
-// attached.
+// Issue #3256 AC 1: a host-rooted route with two enforced cargo index subtrees
+// on one host forwards a request under either subtree to the upstream origin
+// at the verbatim remaining path, with the route credential attached.
 func TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree(t *testing.T) {
 	var gotPaths []string
 	var gotAuths []string
@@ -103,10 +98,9 @@ func TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree(t *testing.T
 	}
 }
 
-// TestHostRooted_RefusesPathOutsideEnforcedSet covers issue #3256 AC 2: a
-// request outside the enforced set is answered 403, the fake upstream
-// records zero requests for it, and the body names the refusing policy and
-// lists the enforced paths.
+// Issue #3256 AC 2: a request outside the enforced set gets a 403, the fake
+// upstream records no request for it, and the body names the refusing policy
+// and lists the enforced paths.
 func TestHostRooted_RefusesPathOutsideEnforcedSet(t *testing.T) {
 	var upstreamRequests int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -147,9 +141,8 @@ func TestHostRooted_RefusesPathOutsideEnforcedSet(t *testing.T) {
 	}
 }
 
-// TestHostRooted_RefusalNeverDialsUpstream verifies a 403 refusal never
-// dials upstream at the TCP level: enforcement runs before the proxy
-// commits to forwarding anything.
+// Enforcement runs before the proxy commits to forwarding anything, so a 403
+// refusal never dials upstream at the TCP level.
 func TestHostRooted_RefusalNeverDialsUpstream(t *testing.T) {
 	inner, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -187,9 +180,8 @@ func TestHostRooted_RefusalNeverDialsUpstream(t *testing.T) {
 	}
 }
 
-// TestHostRooted_EmptyEnforcedPathsRefusesEverything verifies a host-rooted
-// route whose derived path-set is legitimately empty fails closed rather
-// than falling back to some permissive default -- emptiness must never read
+// A host-rooted route whose derived path-set is legitimately empty must fail
+// closed rather than fall back to a permissive default. Emptiness never reads
 // as "no policy configured".
 func TestHostRooted_EmptyEnforcedPathsRefusesEverything(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -213,9 +205,8 @@ func TestHostRooted_EmptyEnforcedPathsRefusesEverything(t *testing.T) {
 	}
 }
 
-// TestHostRooted_RootSubtreeAdmitsWholeHost verifies an EnforcedPaths entry
-// of "/" -- registryvocab.Subtree's "the whole host" sentinel -- admits
-// every path on a host-rooted route, mirroring
+// An EnforcedPaths entry of "/" is registryvocab.Subtree's whole-host
+// sentinel, so it admits every path on a host-rooted route, mirroring
 // registryvocab.PathSet.Admits's own root-subtree rule.
 func TestHostRooted_RootSubtreeAdmitsWholeHost(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -241,12 +232,11 @@ func TestHostRooted_RootSubtreeAdmitsWholeHost(t *testing.T) {
 	}
 }
 
-// TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase covers issue #3257: a
-// host-rooted route with two cargo index bases rewrites the config.json
-// served under either base, even though its own dl is a
-// sibling of the index base rather than nested under it (the Artifactory
-// layout) -- proving the row now matches per declared index base rather
-// than only the bare "/config.json" literal a single-index route matches.
+// Issue #3257: a host-rooted route with two cargo index bases rewrites the
+// config.json served under either base, even where dl is a sibling of the
+// index base rather than nested under it (the Artifactory layout). The row
+// matches per declared index base, not just the bare "/config.json" literal a
+// single-index route matches.
 func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -294,13 +284,11 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 	}
 }
 
-// TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase covers the
-// same per-index-base row match as
-// TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase, but for the Gitea
-// layout, where dl nests under the index base rather than sitting beside
-// it -- proving the match rule is layout-agnostic (rewriteCargoDL's own
-// host check, not the row match, is what decides whether a given dl is
-// rewritable).
+// The same per-index-base row match as
+// TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase, for the Gitea layout
+// where dl nests under the index base instead of sitting beside it. The match
+// rule is layout-agnostic; rewriteCargoDL's host check, not the row match,
+// decides whether a given dl is rewritable.
 func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -337,11 +325,9 @@ func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) 
 	}
 }
 
-// TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow verifies there is
-// no suffix-guessing: a request path that merely resembles
-// "<base>/config.json" but doesn't equal it exactly is never treated as a
-// config.json row match, so its body -- even a JSON object with its own
-// "dl" field -- is relayed byte-identical.
+// No suffix-guessing: a path that resembles "<base>/config.json" without
+// equalling it is never a config.json row match, so its body is relayed
+// byte-identical even when it is a JSON object with its own "dl" field.
 func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
 	const wantBody = `{"dl":"https://crates.example.com/some/other/thing"}`
 
@@ -379,17 +365,16 @@ func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
 	}
 }
 
-// TestNew_StripsInboundAuthorization covers issue #3256 AC 3: the inbound
-// client's own Authorization header never reaches upstream, whether it is
-// replaced by an authenticated route's credential, deleted outright on an
-// unauthenticated pass-through route, or the route attaches its credential
-// to a different header entirely (AuthScheme "header:<Name>").
+// Issue #3256 AC 3: the inbound client's own Authorization header never
+// reaches upstream, whether an authenticated route replaces it, an
+// unauthenticated pass-through route deletes it, or the route attaches its
+// credential to another header (AuthScheme "header:<Name>").
 func TestNew_StripsInboundAuthorization(t *testing.T) {
 	tests := []struct {
 		name       string
 		route      Route
 		wantAuth   string
-		wantHeader map[string]string // additional headers expected on the upstream request
+		wantHeader map[string]string
 	}{
 		{
 			name:     "authenticated route replaces inbound Authorization with its own credential",
@@ -444,10 +429,9 @@ func TestNew_StripsInboundAuthorization(t *testing.T) {
 	}
 }
 
-// TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape covers issue #3257
-// AC 1/2/3: after a config.json rewrite learns a same-host dl subtree that
-// sits beside the cargo index base rather than under it (the Artifactory
-// layout), a later download request into that subtree is admitted even
+// Issue #3257 AC 1/2/3: once a config.json rewrite learns a same-host dl
+// subtree sitting beside the cargo index base rather than under it (the
+// Artifactory layout), a later download into that subtree is admitted even
 // though it was never in the route's static EnforcedPaths.
 func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 	var downloadRequests int
@@ -502,12 +486,10 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 	}
 }
 
-// TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape mirrors
-// TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape for the Gitea
-// layout, where dl nests under the cargo index base rather than sitting
-// beside it -- proving the learning path is layout-agnostic, the same way
-// TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase already
-// proves the rewrite itself is.
+// The Gitea layout version of
+// TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape, where dl nests under
+// the cargo index base instead of sitting beside it, so the learning path is
+// layout-agnostic in the same way the rewrite itself is.
 func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 	var downloadRequests int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -555,11 +537,9 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 	}
 }
 
-// TestHostRooted_DownloadRefusedBeforeConfigJSONFetched covers issue #3257
-// AC 5: a download path is refused with 403, and the fake upstream never
-// dialed, when requested before any config.json fetch has had a chance to
-// learn its dl subtree -- mirroring TestHostRooted_RefusalNeverDialsUpstream's
-// style of proof.
+// Issue #3257 AC 5: a download path requested before any config.json fetch
+// could learn its dl subtree is refused with 403, and the fake upstream
+// records no request.
 func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
 	var upstreamRequests int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -591,10 +571,10 @@ func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
 	}
 }
 
-// TestHostRooted_CrossHostDLNeverLearned covers issue #3257 AC 4: a
-// config.json response naming a dl on a different host than the route's own
-// match-host is relayed unrewritten, and nothing is learned from it -- a
-// later request to what would have been the dl's path is still refused.
+// Issue #3257 AC 4: a config.json response naming a dl on a host other than
+// the route's match-host is relayed unrewritten, and the route learns nothing
+// from it, so a later request to what would have been the dl's path is still
+// refused.
 func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/index-a/config.json" {
@@ -634,10 +614,9 @@ func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
 	}
 }
 
-// TestHostRooted_TwoIndexBasesLearnIndependently covers issue #3257 AC 4:
-// two cargo registries sharing one host each accumulate their own dl subtree
-// independently, and a third, unrelated path that neither config.json ever
-// named is still refused.
+// Issue #3257 AC 4: two cargo registries sharing one host each accumulate
+// their own dl subtree independently, and a third path neither config.json
+// ever named is still refused.
 func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -695,10 +674,8 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	}
 }
 
-// TestRouteLogHandler_LearnRewriteBaseDedups is a direct unit test on
-// learnRewriteBase (in-package access, no HTTP round-trip needed): learning the
-// same dl subtree twice for one route must not grow its learned set past one
-// entry, or a repeat config.json fetch would leak memory unboundedly over a
+// Learning the same dl subtree twice for one route must not grow its learned
+// set past one entry, or repeat config.json fetches would leak memory over a
 // long-lived Forwarder process.
 func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -726,13 +703,11 @@ func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
 	}
 }
 
-// TestRouteLogHandler_LearnEmptyPathNormalizesToRoot pins the normalization
-// a caller-supplied row makes necessary: rows are input now, so one that
-// hands back an empty LearnedPath (an edit whose target sits at the
-// upstream's own root) must not have that stored verbatim, where it would
-// admit through PathSet.Admits' HasPrefix(cleaned, sub+"/") branch rather
-// than through the "/" whole-host sentinel cargo's own rewriter normalizes
-// to.
+// Rows are caller input, so one handing back an empty LearnedPath (an edit
+// whose target sits at the upstream's own root) must not be stored verbatim:
+// it would then admit through PathSet.Admits' HasPrefix(cleaned, sub+"/")
+// branch instead of the "/" whole-host sentinel cargo's own rewriter
+// normalizes to.
 func TestRouteLogHandler_LearnEmptyPathNormalizesToRoot(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -764,9 +739,8 @@ func TestRouteLogHandler_LearnEmptyPathNormalizesToRoot(t *testing.T) {
 	}
 }
 
-// TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener drives the
-// dl rewrite through a real bindregistry.NewTCPForwarder in front of the
-// gated TCP listener, unlike
+// Drives the dl rewrite through a real bindregistry.NewTCPForwarder in front
+// of the gated TCP listener, unlike
 // TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase above, which sets
 // req.Host by hand.
 func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing.T) {
@@ -856,11 +830,10 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 	}
 }
 
-// TestHostRooted_BarePrefixForwardsRootToOrigin pins what a request naming
-// exactly the route prefix and nothing else ("/r0", no trailing slash)
-// actually puts on the wire: there is no remainder to join, and the origin
-// contributes no path of its own, so the upstream sees the root path with
-// the route's credential attached.
+// A request naming exactly the route prefix and nothing else ("/r0", no
+// trailing slash) has no remainder to join, and the origin contributes no path
+// of its own, so the upstream sees the root path with the route's credential
+// attached.
 func TestHostRooted_BarePrefixForwardsRootToOrigin(t *testing.T) {
 	var gotPath, gotRequestURI, gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

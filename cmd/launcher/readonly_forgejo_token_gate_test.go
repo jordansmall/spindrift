@@ -9,12 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 )
 
-// TestCheckReadOnlyForgejoTokenGate table-drives checkReadOnlyForgejoTokenGate's
-// cases, mirroring TestCheckReadOnlyTokenGate's scenario set adapted for
-// Forgejo, which exposes no token-introspection endpoint: read-write no-op,
-// read-only but neither backend is forgejo (no-op), unset Box token, Box
-// token equal to the Launcher's, and a distinct token (unverifiable, so
-// always warns and returns verified=false).
+// This mirrors TestCheckReadOnlyTokenGate's scenario set for Forgejo, which
+// exposes no token-introspection endpoint, so a distinct token is
+// unverifiable and the gate always warns and returns verified=false.
 func TestCheckReadOnlyForgejoTokenGate(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -103,19 +100,11 @@ func TestCheckReadOnlyForgejoTokenGate(t *testing.T) {
 	}
 }
 
-// TestCheckReadOnlyForgejoTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName
-// is the Forgejo-side counterpart to
-// TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName
-// (readonly_token_gate_test.go), pinning the same class of bug on this
-// gate's own self-noop check. It registers a fake backendRow named
-// "custom-forgejo" (not literally "forgejo") that shares backend.Forgejo's
-// TokenEnvVar ("FORGEJO_TOKEN") and sets it as the active codeForge. Before
-// the fix, checkReadOnlyForgejoTokenGate compared c.codeForge to the
-// literal string "forgejo", missed the match, and returned (false, nil)
-// immediately even though gateRegistry's "read-only-token-forgejo"
-// Applicable closure already reported the gate as applicable. After the
-// fix, both sides key off tokenGateApplicable, so the gate actually runs
-// and rejects the missing BOX_FORGEJO_TOKEN.
+// This is the Forgejo counterpart to
+// TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName.
+// The gate used to compare c.codeForge to the literal "forgejo", so it no-opped
+// on a backend that shares Forgejo's TokenEnvVar under another name even though
+// gateRegistry reported the gate as applicable.
 func TestCheckReadOnlyForgejoTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
 	original := backendRows
 	backendRows = append(append([]backendRow{}, original...), backendRow{

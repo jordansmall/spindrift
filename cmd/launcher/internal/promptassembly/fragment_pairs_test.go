@@ -5,13 +5,9 @@ import (
 	"testing"
 )
 
-// pairEnvMatrix enumerates Env values that toggle every bool field
-// independently (the zero Env, one Env per bool field set alone, and an
-// all-bools-true Env), each crossed with the dispatch kinds Gates
-// distinguishes. Built by reflection rather than a hand-listed set so a
-// future pair keyed off a newly added Env bool is swept the moment the
-// field exists, matching the registry-driven shape of the test below --
-// neither end of the pair mechanic should need a matching edit here.
+// pairEnvMatrix builds its Env set by reflection rather than from a hand-listed
+// set, so a pair keyed off a newly added Env bool is swept as soon as the field
+// exists and neither end of the pair mechanic needs a matching edit here.
 func pairEnvMatrix() []Env {
 	typ := reflect.TypeOf(Env{})
 	allTrue := reflect.New(typ).Elem()
@@ -39,13 +35,11 @@ func pairEnvMatrix() []Env {
 	return out
 }
 
-// TestRegistryInverseOfPairsAreExactlyOneOn is the Go half of the
-// exactly-one-on pair mechanic lib/fragment-pairs.nix validates: nix checks
-// that a pair is *declared* well-formedly, but the two gates are computed
-// independently in Gates, so only exercising the real computation proves a
-// declared pair never renders both members or neither. Registry-driven on
-// purpose -- every row that grows an `inverseOf` is covered the moment it is
-// declared in lib/fragments.nix, with no matching edit here.
+// TestRegistryInverseOfPairsAreExactlyOneOn is the Go half of the exactly-one-on
+// pair mechanic lib/fragment-pairs.nix validates: nix checks that a pair is
+// declared well-formedly, but Gates computes the two gates independently, so only
+// the real computation proves a pair never renders both members or neither. It
+// reads the registry, so a new inverseOf row in lib/fragments.nix is covered here.
 func TestRegistryInverseOfPairsAreExactlyOneOn(t *testing.T) {
 	reg, err := LoadRegistryFile("testdata/registry.json")
 	if err != nil {
@@ -81,9 +75,8 @@ func TestRegistryInverseOfPairsAreExactlyOneOn(t *testing.T) {
 			}
 		}
 
-		// Without this the pair would pass vacuously on a matrix that never
-		// moves the knob behind it -- both arms have to be observed for the
-		// complement assertion above to have tested anything.
+		// Both arms have to be observed, or the complement assertion above
+		// passes vacuously on a matrix that never moves the knob behind the pair.
 		if !sawOn || !sawOff {
 			t.Errorf("gate %q (inverseOf %q) was %v for every Env in the matrix; the matrix never exercised the knob behind the pair", row.Gate, row.InverseOf, sawOn)
 		}

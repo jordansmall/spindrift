@@ -10,19 +10,16 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// npmRewriteContext is the one route context every rewriteNpmPackument case
-// below runs against: match-host registry.example.com, forwarded to a local
-// port under prefix "r0". A case that needs a different host copies it and
-// overrides MatchHost.
+// Every rewriteNpmPackument case below runs against this route context. A case
+// that needs a different host copies it and overrides MatchHost.
 var npmRewriteContext = registryvocab.RewriteContext{
 	MatchHost: "registry.example.com",
 	Forwarder: &url.URL{Scheme: "http", Host: "127.0.0.1:9999"},
 	Prefix:    "r0",
 }
 
-// npmPackument builds a minimal packument body with one dist.tarball per
-// name->tarball pair given, so a test case can name however many versions
-// it needs without hand-writing JSON.
+// npmPackument builds a packument body with one dist.tarball per version, so a
+// case can name however many versions it needs without hand-writing JSON.
 func npmPackument(t *testing.T, tarballs map[string]string) []byte {
 	t.Helper()
 	versions := make(map[string]any, len(tarballs))
@@ -38,10 +35,7 @@ func npmPackument(t *testing.T, tarballs map[string]string) []byte {
 	return body
 }
 
-// TestRewriteNpmPackument_AllSameHost verifies that every version's
-// same-host dist.tarball is rewritten to the Forwarder, one edit each, with
-// the route's prefix inserted and the tarball's own path preserved -- and
-// that the edit order is deterministic (sorted by version name) despite Go's
+// The edit order is deterministic, sorted by version name, despite Go's
 // randomized map iteration.
 func TestRewriteNpmPackument_AllSameHost(t *testing.T) {
 	body := npmPackument(t, map[string]string{
@@ -85,10 +79,8 @@ func TestRewriteNpmPackument_AllSameHost(t *testing.T) {
 	}
 }
 
-// TestRewriteNpmPackument_HostMatchNormalization drives the same host
-// comparison normalization rules rewriteCargoDL exercises: an explicit
-// default port on either side, and a case difference, must still compare
-// equal.
+// Host comparison normalizes the same way rewriteCargoDL's does: an explicit
+// default port on either side, and a case difference, still compare equal.
 func TestRewriteNpmPackument_HostMatchNormalization(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -117,9 +109,8 @@ func TestRewriteNpmPackument_HostMatchNormalization(t *testing.T) {
 	}
 }
 
-// TestRewriteNpmPackument_AllForeignHost verifies a wholly cross-host (CDN)
-// packument reports RewriteSkippedForeignHost, leaves the body byte-for-byte
-// untouched, and carries From-only edits for the caller's skip log lines.
+// A wholly cross-host packument still reports its declined tarballs as
+// From-only edits, which the caller logs as skips.
 func TestRewriteNpmPackument_AllForeignHost(t *testing.T) {
 	body := npmPackument(t, map[string]string{
 		"1.0.0": "https://cdn.example.com/pkg/-/pkg-1.0.0.tgz",
@@ -148,10 +139,8 @@ func TestRewriteNpmPackument_AllForeignHost(t *testing.T) {
 	}
 }
 
-// TestRewriteNpmPackument_Mixed verifies a packument holding both a
-// same-host and a foreign-host tarball rewrites only the same-host one in
-// the body, reports RewriteApplied (not a skip -- something was applied),
-// and still carries the foreign one as a declined edit with an empty To.
+// A packument holding both a same-host and a foreign-host tarball reports
+// RewriteApplied, not a skip, because something was applied.
 func TestRewriteNpmPackument_Mixed(t *testing.T) {
 	body := npmPackument(t, map[string]string{
 		"1.0.0": "https://registry.example.com/pkg/-/pkg-1.0.0.tgz",
@@ -191,10 +180,8 @@ func TestRewriteNpmPackument_Mixed(t *testing.T) {
 	}
 }
 
-// TestRewriteNpmPackument_NotRewritten drives every case where
-// rewriteNpmPackument must leave body byte-identical and report
-// outcome=RewriteNone -- nothing recognizable to rewrite at all, distinct
-// from the deliberate RewriteSkippedForeignHost tested above.
+// RewriteNone means there was nothing recognizable to rewrite at all, which is
+// distinct from the deliberate RewriteSkippedForeignHost tested above.
 func TestRewriteNpmPackument_NotRewritten(t *testing.T) {
 	cases := []struct {
 		name string
@@ -230,10 +217,8 @@ func TestRewriteNpmPackument_NotRewritten(t *testing.T) {
 	}
 }
 
-// TestRewriteNpmPackument_PreservesOtherFields verifies a numeric field
-// elsewhere in the packument survives re-serialization as its exact digits
-// -- the UseNumber contract -- and that fields outside the rewritten
-// tarball are otherwise untouched.
+// A numeric field elsewhere in the packument must survive re-serialization as
+// its exact digits, which is the UseNumber contract.
 func TestRewriteNpmPackument_PreservesOtherFields(t *testing.T) {
 	body := []byte(`{"name":"pkg","dist-tags":{"latest":"1.0.0"},"some-count":9007199254740993,"versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/pkg/-/pkg-1.0.0.tgz","shasum":"abc"}}}}`)
 	rc := npmRewriteContext
@@ -252,9 +237,8 @@ func TestRewriteNpmPackument_PreservesOtherFields(t *testing.T) {
 		t.Errorf("name = %v, want pkg", out["name"])
 	}
 
-	// Round-trip the number through json.Number to check exact digits --
-	// plain float64 unmarshal would lose precision on a value this large,
-	// masking exactly the defect UseNumber exists to avoid.
+	// A plain float64 unmarshal would lose precision on a value this large,
+	// masking the defect UseNumber exists to avoid.
 	dec := json.NewDecoder(bytes.NewReader(result.Body))
 	dec.UseNumber()
 	var reDecoded map[string]any
@@ -266,11 +250,8 @@ func TestRewriteNpmPackument_PreservesOtherFields(t *testing.T) {
 	}
 }
 
-// TestRewriteNpmPackument_LearnedPath covers the same LearnedPath contract
-// rewriteCargoDL's own test does: on RewriteApplied, the edit's LearnedPath
-// carries the route-relative remainder the rewritten tarball's path was
-// reduced to, with an empty path normalized to "/" (the root-subtree
-// sentinel), not "".
+// LearnedPath carries the route-relative remainder of the rewritten tarball's
+// path, with an empty path normalized to "/", the root-subtree sentinel, not "".
 func TestRewriteNpmPackument_LearnedPath(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -308,11 +289,6 @@ func TestRewriteNpmPackument_LearnedPath(t *testing.T) {
 	}
 }
 
-// TestNpmRow_RewriteRows_PackumentMatches drives npmRow's declared
-// RewriteRows entry: its Matches func, its Ecosystem/Method tags, and the
-// matcher's path-shape rules -- unscoped and decoded-scoped packument paths
-// match, a tarball path (more segments) never matches regardless of
-// scoping, a root base is handled, and a trailing slash never matches.
 func TestNpmRow_RewriteRows_PackumentMatches(t *testing.T) {
 	rows := npmRow.RewriteRows
 	if len(rows) != 1 {

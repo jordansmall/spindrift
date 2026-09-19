@@ -12,7 +12,6 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// newTestForwarder stands a live Forwarder in front of upstream.
 func newTestForwarder(t *testing.T, upstream *httptest.Server, secret string) *httptest.Server {
 	t.Helper()
 
@@ -37,11 +36,6 @@ func newTestForwarder(t *testing.T, upstream *httptest.Server, secret string) *h
 	return httptest.NewServer(handler)
 }
 
-// TestNewTCPForwarder_RelaysAndAttachesSecret verifies the box-local
-// HTTP-aware forwarder: the secret header rides the outbound leg, the
-// inbound method/path/query reach the fake upstream unchanged, and the fake
-// upstream's response (status + body) comes back through the forwarder
-// unchanged.
 func TestNewTCPForwarder_RelaysAndAttachesSecret(t *testing.T) {
 	const wantSecret = "s3cr3t-value"
 
@@ -94,34 +88,33 @@ func TestNewTCPForwarder_RelaysAndAttachesSecret(t *testing.T) {
 	}
 }
 
-// TestNewTCPForwarder_InvalidUpstreamHost verifies a construction-time error
-// rather than a handler that panics or silently misbehaves at request time.
+// A bad host must fail at construction, not from a handler that panics or
+// misbehaves once a request arrives.
 func TestNewTCPForwarder_InvalidUpstreamHost(t *testing.T) {
 	if _, err := NewTCPForwarder("", 0, "secret"); err == nil {
 		t.Fatalf("NewTCPForwarder with empty host: err = nil, want non-nil")
 	}
 }
 
-// TestNewTCPForwarder_InvalidUpstreamPort verifies a zero port is rejected at
-// construction time rather than building a handler that fails only when a
-// request actually arrives.
+// A zero port must fail at construction, not from a handler that fails only
+// once a request arrives.
 func TestNewTCPForwarder_InvalidUpstreamPort(t *testing.T) {
 	if _, err := NewTCPForwarder("localhost", 0, "secret"); err == nil {
 		t.Fatalf("NewTCPForwarder with zero port: err = nil, want non-nil")
 	}
 }
 
-// TestNewTCPForwarder_InvalidSecret verifies an empty secret is rejected at
-// construction time rather than building a handler that silently forwards
-// requests with no auth header attached.
+// An empty secret must fail at construction. Otherwise the handler forwards
+// every request with no auth header attached.
 func TestNewTCPForwarder_InvalidSecret(t *testing.T) {
 	if _, err := NewTCPForwarder("localhost", 8080, ""); err == nil {
 		t.Fatalf("NewTCPForwarder with empty secret: err = nil, want non-nil")
 	}
 }
 
-// TestNewTCPForwarder_PreservesInboundHost pins the inbound Host surviving the
-// hop, which the launcher proxy needs to derive the Forwarder's own address.
+// Go's SetURL rewrites the outbound Host, so the launcher proxy derived the
+// wrong Forwarder address for the cargo dl rewrite and every crate download
+// got a 401 (#3314). The inbound Host must survive the hop.
 func TestNewTCPForwarder_PreservesInboundHost(t *testing.T) {
 	const wantSecret = "s3cr3t-value"
 	const wantHost = "client.local:9999"

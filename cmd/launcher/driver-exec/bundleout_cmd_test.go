@@ -27,10 +27,8 @@ func writeTestFile(t *testing.T, path, contents string) {
 	}
 }
 
-// TestRunBundleOut_ParsesFlagsAndDelegates verifies the bundle-out
-// subcommand's flag parsing reaches bundleout.Run with the right Config: a
-// non-empty base..branch range produces a bundle at outbox/seam.bundle
-// (issue #1808).
+// The parsed flags must reach bundleout.Run as a usable Config: a non-empty
+// base..branch range produces a bundle at outbox/seam.bundle (issue #1808).
 func TestRunBundleOut_ParsesFlagsAndDelegates(t *testing.T) {
 	dir := t.TempDir()
 	runGitCmd(t, dir, "init", "-b", "main")
@@ -61,9 +59,8 @@ func TestRunBundleOut_ParsesFlagsAndDelegates(t *testing.T) {
 	}
 }
 
-// TestRunBundleOut_MissingRequiredFlagReturnsNonZero verifies a missing
-// -branch fails loudly (exit 1) instead of running bundleout.Run against a
-// zero-value Config.
+// A missing -branch must fail loudly instead of running bundleout.Run against
+// a zero-value Config.
 func TestRunBundleOut_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runBundleOut([]string{
@@ -76,10 +73,8 @@ func TestRunBundleOut_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 	}
 }
 
-// TestIsBundleOutInvocation verifies the bundle-out subcommand's dispatch
-// guard: a bare "bundle-out" first arg selects it, while the ordinary
-// "--"-flag invocation (and no args at all) fall through to the default
-// Driver-invocation path.
+// Only a bare "bundle-out" first arg claims the subcommand; every other arg
+// shape falls through to the default Driver invocation.
 func TestIsBundleOutInvocation(t *testing.T) {
 	cases := []struct {
 		name string

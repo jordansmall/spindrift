@@ -5,27 +5,16 @@ import (
 	"testing"
 )
 
-// TestTransition exercises Transition across every decision point the
-// orchestrator's two loops make today (issue #2548): the legacy loop's
-// single switch (run.go:244-259), the review loop's implement/fix/land
-// switch (run.go:355-401, now split into implementFixTransition and
-// terminalLandTransition per AC2), and the review loop's own review-pass
-// switch (run.go:461-487). Each case names the exact decision-op Reason
-// string and (where applicable) state.CapFired text the source switches
-// emit, since both are part of a byte-for-byte-pinned op stream existing
-// tests assert on. Cases that set CapFired also assert the typed Cap field
-// alongside it.
-// transitionTestCases is TestTransition's own table. It is deliberately NOT
-// reused by TestTransitionNeverReturnsEmptyReason below -- that test sweeps
-// Transition's input space independently, precisely so a new case added to
-// Transition/legacyTransition/implementFixTransition/terminalLandTransition/
-// reviewTransition with no matching table entry here still gets exercised.
+// transitionTestCases is TestTransition's table, covering every decision point
+// the orchestrator's two loops make (issue #2548). Each case names the exact
+// Reason and CapFired strings the source switches emit, because other tests
+// pin that op stream byte for byte. TestTransitionNeverReturnsEmptyReason
+// deliberately does not reuse this table; see its own comment for why.
 var transitionTestCases = []struct {
 	name string
 	in   Input
 	want Decision
 }{
-	// ---- legacy loop (run.go:244-259) ----
 	{
 		name: "legacy stops on outcome reached even with BLOCK verdict",
 		in: Input{
@@ -133,7 +122,6 @@ var transitionTestCases = []struct {
 		want: Decision{Continue: false, Reason: "max slices reached", Stop: StopMaxSlicesReached},
 	},
 
-	// ---- review loop implement/fix/land (run.go:355-401) ----
 	{
 		name: "implement stops on outcome reached",
 		in: Input{
@@ -297,7 +285,6 @@ var transitionTestCases = []struct {
 		want: Decision{Continue: false, Reason: "terminal land pass reached no outcome", Stop: StopTerminalLandNoOutcome},
 	},
 
-	// ---- review loop's own review-pass switch (run.go:461-487) ----
 	{
 		name: "review: no verdict sets LandPhase and always continues (never stops)",
 		in: Input{
@@ -567,7 +554,7 @@ var transitionTestCases = []struct {
 		},
 	},
 
-	// ---- delta-review pass (issue #3246) ----
+	// These cases cover the delta-review pass (issue #3246).
 	{
 		name: "delta review: BLOCK stops outright, no fix lap",
 		in: Input{
@@ -617,33 +604,11 @@ func TestTransition(t *testing.T) {
 	}
 }
 
-// TestTransitionNeverReturnsEmptyReason is a blanket guard for issue #2655
-// acceptance criterion 3: a decision op must never reach stdout with an
-// empty reason. Unlike TestTransition, it does NOT replay
-// transitionTestCases -- a table replay can only fail when TestTransition
-// itself already fails, since every table entry has a matching want.Reason,
-// so it can never catch a *new* fallthrough case added later to
-// Transition/legacyTransition/implementFixTransition/terminalLandTransition/
-// reviewTransition with no corresponding table entry. Instead this test
-// drives Transition directly over a cartesian sweep of Input's own field
-// values, independent of the table, so a future uncovered case is still
-// exercised and caught here even before anyone thinks to add a table entry
-// for it.
-//
-// The sweep covers every PassKind (which also exercises Transition's own
-// dispatch to legacyTransition/implementFixTransition/terminalLandTransition/
-// reviewTransition), every Verdict and LastVerdict, both HasOutcome and
-// LandPhase values, and -- for the four cap-comparison branches spread
-// across legacyTransition/implementFixTransition/reviewTransition --
-// capsScenarios pairs with budgetLevels to walk Pass/ReviewRounds/
-// CumulativeTokens/CumulativeUSD below/at/above each cap in turn.
-// capsScenarios deliberately isolates each cap dimension (rather than
-// always enabling all four at once): reviewTransition in particular checks
-// its caps in a fixed priority order (no-verdict, then MaxSlices, then
-// MaxReviewRounds, then the budget caps), so enabling only MaxSlices would
-// otherwise mask MaxReviewRounds and the budget caps from ever being the
-// branch that fires, including reviewTransition's own
-// `in.Verdict == VerdictBlock && budgetHit` branch.
+// TestTransitionNeverReturnsEmptyReason guards issue #2655 acceptance criterion
+// 3: a decision op must never reach stdout with an empty reason. It sweeps
+// Input's own field values rather than replaying transitionTestCases, because
+// a replay can only fail when TestTransition already fails; the sweep also
+// catches a new fallthrough case that nobody has added a table entry for yet.
 func TestTransitionNeverReturnsEmptyReason(t *testing.T) {
 	passKinds := []PassKind{KindLegacy, KindImplement, KindFix, KindLand, KindReview, KindDeltaReview}
 	verdicts := []Verdict{VerdictNone, VerdictBlock, VerdictApprove}
@@ -651,31 +616,27 @@ func TestTransitionNeverReturnsEmptyReason(t *testing.T) {
 	landPhases := []LandPhase{LandPhaseActive, LandPhaseTerminalCommitted}
 	lastVerdicts := []Verdict{VerdictNone, VerdictBlock, VerdictApprove}
 
-	// capsScenarios isolates each Caps dimension in turn (plus a
-	// fully-disabled baseline and a fully-enabled combo) so that pairing
-	// each one with budgetLevels below actually reaches every cap-
-	// comparison branch, instead of always letting the highest-priority cap
-	// (MaxSlices) mask the rest.
+	// Each scenario isolates one cap dimension. reviewTransition checks its caps
+	// in a fixed priority order, so leaving MaxSlices enabled everywhere would
+	// mask MaxReviewRounds and the budget caps from ever firing.
 	capsScenarios := []Caps{
-		{},                   // every cap disabled
-		{MaxSlices: 1},       // MaxSlices only
-		{MaxReviewRounds: 1}, // MaxReviewRounds only
-		{MaxBudgetTokens: 100, MaxBudgetUSD: 1.0},                                   // both budget dimensions only
-		{MaxSlices: 1, MaxReviewRounds: 1, MaxBudgetTokens: 100, MaxBudgetUSD: 1.0}, // every cap enabled
+		{},
+		{MaxSlices: 1},
+		{MaxReviewRounds: 1},
+		{MaxBudgetTokens: 100, MaxBudgetUSD: 1.0},
+		{MaxSlices: 1, MaxReviewRounds: 1, MaxBudgetTokens: 100, MaxBudgetUSD: 1.0},
 	}
 
-	// budgetLevels sweeps Pass/ReviewRounds/CumulativeTokens/CumulativeUSD
-	// together through below/at/above whichever cap(s) capsScenarios has
-	// enabled for a given combination -- the 1/1/100/1.0 values here line up
-	// with the cap values set in capsScenarios above.
+	// The 1/1/100/1.0 values match the cap values in capsScenarios, so the three
+	// levels sit below, at, and above whichever caps a scenario enables.
 	budgetLevels := []struct {
 		pass, reviewRounds int
 		tokens             int
 		usd                float64
 	}{
-		{pass: 0, reviewRounds: 0, tokens: 0, usd: 0},     // below every cap
-		{pass: 1, reviewRounds: 1, tokens: 100, usd: 1.0}, // at every cap
-		{pass: 2, reviewRounds: 2, tokens: 200, usd: 2.0}, // above every cap
+		{pass: 0, reviewRounds: 0, tokens: 0, usd: 0},
+		{pass: 1, reviewRounds: 1, tokens: 100, usd: 1.0},
+		{pass: 2, reviewRounds: 2, tokens: 200, usd: 2.0},
 	}
 
 	count := 0
@@ -715,10 +676,9 @@ func TestTransitionNeverReturnsEmptyReason(t *testing.T) {
 	}
 }
 
-// TestBudgetExceeded exercises the budgetExceeded helper directly (issue
-// #2694): each of the two cap dimensions can trip it independently, a zero
-// cap on either dimension never fires regardless of usage, and the
-// comparison is >= (at-cap fires), not > (strictly over).
+// TestBudgetExceeded covers the budgetExceeded helper (issue #2694): either cap
+// dimension can trip it alone, a zero cap never fires whatever the usage, and
+// the comparison is >= (at-cap fires), not > (strictly over).
 func TestBudgetExceeded(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -773,9 +733,8 @@ func TestBudgetExceeded(t *testing.T) {
 	}
 }
 
-// TestPassKindString pins the pass_start op's own Role field value for
-// every PassKind (issue #2548 review) -- exercised only transitively by
-// TestTransition's op-stream assertions until now.
+// TestPassKindString pins the pass_start op's Role field value for every
+// PassKind (issue #2548 review).
 func TestPassKindString(t *testing.T) {
 	tests := []struct {
 		kind PassKind
@@ -798,11 +757,10 @@ func TestPassKindString(t *testing.T) {
 	}
 }
 
-// TestPassKindManifestKind pins the pass-manifest entry's own Kind field
-// value for every PassKind (issue #2983): "legacy" for KindLegacy, where
-// String() returns "" (correct for the unrelated pass_start Role field, but
-// wrong for a manifest field that must always name the pass shape), and
-// String()'s own unchanged value for every other kind.
+// TestPassKindManifestKind pins the pass-manifest entry's Kind field for every
+// PassKind (issue #2983). KindLegacy is the one that differs: String() returns
+// "", which is right for the pass_start Role field but wrong for a manifest
+// field that must always name the pass shape.
 func TestPassKindManifestKind(t *testing.T) {
 	tests := []struct {
 		kind PassKind
@@ -825,14 +783,11 @@ func TestPassKindManifestKind(t *testing.T) {
 	}
 }
 
-// TestRoleConstantsAreNamedType pins the Role constants to the named Role
-// type (issue #2766), mirroring Verdict's own type convention. A []Role
-// literal alone can't tell an untyped string constant from a Role one --
-// Go implicitly converts an untyped constant to any type whose underlying
-// type is string, so that check passes either way. Assigning into an
-// any-valued field instead forces Go to use the constant's default type
-// (string) when it's untyped, and its declared type (Role) when it isn't,
-// so reflect.TypeOf distinguishes the two.
+// TestRoleConstantsAreNamedType pins the Role constants to the named Role type
+// (issue #2766). The field is any, not Role: a []Role literal would implicitly
+// convert an untyped string constant, so the check would pass either way. An
+// any-valued field keeps an untyped constant's default type (string) and a
+// declared one's type (Role), so reflect.TypeOf tells the two apart.
 func TestRoleConstantsAreNamedType(t *testing.T) {
 	tests := []struct {
 		name string
@@ -853,11 +808,10 @@ func TestRoleConstantsAreNamedType(t *testing.T) {
 	}
 }
 
-// TestExtraPassAllowed exercises every ExtraPassAllowed branch (issue
-// #3246): all three caps disabled, each cap exactly at its own threshold
-// (fires -- >=, not >), each cap one below its own threshold (does not
-// fire), and the slices-then-tokens-then-USD precedence between them when
-// more than one cap would fire at once.
+// TestExtraPassAllowed covers every ExtraPassAllowed branch (issue #3246): all
+// three caps disabled, each cap at its threshold (it fires on >=, not >), each
+// cap one below, and the slices-then-tokens-then-USD precedence when more than
+// one cap would fire at once.
 func TestExtraPassAllowed(t *testing.T) {
 	tests := []struct {
 		name             string

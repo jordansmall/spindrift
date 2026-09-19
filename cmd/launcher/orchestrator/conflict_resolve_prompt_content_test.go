@@ -2,16 +2,10 @@ package main
 
 import "testing"
 
-// TestConflictResolvePromptOperativeContract is a content-invariant guard
-// (issue #3225) for conflict-resolve-prompt.md's numbered resolution
-// procedure: the generated-file never-hand-merge rule and its
-// resolve-in-source-of-truth/regenerate/stage sequence, the ordinary-file
-// rule, the rebase-continue and repeat-on-further-conflicts steps, the
-// no-PR-or-push boundary, the no-narration rule, and the two completion/
-// unresolvable signals. Issue #3225 reviewed this prompt and found it
-// already all contract and sequencing with no design-history prose to cut;
-// pinning each clause here first means a future cut can't silently take a
-// rule with it.
+// Issue #3225 reviewed conflict-resolve-prompt.md and found no design-history
+// prose to cut: the file is all contract and sequencing. Pinning each clause of
+// its resolution procedure here means a later cut cannot silently take a rule
+// with it.
 func TestConflictResolvePromptOperativeContract(t *testing.T) {
 	assertPromptClauses(t, "conflict-resolve-prompt.md", []promptClause{
 		{

@@ -5,12 +5,11 @@ import (
 	"testing"
 )
 
-// TestLauncherCheckDeps_BackendBindsValidatorToConfig proves
-// launcherCheckDeps's Backend closure really binds a row's own
-// validateTracker to the caller's config, rather than dropping it or
-// binding some other c: an ISSUE_TRACKER=forgejo row with no
-// FORGEJO_BASE_URL/FORGEJO_TOKEN set must fail with forgejo's own
-// validation error through the adapted zero-arg closure.
+// TestLauncherCheckDeps_BackendBindsValidatorToConfig proves the Backend
+// closure binds a row's own validateTracker to the caller's config rather
+// than dropping it or binding a different config: a forgejo row with no
+// FORGEJO_BASE_URL/FORGEJO_TOKEN set must fail with forgejo's own validation
+// error through the adapted zero-arg closure.
 func TestLauncherCheckDeps_BackendBindsValidatorToConfig(t *testing.T) {
 	c := minimalValidConfig()
 	c.issueTracker = "forgejo"
@@ -28,21 +27,19 @@ func TestLauncherCheckDeps_BackendBindsValidatorToConfig(t *testing.T) {
 		t.Errorf("ValidateTracker() = %v, want an error mentioning FORGEJO", err)
 	}
 
-	// Same failure must surface through the real row-building path, not
-	// just the adapter in isolation.
+	// The real row-building path must fail the same way, not just the
+	// adapter in isolation.
 	ch := checkByName(t, launcherCrossKnobChecks(c), "issue-tracker-config")
 	if _, err := ch.Probe(); err == nil {
 		t.Error("issue-tracker-config Probe() = nil, want the forgejo validation error")
 	}
 }
 
-// TestLauncherCheckDeps_BackendNilValidatorsStayNil proves a backendRow
-// whose validateTracker/validateCodeForge are nil (github: axis membership
-// only, no extra validation) adapts to a Backend with nil funcs too — a
-// non-nil no-op wrapper would silently change crossKnobCheck's "no extra
-// validation" arm into "run a no-op that always succeeds", which happens to
-// look identical here but breaks the moment a row's absence of a validator
-// is asserted on directly.
+// TestLauncherCheckDeps_BackendNilValidatorsStayNil proves a backendRow with
+// nil validateTracker/validateCodeForge (github is axis membership only)
+// adapts to a Backend with nil funcs. A non-nil no-op wrapper would turn
+// crossKnobCheck's "no extra validation" arm into a no-op that always
+// succeeds, breaking any test that asserts a row has no validator.
 func TestLauncherCheckDeps_BackendNilValidatorsStayNil(t *testing.T) {
 	c := minimalValidConfig()
 	deps := launcherCheckDeps(c)
@@ -58,12 +55,10 @@ func TestLauncherCheckDeps_BackendNilValidatorsStayNil(t *testing.T) {
 	}
 }
 
-// TestLauncherCrossKnobDeps_ExtraCrossKnobIsRegistryProxyRoutesRow proves
-// launcherCrossKnobDeps wires its ExtraCrossKnob to exactly the
-// registry-proxy-routes row cmd/launcher owns (registryProxyRoutesCheck),
-// the one piece launcherCrossKnobChecks' three-row order
-// (TestLauncherCrossKnobChecks_ReturnsThreeRows) depends on but doesn't
-// itself pin to this adapter field.
+// TestLauncherCrossKnobDeps_ExtraCrossKnobIsRegistryProxyRoutesRow pins
+// ExtraCrossKnob to the registry-proxy-routes row cmd/launcher owns.
+// TestLauncherCrossKnobChecks_ReturnsThreeRows relies on that row for its
+// three-row order but never ties it to this adapter field.
 func TestLauncherCrossKnobDeps_ExtraCrossKnobIsRegistryProxyRoutesRow(t *testing.T) {
 	c := minimalValidConfig()
 	deps := launcherCrossKnobDeps(c)

@@ -13,10 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// writeHandoffFile marshals h to JSON and writes it to a fresh file under
-// t.TempDir(), returning its path -- the fixture every default-verb test
-// below hands to -handoff-file in place of the individually-removed flags
-// (issue #2975 slice 3).
+// writeHandoffFile builds the -handoff-file fixture that replaced the
+// individually-removed per-pass flags (issue #2975 slice 3).
 func writeHandoffFile(t *testing.T, h promptassembly.Handoff) string {
 	t.Helper()
 	data, err := json.Marshal(h)
@@ -30,9 +28,8 @@ func writeHandoffFile(t *testing.T, h promptassembly.Handoff) string {
 	return path
 }
 
-// claudeArgvShape mirrors claude's own argv shape (lib/drivers/claude.nix:
-// promptFlag="-p", agentsFlag="--agents"), the same values
-// assemble-prompt's CLI wrapper would have populated Handoff.ArgvShape with
+// claudeArgvShape mirrors the argv shape lib/drivers/claude.nix declares.
+// It holds what assemble-prompt's CLI wrapper would put in Handoff.ArgvShape
 // for a claude Driver.
 var claudeArgvShape = promptassembly.ArgvShape{
 	PromptStyle: "flag",
@@ -43,10 +40,8 @@ var claudeArgvShape = promptassembly.ArgvShape{
 	Order:       []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
 }
 
-// TestMainRunHandoffFileReproducesClaudeShape verifies a mainRun invocation
-// driven by a -handoff-file whose ArgvShape describes claude's own argv
-// shape reproduces that shape on the fake Driver's received argv (issue
-// #2975 slice 3): -p leads, --agents is present.
+// TestMainRunHandoffFileReproducesClaudeShape pins issue #2975 slice 3: the
+// handoff's ArgvShape, not driver-exec, decides the driver's argv shape.
 func TestMainRunHandoffFileReproducesClaudeShape(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -93,14 +88,10 @@ func TestMainRunHandoffFileReproducesClaudeShape(t *testing.T) {
 	}
 }
 
-// TestMainRunRoleAwareModelEffort verifies mainRun resolves Model/Effort
-// from the handoff's ReviewModel/ReviewEffort when -top-level-role is
-// driverkit.ReviewerRole, and from Model/Effort directly otherwise --
-// replicating the orchestrator's former runWithReviewPass overrideIfSet
-// semantics (issue #2975 slice 3). Also covers the reviewer-role fallback
-// when ReviewModel/ReviewEffort are unset, and the two partial-override
-// combinations, to prove the two guards are independent (issue #2975
-// slice 6).
+// TestMainRunRoleAwareModelEffort pins the reviewer-role override semantics
+// the orchestrator's runWithReviewPass used to own (issue #2975 slice 3),
+// plus the fallback and partial-override cases that prove the two guards
+// act independently (issue #2975 slice 6).
 func TestMainRunRoleAwareModelEffort(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -127,13 +118,9 @@ func TestMainRunRoleAwareModelEffort(t *testing.T) {
 	}{
 		{"implementor", "", handoff.ReviewModel, handoff.ReviewEffort, "opus", "high"},
 		{"reviewer", driverkit.ReviewerRole, handoff.ReviewModel, handoff.ReviewEffort, "sonnet", "low"},
-		// Reviewer role with both ReviewModel/ReviewEffort unset on the
-		// handoff falls back to Model/Effort just like the implementor
-		// case -- the fallback is role-independent once the review
-		// overrides are empty (issue #2975 slice 6).
+		// With both review overrides empty the fallback to Model/Effort is
+		// role-independent (issue #2975 slice 6).
 		{"reviewer-no-review-overrides", driverkit.ReviewerRole, "", "", "opus", "high"},
-		// Partial overrides prove the two "if ReviewX != \"\"" guards in
-		// main.go act independently rather than both-or-nothing.
 		{"reviewer-model-only", driverkit.ReviewerRole, handoff.ReviewModel, "", "sonnet", "high"},
 		{"reviewer-effort-only", driverkit.ReviewerRole, "", handoff.ReviewEffort, "opus", "low"},
 	}
@@ -177,10 +164,9 @@ func TestMainRunRoleAwareModelEffort(t *testing.T) {
 	}
 }
 
-// TestMainRunPromptFileFallsBackToHandoff verifies omitting -prompt-file
-// falls back to the handoff's own PromptFile (issue #2975 slice 3): the
-// per-pass CLI flag stays meaningful for a caller that wants to override it,
-// but is no longer required when the handoff already carries one.
+// TestMainRunPromptFileFallsBackToHandoff pins issue #2975 slice 3:
+// -prompt-file still overrides the handoff, but is no longer required when
+// the handoff already carries a PromptFile.
 func TestMainRunPromptFileFallsBackToHandoff(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -207,9 +193,8 @@ func TestMainRunPromptFileFallsBackToHandoff(t *testing.T) {
 	}
 }
 
-// TestMainRunPromptFileRequiredWhenBothEmpty verifies that when neither
-// -prompt-file nor the handoff's own PromptFile is set, mainRun still fails
-// with the original "-prompt-file is required" error.
+// TestMainRunPromptFileRequiredWhenBothEmpty pins that the handoff fallback
+// did not drop the original "-prompt-file is required" error.
 func TestMainRunPromptFileRequiredWhenBothEmpty(t *testing.T) {
 	dir := t.TempDir()
 	driverBin := writeFakeDriver(t, dir, "fake-driver", "exit 0\n")
@@ -234,20 +219,16 @@ func TestMainRunPromptFileRequiredWhenBothEmpty(t *testing.T) {
 	}
 }
 
-// TestResolveExitUsesSynthesizedExitForOpencode verifies resolveExit
-// replaces the child process's own exit code with the opencode Driver's
-// ResolveExit result (issue #2263) -- opencode's own process exit code is
-// not trustworthy on its own (see driver/opencode/exitsynth.go), so
-// driver-exec's main must apply the Driver's required ResolveExit result
-// after run returns.
+// TestResolveExitUsesSynthesizedExitForOpencode pins issue #2263: opencode's
+// own process exit code is not trustworthy (see
+// driver/opencode/exitsynth.go), so driver-exec must apply the Driver's
+// ResolveExit result after run returns.
 func TestResolveExitUsesSynthesizedExitForOpencode(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
-	// A log with a valid outcome line and no error event synthesizes to 0
-	// (see driver/opencode/exitsynth_test.go's own fixtures) -- distinct
-	// from the "child rc" this test passes in, so a passing assertion proves
-	// the synthesized value actually replaced it rather than coincidentally
-	// matching.
+	// A valid outcome line with no error event synthesizes to 0, distinct
+	// from the child rc the test passes in, so a pass proves the synthesized
+	// value replaced that rc rather than coincidentally matching it.
 	content := `{"type":"result","status":"ready"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -264,9 +245,8 @@ func TestResolveExitUsesSynthesizedExitForOpencode(t *testing.T) {
 	}
 }
 
-// TestResolveExitLeavesClaudeExitCodeUntouched verifies resolveExit is a
-// no-op for a Driver (claude) whose ResolveExit trusts the passed exit code
-// unchanged -- the child rc passes through unchanged.
+// TestResolveExitLeavesClaudeExitCodeUntouched pins the no-op case: claude's
+// ResolveExit trusts the child rc, so resolveExit must not change it.
 func TestResolveExitLeavesClaudeExitCodeUntouched(t *testing.T) {
 	d, err := driver.New("claude")
 	if err != nil {
@@ -279,20 +259,19 @@ func TestResolveExitLeavesClaudeExitCodeUntouched(t *testing.T) {
 	}
 }
 
-// TestResolveExitOnErrorKeepsOriginalRC verifies a ResolveExit failure (e.g.
-// an unreadable log path) degrades safely to the original child rc instead
-// of masking a real failure behind a resolution failure.
+// TestResolveExitOnErrorKeepsOriginalRC pins that a ResolveExit failure
+// degrades to the original child rc instead of masking a real failure behind
+// a resolution failure.
 func TestResolveExitOnErrorKeepsOriginalRC(t *testing.T) {
 	d, err := driver.New("opencode")
 	if err != nil {
 		t.Fatalf("driver.New(opencode): %v", err)
 	}
 
-	// SynthesizeExit tolerates a missing log (see
-	// driver/opencode/exitsynth_test.go's TestSynthesizeExit_MissingFile_IsNonZero),
-	// so this exercises the fallback path indirectly: a missing-file result
-	// is still a non-error, non-zero synthesized code, which is exactly what
-	// this test wants to see replace the child rc.
+	// SynthesizeExit tolerates a missing log (see driver/opencode's
+	// TestSynthesizeExit_MissingFile_IsNonZero), so this reaches the fallback
+	// path indirectly: a missing file still yields a non-error, non-zero
+	// synthesized code that must replace the child rc.
 	got := resolveExit(d, 0, filepath.Join(t.TempDir(), "does-not-exist.log"))
 	if got == 0 {
 		t.Errorf("resolveExit = %d, want a non-zero synthesized exit for a missing/invalid log", got)

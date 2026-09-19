@@ -13,9 +13,8 @@ import (
 // fixture edit that changes the accumulation order can't flake an exact ==.
 const costEpsilon = 1e-9
 
-// TestExtractUsage_MissingLog verifies that ExtractUsage on a log path that
-// does not exist returns Found: false with no error, rather than propagating
-// os.ErrNotExist or panicking.
+// A missing log is not an error: ExtractUsage reports Found: false rather than
+// propagating os.ErrNotExist.
 func TestExtractUsage_MissingLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "nope.log")
 
@@ -28,8 +27,6 @@ func TestExtractUsage_MissingLog(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_EmptyLog verifies that ExtractUsage on a log file that
-// exists but contains no lines returns Found: false with no error.
 func TestExtractUsage_EmptyLog(t *testing.T) {
 	logPath := opencode.WriteLog(t)
 
@@ -42,9 +39,6 @@ func TestExtractUsage_EmptyLog(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_NoStepFinishEvents verifies that ExtractUsage returns
-// Found: false when a log contains events but no step_finish — e.g. only a
-// step_start and unrelated event types.
 func TestExtractUsage_NoStepFinishEvents(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,
@@ -60,9 +54,6 @@ func TestExtractUsage_NoStepFinishEvents(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_SkipsMalformedLines verifies that ExtractUsage skips
-// non-JSON and blank lines interleaved among valid step_start/step_finish
-// pairs, aggregating only the valid step_finish events.
 func TestExtractUsage_SkipsMalformedLines(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,
@@ -91,12 +82,9 @@ func TestExtractUsage_SkipsMalformedLines(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_AggregatesStepFinishEvents verifies that ExtractUsage sums
-// tokens, cost, and turn count across every step_finish event in an opencode
-// NDJSON run log, folding reasoning tokens into OutputTokens, and computes
-// wall-clock DurationMs from the first step_start to the last step_finish
-// timestamp. Per-model breakdown is out of scope for this slice (Models is
-// left empty).
+// Reasoning tokens fold into OutputTokens, and DurationMs spans the first
+// step_start to the last step_finish, which is why the wanted numbers here do
+// not match any single field of the log lines.
 func TestExtractUsage_AggregatesStepFinishEvents(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,
@@ -158,10 +146,8 @@ func TestExtractUsage_AggregatesStepFinishEvents(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_EventSpan verifies that ExtractUsage populates
-// EarliestEventMs/LatestEventMs/HasEventSpan from the same step_start and
-// step_finish timestamps DurationMs is already derived from, when at least
-// one step_start anchors the window.
+// The event span comes from the same timestamps DurationMs is derived from, so
+// the last assertion ties the two together rather than repeating the numbers.
 func TestExtractUsage_EventSpan(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,
@@ -191,11 +177,8 @@ func TestExtractUsage_EventSpan(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_EventSpan_NoStepStart verifies that ExtractUsage leaves
-// HasEventSpan false and EarliestEventMs/LatestEventMs at zero when the log
-// contains step_finish events but no preceding step_start — mirroring the
-// same "no anchor" condition DurationMs's own haveStart check guards
-// against.
+// A step_finish with no preceding step_start leaves the window unanchored, the
+// same condition DurationMs's own haveStart check guards against.
 func TestExtractUsage_EventSpan_NoStepStart(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":3,"output":120,"reasoning":0,"cache":{"write":800,"read":6400}},"cost":0.012}}`,
@@ -222,9 +205,6 @@ func TestExtractUsage_EventSpan_NoStepStart(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_EventSpan_NoStepFinish verifies that ExtractUsage returns
-// a zero-valued, unaffected Report (Found: false, HasEventSpan: false) for a
-// log with no step_finish events at all, even when a step_start is present.
 func TestExtractUsage_EventSpan_NoStepFinish(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,
@@ -248,33 +228,11 @@ func TestExtractUsage_EventSpan_NoStepFinish(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_Fixture locks the aggregate totals against a committed
-// synthetic opencode NDJSON run log: testdata/run-usage-sample.jsonl.
-//
-// The fixture is hand-authored (not a captured real run — this box has no
-// opencode CLI or network to record one) with 3 completed turns, each a
-// step_start/step_finish pair, plus an interspersed unrelated "text" event
-// between turn 1's finish and turn 2's start to prove non-step lines are
-// ignored. Turns 1 and 3 carry modelID "gpt-5"; turn 2 carries
-// "claude-sonnet-4", exercising both the multi-model sum and the
-// ascending-raw-id ordering ("claude-sonnet-4" sorts before "gpt-5").
-// Hand-computed totals from the fixture's round-number tokens:
-//
-//	turn 1 (gpt-5):            input=100 output=50 reasoning=10 cache{write=20 read=200} cost=0.01
-//	turn 2 (claude-sonnet-4):  input=200 output=100 reasoning=0  cache{write=30 read=300} cost=0.02
-//	turn 3 (gpt-5):            input=300 output=150 reasoning=5  cache{write=50 read=500} cost=0.03
-//
-// InputTokens sums to 600; OutputTokens folds reasoning into output per turn
-// (60+100+155) to 315; CacheReadInputTokens sums to 1000;
-// CacheCreationInputTokens (cache.write) sums to 100; TotalCostUSD sums to
-// 0.06; DurationMs is the last step_finish timestamp (4000) minus the first
-// step_start timestamp (1000), i.e. 3000; NumTurns is 3. SummedByModel is
-// now populated by breakdownByModel, summing each turn's per-call usage by
-// distinct messageID and keyed by exact modelID, with cache.write mapped to
-// the 5-minute bucket (opencode reports no TTL split): gpt-5 sums turns 1
-// and 3 (input 400, output 60+155=215, cache.read 700, cache.write5m 70);
-// claude-sonnet-4 is turn 2 alone (input 200, output 100, cache.read 300,
-// cache.write5m 30).
+// testdata/run-usage-sample.jsonl is hand-authored, not a captured run: this
+// box has no opencode CLI or network to record one. Round-number tokens keep
+// the wanted totals hand-computable, an unrelated "text" event proves non-step
+// lines are ignored, and the two model ids pin ascending-raw-id order. opencode
+// reports no cache TTL split, so every cache.write lands in the 5-minute bucket.
 func TestExtractUsage_Fixture(t *testing.T) {
 	report, err := opencode.ExtractUsage("testdata/run-usage-sample.jsonl")
 	if err != nil {
@@ -354,9 +312,9 @@ func TestExtractUsage_Fixture(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_OutputIsNotMainLoopOnly pins that opencode leaves the
-// issue #3213 flag false: its step_finish tallies are real whole-pass output
-// tokens, so nothing downstream may qualify them as main-loop-only.
+// opencode's step_finish tallies are real whole-pass output tokens, so it
+// leaves the issue #3213 flag false and nothing downstream may qualify them as
+// main-loop-only.
 func TestExtractUsage_OutputIsNotMainLoopOnly(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,

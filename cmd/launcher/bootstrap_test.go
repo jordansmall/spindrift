@@ -13,9 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// TestBootstrap_PropagatesValidateError asserts bootstrap runs the shared
-// config load+validate step and surfaces a validation error without
-// constructing a runner, forge client, or dispatch factory.
+// bootstrap surfaces a validation error without constructing a runner, forge
+// client, or dispatch factory.
 func TestBootstrap_PropagatesValidateError(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
@@ -29,13 +28,10 @@ func TestBootstrap_PropagatesValidateError(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ValidateError_WrapsErrConfigInvalid verifies bootstrap()'s
-// own return of a validate(c) failure now satisfies errors.Is(err,
-// errConfigInvalid) (issue #2568 slice 1), so a caller can distinguish a
-// config-validation failure from any other bootstrap failure -- without
-// changing what validate(c) itself returns (see
-// TestBootstrap_PropagatesValidateError, which still asserts the raw
-// REPO_SLUG error text unchanged).
+// bootstrap() wraps a validate(c) failure so errors.Is(err, errConfigInvalid)
+// holds (issue #2568 slice 1), letting a caller tell a config-validation
+// failure from any other bootstrap failure. validate(c) itself is unchanged:
+// TestBootstrap_PropagatesValidateError still asserts the raw REPO_SLUG text.
 func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
@@ -46,9 +42,8 @@ func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
 	}
 }
 
-// TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid verifies
 // bootstrap()'s wrapping of validate(seedConfig) preserves the Remedy text
-// (issue #2886). The driver-credentials row is used because its Remedy
+// (issue #2886). This picks the driver-credentials row because its Remedy
 // differs from its own Probe error text (see
 // TestValidate_RequiredKnobFailure_IncludesRemedy in main_test.go).
 func TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid(t *testing.T) {
@@ -68,23 +63,19 @@ func TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid(t *testing.T) {
 	if !errors.Is(err, errConfigInvalid) {
 		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
 	}
-	// The row's Remedy is a fixed string, so any config resolves the same
-	// text the env above makes bootstrap() fail on.
+	// The row's Remedy is a fixed string, so minimalValidConfig() resolves the
+	// same text the env above makes bootstrap() fail on.
 	wantRemedy := checkByName(t, launcherRequiredKnobChecks(minimalValidConfig()), "driver-credentials").Remedy
 	if !strings.Contains(err.Error(), "\nremedy: "+wantRemedy) {
 		t.Errorf("bootstrap() error = %q, want it to contain remedy line %q", err.Error(), wantRemedy)
 	}
 }
 
-// TestBootstrap_RetiredRegistryProxyCredentialEnv_NoUpstreamURL_WrapsErrConfigInvalid
-// proves the retirement gate (registry-proxy-routes row, checks.go) refuses
-// REGISTRY_PROXY_CREDENTIAL_ENV through bootstrap() unconditionally, even
-// with REGISTRY_PROXY_UPSTREAM_URL left unset -- the specific case a
-// pre-retirement carve-out (issue #2850) used to exempt, on the theory that a
-// leftover credential reference with no upstream URL never touched the
-// registry proxy at all. That carve-out no longer exists: any one of the
-// five retired knobs now aborts the launch on its own, regardless of what
-// else is set.
+// The retirement gate (registry-proxy-routes row, checks.go) refuses
+// REGISTRY_PROXY_CREDENTIAL_ENV unconditionally, even with
+// REGISTRY_PROXY_UPSTREAM_URL unset. That case was the carve-out issue #2850
+// used to exempt; it no longer exists, so any one of the five retired knobs
+// aborts the launch on its own.
 func TestBootstrap_RetiredRegistryProxyCredentialEnv_NoUpstreamURL_WrapsErrConfigInvalid(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -134,12 +125,9 @@ body
 	}
 }
 
-// TestBootstrap_RegistryProxyUpstreamURLAlone_WrapsErrConfigInvalid proves
-// the retirement gate (registry-proxy-routes row, checks.go) fires as a
-// launch-gate failure through bootstrap() when only REGISTRY_PROXY_UPSTREAM_URL
-// is set, before any Box runs, and that the error's migration stanza carries
-// the offending URL back verbatim -- path included -- rather than truncating
-// or rewriting it.
+// The retirement gate (registry-proxy-routes row, checks.go) fires as a
+// launch-gate failure through bootstrap() when only
+// REGISTRY_PROXY_UPSTREAM_URL is set, before any Box runs.
 func TestBootstrap_RegistryProxyUpstreamURLAlone_WrapsErrConfigInvalid(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
@@ -180,12 +168,10 @@ func TestBootstrap_RegistryProxyUpstreamURLAlone_WrapsErrConfigInvalid(t *testin
 	}
 }
 
-// multiEntryNetrc is a netrc file with several machine entries, used by
-// TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost
-// below to prove host-matching, not "first entry wins", is what resolves the
-// credential. The resolution-matrix-level netrc host-matching tests live in
-// internal/credresolver/resolver_test.go, which defines its own copy --
-// that package cannot import this one's test-only const.
+// The non-matching entries around the matching one prove that host-matching,
+// not "first entry wins", resolves the credential. internal/credresolver's own
+// tests define a separate copy because that package cannot import this
+// test-only const.
 const multiEntryNetrc = `machine other.example.com
 login someone
 password wrong-entry
@@ -199,13 +185,10 @@ login someone
 password also-wrong
 `
 
-// setMinimalLocalBootstrapEnv sets the env vars every registry-proxy-routes
-// bootstrap test below needs just to reach the registry-proxy resolution
-// step (ISSUE_TRACKER/CODE_FORGE=local, bwrap runtime, no real forge/tracker
-// network calls) -- factored out here since the six tests it serves add no
-// variation of their own on top of it, unlike the two retirement-gate tests
-// above (which each pin a distinct env shape and so read better spelled out
-// in full).
+// The least env a registry-proxy-routes test needs to reach the registry-proxy
+// resolution step: local tracker and forge, bwrap runtime, so no test makes a
+// real network call. The two retirement-gate tests above each pin a distinct
+// env shape and so spell theirs out in full instead.
 func setMinimalLocalBootstrapEnv(t *testing.T, repoPath string) {
 	t.Helper()
 	t.Setenv("REPO_SLUG", "owner/repo")
@@ -223,14 +206,10 @@ func setMinimalLocalBootstrapEnv(t *testing.T, repoPath string) {
 	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
 }
 
-// TestBootstrap_RegistryProxyRoutesFile_EnvCredential_ResolvesAndUnsets
-// proves buildRegistryProxyRoutes' routes-file branch runs a route's
-// credential through the same destructive credresolver.New(...).Resolve()
-// the scalar knobs' single credential always went through (issue #3139):
-// the resolved value lands on lc.config.registryProxyRoutes, and
-// the source env var is unset afterward -- the same property
-// TestResolveRegistryProxyCredential_FromEnvReturnsValueAndUnsets pins for
-// the scalar path, now exercised end to end through a routes file.
+// buildRegistryProxyRoutes' routes-file branch runs a route's credential
+// through the same destructive credresolver.New(...).Resolve() the retired
+// scalar knobs used (issue #3139): the value lands on
+// lc.config.registryProxyRoutes and the source env var is unset afterward.
 func TestBootstrap_RegistryProxyRoutesFile_EnvCredential_ResolvesAndUnsets(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -262,10 +241,9 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_ENV_CRED" }
 	}
 }
 
-// TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndUpstreamOrigin_Preserved
-// proves a route's auth-scheme and its declared upstream-origin survive
-// resolution onto lc.config.registryProxyRoutes unchanged, including the
-// trailing-slash normalization registryroutes.Parse already applies.
+// A route's auth-scheme and upstream-origin survive resolution onto
+// lc.config.registryProxyRoutes, keeping the trailing-slash normalization
+// registryroutes.Parse applies.
 func TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndUpstreamOrigin_Preserved(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -299,13 +277,10 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_BASIC_CRED" }
 	}
 }
 
-// TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost
-// proves the routes-file netrc path (the only surviving netrc credential
-// path once the scalar knobs are retired): the credential resolves by the
-// *route's own* match-host, not any scalar
-// REGISTRY_PROXY_UPSTREAM_URL (there is none here) -- multiEntryNetrc's
-// non-matching machine entry ahead of the matching one proves host-matching,
-// not "first entry wins", is what resolved it.
+// The routes file is the only surviving netrc credential path now the scalar
+// knobs are retired, and the credential resolves by the route's own
+// match-host. multiEntryNetrc puts a non-matching machine entry ahead of the
+// matching one, so "first entry wins" would fail this.
 func TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -334,19 +309,11 @@ credential = { netrc = "`+netrcPath+`" }
 	}
 }
 
-// TestBootstrap_RegistryProxyRoutesFile_CargoCredential_ResolvesByRegistryName
-// is the cargo-credentials-sourced sibling of
-// TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost
-// above: the route's credential is `{ cargo-credentials = ..., registry-name
-// = ... }`, so the credential that lands on lc.config.registryProxyRoutes is
-// the token of the "[registries.NAME]" table whose NAME matches the route's
-// registry-name, not the route's match-host. The credentials.toml file
-// carries a second, unrelated registry table ahead of the matching one to
-// prove name-matching -- not "first table wins" -- is what resolved the
-// credential, mirroring multiEntryNetrc's own multi-entry proof. The
-// expected token value ("cargos3cr3t") is deliberately distinct from the
-// netrc test's "s3cr3t" so a copy-paste mistake between the two tests would
-// be caught by a mismatched assertion instead of silently passing.
+// The cargo-credentials sibling of the netrc test above: the credential comes
+// from the [registries.NAME] table matching the route's registry-name, not its
+// match-host. An unrelated table sits ahead of the matching one so "first table
+// wins" would fail, and the token differs from the netrc test's so a
+// copy-paste between the two tests fails instead of passing silently.
 func TestBootstrap_RegistryProxyRoutesFile_CargoCredential_ResolvesByRegistryName(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -381,10 +348,9 @@ credential = { cargo-credentials = "`+credentialsPath+`", registry-name = "myreg
 	}
 }
 
-// TestBootstrap_NoRoutesFile_EmptyRoutes proves the registry proxy's
-// documented off state survives becoming a routes builder (issue #3139):
-// with REGISTRY_PROXY_ROUTES_FILE unset, bootstrap() succeeds with an empty
-// route table and never touches credresolver at all.
+// The registry proxy's documented off state survives becoming a routes builder
+// (issue #3139): with REGISTRY_PROXY_ROUTES_FILE unset, bootstrap() succeeds
+// with an empty route table and never touches credresolver.
 func TestBootstrap_NoRoutesFile_EmptyRoutes(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -402,21 +368,11 @@ func TestBootstrap_NoRoutesFile_EmptyRoutes(t *testing.T) {
 	}
 }
 
-// TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute
-// proves a route whose credential can't resolve (here, an unset env var)
-// aborts bootstrap() naming that route's match-host, wrapped in
-// errConfigInvalid the same way every other validate(c)-adjacent bootstrap
-// failure is. This fails at the registry-proxy-routes checks.go row's Peek
-// probe -- checks.go:307-321 reads and Parses the same file and Peeks the
-// same credential ahead of resolveRegistryRoutesFromFile's own
-// read/Parse/Resolve, so validate(c) (called first, inside bootstrap) always
-// rejects an unresolvable route before buildRegistryProxyRoutes ever runs.
-// The "route %q: %w" wrapping this test asserts on is checks.go's Peek
-// wrap, not resolveRegistryRoutesFromFile's "resolving credential for route
-// %q" Resolve wrap -- that wrap is covered directly by
-// TestResolveRegistryRoutesFromFile_ResolveFailure_NamesRoute in
-// registryroutesresolve_test.go, which calls resolveRegistryRoutesFromFile
-// without the checks-gate ahead of it.
+// An unresolvable route credential aborts bootstrap() naming that route's
+// match-host, wrapped in errConfigInvalid. It fails at the registry-proxy-routes
+// row's Peek probe in checks.go, which validate(c) runs before
+// buildRegistryProxyRoutes, so this asserts that Peek wrap, not
+// resolveRegistryRoutesFromFile's Resolve wrap (covered in its own test).
 func TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
@@ -443,8 +399,6 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_CRED_DOES_NOT_EXIST" }
 	}
 }
 
-// mustRunGit runs `git -C dir args...` via the package's own runGit helper,
-// failing t on error.
 func mustRunGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	if err := runGit(dir, args...); err != nil {
@@ -452,8 +406,8 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// mustSeedableCheckout creates a throwaway git checkout with a single commit
-// on "main", suitable as the pwd argument to seedAccumulationRepoIfHostMediated.
+// A throwaway checkout with one commit on "main", for use as the pwd argument
+// to seedAccumulationRepoIfHostMediated.
 func mustSeedableCheckout(t *testing.T) string {
 	t.Helper()
 	checkout := t.TempDir()
@@ -468,11 +422,10 @@ func mustSeedableCheckout(t *testing.T) string {
 	return checkout
 }
 
-// assertClonableAccumulationRepo verifies repoPath is not just present on
-// disk but actually clonable: HEAD resolves to a real ref (rather than the
-// dangling one git init --bare would leave behind, see SeedAccumulationRepo's
-// symbolic-ref step) and that ref has a commit, which is what the "cloning
-// and exploring" acceptance criterion turns on.
+// Presence on disk is not enough: HEAD must resolve to a real ref with a
+// commit, not the dangling ref git init --bare leaves behind (see
+// SeedAccumulationRepo's symbolic-ref step), because cloning is what the
+// acceptance criterion turns on.
 func assertClonableAccumulationRepo(t *testing.T, repoPath, baseBranch string) {
 	t.Helper()
 	if _, err := os.Stat(repoPath); err != nil {
@@ -490,12 +443,10 @@ func assertClonableAccumulationRepo(t *testing.T, repoPath, baseBranch string) {
 	}
 }
 
-// TestSeedAccumulationRepoIfHostMediated_Local_SeedsFromPwd verifies
-// seedAccumulationRepoIfHostMediated wires local.SeedAccumulationRepo (ADR 0033)
-// against config's already-resolved codeForgeAccumulationRepoDir and
-// baseBranch, seeding the bare Accumulation repo from pwd's checkout (issue
-// #1726: seeding must happen before any Box runs, since a defaulted-but-
-// nonexistent path makes the /repo mount silently skip).
+// seedAccumulationRepoIfHostMediated wires local.SeedAccumulationRepo (ADR
+// 0033) against the config's resolved codeForgeAccumulationRepoDir and
+// baseBranch. Seeding must happen before any Box runs (issue #1726): a
+// defaulted but nonexistent path makes the /repo mount silently skip.
 func TestSeedAccumulationRepoIfHostMediated_Local_SeedsFromPwd(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 
@@ -517,11 +468,9 @@ func TestSeedAccumulationRepoIfHostMediated_Local_SeedsFromPwd(t *testing.T) {
 	assertClonableAccumulationRepo(t, repoPath, "main")
 }
 
-// TestSeedAccumulationRepoIfHostMediated_NonLocal_NoOp verifies
-// seedAccumulationRepoIfHostMediated does nothing for github/git (issue #1726
-// acceptance criterion: "no seeding occurs" for those forges) — passing a
-// nonexistent pwd here would fail SeedAccumulationRepo's git push if it
-// were invoked, so a nil error proves the no-op.
+// No seeding occurs for github/git (issue #1726). The nonexistent pwd would
+// fail SeedAccumulationRepo's git push if it were invoked, so a nil error
+// proves the no-op.
 func TestSeedAccumulationRepoIfHostMediated_NonLocal_NoOp(t *testing.T) {
 	c := baseConfig()
 	c.codeForge = "github"
@@ -535,14 +484,10 @@ func TestSeedAccumulationRepoIfHostMediated_NonLocal_NoOp(t *testing.T) {
 	}
 }
 
-// TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd verifies
-// seedAccumulationRepoIfHostMediated now seeds for the research dispatch kind under
-// CODE_FORGE=local, as long as c.selfContained is false (issue #2439):
-// non-self-contained research still clones and explores the repo in-box
-// (agent/entrypoint.sh's clone_repo() under CODE_FORGE=local), so it needs
-// /repo mounted just like work does. Only the no-repo selfContained
-// sub-mode stays a no-op (see
-// TestSeedAccumulationRepoIfHostMediated_ResearchSelfContained_NoOp).
+// The research dispatch kind seeds too under CODE_FORGE=local while
+// c.selfContained is false (issue #2439): research still clones and explores
+// the repo in-box via agent/entrypoint.sh's clone_repo(), so it needs /repo
+// mounted like work does. Only the selfContained sub-mode stays a no-op.
 func TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 
@@ -565,15 +510,11 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd(t *testing
 	assertClonableAccumulationRepo(t, repoPath, "main")
 }
 
-// TestSeedAccumulationRepoIfHostMediated_ResearchSelfContained_NoOp verifies
-// seedAccumulationRepoIfHostMediated skips seeding for the research dispatch kind's
-// self-contained sub-mode (c.selfContained = true) even under
-// CODE_FORGE=local: self-contained research never mounts /repo or clones
-// anything (it posts one verdict comment and stops), so seeding would be
-// pure waste and a needless new failure surface (a missing baseBranch in
-// pwd) for a run that never uses the repo it seeded. Passing a nonexistent
-// pwd would fail SeedAccumulationRepo's git push if it were invoked, so a
-// nil error proves the no-op.
+// Self-contained research skips seeding even under CODE_FORGE=local: it never
+// mounts /repo or clones anything, so seeding would only add a way to fail (a
+// missing baseBranch in pwd) for a run that never uses the repo. The
+// nonexistent pwd would fail SeedAccumulationRepo's git push if it were
+// invoked, so a nil error proves the no-op.
 func TestSeedAccumulationRepoIfHostMediated_ResearchSelfContained_NoOp(t *testing.T) {
 	c := baseConfig()
 	c.codeForge = "local"
@@ -591,14 +532,11 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchSelfContained_NoOp(t *testin
 	}
 }
 
-// TestSeedAccumulationRepoIfHostMediated_ConcurrentCallSameRepo_FailsUntilReleased
-// is the core regression test for issue #2441: a second, independent
-// seedAccumulationRepoIfHostMediated call against the same repoPath — simulating a
-// second `spindrift` process (e.g. a concurrent research and dispatch run)
-// — must fail while the first call's returned lock is still held, rather
-// than silently racing SeedAccumulationRepo's seed+mount window. Once the
-// first lock is released, a third call against the same repoPath succeeds
-// again, proving the lock is per-run rather than a permanent wedge.
+// The core regression test for issue #2441: a second call against the same
+// repoPath, standing in for a concurrent spindrift process, must fail while
+// the first call's lock is held rather than race SeedAccumulationRepo's
+// seed+mount window. A third call after release succeeds, proving the lock is
+// per-run and not permanent.
 func TestSeedAccumulationRepoIfHostMediated_ConcurrentCallSameRepo_FailsUntilReleased(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
@@ -637,16 +575,11 @@ func TestSeedAccumulationRepoIfHostMediated_ConcurrentCallSameRepo_FailsUntilRel
 	t.Cleanup(func() { _ = thirdLock.Release() })
 }
 
-// TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock is the regression
-// test for the seed-failure path's `_ = lock.Release()` at
-// seedAccumulationRepoIfHostMediated (bootstrap.go): a checkout with no commit on
-// baseBranch makes SeedAccumulationRepo's push fail after the lock is
-// already held, and that failure must release the lock rather than leak it
-// — a one-call regression there would wedge the repo for the rest of the
-// process with nothing catching it. Checking the returned lock is nil isn't
-// enough to prove that (a caller could nil it out without releasing), so
-// this proves the underlying flock is actually gone by reacquiring it
-// directly against the same repoPath.
+// Regression test for the seed-failure path's `_ = lock.Release()` in
+// bootstrap.go: a push that fails after the lock is held must release it, or
+// the repo stays wedged for the rest of the process. A nil returned lock does
+// not prove that (a caller could nil it out without releasing), so this
+// reacquires the flock directly against the same repoPath.
 func TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock(t *testing.T) {
 	checkout := t.TempDir()
 	mustRunGit(t, checkout, "init", "-b", "main")
@@ -674,19 +607,11 @@ func TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock(t *testing.
 	t.Cleanup(func() { _ = reacquired.Release() })
 }
 
-// TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock is the
-// regression test for bootstrap's own early-return window (issue #2441):
-// once seedAccumulationRepoIfHostMediated hands back a held lock, every remaining
-// step before launchContext is built can still fail (readiness, the
-// read-only gates), and each of those bare `return nil, err` sites used to
-// leak the lock rather than release it — only process exit dropped the
-// flock. RUNTIME=bwrap keeps r.EnsureReady() a trivial no-op (bwrapAdapter
-// never builds or shells out), so BOX_FORGE_AND_ISSUE_ACCESS=read-only
-// against the default (github) issue tracker deterministically fails
-// checkReadOnlyCapabilityGate instead — offline, past accumLock's
-// acquisition, exactly the window in question. Proves the fix the same way
-// as the seed-failure test above: by reacquiring the lock directly, rather
-// than trusting a nil return alone.
+// Regression test for bootstrap's early-return window (issue #2441): every
+// step after seedAccumulationRepoIfHostMediated hands back a held lock used to
+// leak it on `return nil, err`. RUNTIME=bwrap keeps EnsureReady() a no-op, so
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only against the github tracker fails
+// checkReadOnlyCapabilityGate offline, exactly inside that window.
 func TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
@@ -720,17 +645,11 @@ func TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock(t *testing.T) {
 	t.Cleanup(func() { _ = reacquired.Release() })
 }
 
-// TestBootstrap_Success_HoldsAccumLockUntilCleanup is the regression test for
-// the fix's actual load-bearing property (issue #2441): the accum lock must
-// stay held across a *successful* bootstrap() return — released only when
-// the caller later invokes lc.cleanup() — not just on the early-error paths
-// TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock and
-// TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock already cover. A
-// mutation that deletes cleanup's `accumLock.Release()` call leaves every
-// other test green (nothing else calls lc.cleanup() and then reacquires),
-// silently reopening #2441; this test drives bootstrap all the way to a
-// successful launchContext, proves the lock is still contended before
-// cleanup runs, then proves it's free again after.
+// The load-bearing half of issue #2441: the accum lock stays held across a
+// successful bootstrap() return and is released only by lc.cleanup(). Deleting
+// cleanup's accumLock.Release() leaves every other test green, since nothing
+// else calls lc.cleanup() and then reacquires, so this checks contention
+// before cleanup and a free lock after.
 func TestBootstrap_Success_HoldsAccumLockUntilCleanup(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -772,16 +691,12 @@ body
 		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
 	}
 
-	// Before cleanup: the lock must still be held, proving it survives past
-	// a successful bootstrap() return rather than being released somewhere
-	// on the success path before launchContext is even handed back.
 	if _, err := local.AcquireAccumulationLock(repoPath); err == nil {
 		t.Error("AcquireAccumulationLock before lc.cleanup() = nil error, want contention (accum lock should still be held after a successful bootstrap())")
 	}
 
 	lc.cleanup()
 
-	// After cleanup: the lock must now be free.
 	reacquired, err := local.AcquireAccumulationLock(repoPath)
 	if err != nil {
 		t.Fatalf("AcquireAccumulationLock after lc.cleanup(): %v, want the lock to have been released", err)
@@ -789,16 +704,10 @@ body
 	t.Cleanup(func() { _ = reacquired.Release() })
 }
 
-// pathWithoutPasta returns a PATH value that still resolves "git" (needed by
-// bootstrap's own accumulation-repo seeding, which shells out to it before
-// ever reaching checkBwrapPastaGate) and a stub "bwrap" (needed by
-// validate(c)'s own doctor.RuntimeCheck(c.runtime) LookPath probe, which
-// runs even earlier — see stubExecutableOnPath's doc comment for why any
-// executable file satisfies it) — but deliberately excludes pasta, so
-// checkBwrapPastaGate's exec.LookPath("pasta") call fails deterministically
-// regardless of whether pasta happens to be installed elsewhere on the real
-// test-runner's ambient PATH (this sandbox's own devShell has none, but a
-// future CI image might).
+// A PATH that still resolves "git" (bootstrap's seeding shells out to it) and
+// a stub "bwrap" (validate(c)'s doctor.RuntimeCheck LookPath probe runs even
+// earlier), but excludes pasta, so checkBwrapPastaGate's LookPath("pasta")
+// fails whether or not the real test runner has pasta installed.
 func pathWithoutPasta(t *testing.T) string {
 	t.Helper()
 	git, err := exec.LookPath("git")
@@ -813,18 +722,11 @@ func pathWithoutPasta(t *testing.T) string {
 	return bwrapStubDir + string(os.PathListSeparator) + filepath.Dir(git)
 }
 
-// TestBootstrap_BwrapDefaultNetworkModeMissingPasta_BlocksLaunch is Finding
-// B's wiring test (issue #2666 review): checkBwrapPastaGate is unit-tested
-// directly in bwrap_pasta_gate_test.go, but nothing previously asserted it
-// is actually reached from bootstrap()'s real startup path — every existing
-// RUNNER_KIND=bwrap bootstrap test stubs pasta onto PATH
-// (stubExecutableOnPath(t, "pasta")), so a bootstrap() that silently
-// stopped calling checkBwrapPastaGate at all would leave every one of them
-// green. This is the mirror image: RUNNER_KIND=bwrap, NETWORK_MODE left
-// unset (the isolate-by-default path, same as
-// TestBootstrap_Success_HoldsAccumLockUntilCleanup), pasta deliberately
-// absent from PATH, asserting bootstrap() itself — not checkBwrapPastaGate
-// in isolation — returns an error naming pasta and PATH.
+// The wiring test for issue #2666: bwrap_pasta_gate_test.go covers
+// checkBwrapPastaGate directly, but every other RUNNER_KIND=bwrap bootstrap
+// test stubs pasta onto PATH, so a bootstrap() that stopped calling the gate
+// would leave them all green. Here pasta is absent, and bootstrap() itself
+// must return an error naming pasta and PATH.
 func TestBootstrap_BwrapDefaultNetworkModeMissingPasta_BlocksLaunch(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
@@ -856,9 +758,9 @@ body
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
-	// Deliberately the opposite of every other RUNNER_KIND=bwrap test in this
-	// file: no stubExecutableOnPath(t, "pasta") — PATH is pinned to just a
-	// stub bwrap and git's own directory, so pasta cannot resolve.
+	// No stubExecutableOnPath(t, "pasta") here, unlike every other
+	// RUNNER_KIND=bwrap test in this file: PATH holds only a stub bwrap and
+	// git's directory, so pasta cannot resolve.
 	t.Setenv("PATH", pathWithoutPasta(t))
 
 	lc, err := bootstrap(true, dispatchKindWork, false)
@@ -876,18 +778,11 @@ body
 	}
 }
 
-// stubExecutableOnPath creates an executable script named name in a
-// throwaway dir and prepends that dir to PATH, so runner.ValidateRuntime's
-// exec.LookPath(name) succeeds without the real CLI being installed —
-// ValidateRuntime only probes presence via LookPath, it never runs the
-// binary, so any executable file satisfies it. The script exits nonzero for
-// every invocation, mimicking a real OCI CLI failing `image inspect` against
-// a nonexistent image: the correct runner branch never invokes the stub (the
-// bwrap branch's readiness checks are unconditional no-ops), but a runner
-// selection wrongly routed to the OCI branch instead shells out to it,
-// surfacing as a readiness failure instead of silently reporting "ready" —
-// this is what lets a caller discriminate the correct branch from a wrong
-// one rather than passing either way.
+// runner.ValidateRuntime only probes presence with exec.LookPath, so any
+// executable file satisfies it. The stub exits nonzero on every invocation,
+// mimicking an OCI CLI failing `image inspect` against a missing image: the
+// bwrap branch never runs it, so a selection wrongly routed to the OCI branch
+// shows up as a readiness failure instead of passing either way.
 func stubExecutableOnPath(t *testing.T, name string) {
 	t.Helper()
 	bin := t.TempDir()
@@ -898,17 +793,11 @@ func stubExecutableOnPath(t *testing.T, name string) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime proves runner
-// selection keys off RUNNER_KIND, not a runtime-name comparison (issue
-// #2538): RUNTIME is set to "podman" — a real OCI runtime name, which the
-// old `c.runtime == "bwrap"` check would have read as "select OCI" — but
-// RUNNER_KIND=bwrap must still route to the bwrap adapter. bwrapAdapter's
-// IsReady() is an unconditional no-op (never shells out), so a full,
-// otherwise-successful bootstrap() proves the bwrap branch was taken; had
-// selection still keyed off RUNTIME, this would instead try to run `podman
-// image inspect` and fail. A stub "podman" is put on PATH purely to satisfy
-// runner.ValidateRuntime's upfront CLI-presence check (podman itself is
-// never invoked once the bwrap branch is correctly selected).
+// Runner selection keys off RUNNER_KIND, not a runtime-name comparison (issue
+// #2538). RUNTIME=podman is what the old `c.runtime == "bwrap"` check read as
+// "select OCI". bwrapAdapter's IsReady() never shells out, so a successful
+// bootstrap() proves the bwrap branch was taken; the old comparison would run
+// `podman image inspect` and fail. The stub podman only satisfies LookPath.
 func TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime(t *testing.T) {
 	stubExecutableOnPath(t, "podman")
 	stubExecutableOnPath(t, "pasta")
@@ -953,22 +842,11 @@ body
 	t.Cleanup(lc.cleanup)
 }
 
-// TestBootstrap_RunnerKindOCI_OverridesMatchingRuntime is
-// TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime's mirror: RUNTIME
-// is set to "bwrap" — the literal value the old comparison read as "select
-// bwrap" — but RUNNER_KIND=oci must still route to the OCI adapter.
-// ociAdapter.IsReady() shells out to `$RUNTIME image inspect`; "bwrap" is
-// not an OCI CLI, so that invocation fails and bootstrap surfaces an error
-// instead of the trivial bwrap no-op success the old runtime-name
-// comparison would have produced. stubExecutableOnPath puts a stub "bwrap"
-// on PATH so ValidateRuntime's upfront LookPath("bwrap") check (keyed off
-// RUNTIME, not RUNNER_KIND) succeeds on a host without the real bwrap CLI
-// installed — without the stub, that LookPath failure would short-circuit
-// before runner selection ever runs, and this test would pass vacuously
-// regardless of which branch selection took. Asserting the OCI adapter's
-// own "image absent" readiness message, rather than merely err != nil, is
-// what then proves the OCI branch — not ValidateRuntime — produced this
-// failure.
+// The mirror of the test above: RUNNER_KIND=oci routes to the OCI adapter even
+// with RUNTIME=bwrap. The stub bwrap keeps ValidateRuntime's LookPath (keyed
+// off RUNTIME) from short-circuiting before selection runs, which would make
+// this pass whichever branch was taken. Asserting the adapter's own "image
+// absent" message, not just err != nil, is what pins the OCI branch.
 func TestBootstrap_RunnerKindOCI_OverridesMatchingRuntime(t *testing.T) {
 	stubExecutableOnPath(t, "bwrap")
 	checkout := mustSeedableCheckout(t)
@@ -1011,14 +889,11 @@ body
 	}
 }
 
-// TestResearchLaunchStack_WiresResearchLabelsAndSettle verifies
-// researchLaunchStack (cmdConsole's research-kind mirror of bootstrap's own
-// work-kind wiring, issue #1708) returns a tracker carrying the fixed
-// agent-research label family and a ResearchSettle, not the work Settle —
-// built from the same newIssueTracker/newDispatchFactory/newSettle helpers
-// bootstrap itself uses, just with dispatchKindResearch applied. Uses the
-// local tracker (like TestNewIssueTracker_ResearchKind_WiresVerdictLabels)
-// so the label write is observable from disk with no network dependency.
+// researchLaunchStack is cmdConsole's research-kind mirror of bootstrap's
+// work-kind wiring (issue #1708): the same newIssueTracker/newDispatchFactory/
+// newSettle helpers with dispatchKindResearch applied, so it must return the
+// agent-research label family and a ResearchSettle. The local tracker makes
+// the label write observable from disk with no network dependency.
 func TestResearchLaunchStack_WiresResearchLabelsAndSettle(t *testing.T) {
 	issuesDir := t.TempDir()
 	issueFile := `---

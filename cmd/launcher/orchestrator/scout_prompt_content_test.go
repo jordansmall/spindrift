@@ -2,20 +2,11 @@ package main
 
 import "testing"
 
-// TestScoutPromptOperativeContract is a content-invariant guard (issue
-// #3225, extended by #3449) for scout-prompt.md's output contract: the four
-// section headings, the write-to-disk rule, the line budget, the
-// do-not-implement and no-narration rules, and the citation obligations
-// each section states. Issue #3225 cuts the Map section's rationale
-// sentence for the citation obligation ("The reader verifies from these
-// excerpts instead of re-reading the tree, so a claim without one costs
-// more than it saves") while keeping the obligation itself; pinning each
-// clause here first means that cut can't silently take a rule with it.
-// Issue #3449 moves the brief from the scout's return message onto disk: the
-// scout now writes /tmp/brief.md itself, appends cited excerpts straight
-// from their source files rather than retyping them, verifies each excerpt
-// before returning, and returns a short pointer instead of the brief's
-// contents.
+// TestScoutPromptOperativeContract pins scout-prompt.md's output contract
+// clause by clause (issue #3225, extended by #3449). Issue #3225 cuts the Map
+// section's rationale sentence while keeping the citation obligation itself,
+// and #3449 moves the brief from the return message onto disk, so pinning each
+// clause here first stops either edit from silently taking a rule with it.
 func TestScoutPromptOperativeContract(t *testing.T) {
 	assertPromptClauses(t, "scout-prompt.md", []promptClause{
 		{

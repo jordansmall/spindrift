@@ -13,8 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// TestWriteGithubOutput_AppendsKeyValueLine asserts writeGithubOutput appends
-// a "key=value\n" line to the file named by GITHUB_OUTPUT.
 func TestWriteGithubOutput_AppendsKeyValueLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "output")
@@ -34,9 +32,8 @@ func TestWriteGithubOutput_AppendsKeyValueLine(t *testing.T) {
 	}
 }
 
-// TestWriteGithubOutput_SanitizesNewlines asserts writeGithubOutput replaces
-// embedded newlines in value with spaces so a multi-line error text can't
-// break the single-line key=value GITHUB_OUTPUT format.
+// A newline in the value would break GITHUB_OUTPUT's single-line key=value
+// format and let a multi-line error text inject a second key.
 func TestWriteGithubOutput_SanitizesNewlines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "output")
@@ -56,8 +53,6 @@ func TestWriteGithubOutput_SanitizesNewlines(t *testing.T) {
 	}
 }
 
-// TestWriteGithubOutput_NoopWhenUnset asserts writeGithubOutput is a no-op
-// returning nil when GITHUB_OUTPUT is unset/empty.
 func TestWriteGithubOutput_NoopWhenUnset(t *testing.T) {
 	t.Setenv("GITHUB_OUTPUT", "")
 
@@ -66,15 +61,13 @@ func TestWriteGithubOutput_NoopWhenUnset(t *testing.T) {
 	}
 }
 
-// TestCmdRecover_RunsCleanupOnEveryExit asserts cmdRecover runs the launch
-// context's cleanup hook (driver-cache cleanup) even on the error exit path
-// -- os.Exit no longer lives inside cmdRecover, so this now has to be an
-// explicit call/defer rather than relying on process exit to skip it.
+// os.Exit no longer lives inside cmdRecover, so the driver-cache cleanup has
+// to be an explicit call or defer rather than something process exit skips.
 func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
-	// No PR registered for the branch -- recoverByNumber returns an error.
+	// No PR is registered for the branch, so recoverByNumber returns an error.
 	dir := tempLogDir(t)
 	called := false
 	lc := &launchContext{
@@ -97,9 +90,6 @@ func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 	}
 }
 
-// TestCmdRecover_WritesReasonToGithubOutput asserts cmdRecover writes the
-// recoverByNumber error text to the GITHUB_OUTPUT file under the
-// "recover-reason" key on the no-open-PR error exit path.
 func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "output")
 	t.Setenv("GITHUB_OUTPUT", outputPath)
@@ -107,7 +97,7 @@ func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
-	// No PR registered for the branch -- recoverByNumber returns an error.
+	// No PR is registered for the branch, so recoverByNumber returns an error.
 	dir := tempLogDir(t)
 	lc := &launchContext{
 		config:       c,
@@ -135,12 +125,9 @@ func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 	}
 }
 
-// TestCmdRecover_AdoptedPRSucceeds asserts cmdRecover no longer treats a
-// discovered PR as a draft-PR rejection (issue #2408): recoverByNumber
-// routes any stranded PR through the same adopt-and-gate path, so with
-// green checks it adopts, gates, and merges the PR. cmdRecover must
-// therefore return 0 and never write a "draft PR" rejection reason to
-// GITHUB_OUTPUT.
+// Issue #2408: cmdRecover used to reject a discovered PR as a draft. Now
+// recoverByNumber routes any stranded PR through the adopt-and-gate path, so
+// with green checks it adopts, gates, and merges.
 func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "output")
 	t.Setenv("GITHUB_OUTPUT", outputPath)
@@ -152,8 +139,8 @@ func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
-	// A leading PENDING proves this run's own checks registered — issue
-	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
+	// A leading PENDING proves this run's own checks registered. Issue #1652's
+	// adopted-path gate does not trust an immediate SUCCESS alone.
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
@@ -181,9 +168,6 @@ func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 	}
 }
 
-// TestCmdDispatchSelective_RunsCleanupOnEveryExit asserts cmdDispatchSelective
-// runs the launch context's cleanup hook on the error exit path (unknown
-// issue number).
 func TestCmdDispatchSelective_RunsCleanupOnEveryExit(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
@@ -209,8 +193,6 @@ func TestCmdDispatchSelective_RunsCleanupOnEveryExit(t *testing.T) {
 	}
 }
 
-// TestCmdDispatch_RunsCleanupOnEveryExit asserts cmdDispatch runs the launch
-// context's cleanup hook on the errQueueEmpty exit path.
 func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -237,12 +219,11 @@ func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 	}
 }
 
-// TestCmdConsole_RunsCleanupOnEveryExit asserts cmdConsole runs the launch
-// context's cleanup hook, and actually reaches console.Run (not just
-// bootstrap routing) -- a scripted "q" keypress on stdin quits the real
-// Bubble Tea program immediately since the fake launchContext's Queue starts
-// empty (tea.go's "q" case sends QuitMsg directly unless launch != nil and
-// LiveIssues() is non-empty).
+// The scripted "q" on stdin quits the real Bubble Tea program at once because
+// the fake launchContext's queue starts empty, so this reaches console.Run
+// rather than stopping at bootstrap routing. See tea.go's "q" case, which
+// sends QuitMsg directly unless launch is non-nil and LiveIssues() is
+// non-empty.
 func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
@@ -254,8 +235,8 @@ func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		// runner.NewFake(), not nil like the sibling tests: Init's
-		// orphanDetectCmd calls Factory.OrphanedIssues -> f.runner.ListRunning
-		// unconditionally on startup, which panics on a nil runner.
+		// orphanDetectCmd calls Factory.OrphanedIssues, which calls
+		// f.runner.ListRunning on startup and panics on a nil runner.
 		factory: testFactory(t, dir, runner.NewFake()),
 		settle:  settle.NewFake(),
 		cleanup: func() { called = true },
@@ -274,11 +255,9 @@ func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 	}
 }
 
-// TestCmdConsole_SetsHeartbeatOutToDiscard verifies cmdConsole routes its
-// factory's heartbeat sink to io.Discard before console.Run starts (issue
-// #1583): Bubble Tea owns the terminal in alt-screen/raw mode, so a
-// dispatch's heartbeat writer echoing to os.Stdout there would stairstep
-// down the screen instead of returning to column 0.
+// Issue #1583: Bubble Tea owns the terminal in alt-screen raw mode, so a
+// dispatch's heartbeat writer echoing to os.Stdout stairsteps down the screen
+// instead of returning to column 0.
 func TestCmdConsole_SetsHeartbeatOutToDiscard(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()

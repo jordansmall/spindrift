@@ -9,11 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 )
 
-// TestActivityFeed_ReplaysLatestPassLog_ReturnsOrderedDistinctLines verifies
 // ActivityFeed replays the Dispatch's most-recent pass log through drv's
-// heartbeat parser -- the same machinery RunningHeartbeat uses -- and returns
-// the whole ordered sequence of emitted status lines, not just the last one
-// (#1501 AC1).
+// heartbeat parser, the same machinery RunningHeartbeat uses, and returns the
+// whole ordered sequence of status lines, not just the last one (#1501 AC1).
 func TestActivityFeed_ReplaysLatestPassLog_ReturnsOrderedDistinctLines(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -53,11 +51,10 @@ func TestActivityFeed_ReplaysLatestPassLog_ReturnsOrderedDistinctLines(t *testin
 	}
 }
 
-// TestSidebarActivityCache_UnchangedStat_SkipsReparse verifies a second
-// Refresh call against a pass log whose size matches the cached offset
-// returns the cached feed rather than re-deriving it — syncQueue's per-Msg
-// refresh runs on every tea.Msg, so most calls see the same on-disk log as
-// last time (issue #1502, mirroring HeartbeatCache's own skip, issue #731).
+// A second Refresh against a pass log whose size matches the cached offset
+// returns the cached feed instead of re-deriving it. syncQueue refreshes on
+// every tea.Msg, so most calls see the same on-disk log as last time (issue
+// #1502, mirroring HeartbeatCache's own skip, issue #731).
 func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -100,9 +97,8 @@ func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 	}
 }
 
-// TestSidebarActivityCache_ChangedStat_Reparses verifies a call whose latest
-// pass log grew since the cached call reparses and returns the new content,
-// not the stale cached feed (issue #1502).
+// A call whose latest pass log grew since the cached call reparses and returns
+// the new content, not the stale cached feed (issue #1502).
 func TestSidebarActivityCache_ChangedStat_Reparses(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -148,12 +144,10 @@ func TestSidebarActivityCache_ChangedStat_Reparses(t *testing.T) {
 	}
 }
 
-// TestSidebarActivityCache_NumberChange_Reparses verifies switching which
-// Dispatch is cached (the operator selected a different running Dispatch)
-// invalidates the cache even though the new Dispatch's own log stat has
-// never been seen before — Refresh's cache-hit check compares Number too,
-// not just path and offset, so a stale entry never leaks a wrong Dispatch's
-// feed onto a freshly selected one (issue #1502).
+// Refresh's cache-hit check compares Number as well as path and offset, so
+// selecting a different Dispatch invalidates the cache even though the new
+// Dispatch's own log stat has never been seen before. A stale entry must never
+// leak one Dispatch's feed onto a freshly selected one (issue #1502).
 func TestSidebarActivityCache_NumberChange_Reparses(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -199,14 +193,11 @@ func TestSidebarActivityCache_NumberChange_Reparses(t *testing.T) {
 	}
 }
 
-// TestSidebarActivityCache_DuplicateNarrationAcrossIncrementalBoundary_CollapsesToOneLine
-// verifies that when the second half of a pair of consecutive identical
-// narration events lands in a later append than the first (a Refresh call
-// falls between them), the incremental cache still collapses them to one
-// feed entry — the same collapse ActivityFeed's own whole-file parse gives
-// two back-to-back duplicates (#1501 AC1) — proving the append-tail switch
-// doesn't leak a duplicate line at the boundary between two increments
-// (issue #1749 AC3 parity).
+// When the second of two consecutive identical narration events lands in a
+// later append than the first, the incremental cache still collapses them to
+// one feed entry, the same collapse ActivityFeed's whole-file parse gives two
+// back-to-back duplicates (#1501 AC1). The append-tail switch must leak no
+// duplicate line at the boundary between increments (issue #1749 AC3 parity).
 func TestSidebarActivityCache_DuplicateNarrationAcrossIncrementalBoundary_CollapsesToOneLine(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -251,11 +242,10 @@ func TestSidebarActivityCache_DuplicateNarrationAcrossIncrementalBoundary_Collap
 	}
 }
 
-// TestSidebarActivityCache_FileShorterThanOffset_ResetsAndReparses verifies
-// that when a watched log's size falls below the cache's stored offset (the
-// file was truncated or rotated out from under a running Dispatch), Refresh
-// resets and starts a fresh parser at 0 instead of seeking past the file's
-// new end and mis-parsing — the sidebar feed's own analogue of
+// When a watched log's size falls below the cache's stored offset (truncated
+// or rotated out from under a running Dispatch), Refresh starts a fresh parser
+// at 0 instead of seeking past the file's new end and mis-parsing. This is the
+// sidebar feed's analogue of
 // TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses.
 func TestSidebarActivityCache_FileShorterThanOffset_ResetsAndReparses(t *testing.T) {
 	dir := t.TempDir()
@@ -302,13 +292,11 @@ func TestSidebarActivityCache_FileShorterThanOffset_ResetsAndReparses(t *testing
 	}
 }
 
-// TestSidebarActivityCache_IncrementalAppend_FeedsOnlyAppendedBytes verifies
-// three successive Refresh calls against the same growing pass log each hand
-// the driver's heartbeat parser only the bytes appended since the last call,
-// not the whole file again -- the sidebar feed's own analogue of
-// TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes, now that
-// this ticket points the sidebar's Activity feed at the same append-tail
-// parser RunningHeartbeat already uses (issue #1749).
+// Three successive Refresh calls against the same growing pass log each hand
+// the heartbeat parser only the appended bytes, not the whole file again, now
+// that the Activity feed uses the same append-tail parser RunningHeartbeat
+// uses (issue #1749). It mirrors
+// TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes.
 func TestSidebarActivityCache_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -346,10 +334,10 @@ func TestSidebarActivityCache_IncrementalAppend_FeedsOnlyAppendedBytes(t *testin
 	}
 }
 
-// TestSidebarActivityCache_NoLogsOnDisk_ReturnsFalse verifies Refresh reports
-// ok=false when number has no pass log on disk yet — RunningHeartbeat's own
-// no-log contract, so syncQueue's caller can skip sending a refresh rather
-// than clobbering an already-loaded feed with an empty one (issue #1502).
+// Refresh reports ok=false when number has no pass log on disk yet, matching
+// RunningHeartbeat's no-log contract, so syncQueue's caller can skip sending a
+// refresh rather than clobbering an already-loaded feed with an empty one
+// (issue #1502).
 func TestSidebarActivityCache_NoLogsOnDisk_ReturnsFalse(t *testing.T) {
 	dir := t.TempDir()
 	drv, err := driver.New("")
@@ -364,11 +352,9 @@ func TestSidebarActivityCache_NoLogsOnDisk_ReturnsFalse(t *testing.T) {
 	}
 }
 
-// TestActivityFeed_ConsecutiveIdenticalNarration_CollapsesToOneLine verifies
-// two events that narrate the exact same trimmed text back-to-back (the
-// heartbeat writer emits one line per parsed event, not per distinct step)
-// collapse to a single feed entry, so the feed reads as one line per
-// distinct step rather than a literal per-event replay (#1501 AC1).
+// The heartbeat writer emits one line per parsed event, not per distinct step,
+// so two events narrating the same trimmed text back-to-back collapse to a
+// single feed entry rather than a literal per-event replay (#1501 AC1).
 func TestActivityFeed_ConsecutiveIdenticalNarration_CollapsesToOneLine(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -401,9 +387,8 @@ func TestActivityFeed_ConsecutiveIdenticalNarration_CollapsesToOneLine(t *testin
 	}
 }
 
-// TestActivityFeed_NoLogsOnDisk_ReturnsEmpty verifies a pick that hasn't
-// written any log yet (claimed but not yet launched) renders no Activity
-// feed rather than erroring (#1501 AC1).
+// A pick that has written no log yet (claimed but not yet launched) renders no
+// Activity feed rather than erroring (#1501 AC1).
 func TestActivityFeed_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	drv, err := driver.New("")
 	if err != nil {
@@ -415,19 +400,16 @@ func TestActivityFeed_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestActivityFeed_UnreadableLog_ReturnsEmpty verifies a pass log that
-// exists on disk but can't be read (a directory in its place, standing in
-// for any read failure) degrades to an empty feed instead of erroring
-// (#1501 AC1).
+// A pass log that exists on disk but can't be read degrades to an empty feed
+// instead of erroring (#1501 AC1).
 func TestActivityFeed_UnreadableLog_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	logDir := filepath.Join(dir, ".spindrift", "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// A directory at the log's path fails os.ReadFile with EISDIR, standing
-	// in for any on-disk read failure LogPaths' existence check can't rule
-	// out ahead of time.
+	// A directory at the log's path fails os.ReadFile with EISDIR, standing in
+	// for any read failure LogPaths' existence check can't rule out ahead of time.
 	if err := os.MkdirAll(filepath.Join(logDir, "issue-9.log"), 0o755); err != nil {
 		t.Fatal(err)
 	}

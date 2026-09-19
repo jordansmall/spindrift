@@ -23,8 +23,6 @@ import (
 // transient classification proceeds to retry rather than short-circuiting.
 func noOpenPR(string) (bool, error) { return false, nil }
 
-// retryConfig returns a Config with retry knobs and a default
-// OpenPRForIssue set explicitly.
 func retryConfig(max, backoffSecs, holdJitter int) Config {
 	return Config{
 		Policy: retry.Policy{
@@ -36,8 +34,6 @@ func retryConfig(max, backoffSecs, holdJitter int) Config {
 	}
 }
 
-// fakeClock returns a Clock with a fixed Now and a Sleep that records
-// durations into calls.
 func fakeClock(now time.Time, calls *[]time.Duration) Clock {
 	return Clock{
 		Now:   func() time.Time { return now },
@@ -45,10 +41,8 @@ func fakeClock(now time.Time, calls *[]time.Duration) Clock {
 	}
 }
 
-// newTestDispatch builds a Dispatch wired to fr and drv with the given retry
-// config and clock, without going through a Factory (so tests can inject a
-// fake Clock, which Factory's constructor doesn't expose a seam for
-// bypassing the real cache).
+// newTestDispatch builds a Dispatch through NewFactory with an injected fake
+// Clock, which the ordinary constructors do not allow.
 func newTestDispatch(t *testing.T, cfg Config, fr runner.Runner, drv fakeDriver, clock Clock) *Dispatch {
 	t.Helper()
 	dir := tempLogDir(t)
@@ -60,10 +54,9 @@ func newTestDispatch(t *testing.T, cfg Config, fr runner.Runner, drv fakeDriver,
 	return f.New("1", "t")
 }
 
-// newTestDispatchDiscard is newTestDispatch with the Factory's heartbeat
-// sink set to io.Discard before New(), mirroring the console entry point
-// (issue #1583) so tests can assert retry/hold status lines are suppressed
-// from stdout the same way dispatch-start announce lines are (issue #1829).
+// newTestDispatchDiscard discards the Factory's heartbeat sink the way the
+// console entry point does (issue #1583), so a test can assert that retry and
+// hold status lines stay off stdout (issue #1829).
 func newTestDispatchDiscard(t *testing.T, cfg Config, fr runner.Runner, drv fakeDriver, clock Clock) *Dispatch {
 	t.Helper()
 	dir := tempLogDir(t)
@@ -76,11 +69,8 @@ func newTestDispatchDiscard(t *testing.T, cfg Config, fr runner.Runner, drv fake
 	return f.New("1", "t")
 }
 
-// TestDispatchWithRetry_SuccessOnFirstRun verifies that a successful run
-// whose box reports an outcome line returns it without any classify or
-// sleep calls.
 func TestDispatchWithRetry_SuccessOnFirstRun(t *testing.T) {
-	fr := runner.NewFake() // RunErr = nil → success
+	fr := runner.NewFake()
 	called := false
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		called = true
@@ -112,12 +102,10 @@ func TestDispatchWithRetry_SuccessOnFirstRun(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_SuccessWithCommentLinePopulatesResult verifies that a
-// single-line, nonce-guarded SPINDRIFT_COMMENT alongside the outcome line in
-// the box's log surfaces on Result.Comment/CommentFound — the host-mediated
-// write channel for a local Dispatch's verdict/blocked comment (ADR 0032,
-// issue #1692), now carried as one nonce-bearing base64 line instead of a
-// multi-line block (issue #1940).
+// A single-line, nonce-guarded SPINDRIFT_COMMENT is the host-mediated write
+// channel for a local Dispatch's verdict or blocked comment (ADR 0032, issue
+// #1692), carried as one base64 line instead of a multi-line block (issue
+// #1940).
 func TestDispatchWithRetry_SuccessWithCommentLinePopulatesResult(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -142,10 +130,9 @@ func TestDispatchWithRetry_SuccessWithCommentLinePopulatesResult(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_CommentLineWithWrongNonceNotFound verifies that a
-// SPINDRIFT_COMMENT line carrying a nonce that doesn't match this run's own
-// is ignored — never surfaced on Result.Comment — the same guarantee
-// LastCommentLineInLog documents (issue #1940).
+// A SPINDRIFT_COMMENT line whose nonce does not match this run's own never
+// surfaces on Result.Comment, the same guarantee LastCommentLineInLog
+// documents (issue #1940).
 func TestDispatchWithRetry_CommentLineWithWrongNonceNotFound(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -170,12 +157,9 @@ func TestDispatchWithRetry_CommentLineWithWrongNonceNotFound(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_CommentLineWithWrongNoncePopulatesRejectedCount
-// verifies that a SPINDRIFT_COMMENT line carrying a nonce that doesn't
-// match this run's own -- while never surfacing on Result.Comment -- still
-// counts on Result.CommentRejected, so a caller can settle-log a warning
-// distinguishing "no comment signal at all" from "a comment signal was
-// present but failed nonce verification" (issue #2976).
+// A nonce mismatch still counts on Result.CommentRejected, so a caller can
+// log a warning that distinguishes no comment signal at all from a comment
+// signal that failed nonce verification (issue #2976).
 func TestDispatchWithRetry_CommentLineWithWrongNoncePopulatesRejectedCount(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -197,12 +181,10 @@ func TestDispatchWithRetry_CommentLineWithWrongNoncePopulatesRejectedCount(t *te
 	}
 }
 
-// TestDispatchWithRetry_SuccessWithPRIntentLinePopulatesResult verifies that
-// a single-line, nonce-guarded SPINDRIFT_PR_INTENT control signal alongside
-// the outcome line in the box's log surfaces on Result.PRIntent/PRIntentFound
-// — the host-mediated draft-PR-create channel a read-only github Box uses in
-// place of its own `gh pr create` (issue #1919), now carried as one
-// base64-encoded line rather than a multi-line block (issue #1938).
+// SPINDRIFT_PR_INTENT is the host-mediated draft-PR-create channel a
+// read-only github Box uses in place of its own gh pr create (issue #1919),
+// carried as one base64-encoded line instead of a multi-line block (issue
+// #1938).
 func TestDispatchWithRetry_SuccessWithPRIntentLinePopulatesResult(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -229,13 +211,10 @@ func TestDispatchWithRetry_SuccessWithPRIntentLinePopulatesResult(t *testing.T) 
 	}
 }
 
-// TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop verifies that the
-// driver's own genuine near-miss self-report ("SPINDRIFT_OUTCOME: success",
-// no nonce, paraphrasing the grammar) survives on Result.SelfReport even
-// though a synthetic backstop line (ADR 0036) appended after it wins the
-// authoritative Result.Outcome via last-line-wins (issue #2223/#2224). The
-// backstop line carries this run's own nonce so LastInLog accepts it as
-// authoritative.
+// A synthetic backstop line (ADR 0036) wins the authoritative outcome by
+// last-line-wins, but the driver's own near-miss self-report must still
+// survive on Result.SelfReport (issues #2223 and #2224). The backstop line
+// carries this run's own nonce so LastInLog accepts it as authoritative.
 func TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -269,15 +248,11 @@ func TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop(t *testing.T) {
 	}
 }
 
-// TestDispatchOutcomeResult_SelfReportErrorLoggedToStderr verifies that
-// outcomeResult surfaces resolved.SelfReportError (issue #2343 slice 1's
-// previously-swallowed self-report I/O error) to stderr with the
-// "self-report scan" message — restoring, on the live dispatch path, the
-// exact operator-visible warning the pre-refactor code printed. A single log
-// file can't make the genuine/synthetic tier succeed while the self-report
-// tier independently hits an I/O error (same file, same read shape), so this
-// exercises outcomeResult directly with an injected Resolved rather than
-// driving it through d.Run().
+// outcomeResult must print resolved.SelfReportError to stderr with the
+// "self-report scan" message, the warning the pre-refactor code printed
+// (issue #2343). One log file cannot make the outcome tier succeed while the
+// self-report tier hits an I/O error, so this calls outcomeResult directly
+// with an injected Resolved instead of driving it through d.Run().
 func TestDispatchOutcomeResult_SelfReportErrorLoggedToStderr(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -322,12 +297,9 @@ func TestDispatchOutcomeResult_SelfReportErrorLoggedToStderr(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_SuccessWithIssueIntentLinesPopulatesResult verifies
-// that multiple single-line, nonce-guarded SPINDRIFT_ISSUE_INTENT control
-// signals alongside the outcome line in the box's log all surface on
-// Result.IssueIntents/IssueIntentsFound — the host-mediated issue-filing
-// relay channel (issue #2018). Unlike PR-intent/comment, this is 1-to-many:
-// every verifying line contributes its own payload.
+// SPINDRIFT_ISSUE_INTENT is the host-mediated issue-filing relay (issue
+// #2018). Unlike PR-intent and comment it is one-to-many: every verifying
+// line contributes its own payload.
 func TestDispatchWithRetry_SuccessWithIssueIntentLinesPopulatesResult(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -356,11 +328,9 @@ func TestDispatchWithRetry_SuccessWithIssueIntentLinesPopulatesResult(t *testing
 	}
 }
 
-// TestDispatchWithRetry_NoIssueIntentLinesLeavesResultEmpty verifies a run
-// with no SPINDRIFT_ISSUE_INTENT line at all leaves IssueIntentsFound false
-// and IssueIntents nil — read-write/read-only runs today emit no such
-// signal, so this must be the default shape (issue #2018's "no existing run
-// path changes" acceptance criterion).
+// Read-write and read-only runs emit no issue-intent signal, so false and nil
+// must be the default shape (issue #2018's "no existing run path changes"
+// acceptance criterion).
 func TestDispatchWithRetry_NoIssueIntentLinesLeavesResultEmpty(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -383,13 +353,9 @@ func TestDispatchWithRetry_NoIssueIntentLinesLeavesResultEmpty(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_IssueIntentLineWithWrongNoncePopulatesRejectedCount
-// verifies that a SPINDRIFT_ISSUE_INTENT line carrying a nonce that doesn't
-// match this run's own -- while never surfacing on Result.IssueIntents/
-// IssueIntentsFound -- still counts on Result.IssueIntentsRejected, so a
-// caller can settle-log a warning distinguishing "no issue-intent signal at
-// all" from "an issue-intent signal was present but failed nonce
-// verification" (issue #2976).
+// A nonce mismatch still counts on Result.IssueIntentsRejected, so a caller
+// can log a warning that distinguishes no issue-intent signal at all from one
+// that failed nonce verification (issue #2976).
 func TestDispatchWithRetry_IssueIntentLineWithWrongNoncePopulatesRejectedCount(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -414,11 +380,6 @@ func TestDispatchWithRetry_IssueIntentLineWithWrongNoncePopulatesRejectedCount(t
 	}
 }
 
-// TestDispatchWithRetry_PRIntentLineWithWrongNonceNotFound verifies that a
-// SPINDRIFT_PR_INTENT line carrying a nonce that doesn't match this run's
-// own is ignored — never surfaced on Result.PRIntent — mirroring
-// TestDispatchWithRetry_CommentLineWithWrongNonceNotFound for the PR-intent
-// signal.
 func TestDispatchWithRetry_PRIntentLineWithWrongNonceNotFound(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -443,12 +404,9 @@ func TestDispatchWithRetry_PRIntentLineWithWrongNonceNotFound(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_PRIntentLineWithWrongNoncePopulatesRejectedCount
-// verifies that a SPINDRIFT_PR_INTENT line carrying a nonce that doesn't
-// match this run's own -- while never surfacing on Result.PRIntent -- still
-// counts on Result.PRIntentRejected, so a caller can settle-log a warning
-// distinguishing "no PR-intent signal at all" from "a PR-intent signal was
-// present but failed nonce verification" (issue #2976).
+// A nonce mismatch still counts on Result.PRIntentRejected, so a caller can
+// log a warning that distinguishes no PR-intent signal at all from one that
+// failed nonce verification (issue #2976).
 func TestDispatchWithRetry_PRIntentLineWithWrongNoncePopulatesRejectedCount(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -470,12 +428,11 @@ func TestDispatchWithRetry_PRIntentLineWithWrongNoncePopulatesRejectedCount(t *t
 	}
 }
 
-// TestDispatchWithRetry_SuccessWithoutOutcomeClassifies verifies that a
-// zero-exit box that wrote no outcome line still gets a best-effort
+// A zero-exit box that wrote no outcome line still gets a best-effort
 // classification, so gateIssue-style callers can explain what happened
-// without touching the log themselves.
+// without reading the log themselves.
 func TestDispatchWithRetry_SuccessWithoutOutcomeClassifies(t *testing.T) {
-	fr := runner.NewFake() // RunErr = nil → success, no outcome line written
+	fr := runner.NewFake()
 	wantCls := driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed}
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return wantCls, nil
@@ -496,10 +453,6 @@ func TestDispatchWithRetry_SuccessWithoutOutcomeClassifies(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr verifies
-// that a zero-exit box whose log has an unparseable SPINDRIFT_OUTCOME line
-// (missing required fields) surfaces ParseErr without attempting
-// classification.
 func TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr(t *testing.T) {
 	fr := runner.NewFake()
 	called := false
@@ -527,8 +480,6 @@ func TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr(t *testing.T)
 	}
 }
 
-// TestDispatchWithRetry_TerminalNeverRetried verifies that a terminal
-// failure exits after one attempt without retrying.
 func TestDispatchWithRetry_TerminalNeverRetried(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErr = boxErr
@@ -549,19 +500,17 @@ func TestDispatchWithRetry_TerminalNeverRetried(t *testing.T) {
 	if len(sleeps) != 0 {
 		t.Errorf("sleep calls: got %d, want 0 (no sleep on terminal)", len(sleeps))
 	}
-	// The fake box wrote nothing to its log (no WriteToOutput set), so this
-	// is the "box never launched" case (issue #3119): the error once()
-	// returned must surface on Result.Err.
+	// The fake box wrote nothing to its log, so this is the "box never
+	// launched" case (issue #3119): the error once() returned must surface on
+	// Result.Err.
 	if !errors.Is(result.Err, boxErr) {
 		t.Errorf("Err: got %v, want boxErr", result.Err)
 	}
 }
 
-// TestDispatchWithRetry_TerminalWithNonEmptyLogLeavesErrNil verifies that a
-// terminal failure whose box actually produced log output (it ran and
-// genuinely failed, as opposed to never launching) leaves Result.Err nil --
-// only a pre-launch failure with no log content is surfaced this way (issue
-// #3119).
+// A terminal failure whose box produced log output ran and genuinely failed,
+// so Result.Err stays nil. Only a pre-launch failure with no log content
+// surfaces there (issue #3119).
 func TestDispatchWithRetry_TerminalWithNonEmptyLogLeavesErrNil(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErr = boxErr
@@ -582,9 +531,6 @@ func TestDispatchWithRetry_TerminalWithNonEmptyLogLeavesErrNil(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_TerminalWithoutKillSignalLeavesKilledBySignalFalse
-// verifies that a terminal failure from an ordinary (non-signal) error, such
-// as TerminalNeverRetried's plain boxErr, leaves KilledBySignal false.
 func TestDispatchWithRetry_TerminalWithoutKillSignalLeavesKilledBySignalFalse(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErr = boxErr
@@ -604,9 +550,8 @@ func TestDispatchWithRetry_TerminalWithoutKillSignalLeavesKilledBySignalFalse(t 
 	}
 }
 
-// TestDispatchWithRetry_TerminalWithKillSignalSetsKilledBySignal verifies
-// that a terminal failure whose underlying error is a *runner.RunError with
-// a signal-kill exit code (issue #2378) sets Result.KilledBySignal.
+// A terminal failure whose underlying error is a *runner.RunError with a
+// signal-kill exit code sets Result.KilledBySignal (issue #2378).
 func TestDispatchWithRetry_TerminalWithKillSignalSetsKilledBySignal(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErr = &runner.RunError{ExitCode: 143}
@@ -626,9 +571,8 @@ func TestDispatchWithRetry_TerminalWithKillSignalSetsKilledBySignal(t *testing.T
 	}
 }
 
-// TestDispatchWithRetry_HoldThenSuccess verifies that a 429 with resetsAt
-// causes a hold sleep and re-dispatch, and that the hold does not consume
-// the retry cap when the re-dispatch succeeds.
+// The hold a 429 with resetsAt causes does not consume the retry cap when the
+// re-dispatch succeeds.
 func TestDispatchWithRetry_HoldThenSuccess(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(2 * time.Hour)
@@ -638,8 +582,8 @@ func TestDispatchWithRetry_HoldThenSuccess(t *testing.T) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))                                                                    // holdJitter=0 for determinism
-	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")) // first fails with no outcome, second succeeds
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=0 for determinism
+	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	result := d.Run()
 
@@ -658,10 +602,8 @@ func TestDispatchWithRetry_HoldThenSuccess(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_HoldReDispatchSetsResumeAfterHold verifies that the
-// re-dispatch following a 429 hold carries RESUME_AFTER_HOLD=1 in the box
-// env, while the initial dispatch does not, so the box resumes its pinned
-// session instead of re-pinning after a hold.
+// Only the re-dispatch following a 429 hold carries RESUME_AFTER_HOLD=1, so
+// the box resumes its pinned session instead of re-pinning.
 func TestDispatchWithRetry_HoldReDispatchSetsResumeAfterHold(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(2 * time.Hour)
@@ -671,8 +613,8 @@ func TestDispatchWithRetry_HoldReDispatchSetsResumeAfterHold(t *testing.T) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))                                                                    // holdJitter=0 for determinism
-	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")) // first fails with no outcome, second succeeds
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=0 for determinism
+	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	d.Run()
 
@@ -687,18 +629,11 @@ func TestDispatchWithRetry_HoldReDispatchSetsResumeAfterHold(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_HoldResumeCountsBothAttemptsUsage drives a real
-// Run() through an actual hold-then-resume cycle (like
-// TestDispatchWithRetry_HoldReDispatchSetsResumeAfterHold above), except the
-// held first attempt itself writes genuine, non-empty result-bearing content
-// before dying with no parseable outcome -- mirroring a box that burned real
-// tokens before hitting the rate limit. It then verifies that content is
-// still visible to AllAttemptLogPaths/CumulativeUsage after Run() returns,
-// proving Run's `!resumeAfterHold` guard on quarantinePriorRunLogs (box.go)
-// held: the resumed second attempt's own dispatch must NOT re-fire
-// quarantine and rename the first attempt's just-rotated .1 sibling log out
-// of scanning range, which would silently drop it from both the run-usage
-// comment and the self-heal budget gate (issue #2575 AC3/AC4).
+// The held first attempt burns real tokens before dying, and that content
+// must still reach AllAttemptLogPaths and CumulativeUsage after the resumed
+// attempt runs: Run's !resumeAfterHold guard on quarantinePriorRunLogs
+// (box.go) stops the second dispatch from renaming the first attempt's
+// rotated .1 log out of scanning range (issue #2575 AC3/AC4).
 func TestDispatchWithRetry_HoldResumeCountsBothAttemptsUsage(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(2 * time.Hour)
@@ -718,15 +653,12 @@ func TestDispatchWithRetry_HoldResumeCountsBothAttemptsUsage(t *testing.T) {
 		i := calls
 		calls++
 		if i == 0 {
-			// First (held) attempt: writes real result-bearing content, so
-			// it has genuine, non-empty usage data, but exits non-zero with
-			// no parseable outcome -- the rate limit killed the box before
-			// it could print a verdict -- so the hold path fires.
+			// The rate limit killed the box before it could print a verdict,
+			// so the hold path fires while the log still holds real usage
+			// data.
 			box.Output.Write(firstAttemptResult) //nolint:errcheck
 			return boxErr
 		}
-		// Second (resumed) attempt: succeeds with a genuine, nonce-bearing
-		// outcome.
 		box.Output.Write(secondAttemptOutcome) //nolint:errcheck
 		return nil
 	}
@@ -757,18 +689,17 @@ func TestDispatchWithRetry_HoldResumeCountsBothAttemptsUsage(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_TransientBackoffReDispatchSetsResumeAfterHold verifies
-// that the re-dispatch following a 529/backoff transient (not a 429 hold)
-// ALSO carries RESUME_AFTER_HOLD=1 in the box env, so a cold restart on the
-// backoff path doesn't re-pin --session-id on a possibly-existing session.
+// The re-dispatch following a 529 backoff transient, not just a 429 hold,
+// also carries RESUME_AFTER_HOLD=1, so a cold restart on the backoff path
+// does not re-pin --session-id on a possibly-existing session.
 func TestDispatchWithRetry_TransientBackoffReDispatchSetsResumeAfterHold(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.Overloaded}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 10, 0), fr, drv, fakeClock(time.Time{}, &sleeps))                                                                // backoffSecs=10
-	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")) // first fails (529, no outcome), second succeeds
+	d := newTestDispatch(t, retryConfig(3, 10, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	d.Run()
 
@@ -783,15 +714,12 @@ func TestDispatchWithRetry_TransientBackoffReDispatchSetsResumeAfterHold(t *test
 	}
 }
 
-// TestDispatchWithRetry_NonZeroExitWithOutcomeSettles verifies that a box
-// which prints a valid, nonce-bearing SPINDRIFT_OUTCOME but then exits
-// non-zero settles on that printed outcome (issue #2075) rather than being
-// reclassified into a hold or an agent-failed: the run is returned with
-// Success and OutcomeFound true, with no classify, no sleep, and no
-// re-dispatch.
+// A box that prints a valid, nonce-bearing SPINDRIFT_OUTCOME but then exits
+// non-zero settles on that printed outcome (issue #2075) instead of being
+// reclassified into a hold or an agent-failed.
 func TestDispatchWithRetry_NonZeroExitWithOutcomeSettles(t *testing.T) {
 	fr := runner.NewFake()
-	fr.RunErr = boxErr // every run exits non-zero
+	fr.RunErr = boxErr
 	classified := false
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		classified = true
@@ -823,8 +751,6 @@ func TestDispatchWithRetry_NonZeroExitWithOutcomeSettles(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_HoldJitterAdded verifies that Policy.Jitter is
-// added to the hold sleep duration.
 func TestDispatchWithRetry_HoldJitterAdded(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(1 * time.Hour)
@@ -834,7 +760,7 @@ func TestDispatchWithRetry_HoldJitterAdded(t *testing.T) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 0, 10), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=10s
+	d := newTestDispatch(t, retryConfig(3, 0, 10), fr, drv, fakeClock(fixedNow, &sleeps))
 	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	d.Run()
@@ -848,29 +774,25 @@ func TestDispatchWithRetry_HoldJitterAdded(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_ConsecutiveHoldsConsumeCapAndFail verifies that a
-// series of consecutive 429s without progress eventually exhausts the hold
-// cap and returns Success=false.
 func TestDispatchWithRetry_ConsecutiveHoldsConsumeCapAndFail(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(30 * time.Minute)
 
 	fr := runner.NewFake()
-	fr.RunErr = boxErr // all runs fail
+	fr.RunErr = boxErr
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // max=3
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
 
 	result := d.Run()
 
 	if result.Success {
 		t.Error("want Success=false (cap exhausted), got true")
 	}
-	// With max=3: run1→429(free), run2→429(count=1), run3→429(count=2),
-	// run4→429(count=3 >= 3) → fail before 4th sleep.
-	// Total runs: 4, total sleeps: 3.
+	// With max=3 the first hold is free and the next three count, so the
+	// fourth 429 hits the cap before it sleeps: 4 runs, 3 sleeps.
 	if len(fr.RunCalls) != 4 {
 		t.Errorf("RunCalls: got %d, want 4", len(fr.RunCalls))
 	}
@@ -879,22 +801,20 @@ func TestDispatchWithRetry_ConsecutiveHoldsConsumeCapAndFail(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_HoldCapExhaustedSuppressedWhenDiscardConfigured
-// verifies that the "hold cap exhausted" status line (retry.go) routes
-// through the same humanOut() sink as the dispatch-start announce line
-// (issue #1829): a Factory with its heartbeat sink discarded (the console
-// entry point) writes no hold-cap status to stdout (issue #1847).
+// The "hold cap exhausted" status line routes through the same humanOut()
+// sink as the dispatch-start announce line (issue #1829), so a Factory with
+// its heartbeat sink discarded writes nothing to stdout (issue #1847).
 func TestDispatchWithRetry_HoldCapExhaustedSuppressedWhenDiscardConfigured(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(30 * time.Minute)
 
 	fr := runner.NewFake()
-	fr.RunErr = boxErr // all runs fail
+	fr.RunErr = boxErr
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatchDiscard(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // max=3
+	d := newTestDispatchDiscard(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
 
 	var result Result
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
@@ -907,10 +827,9 @@ func TestDispatchWithRetry_HoldCapExhaustedSuppressedWhenDiscardConfigured(t *te
 	}
 }
 
-// TestDispatchWithRetry_RateLimitHoldSuppressedWhenDiscardConfigured
-// verifies that the "rate limit; holding until" status line (retry.go)
-// routes through humanOut(): a Factory with its heartbeat sink discarded
-// writes no rate-limit-hold status to stdout (issue #1847).
+// The "rate limit; holding until" status line routes through humanOut(), so a
+// Factory with its heartbeat sink discarded writes nothing to stdout (issue
+// #1847).
 func TestDispatchWithRetry_RateLimitHoldSuppressedWhenDiscardConfigured(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(30 * time.Minute)
@@ -921,7 +840,7 @@ func TestDispatchWithRetry_RateLimitHoldSuppressedWhenDiscardConfigured(t *testi
 	}}
 	var sleeps []time.Duration
 	d := newTestDispatchDiscard(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
-	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")) // hold once (no outcome), then succeed
+	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	var result Result
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
@@ -934,21 +853,20 @@ func TestDispatchWithRetry_RateLimitHoldSuppressedWhenDiscardConfigured(t *testi
 	}
 }
 
-// TestDispatchWithRetry_ConsecutiveHoldsEmitToStdoutWithoutOverride verifies
-// that the hold/rate-limit status lines still reach stdout unchanged when no
-// heartbeat sink override is configured -- the non-console CLI dispatch path
-// (issue #1847, matching #1829's precedent for the announce line).
+// With no heartbeat sink override, the hold and rate-limit status lines still
+// reach stdout: the non-console CLI dispatch path (issue #1847, matching
+// #1829's precedent for the announce line).
 func TestDispatchWithRetry_ConsecutiveHoldsEmitToStdoutWithoutOverride(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(30 * time.Minute)
 
 	fr := runner.NewFake()
-	fr.RunErr = boxErr // all runs fail
+	fr.RunErr = boxErr
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // max=3
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
 
 	var result Result
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
@@ -964,18 +882,17 @@ func TestDispatchWithRetry_ConsecutiveHoldsEmitToStdoutWithoutOverride(t *testin
 	}
 }
 
-// TestDispatchWithRetry_TransientRetriesEmitToStdoutWithoutOverride verifies
-// that the transient-backoff and transient-cap-exhausted status lines still
-// reach stdout unchanged when no heartbeat sink override is configured --
-// the non-console CLI dispatch path (issue #1847).
+// With no heartbeat sink override, the transient-backoff and
+// transient-cap-exhausted status lines still reach stdout: the non-console
+// CLI dispatch path (issue #1847).
 func TestDispatchWithRetry_TransientRetriesEmitToStdoutWithoutOverride(t *testing.T) {
 	fr := runner.NewFake()
-	fr.RunErr = boxErr // all runs fail
+	fr.RunErr = boxErr
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.Network}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps)) // max=2
+	d := newTestDispatch(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
 
 	var result Result
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
@@ -991,9 +908,8 @@ func TestDispatchWithRetry_TransientRetriesEmitToStdoutWithoutOverride(t *testin
 	}
 }
 
-// TestDispatchWithRetry_HoldNotCountedAfterProgress verifies that holdCount
-// resets after a non-429 outcome: a hold-then-different-transient-then-
-// success sequence does not accumulate cap from the first hold.
+// holdCount resets after a non-429 outcome, so a hold, then a different
+// transient, then a success does not accumulate cap from the first hold.
 func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(30 * time.Minute)
@@ -1011,16 +927,14 @@ func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
 		return overloadedCls, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(1, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // tight cap
-	// run1 fails (429, no outcome), run2 fails (529 — different class, no outcome), run3 succeeds
+	d := newTestDispatch(t, retryConfig(1, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
 	writeOutcomeOnFinalCall(fr, []error{boxErr, boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	result := d.Run()
 
-	// Even with max=1, the sequence succeeds because:
-	// - run1 → 429 hold (free, prevWasHold=true)
-	// - run2 → 529 (prevWasHold reset to false, transientCount=1 ≤ 1)
-	// - run3 → success
+	// Even with max=1 the sequence succeeds: run 1 holds on a 429 for free and
+	// sets prevWasHold, run 2 is a 529 that resets prevWasHold and counts as
+	// the first transient, and run 3 succeeds.
 	if !result.Success {
 		t.Error("want Success=true (succeeded after mixed transients), got false")
 	}
@@ -1029,17 +943,14 @@ func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_TransientBackoffRetryAndSucceed verifies that a
-// 529/network transient is retried with backoff and succeeds on
-// re-dispatch.
 func TestDispatchWithRetry_TransientBackoffRetryAndSucceed(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.Overloaded}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 10, 0), fr, drv, fakeClock(time.Time{}, &sleeps))                                                                // backoffSecs=10
-	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")) // first fails (529, no outcome), second succeeds
+	d := newTestDispatch(t, retryConfig(3, 10, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	result := d.Run()
 
@@ -1057,10 +968,9 @@ func TestDispatchWithRetry_TransientBackoffRetryAndSucceed(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_TransientBackoffRetrySuppressedWhenDiscardConfigured
-// verifies that the "transient (...); retry" backoff status line
-// (retry.go) routes through humanOut(): a Factory with its heartbeat sink
-// discarded writes no transient-backoff status to stdout (issue #1847).
+// The "transient (...); retry" backoff status line routes through humanOut(),
+// so a Factory with its heartbeat sink discarded writes nothing to stdout
+// (issue #1847).
 func TestDispatchWithRetry_TransientBackoffRetrySuppressedWhenDiscardConfigured(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -1068,7 +978,7 @@ func TestDispatchWithRetry_TransientBackoffRetrySuppressedWhenDiscardConfigured(
 	}}
 	var sleeps []time.Duration
 	d := newTestDispatchDiscard(t, retryConfig(3, 10, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
-	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")) // first fails (529, no outcome), second succeeds
+	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	var result Result
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
@@ -1081,16 +991,14 @@ func TestDispatchWithRetry_TransientBackoffRetrySuppressedWhenDiscardConfigured(
 	}
 }
 
-// TestDispatchWithRetry_TransientCapExhausted verifies that a 529/network
-// transient that never recovers exhausts the cap and returns Success=false.
 func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 	fr := runner.NewFake()
-	fr.RunErr = boxErr // all runs fail
+	fr.RunErr = boxErr
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.Network}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps)) // max=2, backoffSecs=5
+	d := newTestDispatch(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
 
 	result := d.Run()
 
@@ -1104,33 +1012,31 @@ func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 	if len(sleeps) != 2 {
 		t.Fatalf("sleep calls: got %d, want 2", len(sleeps))
 	}
-	// Linear backoff: retry1 = 5s*1, retry2 = 5s*2
+	// The backoff is linear, so retry 1 sleeps 5s and retry 2 sleeps 10s.
 	if sleeps[0] != 5*time.Second {
 		t.Errorf("sleep[0]: got %v, want %v", sleeps[0], 5*time.Second)
 	}
 	if sleeps[1] != 10*time.Second {
 		t.Errorf("sleep[1]: got %v, want %v", sleeps[1], 10*time.Second)
 	}
-	// The cap-exhaustion path already prints its own "!!" status line
-	// (retry.go); Result.Err must stay nil so a caller doesn't duplicate it
-	// (issue #3119).
+	// The cap-exhaustion path prints its own "!!" status line, so Result.Err
+	// must stay nil or a caller duplicates it (issue #3119).
 	if result.Err != nil {
 		t.Errorf("Err: got %v, want nil (cap-exhaustion path prints its own message)", result.Err)
 	}
 }
 
-// TestDispatchWithRetry_TransientCapExhaustedSuppressedWhenDiscardConfigured
-// verifies that the "transient retry cap exhausted" status line (retry.go)
-// routes through humanOut(): a Factory with its heartbeat sink discarded
-// writes no transient-cap status to stdout (issue #1847).
+// The "transient retry cap exhausted" status line routes through humanOut(),
+// so a Factory with its heartbeat sink discarded writes nothing to stdout
+// (issue #1847).
 func TestDispatchWithRetry_TransientCapExhaustedSuppressedWhenDiscardConfigured(t *testing.T) {
 	fr := runner.NewFake()
-	fr.RunErr = boxErr // all runs fail
+	fr.RunErr = boxErr
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.Network}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatchDiscard(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps)) // max=2
+	d := newTestDispatchDiscard(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
 
 	var result Result
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
@@ -1143,16 +1049,15 @@ func TestDispatchWithRetry_TransientCapExhaustedSuppressedWhenDiscardConfigured(
 	}
 }
 
-// TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff verifies that a
-// 429 with no resetsAt is treated as a plain transient (backoff retry, not
-// hold).
+// Dispatch treats a 429 with no resetsAt as a plain transient: backoff retry,
+// not hold.
 func TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: nil}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 15, 0), fr, drv, fakeClock(time.Time{}, &sleeps)) // backoffSecs=15
+	d := newTestDispatch(t, retryConfig(3, 15, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
 	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	result := d.Run()
@@ -1163,24 +1068,21 @@ func TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff(t *testing.T) {
 	if len(sleeps) != 1 {
 		t.Fatalf("sleep calls: got %d, want 1", len(sleeps))
 	}
-	// Should use backoff, not hold: 15s * 1
 	if sleeps[0] != 15*time.Second {
 		t.Errorf("sleep duration: got %v, want 15s (backoff, not hold)", sleeps[0])
 	}
 }
 
-// TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly verifies that when
-// resetsAt is in the past the sleep is clamped to Policy.Jitter.
 func TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly(t *testing.T) {
 	fixedNow := time.Unix(2_000_000, 0).UTC()
-	resetAt := fixedNow.Add(-1 * time.Hour) // in the past
+	resetAt := fixedNow.Add(-1 * time.Hour)
 
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 0, 7), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=7s
+	d := newTestDispatch(t, retryConfig(3, 0, 7), fr, drv, fakeClock(fixedNow, &sleeps))
 	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	d.Run()
@@ -1193,11 +1095,10 @@ func TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_ZeroExitRateLimitHoldsAndRedispatches verifies issue
-// #565: a box that exits zero but writes no SPINDRIFT_OUTCOME line, whose log
-// nonetheless classifies as a rate limit with a known resetsAt, is held and
-// re-dispatched exactly like a non-zero 429 exit — instead of dead-ending as
-// status=missing.
+// Dispatch holds and re-dispatches a box that exits zero and writes no
+// SPINDRIFT_OUTCOME line when its log classifies as a rate limit with a known
+// resetsAt, the same as a non-zero 429 exit, instead of dead-ending as
+// status=missing (issue #565).
 func TestDispatchWithRetry_ZeroExitRateLimitHoldsAndRedispatches(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(2 * time.Hour)
@@ -1209,13 +1110,13 @@ func TestDispatchWithRetry_ZeroExitRateLimitHoldsAndRedispatches(t *testing.T) {
 		if calls == 2 && box.Output != nil {
 			box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
 		}
-		return nil // always exits zero, first attempt writes no outcome line
+		return nil
 	}
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=0
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
 
 	result := d.Run()
 
@@ -1237,11 +1138,9 @@ func TestDispatchWithRetry_ZeroExitRateLimitHoldsAndRedispatches(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_ZeroExitTransientWithoutResetAtUsesBackoff verifies
-// issue #565's third acceptance criterion: a zero-exit, no-outcome run whose
-// log carries a transient marker but no resetsAt (or a non-rate-limit
-// transient) follows the existing backoff-retry path rather than an
-// indefinite hold or an immediate status=missing.
+// A zero-exit, no-outcome run whose log carries a transient marker but no
+// resetsAt follows the backoff-retry path rather than an indefinite hold or
+// an immediate status=missing (issue #565's third acceptance criterion).
 func TestDispatchWithRetry_ZeroExitTransientWithoutResetAtUsesBackoff(t *testing.T) {
 	fr := runner.NewFake()
 	calls := 0
@@ -1250,13 +1149,13 @@ func TestDispatchWithRetry_ZeroExitTransientWithoutResetAtUsesBackoff(t *testing
 		if calls == 2 && box.Output != nil {
 			box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
 		}
-		return nil // always exits zero
+		return nil
 	}
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{Class: driver.Transient, Reason: driver.Overloaded}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 15, 0), fr, drv, fakeClock(time.Time{}, &sleeps)) // backoffSecs=15
+	d := newTestDispatch(t, retryConfig(3, 15, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
 
 	result := d.Run()
 
@@ -1277,10 +1176,9 @@ func TestDispatchWithRetry_ZeroExitTransientWithoutResetAtUsesBackoff(t *testing
 	}
 }
 
-// TestDispatchWithRetry_ZeroExitConsecutiveHoldsConsumeCapAndFail verifies
-// issue #565's second acceptance criterion: consecutive zero-exit rate-limit
-// holds that never recover count against the transient retry cap, landing on
-// Success=false rather than a silent or confusing status=missing.
+// Consecutive zero-exit rate-limit holds that never recover count against the
+// transient retry cap and land on Success=false rather than a silent or
+// confusing status=missing (issue #565's second acceptance criterion).
 func TestDispatchWithRetry_ZeroExitConsecutiveHoldsConsumeCapAndFail(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(30 * time.Minute)
@@ -1290,7 +1188,7 @@ func TestDispatchWithRetry_ZeroExitConsecutiveHoldsConsumeCapAndFail(t *testing.
 		return driver.Classification{Class: driver.Transient, Reason: driver.RateLimit, ResetAt: &resetAt}, nil
 	}}
 	var sleeps []time.Duration
-	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // max=3
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
 
 	result := d.Run()
 
@@ -1305,12 +1203,11 @@ func TestDispatchWithRetry_ZeroExitConsecutiveHoldsConsumeCapAndFail(t *testing.
 	}
 }
 
-// TestDispatchWithRetry_ZeroExitTransientSkipsRetryWhenPRExists verifies
-// issue #565's safety guard: a zero-exit, no-outcome box that classifies as
-// transient is NOT re-dispatched when OpenPRForIssue reports an open PR
-// already exists for the branch -- the box's work already landed, so retrying
-// would duplicate it. The Result passes through unchanged, exactly as before
-// #565, letting settle's own PR lookup route it.
+// Issue #565's safety guard: Dispatch does not re-dispatch a zero-exit,
+// no-outcome box that classifies as transient when OpenPRForIssue reports an
+// open PR for the branch, because the box's work already landed and a retry
+// would duplicate it. The Result passes through unchanged so settle's own PR
+// lookup routes it.
 func TestDispatchWithRetry_ZeroExitTransientSkipsRetryWhenPRExists(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(2 * time.Hour)
@@ -1343,10 +1240,8 @@ func TestDispatchWithRetry_ZeroExitTransientSkipsRetryWhenPRExists(t *testing.T)
 	}
 }
 
-// TestDispatchWithRetry_AppliesToFixToo verifies the behavior change called
-// out in issue #441: a 429 during a fix pass now holds until reset instead
-// of burning a fix attempt, because the retry policy applies uniformly to
-// Fix as it does to Run.
+// A 429 during a fix pass holds until reset instead of burning a fix attempt,
+// because the retry policy applies to Fix as it does to Run (issue #441).
 func TestDispatchWithRetry_AppliesToFixToo(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(1 * time.Hour)
@@ -1357,7 +1252,7 @@ func TestDispatchWithRetry_AppliesToFixToo(t *testing.T) {
 	}}
 	var sleeps []time.Duration
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
-	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")) // fix pass fails once (429, no outcome), then succeeds
+	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
 	result := d.Fix(1, "ci failure detail")
 
@@ -1375,10 +1270,8 @@ func TestDispatchWithRetry_AppliesToFixToo(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_ParsesPassManifestFromOutbox verifies the issue
-// #2983 wiring: when the box's outbox holds a manifest.json written by a
-// prior orchestrator run, a successful dispatch (reaching outcomeResult via
-// successResult) parses it into Result.Passes.
+// When the box's outbox holds a manifest.json written by a prior orchestrator
+// run, a successful dispatch parses it into Result.Passes (issue #2983).
 func TestDispatchWithRetry_ParsesPassManifestFromOutbox(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{}
@@ -1406,11 +1299,10 @@ func TestDispatchWithRetry_ParsesPassManifestFromOutbox(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_MissingPassManifestDegradesToNil verifies the
-// pass-blind degrade contract (issue #2983 AC2): when no manifest.json ever
-// lands in the outbox -- the ordinary case, since every OTHER test in this
-// file never writes one -- Result.Passes is nil and every other field on
-// Result behaves exactly as it did before Passes existed.
+// The pass-blind degrade contract (issue #2983 AC2): when no manifest.json
+// lands in the outbox, the ordinary case for every other test here,
+// Result.Passes is nil and every other field behaves as it did before Passes
+// existed.
 func TestDispatchWithRetry_MissingPassManifestDegradesToNil(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{}

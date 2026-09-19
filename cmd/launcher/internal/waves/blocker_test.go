@@ -16,12 +16,11 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 )
 
-// concurrencyTrackingFake wraps forge.Fake's DepsOf with an in-flight
-// counter and a short sleep, so a test can observe whether NewReadiness's
-// DepsOf calls ever overlap in time. A sequential caller can never push
-// inFlight above 1; a bounded-concurrency caller pushes it above 1 (up to
-// the bound), regardless of GOMAXPROCS, because the sleep yields the OS
-// thread rather than spinning.
+// concurrencyTrackingFake wraps forge.Fake's DepsOf with an in-flight counter
+// and a short sleep so a test can see whether NewReadiness's DepsOf calls
+// overlap. A sequential caller never pushes inFlight above 1; a concurrent one
+// does regardless of GOMAXPROCS, because the sleep yields the OS thread rather
+// than spinning.
 type concurrencyTrackingFake struct {
 	*forge.Fake
 	mu          sync.Mutex
@@ -46,9 +45,9 @@ func (f *concurrencyTrackingFake) DepsOf(num string) ([]forge.Dependency, error)
 	return f.Fake.DepsOf(num)
 }
 
-// TestNewReadiness_DepsOfCallsOverlap guards issue #1745: NewReadiness must
-// fan its per-issue DepsOf calls out with concurrency, not one at a time —
-// a sequential loop can never observe more than one in-flight call.
+// TestNewReadiness_DepsOfCallsOverlap guards issue #1745: NewReadiness must fan
+// its per-issue DepsOf calls out concurrently, not one at a time. A sequential
+// loop never observes more than one in-flight call.
 func TestNewReadiness_DepsOfCallsOverlap(t *testing.T) {
 	fc := &concurrencyTrackingFake{Fake: forge.NewFake()}
 	fc.SetIssue(forge.Issue{Number: "1", Body: ""})
@@ -65,9 +64,9 @@ func TestNewReadiness_DepsOfCallsOverlap(t *testing.T) {
 	}
 }
 
-// TestNewReadiness_DepsOfConcurrencyBounded guards issue #1745's other half:
-// the fan-out must not spawn one goroutine per issue unbounded — with more
-// issues than depsOfConcurrency, maxInFlight must never exceed the cap.
+// TestNewReadiness_DepsOfConcurrencyBounded guards issue #1745's other half: the
+// fan-out must not spawn one unbounded goroutine per issue. With more issues
+// than depsOfConcurrency, maxInFlight must never exceed the cap.
 func TestNewReadiness_DepsOfConcurrencyBounded(t *testing.T) {
 	fc := &concurrencyTrackingFake{Fake: forge.NewFake()}
 	issues := make([]Issue, depsOfConcurrency*3)
@@ -85,8 +84,6 @@ func TestNewReadiness_DepsOfConcurrencyBounded(t *testing.T) {
 		t.Errorf("maxInFlight = %d, want <= %d (bounded concurrency)", fc.maxInFlight, depsOfConcurrency)
 	}
 }
-
-// --- NewReadiness tests ---
 
 func TestNewReadiness_MultipleIssuesWithBlockers(t *testing.T) {
 	fc := forge.NewFake()
@@ -151,10 +148,9 @@ func TestNewReadiness_DepsOfErrorNonFatal(t *testing.T) {
 }
 
 // TestNewReadiness_MixedNativeAndBodySources verifies NewReadiness tags each
-// blocker ref with the source DepsOf resolved it from — one issue's
-// native-relationship blocker and another's body-parsed blocker must not
-// collapse into the same source, so mixed-batch preview/skip/marker
-// annotations can tell them apart.
+// blocker ref with the source DepsOf resolved it from. A native-relationship
+// blocker and a body-parsed one must not collapse into the same source, or
+// mixed-batch preview, skip and marker annotations cannot tell them apart.
 func TestNewReadiness_MixedNativeAndBodySources(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Body: ""})
@@ -175,9 +171,9 @@ func TestNewReadiness_MixedNativeAndBodySources(t *testing.T) {
 	}
 }
 
-// captureStdout swaps os.Stdout for a pipe, runs fn, and returns everything
-// fn printed, restoring os.Stdout on cleanup so a panic inside fn cannot
-// strand the rest of the package writing to a closed pipe.
+// captureStdout returns what fn printed. It restores os.Stdout on cleanup so a
+// panic inside fn cannot strand the rest of the package writing to a closed
+// pipe.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -201,12 +197,10 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 // TestReadinessStatus_LocalTracker_HoldsAndReportsUnfetchableBlocker drives the
-// body-parsed blocker path end to end through a real LocalTracker — DepsOf's
-// "## Blocked by" slug reaches blockerReady/blockerStatus's it.Issue(dep)
-// call and back — rather than stubbing forge.Fake, so a slug that fails
-// LocalTracker's own path-containment guard (issue #3075) is exercised the
-// way a live dispatch would hit it: it must come back unready, not silently
-// satisfied, and the failure must be visible on stdout rather than swallowed.
+// body-parsed blocker path end to end through a real LocalTracker, not a
+// forge.Fake stub, so a blocker slug that fails LocalTracker's path-containment
+// guard (issue #3075) is hit the way a live dispatch hits it: it must come back
+// unready, not silently satisfied, and the failure must show on stdout.
 func TestReadinessStatus_LocalTracker_HoldsAndReportsUnfetchableBlocker(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "issues")
@@ -245,8 +239,6 @@ func TestReadinessStatus_LocalTracker_HoldsAndReportsUnfetchableBlocker(t *testi
 	}
 }
 
-// --- detectCycle tests ---
-
 func TestDetectCycle_Empty(t *testing.T) {
 	_, hasCycle := detectCycle(map[string][]string{}, []string{})
 	if hasCycle {
@@ -255,7 +247,6 @@ func TestDetectCycle_Empty(t *testing.T) {
 }
 
 func TestDetectCycle_NoCycle_Linear(t *testing.T) {
-	// 1 depends on 2, 2 depends on 3 (1→2→3)
 	edges := map[string][]string{
 		"1": {"2"},
 		"2": {"3"},
@@ -267,7 +258,6 @@ func TestDetectCycle_NoCycle_Linear(t *testing.T) {
 }
 
 func TestDetectCycle_NoCycle_Parallel(t *testing.T) {
-	// 1 and 2 both depend on 3 (independent blockers)
 	edges := map[string][]string{
 		"1": {"3"},
 		"2": {"3"},
@@ -279,7 +269,6 @@ func TestDetectCycle_NoCycle_Parallel(t *testing.T) {
 }
 
 func TestDetectCycle_DirectCycle(t *testing.T) {
-	// 1 depends on 2 and 2 depends on 1
 	edges := map[string][]string{
 		"1": {"2"},
 		"2": {"1"},
@@ -291,7 +280,6 @@ func TestDetectCycle_DirectCycle(t *testing.T) {
 }
 
 func TestDetectCycle_TransitiveCycle(t *testing.T) {
-	// 1→2→3→1
 	edges := map[string][]string{
 		"1": {"2"},
 		"2": {"3"},
@@ -304,7 +292,6 @@ func TestDetectCycle_TransitiveCycle(t *testing.T) {
 }
 
 func TestDetectCycle_ExternalBlockerIgnored(t *testing.T) {
-	// 1 depends on 99 (external, not in batch)
 	edges := map[string][]string{
 		"1": {"99"},
 	}
@@ -314,11 +301,9 @@ func TestDetectCycle_ExternalBlockerIgnored(t *testing.T) {
 	}
 }
 
-// --- unreadyBlockers tests ---
-
 func TestUnreadyBlockers_Pending(t *testing.T) {
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"}) // no complete label, still open
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
 	edges := map[string][]string{"10": {"11"}}
 	got := unreadyBlockers(fc, fc, capsFor(fc, fc), "10", edges, nil)
 	if !reflect.DeepEqual(got, []string{"11"}) {
@@ -328,11 +313,9 @@ func TestUnreadyBlockers_Pending(t *testing.T) {
 
 func TestUnreadyBlockers_MergedAndClosedAreReady(t *testing.T) {
 	fc := forge.NewFake()
-	// #11: PR merged — satisfied by merged PR regardless of labels.
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
 	fc.SetPR("11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
 	fc.SetPRState("https://github.com/owner/repo/pull/11", "MERGED")
-	// #12: issue closed with no PR — fallback satisfied.
 	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
 	edges := map[string][]string{"10": {"11", "12"}}
 	if got := unreadyBlockers(fc, fc, capsFor(fc, fc), "10", edges, nil); len(got) != 0 {
@@ -342,11 +325,9 @@ func TestUnreadyBlockers_MergedAndClosedAreReady(t *testing.T) {
 
 func TestUnreadyBlockers_Mixed(t *testing.T) {
 	fc := forge.NewFake()
-	// #11: PR merged — satisfied.
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
 	fc.SetPR("11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
 	fc.SetPRState("https://github.com/owner/repo/pull/11", "MERGED")
-	// #12: still open with no merged PR — blocking.
 	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"})
 	edges := map[string][]string{"10": {"11", "12"}}
 	if got := unreadyBlockers(fc, fc, capsFor(fc, fc), "10", edges, nil); !reflect.DeepEqual(got, []string{"12"}) {
@@ -373,7 +354,7 @@ func TestReadinessReady_OpenPRWithCompleteLabel(t *testing.T) {
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{c.CompleteLabel}})
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
-	// state defaults to OPEN when SetPR is called without SetPRState override
+	// SetPR without a SetPRState override leaves the PR state OPEN.
 
 	if (Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
 		t.Error("Readiness.Ready: want false for open PR with agent-complete label, got true")
@@ -383,7 +364,7 @@ func TestReadinessReady_OpenPRWithCompleteLabel(t *testing.T) {
 func TestReadinessReady_ClosedIssueFallback(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "99", State: "CLOSED"})
-	// No PR registered — simulates human-handled work absorbed outside spindrift.
+	// No PR registered: this is human-handled work absorbed outside spindrift.
 
 	if !(Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
 		t.Error("Readiness.Ready: want true for closed issue with no PR, got false")
@@ -417,8 +398,8 @@ func TestReadinessReady_LocalLandingNotYetMerged(t *testing.T) {
 func TestReadinessReady_LocalLandingBranchRefStaysHeld(t *testing.T) {
 	fc := forge.NewFake()
 	// A raw, pre-merge branch ref (no "@sha") is settle's LandingBranchRef
-	// shape -- not yet upgraded to the containment-checkable IntegrationRef
-	// form, so it must never reach LandingContained and must stay held.
+	// shape, not yet upgraded to the containment-checkable IntegrationRef form,
+	// so it must never reach LandingContained and must stay held.
 	landing := "agent/issue-99"
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
 	branchLanding := forge.Landing{Kind: forge.LandingBranchRef, Branch: landing}
@@ -432,7 +413,7 @@ func TestReadinessReady_LocalLandingBranchRefStaysHeld(t *testing.T) {
 
 func TestReadinessReady_MergedIssueFallback(t *testing.T) {
 	fc := forge.NewFake()
-	// Blocker ref resolves to a PR number: no agent branch, so it falls
+	// The blocker ref resolves to a PR number, so with no agent branch it falls
 	// back to it.Issue(ref), which returns MERGED for a merged PR.
 	fc.SetIssue(forge.Issue{Number: "99", State: "MERGED"})
 
@@ -443,8 +424,8 @@ func TestReadinessReady_MergedIssueFallback(t *testing.T) {
 
 func TestReadinessReady_OpenIssueFallback(t *testing.T) {
 	fc := forge.NewFake()
-	// No PR registered, so it falls back to it.Issue(ref), which returns
-	// still-OPEN — must keep blocking.
+	// No PR registered, so it falls back to it.Issue(ref), which returns a
+	// still-open issue that must keep blocking.
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN"})
 
 	if (Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
@@ -452,14 +433,11 @@ func TestReadinessReady_OpenIssueFallback(t *testing.T) {
 	}
 }
 
-// --- Readiness.Status tests ---
-
 func TestReadinessStatus_ClosedAndFailed(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
-	// #11: closed with no PR — Readiness.Ready's fallback treats it as
-	// ready, but it also carries the Failed label, which must never be
-	// satisfiable.
+	// Closed with no PR, so Readiness.Ready's fallback treats #11 as ready, but
+	// it also carries the Failed label, which must never be satisfiable.
 	fc.SetIssue(forge.Issue{Number: "11", State: "CLOSED", Labels: []string{c.FailedLabel}})
 	edges := map[string][]string{"10": {"11"}}
 
@@ -470,21 +448,19 @@ func TestReadinessStatus_ClosedAndFailed(t *testing.T) {
 	if !reflect.DeepEqual(failed, []string{"11"}) {
 		t.Errorf("Readiness.Status: want failed=[11], got %v", failed)
 	}
-	// #11 is closed, so Readiness.Ready's fallback (blocker.go) already
-	// calls it satisfied — it must stay out of unready even though it's
-	// also failed, or the console would redundantly render both BlockedBy
-	// and Reason for the same blocker (the #755 regression Readiness.Status's
-	// doc warns about).
+	// Readiness.Ready's fallback already calls the closed #11 satisfied, so it
+	// must stay out of unready even though it is also failed. Otherwise the
+	// console renders both BlockedBy and Reason for the same blocker, the #755
+	// regression Readiness.Status's doc warns about.
 	if len(unready) != 0 {
 		t.Errorf("Readiness.Status: want unready=[] for closed+failed blocker, got %v", unready)
 	}
 }
 
-// TestReadinessStatus_OneIssueFetchPerBlocker guards against the double-fetch
-// #1098 found: unreadyBlockers' Ready call and the FailedLabel loop each
-// independently called it.Issue(dep) for the same blocker. No PR is
-// registered here, so Ready falls through to it.Issue — the path where the
-// duplicate always fired.
+// TestReadinessStatus_OneIssueFetchPerBlocker guards the double fetch #1098
+// found: unreadyBlockers' Ready call and the FailedLabel loop each called
+// it.Issue(dep) for the same blocker. No PR is registered here, so Ready falls
+// through to it.Issue, the path where the duplicate always fired.
 func TestReadinessStatus_OneIssueFetchPerBlocker(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
@@ -499,10 +475,10 @@ func TestReadinessStatus_OneIssueFetchPerBlocker(t *testing.T) {
 }
 
 // TestReadinessStatus_MergedPRStillChecksFailedLabel covers the fi == nil
-// branch: a merged PR resolves readiness without blockerReady ever calling
-// it.Issue, so the FailedLabel loop's fetch is the only call, not a
-// duplicate — and it must still run so a failed-labeled blocker with a
-// stale merged PR can't slip past the failed check.
+// branch: a merged PR resolves readiness without blockerReady calling it.Issue,
+// so the FailedLabel loop's fetch is the only call, not a duplicate. It must
+// still run, or a failed-labeled blocker with a stale merged PR slips past the
+// failed check.
 func TestReadinessStatus_MergedPRStillChecksFailedLabel(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
@@ -530,7 +506,7 @@ func TestReadinessStatus_MergedPRStillChecksFailedLabel(t *testing.T) {
 
 // TestReadinessStatus_MultipleBlockersOneFetchEach extends the one-fetch
 // invariant across a mixed set of blockers (push-only-style fall-through and
-// merged-PR) so the dedup holds per-dep, not just for a single blocker.
+// merged PR) so the dedup holds per dep, not just for a single blocker.
 func TestReadinessStatus_MultipleBlockersOneFetchEach(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
@@ -548,12 +524,10 @@ func TestReadinessStatus_MultipleBlockersOneFetchEach(t *testing.T) {
 	}
 }
 
-// --- dependent seed-branch blocker gate tests (#2130) ---
-
-// TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds verifies
-// a blocker whose landing has NOT reached the dependent's own
-// integration/<parent> seed branch stays unready even though the blocker
-// issue itself is still open — the gate must check the dependent's own seed
+// TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds guards the
+// #2130 dependent seed-branch gate: a blocker whose landing has not reached the
+// dependent's own integration/<parent> seed branch stays unready even though the
+// blocker issue is still open. The gate must check the dependent's own seed
 // branch, not the blocker's.
 func TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds(t *testing.T) {
 	c := baseConfig()
@@ -576,8 +550,8 @@ func TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds(t *test
 	if !reflect.DeepEqual(unready, []string{"12"}) {
 		t.Errorf("Status: want unready=[12], got %v", unready)
 	}
-	// The blocker issue is still open with no PR -- it must be the seed-branch
-	// containment check (not a closed/merged fallback) that held it.
+	// The blocker issue is still open with no PR, so the seed-branch containment
+	// check, not a closed or merged fallback, must be what held it.
 	found := false
 	for _, n := range fc.IssueCalls {
 		if n == "12" {
@@ -589,10 +563,10 @@ func TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds(t *test
 	}
 }
 
-// TestBlockerStatus_SeedBranchGate_ContainmentErrorHolds verifies that when
-// the local Code Forge's LandingContained call errors (e.g. a git merge-base
-// failure), the dependent must hold loudly -- stay unready -- rather than
-// treating the blocker as satisfied.
+// TestBlockerStatus_SeedBranchGate_ContainmentErrorHolds verifies that when the
+// local Code Forge's LandingContained call errors (a git merge-base failure,
+// say), the dependent stays unready rather than treating the blocker as
+// satisfied.
 func TestBlockerStatus_SeedBranchGate_ContainmentErrorHolds(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
@@ -616,9 +590,9 @@ func TestBlockerStatus_SeedBranchGate_ContainmentErrorHolds(t *testing.T) {
 	}
 }
 
-// TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady verifies a
-// blocker whose landing HAS reached the dependent's own integration/<parent>
-// seed branch is treated as satisfied.
+// TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady verifies the
+// gate satisfies a blocker whose landing HAS reached the dependent's own
+// integration/<parent> seed branch.
 func TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
@@ -644,8 +618,8 @@ func TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady(t *testing
 
 // TestBlockerStatus_SeedBranchGate_ClosedBlockerReadyRegardlessOfContainment
 // verifies a closed blocker still satisfies the gate regardless of seed-branch
-// containment -- the IssueClosed fallback runs before the containment check
-// and must not be short-circuited by it.
+// containment: the IssueClosed fallback runs before the containment check, and
+// the containment check must not short-circuit it.
 func TestBlockerStatus_SeedBranchGate_ClosedBlockerReadyRegardlessOfContainment(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
@@ -670,11 +644,10 @@ func TestBlockerStatus_SeedBranchGate_ClosedBlockerReadyRegardlessOfContainment(
 }
 
 // TestReadinessReady_SeedBranchGate_EmptySeedScopeNeverChecksContainment
-// verifies a zero SeedScope (nil SeedScopeOf) skips the seed-branch
-// containment check entirely (issue #2151 dropped the pre-#2130 no-scope
-// self-verification fallback that used to answer this case) — an open
-// IntegrationRef-landed blocker stays unready even when LandingContained is
-// scripted true for the empty-parent key, since blockerReady never calls it.
+// verifies a zero SeedScope (nil SeedScopeOf) skips the containment check
+// entirely, since issue #2151 dropped the pre-#2130 no-scope self-verification
+// fallback. An open IntegrationRef-landed blocker stays unready even when
+// LandingContained is scripted true, because blockerReady never calls it.
 func TestReadinessReady_SeedBranchGate_EmptySeedScopeNeverChecksContainment(t *testing.T) {
 	fc := forge.NewFake()
 	landing := "agent/issue-99@abc123"

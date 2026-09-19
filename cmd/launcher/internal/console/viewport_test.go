@@ -2,10 +2,8 @@ package console
 
 import "testing"
 
-// TestViewport_Window_Unbounded_ZeroValue verifies a freshly zero-valued
-// Viewport (height 0, its "unbounded" value, issue #1540) windows every row
-// from offset 0 with nothing hidden above or below — the nil *int convention
-// it replaces.
+// Height 0 is the zero value and means unbounded, replacing the nil *int
+// convention (issue #1540).
 func TestViewport_Window_Unbounded_ZeroValue(t *testing.T) {
 	var v Viewport
 	w := v.Window(5)
@@ -15,9 +13,6 @@ func TestViewport_Window_Unbounded_ZeroValue(t *testing.T) {
 	}
 }
 
-// TestViewport_Window_BoundedHeight_TruncatesAndCountsBelow verifies a
-// bounded height slices [offset, offset+height) and reports the remaining
-// rows as Below when total overruns it.
 func TestViewport_Window_BoundedHeight_TruncatesAndCountsBelow(t *testing.T) {
 	var v Viewport
 	v.SetHeight(3)
@@ -28,9 +23,6 @@ func TestViewport_Window_BoundedHeight_TruncatesAndCountsBelow(t *testing.T) {
 	}
 }
 
-// TestWindow_Shown_NotTruncated_ShowsEveryRowNoAffordance verifies Shown
-// reports every row in [Start, End) as shown with no "more below" count when
-// nothing is hidden.
 func TestWindow_Shown_NotTruncated_ShowsEveryRowNoAffordance(t *testing.T) {
 	w := Window{Start: 0, End: 5, Above: 0, Below: 0}
 	shown, moreBelow := w.Shown()
@@ -39,10 +31,8 @@ func TestWindow_Shown_NotTruncated_ShowsEveryRowNoAffordance(t *testing.T) {
 	}
 }
 
-// TestWindow_Shown_Truncated_HoldsBackOneRowForMoreBelow verifies Shown
-// holds one row back from End-Start so the "… N more below" affordance
-// itself fits within the same budget, and reports the true remaining count
-// — the held-back row plus Below (issue #1061, inherited).
+// Shown holds one row back so the "N more below" line fits in the same
+// budget, and the remaining count includes that held-back row (issue #1061).
 func TestWindow_Shown_Truncated_HoldsBackOneRowForMoreBelow(t *testing.T) {
 	w := Window{Start: 0, End: 4, Above: 0, Below: 46}
 	shown, moreBelow := w.Shown()
@@ -51,9 +41,8 @@ func TestWindow_Shown_Truncated_HoldsBackOneRowForMoreBelow(t *testing.T) {
 	}
 }
 
-// TestViewport_Scroll_ClampsIntoBounds verifies Scroll adds delta to offset,
-// clamped into [0, total-1] — pgup/pgdown's raw movement, independent of
-// height or any cursor.
+// Scroll is pgup/pgdown's raw movement, clamped into [0, total-1] and
+// independent of height or any cursor.
 func TestViewport_Scroll_ClampsIntoBounds(t *testing.T) {
 	var v Viewport
 	v.Scroll(2, 5)
@@ -70,11 +59,8 @@ func TestViewport_Scroll_ClampsIntoBounds(t *testing.T) {
 	}
 }
 
-// TestViewport_MoveCursor_NonPositiveHeight_ClampsOffsetBelowTotal verifies
-// MoveCursor's cursor-follow never leaves offset == total: with height 0
-// (unbounded — no window ever excludes the cursor), offset simply never
-// needs to advance past total-1 (issue #1054, inherited by the Viewport
-// extraction).
+// Cursor-follow must never leave offset == total. At height 0 no window can
+// exclude the cursor, so offset stops at total-1 (issue #1054).
 func TestViewport_MoveCursor_NonPositiveHeight_ClampsOffsetBelowTotal(t *testing.T) {
 	var v Viewport
 	v.MoveCursor(4, 5)
@@ -83,9 +69,8 @@ func TestViewport_MoveCursor_NonPositiveHeight_ClampsOffsetBelowTotal(t *testing
 	}
 }
 
-// TestViewport_MoveCursor_PositiveHeight_AdvancesOffsetToKeepCursorVisible
-// verifies MoveCursor advances offset just far enough that a bounded window
-// still shows the cursor's row (issue #1036).
+// Offset advances just far enough to keep the cursor's row inside a bounded
+// window (issue #1036).
 func TestViewport_MoveCursor_PositiveHeight_AdvancesOffsetToKeepCursorVisible(t *testing.T) {
 	var v Viewport
 	v.SetHeight(2)
@@ -95,16 +80,14 @@ func TestViewport_MoveCursor_PositiveHeight_AdvancesOffsetToKeepCursorVisible(t 
 	}
 }
 
-// TestViewport_SetHeight_ClampOnShrink_PullsOffsetBackToLastFullPage
-// verifies binding a previously-unbounded (or looser) height immediately
-// pulls a now-too-far offset back so the viewport's last page still fills it
-// instead of rendering mostly blank (issue #829) — clamp-on-shrink lives
-// inside SetHeight itself (issue #1540), using the total from the most
-// recent Window/Scroll/MoveCursor call.
+// Binding a tighter height pulls a now-too-far offset back so the last page
+// still fills the viewport instead of rendering mostly blank (issue #829).
+// SetHeight itself does the clamping (issue #1540), using the total from the
+// most recent Window, Scroll or MoveCursor call.
 func TestViewport_SetHeight_ClampOnShrink_PullsOffsetBackToLastFullPage(t *testing.T) {
 	var v Viewport
-	v.Scroll(99, 100) // unbounded (height 0): offset can sit anywhere, lands at 99
-	v.SetHeight(10)   // now bounded: offset 99 would leave only 1 of 10 rows filled
+	v.Scroll(99, 100) // height 0 lets the offset park at the very last row
+	v.SetHeight(10)   // offset 99 would now leave only 1 of 10 rows filled
 	if got := v.Window(100).Start; got != 90 {
 		t.Errorf("offset after binding height to 10 = %d, want 90 (last page fills the new viewport)", got)
 	}

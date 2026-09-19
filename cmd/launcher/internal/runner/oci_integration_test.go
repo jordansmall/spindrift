@@ -13,22 +13,18 @@ import (
 	"time"
 )
 
-// integrationTestImage is a small, well-known multi-arch image used only to
-// probe hardening flags — it never runs the real spindrift entrypoint, so it
-// doesn't need to be pinned by digest the way the production nixBuilderImage
-// is (oci.go isDigestPinned). requireRealOCI gates this file on a reachable
-// daemon, so it only ever pulls in an environment that already has real
-// container tooling and network access (a genuine CI runner).
+// integrationTestImage is a throwaway probe image. It never runs the real
+// spindrift entrypoint, so it needs no digest pin the way the production
+// nixBuilderImage does (oci.go isDigestPinned). requireRealOCI gates this file
+// on a reachable daemon, so the runtime only pulls it where real container
+// tooling and network access already exist.
 const integrationTestImage = "docker.io/library/busybox:stable"
 
-// runProbeAttemptTimeout bounds a single runProbe attempt, covering the
-// implicit image pull on first run — so a registry hang gets killed well
-// inside the test's own 10m timeout instead of riding it out to a panic
-// (issue #2015). Three tests in this package call runProbe, each retrying up
-// to runProbeMaxAttempts times, so the worst case across the whole package is
-// 3 * runProbeMaxAttempts * runProbeAttemptTimeout (plus backoff) — keep that
-// comfortably under the 10m default `go test` timeout (ci.yml has no
-// explicit -timeout), not just under it per-attempt.
+// runProbeAttemptTimeout bounds a single runProbe attempt, including the
+// implicit image pull, so the deadline kills a registry hang well inside the
+// 10m default go test timeout instead of reaching the panic (issue #2015).
+// Three tests call runProbe, each retrying up to runProbeMaxAttempts times, so
+// keep 3 * runProbeMaxAttempts * runProbeAttemptTimeout plus backoff under 10m.
 const runProbeAttemptTimeout = 45 * time.Second
 
 // runProbeMaxAttempts bounds how many times runProbe retries a transient
@@ -39,9 +35,8 @@ const runProbeMaxAttempts = 2
 // hammer a registry that just failed.
 const runProbeRetryBackoff = 3 * time.Second
 
-// requireRealOCI returns the CLI name ("podman" or "docker") for the first
-// runtime on PATH with a reachable daemon, skipping cleanly when neither is
-// usable (issue #576's "skip on hosts with no real runtime").
+// requireRealOCI returns the CLI name for the first runtime on PATH with a
+// reachable daemon, skipping cleanly when neither is usable (issue #576).
 func requireRealOCI(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -60,8 +55,8 @@ func requireRealOCI(t *testing.T) string {
 	return ""
 }
 
-// integrationContainerName returns a name unique enough not to collide with
-// a concurrent test run or a leftover container from a prior one.
+// integrationContainerName avoids collisions with a concurrent test run or a
+// leftover container from a prior one.
 func integrationContainerName(t *testing.T) string {
 	t.Helper()
 	return fmt.Sprintf("spindrift-integration-%d", time.Now().UnixNano())
@@ -71,29 +66,20 @@ func newIntegrationOCIAdapter(cli string) *ociAdapter {
 	return &ociAdapter{cli: cli, image: integrationTestImage}
 }
 
-// ociProbeArgs takes the real buildRunArgs() output for box, so every
-// hardening/env flag reaches the runtime exactly as production would send
-// it, and swaps the fixed "image /agent/entrypoint.sh" tail for
-// integrationTestImage running script under sh -c.
+// ociProbeArgs reuses the real buildRunArgs output so every hardening and env
+// flag reaches the runtime exactly as production sends it, swapping only the
+// fixed image and entrypoint tail for integrationTestImage running script.
 func ociProbeArgs(a *ociAdapter, box Box, script string) []string {
 	args := a.buildRunArgs(box)
 	args = args[:len(args)-2] // drop image + "/agent/entrypoint.sh"
 	return append(args, a.image, "sh", "-c", script)
 }
 
-// runProbe launches the probe container and returns only its stdout. The
-// container's own output goes to stdout; the runtime's first-run image-pull
-// progress ("Trying to pull...", "Copying blob...") and any warnings go to
-// stderr, so we must keep the two apart — CombinedOutput would fold the pull
-// progress into the parse and break it on whichever probe runs first.
-//
-// Each attempt is bounded by runProbeAttemptTimeout so a registry hang on the
-// implicit image pull doesn't ride out to the 10m Go test timeout. A
-// transient registry failure (isTransientRegistryError, or the context
-// deadline itself) is retried up to runProbeMaxAttempts before the test
-// skips rather than fails — a genuine failure (bad args, real capability
-// regression) surfaces immediately on the first attempt, no retry, no skip
-// (issue #2015).
+// runProbe returns only the container's stdout: the runtime writes image-pull
+// progress and warnings to stderr, so CombinedOutput would fold that into the
+// parse and break whichever probe runs first. A transient registry failure or
+// a blown deadline retries up to runProbeMaxAttempts and then skips, while a
+// genuine failure such as bad args fails on the first attempt (issue #2015).
 func runProbe(t *testing.T, cli string, args []string) []byte {
 	t.Helper()
 	var lastErr error
@@ -125,8 +111,8 @@ func runProbe(t *testing.T, cli string, args []string) []byte {
 }
 
 // statusField returns the sole value of the /proc/self/status line beginning
-// with prefix (e.g. "CapEff:\t0000000000000000" -> "0000000000000000"),
-// scanning line by line so an unexpected extra line can't shift the parse.
+// with prefix, scanning line by line so an unexpected extra line cannot shift
+// the parse.
 func statusField(t *testing.T, out []byte, prefix string) string {
 	t.Helper()
 	for _, line := range strings.Split(string(out), "\n") {
@@ -142,9 +128,8 @@ func statusField(t *testing.T, out []byte, prefix string) string {
 	return ""
 }
 
-// TestOCIIntegration_CapabilitiesDropped launches a real container and
-// asserts, from inside it, that its effective capability set is empty — the
-// kernel enforcing --cap-drop=all, not just the flag being present on argv
+// TestOCIIntegration_CapabilitiesDropped asserts from inside a real container
+// that the kernel enforces --cap-drop=all, not just that the flag reaches argv
 // (issue #576).
 func TestOCIIntegration_CapabilitiesDropped(t *testing.T) {
 	cli := requireRealOCI(t)
@@ -158,10 +143,9 @@ func TestOCIIntegration_CapabilitiesDropped(t *testing.T) {
 	}
 }
 
-// TestOCIIntegration_NoNewPrivileges launches a real container and asserts,
-// from inside it, that NoNewPrivs is set — the kernel enforcing
-// --security-opt=no-new-privileges, not just the flag being present on argv
-// (issue #576).
+// TestOCIIntegration_NoNewPrivileges asserts from inside a real container that
+// the kernel enforces --security-opt=no-new-privileges, not just that the flag
+// reaches argv (issue #576).
 func TestOCIIntegration_NoNewPrivileges(t *testing.T) {
 	cli := requireRealOCI(t)
 	a := newIntegrationOCIAdapter(cli)
@@ -174,12 +158,10 @@ func TestOCIIntegration_NoNewPrivileges(t *testing.T) {
 	}
 }
 
-// TestOCIIntegration_SecretNotOnContainerProcessArgv sets a secret in
-// Box.Env and asserts, by reading the running container process's own
-// /proc/self/cmdline, that it never reaches argv — env vars reach the
-// container via envp (-e), not argv, so a regression that started
-// interpolating a secret into the command line would show up here (issue
-// #576).
+// TestOCIIntegration_SecretNotOnContainerProcessArgv reads the container
+// process's own /proc/self/cmdline. Env vars reach the container via envp
+// (-e), not argv, so a regression that interpolated a secret into the command
+// line would show up here (issue #576).
 func TestOCIIntegration_SecretNotOnContainerProcessArgv(t *testing.T) {
 	cli := requireRealOCI(t)
 	const marker = "spindrift-integration-secret-9f3c2a"

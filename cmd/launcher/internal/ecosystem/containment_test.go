@@ -15,44 +15,22 @@ import (
 	"testing"
 )
 
-// ecosystemLiteral is one scanner finding: where the offending literal sits
-// and what it said. Findings stay structured so callers assert on fields and
-// only the code rendering a failure message formats them.
 type ecosystemLiteral struct {
 	File  string
 	Line  int
 	Value string
 }
 
-// scanForEcosystemLiterals parses the package directory dir and returns one
-// finding per string literal whose *entire* unquoted value equals a Table
-// row's Name, case-insensitive.
-//
-// A bare "npm" outside the table is the shape this check exists to catch: a
-// second, driftable home for a fact the row already owns.
-//
-// Equality is whole-literal, not substring: production code legitimately
-// holds literals that *contain* an ecosystem name without routing on one,
-// e.g. "cargo config.json" (a filename) or a flag-usage string mentioning
-// cargo in prose. Flagging those would bury the true positives in noise.
-//
-// Walking *ast.BasicLit of Kind == token.STRING rather than grepping means
-// comments naming an ecosystem are excluded for free -- a doc comment
-// mentioning "gradle" is not a routing decision and must not be flagged.
-//
-// A directory contributes only its own non-test .go files -- it does not
-// recurse. A subpackage is a package of its own and is a target on its own
-// merits: it imports the ecosystem package or it doesn't.
-// deriveEcosystemImporters enumerates every package directory in the tree
-// already, so recursing here would only double-cover a child the derived
-// target list already carries.
-//
-// If dir does not exist, this fails the test loudly (t.Fatalf) rather than
-// silently scanning zero files: a target renamed out from under the check
-// must not quietly drop coverage.
+// scanForEcosystemLiterals returns one finding per string literal in dir's
+// non-test .go files whose entire unquoted value equals a Table row Name.
+// Equality is whole-literal, so the scan skips "cargo config.json" and prose,
+// and walking the AST skips comments. It reads dir's own files only;
+// deriveEcosystemImporters lists every package directory separately.
 func scanForEcosystemLiterals(t *testing.T, dir string) []ecosystemLiteral {
 	t.Helper()
 
+	// A missing dir fails the test loudly rather than scanning zero files: a
+	// target renamed out from under the check must not quietly drop coverage.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("scanForEcosystemLiterals: reading directory %s: %v", dir, err)
@@ -101,10 +79,6 @@ func scanForEcosystemLiterals(t *testing.T, dir string) []ecosystemLiteral {
 	return findings
 }
 
-// writeFixture writes contents to name inside dir, creating dir first so
-// callers can drop a file into a not-yet-existing subdirectory in one line.
-// Kept separate from the scanner under test so a write failure and a scan
-// failure are never confused with each other in a test log.
 func writeFixture(t *testing.T, dir, name, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -115,9 +89,9 @@ func writeFixture(t *testing.T, dir, name, contents string) {
 	}
 }
 
-// lineOf reports the 1-based line of the first line of src containing
-// needle. Fixture sources are generated, so deriving the expected line this
-// way keeps the assertions from drifting when the templates change.
+// lineOf reports the 1-based line of the first line of src containing needle.
+// Fixture sources are generated, so deriving the expected line keeps the
+// assertions from drifting when the templates change.
 func lineOf(t *testing.T, src, needle string) int {
 	t.Helper()
 	for i, line := range strings.Split(src, "\n") {
@@ -129,26 +103,14 @@ func lineOf(t *testing.T, src, needle string) int {
 	return 0
 }
 
-// TestScanForEcosystemLiterals_FixtureDetectsViolation is the durable proof
-// that a deliberate violation trips the check, and that scanning a
-// directory never reaches into a subdirectory to find one. The fixture
-// tree holds a production file that routes on a bare ecosystem literal, a
-// production file that only holds a *containing* literal and a comment
-// naming an ecosystem, a _test.go file that routes on a bare literal, a
-// subpackage that routes on a bare literal, and a testdata directory
-// holding an unparseable .go file. Exactly the top-level violator is
-// reported: the compliant file proves whole-literal equality doesn't
-// over-fire on containment or comments, the _test.go file proves test
-// files are out of scope, and the subpackage and testdata cases both prove
-// the same thing from opposite ends -- neither a parseable subpackage nor
-// an unparseable testdata one is ever descended into, because scanning a
-// directory covers only its own files. The subpackage is a target of its
-// own on the derived list (see TestEcosystemNamesStayInTheTable), never
-// covered by a parent's recursion.
-//
-// Every ecosystem name in the fixture is drawn from Table, so deleting a
-// row can never make this test fail for a reason unrelated to the scanner.
+// TestScanForEcosystemLiterals_FixtureDetectsViolation pins that exactly the
+// top-level violator is reported. The compliant file proves whole-literal
+// equality does not over-fire on containment or comments, the _test.go file
+// proves test files are out of scope, and the subpackage and the unparseable
+// testdata file prove the scan never descends into either.
 func TestScanForEcosystemLiterals_FixtureDetectsViolation(t *testing.T) {
+	// The fixture draws its names from Table, so deleting a row cannot fail
+	// this test for a reason unrelated to the scanner.
 	if len(Table) < 4 {
 		t.Fatalf("fixture needs 4 distinct ecosystem names, Table has %d rows", len(Table))
 	}
@@ -206,7 +168,6 @@ var routed = %q
 }
 
 // readModuleName reads the "module " directive out of the go.mod at path.
-//
 // Duplicated from registryproxy/importgraph_test.go rather than exported
 // across packages, matching that file's own test-local style for the same
 // helper.
@@ -228,10 +189,9 @@ func readModuleName(t *testing.T, path string) string {
 	return ""
 }
 
-// nonTestImports returns every import path named by dir's non-test *.go
-// files, parsed in ImportsOnly mode. Duplicated from
-// registryproxy/importgraph_test.go for the same test-local-style reason as
-// readModuleName above.
+// nonTestImports returns every import path named by dir's non-test *.go files.
+// Duplicated from registryproxy/importgraph_test.go for the same
+// test-local-style reason as readModuleName above.
 func nonTestImports(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -262,12 +222,10 @@ func nonTestImports(t *testing.T, dir string) []string {
 	return imports
 }
 
-// packageDirs lists every directory at or under root that can hold a Go
-// package: root itself, plus every subdirectory, pruning testdata (which
-// may hold deliberately unparseable or fixture .go files -- see
-// internal/console/msgcensus/testdata for a real one with its own nested
-// packages) and dot-prefixed directories (tooling state, not package
-// source).
+// packageDirs lists root and every subdirectory under it that can hold a Go
+// package, pruning testdata (which may hold deliberately unparseable or
+// fixture .go files, as internal/console/msgcensus/testdata does) and
+// dot-prefixed directories, which hold tooling state rather than source.
 func packageDirs(t *testing.T, root string) []string {
 	t.Helper()
 	var dirs []string
@@ -292,23 +250,10 @@ func packageDirs(t *testing.T, root string) []string {
 }
 
 // deriveEcosystemImporters returns every directory under moduleRoot whose
-// non-test .go files directly import moduleName+"/internal/ecosystem",
-// plus moduleRoot itself unconditionally. moduleRoot is where the launcher
-// main package lives (its go.mod's directory); it is included even when it
-// doesn't import internal/ecosystem so that a future refactor routing
-// main's ecosystem access through an intermediary package still leaves
-// main covered.
-//
-// Direct imports only, not the transitive closure importgraph_test.go
-// computes for a different purpose: the criterion is being able to reach
-// Table. A package handed a row's Name as plain string data -- as
-// registrypathset is, via registrydiscover -- could still compare against
-// it, but is deliberately out of scope: it passes a fact through rather
-// than being a second home for one.
-//
-// Fails loudly (t.Fatalf) if zero directories directly import
-// internal/ecosystem, before moduleRoot is added -- a broken walker must
-// not pass vacuously by falling back to the one guaranteed entry.
+// non-test .go files directly import moduleName+"/internal/ecosystem", plus
+// moduleRoot itself, so a refactor routing main's ecosystem access through an
+// intermediary package still leaves main covered. Direct imports only: the
+// criterion is reaching Table, not being handed a row's Name as string data.
 func deriveEcosystemImporters(t *testing.T, moduleRoot, moduleName string) []string {
 	t.Helper()
 	ecosystemImport := moduleName + "/internal/ecosystem"
@@ -320,6 +265,8 @@ func deriveEcosystemImporters(t *testing.T, moduleRoot, moduleName string) []str
 		}
 	}
 
+	// Checked before moduleRoot is added: a broken walker must not pass
+	// vacuously by falling back to the one guaranteed entry.
 	if len(importers) == 0 {
 		t.Fatalf("deriveEcosystemImporters(%s, %s): zero directories directly import %s", moduleRoot, moduleName, ecosystemImport)
 	}
@@ -331,15 +278,11 @@ func deriveEcosystemImporters(t *testing.T, moduleRoot, moduleName string) []str
 	return importers
 }
 
-// buildSyntheticEcosystemModule writes a throwaway module tree under
-// t.TempDir(): a go.mod, a stub internal/ecosystem package (empty --
-// deriveEcosystemImporters only cares that its import path is named, not
-// its contents), a package that imports the stub and holds plantedReader as
-// a bare literal, a sibling package that imports nothing, and a root-level
-// file holding plantedRoot as a bare literal without importing the stub.
-// One tree serves both the "new importer picked up automatically" and the
-// "main package covered unconditionally" fixture tests below, since
-// neither test's assertions interfere with the other's fixture files.
+// buildSyntheticEcosystemModule writes a throwaway module tree: a go.mod, an
+// empty stub internal/ecosystem package, a package importing the stub that
+// holds plantedReader as a bare literal, a sibling importing nothing, and a
+// root file holding plantedRoot without importing the stub. One tree serves
+// both fixture tests below, whose assertions do not interfere.
 func buildSyntheticEcosystemModule(t *testing.T, plantedReader, plantedRoot string) (root, moduleName string) {
 	t.Helper()
 	root = t.TempDir()
@@ -355,13 +298,11 @@ func buildSyntheticEcosystemModule(t *testing.T, plantedReader, plantedRoot stri
 	return root, moduleName
 }
 
-// TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically proves a
-// new importer needs no edit here: newreader is never named anywhere but
-// the fixture-building call below, yet it must turn up in the derived
-// list purely because it imports the stub ecosystem package -- and its
-// planted literal must then be reported by scanning it. sibling, which
-// imports nothing, proves the derivation doesn't just list every directory
-// in the tree.
+// TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically proves a new
+// importer needs no edit here: newreader turns up in the derived list purely
+// because it imports the stub ecosystem package, and scanning it then reports
+// its planted literal. sibling, which imports nothing, proves the
+// derivation does not just list every directory in the tree.
 func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T) {
 	if len(Table) < 1 {
 		t.Fatalf("fixture needs 1 ecosystem name, Table has %d rows", len(Table))
@@ -386,15 +327,10 @@ func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T)
 	}
 }
 
-// TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally proves
-// main is included even without importing the ecosystem package:
-// mainpkg.go plants a bare literal at the fixture module's root without
-// importing the stub ecosystem package at all, and the derivation
-// must still include the root and the scan must still flag it. The second
-// assertion checks the real module root joins up the same way: the actual
-// launcher main package does import internal/ecosystem today, but this
-// assertion only relies on the unconditional inclusion, not on that import
-// staying true.
+// TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally proves main
+// is included even without importing the ecosystem package. The real launcher
+// main package does import internal/ecosystem today, but the second assertion
+// relies only on the unconditional inclusion, not on that import staying true.
 func TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally(t *testing.T) {
 	if len(Table) < 1 {
 		t.Fatalf("fixture needs 1 ecosystem name, Table has %d rows", len(Table))
@@ -420,30 +356,11 @@ func TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally(t *testing.T
 	}
 }
 
-// TestEcosystemNamesStayInTheTable enforces that once a fact about an
-// ecosystem lives in one ecosystem.Table row, every package that imports
-// this one reaches that fact through the row -- never by re-naming the
-// ecosystem as a bare string literal of its own. The target list comes
-// from deriveEcosystemImporters, not a hand-listed set: a package that
-// starts importing internal/ecosystem is covered from its next test run
-// with no edit here, and one that stops importing it drops off the same
-// way.
-//
-// internal/registryproxy is not scanned: its own importgraph_test.go
-// tripwire (ADR 0047) forbids its shipped code from importing
-// internal/ecosystem, so it never reads a row.
-//
-// internal/credresolver is out of scope because its per-ecosystem literals
-// name credential *store formats* (npmrc, cargo credentials,
-// gradle.properties, netrc), which needs no import of internal/ecosystem
-// to write. This package's own row files (cargo.go, npm.go, ...) are out
-// of scope because deriveEcosystemImporters reports only importERS of
-// internal/ecosystem, never the package itself.
-//
-// This test rides the launcher-go-test check defined in nix/checks/go.nix,
-// which nix/checks/default.nix already puts in sourceChecks and which is
-// absent from imageOnlyCheckNames, so it reaches both `nix flake check`
-// and `checks-inbox` with no new nix wiring.
+// TestEcosystemNamesStayInTheTable enforces that every package importing this
+// one reaches an ecosystem fact through its Table row, never by re-naming the
+// ecosystem as a bare literal. Targets come from deriveEcosystemImporters, so
+// the set tracks imports with no edit here; internal/registryproxy is absent
+// because ADR 0047 forbids it importing this package at all.
 func TestEcosystemNamesStayInTheTable(t *testing.T) {
 	const moduleRoot = "../.."
 	moduleName := readModuleName(t, filepath.Join(moduleRoot, "go.mod"))

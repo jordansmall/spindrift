@@ -7,10 +7,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestFake_LandingContained_ScriptsPerLandingAndParent verifies
-// SetLandingContained scripts a result keyed by the (landing string, parent)
-// pair, defaulting to contained=false, nil when unscripted — the same
-// "stays open" default the three predecessors this issue collapsed used.
+// An unscripted (landing, parent) pair must default to contained=false, nil.
+// That is the "stays open" default the three predecessors this fake collapsed
+// all used, so changing it would silently flip callers to closing.
 func TestFake_LandingContained_ScriptsPerLandingAndParent(t *testing.T) {
 	f := forge.NewFake()
 	f.SetLandingContained("agent/issue-42", "1694", true, nil)
@@ -42,10 +41,9 @@ func TestFake_LandingContained_ScriptsPerLandingAndParent(t *testing.T) {
 	}
 }
 
-// TestFake_LandingContained_KeysOnLandingStringForm verifies LandingContained
-// scripts against landing.String() — the IntegrationRef grammar
-// ("<branch>@<sha>") — so a script written for one landing reference resolves
-// correctly when the caller supplies the equivalent typed forge.Landing.
+// Scripts key on landing.String(), the IntegrationRef grammar, so a script
+// written for one landing reference still resolves when the caller passes the
+// equivalent typed forge.Landing.
 func TestFake_LandingContained_KeysOnLandingStringForm(t *testing.T) {
 	f := forge.NewFake()
 	f.SetLandingContained("integration/1694@abc123", "1694", true, nil)
@@ -71,10 +69,8 @@ func TestFake_LandingContained_KeysOnLandingStringForm(t *testing.T) {
 	}
 }
 
-// TestFake_IntegrationTip_ScriptsPerParent verifies SetIntegrationTip scripts
-// IntegrationTip's success result per parent, and IntegrationTipErr overrides
-// it for every call — mirroring LandingRefErr's precedence over
-// LandingRefValue.
+// IntegrationTipErr overrides the per-parent success result on every call,
+// mirroring LandingRefErr's precedence over LandingRefValue.
 func TestFake_IntegrationTip_ScriptsPerParent(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIntegrationTip("1694", "integration/1694@abc123")

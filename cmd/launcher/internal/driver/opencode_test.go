@@ -10,9 +10,6 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-// TestNewSelectsOpencodeByName verifies that New("opencode") resolves to the
-// opencode strategy, the mirror of TestNewDefaultsToClaude for the non-default
-// driver selected explicitly by name.
 func TestNewSelectsOpencodeByName(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
@@ -23,10 +20,8 @@ func TestNewSelectsOpencodeByName(t *testing.T) {
 	}
 }
 
-// TestOpencodeDriverHeartbeatWriterForwardsRaw verifies that the opencode
-// Driver's heartbeat writer passes all bytes to the raw sink unchanged while
-// also emitting a heartbeat line to out, matching opencode.New's contract at
-// the Driver seam (issue #2092: topLevelRole ignored).
+// The raw sink must stay byte-exact, which is what opencode.New promises at
+// the Driver seam (issue #2092).
 func TestOpencodeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
@@ -52,10 +47,8 @@ func TestOpencodeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	}
 }
 
-// TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole verifies that a
-// non-empty topLevelRole has no effect on the opencode Driver's heartbeat
-// writer: opencode's transcript carries no role attribution (issue #2092),
-// so raw is still forwarded unchanged and a heartbeat still emitted.
+// opencode's transcript carries no role attribution, so topLevelRole must
+// change nothing (issue #2092).
 func TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
@@ -78,11 +71,8 @@ func TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole(t *testing.T) {
 	}
 }
 
-// TestOpencodeDriverResolveExitValidOutcomeNoError_IsZero verifies that the
-// opencode Driver's ResolveExit derives 0 from a log carrying a valid
-// SPINDRIFT_OUTCOME line with no type:"error" event, even when the passed-in
-// exitCode is non-zero — opencode's own exit code is never trustworthy
-// (issue #2263).
+// The passed-in exitCode is deliberately non-zero: opencode's own exit code
+// is never trustworthy, so only the log decides (issue #2263).
 func TestOpencodeDriverResolveExitValidOutcomeNoError_IsZero(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
@@ -105,11 +95,8 @@ func TestOpencodeDriverResolveExitValidOutcomeNoError_IsZero(t *testing.T) {
 	}
 }
 
-// TestOpencodeDriverResolveExitErrorEvent_IsNonZero verifies that the
-// opencode Driver's ResolveExit derives a non-zero code from a log carrying
-// a type:"error" event, even when the passed-in exitCode is zero — opencode
-// exits 0 even on a mid-run error, so the log is the only trustworthy
-// source (issue #2263).
+// opencode exits 0 even on a mid-run error, so the passed-in exitCode is 0
+// here and the log is the only trustworthy source (issue #2263).
 func TestOpencodeDriverResolveExitErrorEvent_IsNonZero(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
@@ -135,9 +122,6 @@ func TestOpencodeDriverResolveExitErrorEvent_IsNonZero(t *testing.T) {
 	}
 }
 
-// TestOpencodeDriverResolveExitMissingLog_IsNonZero verifies that the
-// opencode Driver's ResolveExit derives a non-zero code from a missing log
-// file, even when the passed-in exitCode is zero.
 func TestOpencodeDriverResolveExitMissingLog_IsNonZero(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
@@ -154,9 +138,8 @@ func TestOpencodeDriverResolveExitMissingLog_IsNonZero(t *testing.T) {
 	}
 }
 
-// TestOpencodeDriverRenderTranscript verifies the opencode Driver's
-// RenderTranscript delegates to the opencode subpackage's strategy: joined
-// type:"text" part.text bodies, excluding non-text events.
+// The error event between the two text events pins that RenderTranscript
+// joins only text bodies.
 func TestOpencodeDriverRenderTranscript(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {

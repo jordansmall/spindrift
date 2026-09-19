@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// TestFakeQueue_RecordsCallsAndReturnsConfigured exercises all four Queue
-// methods on a FakeQueue and asserts each records its call and round-trips
-// its configured return value.
 func TestFakeQueue_RecordsCallsAndReturnsConfigured(t *testing.T) {
 	wantBatch := Batch{Issues: []Issue{{Number: "1"}}}
 	wantDiscoverErr := errors.New("discover boom")
@@ -67,11 +64,9 @@ func TestFakeQueue_RecordsCallsAndReturnsConfigured(t *testing.T) {
 	}
 }
 
-// TestFakeQueue_DiscoverFunc_ScriptsPerCallResults exercises DiscoverFunc,
-// which lets a test script different Discover results across successive
-// calls (e.g. a rate-limited failure on the first call, success on the
-// second) -- something the fixed DiscoverReturn/DiscoverErr fields can't
-// express.
+// DiscoverFunc scripts a different result per call, such as a rate-limited
+// failure first and success second, which the fixed
+// DiscoverReturn/DiscoverErr fields cannot express.
 func TestFakeQueue_DiscoverFunc_ScriptsPerCallResults(t *testing.T) {
 	wantErr := errors.New("rate limited")
 	wantBatch := Batch{Issues: []Issue{{Number: "1"}}}
@@ -105,10 +100,8 @@ func TestFakeQueue_DiscoverFunc_ScriptsPerCallResults(t *testing.T) {
 	}
 }
 
-// TestFakeQueue_Discover_DiscoverFuncCanCallBackIntoFakeQueue pins that a
-// DiscoverFunc callback may call another FakeQueue method (e.g. Pending) on
-// the same FakeQueue without self-deadlocking. Discover must not hold f.mu
-// while invoking DiscoverFunc.
+// Discover must not hold f.mu while it invokes DiscoverFunc, or a callback
+// that calls back into the same FakeQueue self-deadlocks.
 func TestFakeQueue_Discover_DiscoverFuncCanCallBackIntoFakeQueue(t *testing.T) {
 	f := NewFakeQueue()
 	f.PendingReturn = 3
@@ -131,13 +124,9 @@ func TestFakeQueue_Discover_DiscoverFuncCanCallBackIntoFakeQueue(t *testing.T) {
 	}
 }
 
-// TestFakeQueue_PendingFunc exercises PendingFunc, which lets a test wire a
-// real exclusion-computing closure (e.g. fakePending) through
-// FakeQueue.Pending(claimed) instead of hardcoding an expected constant --
-// the closure recomputes its count from the caller-supplied claimed set
-// rather than returning a fixed value, and it takes priority over
-// PendingReturn/PendingErr. claimed is seeded at the call site, not via
-// Claim/Claimed.
+// PendingFunc recomputes its count from the caller-supplied claimed set and
+// takes priority over PendingReturn/PendingErr, which this test seeds to
+// values it must ignore. claimed comes from the call site, not Claim/Claimed.
 func TestFakeQueue_PendingFunc(t *testing.T) {
 	f := NewFakeQueue()
 
@@ -160,10 +149,8 @@ func TestFakeQueue_PendingFunc(t *testing.T) {
 	}
 }
 
-// TestFakeQueue_Pending_ConcurrentWithClaim pins that FakeQueue's own
-// mu-guarded bookkeeping (Claimed, ClaimCalls, PendingCalls) stays race-free
-// under a concurrent Claim and Pending, and that every call is counted. Run
-// with -race to catch a regression.
+// FakeQueue's mu-guarded bookkeeping must stay race-free under a concurrent
+// Claim and Pending. Run with -race to catch a regression.
 func TestFakeQueue_Pending_ConcurrentWithClaim(t *testing.T) {
 	f := NewFakeQueue()
 
@@ -191,10 +178,8 @@ func TestFakeQueue_Pending_ConcurrentWithClaim(t *testing.T) {
 	}
 }
 
-// TestFakeQueue_Claim_IsIdempotent pins that claiming the same issue number
-// twice is safe: both calls record a ClaimCalls entry and return the same
-// ClaimErr, and Claimed reports the issue claimed after either call --
-// mirroring how headlessQueue.Claim tracks its own claimed map.
+// Claiming the same issue number twice must stay safe, mirroring how
+// headlessQueue.Claim tracks its own claimed map.
 func TestFakeQueue_Claim_IsIdempotent(t *testing.T) {
 	f := NewFakeQueue()
 
@@ -219,9 +204,8 @@ func TestFakeQueue_Claim_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestFakeQueue_EnsureLogDirExists_ReturnsNil verifies FakeQueue's
-// EnsureLogDirExists is a plain no-op: it returns nil and never touches the
-// filesystem (issue #3036), same as every other in-memory FakeQueue method.
+// EnsureLogDirExists must be a no-op that never touches the filesystem
+// (issue #3036), like every other in-memory FakeQueue method.
 func TestFakeQueue_EnsureLogDirExists_ReturnsNil(t *testing.T) {
 	f := NewFakeQueue()
 

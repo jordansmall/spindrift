@@ -10,12 +10,10 @@ import (
 	"time"
 )
 
-// TestSnapshotArtifactIfPresentNilOnReadFailureAfterStat covers the read-
-// failure edge case of snapshotArtifactIfPresent: path stats successfully
-// (it exists) but os.ReadFile fails on it -- here because path is itself a
-// directory, which reliably errors on read on Linux. The function must
-// return nil, the same "nothing to compare against" result as a genuinely
-// absent file, deliberately -- see the function's own doc comment.
+// snapshotArtifactIfPresent must return nil when the path stats but fails to
+// read (here the path is a directory, which reliably errors on read on Linux),
+// the same "nothing to compare against" result as a genuinely absent file. See
+// the function's own doc comment for why.
 func TestSnapshotArtifactIfPresentNilOnReadFailureAfterStat(t *testing.T) {
 	dir := t.TempDir()
 	unreadablePath := filepath.Join(dir, "artifact-dir")
@@ -30,13 +28,10 @@ func TestSnapshotArtifactIfPresentNilOnReadFailureAfterStat(t *testing.T) {
 	}
 }
 
-// TestRecordArtifactPathFreshOnReadFailureAfterStat covers the read-failure
-// edge case of recordArtifactPath: preStat is present (a genuine pre-pass
-// snapshot exists) and the post-pass path stats successfully but fails to
-// read -- here because path is itself a directory. The function must fall
-// through to *target = path (classified fresh), the same fail-open choice a
-// nil preStat gets, rather than clearing *target -- see the function's own
-// doc comment for why.
+// With a genuine pre-pass snapshot, a post-pass path that stats but fails to
+// read (here the path is a directory) must fall through to *target = path,
+// classified fresh. That is the same fail-open choice a nil preStat gets,
+// rather than clearing *target. See the function's own doc comment for why.
 func TestRecordArtifactPathFreshOnReadFailureAfterStat(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "artifact.json")
@@ -62,11 +57,9 @@ func TestRecordArtifactPathFreshOnReadFailureAfterStat(t *testing.T) {
 	}
 }
 
-// TestRoundLogCheckBudget verifies roundLog.checkBudget flags a round whose
-// mean tokens-per-entry exceeds meanCeiling or whose total exceeds
-// totalCeiling, mirroring the pre-#2982
-// TestCheckDispositionsTokenBudget/TestCheckDecisionsTokenBudget cases this
-// method replaces, plus the zero-ceiling ("tripwire disabled") case those
+// These cases mirror the pre-#2982
+// TestCheckDispositionsTokenBudget/TestCheckDecisionsTokenBudget cases that
+// checkBudget replaces, plus the zero-ceiling ("tripwire disabled") case the
 // per-artifact functions never had to cover.
 func TestRoundLogCheckBudget(t *testing.T) {
 	rl := roundLog{phase: "dispositions", meanCeiling: dispositionsMeanTokenCeiling, totalCeiling: dispositionsTotalTokenCeiling}
@@ -76,9 +69,8 @@ func TestRoundLogCheckBudget(t *testing.T) {
 		t.Errorf("checkBudget(%q) = mean %.1f, total %d, exceeded %v, want under the ceiling", compact, mean, total, exceeded)
 	}
 
-	// A compact, well-formed entry using multi-byte UTF-8 (a non-ASCII file
-	// path/reason) must not trip the ceiling on byte count alone -- the
-	// same terse entry in ASCII stays comfortably under it.
+	// Multi-byte UTF-8 must not trip the ceiling on byte count alone; the
+	// ceiling counts runes.
 	nonASCII := "café.go:1 -- fixed in commit abc123: résumé überprüft"
 	if mean, total, exceeded := rl.checkBudget(nonASCII); exceeded {
 		t.Errorf("checkBudget(%q) = mean %.1f, total %d, exceeded %v, want under the ceiling (rune count, not byte count)", nonASCII, mean, total, exceeded)
@@ -90,9 +82,8 @@ func TestRoundLogCheckBudget(t *testing.T) {
 		t.Errorf("checkBudget(%q) = mean %.1f, total %d, exceeded %v, want over the mean ceiling", oversized, mean, total, exceeded)
 	}
 
-	// A pasted diff hunk: many individually short lines, each comfortably
-	// under the mean ceiling on its own, but the round's total balloons --
-	// the mean check alone is blind to this restatement mode.
+	// A pasted diff hunk keeps every line under the mean ceiling while the
+	// round's total grows past its own. The mean check alone misses it.
 	var pastedDiffHunk strings.Builder
 	pastedDiffHunk.WriteString("run.go:1 -- fixed in commit abc123\n")
 	for i := 0; i < 60; i++ {
@@ -108,17 +99,14 @@ func TestRoundLogCheckBudget(t *testing.T) {
 		t.Errorf("checkBudget(\"\") = mean %.1f, total %d, exceeded %v, want mean 0, total 0, not exceeded", mean, total, exceeded)
 	}
 
-	// Both ceilings zero (findings' own instance) disables the tripwire
-	// entirely, regardless of how large content is.
+	// Zeroing both ceilings (findings' own instance) disables the tripwire
+	// entirely, however large the content is.
 	zeroCeiling := roundLog{phase: "findings"}
 	if mean, total, exceeded := zeroCeiling.checkBudget(oversized); exceeded {
 		t.Errorf("checkBudget(oversized) with zero ceilings = mean %.1f, total %d, exceeded %v, want never exceeded", mean, total, exceeded)
 	}
 }
 
-// TestRoundLogAppendFreshNoOpOnEmptyContent verifies appendFresh is a no-op
-// when content == "" -- no log file is created, *logPath stays untouched,
-// and nothing is written to stdout.
 func TestRoundLogAppendFreshNoOpOnEmptyContent(t *testing.T) {
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md"}
 	var logPath string
@@ -134,10 +122,6 @@ func TestRoundLogAppendFreshNoOpOnEmptyContent(t *testing.T) {
 	}
 }
 
-// TestRoundLogAppendFreshCreatesAndAccumulates verifies the first
-// appendFresh call creates the log file via tempPattern and records it in
-// *logPath, and a second call appends to the same file rather than
-// overwriting it -- both rounds' content present, in order.
 func TestRoundLogAppendFreshCreatesAndAccumulates(t *testing.T) {
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md"}
 	var logPath string
@@ -176,11 +160,8 @@ func TestRoundLogAppendFreshCreatesAndAccumulates(t *testing.T) {
 	}
 }
 
-// TestRoundLogAppendFreshEmitsRunStateErrorOnBudgetExceeded verifies
-// appendFresh surfaces a budget-exceeding round as a "run_state_error"
-// spindrift op with Phase "<phase>_budget" on stdout, mirroring the
-// pre-#2982 appendFreshDispositionsRound/appendFreshDecisionsRound
-// functions' own budget-tripwire behavior.
+// The "<phase>_budget" op mirrors the budget tripwire the pre-#2982
+// appendFreshDispositionsRound/appendFreshDecisionsRound functions emitted.
 func TestRoundLogAppendFreshEmitsRunStateErrorOnBudgetExceeded(t *testing.T) {
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md", meanCeiling: dispositionsMeanTokenCeiling, totalCeiling: dispositionsTotalTokenCeiling}
 	var logPath string
@@ -194,7 +175,7 @@ func TestRoundLogAppendFreshEmitsRunStateErrorOnBudgetExceeded(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"dispositions_budget"`) {
 		t.Errorf("stdout = %q, want a run_state_error op with phase dispositions_budget", stdout.String())
 	}
-	// A budget-exceeding round is still appended -- the tripwire flags the
+	// A budget-exceeding round is still appended. The tripwire flags the
 	// content, it does not drop it.
 	got, err := os.ReadFile(logPath)
 	if err != nil {
@@ -205,10 +186,8 @@ func TestRoundLogAppendFreshEmitsRunStateErrorOnBudgetExceeded(t *testing.T) {
 	}
 }
 
-// TestRoundLogAppendFreshEmitsRunStateErrorOnAppendFailure verifies
-// appendFresh surfaces an append failure -- here, *logPath pre-seeded to
-// point at a directory rather than a file -- as a "run_state_error"
-// spindrift op with Phase "<phase>_log" on stdout.
+// Pre-seeding *logPath with a directory rather than a file is what makes the
+// append fail.
 func TestRoundLogAppendFreshEmitsRunStateErrorOnAppendFailure(t *testing.T) {
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md"}
 	logPath := t.TempDir()
@@ -221,10 +200,7 @@ func TestRoundLogAppendFreshEmitsRunStateErrorOnAppendFailure(t *testing.T) {
 	}
 }
 
-// TestRoundLogAppendFreshEmitsRunStateErrorOnCreateFailure verifies
-// appendFresh surfaces a log-file creation failure -- here, an uncreatable
-// TMPDIR so os.CreateTemp("", rl.tempPattern) fails -- as a
-// "run_state_error" spindrift op with Phase "<phase>_log" on stdout.
+// An uncreatable TMPDIR is what makes os.CreateTemp("", rl.tempPattern) fail.
 func TestRoundLogAppendFreshEmitsRunStateErrorOnCreateFailure(t *testing.T) {
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md"}
@@ -241,10 +217,8 @@ func TestRoundLogAppendFreshEmitsRunStateErrorOnCreateFailure(t *testing.T) {
 	}
 }
 
-// TestRoundLogReadAndAppendFreshNoOpWhenSourcePathEmpty verifies
-// readAndAppendFresh is a no-op when sourcePath == "" -- the artifact is
-// disabled for this run entirely -- even if *statePath carries a non-empty
-// value.
+// sourcePath == "" means the artifact is disabled for this run entirely, so
+// readAndAppendFresh must do nothing even when *statePath is non-empty.
 func TestRoundLogReadAndAppendFreshNoOpWhenSourcePathEmpty(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "dispositions.md")
@@ -269,11 +243,9 @@ func TestRoundLogReadAndAppendFreshNoOpWhenSourcePathEmpty(t *testing.T) {
 	}
 }
 
-// TestRoundLogReadAndAppendFreshNoOpWhenStatePathEmpty verifies
-// readAndAppendFresh is a no-op when *statePath == "" -- recordArtifactPath's
-// own path == "" no-op left it untouched, or this pass never wrote a fresh
-// file -- even though sourcePath is non-empty (the artifact is enabled for
-// this run).
+// *statePath == "" means recordArtifactPath's own path == "" no-op left it
+// untouched, or this pass never wrote a fresh file. The artifact is still
+// enabled, since sourcePath is non-empty.
 func TestRoundLogReadAndAppendFreshNoOpWhenStatePathEmpty(t *testing.T) {
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md"}
 	round := 0
@@ -293,10 +265,7 @@ func TestRoundLogReadAndAppendFreshNoOpWhenStatePathEmpty(t *testing.T) {
 	}
 }
 
-// TestRoundLogReadAndAppendFreshEmitsRunStateErrorOnReadFailure verifies
-// readAndAppendFresh surfaces a state-file read failure as a
-// "run_state_error" spindrift op with Phase "<phase>_log" on stdout --
-// pointing *statePath at a directory makes os.ReadFile fail.
+// Pointing *statePath at a directory is what makes os.ReadFile fail.
 func TestRoundLogReadAndAppendFreshEmitsRunStateErrorOnReadFailure(t *testing.T) {
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md"}
 	statePath := t.TempDir()
@@ -317,10 +286,6 @@ func TestRoundLogReadAndAppendFreshEmitsRunStateErrorOnReadFailure(t *testing.T)
 	}
 }
 
-// TestRoundLogReadAndAppendFreshHappyPathIncrementsRoundAndAppends verifies
-// the happy path: *statePath holds fresh, non-empty content, so
-// readAndAppendFresh increments *round and appends it under a "## Round N"
-// header.
 func TestRoundLogReadAndAppendFreshHappyPathIncrementsRoundAndAppends(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "dispositions.md")
@@ -349,9 +314,6 @@ func TestRoundLogReadAndAppendFreshHappyPathIncrementsRoundAndAppends(t *testing
 	}
 }
 
-// TestRoundLogReadAndAppendFreshNoOpOnWhitespaceOnlyContent verifies
-// readAndAppendFresh treats whitespace-only state-file content the same as
-// empty content: a no-op that leaves *round unchanged.
 func TestRoundLogReadAndAppendFreshNoOpOnWhitespaceOnlyContent(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "dispositions.md")
@@ -376,13 +338,11 @@ func TestRoundLogReadAndAppendFreshNoOpOnWhitespaceOnlyContent(t *testing.T) {
 	}
 }
 
-// TestRoundLogReadAndAppendFreshAppendsRoundOnSameSecondSameSizeRewrite composes the
-// real snapshotArtifactIfPresent -> recordArtifactPath -> readAndAppendFresh
-// pipeline end to end (issue #2982 acceptance criterion 2's "appends a
-// round" half) -- unlike TestArtifactSnapshotDetectsSameSecondSameSizeRewrite,
-// which only asserts what recordArtifactPath does to a bare target string,
-// this drives a genuine same-second same-size rewrite all the way through to
-// a real round appended to a real log file on disk.
+// This test runs the real snapshotArtifactIfPresent, recordArtifactPath and
+// readAndAppendFresh end to end (issue #2982 acceptance criterion 2, the
+// "appends a round" half). TestArtifactSnapshotDetectsSameSecondSameSizeRewrite
+// only asserts what recordArtifactPath does to a bare target string; this test
+// carries the rewrite through to a real log file on disk.
 func TestRoundLogReadAndAppendFreshAppendsRoundOnSameSecondSameSizeRewrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dispositions.md")
@@ -401,9 +361,9 @@ func TestRoundLogReadAndAppendFreshAppendsRoundOnSameSecondSameSizeRewrite(t *te
 	}
 	preModTime := info.ModTime()
 
-	// Same length as "original content" and mtime forced back to the
-	// pre-pass value, so neither a size-only nor a mtime-only compare can
-	// tell this apart from a no-op.
+	// The rewrite keeps the original length and forces mtime back to the
+	// pre-pass value, so neither a size-only nor an mtime-only compare can
+	// tell it apart from a no-op.
 	if err := os.WriteFile(path, []byte("modified content"), 0o644); err != nil {
 		t.Fatalf("WriteFile (rewrite): %v", err)
 	}
@@ -439,11 +399,10 @@ func TestRoundLogReadAndAppendFreshAppendsRoundOnSameSecondSameSizeRewrite(t *te
 	}
 }
 
-// TestRoundLogReadAndAppendFreshSkipsRoundOnByteIdenticalRewrite is
-// TestRoundLogReadAndAppendFreshAppendsRoundOnSameSecondSameSizeRewrite's
-// counterpart: a byte-identical rewrite (only mtime moves forward) must
-// leave *statePath cleared, and readAndAppendFresh must find nothing fresh
-// to read -- no round appended, no log file even created.
+// This test is the counterpart to
+// TestRoundLogReadAndAppendFreshAppendsRoundOnSameSecondSameSizeRewrite: a
+// byte-identical rewrite (only mtime moves forward) must leave *statePath
+// cleared, so readAndAppendFresh finds nothing fresh and creates no log file.
 func TestRoundLogReadAndAppendFreshSkipsRoundOnByteIdenticalRewrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dispositions.md")

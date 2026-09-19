@@ -22,9 +22,8 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestParseCargoRegistryDecls_NoIndexLine covers a [registries.NAME] table
-// with no `index` assignment at all -- it must yield no decl, not a decl
-// with an empty Index.
+// A [registries.NAME] table with no `index` assignment must yield no decl at
+// all, not a decl with an empty Index.
 func TestParseCargoRegistryDecls_NoIndexLine(t *testing.T) {
 	content := `[registries.othercorp]
 token = "irrelevant"
@@ -35,9 +34,9 @@ token = "irrelevant"
 	}
 }
 
-// TestParseCargoRegistryDecls_HostileNameSkipped covers the untrusted-name
-// guard: a quoted TOML key carrying shell metacharacters must never reach a
-// caller that could turn it into a shell-sourced env var name.
+// The untrusted-name guard: a quoted TOML key carrying shell metacharacters
+// must never reach a caller that could turn it into a shell-sourced env var
+// name.
 func TestParseCargoRegistryDecls_HostileNameSkipped(t *testing.T) {
 	content := `[registries."evil; rm -rf /"]
 index = "sparse+https://cargo.example.test/index/"
@@ -48,11 +47,10 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestParseCargoRegistryDecls_TrailingComment covers a legal-TOML trailing
-// comment on the index line. A naive quote-trim keeps the comment inside the
-// value, which still host-matches its route and renders verbatim into the
-// [source....] registry stanza -- cargo then sees a URL that matches nothing
-// and the replacement silently never binds.
+// A naive quote-trim keeps a legal-TOML trailing comment inside the value,
+// which still host-matches its route and renders verbatim into the
+// [source....] registry stanza, so cargo sees a URL that matches nothing and
+// the replacement silently never binds.
 func TestParseCargoRegistryDecls_TrailingComment(t *testing.T) {
 	content := `[registries.othercorp]
 index = "sparse+https://cargo.example.test/index/" # note
@@ -66,8 +64,7 @@ index = "sparse+https://cargo.example.test/index/" # note
 	}
 }
 
-// TestParseCargoRegistryDecls_LiteralString covers TOML's other string form:
-// a single-quoted literal string is as legal as a basic one.
+// A single-quoted TOML literal string is as legal as a basic one.
 func TestParseCargoRegistryDecls_LiteralString(t *testing.T) {
 	content := `[registries.othercorp]
 index = 'sparse+https://cargo.example.test/index/'
@@ -81,10 +78,9 @@ index = 'sparse+https://cargo.example.test/index/'
 	}
 }
 
-// TestParseCargoRegistryDecls_MalformedIndexRejected covers every shape of
-// index value that is not a well-formed TOML string. Each must yield no decl
-// at all -- and, since the first index line in a section wins, a malformed
-// one must not fall through to a later, well-formed one.
+// Each index value that is not a well-formed TOML string must yield no decl
+// at all. The first index line in a section wins, so a malformed one must not
+// fall through to a later, well-formed one.
 func TestParseCargoRegistryDecls_MalformedIndexRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -120,9 +116,8 @@ registry = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestParseCargoSourceDecls_ReplaceWithOnlyNoDecl covers the repro's own
-// [source.crates-io] shape: a stanza carrying only replace-with (no
-// registry key) claims no URL and must yield no decl.
+// The repro's own [source.crates-io] shape: a stanza carrying only
+// replace-with, with no registry key, claims no URL and must yield no decl.
 func TestParseCargoSourceDecls_ReplaceWithOnlyNoDecl(t *testing.T) {
 	content := `[source.crates-io]
 replace-with = "artifactory-remote"
@@ -133,9 +128,8 @@ replace-with = "artifactory-remote"
 	}
 }
 
-// TestParseCargoSourceDecls_HostileNameSkipped mirrors
-// TestParseCargoRegistryDecls_HostileNameSkipped: a quoted TOML key must
-// never reach a caller that turns it into a TOML table name.
+// A quoted TOML key must never reach a caller that turns it into a TOML table
+// name.
 func TestParseCargoSourceDecls_HostileNameSkipped(t *testing.T) {
 	content := `[source."evil; rm -rf /"]
 registry = "sparse+https://cargo.example.test/index/"
@@ -172,9 +166,8 @@ registry = 'sparse+https://cargo.example.test/index/'
 	}
 }
 
-// TestParseCargoSourceDecls_DedupedFirstWins covers a name repeated across
-// two [source.NAME] headers: the first occurrence wins, mirroring
-// ParseCargoRegistryDecls' contract.
+// A name repeated across two [source.NAME] headers keeps its first
+// occurrence, mirroring ParseCargoRegistryDecls' contract.
 func TestParseCargoSourceDecls_DedupedFirstWins(t *testing.T) {
 	content := `[source.othercorp]
 registry = "sparse+https://first.example.test/index/"
@@ -188,10 +181,9 @@ registry = "sparse+https://second.example.test/index/"
 	}
 }
 
-// TestParseCargoSourceDecls_RegistriesTableNotMistaken covers a
-// [registries.NAME] table with an index key: it must never be mistaken for
-// a [source.NAME] table, even though both kinds of table can appear in the
-// same repoConfig.
+// A [registries.NAME] table with an index key must never be mistaken for a
+// [source.NAME] table, even though both kinds of table can appear in the same
+// repoConfig.
 func TestParseCargoSourceDecls_RegistriesTableNotMistaken(t *testing.T) {
 	content := `[registries.othercorp]
 index = "sparse+https://cargo.example.test/index/"
@@ -202,12 +194,11 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_ReusesClaimingSourceName covers the issue's
-// exact repro: the repo config's own [source.artifactory-remote] already
-// claims the registries decl's index URL, so the upstream stanza must reuse
-// that name instead of minting spindrift-upstream-artifactory-remote --
-// minting a second [source.…] stanza on the same URL is a hard cargo error
-// ("source ... already defined by ...").
+// The issue's exact repro: the repo config's own [source.artifactory-remote]
+// already claims the registries decl's index URL, so the upstream stanza must
+// reuse that name instead of minting spindrift-upstream-artifactory-remote.
+// A second [source.…] stanza on the same URL is a hard cargo error ("source
+// ... already defined by ...").
 func TestCargoSourceReplacements_ReusesClaimingSourceName(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -241,8 +232,7 @@ registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote
 	}
 }
 
-// TestCargoSourceReplacements_NoClaimingSourceKeepsMintedName is the AC 2
-// regression guard: a repo with only [registries.*] tables and no
+// The AC 2 regression guard: a repo with only [registries.*] tables and no
 // [source.*] stanza claiming the URL must keep the pre-#3248 minted name.
 func TestCargoSourceReplacements_NoClaimingSourceKeepsMintedName(t *testing.T) {
 	const port = 27182
@@ -261,13 +251,11 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_GuardedNamesFallBackToMinted covers a source
-// stanza whose name equals a table the home render already owns
-// (crates-io, spindrift-registry-proxy, or a per-route
-// spindrift-registry-proxy-<prefix>-<name>): reusing any of those would emit a
-// duplicate TOML table within one file, so the minting site must fall back
-// to the pre-existing minted name -- including its pre-existing collision --
-// rather than drop the upstream.
+// Reusing a source name the home render already owns (crates-io,
+// spindrift-registry-proxy, or a per-route
+// spindrift-registry-proxy-<prefix>-<name>) would emit a duplicate TOML table
+// within one file, so the minting site falls back to the pre-existing minted
+// name, its pre-existing collision included, rather than drop the upstream.
 func TestCargoSourceReplacements_GuardedNamesFallBackToMinted(t *testing.T) {
 	const port = 27182
 	for _, guarded := range []string{"crates-io", "spindrift-registry-proxy", "spindrift-registry-proxy-r1-othercorp"} {
@@ -292,15 +280,11 @@ registry = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_RepoSourceNamedAfterMintedUpstreamIsGuarded
-// covers the third class of home-owned name: a minted
-// spindrift-upstream-<name> the render might itself emit. A repo
-// [source.spindrift-upstream-b]
-// claiming decl a's index URL used to make decl a's minting site adopt that
-// same name, and decl b's own default mint is that same name too -- two
-// upstreams sharing one SourceName render as the same [source.…] table
-// twice in one file, a duplicate-table TOML error. Guarding every minted
-// name up front makes the claim fall back to decl a's own mint instead.
+// The third class of home-owned name is a minted spindrift-upstream-<name>
+// the render might itself emit. A repo [source.spindrift-upstream-b] claiming
+// decl a's index URL used to make decl a adopt that name, which decl b mints
+// by default too, rendering the same [source.…] table twice in one file.
+// Guarding every minted name up front falls back to decl a's own mint.
 func TestCargoSourceReplacements_RepoSourceNamedAfterMintedUpstreamIsGuarded(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -334,15 +318,11 @@ registry = "sparse+https://cargo.example.test/a/"
 		t.Errorf("CargoSourceReplacements() = %+v, want decl a to keep its minted name spindrift-upstream-a", got)
 	}
 
-	// The repo's own [source.spindrift-upstream-b] still collides on
-	// aURL with home's now-separately-minted [source.spindrift-upstream-a]
-	// once merged -- assertNoDuplicateCargoSourceTables's cross-file URL
-	// check (gotcha 1) would flag that, but it is not this fix's target: a
-	// repo that squats a reserved spindrift-upstream-<name> table under a
-	// mismatched URL is already self-contradictory, and no reuse choice
-	// here can make it mergeable. This fix's contract is narrower -- the
-	// rendered home file alone must never carry the same [source.…] name
-	// twice, the hard TOML parse error the finding names.
+	// The repo's own [source.spindrift-upstream-b] still collides on aURL with
+	// home's separately-minted [source.spindrift-upstream-a] once merged, which
+	// assertNoDuplicateCargoSourceTables's cross-file URL check (gotcha 1) would
+	// flag. That is not this fix's target. Its contract is narrower: the
+	// rendered home file alone must never carry the same [source.…] name twice.
 	rendered, _, warnings := CargoRepoAwareConfig(port, "r0", routes, repoConfig)
 	if len(warnings) != 0 {
 		t.Errorf("CargoRepoAwareConfig() warnings = %v, want none", warnings)
@@ -398,9 +378,8 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_DeclaredListRestrictsStanzas covers a route
-// whose cargo block declares a non-empty registries list: only names in
-// that list get stanzas, even though another host-matching decl exists in
+// When a route's cargo block declares a non-empty registries list, only names
+// in that list get stanzas, even though another host-matching decl exists in
 // repoConfig.
 func TestCargoSourceReplacements_DeclaredListRestrictsStanzas(t *testing.T) {
 	const port = 27182
@@ -433,8 +412,7 @@ index = "sparse+https://cargo.example.test/undeclared-index/"
 	}
 }
 
-// TestCargoSourceReplacements_DeclaredNameOnWrongHostWarns covers the
-// drift case the retired ApplyNoopContent diagnostic used to catch: the
+// The drift case the retired ApplyNoopContent diagnostic used to catch: the
 // route declares a registry, the repo config declares it too, but its index
 // points at some other host, so nothing binds. Silence here would fail a
 // network-less cargo build with no signal at all.
@@ -462,8 +440,7 @@ index = "sparse+https://moved.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_DeclaredNameAbsentWarns covers a manifest
-// naming a registry the repo config never declares at all.
+// A manifest naming a registry the repo config never declares at all.
 func TestCargoSourceReplacements_DeclaredNameAbsentWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -487,10 +464,8 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_DeclaredNameMalformedIndexWarns covers a
-// declared registry whose index value the TOML value parser rejects: the
-// decl never reaches the host match, so only the declared-name sweep can
-// report it.
+// A declared registry whose index value the TOML value parser rejects never
+// reaches the host match, so only the declared-name sweep can report it.
 func TestCargoSourceReplacements_DeclaredNameMalformedIndexWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -514,9 +489,8 @@ index = "sparse+https://cargo.example.test/index/" garbage
 	}
 }
 
-// TestCargoSourceReplacements_DeclaredNameDedupedIsNotAMiss covers two
-// declared names sharing one real index URL: the second collapses into the
-// first's stanza and genuinely binds through it, so it is not unsatisfied
+// When two declared names share one real index URL, the second collapses into
+// the first's stanza and genuinely binds through it, so it is not unsatisfied
 // and must not warn.
 func TestCargoSourceReplacements_DeclaredNameDedupedIsNotAMiss(t *testing.T) {
 	const port = 27182
@@ -541,9 +515,8 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_EmptyDeclaredListNeverWarns covers a route
-// declaring no cargo registries at all: it declares nothing, so nothing can
-// go unsatisfied, even when the repo config matches none of its host.
+// A route declaring no cargo registries declares nothing, so nothing can go
+// unsatisfied, even when the repo config matches none of its host.
 func TestCargoSourceReplacements_EmptyDeclaredListNeverWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -564,10 +537,9 @@ index = "sparse+https://moved.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_NoCargoBlockBindsEveryHostMatch covers the
-// absent half of the filter: a route carrying no cargo block at all
-// restricts nothing, so every host-matching decl in the repo config binds
-// and no name goes unsatisfied.
+// The absent half of the filter: a route carrying no cargo block at all
+// restricts nothing, so every host-matching decl in the repo config binds and
+// no name goes unsatisfied.
 func TestCargoSourceReplacements_NoCargoBlockBindsEveryHostMatch(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -597,10 +569,9 @@ index = "sparse+https://cargo.example.test/second-index/"
 	}
 }
 
-// TestCargoSourceReplacements_UnknownEcosystemBlockIgnored covers a route
-// whose only block belongs to an ecosystem cargo has no notion of: the
-// lookup misses, so the route behaves exactly like one carrying no block at
-// all rather than erroring or restricting anything.
+// When a route's only block belongs to an ecosystem cargo has no notion of,
+// the lookup misses, so the route behaves exactly like one carrying no block
+// at all rather than erroring or restricting anything.
 func TestCargoSourceReplacements_UnknownEcosystemBlockIgnored(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -625,10 +596,9 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_DedupeSameIndexURL covers two registry names
-// that both point at the same real index URL: cargo maps URL -> source name
-// 1:1, so this must collapse into one upstream stanza, keeping the first
-// name's stanza (repo-config appearance order).
+// Cargo maps a URL to a source name 1:1, so two registry names pointing at
+// the same real index URL must collapse into one upstream stanza, keeping the
+// first name's stanza in repo-config appearance order.
 func TestCargoSourceReplacements_DedupeSameIndexURL(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -652,10 +622,9 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_HostileNameSkipped covers a registry name
-// that fails cargoBareKeyPattern: it must never produce an Upstream, since
-// it would otherwise flow into a rendered TOML table name / shell-sourced
-// env var name.
+// A registry name that fails cargoBareKeyPattern must never produce an
+// Upstream, since it would otherwise flow into a rendered TOML table name or
+// a shell-sourced env var name.
 func TestCargoSourceReplacements_HostileNameSkipped(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -676,9 +645,8 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_TwoRoutes covers a manifest with two routes
-// each naming registries under distinct upstream hosts: both must produce
-// their own replacement, in manifest route order.
+// Two routes naming registries under distinct upstream hosts must each
+// produce their own replacement, in manifest route order.
 func TestCargoSourceReplacements_TwoRoutes(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -706,11 +674,9 @@ index = "sparse+https://corp-b.example.test/index/"
 	}
 }
 
-// TestCargoSourceReplacements_PortedUpstreamHostMatches covers an upstream
-// URL with an explicit port: registrymanifest.Route.UpstreamHost is minted
-// as u.Host (box.go), which keeps a port when the upstream URL has one, so
-// the decl's parsed host must too or a ported upstream never matches its
-// route.
+// registrymanifest.Route.UpstreamHost is minted as u.Host (box.go), which
+// keeps a port when the upstream URL has one, so the decl's parsed host must
+// keep it too or a ported upstream never matches its route.
 func TestCargoSourceReplacements_PortedUpstreamHostMatches(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -734,10 +700,9 @@ index = "sparse+https://cargo.example.test:8443/index/"
 	}
 }
 
-// TestCargoConfigTOMLWithReplacements_EmptyPlanPassthrough covers the no-op
-// case: an empty replacements slice must return CargoConfigTOML's own
-// output byte-for-byte, since that's the pre-#3201 render every existing
-// caller/test still pins.
+// An empty replacements slice must return CargoConfigTOML's own output
+// byte-for-byte, since that is the pre-#3201 render every existing caller and
+// test still pins.
 func TestCargoConfigTOMLWithReplacements_EmptyPlanPassthrough(t *testing.T) {
 	got := CargoConfigTOMLWithReplacements(27182, "r0", nil)
 	want := CargoConfigTOML(27182, "r0", nil)
@@ -746,9 +711,8 @@ func TestCargoConfigTOMLWithReplacements_EmptyPlanPassthrough(t *testing.T) {
 	}
 }
 
-// TestCargoConfigTOMLWithReplacements_OneNamedRegistry byte-pins the
-// rendered content for one named-registry route minting its own proxy
-// source (route.Prefix != the crates-io prefix).
+// The route's prefix differs from the crates-io prefix, so it mints its own
+// proxy source.
 func TestCargoConfigTOMLWithReplacements_OneNamedRegistry(t *testing.T) {
 	replacements := []CargoSourceReplacement{
 		{
@@ -787,10 +751,9 @@ index = "sparse+http://127.0.0.1:27182/r1/"
 	}
 }
 
-// TestCargoConfigTOMLWithReplacements_ReusedProxySource covers the
-// spindrift-registry-proxy reuse case: its [source....] stanza is already in
-// CargoConfigTOML's base render, so the replacement block must emit only
-// its [registries....] entry, never a second [source.spindrift-registry-proxy].
+// The spindrift-registry-proxy [source....] stanza is already in
+// CargoConfigTOML's base render, so the replacement block must emit only its
+// [registries....] entry, never a second [source.spindrift-registry-proxy].
 func TestCargoConfigTOMLWithReplacements_ReusedProxySource(t *testing.T) {
 	replacements := []CargoSourceReplacement{
 		{
@@ -829,10 +792,9 @@ index = "sparse+http://127.0.0.1:27182/r0/"
 	}
 }
 
-// TestCargoConfigTOMLWithReplacements_TwoUpstreamsOneProxySource covers one
-// route with two Upstreams: each gets its own [source.spindrift-upstream-…]
-// stanza, but the [source.…]/[registries.…] proxy pair is emitted once,
-// after both upstreams.
+// With two Upstreams on one route, each gets its own
+// [source.spindrift-upstream-…] stanza, but the [source.…]/[registries.…]
+// proxy pair is emitted once, after both upstreams.
 func TestCargoConfigTOMLWithReplacements_TwoUpstreamsOneProxySource(t *testing.T) {
 	replacements := []CargoSourceReplacement{
 		{
@@ -876,9 +838,8 @@ index = "sparse+http://127.0.0.1:27182/r1/"
 	}
 }
 
-// TestCargoConfigTOMLWithReplacements_TwoRoutes covers two named-registry
-// routes each minting their own proxy source: both blocks appear, in the
-// replacements slice's order.
+// Two named-registry routes each mint their own proxy source, and both blocks
+// appear in the replacements slice's order.
 func TestCargoConfigTOMLWithReplacements_TwoRoutes(t *testing.T) {
 	replacements := []CargoSourceReplacement{
 		{
@@ -954,9 +915,8 @@ func TestCargoReplacementPlaceholders(t *testing.T) {
 	}
 }
 
-// TestCargoReplacementPlaceholders_DedupesReusedProxySource covers two
-// replacements sharing one ProxySource (the reuse case): the placeholder
-// export must appear once, not twice.
+// Two replacements sharing one ProxySource (the reuse case) must yield the
+// placeholder export once, not twice.
 func TestCargoReplacementPlaceholders_DedupesReusedProxySource(t *testing.T) {
 	replacements := []CargoSourceReplacement{
 		{Prefix: "r0", ProxySource: "spindrift-registry-proxy"},
@@ -970,16 +930,11 @@ func TestCargoReplacementPlaceholders_DedupesReusedProxySource(t *testing.T) {
 	}
 }
 
-// assertNoDuplicateCargoSourceTables pins AC 1 (issue #3248): cargo's
-// [source.…] tables map a table name to a registry URL 1:1, so (a) homeConfig
-// -- the rendered $CARGO_HOME/config.toml alone -- must never declare the
-// same table name twice (a same-file duplicate table is a TOML error, not a
-// merge question), and (b) once merged with the repo's own repoConfig, no
-// two distinct table names may claim the same registry URL (cargo's
-// URL->name uniqueness, gotcha 1). A [source.…] stanza with no registry key
-// (e.g. crates-io's replace-with-only shape) claims no URL and is exempt
-// from (b): the repo overriding home's own [source.crates-io] table is
-// cargo's ordinary hierarchical config merge, not a URL collision.
+// assertNoDuplicateCargoSourceTables pins AC 1 (issue #3248): homeConfig alone
+// must never declare the same [source.…] table name twice (a same-file
+// duplicate table is a TOML error, not a merge question), and once merged with
+// repoConfig no two table names may claim the same registry URL (gotcha 1). A
+// stanza with no registry key claims no URL and is exempt from that second check.
 func assertNoDuplicateCargoSourceTables(t *testing.T, repoConfig, homeConfig string) {
 	t.Helper()
 
@@ -1021,12 +976,11 @@ replace-with = "artifactory-remote"
 registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
 `
 
-// TestCargoRepoAwareConfig_RepoClaimingSourceNameRendersMergeableConfig is
-// the issue's end-to-end repro: CargoRepoAwareConfig on a route whose
-// UpstreamHost matches the repo-claimed registry, on a prefix other than the
-// crates-io prefix, must reuse the repo's own [source.artifactory-remote]
-// name rather than mint [source.spindrift-upstream-artifactory-remote] --
-// the mint would be a second stanza on the same URL, which cargo rejects.
+// The issue's end-to-end repro: on a route whose UpstreamHost matches the
+// repo-claimed registry, on a prefix other than the crates-io prefix, the
+// render must reuse the repo's own [source.artifactory-remote] name rather
+// than mint [source.spindrift-upstream-artifactory-remote], which would be a
+// second stanza on the same URL that cargo rejects.
 func TestCargoRepoAwareConfig_RepoClaimingSourceNameRendersMergeableConfig(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
@@ -1064,19 +1018,17 @@ index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/index/"
 
 	// Redundant against the golden above on today's render, but stated as its
 	// own claim so a future golden churn cannot quietly reintroduce a minted
-	// stanza -- the mint is the whole defect this issue fixes.
+	// stanza. The mint is the whole defect this issue fixes.
 	if strings.Contains(got, "spindrift-upstream-") {
 		t.Errorf("CargoRepoAwareConfig() content = %q, want no spindrift-upstream- table at all", got)
 	}
 }
 
-// TestCargoRepoAwareConfig_TwoRegistriesOnOneIndexPath pins the render for
-// two declared registries whose index URLs differ only in scheme: both
-// resolve to the same local index URL, so the second reuses the proxy source
-// the first minted, and the shared [source....]/[registries....] pair is
-// rendered once. Emitting it per replacement instead would declare the same
-// table name twice in one file -- a TOML error cargo refuses to parse at
-// all, not a merge question.
+// Two declared registries whose index URLs differ only in scheme resolve to
+// the same local index URL, so the second reuses the proxy source the first
+// minted and the shared [source....]/[registries....] pair renders once.
+// Emitting it per replacement would declare the same table name twice in one
+// file, a TOML error cargo refuses to parse at all.
 func TestCargoRepoAwareConfig_TwoRegistriesOnOneIndexPath(t *testing.T) {
 	repoConfig := `[registries.othercorp]
 index = "http://cargo.example.test/other-index/"
@@ -1094,7 +1046,7 @@ index = "sparse+https://cargo.example.test/other-index/"
 		t.Errorf("CargoRepoAwareConfig() content declares [registries.spindrift-registry-proxy-r1-othercorp] %d times, want exactly 1: %q", n, got)
 	}
 
-	// Both upstream stanzas still render -- deduping the shared pair must not
+	// Both upstream stanzas still render: deduping the shared pair must not
 	// swallow the second replacement's own source stanza with it.
 	for _, want := range []string{
 		"[source.spindrift-upstream-othercorp]\nregistry = \"http://cargo.example.test/other-index/\"\nreplace-with = \"spindrift-registry-proxy-r1-othercorp\"\n",
@@ -1110,11 +1062,10 @@ index = "sparse+https://cargo.example.test/other-index/"
 	}
 }
 
-// TestCargoRepoAwareConfig_NoDuplicateSourceTablesAcrossMerge is the AC 1
-// regression: run assertNoDuplicateCargoSourceTables (a) over the repro
-// case, where reuse is exercised, and (b) over a repo with no claiming
-// [source.*] stanza, where the minted name is exercised instead -- the
-// no-duplicate contract must hold either way the source name was chosen.
+// The AC 1 regression, run over the repro case, where reuse is exercised, and
+// over a repo with no claiming [source.*] stanza, where the minted name is
+// exercised instead. The no-duplicate contract must hold either way the source
+// name was chosen.
 func TestCargoRepoAwareConfig_NoDuplicateSourceTablesAcrossMerge(t *testing.T) {
 	t.Run("reused claiming name", func(t *testing.T) {
 		routes := []registrymanifest.Route{
@@ -1138,17 +1089,11 @@ index = "sparse+https://cargo.example.test/index/"
 	})
 }
 
-// TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRoute
-// pins the emergent crates-io chain (issue #3248, gotcha 7) as an intended
+// Pins the emergent crates-io chain (issue #3248, gotcha 7) as an intended
 // contract, not an accident: the repo's own [source.crates-io] replace-with
-// = "artifactory-remote" overrides the home render's [source.crates-io]
-// replace-with = "spindrift-registry-proxy" (in-tree config wins cargo's
-// hierarchical merge), so a plain crates-io dependency chains
-// crates-io -> artifactory-remote -> spindrift-registry-proxy-r1-artifactory-remote -> the r1
-// Forwarder URL. That is the named-registry route's own prefix, not the
-// crates-io route's (r0) -- plain crates-io traffic is meant to bypass the
-// crates-io route entirely and ride the corporate route instead, because the
-// repo declared crates-io served from that corporate remote.
+// overrides the home render's, because in-tree config wins cargo's
+// hierarchical merge. Plain crates-io traffic is meant to bypass the crates-io
+// route (r0) and ride the corporate route (r1) the repo declared it served from.
 func TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRoute(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
@@ -1158,7 +1103,7 @@ func TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRou
 	got, _, _ := CargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
 
 	// Link 1: the repo's own file overrides the home render's crates-io
-	// replace-with -- asserted on repoConfig, since that link is cargo's
+	// replace-with. Asserted on repoConfig, since that link is cargo's
 	// file-merge behavior, not something CargoRepoAwareConfig renders.
 	if !strings.Contains(cargoArtifactoryRepoConfig, "[source.crates-io]\nreplace-with = \"artifactory-remote\"\n") {
 		t.Fatalf("repro repoConfig lost its crates-io override -- test fixture drifted")
@@ -1172,22 +1117,18 @@ func TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRou
 
 	// Link 3: the r1 proxy source's registry is r1's own Forwarder URL, not
 	// r0's (the crates-io route's prefix passed in as this render's prefix
-	// argument) -- the bypass landing on the *named-registry route's* prefix
-	// is exactly the contract being pinned here.
+	// argument). The bypass landing on the named-registry route's prefix is
+	// exactly the contract being pinned here.
 	if !strings.Contains(got, "[source.spindrift-registry-proxy-r1-artifactory-remote]\nregistry = \"sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/index/\"\n") {
 		t.Errorf("CargoRepoAwareConfig() content = %q, want spindrift-registry-proxy-r1-artifactory-remote to terminate at the r1 Forwarder URL", got)
 	}
 }
 
-// TestCargoRepoAwareConfig_NoSourceClaimMintsUnchanged is AC 2's end-to-end
-// pin: a repo with only [registries.*] tables (no claiming [source.*]) must
-// render the pre-#3248 minted spindrift-upstream-<name> output byte-for-byte.
-// TestCargoSourceReplacements_NoClaimingSourceKeepsMintedName already pins
-// the plan (SourceName stays minted) and
-// TestCargoConfigTOMLWithReplacements_OneNamedRegistry already pins this
-// exact byte output from a hand-built plan; this test is the missing link
-// between them -- the same repoConfig text, run through the full
-// CargoRepoAwareConfig entry point, must reach that same golden.
+// AC 2's end-to-end pin: a repo with only [registries.*] tables and no
+// claiming [source.*] must render the pre-#3248 minted
+// spindrift-upstream-<name> output byte-for-byte. Other tests pin the plan and
+// pin this byte output from a hand-built plan; this is the missing link, the
+// same repoConfig run through the full CargoRepoAwareConfig entry point.
 func TestCargoRepoAwareConfig_NoSourceClaimMintsUnchanged(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
@@ -1227,13 +1168,11 @@ index = "sparse+http://127.0.0.1:27182/r1/index/"
 	}
 }
 
-// TestCargoSourceReplacements_TwoRegistriesDistinctLocalURLs is
-// issue #3256's headline acceptance criterion at the plan level: a
-// route with two registries on its host must not fold them onto
-// one local index URL (the legacy per-route grouping's bug) -- each
-// registry's own upstream index path carries into its own local URL and its
-// own minted proxy source, so the Forwarder's per-registry enforced subtree
-// (issue #3256's derived path-set) has a URL to key off of.
+// Issue #3256's headline acceptance criterion at the plan level: a route with
+// two registries on its host must not fold them onto one local index URL (the
+// legacy per-route grouping's bug). Each registry's own upstream index path
+// carries into its own local URL and minted proxy source, so the Forwarder's
+// per-registry enforced subtree has a URL to key off of.
 func TestCargoSourceReplacements_TwoRegistriesDistinctLocalURLs(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -1282,11 +1221,9 @@ index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
 	}
 }
 
-// TestCargoSourceReplacements_NoIndexPathDegradesToRoutePrefixURL
-// covers a host-rooted registry whose index carries no path at all (e.g. the
-// host serves the index at its root): the per-registry local URL then
-// degrades to the same shape a legacy route would render, since there is no
-// path to embed.
+// When a host-rooted registry's index carries no path at all (the host serves
+// the index at its root), the per-registry local URL degrades to the same
+// shape a legacy route would render, since there is no path to embed.
 func TestCargoSourceReplacements_NoIndexPathDegradesToRoutePrefixURL(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -1310,12 +1247,11 @@ index = "sparse+https://cargo.example.test"
 	}
 }
 
-// TestCargoSourceReplacements_ReusesCratesIOSourceWhenLocalURLsCoincide
-// covers the one case a host-rooted registry's minted local URL can still
-// collide with the crates-io replacement's own: a pathless index on a route
-// sharing the crates-io render's own prefix. cargo's URL->source-name 1:1
-// rule then requires reusing spindrift-registry-proxy rather than minting a
-// second [source.…] stanza against the same URL.
+// The one case a host-rooted registry's minted local URL can still collide
+// with the crates-io replacement's own: a pathless index on a route sharing
+// the crates-io render's own prefix. Cargo's URL to source-name 1:1 rule then
+// requires reusing spindrift-registry-proxy rather than minting a second
+// [source.…] stanza against the same URL.
 func TestCargoSourceReplacements_ReusesCratesIOSourceWhenLocalURLsCoincide(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -1335,10 +1271,8 @@ index = "sparse+https://cargo.example.test"
 	}
 }
 
-// TestCargoConfigTOMLWithReplacements_TwoRegistries byte-pins the
-// rendered content for a route's two registries: two distinct
-// proxy-source/registries stanza pairs, one per registry, alongside their
-// own upstream stanzas.
+// A route's two registries render two distinct proxy-source/registries stanza
+// pairs, one per registry, alongside their own upstream stanzas.
 func TestCargoConfigTOMLWithReplacements_TwoRegistries(t *testing.T) {
 	replacements := []CargoSourceReplacement{
 		{
@@ -1390,10 +1324,9 @@ index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/"
 	}
 }
 
-// TestCargoReplacementPlaceholders_TwoRegistries covers the
-// placeholder side of the same two-registry plan: two distinct proxy
+// The placeholder side of the same two-registry plan: two distinct proxy
 // sources must yield two distinct CARGO_REGISTRIES_<NAME>_TOKEN exports, not
-// one folded export a shared local URL would have produced.
+// the one folded export a shared local URL would have produced.
 func TestCargoReplacementPlaceholders_TwoRegistries(t *testing.T) {
 	replacements := []CargoSourceReplacement{
 		{ProxySource: "spindrift-registry-proxy-r1-artifactory-internal"},
@@ -1413,11 +1346,10 @@ func TestCargoReplacementPlaceholders_TwoRegistries(t *testing.T) {
 	}
 }
 
-// TestCargoRepoAwareConfig_TwoRegistriesResolveThroughOneRoute is
-// issue #3256's headline acceptance criterion end to end: a repo declaring
-// two cargo registries on one host, routed through a single host-rooted
-// route, must render two distinct proxy stanzas that each carry their own
-// registry's real index URL -- not one route-wide fold-down.
+// Issue #3256's headline acceptance criterion end to end: a repo declaring two
+// cargo registries on one host, routed through a single host-rooted route,
+// must render two distinct proxy stanzas that each carry their own registry's
+// real index URL, not one route-wide fold-down.
 func TestCargoRepoAwareConfig_TwoRegistriesResolveThroughOneRoute(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
@@ -1458,11 +1390,10 @@ index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/"`) {
 	}
 }
 
-// TestCargoRepoAwareConfig_CratesIOChainStillComposes covers issue
-// #3248's crates-io-chained shape on a route: the repo replaces
-// crates-io with its own named source, which this render must still chain
-// onto the route's minted proxy source rather than treating host-rootedness
-// as a reason to skip the reuse.
+// Issue #3248's crates-io-chained shape on a route: the repo replaces
+// crates-io with its own named source, which this render must still chain onto
+// the route's minted proxy source rather than treating host-rootedness as a
+// reason to skip the reuse.
 func TestCargoRepoAwareConfig_CratesIOChainStillComposes(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
@@ -1513,8 +1444,8 @@ registry = "sparse+http://127.0.0.1:%d/r0/"
 	}
 }
 
-// TestCargoConfigTOML_PrefixInterpolated pins that the route prefix, not
-// just the port, lands in the rendered registry URL (issue #3142).
+// The route prefix, not just the port, lands in the rendered registry URL
+// (issue #3142).
 func TestCargoConfigTOML_PrefixInterpolated(t *testing.T) {
 	got := CargoConfigTOML(27182, "artifactory-cargo", nil)
 	want := `[source.crates-io]
@@ -1556,9 +1487,6 @@ func TestCargoRegistryEnvVarName(t *testing.T) {
 	}
 }
 
-// TestParseCargoRegistryConfig_SingleRegistrySparseIndex verifies that a
-// [registries.NAME] table with a "sparse+https://" index URL parses into a
-// Declaration with its "sparse+" prefix stripped and RegistryName set.
 func TestParseCargoRegistryConfig_SingleRegistrySparseIndex(t *testing.T) {
 	content := `
 [registries.mycorp]
@@ -1580,9 +1508,8 @@ index = "sparse+https://cargo.example.com/index/"
 	}
 }
 
-// TestParseCargoRegistryConfig_NoRegistryTableYieldsNamedAnyFalse verifies
-// that a config with no [registries.*] table at all parses to no
-// declarations and namedAny false, distinct from "named but unusable".
+// A config with no [registries.*] table at all yields namedAny false, which is
+// distinct from "named but unusable".
 func TestParseCargoRegistryConfig_NoRegistryTableYieldsNamedAnyFalse(t *testing.T) {
 	content := `
 [net]
@@ -1600,8 +1527,7 @@ git-fetch-with-cli = true
 	}
 }
 
-// TestParseCargoRegistryConfig_MalformedTOMLIsError verifies that
-// unparseable TOML surfaces as an error, not a silently empty result.
+// Unparseable TOML must come back as an error, not a silently empty result.
 func TestParseCargoRegistryConfig_MalformedTOMLIsError(t *testing.T) {
 	_, _, err := cargoRow.ConfigParser("this is not [ valid toml")
 	if err == nil {
@@ -1609,9 +1535,9 @@ func TestParseCargoRegistryConfig_MalformedTOMLIsError(t *testing.T) {
 	}
 }
 
-// TestParseCargoRegistryConfig_FileSchemeIndexNamedButUnusable verifies that
-// a "file://" index URL is skipped (not an absolute http(s) URL) but still
-// sets namedAny true -- the file named a registry, just not a usable one.
+// A "file://" index URL is skipped, since it is not an absolute http(s) URL,
+// but still sets namedAny true: the file named a registry, just not a usable
+// one.
 func TestParseCargoRegistryConfig_FileSchemeIndexNamedButUnusable(t *testing.T) {
 	content := `
 [registries.mirror]
@@ -1629,9 +1555,8 @@ index = "file:///srv/mirror"
 	}
 }
 
-// TestParseCargoRegistryConfig_TwoRegistriesSortedByName verifies that
-// multiple [registries.NAME] tables come back sorted by registry name,
-// independent of their order in the file (map iteration is randomized).
+// Multiple [registries.NAME] tables come back sorted by registry name,
+// independent of their order in the file, because map iteration is randomized.
 func TestParseCargoRegistryConfig_TwoRegistriesSortedByName(t *testing.T) {
 	content := `
 [registries.zeta]
@@ -1652,9 +1577,8 @@ index = "sparse+https://alpha.example.com/index/"
 	}
 }
 
-// TestParseCargoRegistryConfig_NeverStampsEcosystemOrConfigPath verifies the
-// pure-hook contract directly: the parser never sets Ecosystem or
-// ConfigPath, since stamping both is the walker's job.
+// The pure-hook contract: the parser never sets Ecosystem or ConfigPath, since
+// stamping both is the walker's job.
 func TestParseCargoRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
 	content := `
 [registries.mycorp]
@@ -1672,8 +1596,6 @@ index = "sparse+https://cargo.example.com/index/"
 	}
 }
 
-// TestParseCargoRegistryConfig_UnrelatedKeyIgnored verifies that a table
-// with no `index` line under [registries.*] yields no declaration.
 func TestParseCargoRegistryConfig_UnrelatedKeyIgnored(t *testing.T) {
 	content := `
 [registries.mycorp]

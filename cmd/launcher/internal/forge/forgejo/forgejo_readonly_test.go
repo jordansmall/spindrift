@@ -15,10 +15,8 @@ import (
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
-// newReadOnlyRelayHarness sets up a real bare "remote" repo plus a fake
-// Forgejo REST server (only used for Probe/PRForge plumbing the config
-// wires up; RelayBundle itself never touches it), mirroring github's
-// newRelayHarness.
+// The fake Forgejo REST server only backs the Probe/PRForge plumbing the
+// config wires up. RelayBundle itself never touches it.
 func newReadOnlyRelayHarness(t *testing.T) (*forgetest.GitRepoFixture, forge.CodeForge) {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
@@ -28,13 +26,10 @@ func newReadOnlyRelayHarness(t *testing.T) (*forgetest.GitRepoFixture, forge.Cod
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
 
-	// forgetest.NewGitRepoFixture's first push (of "main") never updates the
-	// bare repo's own HEAD symref away from git-init's default (typically
-	// "master", which doesn't exist here), so a fresh clone otherwise has no
-	// local "main" branch to check out -- only refs/remotes/origin/main.
-	// CommitSubjects's base argument needs "main" itself to resolve for
-	// `git log base..ref` to work, the same way it would against a real
-	// forge clone.
+	// forgetest.NewGitRepoFixture's first push leaves the bare repo's HEAD
+	// symref on git-init's default ("master", absent here), so a fresh clone
+	// gets no local "main" to check out. CommitSubjects needs "main" itself to
+	// resolve for `git log base..ref`, as it would against a real forge clone.
 	if out, err := exec.Command("git", "-C", repo.Bare, "symbolic-ref", "HEAD", "refs/heads/main").CombinedOutput(); err != nil {
 		t.Fatalf("set bare repo HEAD to refs/heads/main: %v: %s", err, out)
 	}
@@ -53,11 +48,10 @@ func newReadOnlyRelayHarness(t *testing.T) (*forgetest.GitRepoFixture, forge.Cod
 	return repo, cf
 }
 
-// TestNewForgejoCodeForge_DoesNotImplementBundleRelay guards read-write's own
-// contract: NewForgejoCodeForge (BOX_FORGE_AND_ISSUE_ACCESS=read-write, the
-// Box pushes in-box) must never satisfy forge.BundleRelay, or settle's
-// generic relay-before-merge (ready.go) would try to relay a bundle a
-// read-write Box never wrote and block every read-write forgejo land.
+// A read-write Box (BOX_FORGE_AND_ISSUE_ACCESS=read-write) pushes in-box, so
+// if NewForgejoCodeForge satisfied forge.BundleRelay, settle's generic
+// relay-before-merge (ready.go) would try to relay a bundle that Box never
+// wrote and block every read-write land.
 func TestNewForgejoCodeForge_DoesNotImplementBundleRelay(t *testing.T) {
 	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: "https://codeberg.org",
@@ -69,10 +63,8 @@ func TestNewForgejoCodeForge_DoesNotImplementBundleRelay(t *testing.T) {
 	}
 }
 
-// TestNewForgejoCodeForge_DoesNotImplementDraftPRCreator mirrors
-// TestNewForgejoCodeForge_DoesNotImplementBundleRelay for
-// forge.DraftPRCreator: a read-write Box already opens its own PR in-box, so
-// settle must never call a host-side create for it.
+// A read-write Box already opens its own PR in-box, so settle must never call
+// a host-side create for it.
 func TestNewForgejoCodeForge_DoesNotImplementDraftPRCreator(t *testing.T) {
 	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
 		BaseURL: "https://codeberg.org",
@@ -84,10 +76,9 @@ func TestNewForgejoCodeForge_DoesNotImplementDraftPRCreator(t *testing.T) {
 	}
 }
 
-// TestNewReadOnlyForgejoCodeForge_ImplementsPRForge asserts the read-only
-// adapter keeps the full PRForge surface NewForgejoCodeForge has (via
-// embedding) — it still opens PRs and watches CI exactly as read-write does;
-// only the finished branch's hand-off differs.
+// The read-only adapter keeps every PRForge method NewForgejoCodeForge has,
+// by embedding. It opens PRs and watches CI exactly as read-write does. Only
+// the finished branch's hand-off differs.
 func TestNewReadOnlyForgejoCodeForge_ImplementsPRForge(t *testing.T) {
 	_, cf := newReadOnlyRelayHarness(t)
 	if _, ok := cf.(forge.PRForge); !ok {
@@ -95,9 +86,6 @@ func TestNewReadOnlyForgejoCodeForge_ImplementsPRForge(t *testing.T) {
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_RelayBundle_PushesRefToOrigin asserts
-// RelayBundle imports a Box's code-out bundle and pushes it to the real
-// remote.
 func TestReadOnlyForgejoCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	repo, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -118,10 +106,9 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_RelayBundle_ReRelayForceUpdatesRef asserts a
-// fix-pass retry -- a rebuilt bundle whose branch tip diverged from what an
-// earlier pass already relayed -- overwrites the remote ref rather than
-// being rejected as non-fast-forward.
+// A fix-pass retry rebuilds the bundle with a branch tip that diverged from
+// what an earlier pass relayed. That push must overwrite the remote ref rather
+// than be rejected as non-fast-forward.
 func TestReadOnlyForgejoCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.T) {
 	repo, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -133,9 +120,8 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.
 		t.Fatalf("RelayBundle (first attempt): %v", err)
 	}
 
-	// Rebuild branch from a diverged history (a different marker file, same
-	// name) -- a fresh clone of bare's base, not of the already-relayed ref,
-	// so the new commit shares no ancestry with the one already relayed in.
+	// Clone bare's base rather than the already-relayed ref, so the rebuilt
+	// branch shares no ancestry with the commit the first relay pushed.
 	work := t.TempDir()
 	forgetest.Run(t, "", "clone", repo.Bare, work)
 	forgetest.Run(t, work, "checkout", "main")
@@ -155,9 +141,8 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_RelayBundle_MissingBundleErrors asserts an
-// empty outbox (the Box never wrote a bundle) blocks the seam via an error
-// rather than a nil-error no-op, mirroring local's RelayBundle (ADR 0033).
+// An empty outbox means the Box never wrote a bundle. That must block the seam
+// with an error, not a nil-error no-op, matching local's RelayBundle (ADR 0033).
 func TestReadOnlyForgejoCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 	_, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -172,9 +157,7 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) 
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_RelayBundle_MalformedBundleErrors asserts a
-// corrupt bundle file is rejected by `git bundle verify` rather than fed to
-// fetch.
+// `git bundle verify` must reject the corrupt file before fetch sees it.
 func TestReadOnlyForgejoCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	_, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -190,10 +173,9 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CommitSubjects_ReturnsSubjectsReadOnly asserts
-// CommitSubjects returns the seeded bundle's commit subjects, oldest first,
-// and — unlike RelayBundle — never mutates the real remote: no ref for
-// branch appears on repo.Bare afterward.
+// Subjects come back oldest first. Unlike RelayBundle, CommitSubjects must
+// leave the real remote untouched: no ref for the branch may appear on
+// repo.Bare.
 func TestReadOnlyForgejoCodeForge_CommitSubjects_ReturnsSubjectsReadOnly(t *testing.T) {
 	repo, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -220,9 +202,6 @@ func TestReadOnlyForgejoCodeForge_CommitSubjects_ReturnsSubjectsReadOnly(t *test
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CommitSubjects_MissingBundleErrors mirrors
-// TestReadOnlyForgejoCodeForge_RelayBundle_MissingBundleErrors: an empty
-// outbox (the Box never wrote a bundle) surfaces forge.ErrBundleNotFound.
 func TestReadOnlyForgejoCodeForge_CommitSubjects_MissingBundleErrors(t *testing.T) {
 	_, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -237,10 +216,6 @@ func TestReadOnlyForgejoCodeForge_CommitSubjects_MissingBundleErrors(t *testing.
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CommitSubjects_MalformedBundleErrors mirrors
-// TestReadOnlyForgejoCodeForge_RelayBundle_MalformedBundleErrors: a corrupt
-// bundle file is rejected by `git bundle verify` and surfaces a generic
-// error, not forge.ErrBundleNotFound.
 func TestReadOnlyForgejoCodeForge_CommitSubjects_MalformedBundleErrors(t *testing.T) {
 	_, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -256,9 +231,8 @@ func TestReadOnlyForgejoCodeForge_CommitSubjects_MalformedBundleErrors(t *testin
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_RelayBundle_InvalidRefRejected asserts the
-// defense-in-depth ref guard rejects an empty or flag-like ref before it
-// reaches a refspec or checkout argument.
+// The ref guard must reject an empty or flag-like ref before it reaches a
+// refspec or a checkout argument.
 func TestReadOnlyForgejoCodeForge_RelayBundle_InvalidRefRejected(t *testing.T) {
 	_, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -271,9 +245,8 @@ func TestReadOnlyForgejoCodeForge_RelayBundle_InvalidRefRejected(t *testing.T) {
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CreateDraftPR_ReturnsURL asserts CreateDraftPR
-// POSTs a WIP-prefixed draft PR to Forgejo's REST pull-create endpoint,
-// returns its html_url, and reports created=true (issue #2447).
+// CreateDraftPR POSTs a WIP-prefixed draft PR, returns its html_url, and
+// reports created=true (issue #2447).
 func TestReadOnlyForgejoCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -328,9 +301,7 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors asserts a non-2xx
-// response from Forgejo's pull-create endpoint surfaces as an error rather
-// than a blank URL.
+// A non-2xx create must produce an error, not a blank URL.
 func TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -349,15 +320,11 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors(t *testing.T) {
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict asserts
-// that when Forgejo's pulls-create endpoint fails with 409 Conflict --
-// Forgejo's "a pull request for this head already exists" signal on this
-// endpoint, semantically distinct from the same status's "not mergeable"
-// meaning on the merge endpoint (forgejoStatusMap/errMergeRefused) --
-// CreateDraftPR resolves the branch's own open PR via OpenPRForBranch and
-// returns that PR's URL with no error and created=false, mirroring github's
-// CreateDraftPR adoption (relay.go, issue #2407 slice 1/2; created=false per
-// issue #2447).
+// On the pulls-create endpoint a 409 means "a pull request for this head
+// already exists", not the "not mergeable" sense the same status carries on
+// the merge endpoint (forgejoStatusMap/errMergeRefused). CreateDraftPR adopts
+// the branch's open PR via OpenPRForBranch and reports created=false, as
+// github's adoption does (relay.go, issue #2407 slice 1/2; issue #2447).
 func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -401,13 +368,9 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict(t *test
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingDraftOnConflict
-// asserts that CreateDraftPR's adoption path finds a DRAFT PR for the head,
-// not just a non-draft one. CreateDraftPR itself always creates a draft
-// (forgejoWIPPrefix-titled) PR, so the PR a retried call collides with on
-// 409 is always a draft itself -- OpenPRForBranch's draft-inclusive
-// contract (issue #2408) is what makes this adoption target resolvable at
-// all (issue #2407 follow-up).
+// CreateDraftPR always creates a draft, so the PR a retried call collides with
+// on 409 is itself a draft. Only OpenPRForBranch's draft-inclusive contract
+// (issue #2408) makes that adoption target resolvable (issue #2407 follow-up).
 func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingDraftOnConflict(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -451,10 +414,9 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingDraftOnConflict(t 
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CreateDraftPR_ConflictWithoutOpenPRReturnsOriginalError
-// asserts that when the create call fails with 409 but OpenPRForBranch finds
-// no open PR for that head (e.g. only a closed/merged PR exists), CreateDraftPR
-// returns the original create error unmasked, rather than swallowing it.
+// When a 409 create finds no open PR to adopt (only a closed or merged one
+// exists), CreateDraftPR must return the original create error rather than
+// swallow it.
 func TestReadOnlyForgejoCodeForge_CreateDraftPR_ConflictWithoutOpenPRReturnsOriginalError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

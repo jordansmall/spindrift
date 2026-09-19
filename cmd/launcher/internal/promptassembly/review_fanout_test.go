@@ -8,18 +8,16 @@ import (
 )
 
 // TestReviewFanoutAgentFollowsProvisionedAgents covers issue #3447's second
-// round: the baked /code-review anchor names an agent type the run actually
-// provisions. A Consumer pinning an explicit roster of the historical four
-// entries -- or taking issue #392's reviewModel="" opt-out, which drops the
-// review-axis entry from the baked agents -- must get the skill's own
-// general-purpose default in the rendered line, not an order to spawn an
-// agent type its driver session never defines.
+// round: the baked /code-review anchor must name an agent type the run
+// actually provisions. A Consumer pinning the historical four-entry roster,
+// or taking issue #392's reviewModel="" opt-out, gets the skill's own
+// general-purpose default instead of an agent type its session never defines.
 func TestReviewFanoutAgentFollowsProvisionedAgents(t *testing.T) {
 	reg := loadTestRegistry(t)
 
-	// The rendered clause per driver mechanism: the --agents JSON driver
-	// (claude) provisions by template key, the agent-files driver (opencode)
-	// by an on-disk <name>.md.
+	// The table covers both driver mechanisms: the --agents JSON driver
+	// (claude) provisions by template key, and the agent-files driver
+	// (opencode) by an on-disk <name>.md.
 	cases := []struct {
 		name string
 		env  func(t *testing.T) Env
@@ -106,8 +104,8 @@ func TestReviewFanoutAgentBakedAnchorHasNoHardcodedName(t *testing.T) {
 	}
 }
 
-// orchestratorReviewEnv is coveredEnv in the one cell that renders
-// review-prompt.md into Result.ReviewPromptText.
+// orchestratorReviewEnv returns coveredEnv in the one configuration that
+// renders review-prompt.md into Result.ReviewPromptText.
 func orchestratorReviewEnv() Env {
 	env := coveredEnv()
 	env.OrchestratorEnabled = true
@@ -117,10 +115,9 @@ func orchestratorReviewEnv() Env {
 
 // TestReviewFanoutAgentMalformedAgentsJSON covers the resolver's
 // json.Unmarshal error path, which the Assemble-level table above cannot
-// reach: Assemble's own agents-JSON path rejects a malformed template with
-// an error before any fragment renders. An unparseable template tells the
-// resolver nothing about what the run provisions, so it must fall through to
-// the fallback rather than name an agent type the session may never define.
+// reach: Assemble rejects a malformed template with an error before any
+// fragment renders. An unparseable template says nothing about what the run
+// provisions, so the resolver must fall through to the fallback.
 func TestReviewFanoutAgentMalformedAgentsJSON(t *testing.T) {
 	cases := []struct {
 		name     string

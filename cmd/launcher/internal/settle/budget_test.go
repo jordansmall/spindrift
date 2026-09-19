@@ -9,7 +9,6 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// budgetConfig returns a fixConfig with a token/cost budget layered on top.
 func budgetConfig(maxFixAttempts, maxBudgetTokens int, maxBudgetUSD float64) Config {
 	c := fixConfig(maxFixAttempts)
 	c.MaxBudgetTokens = maxBudgetTokens
@@ -17,11 +16,9 @@ func budgetConfig(maxFixAttempts, maxBudgetTokens int, maxBudgetUSD float64) Con
 	return c
 }
 
-// TestSelfHeal_BudgetExhaustedTokens_StopsBeforeFixPass verifies that when
-// cumulative usage already meets or exceeds MaxBudgetTokens, selfHealGate
-// stops before dispatching another fix pass — even though MaxFixAttempts
-// alone would still allow one — and lands failed with a distinct
-// budget-exhausted status (issue #2001).
+// Once cumulative usage meets MaxBudgetTokens, selfHealGate stops before
+// dispatching another fix pass even though MaxFixAttempts alone would still
+// allow one, and lands failed with a budget-exhausted status (issue #2001).
 func TestSelfHeal_BudgetExhaustedTokens_StopsBeforeFixPass(t *testing.T) {
 	c := budgetConfig(3, 100, 0)
 	fc := forge.NewFake()
@@ -50,10 +47,8 @@ func TestSelfHeal_BudgetExhaustedTokens_StopsBeforeFixPass(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_BudgetExhaustedUSD_StopsBeforeFixPass mirrors the token-cap
-// test for the cost dimension: MaxBudgetUSD alone can trip the gate even
-// with MaxBudgetTokens unset (issue #2001) — the two dimensions are
-// independent, either can exhaust first.
+// MaxBudgetUSD alone trips the gate with MaxBudgetTokens unset. The two
+// dimensions are independent, and either can exhaust first (issue #2001).
 func TestSelfHeal_BudgetExhaustedUSD_StopsBeforeFixPass(t *testing.T) {
 	c := budgetConfig(3, 0, 1.00)
 	fc := forge.NewFake()
@@ -76,9 +71,7 @@ func TestSelfHeal_BudgetExhaustedUSD_StopsBeforeFixPass(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_UnderBudget_FixProceeds verifies that when cumulative usage
-// is below both caps, selfHealGate dispatches the fix pass normally (issue
-// #2001 acceptance criterion: under budget → fix proceeds).
+// Below both caps, selfHealGate dispatches the fix pass normally (issue #2001).
 func TestSelfHeal_UnderBudget_FixProceeds(t *testing.T) {
 	c := budgetConfig(3, 1000, 10.00)
 	fc := forge.NewFake()
@@ -98,10 +91,9 @@ func TestSelfHeal_UnderBudget_FixProceeds(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_BudgetUnset_NoEnforcement verifies that with both budget
-// knobs left at their zero value, behaviour is unchanged: selfHealGate never
-// consults CumulativeUsage's numbers to stop a fix pass, even when they are
-// scripted enormous (issue #2001 acceptance criterion: unset = no cap).
+// With both budget knobs at zero, selfHealGate never stops a fix pass over
+// CumulativeUsage's numbers, no matter how large this test makes them (issue
+// #2001).
 func TestSelfHeal_BudgetUnset_NoEnforcement(t *testing.T) {
 	c := fixConfig(2) // MaxBudgetTokens/MaxBudgetUSD left zero
 	fc := forge.NewFake()
@@ -121,9 +113,8 @@ func TestSelfHeal_BudgetUnset_NoEnforcement(t *testing.T) {
 	}
 }
 
-// TestBudgetExceeded_TableDriven unit-tests budgetExceeded's cap logic
-// directly, independent of selfHealGate's loop plumbing (issue #2001
-// acceptance criterion: usage summing/threshold logic is unit-tested).
+// This test covers budgetExceeded's cap logic directly, without selfHealGate's
+// loop plumbing (issue #2001).
 func TestBudgetExceeded_TableDriven(t *testing.T) {
 	cases := []struct {
 		name     string

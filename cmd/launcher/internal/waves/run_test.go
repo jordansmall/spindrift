@@ -8,12 +8,10 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestRun_Selective_NoEdges_TouchOverlapDefersThenExits verifies that,
-// post-#524, OriginSelective shares drainMaxJobs with the queue path: a
-// declared-touches overlap defers the candidate and Run exits with
-// ErrOpenNoneDispatchable instead of dispatching immediately — the old
-// selective-only overlap bypass existed solely to gate entry into the
-// deleted multi-wave loop and has no reason to survive it.
+// Regression test for #524: OriginSelective shares drainMaxJobs with the queue
+// path, so a declared-touches overlap defers the candidate and Run exits with
+// ErrOpenNoneDispatchable instead of dispatching. The old selective-only
+// overlap bypass existed only to gate entry into the deleted multi-wave loop.
 func TestRun_Selective_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -51,13 +49,10 @@ func TestRun_Selective_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	}
 }
 
-// TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave
-// is the regression test for #477: with MAX_JOBS=0 (uncapped drain) and a
-// dependency edge, one Run invocation dispatches only the currently-unblocked
-// issue; the dependent is neither claimed (still on the dispatch label, not
-// InProgress) nor dispatched — it waits for a fresh invocation, which
-// re-evaluates the image, rather than running from the blocker's frozen
-// image inside the same process.
+// Regression test for #477: with MAX_JOBS=0 (uncapped drain) and a dependency
+// edge, one Run invocation dispatches only the currently-unblocked issue. The
+// dependent is neither claimed nor dispatched; it waits for a fresh invocation
+// that re-evaluates the image instead of running from the blocker's frozen one.
 func TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -106,12 +101,10 @@ func TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave(t
 	}
 }
 
-// TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits verifies that
-// OriginDiscovered (the run() queue-drain path) defers a no-edges candidate
-// whose declared touches overlap an in-progress issue and exits immediately
-// with ErrOpenNoneDispatchable — no in-process wait, no deadlock timer
-// (ADR 0019: the queue path is drain-only; a held issue is picked up by the
-// next invocation instead).
+// ADR 0019 makes the queue path drain-only, so OriginDiscovered defers a
+// no-edges candidate whose declared touches overlap an in-progress issue and
+// exits with ErrOpenNoneDispatchable. No in-process wait, no deadlock timer;
+// the next invocation picks up the held issue.
 func TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -158,10 +151,9 @@ func TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	}
 }
 
-// TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation verifies
-// that once the colliding in-progress issue leaves InProgress, a fresh Run
-// invocation dispatches the previously-deferred candidate — the two-call
-// sequence a real driving loop (dogfood.sh, CI, or an operator re-running
+// Once the colliding in-progress issue leaves InProgress, a fresh Run
+// invocation dispatches the previously-deferred candidate. The two calls are
+// the sequence a real driving loop (dogfood.sh, CI, or an operator re-running
 // dispatch) performs across process invocations.
 func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testing.T) {
 	c := baseConfig()
@@ -193,7 +185,6 @@ func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testin
 		t.Fatalf("NewPlan: %v", err)
 	}
 
-	// First invocation: the collider is still in-progress, so #10 defers.
 	if err := run(c, fc, fc, dir, f, s, plan, claimer); !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("first Run: got %v, want ErrOpenNoneDispatchable", err)
 	}
@@ -201,7 +192,6 @@ func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testin
 		t.Fatalf("first Run: got %d run calls, want 0", len(fr.RunCalls))
 	}
 
-	// The collider completes; a fresh invocation now dispatches #10.
 	fc.TransitionState("20", forge.InProgress, forge.Complete)
 	if err := run(c, fc, fc, dir, f, s, plan, claimer); err != nil {
 		t.Fatalf("second Run: %v", err)

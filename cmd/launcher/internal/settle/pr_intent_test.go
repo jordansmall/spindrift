@@ -8,11 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestEnsureClosesReference covers ensureClosesReference's guarantee that a
-// PR body carries a "Closes #<num>" reference — but only for non-local
-// (GitHub-shaped) trackers, since a LandingRecorder-shaped (local) tracker
-// closes issues through its own axis (ADR 0029), never GitHub's
-// auto-close-on-merge keyword convention.
+// Only non-local (GitHub-shaped) trackers get a "Closes #<num>" reference. A
+// LandingRecorder-shaped (local) tracker closes issues through its own axis
+// (ADR 0029), never through GitHub's auto-close-on-merge keyword.
 func TestEnsureClosesReference(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -99,12 +97,11 @@ func TestEnsureClosesReference(t *testing.T) {
 	}
 }
 
-// TestDefuseClosingKeywords covers defuseClosingKeywords' guarantee that a
-// box-authored string embedded verbatim in a reconstructed PR body (issue
-// #2447) never carries a live GitHub closing-keyword reference: a
-// prompt-injected Box controls its own commit subjects, and a subject
-// shaped like "fix: closes #999" would otherwise auto-close an unrelated
-// issue #999 on merge.
+// A Box-authored string embedded verbatim in a reconstructed PR body (issue
+// #2447) must never carry a live GitHub closing-keyword reference: a
+// prompt-injected Box controls its own commit subjects, and a subject shaped
+// like "fix: closes #999" would otherwise auto-close an unrelated issue #999
+// on merge.
 func TestDefuseClosingKeywords(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -133,9 +130,8 @@ func TestDefuseClosingKeywords(t *testing.T) {
 			if closingKeywordPattern.MatchString(got) {
 				t.Errorf("defuseClosingKeywords(%q) = %q, still matches closingKeywordPattern", tt.subject, got)
 			}
-			// The subject must still be visually recognizable — every digit
-			// and the keyword text itself must survive, only made invisible
-			// to the closing-keyword scanner via a zero-width space.
+			// The digits and keyword text must survive: defusing only hides
+			// them from the scanner behind a zero-width space.
 			digitsOnly := regexp.MustCompile(`\d+`).FindString(tt.subject)
 			if digitsOnly == "" || !strings.Contains(got, digitsOnly) {
 				t.Errorf("defuseClosingKeywords(%q) = %q, want it to still contain the digits %q", tt.subject, got, digitsOnly)

@@ -11,10 +11,8 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker verifies that
-// Config.IgnoreBlockers (the research dispatch kind, ADR 0022: research
-// lands no code, so it is never held on an unmerged dependency) dispatches
-// an issue even though its declared blocker is unmet.
+// ADR 0022: research lands no code, so an unmerged dependency never holds
+// it. IgnoreBlockers dispatches an issue whose blocker is unmet.
 func TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T) {
 	c := baseConfig()
 	label := "agent-research"
@@ -22,8 +20,8 @@ func TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T)
 	c.IgnoreBlockers = true
 
 	fc := forge.NewFake()
-	// Issue #1 is blocked by #3 (open, no complete label) — would normally
-	// hold #1 for a later invocation.
+	// Issue #3 is open and carries no complete label, so an ordinary wave
+	// would hold #1 for a later invocation.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
@@ -48,9 +46,8 @@ func TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T)
 	}
 }
 
-// TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade verifies that
-// Config.IgnoreBlockers also suppresses the cascade-fail path: a batch
-// sibling reaching FailedLabel never fails a research dependent.
+// IgnoreBlockers also suppresses the cascade-fail path: a batch sibling
+// reaching FailedLabel never fails a research dependent.
 func TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade(t *testing.T) {
 	c := baseConfig()
 	label := "agent-research"
@@ -79,10 +76,9 @@ func TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb verifies that a
-// research selective wave's rerun hint names `spindrift research`, not a
-// hardcoded `spindrift dispatch` — the operator must be told the verb that
-// actually carries the remainder into the next invocation (ADR 0022).
+// A research wave's rerun hint must name `spindrift research`, not a
+// hardcoded `spindrift dispatch`: the operator needs the verb that actually
+// carries the remainder into the next invocation (ADR 0022).
 func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 	c := baseConfig()
 	label := "agent-research"
@@ -117,9 +113,8 @@ func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker verifies
-// that the OriginClaimed single-issue path never writes .spindrift/logs/blocked.txt
-// when IgnoreBlockers is set — research is dispatched instead of held.
+// Under IgnoreBlockers the OriginClaimed single-issue path dispatches rather
+// than holding, so it must write no blocked marker.
 func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testing.T) {
 	c := baseConfig()
 	label := "agent-research"

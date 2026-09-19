@@ -9,11 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// mustBareRepoWithConfigs builds a genuinely bare fixture repo the way an
-// Accumulation repo actually looks (ADR 0033): a source checkout gets the
-// listed repo-relative files committed, then a second, bare repo receives
-// those commits over a push -- so the bare repo has no working tree at all.
-// files maps repo-relative path to content. Returns the bare repo's path.
+// mustBareRepoWithConfigs builds the fixture the way an Accumulation repo
+// actually looks (ADR 0033): a source checkout commits the files, then pushes
+// them to a second, bare repo, so the fixture has no working tree at all.
 func mustBareRepoWithConfigs(t *testing.T, branch string, files map[string]string) string {
 	t.Helper()
 	src := t.TempDir()
@@ -49,9 +47,8 @@ func mustBareRepoWithConfigs(t *testing.T, branch string, files map[string]strin
 	return bare
 }
 
-// TestResolveRef_MissingRepoDirFails pins ResolveRef's fail-closed contract
-// directly, rather than only through MaterializeRef/UncoveredHostsFromGitRef
-// callers -- a repoDir that doesn't exist on disk must error.
+// Pins ResolveRef's fail-closed contract directly, not only through its
+// MaterializeRef and UncoveredHostsFromGitRef callers.
 func TestResolveRef_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	if err := ResolveRef(missing, "main"); err == nil {
@@ -59,10 +56,10 @@ func TestResolveRef_MissingRepoDirFails(t *testing.T) {
 	}
 }
 
-// TestResolveRef_EmptyRepoDirFails pins that an empty repoDir errors rather
-// than falling through to `git -C ""`, which would resolve ref against the
-// process cwd's own repo -- run from inside any checkout, a ref like "main"
-// would otherwise resolve and report drift for the wrong repo entirely.
+// An empty repoDir must error rather than fall through to `git -C ""`, which
+// resolves the ref against the process cwd's own repo. Run from inside any
+// checkout, a ref like "main" would otherwise resolve and report drift for the
+// wrong repo. The t.Chdir into the fixture is what makes that failure visible.
 func TestResolveRef_EmptyRepoDirFails(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
@@ -74,9 +71,8 @@ func TestResolveRef_EmptyRepoDirFails(t *testing.T) {
 	}
 }
 
-// TestResolveRef_MissingRefFails pins that a ref absent from an otherwise
-// valid repo errors, naming the ref -- the same wording MaterializeRef's
-// callers (registrypathset) assert on.
+// The error must name the ref: registrypathset asserts on that same wording
+// through MaterializeRef.
 func TestResolveRef_MissingRefFails(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
@@ -91,8 +87,8 @@ func TestResolveRef_MissingRefFails(t *testing.T) {
 	}
 }
 
-// TestResolveRef_ResolvableRefSucceeds pins the success path a caller like
-// registryRouteDriftCheckForRef gates the drift row's existence on.
+// registryRouteDriftCheckForRef gates the drift row's existence on this
+// success path.
 func TestResolveRef_ResolvableRefSucceeds(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
@@ -103,8 +99,6 @@ func TestResolveRef_ResolvableRefSucceeds(t *testing.T) {
 	}
 }
 
-// TestUncoveredHostsFromGitRef_UncoveredHostReported pins the basic path: a
-// host declared by a bare repo's ref and absent from covered comes back.
 func TestUncoveredHostsFromGitRef_UncoveredHostReported(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
@@ -120,8 +114,6 @@ func TestUncoveredHostsFromGitRef_UncoveredHostReported(t *testing.T) {
 	}
 }
 
-// TestUncoveredHostsFromGitRef_FullyCoveredReturnsNone pins that a declared
-// host present in covered never comes back as uncovered.
 func TestUncoveredHostsFromGitRef_FullyCoveredReturnsNone(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
@@ -136,8 +128,6 @@ func TestUncoveredHostsFromGitRef_FullyCoveredReturnsNone(t *testing.T) {
 	}
 }
 
-// TestUncoveredHostsFromGitRef_MissingRepoDirFails pins the fail-closed
-// contract: a repoDir that doesn't exist on disk must error.
 func TestUncoveredHostsFromGitRef_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	_, err := UncoveredHostsFromGitRef(missing, "main", nil)
@@ -146,8 +136,6 @@ func TestUncoveredHostsFromGitRef_MissingRepoDirFails(t *testing.T) {
 	}
 }
 
-// TestUncoveredHostsFromGitRef_MissingRefFails pins that a ref absent from
-// an otherwise-valid repo errors, naming the ref.
 func TestUncoveredHostsFromGitRef_MissingRefFails(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
@@ -162,9 +150,8 @@ func TestUncoveredHostsFromGitRef_MissingRefFails(t *testing.T) {
 	}
 }
 
-// TestUncoveredHostsFromGitRef_NoConfigFilesReturnsNone pins that a ref
-// declaring no config files at all is not an error and yields no uncovered
-// hosts -- distinct from a broken repo/ref, which does error.
+// A ref declaring no config files is not an error, unlike a broken repo or
+// ref. Both yield no hosts, so only the error distinguishes them.
 func TestUncoveredHostsFromGitRef_NoConfigFilesReturnsNone(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", nil)
 

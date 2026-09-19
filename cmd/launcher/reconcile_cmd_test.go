@@ -17,16 +17,13 @@ import (
 	"spindrift.dev/launcher/internal/reconcile"
 )
 
-// testCapabilities resolves c's own forge.Capabilities the same way
-// newReadContext does in production, keyed to c.codeForge/c.issueTracker
-// (issue #2946, issue #3064).
+// testCapabilities resolves capabilities the same way newReadContext does in
+// production, keyed to c.codeForge and c.issueTracker (issue #2946, issue #3064).
 func testCapabilities(t *testing.T, c config, cf forge.CodeForge, it forge.IssueTracker) forge.Capabilities {
 	t.Helper()
 	return forge.ResolveCapabilities(cf, it, mustDescriptor(t, c.codeForge), mustDescriptor(t, c.issueTracker))
 }
 
-// mustDescriptor resolves backend name's Descriptor, failing t if the
-// registry entry is ever renamed or removed.
 func mustDescriptor(t *testing.T, name string) backend.Descriptor {
 	t.Helper()
 	d, ok := backend.ByName(name)
@@ -36,18 +33,16 @@ func mustDescriptor(t *testing.T, name string) backend.Descriptor {
 	return d
 }
 
-// localDescriptor resolves backend "local"'s Descriptor for the tests below
-// that force caps toward the local branch regardless of the config's own
-// backend name (issue #3064).
+// The tests below force caps toward the local branch regardless of the
+// config's own backend name (issue #3064).
 func localDescriptor(t *testing.T) backend.Descriptor {
 	t.Helper()
 	return mustDescriptor(t, "local")
 }
 
-// fakeLiveness is a no-op reconcile.LivenessProbe by default: LogStale
-// defaults to false (not stale) and ContainerLive always reports live=false,
-// so it never triggers a reset on its own — exactly what the Closed-only
-// tests in this file need from the seam.
+// fakeLiveness is a no-op reconcile.LivenessProbe by default: LogStale reports
+// not stale and ContainerLive always reports live=false, so it never triggers a
+// reset on its own, which is what the Closed-only tests here need.
 type fakeLiveness struct {
 	stale     map[string]bool
 	reachable map[string]bool
@@ -61,9 +56,6 @@ func (f fakeLiveness) ContainerLive(num string) (live, reachable bool) {
 
 var _ reconcile.LivenessProbe = fakeLiveness{}
 
-// TestRunReconcile_ClosesMergedLandingIssue verifies runReconcile drives the
-// reconcile.Run seam against a local-tracker config and reports the closed
-// issue number in its output.
 func TestRunReconcile_ClosesMergedLandingIssue(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
@@ -88,9 +80,8 @@ func TestRunReconcile_ClosesMergedLandingIssue(t *testing.T) {
 	}
 }
 
-// TestRunReconcile_ReportsAbandonedIssue verifies runReconcile reports an
-// issue flagged abandoned (its landing PR closed without merging) in its
-// output, distinct from a closed issue (ADR 0029).
+// runReconcile reports an issue whose landing PR closed without merging as
+// abandoned, distinct from a closed issue (ADR 0029).
 func TestRunReconcile_ReportsAbandonedIssue(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
@@ -107,9 +98,8 @@ func TestRunReconcile_ReportsAbandonedIssue(t *testing.T) {
 	}
 }
 
-// TestRunReconcile_NonLocalTrackerIsClearNoOp verifies runReconcile refuses
-// cleanly (a plain message, not an error) for github/jira, and never touches
-// the forge even when a merged landing PR exists to close against.
+// For github or jira the refusal is a plain message, not an error, and the
+// fixture still holds a merged landing PR so an accidental sweep would show up.
 func TestRunReconcile_NonLocalTrackerIsClearNoOp(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "github"
@@ -129,10 +119,6 @@ func TestRunReconcile_NonLocalTrackerIsClearNoOp(t *testing.T) {
 	}
 }
 
-// TestRunReconcile_ReportsResetIssue verifies runReconcile reports an
-// InProgress issue that reconcile.Run reset, alongside the (empty) closed
-// report, so an operator running `spindrift reconcile` sees which issues
-// came back to Dispatchable.
 func TestRunReconcile_ReportsResetIssue(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
@@ -150,11 +136,6 @@ func TestRunReconcile_ReportsResetIssue(t *testing.T) {
 	}
 }
 
-// --- reconcileAfterDispatch tests (dispatch's local-only auto-invoke) ---
-
-// TestReconcileAfterDispatch_LocalTracker_ClosesMergedLanding verifies a
-// dispatch run's final auto-invoke reaches the same reconcile.Run seam
-// runReconcile drives, when the tracker is local.
 func TestReconcileAfterDispatch_LocalTracker_ClosesMergedLanding(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
@@ -176,10 +157,8 @@ func TestReconcileAfterDispatch_LocalTracker_ClosesMergedLanding(t *testing.T) {
 	}
 }
 
-// TestReconcileAfterDispatch_NonLocalTracker_SilentNoOp verifies a dispatch
-// run's final auto-invoke does nothing — and prints nothing — for a
-// github/jira tracker, unlike the standalone `spindrift reconcile` verb's
-// explicit refusal message.
+// The dispatch auto-invoke prints nothing for a github or jira tracker, unlike
+// the standalone `spindrift reconcile` verb's explicit refusal message.
 func TestReconcileAfterDispatch_NonLocalTracker_SilentNoOp(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "github"
@@ -199,12 +178,11 @@ func TestReconcileAfterDispatch_NonLocalTracker_SilentNoOp(t *testing.T) {
 	}
 }
 
-// TestReconcileGuards_ReadTrackerDescriptorFromCaps pins issue #3064 for
-// both runReconcile and reconcileAfterDispatch: the guard reads
-// caps.TrackerDescriptor, not a second backendByName(c.issueTracker) lookup
-// into the config's own name. c names a non-local tracker
-// (backendByName(c.issueTracker) alone would say "no-op"), but
-// caps.TrackerDescriptor is forced to "local" — the sweep must still run.
+// Pins issue #3064 for both reconcile entry points: the guard must read
+// caps.TrackerDescriptor, not look c.issueTracker up again. The fixture
+// deliberately disagrees with itself, naming a non-local tracker in c while
+// forcing caps.TrackerDescriptor to "local", so a guard reading c alone would
+// say "no-op" and the sweep would not run.
 func TestReconcileGuards_ReadTrackerDescriptorFromCaps(t *testing.T) {
 	reconcileFuncs := []struct {
 		name string
@@ -241,11 +219,9 @@ func TestReconcileGuards_ReadTrackerDescriptorFromCaps(t *testing.T) {
 	}
 }
 
-// --- surfaceAfterDispatch tests (CODE_FORGE=local's auto-surface exit, ADR 0033, issue #1730) ---
-
-// writeSeamIssue writes a minimal local issue file named slug+".md" under
-// dir, carrying parent and closed frontmatter fields — the shape
-// surfaceAfterDispatch's SeamLister query reads.
+// writeSeamIssue writes the minimal local issue file shape that
+// surfaceAfterDispatch's SeamLister query reads: a parent and a closed
+// frontmatter field.
 func writeSeamIssue(t *testing.T, dir, slug, parent string, closed bool) {
 	t.Helper()
 	body := "---\ntitle: " + slug + "\nstate: agent-complete\nlabels: []\ncreated: 2026-07-09T12:00:00Z\nparent: " + parent + "\n"
@@ -258,9 +234,9 @@ func writeSeamIssue(t *testing.T, dir, slug, parent string, closed bool) {
 	}
 }
 
-// setGitIdentityEnv gives ambient git commands (forgetest.NewGitRepoFixture's
-// own commits) a commit identity, mirroring the local package's own
-// bundle_test.go helper of the same name.
+// setGitIdentityEnv gives forgetest.NewGitRepoFixture's own commits an
+// identity, mirroring the local package's bundle_test.go helper of the same
+// name.
 func setGitIdentityEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
@@ -269,8 +245,8 @@ func setGitIdentityEnv(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 }
 
-// mustInitCheckout creates a plain git repo at dir, checked out on branch,
-// with one commit — a bare-bones operator checkout standing in for pwd.
+// mustInitCheckout builds the bare-bones operator checkout that stands in for
+// pwd in the surface tests.
 func mustInitCheckout(t *testing.T, dir, branch string) {
 	t.Helper()
 	mustRunGit(t, dir, "init", "-b", branch)
@@ -283,9 +259,6 @@ func mustInitCheckout(t *testing.T, dir, branch string) {
 	mustRunGit(t, dir, "commit", "-m", "base")
 }
 
-// surfaceFixture is newSurfaceFixture's return value; integrationBranch
-// carries the branch name the fixture already derived, so callers need not
-// recompute it.
 type surfaceFixture struct {
 	repo              *forgetest.GitRepoFixture
 	pwd               string
@@ -295,16 +268,9 @@ type surfaceFixture struct {
 	integrationBranch string
 }
 
-// newSurfaceFixture builds a completed broad ticket's fixture — a
-// git-repo already carrying parent's Integration branch, a fresh checkout
-// standing in for pwd, and a config/tracker/*Wired trio wired for
-// codeForge — for callers that vary codeForge and the caps they hand
-// surfaceAfterDispatch.
-//
-// ResolveParent("", parent), not ResolveParent(parent, ""): parent here
-// stands in for the raw parent: frontmatter value writeSeamIssue writes
-// below, not an issue's own number/slug, so it belongs in ResolveParent's
-// rawParent argument.
+// The call is ResolveParent("", parent), not ResolveParent(parent, ""): parent
+// stands in for the raw parent frontmatter value writeSeamIssue writes, not an
+// issue's own number or slug, so it belongs in the rawParent argument.
 func newSurfaceFixture(t *testing.T, parent, codeForge string) surfaceFixture {
 	t.Helper()
 	setGitIdentityEnv(t)
@@ -327,11 +293,8 @@ func newSurfaceFixture(t *testing.T, parent, codeForge string) surfaceFixture {
 	return surfaceFixture{repo: repo, pwd: pwd, c: c, it: it, lw: lw, integrationBranch: integrationBranch}
 }
 
-// TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch verifies
-// surfaceAfterDispatch fetches the completed broad ticket's Integration
-// branch into pwd as a local branch named after the ticket, and reports it
-// through a one-line notice, once every one of its seam issues is closed
-// (issue #1730 AC1, AC7).
+// Issue #1730 AC1 and AC7: once every seam issue is closed, the Integration
+// branch lands in pwd as a local branch named after the ticket.
 func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	const parent = "1700"
 	fx := newSurfaceFixture(t, parent, "local")
@@ -351,13 +314,11 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	}
 }
 
-// TestSurfaceAfterDispatch_UsesPassedWiredInstance verifies surfaceAfterDispatch
-// surfaces through the *localloop.Wired it is handed, rather than minting its
-// own fresh instance from (c, it) — the fix for issue #1833's duplicate
-// Wire() construction. c's own AccumulationRepoDir points at a decoy repo;
-// only the explicitly passed lw's Config points at the repo that actually
-// carries the ticket's Integration branch. A surfaceAfterDispatch that built
-// its own Wired from c would surface the decoy's tip instead.
+// Issue #1833: surfaceAfterDispatch must surface through the *localloop.Wired
+// it is handed, not mint a fresh one from (c, it). c's AccumulationRepoDir
+// points at a decoy repo while only the passed lw points at the repo carrying
+// the ticket's Integration branch, so a surfaceAfterDispatch that builds its
+// own Wired surfaces the decoy's tip and fails.
 func TestSurfaceAfterDispatch_UsesPassedWiredInstance(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
@@ -395,11 +356,9 @@ func TestSurfaceAfterDispatch_UsesPassedWiredInstance(t *testing.T) {
 	}
 }
 
-// TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict verifies
-// surfaceAfterDispatch surfaces no branch while any one of the ticket's
-// seams is still open (issue #1730 AC3), but — unlike the pre-#1811 silent
-// no-op — prints a held verdict naming the open seam, so the ticket is
-// never silent (issue #1811).
+// Issue #1730 AC3: surfaceAfterDispatch surfaces no branch while any seam is
+// still open, and issue #1811 requires a held verdict naming that seam rather
+// than the earlier silent no-op.
 func TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
@@ -431,10 +390,9 @@ func TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict(t *testing.T) {
 	}
 }
 
-// TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp verifies surfaceAfterDispatch
-// does nothing for github/git codeForge, even with a local tracker and a
-// configured parent — CODE_FORGE=local's Accumulation repo doesn't exist
-// under any other codeForge, so there is nothing to surface from.
+// CODE_FORGE=local's Accumulation repo does not exist under any other
+// codeForge, so there is nothing to surface from even with a local tracker and
+// a configured parent.
 func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 	const parent = "1700"
 	issuesDir := t.TempDir()
@@ -455,12 +413,10 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 	}
 }
 
-// TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps pins issue #3064:
-// the auto-surface guard reads caps.ForgeDescriptor, not a second
-// backendByName(c.codeForge) lookup into the config's own name. c names a
-// non-local codeForge (backendByName(c.codeForge) alone would say "no-op"),
-// but caps.ForgeDescriptor is forced to "local" — the sweep must still run
-// and surface the Integration branch.
+// Pins issue #3064: the auto-surface guard must read caps.ForgeDescriptor, not
+// look c.codeForge up again. The fixture names a non-local codeForge in c
+// while forcing caps.ForgeDescriptor to "local", so a guard reading c alone
+// would say "no-op" instead of surfacing the Integration branch.
 func TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps(t *testing.T) {
 	const parent = "1700"
 	fx := newSurfaceFixture(t, parent, "github")
@@ -481,13 +437,11 @@ func TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps(t *testing.T) {
 	}
 }
 
-// TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets
-// verifies surfaceAfterDispatch iterates every distinct resolved parent
-// among the tracker's issues (ADR 0033, issue #1734) — a mixed batch
-// surfaces the broad ticket whose seams are all closed while printing a held
-// verdict, not a branch, for the one with an open seam, instead of
-// collapsing onto a single env-wide parent the way the removed
-// CODE_FORGE_INTEGRATION_PARENT knob did.
+// ADR 0033 and issue #1734: the sweep iterates every distinct resolved parent
+// among the tracker's issues instead of collapsing onto a single env-wide
+// parent the way the removed CODE_FORGE_INTEGRATION_PARENT knob did. The batch
+// mixes a fully closed ticket with one that still has an open seam so both
+// outcomes have to appear in a single run.
 func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *testing.T) {
 	setGitIdentityEnv(t)
 	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("", "broad-a")))
@@ -526,13 +480,10 @@ func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *t
 	}
 }
 
-// TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers verifies a
-// genuine SurfaceIntegrationBranch error for one completed broad ticket
-// doesn't abort the sweep before every other distinct resolved parent gets
-// its own attempt (issue #1734 review follow-up) — pwd not being a git repo
-// at all makes every parent's own "current branch" resolution fail the same
-// way, so both must appear in the combined error for the sweep to have
-// actually reached the second one instead of stopping after the first.
+// Issue #1734 review follow-up: one parent's SurfaceIntegrationBranch error
+// must not abort the sweep. Leaving pwd un-inited makes every parent's current
+// branch resolution fail the same way, so both names have to appear in the
+// combined error for the sweep to have reached the second one.
 func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.T) {
 	setGitIdentityEnv(t)
 	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("", "broad-a")))
@@ -563,12 +514,9 @@ func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.
 	}
 }
 
-// TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch verifies
-// runReconcile's wiring end to end: closing a broad ticket's last open seam
-// this very sweep — not just a ticket that was already fully closed coming
-// in — surfaces the Integration branch into pwd in the same call (issue
-// #1730 AC1), reported through the same writer reconcile's own messages go
-// to.
+// Issue #1730 AC1 end to end: the ticket's last seam closes during this very
+// sweep, rather than arriving already fully closed, and the Integration branch
+// still reaches pwd in the same call.
 func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
@@ -618,15 +566,10 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	}
 }
 
-// TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine
-// verifies that closed parentless issues whose Integration branch has never
-// landed (SurfaceIntegrationBranch's "no seam of <parent> has landed yet"
-// skip) collapse into a single summary line instead of one line per parent
-// (issue #1739): each closed parentless issue is its own singleton broad
-// ticket (ADR 0033, issue #1734, local.ResolveParent), so a tracker with
-// hundreds of closed standalone issues that never went through
-// CODE_FORGE=local would otherwise print that many identical-shaped lines
-// on every single reconcile sweep, forever.
+// Issue #1739: each closed parentless issue is its own singleton broad ticket
+// (ADR 0033, issue #1734), so a tracker holding hundreds of standalone issues
+// that never went through CODE_FORGE=local would print that many identical
+// never-landed skip lines on every sweep. They collapse into one summary line.
 func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine(t *testing.T) {
 	setGitIdentityEnv(t)
 	repo := forgetest.NewGitRepoFixture(t, "main")
@@ -658,12 +601,9 @@ func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine
 	}
 }
 
-// TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses
-// verifies the collapse is specific to the permanent "never landed" skip
-// reason: a parent skipped because it's currently checked out in pwd (a
-// transient, operator-actionable condition, not tracker-history noise)
-// still gets its own line, alongside the never-landed parents' single
-// summary line (issue #1739).
+// Issue #1739: the collapse is specific to the permanent never-landed skip. A
+// parent skipped because it is currently checked out in pwd is transient and
+// the operator can act on it, so it keeps its own line.
 func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(t *testing.T) {
 	setGitIdentityEnv(t)
 	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("9010", "")))
@@ -697,7 +637,6 @@ func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(
 	}
 }
 
-// revParseTest resolves ref inside the repo at dir, failing t on error.
 func revParseTest(t *testing.T, dir, ref string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).CombinedOutput()

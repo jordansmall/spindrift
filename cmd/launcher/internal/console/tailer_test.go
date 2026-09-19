@@ -9,11 +9,8 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 )
 
-// TestTailer_ReadAppended_MissingFile_ReturnsNotOk verifies readAppended
-// reports ok=false rather than panicking or returning a zero-value success
-// when path no longer exists — the same "can't read" contract
-// appendHeartbeat and appendActivity both rely on, exercised here at the
-// tailer directly rather than only indirectly through those two callers.
+// This test pins the "can't read" contract appendHeartbeat and appendActivity
+// both rely on, at the tailer directly rather than through those callers.
 func TestTailer_ReadAppended_MissingFile_ReturnsNotOk(t *testing.T) {
 	drv, err := driver.New("")
 	if err != nil {
@@ -31,10 +28,8 @@ func TestTailer_ReadAppended_MissingFile_ReturnsNotOk(t *testing.T) {
 	}
 }
 
-// TestTailer_ReadAppended_AdvancesOffsetByBytesRead verifies a first call
-// against a fresh tailer feeds the whole file through drv's parser and
-// leaves t.offset at the file's length, so a follow-up call against an
-// unchanged file has nothing left to read.
+// The offset assertion matters because a follow-up call against an unchanged
+// file must find nothing left to read.
 func TestTailer_ReadAppended_AdvancesOffsetByBytesRead(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "issue-9.log")
@@ -62,11 +57,9 @@ func TestTailer_ReadAppended_AdvancesOffsetByBytesRead(t *testing.T) {
 	}
 }
 
-// TestTailer_ReadAppended_DirectoryPath_ReturnsNotOkAndLeavesOffsetUnchanged
-// verifies that a read failure past a successful Open (a directory opens
-// fine but can't be read as a file) reports ok=false and leaves t.offset
-// untouched, so a transient hiccup doesn't clobber state a later call would
-// rely on.
+// The path is a directory because that is how this test reaches a read
+// failure past a successful Open: a directory opens fine but cannot be read
+// as a file. The offset must survive such a hiccup for a later call to use.
 func TestTailer_ReadAppended_DirectoryPath_ReturnsNotOkAndLeavesOffsetUnchanged(t *testing.T) {
 	drv, err := driver.New("")
 	if err != nil {
@@ -87,11 +80,8 @@ func TestTailer_ReadAppended_DirectoryPath_ReturnsNotOkAndLeavesOffsetUnchanged(
 	}
 }
 
-// TestTailer_ReadAppended_SecondCall_FeedsOnlyAppendedBytes verifies a
-// second readAppended call against the same tailer, after more bytes were
-// appended to path, feeds the parser only the bytes appended since the first
-// call — not the whole file again — proving entry.out gets reset and reused
-// rather than only allocated once and left to accumulate.
+// The byte count proves entry.out gets reset and reused between calls rather
+// than allocated once and left to accumulate the whole file again.
 func TestTailer_ReadAppended_SecondCall_FeedsOnlyAppendedBytes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "issue-9.log")

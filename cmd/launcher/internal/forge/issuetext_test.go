@@ -8,12 +8,11 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// issueOnlyTracker wraps an IssueTracker behind the bare interface, hiding
-// any optional surface (CommentLister included) the concrete value beneath
-// it might additionally implement -- Go's embedded-interface promotion only
-// exposes the embedded interface's own method set, not the dynamic value's
-// extra methods, so this is a genuine "tracker not a CommentLister" double
-// built from the real Fake rather than a second hand-rolled tracker.
+// issueOnlyTracker hides every optional interface the wrapped value also
+// implements, CommentLister included: Go promotes only the embedded
+// interface's own method set, not the dynamic value's extra methods. That
+// makes it a real "tracker that is not a CommentLister" built from the
+// Fake rather than a second hand-rolled tracker.
 type issueOnlyTracker struct {
 	forge.IssueTracker
 }
@@ -84,8 +83,8 @@ func TestIssueText(t *testing.T) {
 				t.Errorf("IssueText missing expected retained comment %q", body)
 			}
 		}
-		// The retained window must stay oldest-first: comment-f (index 5)
-		// before comment-o (index 14).
+		// The retained window stays oldest-first: comment-f (index 5)
+		// comes before comment-o (index 14).
 		if strings.Index(got, "comment-f") > strings.Index(got, "comment-o") {
 			t.Errorf("IssueText = %q, comments out of order", got)
 		}
@@ -132,12 +131,11 @@ func TestIssueText(t *testing.T) {
 	})
 
 	t.Run("byte-identical when tracker is not a LinkedIssueLister", func(t *testing.T) {
-		// Slice 2 (linked-issue rendering) only activates when t also
-		// implements LinkedIssueLister; a remote tracker (github, jira)
-		// never does, so this pins that its rendered text is untouched by
-		// this feature. Neither issueOnlyTracker nor the Fake itself is a
-		// LinkedIssueLister (only LocalTracker is), so both must still
-		// render the pre-existing body-plus-comments shape, unchanged.
+		// Linked-issue rendering (slice 2) only activates when the tracker
+		// also implements LinkedIssueLister, which a remote tracker (github,
+		// jira) never does. Neither issueOnlyTracker nor the Fake implements
+		// it (only LocalTracker does), so both must still render the
+		// pre-existing text unchanged.
 		f := forge.NewFake()
 		f.SetIssue(forge.Issue{Number: "1", Body: "the body"})
 		f.CommentsFor = map[string][]forge.Comment{
@@ -149,9 +147,8 @@ func TestIssueText(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IssueText(issueOnlyTracker): %v", err)
 		}
-		// issueOnlyTracker also hides CommentLister (that's its whole
-		// purpose -- see its doc comment), so its own output stays
-		// body-only, same as before this feature.
+		// issueOnlyTracker hides CommentLister too, so its output stays
+		// body-only even though the Fake has a comment set.
 		if got != "the body" {
 			t.Errorf("IssueText(issueOnlyTracker) = %q, want %q", got, "the body")
 		}

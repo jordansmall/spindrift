@@ -7,11 +7,8 @@ import (
 	"testing"
 )
 
-// TestTokenOAuthScopes_ParsesXOAuthScopesHeader verifies TokenOAuthScopes
-// extracts the comma-separated scope list from `gh api -i`'s X-OAuth-Scopes
-// response header (issue #1950's read-only token gate), exercising the real
-// gh-shelling code path against a scripted fake `gh` rather than a live
-// GitHub call.
+// Pins issue #1950's read-only token gate. A scripted fake `gh` stands in for
+// a live GitHub call so the test still runs the real gh-shelling code path.
 func TestTokenOAuthScopes_ParsesXOAuthScopesHeader(t *testing.T) {
 	dir := prependFakeGH(t, `printf 'HTTP/2.0 200 OK\nX-OAuth-Scopes: repo, read:org\n\n{}'`)
 
@@ -33,9 +30,8 @@ func TestTokenOAuthScopes_ParsesXOAuthScopesHeader(t *testing.T) {
 	}
 }
 
-// TestTokenOAuthScopes_EmptyHeaderReturnsNil verifies an empty
-// X-OAuth-Scopes header (a token with no classic scopes at all) yields a nil
-// slice rather than a slice containing one empty string.
+// A token with no classic scopes at all must yield no scopes, not a slice
+// holding one empty string.
 func TestTokenOAuthScopes_EmptyHeaderReturnsNil(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP/2.0 200 OK\nX-OAuth-Scopes: \n\n{}'`)
 
@@ -48,10 +44,8 @@ func TestTokenOAuthScopes_EmptyHeaderReturnsNil(t *testing.T) {
 	}
 }
 
-// TestTokenOAuthScopes_ErrorSurfacesStderr verifies that when `gh api -i
-// user` exits non-zero with a diagnostic on stderr, TokenOAuthScopes's
-// returned error includes that stderr text, routed through ghCommandErr
-// (issue #2864).
+// Pins issue #2864: gh's stderr diagnostic must reach the returned error
+// through ghCommandErr.
 func TestTokenOAuthScopes_ErrorSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 401: Bad credentials\n' >&2
 exit 1
@@ -66,8 +60,6 @@ exit 1
 	}
 }
 
-// TestTokenRepoPushPermission_ParsesPushTrue verifies TokenRepoPushPermission
-// reads `permissions.push` out of the repo endpoint's JSON body.
 func TestTokenRepoPushPermission_ParsesPushTrue(t *testing.T) {
 	prependFakeGH(t, `printf '{"permissions":{"admin":false,"push":true,"pull":true}}'`)
 
@@ -80,8 +72,6 @@ func TestTokenRepoPushPermission_ParsesPushTrue(t *testing.T) {
 	}
 }
 
-// TestTokenRepoPushPermission_ParsesPushFalse verifies a token with no push
-// access is reported as such.
 func TestTokenRepoPushPermission_ParsesPushFalse(t *testing.T) {
 	prependFakeGH(t, `printf '{"permissions":{"admin":false,"push":false,"pull":true}}'`)
 
@@ -94,10 +84,8 @@ func TestTokenRepoPushPermission_ParsesPushFalse(t *testing.T) {
 	}
 }
 
-// TestTokenRepoPushPermission_ErrorSurfacesStderr verifies that when `gh api
-// repos/<slug>` exits non-zero with a diagnostic on stderr,
-// TokenRepoPushPermission's returned error includes that stderr text, routed
-// through ghCommandErr (issue #2864).
+// Pins issue #2864: gh's stderr diagnostic must reach the returned error
+// through ghCommandErr.
 func TestTokenRepoPushPermission_ErrorSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 404: Not Found\n' >&2
 exit 1
@@ -112,12 +100,9 @@ exit 1
 	}
 }
 
-// TestTokenRepoPushPermission_MissingPermissionsFieldFailsClosed verifies
-// that a response with no `permissions` object at all (an ambiguous signal,
-// not a "no push access" signal) returns an error rather than silently
-// reporting push=false -- checkReadOnlyTokenGate treats an introspection
-// error as a startup abort, so this keeps an unreadable signal fail-closed
-// instead of fail-open.
+// A missing permissions object is an ambiguous signal, not a "no push access"
+// signal. checkReadOnlyTokenGate aborts startup on an introspection error, so
+// returning an error here keeps an unreadable signal fail-closed.
 func TestTokenRepoPushPermission_MissingPermissionsFieldFailsClosed(t *testing.T) {
 	prependFakeGH(t, `printf '{"full_name":"owner/repo"}'`)
 

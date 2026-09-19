@@ -7,9 +7,6 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// TestCargoRowRouteDeclaration_AcceptsValidRegistriesList covers the
-// happy path: a "registries" key whose value is a []any of strings passes
-// with no error.
 func TestCargoRowRouteDeclaration_AcceptsValidRegistriesList(t *testing.T) {
 	row := rowByName(t, nameCargo)
 	if row.RouteDeclaration == nil {
@@ -21,10 +18,8 @@ func TestCargoRowRouteDeclaration_AcceptsValidRegistriesList(t *testing.T) {
 	}
 }
 
-// TestCargoRowRouteDeclaration_RejectsUnknownKey covers a key other than
-// "registries". Per RouteDeclarationValidator's contract the returned error
-// is a bare noun-phrase -- it must not itself echo the key, since the
-// caller prefixes the operator's own spelling of it.
+// RouteDeclarationValidator's contract requires a bare noun phrase, so the error
+// must not echo the key: the caller prefixes the operator's own spelling of it.
 func TestCargoRowRouteDeclaration_RejectsUnknownKey(t *testing.T) {
 	row := rowByName(t, nameCargo)
 
@@ -37,10 +32,8 @@ func TestCargoRowRouteDeclaration_RejectsUnknownKey(t *testing.T) {
 	}
 }
 
-// TestCargoRowRouteDeclaration_RejectsNonArrayValue covers a "registries"
-// value that isn't a []any at all (e.g. a bare string) -- go-toml would
-// decode a scalar TOML value that way, and the hook must reject rather than
-// panic on the type assertion.
+// go-toml decodes a scalar TOML value as a bare string, so the hook must reject
+// it rather than panic on the type assertion.
 func TestCargoRowRouteDeclaration_RejectsNonArrayValue(t *testing.T) {
 	row := rowByName(t, nameCargo)
 
@@ -50,8 +43,6 @@ func TestCargoRowRouteDeclaration_RejectsNonArrayValue(t *testing.T) {
 	}
 }
 
-// TestCargoRowRouteDeclaration_RejectsNonStringElement covers a
-// "registries" array carrying a non-string element (e.g. a TOML integer).
 func TestCargoRowRouteDeclaration_RejectsNonStringElement(t *testing.T) {
 	row := rowByName(t, nameCargo)
 
@@ -61,8 +52,6 @@ func TestCargoRowRouteDeclaration_RejectsNonStringElement(t *testing.T) {
 	}
 }
 
-// TestCargoRowRouteDeclaration_RejectsEmptyName covers the moved-over rule:
-// an empty registry name is never valid.
 func TestCargoRowRouteDeclaration_RejectsEmptyName(t *testing.T) {
 	row := rowByName(t, nameCargo)
 
@@ -75,10 +64,8 @@ func TestCargoRowRouteDeclaration_RejectsEmptyName(t *testing.T) {
 	}
 }
 
-// TestCargoRowRouteDeclaration_RejectsBadCharsetName covers the moved-over
-// charset rule (cargoBareKeyPattern): a name outside [A-Za-z0-9_-] is
-// rejected because it ultimately names a CARGO_REGISTRIES_<NAME>_TOKEN
-// shell env var.
+// cargoBareKeyPattern rejects a name outside [A-Za-z0-9_-] because the name
+// ends up in a CARGO_REGISTRIES_<NAME>_TOKEN shell env var.
 func TestCargoRowRouteDeclaration_RejectsBadCharsetName(t *testing.T) {
 	row := rowByName(t, nameCargo)
 
@@ -91,9 +78,6 @@ func TestCargoRowRouteDeclaration_RejectsBadCharsetName(t *testing.T) {
 	}
 }
 
-// TestCargoRowRouteDeclaration_RejectsDuplicateName covers the moved-over
-// dedup rule: the same name repeated within one route's registries list is
-// rejected.
 func TestCargoRowRouteDeclaration_RejectsDuplicateName(t *testing.T) {
 	row := rowByName(t, nameCargo)
 
@@ -106,10 +90,8 @@ func TestCargoRowRouteDeclaration_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
-// TestCargoRouteRegistries_ReadsBlockList pins CargoRouteRegistries as the
-// one place a caller past this package reads a route's declared cargo
-// registries back out, so it never has to spell "cargo"/"registries" itself
-// (ADR 0048).
+// CargoRouteRegistries is the one place a caller outside this package reads a
+// route's declared cargo registries, so no caller spells the keys itself (ADR 0048).
 func TestCargoRouteRegistries_ReadsBlockList(t *testing.T) {
 	blocks := registryvocab.RouteEcosystems{
 		nameCargo: registryvocab.RouteDeclaration{CargoRouteRegistriesKey: []any{"internal", "crates-remote"}},
@@ -122,9 +104,8 @@ func TestCargoRouteRegistries_ReadsBlockList(t *testing.T) {
 	}
 }
 
-// TestCargoRouteRegistries_NilForNoCargoBlock covers both "absent" shapes a
-// caller might hand in: a block that never declared cargo at all, and a nil
-// RouteEcosystems (a route with no per-ecosystem declarations whatsoever).
+// Two distinct absent shapes reach this function: a cargo block with no
+// registries key, and a route with no per-ecosystem declarations at all.
 func TestCargoRouteRegistries_NilForNoCargoBlock(t *testing.T) {
 	blocks := registryvocab.RouteEcosystems{nameCargo: registryvocab.RouteDeclaration{}}
 	if got := CargoRouteRegistries(blocks); got != nil {
@@ -136,13 +117,9 @@ func TestCargoRouteRegistries_NilForNoCargoBlock(t *testing.T) {
 	}
 }
 
-// TestOnlyCargoRowHasRouteDeclaration pins the "nil means no such notion"
-// default (ecosystem.go's ConfigParser doc explains the same convention):
-// every row but cargo's must carry a nil RouteDeclaration, so the parser
-// slice's caller can reject every non-"path" key for a row with no hook
-// rather than reading nil as "accept anything". Comparing against cargoRow's
-// own Name, not a bare literal, keeps this test correct if cargo's row is
-// ever renamed.
+// A nil RouteDeclaration means "no such notion", not "accept anything", so the
+// caller rejects every non-"path" key for a row with no hook. The loop compares
+// against cargoRow.Name rather than a literal so a rename keeps this test honest.
 func TestOnlyCargoRowHasRouteDeclaration(t *testing.T) {
 	for _, row := range Table {
 		if row.Name == cargoRow.Name {

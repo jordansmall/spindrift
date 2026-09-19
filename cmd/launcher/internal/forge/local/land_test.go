@@ -9,8 +9,6 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// gitOutput runs `git -C dir args...` and returns its trimmed stdout,
-// failing t on error.
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
@@ -20,8 +18,8 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// parentCount returns the number of parent commits ref has inside repoPath —
-// 1 for a linear history, 2+ for a merge commit.
+// parentCount returns ref's parent count: 1 for a linear history, 2 or more
+// for a merge commit.
 func parentCount(t *testing.T, repoPath, ref string) int {
 	t.Helper()
 	fields := strings.Fields(gitOutput(t, repoPath, "rev-list", "--parents", "-n", "1", ref))
@@ -59,7 +57,7 @@ func TestLocalCodeForge_Merge_ProducesNoMergeCommit(t *testing.T) {
 }
 
 // TestLocalCodeForge_TwoSeamChain_LandsLinearWithNoMergeCommits asserts a
-// two-seam dependency chain lands with a fully linear Integration branch —
+// two-seam dependency chain lands with a fully linear Integration branch and
 // no merge commits anywhere along it (issue #1889 acceptance criteria).
 func TestLocalCodeForge_TwoSeamChain_LandsLinearWithNoMergeCommits(t *testing.T) {
 	setGitIdentityEnv(t)
@@ -69,12 +67,10 @@ func TestLocalCodeForge_TwoSeamChain_LandsLinearWithNoMergeCommits(t *testing.T)
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	br := cf.(forge.BundleRelay)
 
-	// Seam 2's bundle is built off the pre-seam-1 integration tip, before
-	// seam 1 lands — mirroring a dependent seam in a chain whose own Box ran
-	// against an earlier integration tip than the one it eventually lands
-	// onto. Seeding it first, ahead of seam 1's land, is what makes seam 2's
-	// own Merge do a genuine replay onto the now-advanced tip rather than a
-	// no-op fast-forward.
+	// Seam 2's bundle is built off the pre-seam-1 integration tip, mirroring a
+	// dependent seam whose Box ran against an earlier tip than the one it lands
+	// onto. Seeding it before seam 1 lands is what makes seam 2's Merge replay
+	// onto the advanced tip rather than fast-forward as a no-op.
 	outbox2 := t.TempDir()
 	branch2 := "agent/issue-1699"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox2, branch2, "1699")

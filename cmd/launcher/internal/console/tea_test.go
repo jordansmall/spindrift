@@ -24,54 +24,24 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// teatestTimeout bounds every teatest wait in this package — both for output
-// to appear (waitForOutput/WaitFor) and for the program to finish shutting
-// down (waitFinished/WaitFinished). It is a hang detector, not a latency
-// assertion: the tests measure eventual behavior, never speed, so the bound
-// only has to exceed worst-case timing under a fully loaded CI runner — the
-// full `nix flake check` on a 4-core box, where the go-test derivation races
-// heavy image builds and the Bubble Tea event loop is CPU-starved. One
-// generous budget in a single place replaces the per-site literals that were
-// bumped piecemeal (2s -> 5s -> 15s -> 30s across several commits); a tight
-// bound here only ever flakes, it never catches a real defect — a hung
-// program still fails, just later.
-//
-// That escalation to 30s was chasing the wrong cause: every one of those
-// CI flakes was `WaitFinished` hanging outright on the "quit with live
-// Dispatches" confirm prompt (issue #1277), a real deadlock no timeout could
-// fix, not a slow render under load — a bigger number just delayed the same
-// failure. #1277 fixed it at the source with deterministic "settled" guards
-// on the launch-backed pick tests, and 30s held for the rest of this file
-// afterward. Only one test kept flaking past the fix —
-// TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain, a genuinely
-// heavier CPU-starvation case that pushed the bound to 60s (issue #1327's
-// history) — and #1327 dropped it out of the teatest mechanism entirely for
-// a direct handleKey call plus launch.Wait(), so it no longer answers to
-// this constant at all. With the deadlock fixed and the one CPU-starved
-// outlier gone, nothing left in this file has ever demonstrated a need past
-// 30s; issue #1278 restores that tighter, evidenced bound rather than
-// carrying the 60s headroom the departed test alone required. When a
-// specific test hangs regardless of this bound, the fix is a deterministic
-// wait on real state, not a bigger number — see the waitForDrain/
-// waitForPicksTerminal helpers used by the launch-backed pick tests further
-// down this file.
+// teatestTimeout bounds every teatest wait in this package: a hang detector,
+// not a latency assertion, sized for a CPU-starved CI runner. 30s is the
+// evidenced bound (issue #1278); the earlier escalation to 60s was chasing a
+// deadlock on the quit confirm that issue #1277 fixed at the source. When a
+// test hangs regardless, wait on real state, not on a bigger number.
 const teatestTimeout = 30 * time.Second
 
 // waitForOutputAttempts bounds how many teatestTimeout windows waitForOutput
-// gives a stalled render before failing. CPU contention on a loaded CI
-// runner (issue #1981) can delay a single frame past one window even though
-// the program hasn't hung; retrying buys the scheduler a second window
-// before calling it a hang. A program that's actually stuck still fails,
-// just after attempts*teatestTimeout instead of one window — still bounded,
-// matching teatestTimeout's existing "still fails, just later" philosophy.
+// gives a stalled render before failing. CPU contention on a loaded CI runner
+// (issue #1981) can delay a single frame past one window even though the
+// program has not hung. A program that is actually stuck still fails, just
+// after attempts*teatestTimeout instead of one window.
 const waitForOutputAttempts = 2
 
-// waitForOutput blocks until tm's output contains every one of want, failing
-// the test if it never does within waitForOutputAttempts windows of
-// teatestTimeout. tm.Output() drains as it's read, so every substring a
-// caller needs from one render must be awaited together in a single call —
-// a second call only ever sees bytes written after the first call's read,
-// not the full history.
+// waitForOutput blocks until tm's output contains every one of want. tm.Output()
+// drains as it is read, so every substring a caller needs from one render must
+// be awaited together in a single call: a second call only ever sees bytes
+// written after the first call's read, not the full history.
 func waitForOutput(t *testing.T, tm *teatest.TestModel, want ...string) {
 	t.Helper()
 	if err := waitForOutputRetry(tm.Output(), want, teatestTimeout, 5*time.Millisecond, waitForOutputAttempts); err != nil {
@@ -87,10 +57,9 @@ func waitFinished(t *testing.T, tm *teatest.TestModel) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(teatestTimeout))
 }
 
-// waitForDrain blocks until launch's queue has no PickRunning pick left —
-// LiveIssues() empty — failing the test if the drain hasn't finished within
-// teatestTimeout. See teatestTimeout for why the bound is generous rather
-// than tight.
+// waitForDrain blocks until launch's queue has no PickRunning pick left, that
+// is, until LiveIssues() is empty. See teatestTimeout for why the bound is
+// generous rather than tight.
 func waitForDrain(t *testing.T, launch *Launcher) {
 	t.Helper()
 	if err := waitForDrainWithin(launch, teatestTimeout, 5*time.Millisecond); err != nil {
@@ -115,28 +84,20 @@ func waitForDrainWithin(launch *Launcher, budget, checkInterval time.Duration) e
 	return fmt.Errorf("waitForDrain: still live after %s: %s", budget, strings.Join(live, ", "))
 }
 
-// waitForOrphanRow blocks until tm's output contains every one of want
-// together with the rendered "[orphan" label prefix (view.go) in a single
-// waitForOutput call — tm.Output() drains as read, so a second call could
-// only ever see the label if it happened to render after the first call's
-// read (waitForOutput's own doc comment). The label is the only rendered
-// proof that OrphanDetectedMsg (model.go) has landed and set the row's
-// orphan flag; the "A" adopt binding (keymap_session.go) no-ops silently
-// when that flag hasn't landed yet, and nothing re-presses it, so a caller
-// that waits on the row's title alone can press "A" before orphan
-// detection's Init Cmd — one of three racing Init Cmds — has even run
-// (issue #3118). The literal is left open (no closing "]") because a row
-// with a live heartbeat joins it into the same bracket (view.go), so "]"
-// is not part of a stable prefix.
+// waitForOrphanRow blocks until tm's output contains every one of want plus the
+// rendered "[orphan" label prefix, in one waitForOutput call. That label is the
+// only proof OrphanDetectedMsg landed and set the row's orphan flag, and the
+// "A" adopt binding no-ops silently before it does (issue #3118). The prefix is
+// left unclosed because a live heartbeat joins the same bracket.
 func waitForOrphanRow(t *testing.T, tm *teatest.TestModel, want ...string) {
 	t.Helper()
 	waitForOutput(t, tm, append(append([]string{}, want...), "[orphan")...)
 }
 
 // settlesAfter adds a PickRunning pick numbered num to launch's queue, then
-// settles it to PickSettled after delay on a background goroutine — the
-// shared scaffold behind every test asserting a wait genuinely blocks for
-// the pick's settle delay rather than returning on the first check.
+// settles it to PickSettled after delay on a background goroutine. Every test
+// asserting that a wait genuinely blocks for the settle delay, rather than
+// returning on the first check, shares it.
 func settlesAfter(launch *Launcher, num string, delay time.Duration) {
 	launch.queue.Add(Pick{Number: num, Title: "fix the thing", State: PickRunning})
 	go func() {
@@ -166,10 +127,9 @@ func TestWaitForDrain_SucceedsWhenTheLiveIssueDrainsWithinTheBudget(t *testing.T
 }
 
 // TestWaitForDrain_FailsWhenTheLiveIssueNeverDrains pins waitForDrainWithin's
-// own bound: a pick pinned at PickRunning forever still fails, just after
-// the full budget, matching teatestTimeout's existing "still fails, just
-// later" philosophy — and the failure names the still-live issue number so a
-// hang points at the cause.
+// own bound: a pick pinned at PickRunning forever still fails, just after the
+// full budget. The failure names the still-live issue number so a hang points
+// at the cause.
 func TestWaitForDrain_FailsWhenTheLiveIssueNeverDrains(t *testing.T) {
 	launch := &Launcher{queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
@@ -183,10 +143,10 @@ func TestWaitForDrain_FailsWhenTheLiveIssueNeverDrains(t *testing.T) {
 	}
 }
 
-// TestWaitForDrain_NonPositiveBudgetStillNamesTheLiveIssue pins that a
-// zero/negative budget — which skips the poll loop's body entirely — still
-// reports the actually-live issues in its error, rather than the empty list a
-// loop-only read of LiveIssues() would produce.
+// TestWaitForDrain_NonPositiveBudgetStillNamesTheLiveIssue pins that a zero or
+// negative budget, which skips the poll loop's body entirely, still reports the
+// actually-live issues in its error rather than the empty list a loop-only read
+// of LiveIssues() would produce.
 func TestWaitForDrain_NonPositiveBudgetStillNamesTheLiveIssue(t *testing.T) {
 	launch := &Launcher{queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
@@ -241,9 +201,9 @@ func TestAllPicksTerminal_TrueWhenNamedPickIsInATerminalState(t *testing.T) {
 }
 
 // TestAllPicksTerminal_UsesTheNewestRowWhenANumberAppearsMultipleTimes pins
-// the back-to-front scan documented on allPicksTerminal: a requeue/relaunch
-// can leave two rows for the same number on the queue, and the newest one —
-// not the first match found scanning forward — decides the outcome.
+// the back-to-front scan documented on allPicksTerminal: a requeue or relaunch
+// can leave two rows for the same number on the queue, and the newest one, not
+// the first match found scanning forward, decides the outcome.
 func TestAllPicksTerminal_UsesTheNewestRowWhenANumberAppearsMultipleTimes(t *testing.T) {
 	launch := &Launcher{queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
@@ -274,12 +234,10 @@ func TestWaitForPicksTerminal_WaitsUntilTheNamedPickGoesTerminal(t *testing.T) {
 }
 
 // TestWaitForPicksTerminal_FailsWhenThePickNeverReachesTerminal pins
-// waitForPicksTerminalWithin's own bound: a pick pinned at PickRunning
-// forever still fails, just after the full budget, matching
-// teatestTimeout's existing "still fails, just later" philosophy — and the
-// failure names only the still-non-terminal issue, not one that already
-// settled, so a hang against a multi-number call points at the actual
-// straggler.
+// waitForPicksTerminalWithin's own bound: a pick pinned at PickRunning forever
+// still fails, just after the full budget. The failure names only the
+// still-non-terminal issue, not one that already settled, so a hang against a
+// multi-number call points at the actual straggler.
 func TestWaitForPicksTerminal_FailsWhenThePickNeverReachesTerminal(t *testing.T) {
 	launch := &Launcher{queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
@@ -297,24 +255,11 @@ func TestWaitForPicksTerminal_FailsWhenThePickNeverReachesTerminal(t *testing.T)
 	}
 }
 
-// waitForPicksTerminal blocks until every issue number in numbers has a
-// queue row in a terminal state (Settled/Dissolved/Terminated/Failed),
-// before a caller checks waitForDrain. sendKey delivers the pick keystroke
-// asynchronously (tm.Send just enqueues it), so a check made right after
-// sendKey returns can race the tea Program's own Update goroutine before it
-// has processed that keystroke at all — Queue.Snapshot() at that instant is
-// still whatever it was before the keypress, empty in every call site this
-// guards. A number-blind "every row already on the queue is terminal"
-// check passes vacuously on that empty snapshot; requiring each named
-// number to actually show up, in a terminal state, closes that gap. Once a
-// number's row does exist, its terminal check subsumes waitForDrain:
-// LiveIssues() (launcher.go) only counts rows in PickRunning, so what
-// actually needs the "found and terminal" check — not just "no
-// non-terminal row" — is distinguishing "hasn't started yet" (no row at
-// all, or PickClaiming) from "already finished" (terminal); both read as
-// zero PickRunning rows via LiveIssues() alone, but only one of them is
-// safe to quit against. Bounded by teatestTimeout for the
-// same "still fails, just later" reason as waitForDrain itself.
+// waitForPicksTerminal blocks until every issue number in numbers has a queue
+// row in a terminal state, before a caller checks waitForDrain. tm.Send only
+// enqueues a keystroke, so a check right after sendKey can read a pre-keypress
+// snapshot, on which a number-blind "every row is terminal" check passes
+// vacuously. Requiring the row to be found separates "not started" from "done".
 func waitForPicksTerminal(t *testing.T, launch *Launcher, numbers ...string) {
 	t.Helper()
 	if err := waitForPicksTerminalWithin(launch, numbers, teatestTimeout, 5*time.Millisecond); err != nil {
@@ -340,10 +285,10 @@ func waitForPicksTerminalWithin(launch *Launcher, numbers []string, budget, chec
 	}
 }
 
-// allPicksTerminal reports whether every number in numbers has a matching
-// queue row (by Pick.Number) in a terminal state — see waitForPicksTerminal
-// for why "found and terminal" is required rather than merely "no
-// non-terminal row present".
+// allPicksTerminal reports whether every number in numbers has a matching queue
+// row (by Pick.Number) in a terminal state. See waitForPicksTerminal for why
+// "found and terminal" is required rather than merely "no non-terminal row
+// present".
 func allPicksTerminal(launch *Launcher, numbers []string) bool {
 	return len(nonTerminalPicks(launch, numbers)) == 0
 }
@@ -377,18 +322,11 @@ func nonTerminalPicks(launch *Launcher, numbers []string) []string {
 	return remaining
 }
 
-// TestWaitForOutputRetry_SucceedsWhenDelayedContentArrivesInARetryWindow
-// pins that a stalled first attempt doesn't fail the wait outright: content
-// that only becomes available after the first window elapses (as CPU
-// contention on a loaded CI runner can delay a render past one window, per
-// issue #1981) still succeeds within a later attempt, rather than the
-// caller seeing a spurious timeout. The first window (10ms) is deliberately
-// shorter than the 15ms content delay so retry — not the first attempt — is
-// what lands the read. Give it several retry windows rather than one: on an
-// emulated/contended aarch64 runner a single over-long checkInterval sleep
-// can burn a whole 10ms window observing only pre-deadline EOF, so a lone
-// second window is too tight a margin and flakes (the same #1981 contention
-// this helper exists to absorb).
+// TestWaitForOutputRetry_SucceedsWhenDelayedContentArrivesInARetryWindow pins
+// that a stalled first attempt does not fail the wait outright: content that
+// only arrives after the first window still succeeds in a later attempt (CPU
+// contention on a loaded CI runner, issue #1981). The 10ms first window is
+// shorter than the 15ms delay, and 5 attempts absorb an over-long sleep.
 func TestWaitForOutputRetry_SucceedsWhenDelayedContentArrivesInARetryWindow(t *testing.T) {
 	r := newDelayedReader(15*time.Millisecond, "ready")
 	if err := waitForOutputRetry(r, []string{"ready"}, 10*time.Millisecond, time.Millisecond, 5); err != nil {
@@ -397,9 +335,8 @@ func TestWaitForOutputRetry_SucceedsWhenDelayedContentArrivesInARetryWindow(t *t
 }
 
 // TestWaitForOutputRetry_FailsWhenContentNeverArrivesWithinAnyAttempt pins
-// the retry's own bound: a program that has genuinely hung still fails,
-// just after the full attempts*budget window, matching teatestTimeout's
-// existing hang-detector philosophy.
+// the retry's own bound: a program that has genuinely hung still fails, just
+// after the full attempts*budget window.
 func TestWaitForOutputRetry_FailsWhenContentNeverArrivesWithinAnyAttempt(t *testing.T) {
 	r := bytes.NewReader(nil)
 	if err := waitForOutputRetry(r, []string{"ready"}, 5*time.Millisecond, time.Millisecond, 2); err == nil {
@@ -408,17 +345,15 @@ func TestWaitForOutputRetry_FailsWhenContentNeverArrivesWithinAnyAttempt(t *test
 }
 
 // TestWaitForOutputRetry_SecondAttemptStillSeesContentTheFirstAttemptDrained
-// pins the fix for issue #3118: tm.Output() (the real reader in production)
-// drains as it's read, so once attempt 1 reads "part-one" off the wire,
-// attempt 2 can never read it again — the two attempts must share one
-// accumulating buffer, or a substring that rendered during attempt 1's
-// window and a substring that only renders during attempt 2's window can
-// never be matched together, even though both did eventually appear.
+// pins the fix for issue #3118: tm.Output() drains as it is read, so once
+// attempt 1 reads "part-one" attempt 2 can never read it again. The attempts
+// must share one accumulating buffer, or two substrings that render in
+// different windows can never be matched together.
 func TestWaitForOutputRetry_SecondAttemptStillSeesContentTheFirstAttemptDrained(t *testing.T) {
 	budget := 10 * time.Millisecond
 	// part-two lands mid-way through attempt 2's window (10ms-20ms), with
 	// several retry windows as margin against CPU contention delaying which
-	// attempt actually observes it — same rationale as the "ready" test above.
+	// attempt observes it. Same rationale as the "ready" test above.
 	r := newTwoStageReader(15*time.Millisecond, "part-one", "part-two")
 	if err := waitForOutputRetry(r, []string{"part-one", "part-two"}, budget, time.Millisecond, 5); err != nil {
 		t.Fatalf("waitForOutputRetry() = %v, want nil: part-one (attempt 1) and part-two (a later attempt) together satisfy want", err)
@@ -426,10 +361,10 @@ func TestWaitForOutputRetry_SecondAttemptStillSeesContentTheFirstAttemptDrained(
 }
 
 // twoStageReader mimics teatest's draining output buffer across two timed
-// stages: it yields stageOne immediately, then nothing (io.EOF) until
-// deadlineTwo, then yields stageTwo, then EOF forever — modeling two
-// separate renders arriving at different times, where reading stageOne
-// permanently drains it (a real reader never replays already-read bytes).
+// stages: stageOne immediately, then io.EOF until deadlineTwo, then stageTwo,
+// then EOF forever. It models two renders arriving at different times, where
+// reading stageOne permanently drains it, since a real reader never replays
+// already-read bytes.
 type twoStageReader struct {
 	deadlineTwo      time.Time
 	stageOne         []byte
@@ -455,11 +390,10 @@ func (d *twoStageReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// delayedReader mimics teatest's draining output buffer: it yields nothing
-// (io.EOF, like an empty bytes.Buffer) until deadline, then yields payload
-// — across as many Reads as a small p forces — then EOF forever after,
-// modeling a frame that renders late under CPU contention rather than one
-// that never renders at all.
+// delayedReader mimics teatest's draining output buffer: io.EOF until deadline,
+// then payload across as many Reads as a small p forces, then EOF forever. It
+// models a frame that renders late under CPU contention rather than one that
+// never renders at all.
 type delayedReader struct {
 	deadline time.Time
 	payload  []byte
@@ -480,13 +414,10 @@ func (d *delayedReader) Read(p []byte) (int, error) {
 }
 
 // waitForOutputRetry polls r for want, retrying up to attempts times with a
-// fresh budget each time before giving up — see waitForOutput for why a
-// stalled render gets a second window instead of failing outright. r drains
-// as it's read (it's tm.Output() in production, teatest's live buffer), so a
-// second attempt can never re-read bytes an earlier attempt already
-// consumed; every attempt appends to one shared buffer instead of each
-// starting from its own, so a substring seen in attempt 1 still counts once
-// a later attempt turns up the rest (issue #3118).
+// fresh budget each time. r drains as it is read (tm.Output() in production),
+// so a second attempt can never re-read bytes an earlier one consumed. Every
+// attempt appends to one shared buffer, so a substring seen in attempt 1 still
+// counts once a later attempt turns up the rest (issue #3118).
 func waitForOutputRetry(r io.Reader, want []string, budget, checkInterval time.Duration, attempts int) error {
 	var b bytes.Buffer
 	var err error
@@ -499,11 +430,9 @@ func waitForOutputRetry(r io.Reader, want []string, budget, checkInterval time.D
 }
 
 // waitForOutputOnce is the single-attempt polling loop waitForOutputRetry
-// retries — equivalent to teatest.WaitFor's own loop, reimplemented because
-// WaitFor calls t.Fatal on timeout and so can't be retried. b accumulates
-// across the caller's attempts (see waitForOutputRetry); waitForOutputOnce
-// itself just keeps reading r into it and matching against everything b has
-// seen so far, including bytes read on a prior call.
+// retries. It reimplements teatest.WaitFor's loop because WaitFor calls
+// t.Fatal on timeout and so cannot be retried. b accumulates across the
+// caller's attempts, so matching includes bytes read on a prior call.
 func waitForOutputOnce(r io.Reader, b *bytes.Buffer, want []string, budget, checkInterval time.Duration) error {
 	start := time.Now()
 	for time.Since(start) <= budget {
@@ -526,9 +455,9 @@ func waitForOutputOnce(r io.Reader, b *bytes.Buffer, want []string, budget, chec
 }
 
 // rowNumberCell returns the exact padded number cell a Section table row
-// renders for issue/pick number n (view.go's numberColWidth) — used to build
-// assertions that disambiguate "#4" from "#40" against the real column
-// width instead of a hand-counted space literal.
+// renders for issue/pick number n (view.go's numberColWidth). Assertions use it
+// to tell "#4" from "#40" against the real column width instead of a
+// hand-counted space literal.
 func rowNumberCell(n string) string {
 	return clip("#"+n, numberColWidth, true)
 }
@@ -581,9 +510,8 @@ func TestTea_InitialRender_ShowsBacklog(t *testing.T) {
 
 // TestTeaUpdate_WindowSizeMsg_SetsModelDimensions verifies the tea layer
 // translates Bubble Tea's WindowSizeMsg into the pure Model's Width/Height
-// (issue #842) — exercised by calling teaModel.Update directly, since AC4
-// leaves View unchanged for this slice and there is nothing rendered to
-// assert on yet.
+// (issue #842). It calls teaModel.Update directly because AC4 leaves View
+// unchanged for this slice, so there is nothing rendered to assert on yet.
 func TestTeaUpdate_WindowSizeMsg_SetsModelDimensions(t *testing.T) {
 	f := forge.NewFake()
 	tm := newTeaModel(f, t.TempDir(), nil)
@@ -634,7 +562,6 @@ func TestTea_InitialTermSize_SetsModelDimensions(t *testing.T) {
 	}
 }
 
-// TestTea_QuitKey_ExitsCleanly verifies "q" ends the program.
 func TestTea_QuitKey_ExitsCleanly(t *testing.T) {
 	f := forge.NewFake()
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
@@ -644,8 +571,8 @@ func TestTea_QuitKey_ExitsCleanly(t *testing.T) {
 }
 
 // TestTea_RefreshKey_ReQueriesTracker verifies "R" re-queries the tracker
-// and re-renders — an issue added after the program starts appears only
-// once "R" is sent (issue #1839: refresh moved from "r" to "R").
+// and re-renders: an issue added after the program starts appears only once
+// "R" is sent (issue #1839: refresh moved from "r" to "R").
 func TestTea_RefreshKey_ReQueriesTracker(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -702,8 +629,8 @@ func TestTea_FilterMode_EscCancelRestoresPriorFilter(t *testing.T) {
 }
 
 // TestTea_CursorKeys_MoveHighlightedRow verifies j/down and k/up move the
-// cursor marker across the visible backlog — vim's standard pair, restored
-// now that Terminate moved off "k" to "X" (issue #784, #838, #1500).
+// cursor marker across the visible backlog. They are vim's standard pair,
+// restored now that Terminate moved off "k" to "X" (issue #784, #838, #1500).
 func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -777,9 +704,9 @@ func TestTea_ggChord_JumpsToFirstRow(t *testing.T) {
 }
 
 // TestTea_gLeader_NonGKey_CancelsAndStillActsNormally verifies a lone "g"
-// followed by any other key cancels the pending leader without consuming
-// that key — the g-leader's AC requires the second key's own binding to
-// still apply (issue #1628 AC).
+// followed by any other key cancels the pending leader without consuming that
+// key: the g-leader's AC requires the second key's own binding to still apply
+// (issue #1628 AC).
 func TestTea_gLeader_NonGKey_CancelsAndStillActsNormally(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -789,7 +716,7 @@ func TestTea_gLeader_NonGKey_CancelsAndStillActsNormally(t *testing.T) {
 	waitForOutput(t, tm, "> #1")
 
 	sendKey(tm, "g")
-	sendKey(tm, "j") // not "g" — cancels the leader, then still moves the cursor down
+	sendKey(tm, "j") // not "g", so it cancels the leader and still moves the cursor down
 	waitForOutput(t, tm, "> #2")
 
 	sendKey(tm, "q")
@@ -802,9 +729,9 @@ func TestTea_gLeader_NonGKey_CancelsAndStillActsNormally(t *testing.T) {
 }
 
 // TestTea_gLeader_Timeout_CancelsPendingG verifies a lone "g" left
-// unanswered cancels the pending leader once the 200ms window times out —
-// mirroring TestTea_PickKey_Timeout_ClearsPendingIndicator for the "gg"
-// chord (issue #1628 AC).
+// unanswered cancels the pending leader once the 200ms window times out,
+// mirroring TestTea_PickKey_Timeout_ClearsPendingIndicator for the "gg" chord
+// (issue #1628 AC).
 func TestTea_gLeader_Timeout_CancelsPendingG(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -825,9 +752,9 @@ func TestTea_gLeader_Timeout_CancelsPendingG(t *testing.T) {
 }
 
 // TestResolvePendingG_SecondG_FiresOnFirstAndConsumes verifies the shared
-// resolvePendingG helper — factored out of the four PendingG-checking key
-// handlers (issue #1802) — clears PendingG and fires onFirst when the
-// second key of the chord is "g", consuming the key.
+// resolvePendingG helper, factored out of the four PendingG-checking key
+// handlers (issue #1802), clears PendingG and fires onFirst when the second key
+// of the chord is "g", consuming the key.
 func TestResolvePendingG_SecondG_FiresOnFirstAndConsumes(t *testing.T) {
 	m := Update(NewModel(), GPendingMsg{})
 
@@ -868,8 +795,8 @@ func TestResolvePendingG_OtherKey_ClearsWithoutConsuming(t *testing.T) {
 }
 
 // TestResolvePendingG_NotPending_IsNoop verifies resolvePendingG does
-// nothing when no leader is armed — every non-"gg" keypress reaches it
-// through the handlers' own unconditional call.
+// nothing when no leader is armed. Every non-"gg" keypress reaches it through
+// the handlers' own unconditional call.
 func TestResolvePendingG_NotPending_IsNoop(t *testing.T) {
 	m := NewModel()
 	called := false
@@ -890,9 +817,9 @@ func TestResolvePendingG_NotPending_IsNoop(t *testing.T) {
 	}
 }
 
-// TestArmPendingG_ArmsLeaderAndReturnsTick verifies armPendingG — factored
-// out of the four handlers' identical "g" case (issue #1802) — sets
-// PendingG and returns a non-nil Cmd to arm the leader-window timeout.
+// TestArmPendingG_ArmsLeaderAndReturnsTick verifies armPendingG, factored out
+// of the four handlers' identical "g" case (issue #1802), sets PendingG and
+// returns a non-nil Cmd to arm the leader-window timeout.
 func TestArmPendingG_ArmsLeaderAndReturnsTick(t *testing.T) {
 	got, cmd := armPendingG(teaModel{m: NewModel()})
 
@@ -906,8 +833,8 @@ func TestArmPendingG_ArmsLeaderAndReturnsTick(t *testing.T) {
 
 // TestTea_DetailModal_gLeader_Timeout_CancelsPendingGAndLeavesOffsetAlone
 // verifies a lone "g" left unanswered while the ticket detail modal is open
-// cancels the pending leader on timeout without moving DetailModal.Offset —
-// the modal's own instance of TestTea_gLeader_Timeout_CancelsPendingG's
+// cancels the pending leader on timeout without moving DetailModal.Offset. It
+// is the modal's own instance of TestTea_gLeader_Timeout_CancelsPendingG's
 // timeout coverage (issue #1795 AC).
 func TestTea_DetailModal_gLeader_Timeout_CancelsPendingGAndLeavesOffsetAlone(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
@@ -939,19 +866,11 @@ func TestTea_DetailModal_gLeader_Timeout_CancelsPendingGAndLeavesOffsetAlone(t *
 	}
 }
 
-// TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor verifies pgdown/
-// pgup move the focused backlog column's viewport directly, independent of
-// the cursor, revealing and restoring rows past the fold, by exactly one
-// screenful of rendered rows — derived from the live viewport rather than a
-// fixed constant (issue #1036 AC2, issue #1037 AC1/AC2). At Width 80/Height
-// 12 (the extra 2 rows over a bare Height 10 pay for the header's own
-// bordered panel, issue #1756) the backlog column's item budget is 7 — the
-// header now costs only 3 rows (the "spindrift" wordmark folded into its top
-// border rule rather than a separate banner, issue #1798) — but only 6 of
-// those rows render as content at offset 0 (the 7th is held back for the "N
-// more below" line), so one pgdown must land the viewport on row 6 —
-// landing on row 7 would silently skip row 6, the exact row right past the
-// fold.
+// TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor verifies pgdown and
+// pgup move the focused backlog column's viewport, independent of the cursor,
+// by one screenful of rendered rows derived from the live viewport rather than
+// a fixed constant (issue #1036 AC2, issue #1037 AC1/AC2). Only 6 of the 7
+// budgeted rows render at offset 0, so one pgdown must land on row 6, not 7.
 func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
@@ -1020,12 +939,11 @@ func TestTea_ScrollKeys_CtrlDCtrlUHalfPageThroughBacklogWithoutMovingCursor(t *t
 	waitFinished(t, tm)
 }
 
-// TestTea_ScrollKeys_PgdownScrollsBacklogOffScreenWhenContentFits verifies
-// the rendered effect of pgdown when the whole backlog already fits within
-// one screen (issue #1060): the top, already-fully-visible row disappears
-// from the rendered column instead of the press no-op'ing — the model
-// package's own offset-only scroll tests don't by themselves prove a row
-// silently drops off the rendered window.
+// TestTea_ScrollKeys_PgdownScrollsBacklogOffScreenWhenContentFits verifies the
+// rendered effect of pgdown when the whole backlog already fits on one screen
+// (issue #1060): the top, already-visible row disappears from the rendered
+// column instead of the press no-op'ing. The model package's offset-only scroll
+// tests do not by themselves prove a row drops off the rendered window.
 func TestTea_ScrollKeys_PgdownScrollsBacklogOffScreenWhenContentFits(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	issues := make([]forge.Issue, 3)
@@ -1086,14 +1004,11 @@ func TestTea_ScrollKeys_PgdownScrollsQueueOffScreenWhenContentFits(t *testing.T)
 	}
 }
 
-// TestTea_ScrollKeys_PageSizeTracksViewportHeight verifies the page jump's
-// size tracks the current viewport height rather than a value fixed at
-// startup: the same pgdown that lands on row 5 at Height 10 lands on a later
-// row once the terminal is taller and the backlog column can fit more rows
-// per screen, so paging stays a full page after a resize (issue #1037 AC2).
-// Both heights below add boxBorderRows over their nominal 10/20 to pay for
-// the header's own bordered panel (issue #1756), preserving the item
-// budgets (and so the expected landing rows) this test was written against.
+// TestTea_ScrollKeys_PageSizeTracksViewportHeight verifies the page jump's size
+// tracks the current viewport height rather than a value fixed at startup, so
+// paging stays a full page after a resize (issue #1037 AC2). Both heights below
+// add boxBorderRows over their nominal 10/20 to pay for the header's own
+// bordered panel (issue #1756), preserving the item budgets and landing rows.
 func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
@@ -1108,7 +1023,7 @@ func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
 
 	// A page size still stuck on the Height-10 window (landing around row 6)
 	// or the pre-#1037 fixed constant (10, landing its window at rows 10-23)
-	// would never surface row 25. It's visible only once the page jump uses
+	// would never surface row 25. It is visible only once the page jump uses
 	// the taller terminal's own item budget, landing the viewport around
 	// offset 16 (rows 16-31).
 	sendKey(tm, "pgdown")
@@ -1119,13 +1034,10 @@ func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
 }
 
 // TestTea_ScrollKeys_PageDown_SkipsNoRow verifies two consecutive pgdown
-// presses expose every row in between — a page size computed from the raw
-// item budget instead of the rendered content-row count would overshoot the
-// "N more below" line held back at each truncated screen and silently skip
-// the row right past the fold on every page boundary (issue #1037 AC1). Rows
-// 4 and 8, not 5 and 10: the body budget holds one row back for View()'s own
-// guaranteed trailing "\n" (issue #1825), shrinking each page from 5 rows to
-// 4.
+// presses expose every row in between: a page size computed from the raw item
+// budget instead of the rendered content-row count would overshoot the "N more
+// below" line and skip the row past the fold (issue #1037 AC1). Rows 4 and 8,
+// not 5 and 10, because View()'s trailing newline costs a row (issue #1825).
 func TestTea_ScrollKeys_PageDown_SkipsNoRow(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
@@ -1167,9 +1079,9 @@ func TestTea_ScrollKeys_PageDownClampsAtBacklogEnd(t *testing.T) {
 }
 
 // TestTea_ScrollKeys_PageThroughRunningSection verifies pgdown pages the
-// Running Section's own viewport once "2" has switched there — paging works
-// for whichever Section is active (issue #1037 AC4, generalized from Tab
-// focus to ActiveSection by issue #1500).
+// Running Section's own viewport once "2" has switched there: paging works for
+// whichever Section is active (issue #1037 AC4, generalized from Tab focus to
+// ActiveSection by issue #1500).
 func TestTea_ScrollKeys_PageThroughRunningSection(t *testing.T) {
 	f := forge.NewFake()
 	launch := &Launcher{CodeForge: f, queue: NewQueue()}
@@ -1188,11 +1100,10 @@ func TestTea_ScrollKeys_PageThroughRunningSection(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_SectionKeys_HLAndDigitsSwitchSections verifies "H"/"L" step
-// between Sections and a digit jumps straight to one, and that cursor keys
-// act on whichever Section is now active — the section-switched list's
-// navigation (ADR 0030), replacing the retired Tab focus-toggle (issue
-// #845, issue #1500).
+// TestTea_SectionKeys_HLAndDigitsSwitchSections verifies "H"/"L" step between
+// Sections, a digit jumps straight to one, and cursor keys act on whichever
+// Section is now active. This is the section-switched list's navigation (ADR
+// 0030), replacing the retired Tab focus-toggle (issue #845, issue #1500).
 func TestTea_SectionKeys_HLAndDigitsSwitchSections(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -1218,8 +1129,8 @@ func TestTea_SectionKeys_HLAndDigitsSwitchSections(t *testing.T) {
 
 // TestTea_SectionKeys_HLFromSidebar_ClosesLogAndSwitchesSection verifies "L",
 // pressed while the sidebar (log view) has focus, closes it and lands on the
-// next Section — the same landing as ModeList's own "L" — rather than the
-// silent no-op it was before (issue #1846).
+// next Section, the same landing as ModeList's own "L", rather than the silent
+// no-op it was before (issue #1846).
 func TestTea_SectionKeys_HLFromSidebar_ClosesLogAndSwitchesSection(t *testing.T) {
 	tm := sidebarOpen(t)
 
@@ -1242,9 +1153,8 @@ func TestTea_SectionKeys_HLFromSidebar_ClosesLogAndSwitchesSection(t *testing.T)
 
 // TestTea_EnterKey_OnRunningSection_DrillsRunningPick verifies Enter, on the
 // Running Section, opens the highlighted pick's sidebar when its state is
-// PickRunning — the context-sensitive Enter's work-Section drill (issue
-// #845, generalized to ActiveSection by issue #1500, then to the sidebar by
-// #1501).
+// PickRunning: the context-sensitive Enter's work-Section drill (issue #845,
+// generalized to ActiveSection by issue #1500, then to the sidebar by #1501).
 func TestTea_EnterKey_OnRunningSection_DrillsRunningPick(t *testing.T) {
 	tm := sidebarOpen(t)
 
@@ -1263,9 +1173,9 @@ func TestTea_EnterKey_OnRunningSection_DrillsRunningPick(t *testing.T) {
 }
 
 // TestTea_EnterKey_OnRunningSection_NoOpOnQueuedRow verifies Enter, with focus
-// on the work queue, is a no-op on a row that hasn't reached a
-// Transcript-bearing state yet (PickQueued) — never opens a pane with
-// nothing to show (issue #845).
+// on the work queue, is a no-op on a row that has not reached a
+// Transcript-bearing state yet (PickQueued). It never opens a pane with nothing
+// to show (issue #845).
 func TestTea_EnterKey_OnRunningSection_NoOpOnQueuedRow(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -1290,8 +1200,8 @@ func TestTea_EnterKey_OnRunningSection_NoOpOnQueuedRow(t *testing.T) {
 }
 
 // TestTea_EnterKey_OnRunningSection_ShowsNoticeOnQueuedRow verifies Enter, with
-// focus on the work queue, renders a visible notice on a row that hasn't
-// reached a Transcript-bearing state yet (PickQueued) — previously a silent
+// focus on the work queue, renders a visible notice on a row that has not
+// reached a Transcript-bearing state yet (PickQueued), previously a silent
 // no-op (issue #998).
 func TestTea_EnterKey_OnRunningSection_ShowsNoticeOnQueuedRow(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
@@ -1314,8 +1224,8 @@ func TestTea_EnterKey_OnRunningSection_ShowsNoticeOnQueuedRow(t *testing.T) {
 }
 
 // TestTea_EnterKey_OnRunningSection_NoticeClearsOnNextKey verifies the
-// no-transcript notice armed by Enter clears once the operator's next
-// keypress arrives — a one-shot hint, not a sticky one (issue #998).
+// no-transcript notice armed by Enter clears once the operator's next keypress
+// arrives. It is a one-shot hint, not a sticky one (issue #998).
 func TestTea_EnterKey_OnRunningSection_NoticeClearsOnNextKey(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -1345,7 +1255,7 @@ func TestTea_EnterKey_OnRunningSection_NoticeClearsOnNextKey(t *testing.T) {
 // TestHasTranscript_PerState verifies hasTranscript against every PickState:
 // true for running/settled/terminated/failed (each left logs on disk from a
 // Box that ran or is running), false for queued/claiming/held/dissolved
-// (never launched) — issue #845, PickFailed's inclusion per issue #992.
+// (never launched). Issue #845; PickFailed's inclusion per issue #992.
 func TestHasTranscript_PerState(t *testing.T) {
 	tests := []struct {
 		state PickState
@@ -1405,8 +1315,8 @@ func sidebarOpen(t *testing.T) *teatest.TestModel {
 
 // TestTea_PollTick_AdvancesOpenSidebarActivityFeed verifies the selected
 // running Dispatch's Activity feed advances on its own, with no operator
-// keypress, as its pass log grows across successive poll ticks — the payoff
-// of the whole live-tail sidebar (issue #1502, ADR 0030).
+// keypress, as its pass log grows across successive poll ticks: the payoff of
+// the whole live-tail sidebar (issue #1502, ADR 0030).
 func TestTea_PollTick_AdvancesOpenSidebarActivityFeed(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -1448,10 +1358,9 @@ func TestTea_PollTick_AdvancesOpenSidebarActivityFeed(t *testing.T) {
 // shows "[follow]" again (issue #1502, ADR 0030).
 func TestTea_SidebarKey_ScrollUpDetachesFollow_GReattaches(t *testing.T) {
 	// sidebarOpen's own waitForOutput already drained the frame that first
-	// showed "[follow]" (tm.Output() drains as it's read) — asserting it
-	// again here would block forever waiting for a repeat of bytes already
-	// consumed, so the sequence starts from the first state-changing key
-	// instead (issue #1502).
+	// showed "[follow]" (tm.Output() drains as it is read). Asserting it again
+	// here would block forever on bytes already consumed, so the sequence
+	// starts from the first state-changing key instead (issue #1502).
 	tm := sidebarOpen(t)
 
 	sendKey(tm, "k")
@@ -1465,13 +1374,10 @@ func TestTea_SidebarKey_ScrollUpDetachesFollow_GReattaches(t *testing.T) {
 }
 
 // TestTea_SidebarKey_ggJumpsToTop verifies the "gg" chord, while the sidebar
-// has focus, scrolls it to the top and detaches Follow — reusing the same
-// g-leader chord the Section list's "gg" (issue #1628) already arms, rather
-// than a duplicate chord mechanism (issue #1629). sidebarOpen's freshly
-// loaded, still-following sidebar starts with Offset overshot to len(Lines)
-// (model.go's SidebarLoadedMsg comment) — 1 here, not yet clamped back to 0
-// by a render — so gg's reset to 0 is a real, verifiable field transition,
-// not a no-op against an already-zero Offset.
+// has focus, scrolls it to the top and detaches Follow, reusing the g-leader
+// chord the Section list already arms (issue #1628) rather than a duplicate
+// mechanism (issue #1629). A freshly loaded, still-following sidebar starts
+// with Offset overshot to len(Lines), so gg's reset to 0 is a real transition.
 func TestTea_SidebarKey_ggJumpsToTop(t *testing.T) {
 	tm := sidebarOpen(t)
 
@@ -1494,8 +1400,8 @@ func TestTea_SidebarKey_ggJumpsToTop(t *testing.T) {
 // TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch verifies switching the
 // docked sidebar from one running Dispatch to another and back restores the
 // first Dispatch's scroll offset and detached Follow state exactly where the
-// operator left it — hopping between running Dispatches never loses their
-// place (issue #1502, ADR 0030).
+// operator left it. Hopping between running Dispatches never loses their place
+// (issue #1502, ADR 0030).
 func TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -1557,12 +1463,11 @@ func TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch(t *testing.T) {
 	}
 }
 
-// TestTea_PollTick_DoesNotRefreshSettledSidebar verifies a Settled
-// Dispatch's open sidebar never re-derives its Activity feed on a poll tick,
-// even though its pass log grows on disk afterward — a Settled Dispatch has
-// nothing left to tail (#1501 AC5), and refreshing it anyway would widen the
-// bounded-I/O scope past "the selected Dispatch, while it's actually running"
-// (review finding on issue #1502).
+// TestTea_PollTick_DoesNotRefreshSettledSidebar verifies a Settled Dispatch's
+// open sidebar never re-derives its Activity feed on a poll tick, even though
+// its pass log grows on disk afterward: a Settled Dispatch has nothing left to
+// tail (#1501 AC5), and refreshing it would widen the bounded-I/O scope past
+// the selected Dispatch while it is running (review of issue #1502).
 func TestTea_PollTick_DoesNotRefreshSettledSidebar(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -1592,9 +1497,9 @@ func TestTea_PollTick_DoesNotRefreshSettledSidebar(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// No waitForOutput for "second update": there is nothing to wait for —
-	// the point is it must never arrive. Sleep past several poll ticks
-	// instead, then assert directly against the Model.
+	// No waitForOutput for "second update": the point is that it must never
+	// arrive. Sleep past several poll ticks instead, then assert against the
+	// Model directly.
 	time.Sleep(50 * time.Millisecond)
 
 	sendKey(tm, "q")
@@ -1610,11 +1515,10 @@ func TestTea_PollTick_DoesNotRefreshSettledSidebar(t *testing.T) {
 }
 
 // TestTea_SidebarActivityTick_AdvancesWithoutKeypressOrPoll verifies the
-// dedicated ~1s sidebar-refresh tick drives a running Dispatch's open
-// activity feed on its own — pollInterval is pinned to an hour, well past
-// this test's own wait, and no key is sent between the log's growth and the
-// assertion, so only the dedicated tick can be responsible for "second
-// update" landing (issue #1735).
+// dedicated ~1s sidebar-refresh tick drives a running Dispatch's open activity
+// feed on its own (issue #1735). pollInterval is pinned to an hour and no key
+// is sent between the log's growth and the assertion, so only the dedicated
+// tick can be responsible for "second update" landing.
 func TestTea_SidebarActivityTick_AdvancesWithoutKeypressOrPoll(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -1650,12 +1554,11 @@ func TestTea_SidebarActivityTick_AdvancesWithoutKeypressOrPoll(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_SidebarActivityTick_AdvancesTranscriptView verifies the same
-// dedicated ~1s tick that live-tails the Activity feed (#1735) also
-// re-reads and re-renders the Transcript view once "t" switches to it — the
-// open-time-snapshot bug issue #1736 fixes. pollInterval is pinned to an
-// hour and no key is sent between the log's growth and the assertion, so
-// only the tick can be responsible for "second update" landing.
+// TestTea_SidebarActivityTick_AdvancesTranscriptView verifies the same ~1s tick
+// that live-tails the Activity feed (#1735) also re-reads and re-renders the
+// Transcript view once "t" switches to it, the open-time-snapshot bug issue
+// #1736 fixes. pollInterval is pinned to an hour and no key is sent between the
+// log's growth and the assertion, so only the tick can be responsible.
 func TestTea_SidebarActivityTick_AdvancesTranscriptView(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -1695,8 +1598,8 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptView(t *testing.T) {
 }
 
 // TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed verifies the
-// tick keeps refreshing the Transcript view after "z" zooms it fullscreen —
-// zoom is passive reading with no keypresses of its own, the same
+// tick keeps refreshing the Transcript view after "z" zooms it fullscreen. Zoom
+// is passive reading with no keypresses of its own, the same
 // frozen-until-keypress symptom #1735 fixed for Activity, extended to
 // Transcript by #1736 AC2 ("works while zoomed").
 func TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed(t *testing.T) {
@@ -1741,8 +1644,8 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed(t *testing.T)
 }
 
 // TestTea_SidebarActivityTick_AdvancesRawTranscriptView verifies the tick
-// keeps refreshing the Transcript view's byte-exact raw form too, not just
-// the rendered one — the raw toggle ("t" twice) reads the same live
+// keeps refreshing the Transcript view's byte-exact raw form too, not just the
+// rendered one: the raw toggle ("t" twice) reads the same live
 // SidebarTranscriptMsg.Raw payload (issue #1736).
 func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
 	f := forge.NewFake()
@@ -1761,11 +1664,10 @@ func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
 	launch.pollInterval = time.Hour
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	// Wide enough that the floating log modal's box (issue #1845) has room
-	// to show this fixture's full raw JSON line without clipping it before
-	// reaching the "text" value — narrower than sidebarFits' docked
-	// threshold, so the sidebar still opens through the modal/narrow-terminal
-	// path this test means to exercise, not the docked layout.
+	// Wide enough that the floating log modal's box (issue #1845) shows this
+	// fixture's full raw JSON line without clipping it before the "text"
+	// value, yet narrower than sidebarFits' docked threshold, so the sidebar
+	// still opens through the narrow-terminal path this test exercises.
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(110, 24))
 	waitForOutput(t, tm, "fix the thing")
 
@@ -1790,8 +1692,8 @@ func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
 }
 
 // TestTea_SidebarActivityTick_AdvancesWhileZoomed verifies the live-tail tick
-// keeps refreshing the sidebar's activity feed after "z" zooms it fullscreen
-// — zoom is passive reading with no keypresses of its own, exactly the
+// keeps refreshing the sidebar's activity feed after "z" zooms it fullscreen.
+// Zoom is passive reading with no keypresses of its own, exactly the
 // frozen-until-keypress symptom issue #1735 reports.
 func TestTea_SidebarActivityTick_AdvancesWhileZoomed(t *testing.T) {
 	f := forge.NewFake()
@@ -1832,12 +1734,10 @@ func TestTea_SidebarActivityTick_AdvancesWhileZoomed(t *testing.T) {
 }
 
 // TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines verifies follow's
-// auto-scroll-to-bottom lands on the dedicated tick itself, not just a
-// keypress or the pollTick backlog poll (defaultPollInterval, or a test
-// override; AC2 of issue #1735). The feed starts
-// taller than the docked viewport so a genuine scroll is observable: a line
-// appended below the current bottom only becomes visible if the tick
-// actually re-snapped Offset, not merely refreshed the underlying content.
+// auto-scroll-to-bottom lands on the dedicated tick itself, not just a keypress
+// or the pollTick backlog poll (issue #1735 AC2). The feed starts taller than
+// the docked viewport, so a line appended below the bottom becomes visible only
+// if the tick re-snapped Offset rather than merely refreshing the content.
 func TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -1870,7 +1770,7 @@ func TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(grown), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	waitForOutput(t, tm, "line-50") // no keypress — only the tick's follow re-snap reveals it
+	waitForOutput(t, tm, "line-50") // no keypress: only the tick's follow re-snap reveals it
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -1902,8 +1802,8 @@ func TestTea_Update_ArmsSidebarActivityTick_OnRunningSidebarOpen_DisarmsOnClose(
 
 // TestTea_Update_DisarmsSidebarActivityTick_WhenDispatchSettles verifies the
 // tick disarms the moment its Dispatch stops running, even while the sidebar
-// stays open — a Settled/Terminated/Failed Dispatch's logs never change
-// again, so ticking it further would be pure waste (issue #1735).
+// stays open. A Settled/Terminated/Failed Dispatch's logs never change again,
+// so ticking it further would be pure waste (issue #1735).
 func TestTea_Update_DisarmsSidebarActivityTick_WhenDispatchSettles(t *testing.T) {
 	m := Update(NewModel(), QueueSnapshotMsg{Picks: []Pick{{Number: "42", State: PickRunning}}})
 	tm := teaModel{m: m}
@@ -1922,7 +1822,7 @@ func TestTea_Update_DisarmsSidebarActivityTick_WhenDispatchSettles(t *testing.T)
 
 // TestTea_Update_SidebarActivityTickMsg_ReArmsWhileLive_StopsOnceClosed
 // verifies the tick's own arrival re-arms itself while the sidebar is still
-// live, and stops re-arming once the sidebar has since closed — the same
+// live, and stops re-arming once the sidebar has since closed, the same
 // self-perpetuating-while-warranted shape as pollTickMsg (issue #1735).
 func TestTea_Update_SidebarActivityTickMsg_ReArmsWhileLive_StopsOnceClosed(t *testing.T) {
 	m := Update(NewModel(), QueueSnapshotMsg{Picks: []Pick{{Number: "42", State: PickRunning}}})
@@ -1946,10 +1846,9 @@ func TestTea_Update_SidebarActivityTickMsg_ReArmsWhileLive_StopsOnceClosed(t *te
 }
 
 // TestTea_Update_SidebarActivityTickMsg_DropsStaleGeneration verifies a
-// straggler tick from before a close-then-reopen — carrying the generation
-// that armed before the reopen — is dropped rather than re-armed, so a
-// close/reopen inside one tick interval never leaves two tick chains running
-// side by side forever (review finding on issue #1735).
+// straggler tick carrying the generation armed before a close-then-reopen is
+// dropped rather than re-armed, so a close and reopen inside one tick interval
+// never leaves two tick chains running side by side (review of issue #1735).
 func TestTea_Update_SidebarActivityTickMsg_DropsStaleGeneration(t *testing.T) {
 	m := Update(NewModel(), QueueSnapshotMsg{Picks: []Pick{{Number: "42", State: PickRunning}}})
 	tm := teaModel{m: m}
@@ -1976,12 +1875,11 @@ func TestTea_Update_SidebarActivityTickMsg_DropsStaleGeneration(t *testing.T) {
 	}
 }
 
-// TestTea_SidebarKey_OpensActivityPane verifies Enter, on the Running
-// Section, opens a full-screen sidebar showing the highlighted running
-// pick's Activity feed by default (issue #786; retargeted to a work-Section
-// Enter by issue #845, generalized from FocusedColumn to ActiveSection by
-// issue #1500, and from a fullscreen-only Transcript drill-in to the
-// Activity-feed-default sidebar by #1501).
+// TestTea_SidebarKey_OpensActivityPane verifies Enter, on the Running Section,
+// opens a full-screen sidebar showing the highlighted running pick's Activity
+// feed by default (issue #786; retargeted to a work-Section Enter by #845,
+// generalized from FocusedColumn to ActiveSection by #1500, and made an
+// Activity-feed-default sidebar rather than a Transcript drill-in by #1501).
 func TestTea_SidebarKey_OpensActivityPane(t *testing.T) {
 	tm := sidebarOpen(t)
 
@@ -1995,7 +1893,7 @@ func TestTea_SidebarKey_OpensActivityPane(t *testing.T) {
 }
 
 // TestTea_SidebarKey_QuitsWithoutClosing verifies "q" hard-quits straight
-// out of an open sidebar, without requiring "x" first — the sidebar guard in
+// out of an open sidebar, without requiring "x" first: the sidebar guard in
 // handleKey must not swallow the universal quit keystroke (issue #826).
 func TestTea_SidebarKey_QuitsWithoutClosing(t *testing.T) {
 	tm := sidebarOpen(t)
@@ -2005,7 +1903,7 @@ func TestTea_SidebarKey_QuitsWithoutClosing(t *testing.T) {
 }
 
 // TestTea_SidebarKey_QuitsOnCtrlCWithoutClosing verifies "ctrl+c" hard-quits
-// straight out of an open sidebar, without requiring "x" first — same
+// straight out of an open sidebar, without requiring "x" first, the same
 // universal-quit carve-out as "q" (issue #826).
 func TestTea_SidebarKey_QuitsOnCtrlCWithoutClosing(t *testing.T) {
 	tm := sidebarOpen(t)
@@ -2016,13 +1914,9 @@ func TestTea_SidebarKey_QuitsOnCtrlCWithoutClosing(t *testing.T) {
 
 // TestTea_FocusKeys_MoveBetweenListAndDockedSidebar verifies "h"/"l" move
 // keyboard focus between the list and a docked sidebar on a terminal wide
-// enough to show both (sidebarFits): "h" moves it to the list, where "j"
-// still moves the row cursor (proving "t" sent right after is a no-op on the
-// list, not a sidebar toggle); "l" then returns focus to the sidebar, where
-// "t" still cycles its content (#1501, ADR 0030). Asserted against the final
-// Model rather than screen-scraped mid-sequence text — teatest's output
-// reader only ever shows a frame that actually changed visible bytes, which
-// an ANSI-stripped (NO_COLOR-profile) focus-only style change need not do.
+// enough to show both (#1501, ADR 0030). Asserted against the final Model
+// rather than screen-scraped text: teatest's reader only surfaces a frame whose
+// visible bytes changed, which an ANSI-stripped style change need not do.
 func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -2057,10 +1951,9 @@ func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
 	sendKey(tm, "l")
 	sendKey(tm, "t") // reaches the sidebar now that "l" refocused it
 
-	// "q" hard-quits directly here, with no drain/terminate-all/stay confirm
-	// — Focus ended on the sidebar above, and the sidebar's own "q" always
-	// force-quits regardless of live Dispatches (issue #826's precedent,
-	// inherited from the old drill-in pane).
+	// "q" hard-quits here with no drain/terminate-all/stay confirm: Focus
+	// ended on the sidebar above, and the sidebar's own "q" always
+	// force-quits regardless of live Dispatches (issue #826).
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 
@@ -2077,11 +1970,10 @@ func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
 }
 
 // TestTea_SidebarKey_ClosesFromDockedListFocus verifies both "esc" and "x"
-// close a docked sidebar even when keyboard focus is on the list — the
-// key-routing guard in handleKey only ever reached handleSidebarKey's
-// close case when Focus was on the sidebar, so a docked sidebar with focus
-// moved back to the list ("h") could not be dismissed without first
-// pressing "l" to refocus it (issue #1582).
+// close a docked sidebar even when keyboard focus is on the list. The
+// key-routing guard in handleKey only ever reached handleSidebarKey's close
+// case when Focus was on the sidebar, so a docked sidebar with focus moved back
+// to the list ("h") could not be dismissed without pressing "l" (issue #1582).
 func TestTea_SidebarKey_ClosesFromDockedListFocus(t *testing.T) {
 	for _, key := range []string{"esc", "x"} {
 		t.Run(key, func(t *testing.T) {
@@ -2127,8 +2019,8 @@ func TestTea_SidebarKey_ClosesFromDockedListFocus(t *testing.T) {
 }
 
 // TestTea_SidebarKey_NoSidebarListKeysStillNoOp verifies "x" and "esc" on the
-// list remain a no-op when no sidebar is open — the new close case in the
-// list handler only fires when Model.Sidebar is non-nil (issue #1582 AC2).
+// list remain a no-op when no sidebar is open: the new close case in the list
+// handler only fires when Model.Sidebar is non-nil (issue #1582 AC2).
 func TestTea_SidebarKey_NoSidebarListKeysStillNoOp(t *testing.T) {
 	for _, key := range []string{"esc", "x"} {
 		t.Run(key, func(t *testing.T) {
@@ -2155,8 +2047,8 @@ func TestTea_SidebarKey_NoSidebarListKeysStillNoOp(t *testing.T) {
 }
 
 // TestTea_EnterKey_OnStaticRow_OpensSidebar verifies Enter opens the sidebar
-// for a Settled, Terminated, or Failed pick — the static case with nothing
-// left to tail, still shown from its final on-disk logs (#1501 AC5).
+// for a Settled, Terminated, or Failed pick: the static case with nothing left
+// to tail, still shown from its final on-disk logs (#1501 AC5).
 func TestTea_EnterKey_OnStaticRow_OpensSidebar(t *testing.T) {
 	tests := []struct {
 		state      PickState
@@ -2199,9 +2091,9 @@ func TestTea_EnterKey_OnStaticRow_OpensSidebar(t *testing.T) {
 }
 
 // TestTea_HandleKey_ArrowKeys_MirrorHAndL verifies the left/right arrow keys
-// move sidebar focus exactly like "h"/"l" — the same case in handleKey's
-// switch, exercised directly here since the two full teatest sequences above
-// already cover "h"/"l" letter-by-letter (#1501, ADR 0030).
+// move sidebar focus exactly like "h"/"l", the same case in handleKey's switch.
+// It runs directly because the two full teatest sequences above already cover
+// "h"/"l" letter by letter (#1501, ADR 0030).
 func TestTea_HandleKey_ArrowKeys_MirrorHAndL(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42"})
@@ -2220,10 +2112,9 @@ func TestTea_HandleKey_ArrowKeys_MirrorHAndL(t *testing.T) {
 }
 
 // TestTea_HandleKey_ZKey_TogglesSidebarZoom verifies "z" forces the sidebar
-// into its fullscreen zoom, and a second "z" releases it back to docked —
-// exercised directly on a terminal wide enough to dock, so the toggle's
-// effect isn't masked by sidebarFits' own narrow-terminal fallback (issue
-// #1502, ADR 0030).
+// into its fullscreen zoom, and a second "z" releases it back to docked. It
+// runs on a terminal wide enough to dock so the toggle's effect is not masked
+// by sidebarFits' own narrow-terminal fallback (issue #1502, ADR 0030).
 func TestTea_HandleKey_ZKey_TogglesSidebarZoom(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42"})
@@ -2242,7 +2133,7 @@ func TestTea_HandleKey_ZKey_TogglesSidebarZoom(t *testing.T) {
 
 // TestTea_HandleKey_ZoomedSidebar_RoutesKeysToSidebarRegardlessOfFocus
 // verifies a zoomed sidebar routes every keypress to the sidebar even while
-// Model.Focus is still FocusList — the same "no list on screen to route
+// Model.Focus is still FocusList: the same "no list on screen to route
 // list-only keys to" rule handleKey already applies to the narrow-terminal
 // fullscreen fallback (issue #1502, ADR 0030).
 func TestTea_HandleKey_ZoomedSidebar_RoutesKeysToSidebarRegardlessOfFocus(t *testing.T) {
@@ -2264,12 +2155,10 @@ func TestTea_HandleKey_ZoomedSidebar_RoutesKeysToSidebarRegardlessOfFocus(t *tes
 	}
 }
 
-// TestTea_HandleKey_HKey_NoOpWhileZoomed verifies "h"/left is a no-op while
-// the sidebar is zoomed, even on a terminal wide enough to dock — zoomed
-// fullscreen has no list on screen to focus, the same rule already applied
-// to the narrow-terminal fallback; moving Focus to FocusList here anyway
-// would desync it from the still-fullscreen render until "z" un-zooms
-// (review finding on issue #1502).
+// TestTea_HandleKey_HKey_NoOpWhileZoomed verifies "h"/left is a no-op while the
+// sidebar is zoomed, even on a terminal wide enough to dock: zoomed fullscreen
+// has no list on screen to focus. Moving Focus to FocusList here would desync
+// it from the still-fullscreen render until "z" un-zooms (review of #1502).
 func TestTea_HandleKey_HKey_NoOpWhileZoomed(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42"})
@@ -2331,8 +2220,8 @@ func TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw(t *testing.T) {
 
 // newSidebarScrollTestModel builds a teaModel with a 50-line "line-NN"
 // Activity feed already open and following at the bottom (fresh-open-while-
-// following, ADR 0030, issue #1502) — the shared fixture the three
-// TestTea_SidebarScrollKeys_* tests below page through.
+// following, ADR 0030, issue #1502). The three TestTea_SidebarScrollKeys_*
+// tests below share it.
 func newSidebarScrollTestModel(t *testing.T) teaModel {
 	t.Helper()
 	activity := make([]ActivityLine, 50)
@@ -2350,22 +2239,10 @@ func newSidebarScrollTestModel(t *testing.T) teaModel {
 }
 
 // TestTea_SidebarScrollKeys_PageThroughContent verifies pgdown/pgup move the
-// sidebar's scroll offset by a full fixedPaneScrollDelta-sized page (issue
-// #786), driven directly through teaModel.handleKey rather than a
-// teatest.TestModel scraping rendered "line-NN" text: the render-scraping
-// version could time out waiting on a render that was merely slow, not
-// hung, under CI's CPU contention (both waitForOutput retry windows
-// elapsing at 60s+, issue #2014). Asserting Sidebar.Offset directly needs no
-// render at all, so it can't flake on render latency. The clamp/Follow-detach
-// arithmetic itself is already pinned by TestUpdate_SidebarScrollMsg_* in
-// model_test.go; this test's own job is only confirming pgdown/pgup route
-// to a full fixedPaneScrollDelta SidebarScrollMsg through the real keymap
-// dispatch. A fresh open starts at the bottom while following (ADR 0030,
-// issue #1502) rather than at Offset 0, so the sequence pages all the way
-// to the top first — three pgups guarantee reaching Offset 0 from the
-// fresh-open bottom offset (50 lines, comfortably more than 3 pgups' worth
-// of a 22-line budget) — before exercising the original pgdown/pgup
-// mechanics from that known point.
+// sidebar's scroll offset by a full fixedPaneScrollDelta page (issue #786),
+// driven through teaModel.handleKey rather than a render-scraping teatest run
+// that timed out on merely slow renders under CI contention (issue #2014). A
+// fresh open starts at the bottom, so three pgups reach Offset 0 (issue #1502).
 func TestTea_SidebarScrollKeys_PageThroughContent(t *testing.T) {
 	tm := newSidebarScrollTestModel(t)
 
@@ -2389,10 +2266,9 @@ func TestTea_SidebarScrollKeys_PageThroughContent(t *testing.T) {
 
 // TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent mirrors
 // TestTea_SidebarScrollKeys_PageThroughContent for the vim page chords
-// ctrl+f/ctrl+b, which must page the sidebar identically to pgdown/pgup
-// (issue #1647). Driven directly through teaModel.handleKey rather than a
-// teatest.TestModel — see TestTea_SidebarScrollKeys_PageThroughContent's
-// doc comment for why (issue #2014).
+// ctrl+f/ctrl+b, which must page the sidebar identically to pgdown/pgup (issue
+// #1647). Driven through teaModel.handleKey rather than a teatest.TestModel;
+// see TestTea_SidebarScrollKeys_PageThroughContent for why (issue #2014).
 func TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent(t *testing.T) {
 	tm := newSidebarScrollTestModel(t)
 
@@ -2416,11 +2292,9 @@ func TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent(t *testing.T) {
 
 // TestTea_SidebarScrollKeys_CtrlDCtrlUHalfPageThroughContent mirrors
 // TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent for the vim
-// half-page chords ctrl+d/ctrl+u, which must move the sidebar by half of
-// what ctrl+f/ctrl+b move it (issue #1648). Driven directly through
-// teaModel.handleKey rather than a teatest.TestModel — see
-// TestTea_SidebarScrollKeys_PageThroughContent's doc comment for why (issue
-// #2014).
+// half-page chords ctrl+d/ctrl+u, which must move the sidebar by half of what
+// ctrl+f/ctrl+b move it (issue #1648). Driven through teaModel.handleKey; see
+// TestTea_SidebarScrollKeys_PageThroughContent for why (issue #2014).
 func TestTea_SidebarScrollKeys_CtrlDCtrlUHalfPageThroughContent(t *testing.T) {
 	tm := newSidebarScrollTestModel(t)
 
@@ -2444,12 +2318,11 @@ func TestTea_SidebarScrollKeys_CtrlDCtrlUHalfPageThroughContent(t *testing.T) {
 	}
 }
 
-// TestTea_SidebarKey_NoDriver_ShowsGracefulMessage verifies opening the
-// sidebar during a launch-less session (no Driver configured) surfaces a
-// readable error instead of panicking on a nil Driver (issue #786 AC4).
-// Picks is seeded directly (rather than via the "p"/Enter pick path) since a
-// nil Launcher can never promote a pick to PickRunning through the normal
-// flow — isolating the no-Driver render path from how the row got there.
+// TestTea_SidebarKey_NoDriver_ShowsGracefulMessage verifies opening the sidebar
+// during a launch-less session (no Driver configured) surfaces a readable error
+// instead of panicking on a nil Driver (issue #786 AC4). Picks is seeded
+// directly because a nil Launcher can never promote a pick to PickRunning
+// through the normal flow, isolating the no-Driver render path.
 func TestTea_SidebarKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -2473,12 +2346,11 @@ func TestTea_SidebarKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_SidebarKey_ClaimedNotYetLaunched_ShowsEmptyActivityNotError
-// verifies a pick that reads PickRunning a moment before its Box's first log
-// write lands on disk opens the sidebar showing an empty Activity feed, not
-// an error — hasTranscript's PickRunning gate can admit this window, and
-// ActivityFeed's own graceful-empty contract must win over DrillIn's "no
-// logs found" for the combined SidebarLoadedMsg (#1501 review finding).
+// TestTea_SidebarKey_ClaimedNotYetLaunched_ShowsEmptyActivityNotError verifies
+// a pick that reads PickRunning a moment before its Box's first log write opens
+// the sidebar showing an empty Activity feed, not an error: hasTranscript's
+// PickRunning gate admits this window, and ActivityFeed's graceful-empty
+// contract must beat DrillIn's "no logs found" (#1501 review finding).
 func TestTea_SidebarKey_ClaimedNotYetLaunched_ShowsEmptyActivityNotError(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -2486,7 +2358,7 @@ func TestTea_SidebarKey_ClaimedNotYetLaunched_ShowsEmptyActivityNotError(t *test
 	launch := newTestLauncher(t, f)
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	// No log file written for #42 -- the race this test targets.
+	// No log file written for #42: the race this test targets.
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
@@ -2524,8 +2396,6 @@ func TestTea_HandleKey_RebuildOutputKey_OpensPaneWhenOutputPresent(t *testing.T)
 	}
 }
 
-// TestTea_HandleKey_RebuildOutputKey_NoOpWhenOutputEmpty verifies "o" is a
-// no-op with nothing captured yet.
 func TestTea_HandleKey_RebuildOutputKey_NoOpWhenOutputEmpty(t *testing.T) {
 	tm := teaModel{m: NewModel()}
 
@@ -2550,8 +2420,6 @@ func TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc(t *testing.T) {
 	}
 }
 
-// TestTea_HandleRebuildOutputKey_ScrollsOnJK verifies "j"/"k" move
-// RebuildOutputOffset while the pane is open.
 func TestTea_HandleRebuildOutputKey_ScrollsOnJK(t *testing.T) {
 	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
 	m = Update(m, RebuildOutputOpenMsg{})
@@ -2624,9 +2492,9 @@ func TestTea_HandleRebuildOutputKey_GJumpsToLastPage(t *testing.T) {
 
 // TestTea_HandleKey_RebuildOutput_ggJumpsToFirstPage verifies a lone "g"
 // followed by a second "g" resets RebuildOutputOffset to 0 while the
-// rebuild-output pane is open — reusing the same PendingG/gChordTick
-// machinery issue #1628 introduced for the list body rather than duplicating
-// it (issue #1630 AC2/AC3).
+// rebuild-output pane is open, reusing the PendingG/gChordTick machinery issue
+// #1628 introduced for the list body rather than duplicating it (issue #1630
+// AC2/AC3).
 func TestTea_HandleKey_RebuildOutput_ggJumpsToFirstPage(t *testing.T) {
 	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
 	m = Update(m, RebuildOutputOpenMsg{})
@@ -2649,9 +2517,9 @@ func TestTea_HandleKey_RebuildOutput_ggJumpsToFirstPage(t *testing.T) {
 
 // TestTea_HandleKey_RebuildOutput_gLeader_NonGKey_CancelsAndStillScrolls
 // verifies a lone "g" followed by a non-"g" key in the rebuild-output pane
-// cancels the pending leader without consuming that key — its own scroll
-// binding still applies, mirroring the list body's own g-leader fallthrough
-// (issue #1628 AC) rather than swallowing the second key (issue #1630 AC3).
+// cancels the pending leader without consuming that key: its own scroll binding
+// still applies, mirroring the list body's g-leader fallthrough (issue #1628
+// AC) rather than swallowing the second key (issue #1630 AC3).
 func TestTea_HandleKey_RebuildOutput_gLeader_NonGKey_CancelsAndStillScrolls(t *testing.T) {
 	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
 	m = Update(m, RebuildOutputOpenMsg{})
@@ -2668,8 +2536,8 @@ func TestTea_HandleKey_RebuildOutput_gLeader_NonGKey_CancelsAndStillScrolls(t *t
 }
 
 // TestTea_RebuildOutputPane_ggAndGJumpTopAndBottom drives the rebuild-output
-// pane end to end: opening it, jumping to the bottom with "G", then back to
-// the top with "gg" — the pane's own analogue of TestTea_GKey_JumpsToLastRow/
+// pane end to end: opening it, jumping to the bottom with "G", then back to the
+// top with "gg". It is the pane's analogue of TestTea_GKey_JumpsToLastRow and
 // TestTea_ggChord_JumpsToFirstRow for the list body (issue #1630 AC1/AC2).
 func TestTea_RebuildOutputPane_ggAndGJumpTopAndBottom(t *testing.T) {
 	f := forge.NewFake()
@@ -2706,17 +2574,16 @@ func TestTea_HelpKey_OpensOverlay(t *testing.T) {
 
 	sendKey(tm, "?")
 	// "p" and "P" (issue #1838) are each listed as their own standalone
-	// keybinding — a keybinding nobody can find in this overlay isn't
-	// discoverable.
+	// keybinding: one nobody can find in this overlay is not discoverable.
 	waitForOutput(t, tm, "toggle this help", "pick the highlighted Backlog row", "pick all ready")
 
-	sendKey(tm, "?") // close the overlay — it's modal, so "q" alone can't reach quit while open
+	sendKey(tm, "?") // close the overlay: it is modal, so "q" alone cannot reach quit
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 }
 
 // TestTea_BackgroundPoll_RefreshesWithoutOperatorInput verifies a slow fixed
-// background poll re-queries the tracker on its own — no operator command —
+// background poll re-queries the tracker on its own, with no operator command,
 // so a late-arriving issue still surfaces during an otherwise-idle session
 // (#647 AC5, issue #784).
 func TestTea_BackgroundPoll_RefreshesWithoutOperatorInput(t *testing.T) {
@@ -2754,17 +2621,11 @@ func TestTea_LaunchRefreshSignal_RefreshesWithoutOperatorInput(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestWaitRefreshSignal_BlocksUntilDoneCloses_ThenReturnsNil verifies
-// waitRefreshSignal's actual cancellation contract directly, against a
-// test-local done channel only — no process-global goroutine dump (issue
-// #2013). Replaces the old TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine,
-// which matched the leaked/absent goroutine by function name in a
-// process-global pprof.Lookup("goroutine") dump; since every launch-backed
-// teaModel in the package arms a goroutine under that same name, a sibling
-// test's still-draining instance could satisfy or fail the assertion
-// regardless of this test's own goroutine, making the check flaky rather
-// than a leak detector (issue #823 for the original cancel guarantee this
-// pins).
+// TestWaitRefreshSignal_BlocksUntilDoneCloses_ThenReturnsNil pins
+// waitRefreshSignal's cancellation contract (issue #823) against a test-local
+// done channel, with no process-global goroutine dump (issue #2013). The old
+// pprof-name-matching version was flaky: every launch-backed teaModel arms a
+// goroutine under the same name, so a sibling test could decide the assertion.
 func TestWaitRefreshSignal_BlocksUntilDoneCloses_ThenReturnsNil(t *testing.T) {
 	f := forge.NewFake()
 	launch := &Launcher{CodeForge: f, queue: NewQueue(), pollInterval: time.Hour}
@@ -2791,13 +2652,11 @@ func TestWaitRefreshSignal_BlocksUntilDoneCloses_ThenReturnsNil(t *testing.T) {
 	}
 }
 
-// TestTeaUpdate_QuitKey_ClosesDoneChannel verifies the other half of the
-// cancellation contract TestWaitRefreshSignal_BlocksUntilDoneCloses_ThenReturnsNil
-// pins: reaching Update's Quitting choke point closes teaModel.done, the
-// channel waitRefreshSignal's Cmd selects on to unblock (issue #823, issue
-// #2013). Drives Update directly with the same "q" tea.KeyMsg the real quit
-// key sends, rather than a full teatest run, so this test needs neither the
-// program's own event loop nor any process-global goroutine inspection.
+// TestTeaUpdate_QuitKey_ClosesDoneChannel pins the other half of the
+// cancellation contract: reaching Update's Quitting choke point closes
+// teaModel.done, the channel waitRefreshSignal's Cmd selects on to unblock
+// (issue #823, issue #2013). It drives Update directly with the same "q"
+// tea.KeyMsg, so it needs neither the event loop nor goroutine inspection.
 func TestTeaUpdate_QuitKey_ClosesDoneChannel(t *testing.T) {
 	f := forge.NewFake()
 	tm := newTeaModel(f, t.TempDir(), nil)
@@ -2826,18 +2685,17 @@ func TestTea_WithLauncher_RendersCapAndLive(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_WithLauncher_RendersLiveQueueState verifies every render — not
-// just the one right after a pick — reflects the launcher's live Queue
-// state, so a transition that happens entirely in the background (claim,
-// run, settle, or a raced-claim dissolve) actually reaches the operator's
-// screen (#646 AC4, AC6).
+// TestTea_WithLauncher_RendersLiveQueueState verifies every render, not just
+// the one right after a pick, reflects the launcher's live Queue state, so a
+// transition that happens entirely in the background (claim, run, settle, or a
+// raced-claim dissolve) reaches the operator's screen (#646 AC4, AC6).
 func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent", "priority-p1", "bug"}})
 
 	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 	// Simulate a state transition that happened entirely on the background
-	// Queue (a real launch's claim/run/settle) — isolating the render-sync
+	// Queue (a real launch's claim/run/settle), isolating the render-sync
 	// behavior from how a pick enters the queue.
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickDissolved, Reason: "issue is closed"})
 
@@ -2861,8 +2719,7 @@ func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 	// A held pick's badge is set entirely by Queue.Discover's blocker check
 	// (queue.go setHeld); landing the state directly isolates the render-sync
-	// behavior under test from blocker-edge mechanics already covered at
-	// queue_test.go.
+	// behavior from blocker-edge mechanics already covered in queue_test.go.
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickHeld, BlockedBy: "#41 (native)"})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
@@ -2876,9 +2733,9 @@ func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 
 // TestTea_WithLauncher_RendersBlockerDespiteLongTitle verifies a held pick's
 // "held by #N" badge reaches the rendered output through the tea layer even
-// paired with a realistically long title on an 80-column terminal — the
-// queue row previously put Title before BlockedBy, so clip()'s tail
-// truncation dropped the blocker badge first (issue #858).
+// paired with a realistically long title on an 80-column terminal. The queue
+// row previously put Title before BlockedBy, so clip()'s tail truncation
+// dropped the blocker badge first (issue #858).
 func TestTea_WithLauncher_RendersBlockerDespiteLongTitle(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the launcher retry backoff for the dispatch workflow", State: forge.IssueOpen})
@@ -2897,8 +2754,8 @@ func TestTea_WithLauncher_RendersBlockerDespiteLongTitle(t *testing.T) {
 
 // TestTea_StaleStatus_RendersBanner verifies the tea layer's per-render sync
 // installs the launcher's live stale verdict onto the view, exactly as
-// syncQueue does for the picks queue — the operator sees the banner without
-// an explicit refresh (issue #652 AC1).
+// syncQueue does for the picks queue. The operator sees the banner without an
+// explicit refresh (issue #652 AC1).
 func TestTea_StaleStatus_RendersBanner(t *testing.T) {
 	f := forge.NewFake()
 	launch := newTestLauncher(t, f)
@@ -2912,13 +2769,10 @@ func TestTea_StaleStatus_RendersBanner(t *testing.T) {
 }
 
 // TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll verifies stale
-// detection itself wakes an already-idling Program — not the next poll
-// tick (defaultPollInterval, or a test override) or a coincidental Msg.
-// TestTea_StaleStatus_RendersBanner above drives staleness synchronously
-// via freshnessChecker() before the tea model even exists, masking this
-// exact gap; this test detects staleness only after the Program is
-// running idle, with pollInterval set far longer than the test's wait
-// window so a poll tick could never be the cause (issue #762).
+// detection itself wakes an already-idling Program, not the next poll tick.
+// TestTea_StaleStatus_RendersBanner above drives staleness synchronously before
+// the tea model exists, masking this gap; here staleness lands only once the
+// Program is idle, with pollInterval far past the test's wait (issue #762).
 func TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -2935,13 +2789,11 @@ func TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey verifies a settle —
-// the session's own tracker write — fires a backlog refresh on its own, so
-// an issue added to the tracker while a Box is running appears on a render
-// once that Box settles, without the operator ever pressing "r" (#647 AC4,
-// issue #784). The pick itself is landed directly on launch.queue (the
-// retired "p" keystroke has no tea-layer replacement yet) so this isolates
-// the async-refresh behavior under test.
+// TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey verifies a settle, the
+// session's own tracker write, fires a backlog refresh on its own, so an issue
+// added while a Box is running appears on a render once that Box settles
+// without the operator pressing "r" (#647 AC4, issue #784). The pick is landed
+// directly on launch.queue, isolating the async-refresh behavior under test.
 func TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
@@ -2988,10 +2840,9 @@ func TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "99", Title: "late arrival", State: forge.IssueOpen})
 	close(release)
 	waitForOutput(t, tm, "late arrival")
-	// The fake Run above only just unblocked (close(release)) — wait for it
-	// to actually settle before "q", or "q" can race the still-live pick
-	// onto the issue #822 quit confirm and hang until teatest's timeout
-	// (the bug CI caught, issue #3069).
+	// The fake Run only just unblocked, so wait for it to settle before "q",
+	// or "q" races the still-live pick onto the issue #822 quit confirm and
+	// hangs until teatest's timeout (the bug CI caught, issue #3069).
 	waitForDrain(t, launch)
 
 	sendKey(tm, "q")
@@ -2999,8 +2850,8 @@ func TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 }
 
 // TestTea_PickKey_PromotesAndQueuesHighlighted verifies "p" promotes the
-// highlighted issue through the Untriaged->Dispatchable transition and lands
-// it on the queue — the launch button acting on the cursor row (issue #785).
+// highlighted issue through the Untriaged->Dispatchable transition and lands it
+// on the queue: the launch button acting on the cursor row (issue #785).
 func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3010,23 +2861,20 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "p")
-	// Wait for the pick's fake Dispatch to actually finish (LiveIssues()
-	// empty) — otherwise "q" can race the still-live pick and land on the
-	// quit confirm (issue #822) instead of exiting, hanging until teatest's
-	// timeout (same race TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue
-	// already guards against). waitForPicksTerminal goes first: tryLaunch's
-	// background drain goroutine may not have been scheduled yet, and
-	// LiveIssues() alone can't tell "hasn't started" from "already done".
+	// Wait for the pick's fake Dispatch to finish, or "q" races the still-live
+	// pick onto the quit confirm (issue #822) and hangs until teatest's
+	// timeout. waitForPicksTerminal goes first because tryLaunch's background
+	// drain goroutine may not be scheduled yet, and LiveIssues() alone cannot
+	// tell "has not started" from "already done".
 	waitForPicksTerminal(t, launch, "42")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 }
 
-// TestTea_PickKey_QueuesHighlightedInstantly verifies "p" lands the pick in
-// the same Update call the keystroke triggers — no pending mode, no
-// intermediate hint, no trailing key needed — replacing the "pa" leader
-// chord's 200ms wait (issue #1838).
+// TestTea_PickKey_QueuesHighlightedInstantly verifies "p" lands the pick in the
+// same Update call the keystroke triggers, with no pending mode, no hint, and
+// no trailing key, replacing the "pa" leader chord's 200ms wait (issue #1838).
 func TestTea_PickKey_QueuesHighlightedInstantly(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3043,7 +2891,7 @@ func TestTea_PickKey_QueuesHighlightedInstantly(t *testing.T) {
 
 // TestTea_ResearchKey_QueuesHighlightedInstantly verifies "r" lands the
 // highlighted issue as a KindResearch pick in the same Update call the
-// keystroke triggers — the research counterpart of "p" (issue #1839).
+// keystroke triggers: the research counterpart of "p" (issue #1839).
 func TestTea_ResearchKey_QueuesHighlightedInstantly(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3060,9 +2908,8 @@ func TestTea_ResearchKey_QueuesHighlightedInstantly(t *testing.T) {
 
 // TestTea_EnterKey_OnBacklogSection_OpensDetailModal verifies Enter, on the
 // Backlog Section (the default), opens the fullscreen ticket detail modal
-// instead of picking the highlighted issue — picking moved to "p" (issue
-// #1632). The modal shows the highlighted issue's title instantly, before
-// any async body/blocker fetch lands.
+// instead of picking the highlighted issue; picking moved to "p" (issue #1632).
+// The modal shows the title instantly, before any async body fetch lands.
 func TestTea_EnterKey_OnBacklogSection_OpensDetailModal(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3076,11 +2923,10 @@ func TestTea_EnterKey_OnBacklogSection_OpensDetailModal(t *testing.T) {
 
 	sendKey(tm, "esc")
 	// Not the header's status line: at Height 24 the titled-border header
-	// (issue #1798) is only 3 rows tall, entirely above the floating box's
-	// y origin, so closing the modal never changes those rows' bytes and
-	// Bubble Tea's differential renderer never re-emits them (same class of
-	// quirk as the "r"-key comment further down this file). The Section
-	// tabs row sits inside the box's overlaid range and always redraws.
+	// (issue #1798) sits entirely above the floating box's y origin, so
+	// closing the modal never changes those rows' bytes and Bubble Tea's
+	// differential renderer never re-emits them. The Section tabs row sits
+	// inside the box's overlaid range and always redraws.
 	waitForOutput(t, tm, "[1] Backlog")
 
 	sendKey(tm, "q")
@@ -3090,8 +2936,7 @@ func TestTea_EnterKey_OnBacklogSection_OpensDetailModal(t *testing.T) {
 // TestTea_DetailModal_FetchErr_ShowsFailedToLoad verifies a body fetch that
 // fails against the real tracker seam surfaces "failed to load" through the
 // actual async Cmd/Msg round-trip, not just Update applied directly (issue
-// #1632 review finding — the error render path had no integration
-// coverage).
+// #1632 review finding: the error render path had no integration coverage).
 func TestTea_DetailModal_FetchErr_ShowsFailedToLoad(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3110,10 +2955,10 @@ func TestTea_DetailModal_FetchErr_ShowsFailedToLoad(t *testing.T) {
 }
 
 // TestTea_DetailModal_LoadsBodyAsyncAndCachesForReopen verifies the modal's
-// body arrives from a background fetch — a separate Issue call, since
-// ListOpenIssues never carries Body — and that reopening the same ticket
-// after closing it never issues a second Issue call: the loaded detail is
-// cached on Model.DetailCache and applied instantly instead (issue #1632).
+// body arrives from a background fetch, a separate Issue call since
+// ListOpenIssues never carries Body, and that reopening the same ticket never
+// issues a second one: the loaded detail is cached on Model.DetailCache and
+// applied instantly instead (issue #1632).
 func TestTea_DetailModal_LoadsBodyAsyncAndCachesForReopen(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Body: "the full ticket body", State: forge.IssueOpen})
@@ -3126,7 +2971,7 @@ func TestTea_DetailModal_LoadsBodyAsyncAndCachesForReopen(t *testing.T) {
 	waitForOutput(t, tm, "the full ticket body")
 
 	sendKey(tm, "esc")
-	// Not the header's status line — see the same note on
+	// Not the header's status line; see the note on
 	// TestTea_EnterKey_OnBacklogSection_OpensDetailModal.
 	waitForOutput(t, tm, "[1] Backlog")
 
@@ -3148,9 +2993,9 @@ func TestTea_DetailModal_LoadsBodyAsyncAndCachesForReopen(t *testing.T) {
 }
 
 // TestTea_DetailModalKey_ScrollsBodyWithJAndArrows verifies "j"/down scrolls
-// the ticket detail modal's body forward, revealing lines the initial
-// viewport didn't have room for — the "body scrolls with j/k and the arrow
-// keys" AC (issue #1632).
+// the ticket detail modal's body forward, revealing lines the initial viewport
+// had no room for: the "body scrolls with j/k and the arrow keys" AC (issue
+// #1632).
 func TestTea_DetailModalKey_ScrollsBodyWithJAndArrows(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	var lines []string
@@ -3177,8 +3022,8 @@ func TestTea_DetailModalKey_ScrollsBodyWithJAndArrows(t *testing.T) {
 }
 
 // TestTea_DetailModal_ggAndGJumpTopAndBottom drives the ticket detail modal
-// end to end: opening it, jumping to the bottom with "G", then back to the
-// top with "gg" — the modal's own analogue of
+// end to end: opening it, jumping to the bottom with "G", then back to the top
+// with "gg", the modal's analogue of
 // TestTea_RebuildOutputPane_ggAndGJumpTopAndBottom (issue #1795).
 func TestTea_DetailModal_ggAndGJumpTopAndBottom(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
@@ -3288,12 +3133,11 @@ func TestTea_HandleDetailModalKey_ScrollsOnCtrlDCtrlU(t *testing.T) {
 	}
 }
 
-// TestTea_HandleKey_DetailModal_ggJumpsToFirstPage verifies a lone "g"
-// followed by a second "g" resets DetailModal.Offset to 0 while the ticket
-// detail modal is open — reusing the same PendingG/gChordTick machinery
-// issue #1628 introduced for the list body rather than duplicating it,
-// mirroring TestTea_HandleKey_RebuildOutput_ggJumpsToFirstPage (issue
-// #1795).
+// TestTea_HandleKey_DetailModal_ggJumpsToFirstPage verifies a lone "g" followed
+// by a second "g" resets DetailModal.Offset to 0 while the ticket detail modal
+// is open, reusing the PendingG/gChordTick machinery issue #1628 introduced for
+// the list body and mirroring
+// TestTea_HandleKey_RebuildOutput_ggJumpsToFirstPage (issue #1795).
 func TestTea_HandleKey_DetailModal_ggJumpsToFirstPage(t *testing.T) {
 	lines := make([]string, 200)
 	for i := range lines {
@@ -3319,12 +3163,10 @@ func TestTea_HandleKey_DetailModal_ggJumpsToFirstPage(t *testing.T) {
 	}
 }
 
-// TestTea_HandleKey_DetailModal_gLeader_NonGKey_CancelsAndStillScrolls
-// verifies a lone "g" followed by a non-"g" key in the detail modal cancels
-// the pending leader without consuming that key — its own scroll binding
-// still applies, mirroring
-// TestTea_HandleKey_RebuildOutput_gLeader_NonGKey_CancelsAndStillScrolls
-// (issue #1795).
+// TestTea_HandleKey_DetailModal_gLeader_NonGKey_CancelsAndStillScrolls verifies
+// a lone "g" followed by a non-"g" key in the detail modal cancels the pending
+// leader without consuming that key: its own scroll binding still applies, as
+// in the rebuild-output pane's own g-leader test (issue #1795).
 func TestTea_HandleKey_DetailModal_gLeader_NonGKey_CancelsAndStillScrolls(t *testing.T) {
 	lines := make([]string, 200)
 	for i := range lines {
@@ -3348,8 +3190,7 @@ func TestTea_HandleKey_DetailModal_gLeader_NonGKey_CancelsAndStillScrolls(t *tes
 // TestTea_DetailModalKey_PicksDisplayedIssueAndClosesModal verifies "p",
 // pressed while the ticket detail modal is open, promotes the modal's own
 // displayed issue through the same Untriaged->Dispatchable pick/launch path
-// as the Backlog list's "p" (issue #785), then closes the modal — issue
-// #1835.
+// as the Backlog list's "p" (issue #785), then closes the modal (issue #1835).
 func TestTea_DetailModalKey_PicksDisplayedIssueAndClosesModal(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Body: "the full ticket body", State: forge.IssueOpen})
@@ -3362,9 +3203,8 @@ func TestTea_DetailModalKey_PicksDisplayedIssueAndClosesModal(t *testing.T) {
 	waitForOutput(t, tm, "the full ticket body")
 
 	sendKey(tm, "p")
-	// Wait for the pick's fake Dispatch to actually finish (LiveIssues()
-	// empty) — same race guard TestTea_PickKey_PromotesAndQueuesHighlighted's
-	// own comment explains.
+	// Wait for the pick's fake Dispatch to finish: the same race guard
+	// TestTea_PickKey_PromotesAndQueuesHighlighted explains.
 	waitForPicksTerminal(t, launch, "42")
 
 	sendKey(tm, "q")
@@ -3377,13 +3217,10 @@ func TestTea_DetailModalKey_PicksDisplayedIssueAndClosesModal(t *testing.T) {
 }
 
 // TestTea_DetailModalKey_ResearchPicksInstantlyAndClosesModal verifies "r"
-// inside the ticket detail modal promotes the displayed issue as a
-// KindResearch pick immediately — no delay, no leader chord — and closes the
-// modal on success, the modal's own analogue of the Backlog's instant "r"
-// (issue #1839) the same way the modal's existing "p" already mirrors the
-// Backlog's instant "p" (issue #1836, redesigned after #1838 deleted the
-// old "p"-then-"a"/"r" chord this issue originally asked the modal to
-// mirror).
+// inside the ticket detail modal promotes the displayed issue as a KindResearch
+// pick immediately, with no delay and no leader chord, and closes the modal on
+// success: the modal's analogue of the Backlog's instant "r" (issue #1839), the
+// way the modal's "p" already mirrors the Backlog's "p" (issue #1836).
 func TestTea_DetailModalKey_ResearchPicksInstantlyAndClosesModal(t *testing.T) {
 	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	workTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", State: forge.IssueOpen})
@@ -3417,13 +3254,11 @@ func TestTea_DetailModalKey_ResearchPicksInstantlyAndClosesModal(t *testing.T) {
 	}
 }
 
-// TestTea_HandleDetailModalKey_PickAlreadyActive_NoOpAndModalStaysOpen
-// verifies "p", pressed on a ticket detail modal whose displayed issue
-// already has an active (queued/held/claiming/running) pick, neither
-// appends a second row nor closes the modal — the "no longer dispatchable"
+// TestTea_HandleDetailModalKey_PickAlreadyActive_NoOpAndModalStaysOpen verifies
+// "p" on a modal whose displayed issue already has an active pick neither
+// appends a second row nor closes the modal: the "no longer dispatchable"
 // degrade-safely AC (issue #1835), mirroring
-// TestTea_PickKey_AlreadyPicked_NoDuplicateRow's Backlog-list coverage of
-// the same alreadyActive gate.
+// TestTea_PickKey_AlreadyPicked_NoDuplicateRow's coverage of the same gate.
 func TestTea_HandleDetailModalKey_PickAlreadyActive_NoOpAndModalStaysOpen(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3452,8 +3287,8 @@ func TestTea_HandleDetailModalKey_PickAlreadyActive_NoOpAndModalStaysOpen(t *tes
 // TestTea_HandleDetailModalKey_PickTargetsModalIssueDespiteBacklogReorder
 // verifies "p" picks the ticket detail modal's own displayed issue even
 // when a background Backlog refresh has reordered rows underneath the open
-// modal and left Cursor pointing at a different issue's new row — the pick
-// must key on DetailModal.Number, never the cursor position (issue #1835).
+// modal and left Cursor pointing at a different issue's new row. The pick must
+// key on DetailModal.Number, never the cursor position (issue #1835).
 func TestTea_HandleDetailModalKey_PickTargetsModalIssueDespiteBacklogReorder(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3467,7 +3302,7 @@ func TestTea_HandleDetailModalKey_PickTargetsModalIssueDespiteBacklogReorder(t *
 	// Cursor sits on row 0 (#42) when the modal opens.
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 	// A background refresh lands while the modal is still open, reordering
-	// row 0 to #7 — Cursor is untouched by IssuesLoadedMsg, so it now points
+	// row 0 to #7. Cursor is untouched by IssuesLoadedMsg, so it now points
 	// at #7's row instead of the modal's own #42.
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
 		{Number: "7", Title: "unrelated issue", State: forge.IssueOpen},
@@ -3483,12 +3318,10 @@ func TestTea_HandleDetailModalKey_PickTargetsModalIssueDespiteBacklogReorder(t *
 }
 
 // TestTea_HandleDetailModalKey_PickNoLongerDispatchable_DissolvesAndStaysOpen
-// verifies "p" on a modal whose displayed issue has gone InProgress since
-// the modal opened (claimed elsewhere) lands a PickDissolvedMsg rather than
-// mis-picking, and leaves the modal open — the tracker-side half of the
-// "no longer dispatchable" degrade-safely AC (issue #1835), mirroring
-// TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition's
-// coverage of PickIssue's own rejection.
+// verifies "p" on a modal whose displayed issue has gone InProgress since the
+// modal opened (claimed elsewhere) lands a PickDissolvedMsg rather than
+// mis-picking, and leaves the modal open: the tracker-side half of the "no
+// longer dispatchable" degrade-safely AC (issue #1835).
 func TestTea_HandleDetailModalKey_PickNoLongerDispatchable_DissolvesAndStaysOpen(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
@@ -3510,14 +3343,11 @@ func TestTea_HandleDetailModalKey_PickNoLongerDispatchable_DissolvesAndStaysOpen
 	}
 }
 
-// TestTea_HandleDetailModalKey_PickViaLauncher_DissolveLeavesModalOpen
-// mirrors TestTea_HandleDetailModalKey_PickNoLongerDispatchable_
-// DissolvesAndStaysOpen but through the launcher-backed landPick branch
-// (t.launch != nil) rather than the nil-launcher PickIssue one, closing the
-// production degrade-safe path's coverage gap a review of issue #1835
-// flagged — a raced/failed TransitionState landing a PickDissolvedMsg via
-// Launcher.Pick must leave the modal open exactly like the nil-launcher
-// case does.
+// TestTea_HandleDetailModalKey_PickViaLauncher_DissolveLeavesModalOpen mirrors
+// the nil-launcher dissolve test through the launcher-backed landPick branch,
+// closing the production degrade-safe path's coverage gap a review of issue
+// #1835 flagged: a raced or failed TransitionState landing a PickDissolvedMsg
+// via Launcher.Pick must leave the modal open like the nil-launcher case.
 func TestTea_HandleDetailModalKey_PickViaLauncher_DissolveLeavesModalOpen(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3538,14 +3368,11 @@ func TestTea_HandleDetailModalKey_PickViaLauncher_DissolveLeavesModalOpen(t *tes
 	}
 }
 
-// TestTea_DetailModal_ResolvesOnlyOwnBlockersNotWholeBacklog verifies
-// opening a ticket detail modal costs exactly the DepsOf call needed for
-// that one ticket's own Blocked-by edge — not a DepsOf call per backlog
-// issue — so first-open latency no longer scales with backlog size (issue
-// #1744). Blocks resolves from the Fake's BlockersLister-backed BlocksOf
-// instead, which the Fake derives in-memory rather than issuing any
-// tracked call, mirroring the github/jira adapters' single native
-// "blocking" lookup.
+// TestTea_DetailModal_ResolvesOnlyOwnBlockersNotWholeBacklog verifies opening a
+// ticket detail modal costs exactly the one DepsOf call that ticket's own
+// Blocked-by edge needs, not one per backlog issue, so first-open latency no
+// longer scales with backlog size (issue #1744). Blocks resolves from the
+// Fake's in-memory BlocksOf instead, which issues no tracked call.
 func TestTea_DetailModal_ResolvesOnlyOwnBlockersNotWholeBacklog(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "7", Title: "waves core", State: forge.IssueOpen})
@@ -3587,7 +3414,7 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "the full ticket body")
 	sendKey(tm, "esc")
-	// Not the header's status line — see the same note on
+	// Not the header's status line; see the note on
 	// TestTea_EnterKey_OnBacklogSection_OpensDetailModal.
 	waitForOutput(t, tm, "[1] Backlog")
 
@@ -3597,14 +3424,10 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 	}
 
 	// "R"'s cache invalidation (DetailCacheInvalidatedMsg) applies
-	// synchronously in the same Update call the keypress triggers, ahead of
-	// the refreshCmd it also fires — so the very next "enter" is already
-	// guaranteed to see an empty cache with no wait needed in between. A
-	// waitForOutput here would be a red herring besides: the backlog
-	// content is unchanged by "R" (same one issue, same everything), and
-	// Bubble Tea's renderer only ever re-emits lines that actually changed
-	// since the last frame, so "fix the thing" never reappears as fresh
-	// bytes in the output stream to wait on.
+	// synchronously in the same Update call, ahead of the refreshCmd it also
+	// fires, so the next "enter" already sees an empty cache. A waitForOutput
+	// here would never return: "R" changes no backlog content, and Bubble Tea
+	// re-emits only lines that actually changed since the last frame.
 	sendKey(tm, "R")
 
 	sendKey(tm, "enter")
@@ -3620,13 +3443,10 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 }
 
 // TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost verifies reopening a
-// ticket detail after "R" re-resolves it with exactly one DepsOf call — not
-// zero (there is no whole-backlog graph left to stay "warm" the way issue
-// #1746 once meant to keep one warm across a refresh) and not a call per
-// backlog issue either — so a refresh never reintroduces the O(backlog)
-// cost issue #1744 removed, even though DetailCache was just cleared and
-// this open is a genuine re-fetch (issue #1744; refresh moved from "r" to
-// "R" in issue #1839).
+// ticket detail after "R" re-resolves it with exactly one DepsOf call: not zero
+// (no warm whole-backlog graph survives a refresh any more, issue #1746) and
+// not one per backlog issue, so a refresh never reintroduces the O(backlog)
+// cost issue #1744 removed ("r" became "R" in issue #1839).
 func TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "7", Title: "waves core", Body: "core body", State: forge.IssueOpen})
@@ -3639,7 +3459,7 @@ func TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost(t *testing.T) {
 	waitForOutput(t, tm, "core body")
 
 	sendKey(tm, "esc")
-	// Not the header's status line — see the same note on
+	// Not the header's status line; see the note on
 	// TestTea_EnterKey_OnBacklogSection_OpensDetailModal.
 	waitForOutput(t, tm, "[1] Backlog")
 	sendKey(tm, "R")
@@ -3656,10 +3476,9 @@ func TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_PickKey_FollowedByQuit_PicksThenQuits verifies "p" followed by
-// "q" still exits the program — the pick already landed on the keystroke
-// itself, so "q" must not be swallowed along with it (issue #785 review,
-// issue #1838).
+// TestTea_PickKey_FollowedByQuit_PicksThenQuits verifies "p" followed by "q"
+// still exits the program: the pick already landed on the keystroke itself, so
+// "q" must not be swallowed along with it (issue #785 review, issue #1838).
 func TestTea_PickKey_FollowedByQuit_PicksThenQuits(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3678,8 +3497,8 @@ func TestTea_PickKey_FollowedByQuit_PicksThenQuits(t *testing.T) {
 }
 
 // TestTea_PickKey_AlreadyPicked_NoDuplicateRow verifies picking an issue
-// that already has an active (non-terminal) row never appends a second one
-// — Queue's row-scan helpers (setState, tryMarkClaiming) assume at most one
+// that already has an active (non-terminal) row never appends a second one.
+// Queue's row-scan helpers (setState, tryMarkClaiming) assume at most one
 // non-terminal row per issue number; a duplicate leaves one row stuck at
 // PickQueued forever and can hang the drain loop (issue #785 review).
 func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
@@ -3690,11 +3509,10 @@ func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "p")
-	// "waiting 1" (the header's status line, always visible regardless of
-	// ActiveSection) proves the first pick landed before the second attempt
-	// below — checking the header rather than switching to the Running
-	// Section keeps the operator on Backlog, where Pick actually acts
-	// (issue #1500).
+	// "waiting 1" (the header's status line, visible regardless of
+	// ActiveSection) proves the first pick landed before the second attempt.
+	// Checking the header rather than switching to the Running Section keeps
+	// the operator on Backlog, where Pick acts (issue #1500).
 	waitForOutput(t, tm, "waiting 1")
 
 	sendKey(tm, "p")
@@ -3714,10 +3532,10 @@ func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
 }
 
 // TestTea_AlreadyActive_ReadsModelPicksOnly verifies alreadyActive consults
-// only Model.Picks, never the launcher's own private queue — Pick/Unpick/
-// TerminateAsync all land their snapshot on Model.Picks synchronously, in
-// the same Update cycle that fired the keypress, so the live-queue bypass
-// #837 introduced is no longer necessary (issue #1542).
+// only Model.Picks, never the launcher's own private queue. Pick, Unpick and
+// TerminateAsync all land their snapshot on Model.Picks synchronously, in the
+// same Update cycle that fired the keypress, so the live-queue bypass #837
+// introduced is no longer necessary (issue #1542).
 func TestTea_AlreadyActive_ReadsModelPicksOnly(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3728,7 +3546,7 @@ func TestTea_AlreadyActive_ReadsModelPicksOnly(t *testing.T) {
 	// Model.Picks shows #42 running...
 	tm.m.Picks = append(tm.m.Picks, Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	// ...while the private queue, not yet synced onto Model.Picks, shows it
-	// settled — alreadyActive must not see this.
+	// settled. alreadyActive must not see this.
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
 
 	if !tm.alreadyActive("42") {
@@ -3757,7 +3575,7 @@ func TestTea_AlreadyActive_ReadsModelPicksOnly(t *testing.T) {
 		tm := newTeaModel(f, t.TempDir(), launch)
 
 		// The private queue shows #42 running, but Model.Picks was never
-		// synced from it — alreadyActive must not reach past Model.Picks.
+		// synced from it. alreadyActive must not reach past Model.Picks.
 		launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 		if tm.alreadyActive("42") {
@@ -3767,9 +3585,9 @@ func TestTea_AlreadyActive_ReadsModelPicksOnly(t *testing.T) {
 }
 
 // TestTea_PickKey_FailedPromotion_SurvivesQueueResync verifies a raced/
-// closed/relabeled promotion's dissolved row stays on screen — the launcher's
-// own per-render Queue resync (syncQueue) must not silently wipe it just
-// because the failed pick never landed on the live Queue (issue #785 review).
+// closed or relabeled promotion's dissolved row stays on screen. The launcher's
+// per-render Queue resync (syncQueue) must not wipe it just because the failed
+// pick never landed on the live Queue (issue #785 review).
 func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3788,9 +3606,9 @@ func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 	waitForOutput(t, tm, "dissolved")
 
 	// Force a second render (a plain refresh, not a pick) to prove the
-	// dissolved row survives more than the one render right after the
-	// keypress — the launcher's own per-render Queue resync must not wipe
-	// it just because it never landed on the live Queue.
+	// dissolved row survives more than the render right after the keypress:
+	// the per-render Queue resync must not wipe it just because it never
+	// landed on the live Queue.
 	sendKey(tm, "r")
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -3802,11 +3620,10 @@ func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 }
 
 // TestTea_TerminateKey_NotLive_NeverArmsConfirm verifies "X" only arms a
-// confirm for a highlighted issue with an actual live Dispatch (ADR 0024,
-// AC2: "the highlighted live Dispatch") — a plain backlog row that was never
-// picked, or a pick that hasn't reached PickRunning yet, must not trigger
-// Terminate's full side effects (relabel, comment) on nothing (issue #785
-// review).
+// confirm for a highlighted issue with an actual live Dispatch (ADR 0024, AC2).
+// A plain backlog row that was never picked, or a pick that has not reached
+// PickRunning yet, must not trigger Terminate's side effects (relabel, comment)
+// on nothing (issue #785 review).
 func TestTea_TerminateKey_NotLive_NeverArmsConfirm(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3826,8 +3643,8 @@ func TestTea_TerminateKey_NotLive_NeverArmsConfirm(t *testing.T) {
 }
 
 // TestTea_TerminateKey_NilLauncher_NeverArmsConfirm verifies "X" is a no-op
-// in a launch-less session — there is no live Dispatch to reclaim, so no
-// confirm prompt should ever arm (issue #785 review).
+// in a launch-less session: there is no live Dispatch to reclaim, so no confirm
+// prompt should ever arm (issue #785 review).
 func TestTea_TerminateKey_NilLauncher_NeverArmsConfirm(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3846,10 +3663,10 @@ func TestTea_TerminateKey_NilLauncher_NeverArmsConfirm(t *testing.T) {
 }
 
 // TestTea_PickKey_TriggersAutoRefresh_NoExplicitRefreshKey verifies a pick's
-// promotion — the session's own tracker write — fires the same
-// signalRefresh auto-refresh every other write triggers (#647 AC4), so a
-// late-arriving issue surfaces without the operator pressing "r" (issue
-// #785 review: "a claim attempt is always a tracker write, win or lose").
+// promotion, the session's own tracker write, fires the same signalRefresh
+// auto-refresh every other write triggers (#647 AC4), so a late-arriving issue
+// surfaces without the operator pressing "r". A claim attempt is always a
+// tracker write, win or lose (issue #785 review).
 func TestTea_PickKey_TriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3862,21 +3679,19 @@ func TestTea_PickKey_TriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "99", Title: "late arrival", State: forge.IssueOpen})
 	sendKey(tm, "p")
 	waitForOutput(t, tm, "late arrival")
-	// Wait for the pick's fake Dispatch to actually finish (LiveIssues()
-	// empty) before "q", guarding the live-dispatch quit-confirm race (issue
-	// #822) — without it "q" can race the still-live pick onto the confirm
-	// and hang until teatest's timeout.
+	// Wait for the pick's fake Dispatch to finish before "q", guarding the
+	// live-dispatch quit-confirm race (issue #822): without it "q" races the
+	// still-live pick onto the confirm and hangs until teatest's timeout.
 	waitForDrain(t, launch)
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 }
 
-// TestTea_PickKey_FailedPromotion_StillTriggersAutoRefresh verifies a raced/
-// closed/relabeled pick still fires signalRefresh — "a claim attempt is
-// always a tracker write, win or lose" (issue #785 review) — even though,
-// unlike a successful pick, it never reaches tryLaunch's own drain-side
-// signal.
+// TestTea_PickKey_FailedPromotion_StillTriggersAutoRefresh verifies a raced,
+// closed or relabeled pick still fires signalRefresh, because a claim attempt
+// is always a tracker write, win or lose (issue #785 review), even though it
+// never reaches tryLaunch's own drain-side signal.
 func TestTea_PickKey_FailedPromotion_StillTriggersAutoRefresh(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3918,8 +3733,8 @@ func TestTea_UnpickKey_RemovesQueuedHighlighted(t *testing.T) {
 
 // TestTea_DetailModalKey_UnpicksDisplayedIssueAndCloses verifies "u" inside
 // the ticket detail modal drops the modal's own displayed issue's
-// queued-but-unlaunched pick and closes the modal — the modal's analogue of
-// the Backlog's own "u" (issue #1836).
+// queued-but-unlaunched pick and closes the modal, the modal's analogue of the
+// Backlog's own "u" (issue #1836).
 func TestTea_DetailModalKey_UnpicksDisplayedIssueAndCloses(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3948,10 +3763,10 @@ func TestTea_DetailModalKey_UnpicksDisplayedIssueAndCloses(t *testing.T) {
 }
 
 // TestTea_DetailModalKey_UnpickNoQueuedPick_NoOpAndModalStaysOpen verifies
-// "u" on a modal whose displayed issue has never been picked is a safe
-// no-op — it neither errors nor closes the modal — mirroring Launcher.
-// Unpick/Queue.Remove's own no-op contract for a number that never queued
-// (issue #1836).
+// "u" on a modal whose displayed issue has never been picked is a safe no-op:
+// it neither errors nor closes the modal, mirroring Launcher.Unpick and
+// Queue.Remove's own no-op contract for a number that never queued (issue
+// #1836).
 func TestTea_DetailModalKey_UnpickNoQueuedPick_NoOpAndModalStaysOpen(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3971,12 +3786,10 @@ func TestTea_DetailModalKey_UnpickNoQueuedPick_NoOpAndModalStaysOpen(t *testing.
 }
 
 // TestTea_DetailModalKey_UnpickAlreadyRunning_NoOpAndModalStaysOpen verifies
-// "u" on a modal whose displayed issue has already been claimed/launched
-// (PickRunning, past PickQueued/PickHeld) is a no-op — Launcher.Unpick/
-// Queue.Remove refuse to drop anything but a still-queued/held row, so the
-// row survives and hasPickNumber's before/after comparison correctly sees no
-// removal, distinct from TestTea_DetailModalKey_UnpickNoQueuedPick_
-// NoOpAndModalStaysOpen's "never picked at all" case (issue #1836 review).
+// "u" on a modal whose displayed issue has already been claimed (PickRunning)
+// is a no-op: Launcher.Unpick and Queue.Remove refuse to drop anything but a
+// still-queued or held row, so the row survives, distinct from the "never
+// picked at all" case above (issue #1836 review).
 func TestTea_DetailModalKey_UnpickAlreadyRunning_NoOpAndModalStaysOpen(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3996,10 +3809,10 @@ func TestTea_DetailModalKey_UnpickAlreadyRunning_NoOpAndModalStaysOpen(t *testin
 	}
 }
 
-// TestTea_DetailModalKey_BulkPickAllStaysUnbound verifies "P" — the
-// Backlog's own bulk pick-all-ready key — does nothing inside the ticket
-// detail modal: a single-issue view has no "all" to bulk-pick (issue #1836
-// AC), so the modal simply has no "P" binding of its own.
+// TestTea_DetailModalKey_BulkPickAllStaysUnbound verifies "P", the Backlog's
+// bulk pick-all-ready key, does nothing inside the ticket detail modal: a
+// single-issue view has no "all" to bulk-pick (issue #1836 AC), so the modal
+// has no "P" binding of its own.
 func TestTea_DetailModalKey_BulkPickAllStaysUnbound(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -4020,9 +3833,9 @@ func TestTea_DetailModalKey_BulkPickAllStaysUnbound(t *testing.T) {
 }
 
 // TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue verifies "P" picks
-// every currently-Dispatchable issue in one bulk gesture (#647 AC3) rather
-// than requiring one "p" per row — a standalone key, not a trailing "a"
-// after "p" (issue #1838 replaced that leader chord).
+// every currently-Dispatchable issue in one bulk gesture (#647 AC3) rather than
+// requiring one "p" per row. It is a standalone key, not a trailing "a" after
+// "p" (issue #1838 replaced that leader chord).
 func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
@@ -4034,16 +3847,10 @@ func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 
 	sendKey(tm, "P")
 	// Both picks race the fake Dispatch to completion behind the default cap
-	// of 1; waitForDrain below is what guards "q" against racing the quit
-	// confirm (issue #822). The render wait stays because fm.m.Picks — the
-	// Model's own copy of the queue — syncs via an async QueueSnapshotMsg
-	// independent of the launcher's own queue, so waitForDrain alone doesn't
-	// prove the Model's own copy has converged to what this test asserts
-	// below; waiting for the render is the only signal, through teatest's
-	// API, of that convergence. waitForDrain is still called right after it
-	// to satisfy #3069's AC5 real-drain-before-quit requirement, structurally
-	// parallel to this file's other pick sites, even though it's usually
-	// already true by the time the render wait returns.
+	// of 1, and waitForDrain guards "q" against racing the quit confirm
+	// (issue #822). The render wait stays because fm.m.Picks syncs via an
+	// async QueueSnapshotMsg independent of the launcher's queue, so
+	// waitForDrain alone never proves the Model's copy converged (#3069 AC5).
 	waitForOutput(t, tm, "settled 2")
 	waitForDrain(t, launch)
 	sendKey(tm, "q")
@@ -4060,30 +3867,28 @@ func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 }
 
 // TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain verifies "+"
-// launches a held/queued pick immediately even when no drain is currently
-// active to catch the Limiter's Grown signal (ADR 0023: "raising launches a
-// held pick immediately") — a session that never called tryLaunch (no prior
-// pick, no poll tick yet) must not leave a queued pick stranded until one
-// finally does (issue #785 review).
+// launches a held or queued pick immediately even when no drain is active to
+// catch the Limiter's Grown signal (ADR 0023). A session that never called
+// tryLaunch must not leave a queued pick stranded until one finally does
+// (issue #785 review).
 func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
 	launch := newTestLauncher(t, f)
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
-	// No tryLaunch call yet — no drain is active to observe Resize's Grown
+	// No tryLaunch call yet, so no drain is active to observe Resize's Grown
 	// signal.
 
 	tm := newTeaModel(f, t.TempDir(), launch)
-	// tryLaunch runs synchronously inside the "+" case, not via the
-	// returned Cmd, so discarding both return values here still exercises
-	// it — a future move of that call into the Cmd would leave the pick
-	// stranded at PickQueued below and this test would go red, not pass
-	// silently.
+	// tryLaunch runs synchronously inside the "+" case, not via the returned
+	// Cmd, so discarding both return values still exercises it. Moving that
+	// call into the Cmd would strand the pick at PickQueued below and turn
+	// this test red rather than letting it pass silently.
 	tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("+")})
 
 	// launch.Wait() joins the drain goroutine the fallback tryLaunch call
 	// spawns, so this blocks on the real launch instead of a rendered frame
-	// under a stopwatch (issue #1327) — no teatest, no wall-clock timeout.
+	// under a stopwatch (issue #1327): no teatest, no wall-clock timeout.
 	launch.Wait()
 
 	snap := launch.queue.Snapshot()
@@ -4112,10 +3917,9 @@ func TestTea_ResizeKeys_RaiseAndLowerLiveCap(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_RebuildKey_NotStale_NeverRunsRebuildFn verifies "b" is a no-op
-// while the image is fresh — the trigger is a stale image (both the AC and
-// the help text say "rebuild the stale image"), not a bare keypress (issue
-// #785 review).
+// TestTea_RebuildKey_NotStale_NeverRunsRebuildFn verifies "b" is a no-op while
+// the image is fresh: the trigger is a stale image (both the AC and the help
+// text say "rebuild the stale image"), not a bare keypress (issue #785 review).
 func TestTea_RebuildKey_NotStale_NeverRunsRebuildFn(t *testing.T) {
 	f := forge.NewFake()
 	rebuilt := make(chan struct{}, 1)
@@ -4165,9 +3969,9 @@ func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
 			return "", "", nil
 		},
 	}
-	// It carries an open blocker so the post-rebuild re-drain (Rebuild
-	// calls tryLaunch again on success) holds it instead of actually
-	// launching a Box — this Launcher has no Factory to run one.
+	// It carries an open blocker so the post-rebuild re-drain (Rebuild calls
+	// tryLaunch again on success) holds it instead of launching a Box: this
+	// Launcher has no Factory to run one.
 	queueStalePick(t, launch, f)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
@@ -4221,7 +4025,7 @@ func TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch(t *testing.
 
 // TestTea_TerminateKey_ConfirmPrompt_HintsQuitKeys verifies the live confirm
 // prompt itself hints that q/ctrl+c decline and quit, not just the "?" help
-// overlay — discoverability gap flagged by #748 review (issue #1095).
+// overlay: a discoverability gap flagged by #748 review (issue #1095).
 func TestTea_TerminateKey_ConfirmPrompt_HintsQuitKeys(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
 
@@ -4239,7 +4043,7 @@ func TestTea_TerminateKey_ConfirmPrompt_HintsQuitKeys(t *testing.T) {
 }
 
 // TestTea_TerminateKey_ConfirmThenCapitalY_Confirms verifies the confirm
-// prompt accepts "Y" as well as "y" — the "[y/N]" prompt reads as
+// prompt accepts "Y" as well as "y": the "[y/N]" prompt reads as
 // case-insensitive to an operator (issue #785 review).
 func TestTea_TerminateKey_ConfirmThenCapitalY_Confirms(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
@@ -4263,11 +4067,10 @@ func TestTea_TerminateKey_ConfirmThenCapitalY_Confirms(t *testing.T) {
 }
 
 // TestTea_TerminateKey_InRunningSection_TargetsHighlighted verifies "X"
-// resolves the Running Section's own highlighted row — switching Sections
-// resets Cursor to 0 (issue #1500), so a cursor move within the Running
-// Section after the switch must target the row it actually highlights
-// there, not carry over any position from the Backlog Section (issue #997,
-// generalized from FocusedColumn to ActiveSection by issue #1500).
+// resolves the Running Section's own highlighted row. Switching Sections resets
+// Cursor to 0 (issue #1500), so a cursor move after the switch must target the
+// row it actually highlights there, not carry over a position from the Backlog
+// Section (issue #997, generalized from FocusedColumn to ActiveSection).
 func TestTea_TerminateKey_InRunningSection_TargetsHighlighted(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 	fc.SetIssue(forge.Issue{Number: "43", Title: "also running", Labels: []string{"agent-in-progress"}})
@@ -4298,7 +4101,7 @@ func TestTea_TerminateKey_InRunningSection_TargetsHighlighted(t *testing.T) {
 }
 
 // TestTea_TerminateKey_ConfirmThenOther_Declines verifies any key other than
-// "y" at the confirm prompt declines the terminate — the running Dispatch is
+// "y" at the confirm prompt declines the terminate: the running Dispatch is
 // left untouched (ADR 0024, issue #785).
 func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
@@ -4312,9 +4115,9 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	sendKey(tm, "n")
 	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
 
-	// The Dispatch is still live after declining, so "q" now arms the
-	// quit confirm (issue #822) instead of exiting immediately — drain to
-	// finish the test.
+	// The Dispatch is still live after declining, so "q" now arms the quit
+	// confirm (issue #822) instead of exiting immediately; drain to finish
+	// the test.
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
@@ -4329,13 +4132,11 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	}
 }
 
-// TestTea_TerminateKey_ConfirmThenQuit_ArmsQuitConfirm verifies the
-// universal quit keystroke at the terminate-confirm prompt is not swallowed
-// by the pending terminate, but also does not quit outright: "q" declines
-// the terminate and arms the same drain/terminate-all/stay confirm the main
-// quit key uses, since a terminate-confirm prompt guarantees a live
-// Dispatch (issue #1215, ADR 0023). Driving "d" (drain) finishes the
-// scenario without killing anything.
+// TestTea_TerminateKey_ConfirmThenQuit_ArmsQuitConfirm verifies the universal
+// quit keystroke at the terminate-confirm prompt is neither swallowed by the
+// pending terminate nor quits outright: "q" declines the terminate and arms the
+// same drain/terminate-all/stay confirm the main quit key uses, since a
+// terminate-confirm prompt guarantees a live Dispatch (issue #1215, ADR 0023).
 func TestTea_TerminateKey_ConfirmThenQuit_ArmsQuitConfirm(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 
@@ -4399,7 +4200,7 @@ func TestTea_TerminateKey_ConfirmThenQuit_Stay_KeepsRunning(t *testing.T) {
 	sendKey(tm, "s")
 	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
 
-	// Still live after staying — drain to finish the test cleanly.
+	// Still live after staying; drain to finish the test cleanly.
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
@@ -4414,19 +4215,11 @@ func TestTea_TerminateKey_ConfirmThenQuit_Stay_KeepsRunning(t *testing.T) {
 	}
 }
 
-// TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks
-// verifies handleTerminateConfirmKey's "y" branch — the Update-path call
-// site itself, driven by a real keypress through teatest, not a bare method
-// call — returns before Launcher.TerminateAsync's backgrounded Terminate
-// call finishes its tracker.Comment I/O (issue #745). A blockingCommentTracker
-// wired under newTeaModel holds Comment open on an unblock channel; while it
-// is still blocked, the confirm prompt must already be gone and the backlog
-// view back (proving Update returned) and the queue pick must still read
-// PickRunning (proving Terminate itself, which only sets PickTerminated
-// after Comment returns, has not reached that line yet) — asserting the
-// Update path never blocked, not just that the terminate eventually
-// completes, which TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch
-// already covers with a non-blocking tracker (issue #1084).
+// TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks pins
+// that handleTerminateConfirmKey's "y" branch returns before TerminateAsync's
+// backgrounded Terminate finishes its tracker.Comment I/O (issue #745). A
+// blockingCommentTracker holds Comment open, so while it blocks the prompt must
+// be gone and the queue pick must still read PickRunning (issue #1084).
 func TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 	bt := &blockingCommentTracker{IssueTracker: fc, unblock: make(chan struct{})}
@@ -4440,13 +4233,13 @@ func TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks(t *te
 	sendKey(tm, "y")
 	// If handleTerminateConfirmKey ever called Terminate synchronously
 	// instead of TerminateAsync, Update itself would block here on
-	// bt.unblock (still closed below) and this render would never arrive —
+	// bt.unblock (still closed below) and this render would never arrive;
 	// waitForOutput would hang until teatestTimeout and fail the test.
 	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
 
-	// The background goroutine's own scheduling isn't ordered against this
-	// render, so poll rather than read commentHit once — a bounded wait
-	// still fails fast if Comment was never reached at all.
+	// The background goroutine's scheduling is not ordered against this
+	// render, so poll rather than read commentHit once; a bounded wait still
+	// fails fast if Comment was never reached at all.
 	deadline := time.Now().Add(2 * time.Second)
 	for atomic.LoadInt32(&bt.commentHit) == 0 {
 		if time.Now().After(deadline) {
@@ -4498,8 +4291,8 @@ func TestTea_TerminateConfirmKey_Quit_ClearsTerminateConfirmArmsQuitConfirm(t *t
 	}
 }
 
-// newAlphaBetaFake returns a Fake tracker with two open issues, "alpha"
-// labeled "a" and "beta" labeled "b" — shared fixture for filter tests.
+// newAlphaBetaFake returns a Fake tracker with two open issues, "alpha" labeled
+// "a" and "beta" labeled "b". The filter tests share it.
 func newAlphaBetaFake() *forge.Fake {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "alpha", State: forge.IssueOpen, Labels: []string{"a"}})
@@ -4507,11 +4300,10 @@ func newAlphaBetaFake() *forge.Fake {
 	return f
 }
 
-// queueStalePick queues a pick and drains it through tryLaunch — a queued
-// pick is what actually hits the stale gate in production (Rebuild's own doc
-// comment: "any pick held ... through the stale window") — tryLaunch is a
-// real no-op on an empty queue post-#754, so an empty-queue call here would
-// never reach freshnessChecker at all.
+// queueStalePick queues a pick and drains it through tryLaunch. A queued pick
+// is what hits the stale gate in production, and tryLaunch is a real no-op on
+// an empty queue after #754, so an empty-queue call here would never reach
+// freshnessChecker at all.
 func queueStalePick(t *testing.T, launch *Launcher, f forge.IssueTracker) {
 	t.Helper()
 	launch.queue.Add(Pick{Number: "1", Title: "placeholder", State: PickQueued})
@@ -4520,16 +4312,16 @@ func queueStalePick(t *testing.T, launch *Launcher, f forge.IssueTracker) {
 }
 
 // markStale sets launch.Fresh to report staleness with msg and runs
-// freshnessChecker() once to apply it synchronously — no queue, no
-// goroutine, no Wait().
+// freshnessChecker() once to apply it synchronously: no queue, no goroutine,
+// no Wait().
 func markStale(launch *Launcher, msg string) {
 	launch.Fresh = func() (bool, bool, string) { return true, false, msg }
 	launch.freshnessChecker()()
 }
 
 // newTestLauncher builds a Launcher wired to a runner.Fake Box and a
-// settle.Fake — enough plumbing to prove a queued issue runs a real (fake)
-// Box and settles.
+// settle.Fake: enough plumbing to prove a queued issue runs a real (fake) Box
+// and settles.
 func newTestLauncher(t *testing.T, cf forge.CodeForge) *Launcher {
 	t.Helper()
 	dir := t.TempDir()
@@ -4547,22 +4339,18 @@ func newTestLauncher(t *testing.T, cf forge.CodeForge) *Launcher {
 	t.Cleanup(factory.Cleanup)
 	launch := &Launcher{CodeForge: cf, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
 	// Cleanup runs LIFO, so this drains any in-flight background dispatch
-	// before factory.Cleanup releases its resources — an un-joined drain
-	// goroutine otherwise keeps running (and printing) after the test that
-	// spawned it returns, stealing scheduler time from whatever teatest-based
-	// test runs next and risking its own tight WithDuration deadline.
+	// before factory.Cleanup releases its resources. An un-joined drain
+	// goroutine otherwise keeps running after the test that spawned it
+	// returns, stealing scheduler time from the next teatest-based test.
 	t.Cleanup(launch.Wait)
 	return launch
 }
 
 // TestTea_Update_ReusesHeartbeatCacheAcrossCalls verifies the tea layer's
-// heartbeat cache survives across repeated Update calls on the same session
-// (issue #731) — not just within one syncQueue call — by proving a second
-// Update, given an on-disk log rewritten to different content but pinned
-// back to the same size/mtime, still reports the first call's line rather
-// than a reparse of the new content. teaModel.Update takes a value receiver,
-// so this also proves the cache lives behind a pointer field rather than
-// being silently reallocated (and thus reset) on every copy.
+// heartbeat cache survives repeated Update calls on the same session (issue
+// #731), not just one syncQueue call: a second Update, given a log rewritten to
+// different content but pinned to the same size and mtime, still reports the
+// first line. teaModel.Update takes a value receiver, so the cache is a pointer.
 func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -4585,11 +4373,10 @@ func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	tm := newTeaModel(f, dir, launch)
-	// Model.Picks is the sole source refreshPickDecorations decorates —
-	// unlike the old per-Update syncQueue pull, it is never repopulated
-	// from the launcher's private queue except through Init's one-time
-	// bootstrap or a pushed transition, neither of which this direct
-	// tm.Update call triggers (issue #1542).
+	// Model.Picks is the sole source refreshPickDecorations decorates. Unlike
+	// the old per-Update syncQueue pull, it is never repopulated from the
+	// launcher's private queue except through Init's one-time bootstrap or a
+	// pushed transition, neither of which this tm.Update call fires (#1542).
 	tm.m.Picks = append(tm.m.Picks, Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	model, _ := tm.Update(struct{}{})
 	tm = model.(teaModel)
@@ -4621,7 +4408,7 @@ func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 // refreshPickDecorations re-reads and re-renders the Transcript while
 // ShowTranscript is active on a running Dispatch's open sidebar, driven by
 // the same per-Update refresh path the #1735 tick already exercises for the
-// Activity feed — the open-time-snapshot bug issue #1736 fixes.
+// Activity feed. It is the open-time-snapshot bug issue #1736 fixes.
 func TestTea_Update_RefreshesOpenTranscriptView_WhenPassLogGrows(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -4659,9 +4446,9 @@ func TestTea_Update_RefreshesOpenTranscriptView_WhenPassLogGrows(t *testing.T) {
 
 // TestTea_Update_DoesNotRefreshTranscript_ForSettledSidebar verifies a
 // Settled Dispatch's open sidebar, with the Transcript view active, never
-// re-reads its pass logs even though they grow on disk afterward — a
-// Settled Dispatch has nothing left to tail, mirroring Activity's own scope
-// (#1502) and satisfying #1736 AC3 ("not needlessly re-read").
+// re-reads its pass logs even though they grow on disk afterward: a Settled
+// Dispatch has nothing left to tail, mirroring Activity's own scope (#1502)
+// and satisfying #1736 AC3 ("not needlessly re-read").
 func TestTea_Update_DoesNotRefreshTranscript_ForSettledSidebar(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -4706,13 +4493,10 @@ func TestTea_QuitKey_WithLiveDispatch_ArmsQuitConfirm(t *testing.T) {
 	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
-	// The first confirm is a fresh paint and asserts reliably; it pins this
-	// test's own concern — a live Dispatch renders the full drain/
-	// terminate-all/stay prompt. The stay-then-requit dance is covered
-	// deterministically off the renderer by
+	// The first confirm is a fresh paint and asserts reliably. The
+	// stay-then-requit dance is covered off the renderer by
 	// TestTea_QuitKey_Stay_DeclinesAndKeepsRunning, so it is not repeated
-	// here where the second confirm's frame-coalescing hang (issue #1664)
-	// lived. Drain to finish cleanly.
+	// here, where the second confirm's frame-coalescing hang lived (#1664).
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches", "drain", "terminate-all", "stay")
 
@@ -4735,9 +4519,8 @@ func TestTea_QuitKey_TerminateAll_ReapsEveryLiveDispatch(t *testing.T) {
 	sendKey(tm, "t")
 	waitFinished(t, tm)
 	// TerminateAsync's Kill runs in a background goroutine tracked by
-	// launch.wg — production's own Run waits on it the same way
-	// (tea.go's Run) after the program exits, before this can safely read
-	// fr.KillCalls.
+	// launch.wg. Production's Run waits on it the same way after the program
+	// exits, before this can safely read fr.KillCalls.
 	launch.Wait()
 
 	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
@@ -4745,20 +4528,11 @@ func TestTea_QuitKey_TerminateAll_ReapsEveryLiveDispatch(t *testing.T) {
 	}
 }
 
-// TestTea_QuitKey_Stay_DeclinesAndKeepsRunning verifies "s" at the quit
-// confirm cancels the quit, touching no live Dispatch and leaving the
-// session running (issue #651, ADR 0023, issue #822).
-//
-// Driven through handleKey directly rather than teatest: the quit-confirm
-// frame renders the backlog body beneath its prompt line, and tm.Output()
-// drains as it is read, so a q -> s -> q sequence painted under Bubble Tea's
-// frame-coalescing renderer can emit no fresh "quit with live Dispatches"
-// bytes for the second confirm — the darwin scheduler made that coalescing
-// reliable enough to hang the old teatest wait past 30s (issue #1664).
-// Asserting Mode on the returned model exercises the same arming
-// deterministically, off the renderer — the #1327 approach for this class of
-// hang. The seeded pick never leaves PickRunning here (no tryLaunch, no
-// dispatch), so no "settled" guard applies.
+// TestTea_QuitKey_Stay_DeclinesAndKeepsRunning verifies "s" at the quit confirm
+// cancels the quit, touching no live Dispatch and leaving the session running
+// (issue #651, ADR 0023, issue #822). Driven through handleKey: under Bubble
+// Tea's frame-coalescing renderer a q, s, q sequence can emit no fresh bytes
+// for the second confirm, which hung the old wait (issues #1664, #1327).
 func TestTea_QuitKey_Stay_DeclinesAndKeepsRunning(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 
@@ -4774,7 +4548,7 @@ func TestTea_QuitKey_Stay_DeclinesAndKeepsRunning(t *testing.T) {
 		t.Fatalf("Mode after s = %v, want ModeList (stay declines the quit)", tm.m.Mode)
 	}
 
-	// Still live after staying — the second quit re-arms the same confirm.
+	// Still live after staying, so the second quit re-arms the same confirm.
 	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if tm.m.Mode != ModeQuitConfirm {
 		t.Fatalf("Mode after second q = %v, want ModeQuitConfirm (Dispatch still live)", tm.m.Mode)
@@ -4824,9 +4598,8 @@ func TestTea_PickKeyThenQuit_WithLiveDispatch_ArmsQuitConfirm(t *testing.T) {
 
 // TestTea_Init_DetectsOrphanedIssuesWithoutAdopting verifies a sandbox still
 // running from a prior crashed session is flagged an orphan at startup but
-// never adopted through RecoverFn on its own — adoption is the operator's
-// explicit gesture now, not a startup sweep (issue #1619, demoted from
-// #651/#822's auto-adopt).
+// never adopted through RecoverFn on its own. Adoption is now the operator's
+// explicit gesture, not a startup sweep (issue #1619, demoted from #651/#822).
 func TestTea_Init_DetectsOrphanedIssuesWithoutAdopting(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -4878,10 +4651,9 @@ func TestTea_Init_DetectsOrphanedIssuesWithoutAdopting(t *testing.T) {
 
 // TestTea_EnterOnOrphanRow_OpensSidebarReadOnly verifies pressing Enter on a
 // Backlog row flagged as an orphan (issue #1619) opens the same live-tail
-// sidebar a session-launched Dispatch gets, loaded from that issue's local
-// pass logs, instead of picking the issue onto the operator's queue — and
-// that opening it never calls RecoverFn, since drill-in on an orphan row is
-// read-only end to end (issue #1621).
+// sidebar a session-launched Dispatch gets, loaded from that issue's local pass
+// logs, instead of picking the issue onto the queue, and never calls RecoverFn:
+// drill-in on an orphan row is read-only end to end (issue #1621).
 func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -4900,9 +4672,8 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 		t.Fatalf("driver.New: %v", err)
 	}
 	// RunningNames flags #42 as a locally-running orphan sandbox at startup
-	// detection (issue #1619) — a manually-seeded OrphanNums would just be
-	// overwritten by the real orphanDetectCmd Init() fires, same as any
-	// other startup detection result.
+	// detection (issue #1619). A manually-seeded OrphanNums would just be
+	// overwritten by the real orphanDetectCmd Init() fires.
 	fr := runner.NewFake()
 	fr.RunningNames = []string{"agent-issue-42"}
 	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
@@ -4930,8 +4701,8 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "hi")
 
-	// The toggle and close gestures are as much a part of the read-only
-	// drill-in as opening it — AC4 names all three explicitly.
+	// AC4 names opening, toggling and closing the read-only drill-in, so this
+	// asserts all three gestures, not just the open.
 	sendKey(tm, "t")
 	waitForOutput(t, tm, "transcript #42")
 	sendKey(tm, "x")
@@ -4953,10 +4724,9 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 }
 
 // TestTea_OrphanRow_ShowsLiveHeartbeat verifies a Backlog row flagged an
-// orphan (issue #1619) shows its box's live heartbeat, derived from its
-// on-disk pass log the same way a running Pick's queue row already does
-// (#647 AC2) — the operator can tell an orphan is still making progress
-// without drilling in (issue #1621).
+// orphan (issue #1619) shows its box's live heartbeat, derived from its on-disk
+// pass log the same way a running Pick's queue row already does (#647 AC2). The
+// operator can tell an orphan is making progress without drilling in (#1621).
 func TestTea_OrphanRow_ShowsLiveHeartbeat(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -4993,11 +4763,11 @@ func TestTea_OrphanRow_ShowsLiveHeartbeat(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_OrphanAdopted_ClearsOrphanHeartbeats verifies OrphanHeartbeats
-// drops a number the instant it stops being an orphan — an adopt succeeding
-// (or any other path that empties OrphanNums) must not leave a stale
-// heartbeat sitting in the map forever, even though view.go's IsOrphan gate
-// already keeps it from ever rendering (issue #1621 review finding).
+// TestTea_OrphanAdopted_ClearsOrphanHeartbeats verifies OrphanHeartbeats drops
+// a number the instant it stops being an orphan. An adopt succeeding, or any
+// other path that empties OrphanNums, must not leave a stale heartbeat in the
+// map, even though view.go's IsOrphan gate keeps it from rendering (issue #1621
+// review finding).
 func TestTea_OrphanAdopted_ClearsOrphanHeartbeats(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5038,12 +4808,10 @@ func TestTea_OrphanAdopted_ClearsOrphanHeartbeats(t *testing.T) {
 	}
 }
 
-// TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice verifies an
-// orphan row with no local pass log yet — e.g. a box the orphan-detected
-// sandbox hasn't written its first log line for, or one CI dispatched on a
-// remote runner and this host only ever sees as a running container —
-// opens the sidebar with a graceful explanatory message rather than a blank
-// pane or an error (issue #1621).
+// TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice verifies an orphan
+// row with no local pass log yet, such as a box that has not written its first
+// line or one CI dispatched on a remote runner, opens the sidebar with a
+// graceful explanatory message rather than a blank pane or an error (#1621).
 func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5052,8 +4820,8 @@ func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately no .spindrift/logs/issue-42.log -- the race/remote-dispatch case
-	// this test targets.
+	// Deliberately no .spindrift/logs/issue-42.log: the race and
+	// remote-dispatch case this test targets.
 
 	drv, err := driver.New("")
 	if err != nil {
@@ -5088,12 +4856,11 @@ func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
 	}
 }
 
-// TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive verifies a
-// "no local logs for this dispatch" Notice, shown while an orphan row's
-// sidebar is open on an issue with nothing on disk yet, clears the instant
-// the box's first log line lands and syncQueue's live tail picks it up —
-// the operator's stale-race window resolving itself must not leave the
-// notice covering up real content that has since arrived (issue #1621).
+// TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive verifies a "no
+// local logs for this dispatch" Notice, shown while an orphan row's sidebar is
+// open on an issue with nothing on disk yet, clears the instant the box's first
+// log line lands and syncQueue's live tail picks it up, so the notice never
+// covers real content that has since arrived (issue #1621).
 func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5102,8 +4869,8 @@ func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T)
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately no .spindrift/logs/issue-42.log yet -- the sidebar opens on the
-	// graceful-notice path this test then races against a real log write.
+	// Deliberately no .spindrift/logs/issue-42.log yet: the sidebar opens on
+	// the graceful-notice path, which this test races against a log write.
 
 	drv, err := driver.New("")
 	if err != nil {
@@ -5147,9 +4914,9 @@ func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T)
 
 // TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth verifies closing and
 // reopening an orphan row's sidebar re-runs the whole load, picking up
-// Transcript growth the live Activity feed alone wouldn't — the same
-// reopen-to-refresh contract a session-launched Dispatch's sidebar already
-// has (issue #719, inherited), extended to orphan rows (issue #1621).
+// Transcript growth the live Activity feed alone would not: the same
+// reopen-to-refresh contract a session-launched Dispatch's sidebar already has
+// (issue #719), extended to orphan rows (issue #1621).
 func TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5188,9 +4955,9 @@ func TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth(t *testing.T) {
 	sendKey(tm, "x")
 	waitForOutput(t, tm, "fix the thing")
 
-	// Grown while the sidebar was closed -- a Transcript-only load's own
-	// #719 case, not the live Activity feed (which only advances while the
-	// sidebar stays open).
+	// Grown while the sidebar was closed: a Transcript-only load's own #719
+	// case, not the live Activity feed, which advances only while the sidebar
+	// stays open.
 	grown := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second pass"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(grown), 0o644); err != nil {
 		t.Fatal(err)
@@ -5204,10 +4971,10 @@ func TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth(t *testing.T) {
 }
 
 // TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed verifies an orphan
-// row's open sidebar advances on its own as its box's on-disk pass log
-// grows, with no operator keypress — the same live-tail payoff a
-// session-launched running Dispatch's sidebar already gets (issue #1502),
-// now extended to a box this session never launched (issue #1621).
+// row's open sidebar advances on its own as its box's on-disk pass log grows,
+// with no operator keypress: the same live-tail payoff a session-launched
+// running Dispatch's sidebar already gets (issue #1502), extended to a box this
+// session never launched (issue #1621).
 func TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5288,11 +5055,10 @@ func TestOrphanDetectCmd_ReturnsDetectedNumbers(t *testing.T) {
 }
 
 // TestOrphanDetectCmd_OrphanedIssuesErr_ReportsNoOrphans verifies a failed
-// OrphanedIssues() lookup at startup degrades to "no orphans detected"
-// rather than surfacing a failure banner — startup detection is best-effort
-// and silent on its own failure, mirroring DogfoodNotice's read-error
-// fallback, since #1619 retired the only startup warning ("orphan recovery
-// failed") this lookup used to feed.
+// OrphanedIssues() lookup at startup degrades to "no orphans detected" rather
+// than surfacing a failure banner: startup detection is best-effort and silent
+// on its own failure, since #1619 retired the only startup warning ("orphan
+// recovery failed") this lookup used to feed.
 func TestOrphanDetectCmd_OrphanedIssuesErr_ReportsNoOrphans(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -5358,12 +5124,11 @@ func TestTea_AdoptOrphanKey_NoOpenPR_SurfacesReasonWithNoAdoption(t *testing.T) 
 	waitFinished(t, tm)
 }
 
-// slowOrphanDetectRunner wraps runner.Fake so ListRunning sleeps delay
-// before delegating — making the Init-time race between orphanDetectCmd
-// (tea.go) and the issue list's own render deterministic instead of
-// scheduling luck (issue #3118). orphanDetectCmd is the only Init Cmd that
-// calls ListRunning, so delaying it alone is enough to guarantee the issue
-// title renders first.
+// slowOrphanDetectRunner wraps runner.Fake so ListRunning sleeps delay before
+// delegating, making the Init-time race between orphanDetectCmd and the issue
+// list's own render deterministic instead of scheduling luck (issue #3118).
+// orphanDetectCmd is the only Init Cmd that calls ListRunning, so delaying it
+// alone guarantees the issue title renders first.
 type slowOrphanDetectRunner struct {
 	*runner.Fake
 	delay time.Duration
@@ -5375,14 +5140,10 @@ func (r *slowOrphanDetectRunner) ListRunning() ([]string, error) {
 }
 
 // TestTea_AdoptOrphanKey_LateOrphanDetection_StillSurfacesReason pins issue
-// #3118's fix: a slow ListRunning forces orphan detection's Init Cmd to
-// lose its race against the issue list's own load, so the row's title
-// renders well before OrphanDetectedMsg sets the orphan flag. Waiting for
-// waitForOrphanRow's "[orphan" prefix, not just the title, before pressing
-// "A" means the press still lands after the flag — the reason still
-// surfaces. Without that wait the "A" binding (keymap_session.go) no-ops
-// silently on a row not yet flagged an orphan, and nothing re-presses it,
-// so the banner would never appear.
+// #3118's fix: a slow ListRunning makes orphan detection's Init Cmd lose its
+// race against the issue list's load, so the title renders well before
+// OrphanDetectedMsg sets the orphan flag. Waiting on waitForOrphanRow's
+// "[orphan" prefix keeps the "A" press after the flag, so the reason surfaces.
 func TestTea_AdoptOrphanKey_LateOrphanDetection_StillSurfacesReason(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5421,10 +5182,10 @@ func TestTea_AdoptOrphanKey_LateOrphanDetection_StillSurfacesReason(t *testing.T
 }
 
 // TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt verifies a
-// successful adopt clears the row's orphan flag, so a second "A" press on
-// the same, now-adopted row never fires RecoverFn again — a repeat press
-// would otherwise race a second same-process settle over the PR the first
-// adopt already claimed (issue #1619 review finding).
+// successful adopt clears the row's orphan flag, so a second "A" press on the
+// same, now-adopted row never fires RecoverFn again. A repeat press would
+// otherwise race a second same-process settle over the PR the first adopt
+// already claimed (issue #1619 review finding).
 func TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5460,9 +5221,9 @@ func TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt(t *testing.T
 	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "A")
-	// Poll t's own final orphan flag via a short settle window instead of a
-	// rendered signal — a successful adopt renders no banner of its own
-	// (the whole point being "changes nothing" beyond clearing the flag).
+	// Poll via a short settle window instead of a rendered signal: a
+	// successful adopt renders no banner of its own, changing nothing beyond
+	// clearing the flag.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) && atomic.LoadInt32(&calls) == 0 {
 		time.Sleep(10 * time.Millisecond)
@@ -5485,14 +5246,10 @@ func TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt(t *testing.T
 }
 
 // TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice verifies a
-// second "A" press on the same orphan-flagged row, sent while the first
-// adopt's RecoverFn call is still in flight (before OrphanAdoptedMsg has had
-// a chance to clear the orphan flag), never fires a second RecoverFn call —
-// two concurrent RecoverFn calls for the same issue would race two
-// SettleAdopted goroutines over the same PR, the exact same-process
-// merge-authority race #1619 exists to prevent (review finding: the flag
-// only clears once RecoverFn returns, leaving the in-flight window itself
-// unguarded).
+// second "A" press sent while the first adopt's RecoverFn call is still in
+// flight, before OrphanAdoptedMsg can clear the orphan flag, never fires a
+// second RecoverFn call: two concurrent calls for the same issue would race two
+// SettleAdopted goroutines over one PR, the race #1619 exists to prevent.
 func TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5539,7 +5296,7 @@ func TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice(t *testing.
 	}
 
 	// The first adopt is now blocked inside RecoverFn, well before
-	// OrphanAdoptedMsg could have landed to clear the orphan flag — exactly
+	// OrphanAdoptedMsg could have landed to clear the orphan flag: exactly
 	// the in-flight window a second press must not slip through.
 	sendKey(tm, "A")
 	time.Sleep(200 * time.Millisecond)
@@ -5557,7 +5314,7 @@ func TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice(t *testing.
 }
 
 // TestTea_AdoptOrphanKey_NonOrphanRow_NoAdopt verifies "A" on a highlighted
-// Backlog row that was never flagged an orphan is a no-op — the gesture is
+// Backlog row that was never flagged an orphan is a no-op: the gesture is
 // scoped to orphan-flagged rows only (issue #1619).
 func TestTea_AdoptOrphanKey_NonOrphanRow_NoAdopt(t *testing.T) {
 	f := forge.NewFake()
@@ -5604,10 +5361,9 @@ func TestTea_AdoptOrphanKey_NonOrphanRow_NoAdopt(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt verifies "A" is
-// scoped to the Backlog Section — pressed while a work Section is active,
-// it must never adopt, even if the active Section happens to show the same
-// issue number as a Pick (issue #1619).
+// TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt verifies "A" is scoped
+// to the Backlog Section: pressed while a work Section is active it must never
+// adopt, even if that Section shows the same issue number as a Pick (#1619).
 func TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5641,9 +5397,9 @@ func TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	// waitForOrphanRow, not just the title: without it the orphan flag may
-	// not have landed yet, and the assertion below would pass vacuously —
-	// "A" is scoped to orphan-flagged rows, so a never-flagged row is
-	// already a no-op regardless of SectionBacklog (issue #3118).
+	// not have landed and the assertion below would pass vacuously, since
+	// "A" already no-ops on a never-flagged row regardless of the active
+	// Section (issue #3118).
 	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "2") // SectionRunning
@@ -5660,9 +5416,9 @@ func TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt(t *testing.T) {
 }
 
 // TestTea_Init_OrphanedIssuesErr_NeverWarnsAtStartup verifies a failed
-// OrphanedIssues() lookup at startup degrades silently — no "orphan
-// recovery failed" banner, since startup never adopts (and so never fails
-// to adopt) on its own anymore (issue #1619).
+// OrphanedIssues() lookup at startup degrades silently, with no "orphan
+// recovery failed" banner, since startup never adopts and so never fails to
+// adopt on its own anymore (issue #1619).
 func TestTea_Init_OrphanedIssuesErr_NeverWarnsAtStartup(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -5704,17 +5460,10 @@ func TestTea_Init_OrphanedIssuesErr_NeverWarnsAtStartup(t *testing.T) {
 }
 
 // TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth verifies backlog and
-// queue titles full of wide CJK characters render within the terminal's
-// actual display width through the full Bubble Tea render path, not just
-// rune count — a rune-count-only clip truncates by counting runes instead of
-// columns, so a mostly-wide-character row can survive truncation still
-// twice as wide as the column budget it was meant to enforce (issue #859
-// AC4/AC6). Both columns carry a wide title so a fix that only tightens one
-// side can't hide behind the other's slack. Table cases extend coverage
-// beyond CJK to emoji, zero-width combining marks, and ANSI-escaped content
-// (issue #1261) — each character type has a different display-width
-// calculation, so a fix that's correct for one can still be wrong for
-// another.
+// queue titles full of wide characters render within the terminal's display
+// width through the full Bubble Tea render path, not just rune count: a
+// rune-counting clip can leave a row twice as wide as its budget (issue #859
+// AC4/AC6). Cases cover CJK, emoji, combining marks and ANSI (issue #1261).
 func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
 	// Pinned to a color-capable terminal: the header is styled (ADR 0031)
 	// and the width check below must hold with those ANSI codes in play,
@@ -5733,13 +5482,11 @@ func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
 			queueTitle:   strings.Repeat("文", 40),
 		},
 		{
-			// U+FE0F is an emoji variation selector: it's zero-width
-			// itself and go-runewidth's current width table already
-			// keeps rocket/sparkles at a constant width with or without
-			// it, so this fixture doesn't prove VS16-conditional width
-			// -- it pins that a title carrying the codepoint still
-			// renders and clips like plain emoji, per AC's "including
-			// emoji variation selectors" requirement.
+			// U+FE0F is an emoji variation selector: it is zero-width
+			// and go-runewidth already keeps rocket and sparkles at a
+			// constant width with or without it, so this fixture does
+			// not prove VS16-conditional width. It pins that a title
+			// carrying the codepoint still clips like plain emoji.
 			name:         "emoji with variation selector",
 			backlogTitle: strings.Repeat("\U0001F680\ufe0f", 40), // rocket + U+FE0F emoji variation selector
 			queueTitle:   strings.Repeat("\u2728\ufe0f", 40),     // sparkles + U+FE0F emoji variation selector
@@ -5777,22 +5524,11 @@ func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
 			sendKey(tm, "q")
 			final := tm.FinalModel(t, teatest.WithFinalTimeout(teatestTimeout)).(teaModel)
 
-			// #859's AC called for "golden output reflects correct clipping
-			// at visual column boundaries" — read literally that implies a
-			// golden-file snapshot, but this package has no golden-file
-			// tooling at all, and none of its other clip tests use one
-			// either (view_test.go's TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount
-			// uses this same width idiom, just against its own budget). The
-			// per-line display-width check below, run against real Bubble
-			// Tea render output, IS this package's established verification
-			// for "correct clipping at visual column boundaries": it fails
-			// exactly when a line spills past the column budget, which is
-			// what a golden diff would also catch here, without requiring
-			// fixture upkeep for a rendering surface this volatile (issue
-			// #1260). Only one Section renders at a time (ADR 0030), so the
-			// backlog and Running Section renders are checked separately —
-			// each still has to fit the terminal, but neither has to fit
-			// alongside the other's row anymore (issue #1500).
+			// #859's AC asked for golden output, but this package has no
+			// golden-file tooling; the per-line display-width check below,
+			// against real Bubble Tea output, fails exactly where a golden
+			// diff would (issue #1260). Only one Section renders at a time
+			// (ADR 0030), so the two are checked separately (issue #1500).
 			backlogOut := View(Update(final.m, SectionJumpMsg{Section: SectionBacklog}))
 			runningOut := View(Update(final.m, SectionJumpMsg{Section: SectionRunning}))
 			// lipgloss.Width, not runewidth.StringWidth: a styled header

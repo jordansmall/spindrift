@@ -11,10 +11,8 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// mustRunGit runs git in dir and fails the test on error, folding stderr
-// into the failure message -- the same shape bootstrap_test.go's own
-// mustRunGit uses, kept local here rather than shared since the two test
-// files live in different packages.
+// mustRunGit repeats bootstrap_test.go's helper of the same name because the
+// two test files live in different packages.
 func mustRunGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -24,15 +22,11 @@ func mustRunGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// mustBareRepoWithConfigs builds a genuinely bare fixture repo the way an
-// Accumulation repo actually looks (ADR 0033): a source checkout gets the
-// listed repo-relative files committed, then a second, bare repo receives
-// those commits over a push -- so the bare repo has no working tree at all,
-// unlike a plain t.TempDir() Derive fixture. files maps repo-relative path
-// to content; uncommittedFiles is written into the source checkout's
-// working tree but never committed, letting a test pin that only committed
-// content reaches the derived set (issue #3310 AC2). Returns the bare
-// repo's path.
+// mustBareRepoWithConfigs pushes a source checkout into a second, bare repo so
+// the fixture has no working tree at all, the way an Accumulation repo looks
+// (ADR 0033) and unlike a plain t.TempDir() Derive fixture. uncommittedFiles
+// lands in the source checkout's working tree but never in a commit, so a test
+// can pin that only committed content reaches the derived set (issue #3310 AC2).
 func mustBareRepoWithConfigs(t *testing.T, branch string, files, uncommittedFiles map[string]string) string {
 	t.Helper()
 	src := t.TempDir()
@@ -78,9 +72,6 @@ func mustBareRepoWithConfigs(t *testing.T, branch string, files, uncommittedFile
 	return bare
 }
 
-// TestDeriveFromGitRef_CommittedNpmDerives is the seam's basic happy path:
-// a bare repo's main ref carries a committed .npmrc, and the derived set
-// looks exactly like Derive's own over an equivalent checkout.
 func TestDeriveFromGitRef_CommittedNpmDerives(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
@@ -100,9 +91,7 @@ func TestDeriveFromGitRef_CommittedNpmDerives(t *testing.T) {
 	}
 }
 
-// TestDeriveFromGitRef_MultipleEcosystemsMaterializeAndDerive covers the
-// nested-config case (.cargo/config.toml under a subdirectory) alongside a
-// flat one (.npmrc), pinning that materialization creates parent
+// The nested .cargo/config.toml pins that materialization creates parent
 // directories rather than only handling repo-root files.
 func TestDeriveFromGitRef_MultipleEcosystemsMaterializeAndDerive(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
@@ -133,12 +122,9 @@ index = "sparse+https://cargo.example.com/repo/cargo/index"
 	}
 }
 
-// TestDeriveFromGitRef_UncommittedFileNeverEnters is issue #3310 AC2 and the
-// load-bearing test of the whole slice: a config file written into the
-// source checkout's working tree but never committed must not appear in the
-// derived set, while a committed one on the same ref does. If this test
-// passed by reading the working tree instead of the ref, the derived set
-// would admit a registry the Accumulation repo never actually recorded.
+// Issue #3310 AC2. If DeriveFromGitRef read the working tree instead of the
+// ref, the derived set would admit a registry the Accumulation repo never
+// recorded.
 func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main",
 		map[string]string{".npmrc": "registry=https://committed.example.com/npm\n"},
@@ -159,9 +145,8 @@ func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
 	}
 }
 
-// TestDeriveFromGitRef_OtherBranchConfigNeverEnters pins that DeriveFromGitRef
-// reads exactly the ref it was asked for: a config file committed on a
-// different branch must not leak into the derived set for main.
+// The fixture needs two branches so a config committed on one cannot leak
+// into the derived set for the other.
 func TestDeriveFromGitRef_OtherBranchConfigNeverEnters(t *testing.T) {
 	src := t.TempDir()
 	mustRunGit(t, src, "init", "-b", "main")
@@ -193,8 +178,6 @@ func TestDeriveFromGitRef_OtherBranchConfigNeverEnters(t *testing.T) {
 	}
 }
 
-// TestDeriveFromGitRef_MissingRepoDirFails pins the fail-closed contract:
-// a repoDir that doesn't exist on disk must error, naming the dir.
 func TestDeriveFromGitRef_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	_, err := DeriveFromGitRef(missing, "main")
@@ -206,8 +189,7 @@ func TestDeriveFromGitRef_MissingRepoDirFails(t *testing.T) {
 	}
 }
 
-// TestDeriveFromGitRef_NotAGitRepoFails pins that a plain, non-repo
-// directory is rejected rather than treated as an empty tree.
+// A plain directory must be rejected rather than read as an empty tree.
 func TestDeriveFromGitRef_NotAGitRepoFails(t *testing.T) {
 	dir := t.TempDir()
 	_, err := DeriveFromGitRef(dir, "main")
@@ -216,10 +198,8 @@ func TestDeriveFromGitRef_NotAGitRepoFails(t *testing.T) {
 	}
 }
 
-// TestDeriveFromGitRef_MissingRefFails pins that a ref absent from an
-// otherwise-valid repo errors, naming the ref -- distinct from a repo
-// declaring no config files, which is not an error (see
-// TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet).
+// A missing ref is an error, unlike a ref that declares no config files. See
+// TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet for the other half.
 func TestDeriveFromGitRef_MissingRefFails(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
@@ -234,11 +214,9 @@ func TestDeriveFromGitRef_MissingRefFails(t *testing.T) {
 	}
 }
 
-// TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet pins that "declares
-// nothing" is not itself an error at this seam -- a valid ref with no
-// committed config files derives a nil set and a nil error, leaving the
-// caller (registryroutesresolve.go) to decide whether that's a failure for
-// the route it's resolving.
+// Declaring nothing is not an error here. The caller
+// (registryroutesresolve.go) decides whether an empty set fails the route it
+// is resolving.
 func TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", nil, nil)
 

@@ -6,15 +6,11 @@ import (
 	"testing"
 )
 
-// TestCavemanDefaultFragmentContract is a content-invariant guard (issue
-// #2710) for fragments/caveman-default.md's prose -- why each marker is
-// exempt and the shape it must keep -- distinct from the bare-literal
-// parity guard in markers_test.go's TestPromptMarkersMatchScanner. Each
-// case below is a load-bearing clause the prose must keep verbatim (modulo
-// line-wrap whitespace, via normalizeWhitespace shared with
-// review_prompt_content_test.go); checking them separately, rather than
-// pinning the whole fragment as one string, lets a harmless reword of one
-// clause fail only that case instead of the entire brittle paragraph.
+// TestCavemanDefaultFragmentContract pins the prose of
+// fragments/caveman-default.md (issue #2710): why each marker is exempt and the
+// shape it must keep. The parity guard in markers_test.go's
+// TestPromptMarkersMatchScanner covers only the bare marker literals. Each case
+// checks one clause on its own, so rewording one clause fails only that case.
 func TestCavemanDefaultFragmentContract(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/caveman-default.md"))

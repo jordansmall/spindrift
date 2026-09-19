@@ -5,29 +5,25 @@ import (
 	"testing"
 )
 
-// TestNonConverging_SameStaleRevAsPrior verifies that a stale verdict at the
-// same rev the prior launcher process already exited stale on is reported
-// as non-converging — a rebuild happened (the rev didn't change) and the
-// image is still stale, so the divergence is structural, not stale content.
+// A stale verdict at the same rev the prior launcher process exited stale on
+// means a rebuild happened without the rev moving, so the divergence is
+// structural rather than stale content.
 func TestNonConverging_SameStaleRevAsPrior(t *testing.T) {
 	if got := NonConverging("deadbeef", "deadbeef"); !got {
 		t.Errorf("NonConverging(%q, %q) = false, want true", "deadbeef", "deadbeef")
 	}
 }
 
-// TestNonConverging_DifferentPriorRev verifies that a stale verdict at a rev
-// different from the prior stale rev is NOT non-converging — the base tip
-// moved since the last stale exit, so this could simply be ordinary content
-// staleness that a rebuild will resolve.
+// The base tip moved since the last stale exit, so this can be ordinary
+// content staleness that a rebuild resolves.
 func TestNonConverging_DifferentPriorRev(t *testing.T) {
 	if got := NonConverging("deadbeef", "priorrev"); got {
 		t.Errorf("NonConverging(%q, %q) = true, want false", "deadbeef", "priorrev")
 	}
 }
 
-// TestNonConverging_EmptyStaleRev verifies that an empty staleRev (no rev
-// was fetched — e.g. the fetch itself failed) is never reported as
-// non-converging, regardless of priorStaleRev.
+// An empty staleRev means no rev was fetched, for instance because the fetch
+// failed, so there is nothing to compare against priorStaleRev.
 func TestNonConverging_EmptyStaleRev(t *testing.T) {
 	if got := NonConverging("", "deadbeef"); got {
 		t.Errorf("NonConverging(%q, %q) = true, want false", "", "deadbeef")
@@ -37,11 +33,6 @@ func TestNonConverging_EmptyStaleRev(t *testing.T) {
 	}
 }
 
-// TestHostTaintDiagnostic_ContainsRequiredSubstrings verifies the returned
-// diagnostic names the likely cause (a consumer flake's packages,
-// extraClosures, or skills pulling in a darwin derivation), gives the
-// locate command, and echoes back the two tags an operator needs to see —
-// the ones that will never converge.
 func TestHostTaintDiagnostic_ContainsRequiredSubstrings(t *testing.T) {
 	got := HostTaintDiagnostic("oci", "main", "deadbeef", ".#packages.x86_64-linux.agent-image", "spindrift:aaaa", "spindrift:bbbb")
 
@@ -62,13 +53,10 @@ func TestHostTaintDiagnostic_ContainsRequiredSubstrings(t *testing.T) {
 	}
 }
 
-// TestHostTaintDiagnostic_Bwrap_DoesNotBlameDarwin verifies that under
-// runnerKind == KindBwrap the diagnostic doesn't blame "darwin" (impossible:
-// the agent-closure package, and bwrap generally, only exists when the host
-// is already Linux — see lib/mkHarness.nix's isLinux && runtime == "bwrap"
-// gate) and doesn't call the compared values "image tag" (bwrap's imageTag
-// slot holds a bare nix store path, not a "repo:tag" string). It still must
-// echo back the two compared paths, the locate command, and the flake attr.
+// Under KindBwrap the host is always Linux, since lib/mkHarness.nix gates the
+// agent-closure package on isLinux && runtime == "bwrap", so darwin can never
+// be the cause. The bwrap imageTag slot also holds a bare nix store path, not
+// a repo:tag string.
 func TestHostTaintDiagnostic_Bwrap_DoesNotBlameDarwin(t *testing.T) {
 	got := HostTaintDiagnostic(KindBwrap, "main", "deadbeef", ".#packages.x86_64-linux.agent-closure", "/nix/store/aaa-agent-closure", "/nix/store/bbb-agent-closure")
 
