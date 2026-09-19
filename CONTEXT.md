@@ -755,6 +755,40 @@ the exported blocker primitives and the empty-edges construction.
 _Avoid_: blocker check, gate (that is the engine's internal act), preflight
 (collides with the stale-base preflight).
 
+**Driving loop**:
+The outer loop that re-invokes the launcher, owning what a single invocation
+structurally cannot: advancing the checkout, rebuilding the image, and
+deciding whether to run again. ADR 0019 makes the invocation the
+image-freshness boundary, so every driving loop exists to supply the other
+half of that boundary. Instances differ by who decides to re-run — an
+operator (Console), a script (dogfood.sh), a workflow (CI) — not by what the
+role is.
+_Avoid_: supervisor, runner (that is the Box sandbox seam), harness. Note
+"daemon" names one instance ([[Daemon]]), never the role itself, and never
+the container-runtime daemon the bwrap runtime is "daemonless" of.
+
+**Daemon**:
+The shipped unattended [[Driving loop]]: `apps.daemon`, generated per-Consumer
+by `mkHarness` beside `apps.default`. It holds `MAX_PARALLEL` slots and fills
+each with one single-Box launcher invocation pinned to a fetched revision,
+making it the owner of dispatch concurrency and superseding continuous
+dispatch, which is deprecated in its favour but kept for operators who want no
+daemon and retained as the Console's engine. Distinct from the
+*container-runtime* daemon (podman/docker) that the bwrap runtime is
+"daemonless" of — spindrift's Daemon is runtime-agnostic and drives a bwrap
+harness as readily as an OCI one.
+_Avoid_: service, scheduler, supervisor, dogfood loop.
+
+**Awake window**:
+The wall-clock span during which the [[Daemon]] may *start* a launcher
+invocation, expressed as one `start-end` string in a configured timezone.
+A window whose end precedes its start wraps past midnight — the overnight
+case is first-class, not an error. It gates starting work only: a Box in
+flight when the window closes runs to completion, and so does the settle that
+follows it, because killing work already paid for saves nothing.
+_Avoid_: schedule, uptime, business hours, quiet hours (it names when the
+Daemon is permitted to act, not when the repository is quiet).
+
 **Console**:
 The interactive driving loop: a launcher session in which an operator composes
 the running work by Picking issues (promoting them as needed), watches live
