@@ -152,18 +152,25 @@ and a `[build failed]` line, so the compile or test error costs a second
 turn running `nix log`. Pass no `-j`, `--max-jobs`, or `--cores` flags
 alongside it: the Box's baked `nix.conf` pins `cores = 4` (lib/image.nix's
 `nixConfigFile`), and Nix's own default already builds one derivation at
-a time, so hand-tuning either on top is guesswork.
+a time, so hand-tuning either on top is guesswork. The one exception, an
+`EXIT:137` kill, is below.
 
 A check failure is deterministic: the same derivation hash fails the same
 way however it is scheduled. Never re-run a failed check unchanged — not
-under reduced parallelism, not after a sleep. Each retry is a multi-minute
-build with a foregone conclusion; the only remedies are to fix the code or
-read the log `-L` already surfaced, and re-run only after a real edit. A
-build the kernel killed (`EXIT:137`, out of memory) is the exception: that
-is not a check result at all, so a re-run is legitimate there, unlike a
-real failure. If the kill happened under the full `nix flake check`,
-re-run the scoped `checks-inbox` target instead — lowering parallelism is
-never the answer.
+under reduced parallelism (the `EXIT:137` carve-out below is outside
+this rule), not after a sleep. Each retry is a multi-minute build with a
+foregone conclusion; the only remedies are to fix the code or read the
+log `-L` already surfaced, and re-run only after a real edit. A build the
+kernel killed (`EXIT:137`, out of memory) is the exception: that is not a
+check result at all, so a re-run is legitimate there, unlike a real
+failure. Under the full `nix flake check`, re-run the scoped
+`checks-inbox` target instead — a smaller target, not a smaller
+`--cores`. Under `checks-inbox` itself there is no smaller target left,
+so `--cores 1` is the one sanctioned exception to the no-resource-flags
+rule above: `max-jobs` is already 1, which leaves the concurrent compiles
+or test binaries inside a single derivation as the thing actually holding
+memory. Reach for it once, only after an `EXIT:137`, and never for a
+check that genuinely failed.
 
 Nix flakes only evaluate git-tracked files: `git add` any new file (e.g.
 `git add -A`) before the first `nix build`/`nix flake check` that touches it,
