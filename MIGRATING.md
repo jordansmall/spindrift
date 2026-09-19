@@ -1,5 +1,36 @@
 # Migration Guide
 
+## The comment-discipline anchor is gone; the four prompts inline the `/code-comments` policy body verbatim (issue #3505)
+
+`${CODE_COMMENTS_STEP}` and `fragments/code-comments-default.md` are both
+gone. `issue-prompt.md`, `fix-prompt.md`, and `conflict-resolve-prompt.md`
+now carry the `/code-comments` policy prose inlined verbatim, the same
+treatment `worker-prompt.md` already had (issue #3419) — a rule in the
+prompt cannot be skipped, where a pointer at a skill can, and a run against
+issue #3478 (PR #3499) showed a coordinator skipping the `/code-comments`
+invocation across every pass. The `/code-comments` skill itself is
+unaffected: it still bakes into every image unconditionally and stays
+invocable, it just no longer backs a prompt-side anchor.
+
+If you override the prompt directory (`perSystem.spindrift.agents.prompt` or
+`SPINDRIFT_PROMPT_DIR`) and your copy of any of these four prompts, or a
+fragment it reads, still ships `${CODE_COMMENTS_STEP}` or
+`fragments/code-comments-default.md`: drop the fragment file, and replace
+`${CODE_COMMENTS_STEP}` with the policy prose inline. Diff the bundled
+`templates/default/prompts/issue-prompt.md` against your copy for the exact
+wording and placement (inside the IMPLEMENT section's variable run, after
+the `${TDD_*_STEP}` pair and before
+`${PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP}${PRINCIPLE_LAZINESS_PROTOCOL_STEP}# CHECK`).
+
+A leftover `${CODE_COMMENTS_STEP}` in an override prompt is not an error and
+not silently dropped: prompt assembly only substitutes tokens it has a value
+for and passes everything else through untouched, so the literal text
+`${CODE_COMMENTS_STEP}` renders straight into the prompt the agent reads —
+confirmed against `substitute` in
+`cmd/launcher/internal/promptassembly/assemble.go` (the `phase_prompt_assembly`
+path) and the `_subst`/`envsubst` allowlist in `agent/entrypoint.sh` (the
+`phase_conflict_resolve` path); both leave an unlisted `${NAME}` token as-is.
+
 ## The read-only `/issues` mount is retired; local issue text is injected (issue #3471)
 
 The Box no longer gets a read-only `/issues` mount, under either runner, for
@@ -486,6 +517,13 @@ against the bundled copy and pull the hunt-dimensions block in.
 
 ## The CODE COMMENTS section is gone from the prompt, replaced by a harness-owned `/code-comments` skill (issue #3221)
 
+> Superseded by issue #3505 (above): the `${CODE_COMMENTS_STEP}` anchor and
+> `fragments/code-comments-default.md` described below are both gone. The
+> instructions in this section that tell you to add `${CODE_COMMENTS_STEP}`
+> to a custom prompt no longer apply — see the #3505 section at the top of
+> this file instead. The rest of this section's history (why the old
+> `# CODE COMMENTS` block was removed and the skill introduced) still holds.
+
 The bundled issue-pass prompt template no longer carries a `# CODE COMMENTS`
 heading. It used to sit inline at the end of the IMPLEMENT phase, unconditionally,
 stating the comment-discipline rule in full: a comment earns its place only by
@@ -512,13 +550,11 @@ it. The skill still bakes into the image, so `/code-comments` is available to
 the agent, but nothing will invoke it unless your prompt says so. Two
 options:
 
-- Take the reduction: delete your inline comment-discipline prose and put
-  `${CODE_COMMENTS_STEP}` in its place. That variable renders the
-  `fragments/code-comments-default.md` anchor whenever the skill is baked —
-  the same bakedness gating `/check-hygiene` and `/caveman` already use, so a
-  prompt never names a skill its box does not carry. Diff
-  `templates/default/prompts/issue-prompt.md` against your copy to see the
-  exact placement.
+- Take the reduction: delete your inline comment-discipline prose. This
+  section told you to put `${CODE_COMMENTS_STEP}` in its place; as of issue
+  #3505 that variable no longer resolves, so put the policy prose itself
+  there instead. See the #3505 section at the top of this file for the
+  current instructions.
 - Change nothing: your prompt keeps its inline prose and simply never anchors
   the skill. This is fully supported — the skill is inert if unmentioned —
   but you pay the prompt-context cost the reduction was meant to recover.
@@ -538,10 +574,10 @@ it fed have both been removed. The bundled `fix-prompt.md` now carries
 `worker-prompt.md` and `conflict-resolve-prompt.md` already carried.
 
 If you ship your own `fix-prompt.md`, you no longer gain the comment rule
-automatically — add `${CODE_COMMENTS_STEP}` to it yourself, in the FIX
-section, at the point in your prompt where an agent is about to start
-editing code. Diff `templates/default/prompts/fix-prompt.md` against your
-copy to see the bundled placement.
+automatically. This section told you to add `${CODE_COMMENTS_STEP}` yourself;
+as of issue #3505 the bundled `fix-prompt.md` no longer carries that anchor
+either, so add the policy prose itself instead. See the #3505 section at the
+top of this file for the current instructions.
 
 ### The fragment file was renamed
 
