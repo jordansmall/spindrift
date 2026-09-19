@@ -2070,9 +2070,16 @@ fresh `/tmp/decisions.md` (issue #3245) declaring gate-discovered work —
 read from that pass's own fresh decisions file, not the accumulated
 across-passes decisions log, so an earlier pass's own mention of the phrase
 can never false-fire it — or a recorded land delta (issue #3244) whose
-touched paths land outside the paths the approving round's own findings
-named. A delta confined to those paths, the common case, fires nothing and
-costs the run nothing. An unknown delta — the same "unknown" case the
+touched lines land outside what the approving round's own findings vouch
+for (issue #3504): a finding's `path:line` citation vouches for that line,
+widened by a small tolerance window, not the whole file, so the gate fires
+when the delta touches lines beyond those windows; a finding that names a
+path with no line still vouches for the whole path; and a path the delta
+touched but whose pre-image ranges aren't determinable — the same dropout
+cases enumerated above — fails open rather than firing, the same posture
+an unknown delta takes. A delta whose touched lines fall within what the
+findings already cover, the common case, fires nothing and costs the run
+nothing. An unknown delta — the same "unknown" case the
 `land_delta` marker above already renders explicitly — does not fire on
 its own either: there is nothing to compare it against, so the gate
 degrades rather than escalates, the same fail-open posture every other
