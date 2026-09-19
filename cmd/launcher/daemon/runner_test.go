@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -106,6 +107,59 @@ func TestRunChild_OversizedLineDoesNotHang(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("RunChild() did not return: an oversized line left the child blocked on an unread pipe")
 	}
+}
+
+// TestRunChild_ChildInOwnProcessGroup asserts the child started through the
+// runnerExecCommand seam is isolated into its own process group (Setpgid),
+// so a group-wide Ctrl-C SIGINT never reaches it — only the daemon's own
+// forwarded SIGTERM does (issue #3538). Polls for r.child rather than
+// racing cmd.Start() from outside RunChild, since RunChild only publishes
+// the started process after starting it.
+func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", "sleep 0.3")
+	}
+
+	r := newHostRunner(t.TempDir(), ".#", "main")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := r.RunChild(context.Background(), daemon.KindDispatch, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"); err != nil {
+			t.Errorf("RunChild() unexpected error: %v", err)
+		}
+	}()
+
+	var pid int
+	for i := 0; i < 100; i++ {
+		r.mu.Lock()
+		if r.child != nil {
+			pid = r.child.Pid
+		}
+		r.mu.Unlock()
+		if pid != 0 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if pid == 0 {
+		t.Fatal("child never started")
+	}
+
+	childPgid, err := syscall.Getpgid(pid)
+	if err != nil {
+		t.Fatalf("Getpgid(child): %v", err)
+	}
+	selfPgid, err := syscall.Getpgid(os.Getpid())
+	if err != nil {
+		t.Fatalf("Getpgid(self): %v", err)
+	}
+	if childPgid == selfPgid {
+		t.Errorf("child pgid %d == test process pgid %d, want isolated group", childPgid, selfPgid)
+	}
+
+	<-done
 }
 
 func gitRunT(t *testing.T, dir string, args ...string) {

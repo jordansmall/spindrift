@@ -72,6 +72,14 @@ func (r *hostRunner) RunChild(ctx context.Context, kind daemon.Kind, revision st
 	}
 
 	cmd := runnerExecCommand(argv[0], argv[1:]...)
+	// A terminal Ctrl-C delivers SIGINT to the whole foreground process
+	// group (daemon, nix run, launcher); the daemon only treats SIGTERM as
+	// a drain request (see forwardStop below), so without this the group
+	// signal would kill the child outright and abandon a running Box
+	// mid-flight — exactly what issue #3538 forbids. Same reasoning as
+	// internal/runner/nixrealize.go's background `nix build` fork; see
+	// "Background realize process isolation" in docs/reference.md.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Stdout is scanned line-by-line for announce lines (there is no
 	// machine-readable channel for them — daemon.ParseAnnouncedIssue's own
 	// doc), so it cannot also go straight to os.Stderr via cmd.Stdout; each
