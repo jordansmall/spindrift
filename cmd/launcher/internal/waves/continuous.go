@@ -36,6 +36,15 @@ func resolvePollInterval(override time.Duration) time.Duration {
 // can then rebuild and re-invoke (exit code 4, see main.go's runExitCode).
 var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 
+// ErrSignalledStop is returned by RunContinuous once cfg.Stop has been closed:
+// no further Boxes launch, in-flight ones finish, and the driving loop exits
+// without a rebuild (exit code 7, see main.go's runExitCode). It takes
+// precedence over ErrImageStale and ErrOpenNoneDispatchable in the terminal
+// switch below, whichever detection races first, since an operator's explicit
+// wind-down request should never be masked by a stale-image or empty-queue
+// verdict discovered in the same drain (#3520).
+var ErrSignalledStop = errors.New("stop requested; drained outstanding work")
+
 // Discoverer re-queries the dispatchable Batch. RunContinuous calls it at
 // startup and again before every slot refill, so a blocker that merges mid-run
 // is picked up without a fresh invocation. A caller must check Failed
@@ -192,6 +201,12 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	var mu sync.Mutex
 	idle := sync.NewCond(&mu)
 	stale := false
+	// signalled latches an operator wind-down request observed on cfg.Stop
+	// (#3520), mu-guarded exactly like stale: refill's guard and the terminal
+	// switch below both read it, and the dedicated stop watcher goroutine is
+	// the only other writer, so the drain-once invariant holds the same way
+	// staleDrain's does.
+	signalled := false
 	dispatchedAny := false
 	claimed := make(map[string]bool)
 	// logged keys an issue number to the last skip line printed for it, so the
@@ -222,6 +237,33 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		clock = retry.RealClock()
 	}
 
+	// observeStop is a non-blocking latch on cfg.Stop (#3520). Caller holds mu.
+	// refill calls it on every entry — bootstrap, completion-triggered, grow
+	// listener, and the ~3m poll tick all funnel through refill — so a stop
+	// closed at any point is picked up on the very next of those triggers. The
+	// dedicated watcher goroutine below calls the same helper — see its own
+	// comment for the promptness that buys. announce is false only
+	// for the final post-drain latch, where the drain is already over and a
+	// drain line would mislead.
+	observeStop := func(announce bool) {
+		if signalled || cfg.Stop == nil {
+			return
+		}
+		select {
+		case <-cfg.Stop:
+			signalled = true
+			if !announce {
+				return
+			}
+			if outstanding > 0 {
+				fmt.Println("==> stop requested; draining outstanding work")
+			} else {
+				fmt.Println("==> stop requested; nothing in flight")
+			}
+		default:
+		}
+	}
+
 	// refill reports whether it launched a Box, so a caller filling more than
 	// one freed slot from a single trigger can loop it until a call finally does
 	// nothing, rather than assuming one trigger is worth exactly one launch.
@@ -230,7 +272,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// before its body is assigned.
 	var drainRefill func() int
 	refill = func() bool {
-		if stale || closed {
+		observeStop(true)
+		if stale || closed || signalled {
 			return false
 		}
 		if !limiter.TryAcquire() {
@@ -286,7 +329,20 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			}
 			backoff := cfg.Policy.Backoff(clock).Duration(attempt)
 			fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry %d/%d in %s\n", attempt, cfg.Policy.Max, backoff)
+			// mu is dropped across the sleep so the stop-watcher isn't blocked
+			// out of the drain line for the whole backoff (#3520 review). A
+			// whole other refill (completion, grow, or poll tick) may run to
+			// completion in this window; that is safe because this one re-reads
+			// every input it decides on — the Discover above, claimed, and the
+			// stop/stale flags — after re-taking mu, so it cannot duplicate a
+			// launch the other made.
+			mu.Unlock()
 			clock.Sleep(backoff)
+			mu.Lock()
+			observeStop(true)
+			if stale || closed || signalled {
+				return false
+			}
 		}
 		// Continuous refill has no Origin concept, always the discovered pool
 		// and never a hand-picked list, so unlike NewPlan it sorts
@@ -427,6 +483,33 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 	}()
 
+	// stopWatchDone stops the watcher once this call is finished, whether or
+	// not cfg.Stop was ever closed; stopExited confirms it has exited before
+	// RunContinuous returns — the same shutdown shape as growDone/done and
+	// pollDone/pollExited above, so signalled has no writer left once this
+	// function reads it below (#3520). Only started when cfg.Stop != nil: a
+	// nil channel would block select forever, so there is nothing to watch.
+	var stopWatchDone, stopExited chan struct{}
+	if cfg.Stop != nil {
+		stopWatchDone = make(chan struct{})
+		stopExited = make(chan struct{})
+		go func() {
+			defer close(stopExited)
+			select {
+			case <-cfg.Stop:
+				// The promptness seam: refill's own observeStop call only fires
+				// on the next completion, grow, or ~3m poll tick. Without this
+				// watcher, a stop that arrives while the run is blocked in
+				// idle.Wait() below would print nothing until one of those next
+				// occurs.
+				mu.Lock()
+				observeStop(true)
+				mu.Unlock()
+			case <-stopWatchDone:
+			}
+		}()
+	}
+
 	mu.Lock()
 	drainRefill()
 	for outstanding > 0 {
@@ -439,7 +522,24 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	<-done
 	close(pollDone)
 	<-pollExited
+	if stopWatchDone != nil {
+		close(stopWatchDone)
+		<-stopExited
+	}
 
+	// The watcher's select picks arbitrarily when cfg.Stop and stopWatchDone
+	// are both ready, so a stop closing as the drain finishes could otherwise
+	// go unseen and flip this run's verdict on a coin toss. Reading cfg.Stop
+	// once more, after the watcher has exited and left signalled without a
+	// concurrent writer, settles it (#3520). announce=false: the drain is over,
+	// so there is none to announce.
+	mu.Lock()
+	observeStop(false)
+	mu.Unlock()
+
+	if signalled {
+		return ErrSignalledStop
+	}
 	if stale {
 		return ErrImageStale
 	}

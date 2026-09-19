@@ -6,8 +6,10 @@
 package waves
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -2370,5 +2372,523 @@ func TestResolvePollInterval(t *testing.T) {
 	const override = 10 * time.Millisecond
 	if got := resolvePollInterval(override); got != override {
 		t.Errorf("resolvePollInterval(%s): got %s, want %s", override, got, override)
+	}
+}
+
+// TestRunContinuous_StopClosedBeforeCall_NonEmptyQueue_ReturnsErrSignalledStop
+// covers #3520's pre-launch case: a Stop already closed when RunContinuous is
+// called must win the very first refill guard, so nothing ever claims or
+// launches despite a dispatchable issue sitting in the queue.
+func TestRunContinuous_StopClosedBeforeCall_NonEmptyQueue_ReturnsErrSignalledStop(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	stop := make(chan struct{})
+	close(stop)
+	c.Stop = stop
+
+	// nil, nil: a stopped-before-call run must never reach dispatch.Factory.New
+	// at all, so a nil Factory/Settler is a stronger guarantee than an
+	// fr.RunCalls==0 assertion would be.
+	var err error
+	out := captureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
+	})
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if len(fake.ClaimCalls) != 0 {
+		t.Fatalf("ClaimCalls: got %v, want none (stop closed before any refill)", fake.ClaimCalls)
+	}
+	// Nothing was ever outstanding, so the line must not claim a drain is
+	// under way.
+	if !strings.Contains(out, "nothing in flight") {
+		t.Fatalf("stdout: got %q, want the nothing-in-flight line", out)
+	}
+	if strings.Contains(out, "draining outstanding work") {
+		t.Fatalf("stdout: got %q, want no draining line (queue was empty)", out)
+	}
+}
+
+// TestRunContinuous_StopClosedBeforeCall_EmptyQueue_ReturnsErrSignalledStopNotOpenNoneDispatchable
+// covers #3520's exit-code precedence: with nothing dispatchable, the
+// terminal switch could plausibly return ErrOpenNoneDispatchable instead, but
+// a signalled stop must win that race too — it is a distinct exit code (7),
+// never 3.
+func TestRunContinuous_StopClosedBeforeCall_EmptyQueue_ReturnsErrSignalledStopNotOpenNoneDispatchable(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN"}) // never dispatchable: unlabeled
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	stop := make(chan struct{})
+	close(stop)
+	c.Stop = stop
+
+	var err error
+	out := captureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
+	})
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if errors.Is(err, ErrOpenNoneDispatchable) {
+		t.Fatalf("RunContinuous: got ErrOpenNoneDispatchable wrapped in, want ErrSignalledStop only")
+	}
+	if !strings.Contains(out, "nothing in flight") {
+		t.Fatalf("stdout: got %q, want the nothing-in-flight line", out)
+	}
+	if strings.Contains(out, "draining outstanding work") {
+		t.Fatalf("stdout: got %q, want no draining line (queue was empty)", out)
+	}
+}
+
+// TestRunContinuous_StopClosedWhileBoxInFlight_DrainsWithoutFurtherLaunchAndPrintsOnce
+// covers #3520's drain: a Stop closed mid-run lets the in-flight Box finish
+// and settle, blocks the poll ticker's own refill attempts (pollInterval is
+// overridden short enough for several ticks to fire before release), and
+// prints the drain line exactly once despite every one of those attempts
+// re-checking the latch.
+func TestRunContinuous_StopClosedWhileBoxInFlight_DrainsWithoutFurtherLaunchAndPrintsOnce(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+	c.pollInterval = 5 * time.Millisecond
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	fr := runner.NewFake()
+	started1 := make(chan struct{})
+	release1 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "1" {
+			close(started1)
+			<-release1
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+
+	stop := make(chan struct{})
+	c.Stop = stop
+
+	var err error
+	out := captureStdout(t, func() {
+		resultCh := make(chan error, 1)
+		go func() {
+			resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+		}()
+
+		select {
+		case <-started1:
+		case <-time.After(2 * time.Second):
+			t.Fatal("issue #1 was never dispatched")
+		}
+
+		close(stop)
+		// Long enough for several 5ms poll ticks to fire while #1 is still
+		// running, proving the guard holds across repeated refill attempts,
+		// not just the first one.
+		time.Sleep(50 * time.Millisecond)
+		close(release1)
+
+		select {
+		case err = <-resultCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("RunContinuous did not return after #1 was released")
+		}
+	})
+
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 1 (no launch after stop, including by the poll ticker)", fr.RunCalls)
+	}
+	if got := strings.Count(out, "stop requested"); got != 1 {
+		t.Fatalf("drain line printed %d time(s) in stdout, want exactly 1:\n%s", got, out)
+	}
+}
+
+// TestRunContinuous_StopClosedAsLastBoxCompletes_ReturnsErrSignalledStop
+// pins the latest a stop can still be observed (#3520): closed from inside the
+// only Box's Run, it lands after that Box was launched and just as the run
+// starts winding down, and must still be the verdict rather than the nil one
+// an otherwise-complete drain would return.
+func TestRunContinuous_StopClosedAsLastBoxCompletes_ReturnsErrSignalledStop(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	stop := make(chan struct{})
+	c.Stop = stop
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		close(stop)
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+
+	err := RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+}
+
+// TestRunContinuous_StaleThenStop_ReturnsErrSignalledStopNotErrImageStale
+// covers #3520's precedence when the image goes stale first: a stop that
+// arrives afterward, while the stale drain is still awaiting the in-flight
+// Box, must still win the terminal switch.
+func TestRunContinuous_StaleThenStop_ReturnsErrSignalledStopNotErrImageStale(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	started1 := make(chan struct{})
+	release1 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "1" {
+			close(started1)
+			<-release1
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
+
+	// Fresh for the first refill (fills #1's slot), stale for every refill
+	// after, same shape as TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish.
+	var freshCalls int
+	var freshMu sync.Mutex
+	fresh := func() (bool, bool, string) {
+		freshMu.Lock()
+		defer freshMu.Unlock()
+		freshCalls++
+		if freshCalls == 1 {
+			return true, true, "fresh"
+		}
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	stop := make(chan struct{})
+	c.Stop = stop
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	}()
+
+	select {
+	case <-started1:
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #1 was never dispatched")
+	}
+
+	// #1's own slot filled fresh; the second initial refill attempt (slot 2)
+	// goes stale, so by now the run is already draining on staleness alone.
+	// Signal the stop on top of that in-progress stale drain.
+	close(stop)
+	close(release1)
+
+	select {
+	case err := <-resultCh:
+		if !errors.Is(err, ErrSignalledStop) {
+			t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+		}
+		if errors.Is(err, ErrImageStale) {
+			t.Fatalf("RunContinuous: got ErrImageStale wrapped in, want ErrSignalledStop only (stop must win over stale)")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
+}
+
+// TestRunContinuous_StopThenStale_ReturnsErrSignalledStopNotErrImageStale
+// covers #3520's precedence in the other detection order: a stop closed
+// before RunContinuous is even called must win even though the freshness
+// checker would otherwise report stale on the very first refill.
+func TestRunContinuous_StopThenStale_ReturnsErrSignalledStopNotErrImageStale(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}}
+	// Would report stale on the very first call — never reached, since the
+	// stop guard short-circuits refill before fresh() is ever consulted.
+	fresh := func() (bool, bool, string) {
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	stop := make(chan struct{})
+	close(stop)
+	c.Stop = stop
+
+	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if errors.Is(err, ErrImageStale) {
+		t.Fatalf("RunContinuous: got ErrImageStale wrapped in, want ErrSignalledStop only (stop must win over stale)")
+	}
+}
+
+// TestRunContinuous_NonNilStopNeverClosed_OrdinaryResultUnaffected covers
+// #3520's negative case: a non-nil Stop that the operator never closes must
+// not change RunContinuous's ordinary outcome, and closing it after the call
+// has already returned must be harmless — no panic, no further launch, no
+// goroutine left writing to state this call already returned.
+func TestRunContinuous_NonNilStopNeverClosed_OrdinaryResultUnaffected(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	stop := make(chan struct{})
+	c.Stop = stop
+
+	err := RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	if err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+
+	// Closing after return must not panic or race with anything still
+	// running: the stop watcher goroutine, if any, is already confirmed
+	// exited before RunContinuous returns.
+	close(stop)
+}
+
+// TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_LaunchesNothing
+// reproduces the #3520 review finding at continuous.go:351: a stop closed
+// while refill is sleeping out a forge.ErrRateLimit re-discover backoff must
+// abort that refill on wake, not fall through to a re-discover that
+// succeeds and claims/launches one more Box. Discover fails once (forcing
+// the backoff sleep) then would succeed on the very next call if reached —
+// the fix must never let refill reach that second call once Sleep's own
+// stop-close has landed.
+func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_LaunchesNothing(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+	c.Policy.Max = 3
+	c.Policy.Unit = time.Second
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+
+	stop := make(chan struct{})
+	c.Stop = stop
+
+	// The Sleep injection is the reviewer's own repro: close cfg.Stop from
+	// inside the backoff sleep, then see whether refill still launches.
+	c.Clock = retry.Clock{
+		Now: func() time.Time { return time.Time{} },
+		Sleep: func(time.Duration) {
+			close(stop)
+		},
+	}
+
+	fake := NewFakeQueue()
+	fake.DiscoverFunc = func(callN int) (Batch, error) {
+		if callN == 1 {
+			return Batch{}, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
+		}
+		// Only reached if the post-sleep stop check is missing; must never
+		// happen once the fix lands.
+		return Batch{Issues: []Issue{{Number: "1"}}}, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	var err error
+	out := captureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	})
+
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %v, want none (stop closed during the backoff sleep must abort before any launch)", fr.RunCalls)
+	}
+	if fake.DiscoverCalls != 1 {
+		t.Fatalf("DiscoverCalls: got %d, want 1 (the post-sleep stop check must return before a second re-discover)", fake.DiscoverCalls)
+	}
+	if !strings.Contains(out, "stop requested") {
+		t.Fatalf("stdout: got %q, want a stop-requested line", out)
+	}
+}
+
+// TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_PrintsPromptlyNotAfterFullBackoff
+// reproduces the #3520 review finding at continuous.go:333: refill used to
+// hold mu across the backoff clock.Sleep, so the dedicated stop-watcher
+// goroutine (which needs mu to print) was blocked out until the sleep
+// returned. This drives a Sleep that blocks on a channel the test alone
+// controls, closes cfg.Stop while that sleep is still blocked, and asserts
+// the drain line appears on stdout before the sleep is ever released. A
+// regression to a mu-held sleep reproduces the finding exactly: the watcher
+// cannot take mu until Sleep returns, so the line never appears within the
+// bounded wait below and the test times out instead of passing.
+func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_PrintsPromptlyNotAfterFullBackoff(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+	c.Policy.Max = 3
+	c.Policy.Unit = time.Second
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	sleeping := make(chan struct{})
+	release := make(chan struct{})
+	c.Clock = retry.Clock{
+		Now: func() time.Time { return time.Time{} },
+		Sleep: func(time.Duration) {
+			close(sleeping)
+			<-release
+		},
+	}
+
+	fake := NewFakeQueue()
+	fake.DiscoverErr = fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	stop := make(chan struct{})
+	c.Stop = stop
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	// captureStdout can't serve this test: it reads the pipe only after fn
+	// returns, and the assertion below must see a line while RunContinuous is
+	// still mid-run. Hence the hand-swap, plus a scanner goroutine that never
+	// blocks on a full channel and always ends when closeStdout runs.
+	lines := make(chan string, 16)
+	scannerDone := make(chan struct{})
+	go func() {
+		defer close(scannerDone)
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			select {
+			case lines <- scanner.Text():
+			default:
+			}
+		}
+	}()
+	var closeOnce sync.Once
+	closeStdout := func() { closeOnce.Do(func() { _ = w.Close() }) }
+	t.Cleanup(func() {
+		closeStdout()
+		<-scannerDone
+	})
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
+	}()
+
+	select {
+	case <-sleeping:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refill never reached the backoff sleep")
+	}
+
+	close(stop)
+
+	// The sleep is held open by release, not by a duration, so seeing the
+	// line here proves the watcher printed it without the sleep returning —
+	// exactly the promptness the finding says a mu-held sleep breaks.
+	found := false
+	deadline := time.After(1 * time.Second)
+	for !found {
+		select {
+		case line := <-lines:
+			if strings.Contains(line, "stop requested") {
+				found = true
+			}
+		case <-deadline:
+			t.Fatal("stop-requested line not observed while the backoff sleep was still held open")
+		}
+	}
+
+	close(release)
+
+	select {
+	case err = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return after the backoff sleep was released")
+	}
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
 	}
 }

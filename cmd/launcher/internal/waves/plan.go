@@ -144,6 +144,13 @@ type Config struct {
 	// Clock is the injectable sleep seam a rate-limited re-discover retry backs
 	// off through. When unset, it defaults to retry.RealClock().
 	Clock retry.Clock
+
+	// Stop is the operator wind-down seam (#3520). runContinuousDispatch
+	// (main.go) hands it a channel that closes on the first SIGTERM; nil
+	// means the caller offers no stop request, true of every other call
+	// site. Closing it asks RunContinuous to drain rather than launch
+	// further Boxes. Tests close this channel directly.
+	Stop <-chan struct{}
 }
 
 // NewPlan decides how in.Issues should be dispatched. Every Origin selects
