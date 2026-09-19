@@ -193,6 +193,11 @@
             # opaquely once the launcher realizes agent-closure, not up front.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               dogfood-bwrap = fixtures.dogfoodBwrapHarness.apps.default;
+              # Its daemon counterpart (issue #3538): dogfoodBwrapHarness's own
+              # daemonApp default points back at `.#dogfood-bwrap`, so this
+              # drives a bwrap Box rather than the podman one apps.daemon
+              # (off the default harness) would.
+              dogfood-bwrap-daemon = fixtures.dogfoodBwrapHarness.apps.daemon;
             };
 
             devShells = {
