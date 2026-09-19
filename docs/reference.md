@@ -4404,9 +4404,12 @@ guaranteed correct for your config.
 | 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
 | 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
 | 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found the loaded host launcher is stale relative to the flake's launcher-currency attr (or, under the OCI runtime, that the loaded image would also be rebuilt against the current base-branch tip); in-flight Boxes finished, no new ones launched | pull + rebuild, then re-invoke — the same boundary exit 0 runs; on an image-stale verdict the rebuild is often already pre-warmed by a background `nix build` the launcher kicked off during the drain, so the driving loop's rebuild is frequently a cache hit — a launcher-only-stale verdict does not trigger that background prebuild, so the rebuild there always runs cold |
+| 5    | the loaded image is stale in a way no rebuild converges (host-tainted: a host-system derivation reached the image graph, so the same base tip stays stale after a rebuild against it) | halt — print the non-converging divergence and stop; re-invoking cannot fix it |
+| 6    | bootstrap rejected the config (the launcher's `exitConfigInvalid`) — e.g. a missing required setting, or flags that cannot combine | no branch of its own: falls into the catch-all `launcher failed (exit 6)` message on stderr, and the loop exits 1 |
+| 7    | `CONTINUOUS_DISPATCH` mode: an operator sent `SIGTERM`; the launcher stopped claiming new issues, let in-flight Boxes finish and settle, ran its normal teardown, and exited | stop — do not pull, rebuild, or re-invoke; the operator asked the run to stop, which is exactly what distinguishes 7 from 4 |
 
 Under the bwrap runtime, a verdict where only the agent-closure image
-dimension is stale no longer reaches this exit at all: the launcher
+dimension is stale no longer reaches exit 4 at all: the launcher
 hot-swaps the realized closure in place and keeps refilling instead of
 draining (ADR 0043, issue #2682). The agent-closure dimension covers the
 agent files, the agent env, the in-box nix config, and the configured
@@ -4436,6 +4439,18 @@ worth grepping and summing. `heldBack` can be the literal string `unknown`
 instead of a number — a transient tracker error at the moment the drain
 started, not a confirmed zero — so a naive summing script must skip or
 special-case that value rather than parse it as an integer.
+
+A signalled stop (exit 7) is a drain too, but not a stale drain — unless a
+stale drain was already under way when the signal arrived, in which case it
+still finishes and reports its `STALE_DRAIN` line before the run exits 7;
+absent that, no `STALE_DRAIN` line is written. `SIGTERM` stops the launcher
+claiming anything new and waits only on the Boxes already in flight, so
+stopping is bounded by the slowest of those Boxes rather than by the whole
+queue. The launcher prints a line when a drain begins, so an operator can
+tell a drain from a hang. Only the first `SIGTERM` is handled today; a
+second is harmless rather than an escalation to a hard abort. Behavior is
+identical under the OCI and bwrap runtimes — nothing in the signal path
+branches on runtime.
 
 Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode in a
 driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
