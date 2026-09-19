@@ -7,6 +7,16 @@
 > whose refresh does not require a process restart, and splits the verdict so
 > only launcher-affecting changes still drain and exit.
 
+> **Extended again by [ADR 0051](0051-the-driving-loop-is-a-shipped-app-above-the-invocation-boundary.md).**
+> Nothing below becomes false; the conclusion is carried one step further. This
+> ADR made one invocation run at most one wave. ADR 0051 gives dispatch
+> concurrency to a daemon that runs one Box per invocation, each pinned to a
+> fetched revision — so "freshness is automatic, never orchestrated" stops being
+> a property of the queue drain and becomes a property of every Box's birth.
+> Continuous dispatch, the in-process pool this ADR left intact, is deprecated
+> in the daemon's favour but kept for operators who want no daemon, and remains
+> the Console's engine.
+
 The agent image reference is evaluated once, at flake-eval time: `nix run`
 bakes `IMAGE_TAG="spindrift:<store-hash>"` (and `IMAGE_DRV`) into the
 launcher's environment before the Go binary starts. The launcher never
