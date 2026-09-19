@@ -1,5 +1,18 @@
 # Local code is the one host-mediated forge: read-only clone mount in, launcher-landed bundle out
 
+> **Note (issue #3480):** every reference below to ADR 0032's `/issues` mount
+> names a retired mechanism — the unifying principle's "a read-only mount in"
+> on the issue plane, the precedent this ADR's read-only code-in mount reuses,
+> and the peer exception the Box's zero-shared-host-filesystem rule counts.
+> [ADR 0050: local issue reads cross the seam as host-injected
+> text](0050-local-issue-reads-cross-the-seam-as-host-injected-text.md) retired
+> that mount; local issue content crosses the seam as host-injected
+> `ISSUE_TEXT` instead, so that rule carries one fewer exception than both
+> counts below state — the "second RO exception" and the "third documented
+> exception". This ADR's own exceptions — a read-only clone mount of
+> `.spindrift/accum.git` and a writable outbox — are not retired, and the rest
+> of this ADR's host-mediation argument is unaffected.
+
 ## Context
 
 ADR 0013 split the Forge into two independent axes — Issue Tracker and Code
