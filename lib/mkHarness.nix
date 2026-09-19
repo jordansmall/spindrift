@@ -1150,6 +1150,23 @@ let
     meta.license = lib.licenses.mit;
   };
 
+  # daemon re-invokes launcherBin's own flake app for each child Dispatch
+  # (issue #3538), so it shares launcherSrc and launcherVendorHash with
+  # launcherBin verbatim -- same source tree, same vendor hash, the two
+  # cannot drift apart. Only `subPackages` differs, which per
+  # nix/quickstart.nix's comment does not change vendoring. No ldflags: the
+  # daemon bakes no version/revision of its own.
+  daemonBin = hostPkgs.buildGoModule {
+    pname = "spindrift-daemon";
+    version = spindriftVersion;
+    src = launcherSrc;
+    modRoot = "cmd/launcher";
+    vendorHash = buildConstants.launcherVendorHash;
+    subPackages = [ "daemon" ];
+    doCheck = false;
+    meta.license = lib.licenses.mit;
+  };
+
   # A revision-independent sibling of launcherBin (issue #2677, ADR 0043):
   # launcherBin bakes `-X main.revision`, so its store path moves on every
   # commit. Staleness detection (issue #1364) needs a hash stable across
@@ -1162,10 +1179,15 @@ let
   # defeating the point.
 
   # The fileset is a directory-level approximation of the launcher's import
-  # graph, not the graph itself: it subtracts the driver-exec, orchestrator
-  # and quickstart subtrees. A reviewer found 13 directories included here
-  # that are outside the real import graph (internal/testutil, for one), so
-  # perturbing those still moves this outPath (issue #2677 review fix).
+  # graph, not the graph itself: it subtracts the driver-exec, orchestrator,
+  # quickstart and daemon subtrees (each an independent `package main` the
+  # launcher never imports), plus internal/daemon (issue #3538: no
+  # non-test package outside cmd/launcher/daemon imports it, and the
+  # one test that does -- internal/dispatch/announce_test.go -- is
+  # filtered out with every other _test.go below). A reviewer found 13
+  # directories included here that are outside the real import graph
+  # (internal/testutil, for one), so perturbing those still moves this
+  # outPath (issue #2677 review fix).
   launcherCurrencyFileset =
     lib.fileset.difference
       (lib.fileset.unions [
@@ -1178,6 +1200,8 @@ let
           ../cmd/launcher/driver-exec
           ../cmd/launcher/orchestrator
           ../cmd/launcher/quickstart
+          ../cmd/launcher/daemon
+          ../cmd/launcher/internal/daemon
         ]
       );
 
@@ -1319,6 +1343,31 @@ let
     ];
     meta.license = lib.licenses.mit;
   };
+
+  # The unattended driving loop (issue #3538): sources harness.env the same
+  # way spindriftBin does and shares runInputDocumentFile with it, so no
+  # knob is hand-copied and none can drift between the CLI and the loop. It
+  # re-invokes the Consumer's own CLI app (DAEMON_APP, default `.#`) through
+  # `nix run` rather than exec'ing launcherBin directly, because that is how
+  # it drives a *child* Dispatch through the flake's own app resolution
+  # (e.g. `.#dogfood-bwrap` for a bwrap Consumer) instead of always the
+  # binary it happened to be built against. It is the only component that
+  # invokes `nix` at runtime, hence the unconditional runtimeInput below.
+  daemonWrapper =
+    (hostPkgs.writeShellApplication {
+      name = "spindrift-daemon";
+      runtimeInputs = with hostPkgs; [
+        nix
+        git
+        coreutils
+      ];
+      text = runShellBody + ''
+        exec ${daemonBin}/bin/daemon --input ${runInputDocumentFile} "$@"
+      '';
+    }).overrideAttrs
+      (_: {
+        meta.license = lib.licenses.mit;
+      });
 
   # Single-verb wrapper execing `launcher dispatch`. Off the flake outputs
   # (issue #613); it survives only as a bats/equivalence test fixture for the
@@ -1529,5 +1578,14 @@ else
     apps.default = {
       type = "app";
       program = "${spindrift}/bin/spindrift";
+    };
+
+    # The daemon per Consumer, beside apps.default (issue #3538): re-invokes
+    # this same Consumer's own CLI app for each child Dispatch, so choosing a
+    # runtime is choosing which harness's apps.daemon to run, not editing a
+    # script.
+    apps.daemon = {
+      type = "app";
+      program = "${daemonWrapper}/bin/spindrift-daemon";
     };
   }

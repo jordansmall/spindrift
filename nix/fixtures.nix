@@ -67,10 +67,22 @@ let
   # paths yield byte-identical outputs.
   harness = import ../lib/mkHarness.nix dogfoodHarnessArgs;
 
-  # The A/B twin of `harness` above (issue #2672): only `runtime` differs, so
-  # the dogfood loop runs through the daemonless bwrap runner without a second,
-  # hand-copied config drifting from the podman-backed original.
-  dogfoodBwrapHarness = import ../lib/mkHarness.nix (dogfoodHarnessArgs // { runtime = "bwrap"; });
+  # The A/B twin of `harness` above (issue #2672): only `runtime` and
+  # `daemonApp` differ, so the dogfood loop runs through the daemonless bwrap
+  # runner without a second, hand-copied config drifting from the
+  # podman-backed original. daemonApp points its daemon back at
+  # `.#dogfood-bwrap` (issue #3538) so `nix run .#dogfood-bwrap-daemon`
+  # drives a bwrap Box, not the podman one the schema default (`.#`) would
+  # re-invoke.
+  dogfoodBwrapHarness = import ../lib/mkHarness.nix (
+    dogfoodHarnessArgs
+    // {
+      runtime = "bwrap";
+      defaults = dogfoodHarnessArgs.defaults // {
+        daemonApp = ".#dogfood-bwrap";
+      };
+    }
+  );
 
   # Used by template-fixture: the template module consumer has a stub self with
   # no shortRev, so its revision is "unknown" and this call must match by
