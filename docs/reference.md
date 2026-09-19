@@ -503,32 +503,20 @@ already must ship `filer-prompt.md` when the filer is configured — the
 entrypoint reads the fragment unconditionally once its gate is on, with no
 baked-in fallback.
 
-The comment-discipline anchor (`fragments/code-comments-default.md`,
-`CODE_COMMENTS_STEP`) points at the harness-owned `/code-comments` skill,
-the same shape as `check-hygiene-default.md`/`CHECK_HYGIENE_STEP`: the
-Conditional fragment registry row gates on `CODE_COMMENTS_BAKED`, true only
-once `DRIVER_SKILLS_DIR/code-comments/SKILL.md` is actually baked, and
-`phase_conflict_resolve`'s own hand-precompute (`agent/entrypoint.sh`) reads
-it behind the same `[ -f ... ]` presence check as its `CAVEMAN_STEP`/
-`SKILL_PREAMBLE` neighbors in that same function — it no longer reads the
-fragment unconditionally. Concretely: a `SPINDRIFT_PROMPT_DIR` override
-directory only needs to ship `fragments/code-comments-default.md` when it
-also ships the `code-comments` skill; if it does, and the fragment is
-missing, `phase_conflict_resolve` aborts under `set -euo pipefail` the
-moment a rebase conflict actually occurs — the plain assignment
-`CODE_COMMENTS_STEP="$(_subst ...)"` trips `set -e` on a failed command
-substitution once the guard admits it. `worker-prompt.md` is the one
-exception (issue #3419): it carries the policy body inlined verbatim
-instead of the `${CODE_COMMENTS_STEP}` anchor, and the template itself
-never names the skill (the rendered prompt's `SKILL_PREAMBLE` still lists
-every baked skill, `code-comments` included — per-role scoping of that
-list is issue #3418's territory, not this row's).
-Invoking the skill costs a full context replay to retrieve roughly 85
-tokens of prose, and nearly every worker writes a comment, so the anchor
-fires almost always — a cost the worker's many short-lived dispatches pay
-once each, while the coordinator (issue-prompt.md), `fix-prompt.md`, and
-`conflict-resolve-prompt.md` are long-lived or few enough that the anchor
-still pays for itself, so they keep it.
+The comment-discipline rule is no longer a fragment anchor: `worker-prompt.md`
+(issue #3419), and now `issue-prompt.md`, `fix-prompt.md`, and
+`conflict-resolve-prompt.md` too (issue #3505), each carry the
+`/code-comments` policy body inlined verbatim instead of pointing at a
+`${CODE_COMMENTS_STEP}` fragment. A build-time check
+(`prompt-code-comments-inlined`, `nix/checks/prompts.nix`)
+pins all four against `templates/default/skills/code-comments/SKILL.md` and
+fails if any of them drifts from it or still names `/code-comments` or
+`CODE_COMMENTS_STEP`. The `/code-comments` skill itself still bakes into
+every image and stays invocable — only the prompt-side delivery changed, from
+a pointer a coordinator could skip invoking to prose it cannot skip reading.
+`fragments/code-comments-default.md` and the `CODE_COMMENTS_STEP` registry
+row are gone; there is nothing left in the Conditional fragment registry for
+comment discipline to opt into.
 
 The `OPEN A PULL REQUEST` ticket-reference line is the one row with three
 mutually exclusive fragments (`pr-body-closes.md` / `pr-body-local-ref.md` /
@@ -4543,12 +4531,17 @@ consumer that skips a skill gets prompts with zero residue for it.
 `auto-format`, `auto-lint`, `check-hygiene`, and `code-comments` (see the
 `skills` row above) are the harness-owned skills among the mix — they bake
 into every image unconditionally. The `auto-format`/`auto-lint` deferrals gate
-on the `AUTO_FORMAT`/`AUTO_LINT` knobs instead; `check-hygiene` and
-`code-comments` gate on the skill's own presence
-(`CHECK_HYGIENE_BAKED`/`CODE_COMMENTS_BAKED`) exactly like the
+on the `AUTO_FORMAT`/`AUTO_LINT` knobs instead; `check-hygiene` gates on the
+skill's own presence (`CHECK_HYGIENE_BAKED`) exactly like the
 Consumer-configured deferrals above — on a stock image that gate is satisfied
 as soon as the skill bakes, so it only reads false if an operator's
-skills-mount override shadows the skill away.
+skills-mount override shadows the skill away. `code-comments` is not a
+prompt-side deferral at all (issue #3505): its policy body is inlined
+verbatim in the four prompts that need it, unconditionally.
+`CODE_COMMENTS_BAKED` is still computed
+(`cmd/launcher/internal/promptassembly/gates.go`) and handed to prompt
+assembly, but it now gates no fragment row — only the skill invocation
+itself stays baked and available.
 
 ## Shell completion
 
