@@ -2108,4 +2108,30 @@ in
         }
         touch $out
       '';
+
+  # Grep pin (issue #3478): commit-unbaked.md must restate both of the
+  # subject-limit tiers the upstream /commit skill teaches -- ≤50 preferred,
+  # never exceed 72 -- not the flat ≤50 whose lossy paraphrase let the
+  # documented and the practiced subject length drift apart. The assembled
+  # goldens do embed the sentence, but `nix run .#regen-goldens` rewrites
+  # them, so they catch an unregenerated edit rather than a deliberate
+  # rewording; only a pin encodes the intent. The clauses are upstream's own
+  # phrasing, so re-syncing the fragment verbatim to the skill keeps this
+  # green. commit-fragment-parity.nix leaves the column bounds unpinned on
+  # both sides; #3486 tracks pinning them there.
+  commit-unbaked-fragment-two-tier-subject-limit =
+    pkgs.runCommand "commit-unbaked-fragment-two-tier-subject-limit" { }
+      ''
+        f=${../../templates/default/prompts/fragments/commit-unbaked.md}
+        # Join hard-wrapped lines before matching: this fragment's prose wraps
+        # at the terminal width, so a tier can straddle a line break.
+        flat=$(tr '\n' ' ' < "$f")
+        for tier in 'subject ≤50, never exceed 72' 'body ≤72'; do
+          grep -qF -- "$tier" <<<"$flat" || {
+            echo "expected the wrap tier '$tier' in commit-unbaked.md" >&2
+            exit 1
+          }
+        done
+        touch $out
+      '';
 }
