@@ -3,6 +3,7 @@ package registrydiscover
 import (
 	"fmt"
 	"hash/fnv"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/credresolver"
@@ -111,7 +112,9 @@ func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Rou
 		routes = append(routes, route)
 	}
 
-	disambiguateEnvPlaceholders(routes)
+	if err := disambiguateEnvPlaceholders(routes); err != nil {
+		return nil, Report{}, err
+	}
 
 	return routes, report, nil
 }
@@ -119,22 +122,49 @@ func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Rou
 // disambiguateEnvPlaceholders resolves envPlaceholder collisions among this
 // run's unmatched routes: envPlaceholder folds hyphens and dots alike to "_",
 // so two hosts can share one name and a value an operator sets for one host
-// silently reaches the other. The suffix hashes the host alone, so a route's
-// name never depends on what else the run discovered.
-func disambiguateEnvPlaceholders(routes []Route) {
-	byName := make(map[string][]int)
+// silently reaches the other. It runs to a fixpoint against the whole table,
+// not one pass, because suffixing a colliding name can itself collide with
+// another route's untouched base name or with another round's suffix. Each
+// round re-buckets by the current CredentialValue and suffixes every member
+// of every 2+ bucket, never just the "losers" of some claim order, so the
+// result depends only on the set of hosts, not on declaration order or Go's
+// randomized map iteration order.
+func disambiguateEnvPlaceholders(routes []Route) error {
+	var envIdxs []int
 	for i, r := range routes {
-		if r.CredentialSource != "env" {
-			continue
+		if r.CredentialSource == "env" {
+			envIdxs = append(envIdxs, i)
 		}
-		byName[r.CredentialValue] = append(byName[r.CredentialValue], i)
 	}
-	for _, idxs := range byName {
-		if len(idxs) < 2 {
-			continue
+
+	// hostHash is fixed-width, so a route touched by a previous round
+	// already ends in "_"+hostHash(its own host), and two touched routes
+	// can collide again only if their hosts hash equal. Absent that, every
+	// round with a remaining collision must suffix at least one route for
+	// the first time, so len(envIdxs)+1 rounds is always enough; hitting
+	// the bound means a real hostHash collision.
+	for round := 0; ; round++ {
+		byName := make(map[string][]int)
+		for _, i := range envIdxs {
+			byName[routes[i].CredentialValue] = append(byName[routes[i].CredentialValue], i)
 		}
-		for _, i := range idxs {
-			routes[i].CredentialValue = fmt.Sprintf("%s_%s", routes[i].CredentialValue, hostHash(routes[i].MatchHost))
+
+		var contested []string
+		for name, idxs := range byName {
+			if len(idxs) >= 2 {
+				contested = append(contested, name)
+			}
+		}
+		if len(contested) == 0 {
+			return nil
+		}
+		if round == len(envIdxs) {
+			return fmt.Errorf("registrydiscover: could not disambiguate env placeholder %q after %d rounds", slices.Min(contested), round)
+		}
+		for _, name := range contested {
+			for _, i := range byName[name] {
+				routes[i].CredentialValue = fmt.Sprintf("%s_%s", routes[i].CredentialValue, hostHash(routes[i].MatchHost))
+			}
 		}
 	}
 }
