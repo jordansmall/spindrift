@@ -111,6 +111,9 @@ is ever load-bearing. Resolution happens host-side at launcher startup;
 decided. Nothing here changes what the Box can read: still no credential, on
 any path.
 
+See the issue #3151 amendment below: an `exec` helper does not run with the
+launcher's ambient environment, only a small fixed allowlist.
+
 ### Discovery writes the file; doctor keeps it honest
 
 The Target repo already declares which registries it uses — in
@@ -380,3 +383,74 @@ record of the pre-#3404 manifest. The two earlier amendments' account of what
 the field *means* — which declared registries get a replacement stanza, and
 what the placeholder names once one is replaced — is unchanged; only where
 the names ride is.
+
+## Amendment (issue #3151): `exec` runs with an allowlisted environment, not the launcher's own
+
+The source table's `exec` row and the paragraph following it describe *what*
+runs (`argv`, stdout is the credential) but say nothing about *what
+environment it runs with*. Before this amendment, `execResolver.Peek` left
+`exec.Cmd.Env` nil, which Go's `os/exec` treats as "inherit the calling
+process's environment" — so a credential helper spawned by the launcher saw
+everything the launcher saw, including every other route's `env`-sourced
+credential still set at that point and, in the AFK dispatch path, the
+GitHub App installation token. A helper's own bugs or a malicious argv could
+exfiltrate any of it.
+
+`execResolver.Peek` now builds the child's environment from a fixed
+allowlist of five names — `PATH`, `HOME`, `GNUPGHOME`, `GPG_TTY`,
+`SSH_AUTH_SOCK` — and forwards a name only when it is actually set in the
+launcher's own environment, so an *unset* allowlisted name never becomes
+an empty-valued var in the child. That guarantee is about unset names, not
+empty ones: `os.LookupEnv` reports `ok` for a set-but-empty variable, so a
+launcher running with `HOME=""` still forwards `HOME=` to the child.
+`HOME` is what a helper binary needs to locate its own config; `PATH` is
+not what finds the helper itself — `exec.Command` resolves `argv[0]`
+through the launcher's own `PATH` at construction time, before `cmd.Env`
+applies — but the forwarded `PATH` is what the helper's *own* children,
+if it spawns any, see when resolving their argv. The
+`GNUPGHOME`/`GPG_TTY`/`SSH_AUTH_SOCK` trio is what the realistic helpers
+this source exists for (`pass`, which spawns `gpg-agent`; `op read`) need
+to reach an already-unlocked agent rather than prompt interactively.
+Nothing else reaches the child — no `SPINDRIFT_*` variable, no GitHub App
+installation token, no other route's credential — with one exception: a
+credential itself stored under one of the five allowlisted names is
+reachable — the rule this section closes on, that an allowlisted name
+must not double as a route's `env` credential source. The
+allowlist is fixed and does not vary by route.
+
+This closes over the same route-order hazard the two-pass resolution
+described under `resolveRegistryRoutesFromFile` fixes on the other side:
+every `env`-sourced credential in the routes file is resolved, and its
+source variable unset, in a first pass, before any route's credential —
+`exec` included — is resolved in a second pass. So an `exec` helper never
+observes an unresolved `env` credential regardless of which route comes
+first in the file, and an `exec` helper's own environment is the allowlist
+above regardless of route order either way.
+
+The trade-off is deliberate and has no per-route override today: a helper
+that needs some other ambient variable — a service-account token like
+`OP_SERVICE_ACCOUNT_TOKEN`, say — cannot receive it through the launcher's
+environment. Such a helper needs its own on-disk config (most secret-manager
+CLIs support one) rather than an environment variable, or the allowlist
+needs a new name — a decision worth making deliberately, since each addition
+widens what every `exec` helper on every route can see, not just the one
+route that needs it.
+
+The two-pass unset above lives only in `resolveRegistryRoutesFromFile`, the
+launch path's route-loading step. Two peek paths run before that step, or
+outside it entirely, and never unset anything: the launch path's own
+`validate` cross-knob check — `cmd/launcher/launcherchecksadapter.go` wires
+`registryProxyRoutesCheck(c, true)` into `ExtraCrossKnob`, whose Probe in
+`cmd/launcher/checks.go` calls `credresolver.New(route.Credential).Peek()`
+over every route before the file is ever resolved — and doctor's route gate
+(`cmd/launcher/registryroutes_doctor_checks.go`), which calls the same
+`Peek`. On either path, a route declaring `credential = { env =
+"SSH_AUTH_SOCK" }` leaves that value readable by a sibling route's `exec`
+helper, bounded only by the allowlist above. Registry store discovery
+(`cmd/launcher/internal/registrydiscover/storelookup.go`) shares the
+never-unsets property but not the hazard: its `Peek` call doesn't unset
+either, but the kind table's `exec` row carries no `StoreConfig`, and
+`storeLookupConfig` rejects any kind whose `StoreConfig` is nil, so
+discovery can never construct an `exec` Config or spawn a helper in the
+first place. This takes a pathological operator config to trigger, but an
+allowlisted name must not double as a route's `env` credential source.
