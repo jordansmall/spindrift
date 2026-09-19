@@ -1,6 +1,6 @@
 // Package terminate carries the signal an operator's Terminate gesture (ADR
-// 0024, issue #649) sends to an in-flight Dispatch/Settle loop. Terminate
-// itself reaps, moves the tracker, and comments; Registry only stops a
+// 0024, issue #649) sends to an in-flight Dispatch/Settle loop. Reclaim reaps,
+// moves the tracker, and comments (issue #3519); Registry only stops a
 // surviving goroutine from corrupting the issue's state afterwards.
 package terminate
 
