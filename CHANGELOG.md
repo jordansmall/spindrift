@@ -1,5 +1,107 @@
 # Changelog
 
+## [0.18.1](https://github.com/jordansmall/spindrift/compare/v0.18.0...v0.18.1) (2026-09-19)
+
+
+### Features
+
+* **dispatch:** forward the injected issue text into the Box ([210e5ad](https://github.com/jordansmall/spindrift/commit/210e5ad3350446f6a7a0de14788a6a3fe19d480c))
+* **driver-exec:** emit the prompt composition report ([e73d9b4](https://github.com/jordansmall/spindrift/commit/e73d9b4f6a6090a90c1f936691f8b8b0a0b29cb2)), closes [#3444](https://github.com/jordansmall/spindrift/issues/3444)
+* **forge:** read an issue's body and comments host-side ([d2c8311](https://github.com/jordansmall/spindrift/commit/d2c8311d6ef8a45c18be6fb56ab787334f95234c))
+* **forge:** render the link chain into the issue text ([6bc77d4](https://github.com/jordansmall/spindrift/commit/6bc77d4922dd1c5bfca495843b0af99ec3d9653d)), closes [#3469](https://github.com/jordansmall/spindrift/issues/3469)
+* **forge:** walk a local issue's link chain ([4be0736](https://github.com/jordansmall/spindrift/commit/4be0736fb4a055f8f7c25dc250e740843d656ec7)), closes [#3469](https://github.com/jordansmall/spindrift/issues/3469)
+* **landdelta:** add pre-image line ranges to the Delta type ([315c66d](https://github.com/jordansmall/spindrift/commit/315c66d92d343fd4d97fe93e01d234677298fc69)), closes [#3503](https://github.com/jordansmall/spindrift/issues/3503)
+* **landdelta:** populate the pre-image ranges on both compute paths ([bdfbf85](https://github.com/jordansmall/spindrift/commit/bdfbf85bc6f066c27be49e90aa2a939016a29aba)), closes [#3503](https://github.com/jordansmall/spindrift/issues/3503)
+* **promptassembly:** append the injected issue text to each prompt ([41e5b50](https://github.com/jordansmall/spindrift/commit/41e5b50266c8c28686b62fd4bd6d85de8dc610df))
+* **promptassembly:** report prompt composition per pass kind ([76dea11](https://github.com/jordansmall/spindrift/commit/76dea1168cef4dee4bb3b401bcc52e4c1a7669e6)), closes [#3444](https://github.com/jordansmall/spindrift/issues/3444)
+* **prompts:** anchor the principle skills where they apply ([eaaf3a6](https://github.com/jordansmall/spindrift/commit/eaaf3a64476d4da68a1bd8ddefa7d8da432ca06c))
+* **prompts:** fold prose findings in place ([9e9eac0](https://github.com/jordansmall/spindrift/commit/9e9eac0ecd988a34e7a51613205772949a575a7a))
+* **prompts:** have the scout write its own brief ([1e89c02](https://github.com/jordansmall/spindrift/commit/1e89c0200c9b2d9837ea7ccc44a7de9b77d83b24)), closes [#3449](https://github.com/jordansmall/spindrift/issues/3449)
+* **prompts:** inline the code-comments policy ([6dab599](https://github.com/jordansmall/spindrift/commit/6dab599b6ae9fb381d9c4f63554149f75289ea6d)), closes [#3505](https://github.com/jordansmall/spindrift/issues/3505)
+* **prompts:** run review fan-out on review-axis ([87716fc](https://github.com/jordansmall/spindrift/commit/87716fc177a9e13a63fe753077dcafb7923b4c0c)), closes [#3447](https://github.com/jordansmall/spindrift/issues/3447)
+* **roster:** add the review-axis agent entry ([d5d6fcf](https://github.com/jordansmall/spindrift/commit/d5d6fcf4e562f38a06fe2f9d0c1bdeddbe5c4c9e)), closes [#3447](https://github.com/jordansmall/spindrift/issues/3447)
+* **skills:** bake three pstack principle skills ([ffaab58](https://github.com/jordansmall/spindrift/commit/ffaab5848e1a7fe4378be061b0898e25edd379b4))
+
+
+### Bug Fixes
+
+* **registry-proxy:** read a rejected socket mount as incapable ([d2fbef9](https://github.com/jordansmall/spindrift/commit/d2fbef967f8c0a58bfb6bf15a687c8efa9d2f29b)), closes [#3466](https://github.com/jordansmall/spindrift/issues/3466)
+
+
+### Performance Improvements
+
+* **orchestrator:** append each pass's seeded block, don't prepend it ([fa852f9](https://github.com/jordansmall/spindrift/commit/fa852f9e23c0e3bfaebae84db5e2d70b696a9015))
+
+
+### Security
+
+* **launcher:** run exec credential helpers on an allowlist ([397aa8b](https://github.com/jordansmall/spindrift/commit/397aa8b5e2724a86ad8adcb512fa79537ecff269)), closes [#3151](https://github.com/jordansmall/spindrift/issues/3151)
+* **launcher:** unset env credentials before exec routes run ([b9ae562](https://github.com/jordansmall/spindrift/commit/b9ae562917097fcb27877777d59950530860bbc8)), closes [#3151](https://github.com/jordansmall/spindrift/issues/3151)
+* **registrydiscover:** disambiguate to a fixpoint ([9501027](https://github.com/jordansmall/spindrift/commit/9501027e20847c6c6288280ff73eecdc81f7fdd0))
+* **runner:** keep the injected issue text off the runner's argv ([b6e28f8](https://github.com/jordansmall/spindrift/commit/b6e28f8594501a8db4a64bc790b0ce9818802110))
+* **runner:** retire the read-only /issues mount ([5887c03](https://github.com/jordansmall/spindrift/commit/5887c03e10c1e8767d46ae4396bc7c11bd0305aa)), closes [#3471](https://github.com/jordansmall/spindrift/issues/3471)
+
+
+### Documentation
+
+* add the 0.18.1 release notes ([ca20136](https://github.com/jordansmall/spindrift/commit/ca201365e8298098197f229e3434ef996429e3f9))
+* **adr:** correct ADR 0044's socket evidence ([12ff4c5](https://github.com/jordansmall/spindrift/commit/12ff4c564151d8cda97871ece6d1bb79579ea3da)), closes [#3467](https://github.com/jordansmall/spindrift/issues/3467) [#3466](https://github.com/jordansmall/spindrift/issues/3466)
+* **adr:** flag ADR 0033's stale /issues references ([da20e49](https://github.com/jordansmall/spindrift/commit/da20e49794837a68c7fa76b166e17f47c95bb294)), closes [#3480](https://github.com/jordansmall/spindrift/issues/3480)
+* **adr:** qualify ADR 0044's [#3111](https://github.com/jordansmall/spindrift/issues/3111) probe rule ([0c25d11](https://github.com/jordansmall/spindrift/commit/0c25d11d03e839df7c09e031c3cef3d456ba0a50)), closes [#3475](https://github.com/jordansmall/spindrift/issues/3475)
+* **adr:** record local issue reads as injected text ([49e01f8](https://github.com/jordansmall/spindrift/commit/49e01f87249b579aa96e028b6a4432140e21d738)), closes [#3471](https://github.com/jordansmall/spindrift/issues/3471)
+* **adr:** record the exec credential environment rules ([1764288](https://github.com/jordansmall/spindrift/commit/1764288bffa557ffe67fc1a477913442e5a3e68d)), closes [#3151](https://github.com/jordansmall/spindrift/issues/3151)
+* **dispatch:** correct the issue-text failure contract ([a1e428e](https://github.com/jordansmall/spindrift/commit/a1e428ebbc282027e70548fe55f8e702251e6117)), closes [#3469](https://github.com/jordansmall/spindrift/issues/3469)
+* **launcher:** trim comments in Go sources ([1e5510d](https://github.com/jordansmall/spindrift/commit/1e5510d70ce35993093e6daac6bdbccd519b8df4))
+* **localloop:** explain stuck broad-ticket landings ([5a45bc0](https://github.com/jordansmall/spindrift/commit/5a45bc0d978bacc463facb39115c78baeaa653bf)), closes [#3440](https://github.com/jordansmall/spindrift/issues/3440)
+* **lore:** fence the parallelism ban to its trigger ([9b82a3e](https://github.com/jordansmall/spindrift/commit/9b82a3e6a8237062324c1583b04b33f079db1751))
+* **nix-checks:** make a failed check self-diagnosing ([40b22eb](https://github.com/jordansmall/spindrift/commit/40b22ebd40b72f92103ba86cca754211a94f5506)), closes [#3448](https://github.com/jordansmall/spindrift/issues/3448)
+* **nix:** trim comments in Nix sources ([678bd9f](https://github.com/jordansmall/spindrift/commit/678bd9fbf66a110ec10cedcd2641764680c89955))
+* **prompts:** drop coordinator comment review ([bd2f596](https://github.com/jordansmall/spindrift/commit/bd2f5963a30e27d7298116ce71b3dcfb26a3ed20)), closes [#3450](https://github.com/jordansmall/spindrift/issues/3450)
+* **prompts:** restate both commit subject tiers ([ce39860](https://github.com/jordansmall/spindrift/commit/ce398604bffc037e9f3722944249e9a2d76ab738)), closes [#3478](https://github.com/jordansmall/spindrift/issues/3478)
+* record the inlined code-comments policy ([0927ef8](https://github.com/jordansmall/spindrift/commit/0927ef819ca0fdafe2e3a0a30fb8c20c4544ee79)), closes [#3505](https://github.com/jordansmall/spindrift/issues/3505)
+* **reference:** describe the injected local link chain ([e83bbc9](https://github.com/jordansmall/spindrift/commit/e83bbc96335e0e7d62db96662d3da94d8c956a62)), closes [#3469](https://github.com/jordansmall/spindrift/issues/3469)
+* **reference:** describe the scout-written brief ([ee07bf4](https://github.com/jordansmall/spindrift/commit/ee07bf4d87c3606e7ebd9844341c75bcaaa677a5))
+* **reference:** describe the transport probe's control probe ([c229be3](https://github.com/jordansmall/spindrift/commit/c229be355497be43344a47577ab09e824e64f5e4))
+* **reference:** document the land delta's pre-image ranges ([ec5e2f5](https://github.com/jordansmall/spindrift/commit/ec5e2f5462b0dd5ac6b85f2afdf1fb0aaf02c5e7)), closes [#3503](https://github.com/jordansmall/spindrift/issues/3503)
+* **reference:** drop an unmeasured virtiofs claim ([efdc9dd](https://github.com/jordansmall/spindrift/commit/efdc9dd9c3352c6b6b7b461dd21f6c846742a360)), closes [#3467](https://github.com/jordansmall/spindrift/issues/3467)
+* **reference:** list the three principle skills ([7af5c62](https://github.com/jordansmall/spindrift/commit/7af5c623c01afd909552bad3286ea5690e897295))
+* **reference:** narrow doctor's row-prefix claim ([cb7a18d](https://github.com/jordansmall/spindrift/commit/cb7a18d809021e0cb7985107cc89aa7d150b46cd))
+* **reference:** state the fixpoint naming rule ([82dc5ed](https://github.com/jordansmall/spindrift/commit/82dc5ed96eaf269123a06c6bd3dd3134cc227c23))
+* **roster:** say the scout writes the brief ([b3c6aea](https://github.com/jordansmall/spindrift/commit/b3c6aead5d2f0cdc1aa5807171d7c4b1f44d27c5))
+* **shell:** trim comments in shell and bats ([a1c842f](https://github.com/jordansmall/spindrift/commit/a1c842f4b8f0197b2cf7eb1860ce2d397f36bb61))
+
+
+### Code Refactoring
+
+* **console:** terminate through the shared routine ([3b46f40](https://github.com/jordansmall/spindrift/commit/3b46f4056136ac668373230d470edcdc0c008f46)), closes [#3519](https://github.com/jordansmall/spindrift/issues/3519)
+* **doctor:** drop callerless check helpers ([7a78ec0](https://github.com/jordansmall/spindrift/commit/7a78ec08fa2de8baca8d16efa876b4250f016ae3)), closes [#3161](https://github.com/jordansmall/spindrift/issues/3161)
+* **promptassembly:** render prompts as attributed segments ([42286de](https://github.com/jordansmall/spindrift/commit/42286de5293b694e2b90a1b4d54ab708817157b2))
+* **prompts:** stop sending the local agent to a folder ([a0b0510](https://github.com/jordansmall/spindrift/commit/a0b0510c31b6bfa7556ce6184feb51c546c1e46b)), closes [#3469](https://github.com/jordansmall/spindrift/issues/3469)
+* **prompts:** stop telling the agent to fetch the issue ([c25b07d](https://github.com/jordansmall/spindrift/commit/c25b07d2864d3f6c988c20b51b903db40050b34d))
+* **runner:** name the no-argv env set for its criterion ([43efaf9](https://github.com/jordansmall/spindrift/commit/43efaf981a51a0252a9ee32103c1ee9c0c7df39f))
+* **terminate:** add the shared reap-and-release routine ([85b1c8c](https://github.com/jordansmall/spindrift/commit/85b1c8cd79dd157d19e5532d52ae8680746f9042)), closes [#3519](https://github.com/jordansmall/spindrift/issues/3519)
+
+
+### Tests
+
+* **checks:** pin the fragment's subject tiers ([f922792](https://github.com/jordansmall/spindrift/commit/f9227925e6c09b5356df6e1fabafb00b0acae64a))
+* **checks:** pin the OOM cores carve-out in lore parity ([0d7383d](https://github.com/jordansmall/spindrift/commit/0d7383d1bc01f11a97f43eed5d0034ec0d292923))
+* **launcher:** call doctorCheckSets in tests ([351f148](https://github.com/jordansmall/spindrift/commit/351f1488089b7cdf49c377629aed2164ae706bde))
+* **launcher:** pin the prose-fold rule ([b27ea98](https://github.com/jordansmall/spindrift/commit/b27ea9888b7eebf0be9bcc694349b415ea54e08f))
+* **launcher:** trim comments in Go tests ([550c0b9](https://github.com/jordansmall/spindrift/commit/550c0b9550a67949e6200d8a85d4c8a571a1b0eb))
+* **localloop:** pin stuck broad-ticket surfacing ([d1d64d5](https://github.com/jordansmall/spindrift/commit/d1d64d55ae2b8d442508040bd2dda03d588439df)), closes [#3440](https://github.com/jordansmall/spindrift/issues/3440)
+* **nix-checks:** pin the CLAUDE.md/skill lore mirror ([820eadf](https://github.com/jordansmall/spindrift/commit/820eadf69e1116d5bcfb22ce6a7e546b277e14a6)), closes [#3448](https://github.com/jordansmall/spindrift/issues/3448)
+* **orchestrator:** pin the per-pass prefix families ([cd4cc88](https://github.com/jordansmall/spindrift/commit/cd4cc8812b2d3631198dad8a0c297fa6008c4703))
+* **promptassembly:** pin the local tracker's issue text ([c4ea8ae](https://github.com/jordansmall/spindrift/commit/c4ea8ae37623c1a3dea86e532d3a366cc9c97497)), closes [#3469](https://github.com/jordansmall/spindrift/issues/3469)
+* **prompts:** ban /issues from the prompt templates ([67a0a0e](https://github.com/jordansmall/spindrift/commit/67a0a0e0502f5c6f0b649bdca2dcfdf867a62e14)), closes [#3471](https://github.com/jordansmall/spindrift/issues/3471)
+* **runner:** invert the /issues mount tests first ([491c7c3](https://github.com/jordansmall/spindrift/commit/491c7c37c8978445cdb34a618c01842aefbd137b)), closes [#3471](https://github.com/jordansmall/spindrift/issues/3471)
+* **runner:** pin ISSUE_TEXT's empty case and its path to the prompt ([4e5204d](https://github.com/jordansmall/spindrift/commit/4e5204d1e8f9408ce1d43711a6a95c3b6a33a671))
+
+
+### Build System
+
+* **flake:** bump jordan-skills for the principle skills ([6bf13f5](https://github.com/jordansmall/spindrift/commit/6bf13f5b95a9ecb81dada26eb5a8461a14c3787a))
+
 ## [0.18.0](https://github.com/jordansmall/spindrift/compare/v0.17.1...v0.18.0) (2026-09-07)
 
 
