@@ -30,17 +30,23 @@ running `nix log`:
 That invocation is complete as written — pass no `-j`, `--max-jobs` or
 `--cores` flags. The Box's baked `nix.conf` pins `cores = 4`, and Nix's
 own default already builds one derivation at a time, so hand-tuning
-either is guesswork.
+either is guesswork. The one exception, an `EXIT:137` kill, is below.
 
 A check failure is deterministic: the same derivation hash fails the same way
 however it is scheduled. Never re-run a failed check unchanged — not under
-reduced parallelism, not after a sleep. Each retry is a multi-minute build
-with a foregone conclusion. The only remedies are to fix the code or read the
-log `-L` already surfaced; re-run only after a real edit. A build the kernel
-killed (`EXIT:137`, out of memory) is the exception: that is not a check
-result at all, so a re-run is legitimate there, unlike a real failure. If
-the kill happened under the full `nix flake check`, re-run the scoped
-`checks-inbox` target instead — lowering parallelism is never the answer.
+reduced parallelism (the `EXIT:137` carve-out below is outside this rule), not
+after a sleep. Each retry is a multi-minute build with a foregone conclusion.
+The only remedies are to fix the code or read the log `-L` already surfaced;
+re-run only after a real edit. A build the kernel killed (`EXIT:137`, out of
+memory) is the exception: that is not a check result at all, so a re-run is
+legitimate there, unlike a real failure. Under the full `nix flake check`,
+re-run the scoped `checks-inbox` target instead — a smaller target, not a
+smaller `--cores`. Under `checks-inbox` itself there is no smaller target left,
+so `--cores 1` is the one sanctioned exception to the no-resource-flags rule
+above: `max-jobs` is already 1, which leaves the concurrent compiles or test
+binaries inside a single derivation as the thing actually holding memory. Reach
+for it once, only after an `EXIT:137`, and never for a check that genuinely
+failed.
 
 If `nix develop` is unavailable or fails, fall back to the baked toolchain and
 log the fallback. Go module without a devShell:

@@ -771,9 +771,11 @@ in
 
   # Issue #3448: the Box's baked nix.conf pins `cores = N` and one derivation
   # at a time is Nix's own default, so the skill must tell the agent not to
-  # hand-tune `-j`/`--max-jobs`/`--cores`. The pin here is value-agnostic:
+  # hand-tune `-j`/`--max-jobs`/`--cores` outside the one `EXIT:137` carve-out
+  # the skill itself fences (issue #3452). The pin here is value-agnostic:
   # the value belongs to nix-checks-lore-cores-matches-nix-conf, so the two
-  # checks never give contradictory remedies on a cores bump.
+  # checks never give contradictory remedies on a cores bump; the carve-out
+  # itself is pinned by nix-checks-lore-parity-clause-oom-cores-carve-out.
   nix-checks-skill-no-resource-flag-tuning =
     pkgs.runCommand "nix-checks-skill-no-resource-flag-tuning" { }
       ''
