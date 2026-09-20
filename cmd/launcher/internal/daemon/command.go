@@ -18,41 +18,24 @@ type ChildSpec struct {
 // is pure: no filesystem or process access, so the loop slice's seam is
 // tested by feeding it a ChildSpec and asserting on the returned argv.
 func ChildCommand(s ChildSpec) ([]string, error) {
-	if s.RepoPath == "" || !path.IsAbs(s.RepoPath) {
-		return nil, fmt.Errorf("daemon: repo path must be an absolute path, got %q", s.RepoPath)
-	}
-	if s.Revision == "" {
-		return nil, fmt.Errorf("daemon: revision must not be empty (a child must always be pinned)")
-	}
-	// RepoPath is interpolated straight into the flakeref below; any of
-	// these three chars would open a second query string, fragment, or
-	// query param, producing a malformed ref instead of a clear error.
-	if strings.ContainsAny(s.RepoPath, "#?&") {
-		return nil, fmt.Errorf("daemon: repo path must not contain '#', '?', or '&', got %q", s.RepoPath)
+	if err := validateRepoPathAndRevision(s.RepoPath, s.Revision, "a child must always be pinned"); err != nil {
+		return nil, err
 	}
 	kind, err := ParseKind(string(s.Kind))
 	if err != nil {
 		return nil, err
 	}
 
-	// git+file:// (not a bare path) because only a git flakeref accepts
-	// ?rev=, and that pin is the whole point: the daemon must never
-	// evaluate a moving working tree. allRefs=1 because the resolved tip
-	// lives on a remote-tracking ref the local checkout's own branch may
-	// lag behind.
-	flakeref := fmt.Sprintf("git+file://%s?rev=%s&allRefs=1", s.RepoPath, s.Revision)
-
 	// The fragment is omitted entirely for the default attr rather than
 	// emitting a bare trailing "#", which nix would reject. frag is
 	// interpolated straight after that "#", so it gets the same
 	// malformed-ref check RepoPath got above (the ".#" prefix itself is
 	// stripped first, so a bare default attr never trips it).
-	if frag := strings.TrimPrefix(s.AppAttr, ".#"); frag != "" {
-		if strings.ContainsAny(frag, "#?&") {
-			return nil, fmt.Errorf("daemon: app attr must not contain '#', '?', or '&', got %q", s.AppAttr)
-		}
-		flakeref += "#" + frag
+	frag := strings.TrimPrefix(s.AppAttr, ".#")
+	if frag != "" && strings.ContainsAny(frag, "#?&") {
+		return nil, fmt.Errorf("daemon: app attr must not contain '#', '?', or '&', got %q", s.AppAttr)
 	}
+	flakeref := pinnedFlakeref(s.RepoPath, s.Revision, frag)
 
 	return []string{
 		"nix", "run", flakeref, "--",
@@ -65,4 +48,83 @@ func ChildCommand(s ChildSpec) ([]string, error) {
 		"--max-jobs", "1",
 		"--max-parallel", "1",
 	}, nil
+}
+
+// validateRepoPathAndRevision runs the checks ChildCommand and SelfCommand
+// both need before touching repoPath or revision: repoPath must be an
+// absolute path free of the chars that would open a second query string,
+// fragment, or query param once interpolated into the flakeref
+// (pinnedFlakeref), and revision must be non-empty — unpinnedMsg supplies
+// each call site's own wording for why. It stops short of the two attr/frag
+// checks below: those diverge on empty-frag policy (ChildCommand's AppAttr
+// defaults on empty, SelfCommand's SelfAttr rejects it), so the honest
+// shared core is only these three checks, not the whole validation.
+func validateRepoPathAndRevision(repoPath, revision, unpinnedMsg string) error {
+	if repoPath == "" || !path.IsAbs(repoPath) {
+		return fmt.Errorf("daemon: repo path must be an absolute path, got %q", repoPath)
+	}
+	if revision == "" {
+		return fmt.Errorf("daemon: revision must not be empty (%s)", unpinnedMsg)
+	}
+	if strings.ContainsAny(repoPath, "#?&") {
+		return fmt.Errorf("daemon: repo path must not contain '#', '?', or '&', got %q", repoPath)
+	}
+	return nil
+}
+
+// pinnedFlakeref builds a git flakeref pinned to revision at repoPath, with
+// frag (already stripped of its leading ".#") appended as the fragment when
+// non-empty. Shared by ChildCommand and SelfCommand: both need the exact
+// same pin, for the exact same reason.
+//
+// git+file:// (not a bare path) because only a git flakeref accepts ?rev=,
+// and that pin is the whole point: the daemon must never evaluate a moving
+// working tree. allRefs=1 because the resolved tip lives on a
+// remote-tracking ref the local checkout's own branch may lag behind.
+func pinnedFlakeref(repoPath, revision, frag string) string {
+	flakeref := fmt.Sprintf("git+file://%s?rev=%s&allRefs=1", repoPath, revision)
+	if frag != "" {
+		flakeref += "#" + frag
+	}
+	return flakeref
+}
+
+// SelfSpec is everything one self-build evaluation needs.
+type SelfSpec struct {
+	RepoPath string // absolute path to the operator's checkout
+	SelfAttr string // DAEMON_SELF_APP, e.g. ".#daemon"
+	Revision string // full git rev to evaluate at
+	System   string // nix system double, e.g. "x86_64-linux"
+}
+
+// SelfCommand builds the argv that evaluates the daemon's own program store
+// path at a pinned revision.
+func SelfCommand(s SelfSpec) ([]string, error) {
+	if err := validateRepoPathAndRevision(s.RepoPath, s.Revision, "a self-check must always be pinned"); err != nil {
+		return nil, err
+	}
+	if s.System == "" {
+		return nil, fmt.Errorf("daemon: system must not be empty")
+	}
+	frag := strings.TrimPrefix(s.SelfAttr, ".#")
+	// Unlike ChildCommand's AppAttr, an empty attr here is an error rather
+	// than a default: "apps.<system>..program" is a malformed attribute
+	// path, not nix's default search path (that's ChildCommand's flakeref
+	// fragment, which nix run itself defaults for; nix eval has no such
+	// default to fall back on).
+	if frag == "" {
+		return nil, fmt.Errorf("daemon: self attr must not be empty, got %q", s.SelfAttr)
+	}
+	if strings.ContainsAny(frag, "#?&") {
+		return nil, fmt.Errorf("daemon: self attr must not contain '#', '?', or '&', got %q", s.SelfAttr)
+	}
+
+	// The fragment is the full attribute path (apps.<system>.<attr>.program),
+	// not the bare attr ChildCommand passes: nix eval's own fragment
+	// resolution only tries packages.<system>/legacyPackages.<system> --
+	// apps is nix run's default search path, not nix eval's -- so the
+	// system double has to be supplied rather than inferred by nix.
+	frag = fmt.Sprintf("apps.%s.%s.program", s.System, frag)
+
+	return []string{"nix", "eval", "--raw", pinnedFlakeref(s.RepoPath, s.Revision, frag)}, nil
 }
