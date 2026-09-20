@@ -1,42 +1,15 @@
 # Drift parity between the commit fallback fragment and the upstream `/commit`
 # skill (issue #3222, following the tdd pattern from #3219).
-# nix/checks/tdd-fragment-parity.nix carries the full rationale; this file
+# nix/checks/mk-fragment-parity.nix carries the full rationale; this file
 # repeats only what differs.
-{ pkgs, fixtures, ... }:
+{ mkFragmentParity, ... }:
 let
-  inherit (pkgs.lib)
-    assertMsg
-    concatStringsSep
-    hasInfix
-    toLower
-    ;
-
-  skillRowByName =
-    name:
-    let
-      matches = builtins.filter (r: r.name == name) fixtures.dogfoodSkills;
-    in
-    if matches == [ ] then
-      throw "nix/checks/commit-fragment-parity.nix: no dogfood skill named \"${name}\" (nix/dogfood-skills.nix row may have been renamed or dropped)"
-    else
-      builtins.head matches;
-
-  normalize =
-    text:
-    let
-      words = builtins.filter (w: builtins.isString w && w != "") (builtins.split "[[:space:]]+" text);
-    in
-    toLower (concatStringsSep " " words);
-
-  skillText = normalize (skillRowByName "commit").src;
-  fallbackText = normalize (
-    builtins.readFile ../../templates/default/prompts/fragments/commit-unbaked.md
-  );
+  fallbackText = builtins.readFile ../../templates/default/prompts/fragments/commit-unbaked.md;
   anchorText = builtins.readFile ../../templates/default/prompts/fragments/commit-baked.md;
 
   skillDesc = "the upstream commit SKILL.md (pinned `jordan-skills` flake input, read via nix/dogfood-skills.nix)";
   fallbackDesc = "templates/default/prompts/fragments/commit-unbaked.md";
-  remedy = "either re-sync the fallback with the skill, or -- if the skill's discipline genuinely changed -- update this check's clause list to match.";
+  anchorDesc = "templates/default/prompts/fragments/commit-baked.md";
 
   # Only two clauses are pinned. The skill and the fallback spell the wrap rule
   # and the column bounds differently ("hard line wraps" against "hard-wrap at
@@ -62,19 +35,6 @@ let
     }
   ];
 
-  clauseCheck = c: {
-    name = "commit-fragment-parity-clause-${c.name}";
-    value =
-      let
-        needle = normalize c.clause;
-      in
-      assert assertMsg (hasInfix needle skillText)
-        "commit fallback drift: ${skillDesc} no longer states \"${c.clause}\", which ${fallbackDesc} restates -- ${remedy}";
-      assert assertMsg (hasInfix needle fallbackText)
-        "commit fallback drift: ${fallbackDesc} no longer states \"${c.clause}\", which ${skillDesc} teaches -- ${remedy}";
-      pkgs.runCommand "commit-fragment-parity-clause-${c.name}" { } "touch $out";
-  };
-
   # Phrases that belong only to the unbaked arm's format-rule prose.
   stepProseMarkers = [
     "conventional commits v1.0.0"
@@ -82,20 +42,20 @@ let
     "subject"
     "self-evident"
   ];
-  normalizedAnchor = normalize anchorText;
-  leakedMarkers = builtins.filter (m: hasInfix m normalizedAnchor) stepProseMarkers;
-  anchorLines = builtins.filter (l: builtins.isString l && normalize l != "") (
-    builtins.split "\n" anchorText
-  );
 in
-builtins.listToAttrs (map clauseCheck sharedClauses)
-// {
-  commit-fragment-parity-baked-anchor-omits-step-prose =
-    assert assertMsg (leakedMarkers == [ ])
-      "templates/default/prompts/fragments/commit-baked.md restates the unbaked arm's format-rule prose (${concatStringsSep ", " leakedMarkers}) -- the baked arm must name the `/commit` skill and stop, since the skill itself carries that prose in-box; move any wording worth keeping into ${fallbackDesc}.";
-    assert assertMsg (builtins.length anchorLines == 1)
-      "templates/default/prompts/fragments/commit-baked.md is ${toString (builtins.length anchorLines)} non-empty lines, want 1 -- the baked arm is an anchor line, not a paragraph; prose belongs in ${fallbackDesc}.";
-    assert assertMsg (hasInfix "/commit" anchorText)
-      "templates/default/prompts/fragments/commit-baked.md no longer names the `/commit` skill -- the baked arm's entire job is to point at the baked skill, so with the name gone the prompt says nothing about commit-message discipline at all.";
-    pkgs.runCommand "commit-fragment-parity-baked-anchor-omits-step-prose" { } "touch $out";
-}
+(mkFragmentParity {
+  skillName = "commit";
+  sourceFile = "nix/checks/commit-fragment-parity.nix";
+  inherit
+    skillDesc
+    fallbackText
+    fallbackDesc
+    anchorText
+    anchorDesc
+    sharedClauses
+    stepProseMarkers
+    ;
+  proseKind = "format-rule prose";
+  carriedKind = "prose";
+  discipline = "commit-message discipline";
+}).checks
