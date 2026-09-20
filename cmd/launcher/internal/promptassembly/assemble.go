@@ -108,10 +108,7 @@ type Handoff struct {
 // lib/mkHarness.nix's choicesCheckOk assert and main.go's validate() (issue
 // #2540). No combination of the other axes is rejected (issue #2354).
 func checkCoveredCell(e Env) error {
-	kind := e.DispatchKind
-	if kind == "" {
-		kind = defaultDispatchKind
-	}
+	kind := e.kind()
 	if kind != defaultDispatchKind && kind != "research" {
 		return fmt.Errorf("dispatch kind %q: %w", e.DispatchKind, ErrUnsupportedCell)
 	}
@@ -323,10 +320,7 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	// first regardless of FixPass, then a warm fix pass, then the default
 	// work cell. Result.Prompt must carry no trailing newline, because the
 	// writer prints it raw and nothing re-adds one downstream.
-	kind := e.DispatchKind
-	if kind == "" {
-		kind = defaultDispatchKind
-	}
+	kind := e.kind()
 
 	var baseName, sessionMode string
 	switch {
