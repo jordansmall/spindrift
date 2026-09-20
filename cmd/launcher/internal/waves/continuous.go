@@ -468,6 +468,12 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// line, so neither a Failed transition nor a Settle belongs
 				// here.
 				fmt.Printf("    ~~ #%s terminated by operator; abandoning\n", iss.Number)
+			case result.AlreadyInFlight:
+				// A live run, possibly orphaned by a killed launcher, still owns
+				// this issue's container, so skip without a dispatch-state
+				// transition and leave its in-progress claim untouched (#562,
+				// #3633).
+				fmt.Printf("    ~~ #%s already in flight; skipping (live run continues)\n", iss.Number)
 			case !result.Success:
 				fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 				result.ReportFailureReason(iss.Number)

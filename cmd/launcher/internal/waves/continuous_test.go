@@ -1815,6 +1815,53 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	}
 }
 
+// TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition verifies that
+// when a second dispatch slot's Box reports its container is already running
+// (a live run possibly orphaned by a killed launcher, not a genuine box
+// failure), RunContinuous's goroutine switch skips it without a Failed
+// transition or a Settler.Fail call, matching dispatchWave's
+// case result.AlreadyInFlight arm (issue #3633).
+func TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	fr.IsRunningRet = true
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	fakeSettle := settle.NewFake()
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	out := testutil.CaptureStdout(t, func() {
+		if err := RunContinuous(c, nil, fc, fc, f, fakeSettle, fake, fresh); err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	})
+
+	for _, call := range fc.TransitionStateCalls {
+		if call.To == forge.Failed {
+			t.Errorf("must NOT transition to Failed when already in flight; got %+v", fc.TransitionStateCalls)
+		}
+	}
+	if len(fakeSettle.FailCalls) != 0 {
+		t.Errorf("Fail must not be called when already in flight; got %+v", fakeSettle.FailCalls)
+	}
+	if len(fakeSettle.SettleCalls) != 0 {
+		t.Errorf("Settle must not be called when already in flight; got %+v", fakeSettle.SettleCalls)
+	}
+	if !strings.Contains(out, "#1") || !strings.Contains(out, "already in flight") {
+		t.Errorf("want a distinct 'already in flight' line naming #1; got output=%q", out)
+	}
+}
+
 // TestRunContinuous_FailedBoxWithEmptyLogPrintsErrToStderr is
 // TestRunContinuous_FailedBoxCallsSettlerFail's stderr-output counterpart:
 // a box that never launched (Result.Err populated per dispatch/retry.go)
