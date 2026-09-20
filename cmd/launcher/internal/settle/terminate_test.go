@@ -13,6 +13,19 @@ import (
 	"spindrift.dev/launcher/internal/terminate"
 )
 
+// assertNoTransitionOrComment fails t if either call slice is non-empty,
+// the shared "must not act after termination" check repeated across the
+// tests below.
+func assertNoTransitionOrComment(t *testing.T, fc *forge.Fake) {
+	t.Helper()
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionState must not be called after termination; got %+v", fc.TransitionStateCalls)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("Comment must not be called after termination; got %+v", fc.CommentCalls)
+	}
+}
+
 // A termination marked before gateToGreen's first poll makes it bail without
 // ever confirming green or swapping agent-complete. This is ADR 0024's
 // "abandons the settle wherever it stands" applied to the CI-watch phase.
@@ -121,6 +134,77 @@ func TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase(t *testing
 	}
 	if fc.Merged != "" {
 		t.Errorf("Merge must not be called after termination; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// terminatingAfterPolls wraps a forge.Fake so its CheckState call marks num
+// terminated once it has been called n times, simulating a signal landing
+// mid-poll rather than before the wait even starts (issue #3523).
+type terminatingAfterPolls struct {
+	*forge.Fake
+	reg   *terminate.Registry
+	num   string
+	n     int
+	calls int
+}
+
+func (f *terminatingAfterPolls) CheckState(url string) (forge.RollupState, error) {
+	f.calls++
+	state, err := f.Fake.CheckState(url)
+	if f.calls >= f.n {
+		f.reg.Mark(f.num)
+	}
+	return state, err
+}
+
+// A termination marked mid-poll — after the loop has already made a few
+// CheckState calls, unlike TestGateToGreen_TerminatedAbandonsWithoutTransition
+// above which marks before the first poll — must abandon at the very next
+// checkpoint rather than run out MergePollTimeout (issue #3523). baseConfig's
+// MergePollTimeout(100)/MergePollInterval(1) gives a deadline poll count far
+// past wantPolls, so a got.elapsed anywhere near 100 would mean the mark was
+// missed and the loop ran to the deadline instead of stopping promptly.
+func TestGateToGreen_TerminatedMidPollAbandonsPromptly(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	reg := terminate.NewRegistry()
+	const wantPolls = 5
+	tf := &terminatingAfterPolls{Fake: fc, reg: reg, num: "1", n: wantPolls}
+	s := newTestSettle(c, tf, tf)
+	s.SetTerminated(reg)
+
+	got, _ := s.gateToGreen("1", 0, testPR, false)
+
+	if got.outcome != gateAbandoned {
+		t.Errorf("gateToGreen = %v, want gateAbandoned", got.outcome)
+	}
+	if got.elapsed != wantPolls {
+		t.Errorf("elapsed = %d, want %d — a mid-poll termination must stop at the next checkpoint, not run toward MergePollTimeout=%d", got.elapsed, wantPolls, c.MergePollTimeout)
+	}
+	assertNoTransitionOrComment(t, fc)
+}
+
+// The graceful-drain counterpart to TestGateToGreen_TerminatedMidPollAbandonsPromptly:
+// with nothing ever marked, gateToGreen must run the wait out to its full
+// MergePollTimeout and return gateTerminal, never cut short. A drain that
+// never escalates to a signal must not shorten an in-flight settle
+// (issue #3523).
+func TestGateToGreen_NeverTerminatedRunsFullDeadline(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	s := newTestSettle(c, fc, fc)
+	reg := terminate.NewRegistry()
+	s.SetTerminated(reg)
+
+	got, _ := s.gateToGreen("1", 0, testPR, false)
+
+	if got.outcome != gateTerminal {
+		t.Errorf("gateToGreen = %v, want gateTerminal", got.outcome)
+	}
+	if got.elapsed != c.MergePollTimeout {
+		t.Errorf("elapsed = %d, want %d (MergePollTimeout) — a never-terminated wait must run the full deadline", got.elapsed, c.MergePollTimeout)
 	}
 }
 
@@ -280,12 +364,7 @@ func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testi
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
 	}
-	if len(fc.TransitionStateCalls) != 0 {
-		t.Errorf("TransitionState must not be called after termination; got %+v", fc.TransitionStateCalls)
-	}
-	if len(fc.CommentCalls) != 0 {
-		t.Errorf("Comment must not be called after termination; got %+v", fc.CommentCalls)
-	}
+	assertNoTransitionOrComment(t, fc)
 }
 
 // Reproduces the issue #743 race at the settle seam: an old, still-in-flight
