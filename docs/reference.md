@@ -1320,6 +1320,7 @@ the authoritative list.
 | `DAEMON_APP`           | `.#`    | — (post-freeze; no legacy alias — set `dispatch.daemonApp`) | flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision — the Consumer's own CLI app, e.g. `.#` or `.#dogfood-bwrap`; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
 | `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host — see [Daemon](#daemon) |
 | `DAEMON_SELF_APP`      | `.#daemon` | — (post-freeze; no legacy alias — set `dispatch.daemonSelfApp`) | flake app attribute of the daemon itself, evaluated at each fetched tip to notice its own build changed and halt — distinct from `DAEMON_APP`, the child Dispatch app; a Consumer that re-exports the daemon under another top-level attribute (e.g. spindrift's own `.#dogfood-bwrap-daemon`) must set this to match, or the check would evaluate a different harness's daemon and report a permanent, spurious change; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
+| `RESEARCH_RESERVATION` | `1`     | — (post-freeze; no legacy alias — set `dispatch.researchReservation`) | how many of `MAX_PARALLEL`'s pool slots prefer research Dispatches over work — a floor, not a ceiling; read by the daemon only — see [Daemon](#daemon) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
 | `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap); also forwarded into the Box, where the orchestrator's own review loop applies the same threshold to its own fresh, Box-local sum (implement/fix/review passes plus dispatched workers in *this* Box only, not the host's cross-Box figure) to commit to a terminal land pass instead of a further BLOCK-triggered review round |
@@ -4627,11 +4628,18 @@ itself stays baked and available.
 `apps.daemon` is the unattended driving loop (issue #3538): generated per
 Consumer beside `apps.default` (`lib/mkHarness.nix`), it's run as `nix run
 .#daemon` — or, for spindrift's own bwrap harness,
-`nix run .#dogfood-bwrap-daemon`. It takes an optional positional Dispatch
-kind, `dispatch` (default) or `research`, the same two `spindrift` drives
-directly. Unlike a single `spindrift dispatch`/`research` invocation or
-`dogfood.sh`'s bounded batch, the daemon keeps working the queue after it
-drains, so work labelled later is picked up without a restart.
+`nix run .#dogfood-bwrap-daemon`. It takes an optional positional argument
+selecting which Dispatch kinds it draws from: `dispatch` restricts it to
+work, `research` restricts it to advise-only research, and omitting the
+argument (the default, issue #3541) draws from both, off the single pool
+described under **Pool** below. Both alone still run: `dispatch` is how an
+operator who has not created the research labels runs the daemon, work-only,
+exactly as before this ticket. The default flipped to both because an
+operator no longer has to choose between advancing the queue and enriching
+the backlog for later — a daemon left running just does both. Unlike a
+single `spindrift dispatch`/`research` invocation or `dogfood.sh`'s bounded
+batch, the daemon keeps working the queue after it drains, so work labelled
+later is picked up without a restart.
 
 The daemon is a separate binary (`cmd/launcher/daemon`), built from the same
 source tree and vendor hash as the launcher, and it's the only component
@@ -4651,8 +4659,13 @@ the tip at daemon startup.
 **Pool.** `MAX_PARALLEL` is the daemon's own pool size (`Config.Slots`,
 `cmd/launcher/internal/daemon/loop.go`): `Loop` runs that many slot
 goroutines, each independently fetching, resolving, and driving its own
-children, rather than one loop iterating a single child. The cap still
-covers everything the daemon runs — one child means one Box
+children, rather than one loop iterating a single child. When both kinds
+are in play, they draw from that same single pool rather than one pool
+apiece (`Config.Kinds`, issue #3541): research runs through the full Box
+and costs exactly what work costs, so a second, research-only pool would
+quietly invalidate the operator's `MEMORY_LIMIT` × `MAX_PARALLEL` sizing by
+letting the daemon's real peak exceed what that sizing accounted for. The
+cap still covers everything the daemon runs — one child means one Box
 (`ChildCommand` appends `--max-jobs 1 --max-parallel 1` to every
 invocation, `cmd/launcher/internal/daemon/command.go`), so a slot can never
 itself fan out into a second, uncounted wave, and an operator's
@@ -4681,10 +4694,12 @@ itself per-checkout for a linked `git worktree`, exactly the granularity
 "one daemon per checkout" means. Two daemons against one checkout would
 each hold `MAX_PARALLEL` slots, doubling the real concurrency and making
 the `MEMORY_LIMIT` × `MAX_PARALLEL` sizing above a lie; the lock is what
-keeps that arithmetic honest. It covers both Dispatch kinds — a `dispatch`
-daemon and a `research` daemon against the same checkout is exactly the
-doubled concurrency the lock refuses, so running both against one checkout
-needs two checkouts, which is the supported way to do it.
+keeps that arithmetic honest. It covers both Dispatch kinds — two separate
+daemons, one `dispatch` and one `research`, against the same checkout is
+exactly the doubled concurrency the lock refuses. Running both kinds
+against one checkout is what a single dual-kind daemon drawing from one
+pool (**Reservation** below) already does; two daemon processes still mean
+two checkouts.
 
 The lock never blocks and never retries: a second instance finds it
 already held and exits at once rather than waiting, so an operator sees
@@ -4699,6 +4714,55 @@ deleting it would only reopen a race with a concurrent acquirer. A refused
 acquire is recorded in the event stream as well as on stderr: a `halt`
 event whose `reason` is prefixed `instance-lock:`, and the daemon exits 1.
 
+**Reservation.** `RESEARCH_RESERVATION` (default 1) is how many of the
+pool's `MAX_PARALLEL` slots prefer research over work (`slotOrder`,
+`cmd/launcher/internal/daemon/pool.go`). It is a floor, not a ceiling: a
+reserved slot takes research only while research actually has queued work,
+and either kind bursts into the whole pool the instant the other has
+backed off into an empty result — reserved capacity never sits idle
+waiting for work that isn't there. 0 is work-first, with research only on
+the leftovers; a value equal to `MAX_PARALLEL` is research-first. The
+reservation binds only while both kinds have work; the moment one runs dry
+every slot, reserved or not, is free to fill itself from the other. The
+preference itself is decided statically, per slot, from the slot's own
+index against the reservation (slot index below the reservation prefers
+research, the rest prefer work) rather than from a live count of who is
+currently running what — a static assignment makes the floor exact without
+lock-step counting across slots, and it means two slots picking a kind
+concurrently can never both claim the same reserved slot, since each
+computes its own answer from its own slot number alone. The knob is inert
+when the daemon's positional verb already restricts it to one kind (there
+is nothing to reserve slots *from*); a value above `MAX_PARALLEL` fails
+daemon startup the same way a non-positive `MAX_PARALLEL` does. At
+`MAX_PARALLEL=1` the default of 1 makes a dual-kind daemon research-first —
+its one slot always prefers research when research has work — so an
+operator who wants that single slot work-first instead sets
+`RESEARCH_RESERVATION=0`. Like the idle-backoff and breaker defaults below,
+1 is a defensible first cut, not a tuned final answer — issue #3541 put the
+final value out of scope, and it expects a real unattended run to argue
+with it.
+
+**Cross-family discovery.** Running both kinds off one pool means the same
+issue can legitimately be dispatchable and researchable at once — the two
+label families are independent and, per `CLAUDE.md`'s "Research label
+lifecycle" section, may both sit on one issue at once. Left alone, that
+would let a researcher and a worker land on the
+same issue at the same time, the researcher writing enrichment for a
+worker that's already running. Each kind's own discovery query
+(`queryOpenIssues`, `cmd/launcher/main.go`) skips a discovered issue that
+already carries the *other* family's in-progress label, so a slot never
+picks up work the other family has already claimed. This is a
+discovery-time scheduling preference, not a new claim rule — the
+claim-time invariant that the two label families never interact is
+unchanged, and an explicitly claimed `ISSUE_NUMBER` still runs regardless
+of what the other family's label says, exactly as it did before this
+ticket. The filter is tracker-derived: it reads the labels the tracker
+already returned with each issue rather than adding a query qualifier, so
+in-progress work started by a Console session, CI, or a human is just as
+visible to it as work this daemon started itself, and an operator who has
+never created the research labels pays nothing for the check — an absent
+label is a label no issue carries, so the filter is a silent no-op.
+
 `DAEMON_APP` (default `.#`) is the flake app attribute the daemon
 re-invokes for each child — see the `DAEMON_APP` row in [Advanced
 tuning](#advanced-tuning). `DAEMON_SELF_APP` (default `.#daemon`) is its
@@ -4710,29 +4774,49 @@ Each child's exit code is interpreted the same way `spindrift`'s own exit
 codes are (see the [exit-code table](#dogfood-loop) in Dogfood loop above,
 which this table's meanings link back to) — but the daemon's *action* on
 each code is its own, distinct from dogfood.sh's pull-and-rebuild loop.
-The wait below is no longer a fixed interval: it is a pool-wide idle
-backoff (`idleBackoff`, `cmd/launcher/internal/daemon/backoff.go`). The
-first no-work check waits `IdleFloor` (`daemonIdleFloor`, default 5
-minutes, `cmd/launcher/daemon/main.go`); each further *consecutive*
-no-work check doubles the wait, capped at `IdleCap` (`daemonIdleCap`,
-default 30 minutes) — 5m → 10m → 20m → 30m, which takes a drought from
-12 checks an hour down to 2, at the price of waiting out at most that
-half hour before the next check notices work that arrived just after a
-capped wait began. The streak is pool-wide,
-not per slot, the same shape as the breaker below: the quantity it bounds
-is the pool's aggregate rate-limit spend against the forge, since an idle
-check still costs a fetch, an evaluation, a bootstrap and a discovery
-query to learn "nothing to do" again. A check that answers something
-else — exit 0 or exit 4, below — resets the wait back to `IdleFloor`, on
-the theory that a check finding real work is evidence the drought is
-over.
+The wait below is no longer a fixed interval: it is an idle backoff, one
+per configured Dispatch kind (`kindBackoff`,
+`cmd/launcher/internal/daemon/backoff.go`) rather than one pool-wide timer
+(issue #3541 split it: an empty work queue must not slow research down,
+and vice versa, so each kind's own no-work streak — and the growing wait
+it earns — lives and resets independently of the other's). Within a kind
+the streak is still pool-wide, not per slot: any slot's no-work result
+against a kind counts against that kind's one timer, the same shape as the
+breaker below. The first no-work check against a kind waits `IdleFloor`
+(`daemonIdleFloor`, default 5 minutes, `cmd/launcher/daemon/main.go`); each
+further *consecutive* no-work check against that same kind doubles the
+wait, capped at `IdleCap` (`daemonIdleCap`, default 30 minutes) — 5m → 10m
+→ 20m → 30m, which takes a drought from 12 checks an hour down to 2, at the
+price of waiting out at most that half hour before the next check notices
+work that arrived just after a capped wait began. The quantity each kind's
+backoff bounds is that kind's own rate-limit spend against the forge, since
+an idle check still costs a fetch, an evaluation, a bootstrap and a
+discovery query to learn "nothing to do" again. A check that answers
+something else — exit 0 or exit 4, below — resets that kind's wait back to
+`IdleFloor`, on the theory that a check finding real work is evidence that
+kind's drought is over; the other kind's own timer, if any, is untouched.
+
+Because the backoff is now per kind, a `Wait` outcome (exit 2 or 3) no
+longer sleeps the slot in place: the slot records the no-work result
+against the kind it just ran and immediately loops back to the top, where
+it tries the *other* configured kind at once if that kind is still
+runnable — an empty work queue does not idle a slot that could be running
+research, and an empty research queue does not idle one that could be
+running work. Only once every configured kind is gated does the pool
+actually sleep, and then for the shortest of the gated kinds' remaining
+waits — the pool as a whole can move the instant any one kind's gate
+lifts, even though a given slot only picks up work once it wakes and
+re-checks. A daemon restricted to one kind by its positional verb never
+sees this switch: with one kind configured, a `Wait` outcome always finds
+every configured kind gated, so it degenerates to the old single-timer
+in-place wait.
 
 | exit | meaning | daemon action |
 |------|---------|----------------|
-| 0    | dispatched work | go again at once; resets the idle backoff to `IdleFloor` |
-| 2    | queue empty | wait the current backoff in one uninterrupted sleep, then go again — a merge cannot create work in an empty queue, so polling mid-wait would only spend a query for nothing |
-| 3    | none dispatchable | with a sibling slot's child running, routine — emit `idle` and wait the current backoff as usual; with the whole pool otherwise idle, nothing can start — emit a distinct `jam` event instead, then wait the current backoff and retry (a single-slot daemon therefore reports every exit 3 as a jam). Either way the wait is slept in `IdleFloor`-sized slices with a `ResolveRevision` poll between slices, since a merge here *can* unblock the jam — the first no-work wait is exactly one `IdleFloor` slice and so polls nothing, with mid-wait polling starting only once the backoff has grown past the floor; if the tip has moved, the slot emits `tip_moved`, resets the backoff to `IdleFloor`, and goes again at once instead of riding out the rest of the wait. A poll that errors is treated as no change observed — it never feeds the breaker, since the next iteration's own top-of-loop fetch is what reports a broken fetch |
-| 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke; resets the idle backoff to `IdleFloor` |
+| 0    | dispatched work | go again at once; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
+| 2    | queue empty | record it against this kind's own backoff (emit `idle`), then loop back around: switch to the other configured kind at once if it is still runnable, or sleep — via the shared `idleSleep` — only if every kind is now gated. A queue-empty gate is never itself polled mid-wait: a merge cannot create work in an empty queue, so polling for one would only spend a query for nothing |
+| 3    | none dispatchable | with a sibling slot's child running, routine — record it against this kind's backoff (emit `idle`) the same as exit 2; with the whole pool otherwise idle, nothing can start — record it as a jam instead (emit `jam`), same routing (a single-slot daemon therefore reports every exit 3 as a jam). Either way the slot switches to the other configured kind at once if that kind is still runnable; only once every kind is gated, *and* at least one of them is jammed, does the shared `idleSleep` poll `ResolveRevision` between `IdleFloor`-sized sleep slices, since a merge here *can* unblock the jam — the first no-work wait for a kind is exactly one `IdleFloor` slice and so polls nothing, with mid-wait polling starting only once that kind's backoff has grown past the floor; if the tip has moved, the slot emits `tip_moved` once and resets *every currently-jammed kind's* backoff to `IdleFloor` (the observed change is evidence for all of them, not just the kind this slot was running), and goes again at once instead of riding out the rest of the wait. A poll that errors is treated as no change observed — it never feeds the breaker, since the next iteration's own top-of-loop fetch is what reports a broken fetch |
+| 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
 | 5    | host-tainted | halt the pool |
 | 6    | config-invalid | halt the pool |
 | 7    | signalled stop | halt the pool |
@@ -4962,7 +5046,7 @@ stderr instead. Event names and fields (`cmd/launcher/internal/daemon/events.go`
 `loop.go`):
 
 Every per-slot event — `child_start`, `box`, `child_finish`, `idle`, `jam`,
-`backoff`, `breaker_trip` — carries a `slot` (0-based, the pool slot the
+`tip_moved`, `backoff`, `breaker_trip` — carries a `slot` (0-based, the pool slot the
 event belongs to); `breaker_trip`'s `slot` is whichever slot's failure was
 the one that crossed `BreakerThreshold`, since the breaker itself counts
 across the whole pool but the crossing is always attributable to one
@@ -4980,17 +5064,17 @@ slot happened to observe the transition. `halt` is the only event with no
 | `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched |
 | `box` | `time`, `kind`, `issue`, `revision`, `slot` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
 | `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
-| `idle` | `time`, `kind`, `wait`, `slot` | entering an idle wait after `queue-empty`, or after `none-dispatchable` with a sibling slot's child running; `wait` carries the current pool-wide idle backoff, so a widening `wait` across successive `idle` events is how a growing backoff reaches the stream |
-| `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | entering an idle wait after `none-dispatchable` with the whole pool otherwise idle — nothing running and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries the current pool-wide idle backoff, same as `idle` above |
-| `tip_moved` | `time`, `kind`, `revision`, `slot`, `reason` | a none-dispatchable wait (exit 3) was cut short: a poll between its `IdleFloor`-sized sleep slices found `BASE_BRANCH`'s tip had moved since this slot's last child ran, so the slot reset its idle backoff and started its next iteration at once instead of sleeping out the rest of the wait. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
+| `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot's child running; `wait` carries `kind`'s own idle backoff, so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
+| `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | recording a no-work result against `kind` after `none-dispatchable` with the whole pool otherwise idle — nothing running and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries `kind`'s own idle backoff, same as `idle` above |
+| `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | a poll during the shared idle sleep, entered because every configured kind was gated and at least one of them was jammed, found `BASE_BRANCH`'s tip had moved since this slot's last child ran, so the slot reset every currently-jammed kind's backoff and started its next iteration at once instead of sleeping out the rest of the wait. `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`, never started; `reason` is prefixed by cause, now including `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above) and `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above) alongside a halt-mapped child outcome, a context cancellation, a tripped breaker, or an invalid startup config |
 
-**What this first cut doesn't do.** Per-kind backoff is a later ticket; the
-instance lock and the self-change halt (issue #3543, above) are already in,
-alongside the pool concurrency this daemon does now own (`MAX_PARALLEL`,
-above) and does override the Consumer's own
+**What this first cut doesn't do.** The instance lock, the self-change halt
+(issue #3543, above) and per-kind backoff are all in now, alongside the
+pool concurrency this daemon does own (`MAX_PARALLEL`, above) and does
+override the Consumer's own
 `dispatch.maxJobs`/`dispatch.maxParallel` for every child it starts — each
 child is pinned to exactly one Box (`--max-jobs 1 --max-parallel 1`, see
 **Pool** above) regardless of the Consumer's configured wave size, since
