@@ -607,7 +607,7 @@ func TestLoopSelfPathCtxCancelledIsNotABreakerFailure(t *testing.T) {
 
 	reason := Loop(ctx, cfg, r, em, clk)
 
-	assertCancelledStopNoBreaker(t, reason, &buf)
+	assertCancelledStopNoBreaker(t, reason, decodeEvents(t, &buf))
 }
 
 // TestLoopResolveRevisionCtxCancelledIsNotABreakerFailure is
@@ -623,21 +623,62 @@ func TestLoopResolveRevisionCtxCancelledIsNotABreakerFailure(t *testing.T) {
 
 	reason := Loop(ctx, testConfig(1), r, em, clk)
 
-	assertCancelledStopNoBreaker(t, reason, &buf)
+	assertCancelledStopNoBreaker(t, reason, decodeEvents(t, &buf))
 }
 
 // assertCancelledStopNoBreaker fails unless Loop stopped on the cancellation
-// itself and left none of the bookkeeping a real seam failure would.
-func assertCancelledStopNoBreaker(t *testing.T, reason string, buf *bytes.Buffer) {
+// itself and left none of the bookkeeping a real seam failure would. Takes
+// the already-decoded events, not the raw buffer: a caller that also wants
+// to assert on event names/order (e.g. child_finish presence) must decode
+// once and reuse the slice, since decodeEvents drains the buffer.
+func assertCancelledStopNoBreaker(t *testing.T, reason string, events []Event) {
 	t.Helper()
 	if !strings.HasPrefix(reason, "context-cancelled:") {
 		t.Fatalf("halt reason = %q, want prefix %q", reason, "context-cancelled:")
 	}
-	events := decodeEvents(t, buf)
 	for _, e := range events {
 		if e.Event == "backoff" || e.Event == "breaker_trip" {
 			t.Fatalf("events = %v, want no backoff/breaker_trip event on an ordinary operator stop", events)
 		}
+	}
+}
+
+// TestLoopCtxCancelledIsNotABreakerFailure covers two RunChild-result races
+// against an operator's SIGTERM tearing the loop's ctx down mid-run, neither
+// of which must spend a breaker failure — both must halt on the
+// cancellation instead of reaching backoffOrHalt.
+func TestLoopCtxCancelledIsNotABreakerFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		result ChildResult
+		err    error
+	}{
+		// This issue's slice: a child forwarded SIGTERM that dies on the
+		// default disposition before installing its own handler reports an
+		// unclassified exit (e.g. 143), same as any other unrecognised code.
+		{name: "unclassified exit", result: ChildResult{Exit: 143}},
+		// The RunChild seam-error branch: the child's own wait can fail as
+		// an operator SIGTERM tears it down.
+		{name: "RunChild seam error", err: errors.New("wait: signal: killed")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			r := &cancellingRunner{cancel: cancel, revision: "rev1", result: tt.result, err: tt.err}
+			clk := &fakeClock{}
+			var buf bytes.Buffer
+			em := newTestEmitter(&buf)
+
+			reason := Loop(ctx, testConfig(1), r, em, clk)
+
+			events := decodeEvents(t, &buf)
+			assertCancelledStopNoBreaker(t, reason, events)
+			names := eventNames(events)
+			wantNames := []string{"child_start", "child_finish", "halt"}
+			if fmt.Sprint(names) != fmt.Sprint(wantNames) {
+				t.Fatalf("events = %v, want %v: the started child's child_finish must still be emitted", names, wantNames)
+			}
+		})
 	}
 }
 
@@ -682,6 +723,10 @@ type cancellingRunner struct {
 	cancel   context.CancelFunc
 	revision string
 	result   ChildResult
+	// err, if set, is what RunChild returns instead of result after
+	// cancelling — scripting the seam-error variant of the same race (the
+	// child's own wait failing as an operator SIGTERM tears it down).
+	err      error
 	runCalls int
 }
 
@@ -696,6 +741,9 @@ func (r *cancellingRunner) SelfPath(ctx context.Context, revision string) (strin
 func (r *cancellingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
 	r.runCalls++
 	r.cancel()
+	if r.err != nil {
+		return ChildResult{}, r.err
+	}
 	return r.result, nil
 }
 

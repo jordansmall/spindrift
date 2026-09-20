@@ -136,7 +136,10 @@ type Config struct {
 // An unclassified failure is not one of those: a resolve failure, a
 // RunChild error or an unrecognised exit code backs its own slot off and
 // refills it, leaving the siblings working, and only reaches a halt by
-// tripping the breaker.
+// tripping the breaker — unless ctx is already cancelled (an operator
+// SIGTERM forwarded to a child that had not yet installed its own handler,
+// or that raced the seam's own teardown), in which case it is an ordinary
+// stop and never reaches the breaker at all.
 //
 // It never kills a child it has started: once a slot calls RunChild, it
 // always waits for it to return and always emits that child's child_finish
@@ -315,6 +318,13 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 				em.Emit(Event{Event: "box", Kind: kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
 			}
 			em.Emit(Event{Event: "child_finish", Kind: kind, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
+			// This seam error can be the child's own wait failing as an
+			// operator SIGTERM tears it down mid-run, same as the
+			// ResolveRevision guard above — check before spending a breaker
+			// failure on it.
+			if stopOnCancel(ctx, kind, p) {
+				return
+			}
 			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err)) {
 				return
 			}
@@ -367,6 +377,12 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 			// genuinely idling.
 			continue
 		case Backoff:
+			// An unrecognised exit can be a child dying on the default
+			// SIGTERM disposition before it installed its own handler —
+			// same operator-stop guard as above, not a breaker failure.
+			if stopOnCancel(ctx, kind, p) {
+				return
+			}
 			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit)) {
 				return
 			}
