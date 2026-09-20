@@ -88,16 +88,7 @@ func TestRunChild_OversizedLineDoesNotHang(t *testing.T) {
 	}
 
 	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
-	resultCh := make(chan daemon.ChildResult, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
-		if err != nil {
-			errCh <- err
-			return
-		}
-		resultCh <- got
-	}()
+	resultCh, errCh := startChild(t, r)
 
 	select {
 	case err := <-errCh:
@@ -395,6 +386,55 @@ func waitForArmed(t *testing.T, r *hostRunner, nChildren int, armed ...string) {
 	t.Fatalf("children never started and armed their SIGTERM traps: %d of %d published", published, nChildren)
 }
 
+// childExitOnFirstSignal traps SIGTERM and exits 7 on it, so a forwarded
+// stop proves the signal was delivered and drained rather than SIGKILLed.
+//
+// `: >"$0"` truncates the trap-armed marker file passed in as $0, which is
+// how waitForArmed tells the trap is installed; the `sleep 0.05` busy loop
+// exists so the shell returns from its foreground child often enough to
+// run the trap.
+const childExitOnFirstSignal = `trap 'exit 7' TERM; : >"$0"; while :; do sleep 0.05; done`
+
+// childExitOnSecondSignal traps both SIGTERM and SIGINT, counts them, and
+// exits 7 only on the second — the two-call forwardStop contract. Marker
+// file and busy loop as above.
+const childExitOnSecondSignal = `
+n=0
+trap 'n=$((n+1)); if [ "$n" -ge 2 ]; then exit 7; fi' TERM INT
+: >"$0"
+while :; do sleep 0.05; done`
+
+// startChild starts a RunChild call on its own goroutine and hands back the
+// channels its result or error lands on, so each test only has to write the
+// select and its own assertions rather than re-declaring the same
+// resultCh/errCh/go func plumbing.
+func startChild(t *testing.T, r *hostRunner) (<-chan daemon.ChildResult, <-chan error) {
+	t.Helper()
+	resultCh := make(chan daemon.ChildResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- got
+	}()
+	// Belt-and-suspenders against a test that times out (t.Fatal) before its
+	// child ever exits: RunChild clears r.children[0] on return, so a
+	// still-published entry here means the busy-loop child is still running
+	// and would otherwise outlive the test binary.
+	t.Cleanup(func() {
+		r.mu.Lock()
+		child := r.children[0]
+		r.mu.Unlock()
+		if child != nil {
+			_ = child.Kill()
+		}
+	})
+	return resultCh, errCh
+}
+
 // TestForwardStop_DeliversSIGTERMToChild drives the exec seam at a script
 // that traps SIGTERM and exits with a distinct code, so a forwarded stop
 // proves the signal reached the child specifically (child.Signal(pid) never
@@ -407,20 +447,11 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 	dir := t.TempDir()
 	armed := filepath.Join(dir, "trap-armed")
 	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("/bin/sh", "-c", `trap 'exit 7' TERM; : >"$0"; while :; do sleep 0.05; done`, armed)
+		return exec.Command("/bin/sh", "-c", childExitOnFirstSignal, armed)
 	}
 
 	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
-	resultCh := make(chan daemon.ChildResult, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
-		if err != nil {
-			errCh <- err
-			return
-		}
-		resultCh <- got
-	}()
+	resultCh, errCh := startChild(t, r)
 
 	waitForArmed(t, r, 1, armed)
 
@@ -463,7 +494,7 @@ func TestForwardStop_DeliversSIGTERMToEveryChild(t *testing.T) {
 		n := callN
 		callN++
 		callMu.Unlock()
-		return exec.Command("/bin/sh", "-c", `trap 'exit 7' TERM; : >"$0"; while :; do sleep 0.05; done`, armed[n])
+		return exec.Command("/bin/sh", "-c", childExitOnFirstSignal, armed[n])
 	}
 
 	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
@@ -495,6 +526,188 @@ func TestForwardStop_DeliversSIGTERMToEveryChild(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("forwardStop did not cause every child to exit promptly (some abandoned, not drained)")
 		}
+	}
+}
+
+// TestForwardStop_RaceWindowChildStillSignalled covers the race RunChild's
+// publish-after-Start leaves open: forwardStop is called before the child is
+// even started, so it fans out over an empty r.children and would otherwise
+// strand the child unsignalled. RunChild must replay the already-pending
+// stop once it publishes, so the child still receives its SIGTERM and exits
+// on its own terms rather than being abandoned to run its Box to completion.
+func TestForwardStop_RaceWindowChildStillSignalled(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+	dir := t.TempDir()
+	armed := filepath.Join(dir, "trap-armed")
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", childExitOnFirstSignal, armed)
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+
+	// forwardStop lands before RunChild has even been called — the extreme
+	// end of the publish-after-Start race window.
+	r.forwardStop()
+
+	resultCh, errCh := startChild(t, r)
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	case got := <-resultCh:
+		// Not asserted as exactly 7: the replay fires the instant RunChild
+		// publishes, which can outrace the shell's own `trap` install
+		// (interpreter startup costs real OS time; the replay send does
+		// not), so delivery may land before the trap arms and the process
+		// ends via SIGTERM's default action (Exit -1) rather than the
+		// handler (Exit 7). Either way the busy loop below never exits
+		// unsignalled, so any nonzero exit proves the signal reached this
+		// child rather than it being abandoned to run forever.
+		if got.Exit == 0 {
+			t.Errorf("Exit = %d, want nonzero (busy loop never exits unsignalled)", got.Exit)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("child born in the race window was never signalled (abandoned, not drained)")
+	}
+}
+
+// TestForwardStop_SecondCallDeliversTheEscalation asserts calling
+// forwardStop twice delivers two distinct signals to a running child —
+// SIGTERM then SIGINT — end to end with no seam override: the child traps
+// both, counts, and only exits on the second — the same
+// first-drains/second-aborts contract the child launcher enforces on
+// itself (issue #3521), mirrored here on the daemon's forwarding side. The
+// trap covers both kinds because the second forwardStop now sends SIGINT,
+// not a second SIGTERM (two distinct kinds is the fix for the coalescing
+// race; see TestForwardStop_TwoCallsBeforeStartReplayBoth).
+func TestForwardStop_SecondCallDeliversTheEscalation(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+	dir := t.TempDir()
+	armed := filepath.Join(dir, "trap-armed")
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", childExitOnSecondSignal, armed)
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	resultCh, errCh := startChild(t, r)
+
+	waitForArmed(t, r, 1, armed)
+
+	r.forwardStop()
+
+	// The child must survive the first SIGTERM alone: give it a beat before
+	// escalating, and confirm it hasn't already exited.
+	select {
+	case got := <-resultCh:
+		t.Fatalf("child exited after a single forwardStop (Exit=%d), want it to survive the first and only exit on the second", got.Exit)
+	case err := <-errCh:
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	r.forwardStop()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	case got := <-resultCh:
+		if got.Exit != 7 {
+			t.Errorf("Exit = %d, want 7 (child observed two SIGTERMs and exited on the second)", got.Exit)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second forwardStop did not cause the child to exit promptly")
+	}
+}
+
+// TestForwardStop_TwoCallsBeforeStartReplayBoth is
+// TestForwardStop_RaceWindowChildStillSignalled at stop count two: the
+// replay must send both signals, in order and with distinct kinds (SIGTERM
+// then SIGINT), not one SIGTERM twice — two identical standard signals sent
+// back-to-back coalesce into a single pending delivery, and the child then
+// drains where it was told to reap. It asserts on the *sequence*, through
+// the runnerSignal seam, because OS-level delivery can't show it: a child
+// born mid-fan-out has installed no handler yet, so it dies on the first
+// signal's default disposition and the second leaves no trace. The child
+// here is the cheapest one that still drives RunChild's real publish path.
+func TestForwardStop_TwoCallsBeforeStartReplayBoth(t *testing.T) {
+	origExec := runnerExecCommand
+	origSignal := runnerSignal
+	t.Cleanup(func() { runnerExecCommand = origExec; runnerSignal = origSignal })
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", "sleep 0.3")
+	}
+
+	var mu sync.Mutex
+	var sent []os.Signal
+	runnerSignal = func(p *os.Process, sig os.Signal) error {
+		mu.Lock()
+		sent = append(sent, sig)
+		mu.Unlock()
+		return nil
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+
+	r.forwardStop()
+	r.forwardStop()
+
+	resultCh, errCh := startChild(t, r)
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	case got := <-resultCh:
+		if got.Exit != 0 {
+			t.Errorf("Exit = %d, want 0 (unsignalled sleep 0.3 exits cleanly)", got.Exit)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunChild did not return promptly")
+	}
+
+	mu.Lock()
+	got := append([]os.Signal(nil), sent...)
+	mu.Unlock()
+	want := []os.Signal{syscall.SIGTERM, syscall.SIGINT}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("signals sent = %v, want %v (SIGTERM then SIGINT, replayed in order)", got, want)
+	}
+}
+
+// TestForwardStop_ThirdCallForwardsNothing asserts a third forwardStop is a
+// no-op on the wire: stopSignalSequence has only two kinds (SIGTERM,
+// SIGINT), and a child that hasn't exited after both has nothing left to
+// distinguish a third request by, so forwardStop must stop sending once its
+// bound is spent rather than fanning out unboundedly.
+func TestForwardStop_ThirdCallForwardsNothing(t *testing.T) {
+	origSignal := runnerSignal
+	t.Cleanup(func() { runnerSignal = origSignal })
+
+	var mu sync.Mutex
+	var sent []os.Signal
+	runnerSignal = func(p *os.Process, sig os.Signal) error {
+		mu.Lock()
+		sent = append(sent, sig)
+		mu.Unlock()
+		return nil
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r.mu.Lock()
+	r.children[0] = &os.Process{}
+	r.mu.Unlock()
+
+	r.forwardStop()
+	r.forwardStop()
+	r.forwardStop()
+
+	mu.Lock()
+	got := append([]os.Signal(nil), sent...)
+	mu.Unlock()
+	want := []os.Signal{syscall.SIGTERM, syscall.SIGINT}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("signals sent = %v, want %v (a third forwardStop call sends nothing)", got, want)
 	}
 }
 

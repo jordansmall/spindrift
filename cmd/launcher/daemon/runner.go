@@ -28,6 +28,12 @@ type hostRunner struct {
 
 	mu       sync.Mutex
 	children map[int]*os.Process // slot -> currently running child, for signal forwarding; empty when idle
+	// stopsForwarded counts stop requests actually forwarded so far (not
+	// merely received): it indexes stopSignalSequence, so it never exceeds
+	// len(stopSignalSequence) — forwardStop enforces that bound itself,
+	// rather than relying on callers to stop asking at two. Replayed onto a
+	// child born mid-fan-out (see RunChild).
+	stopsForwarded int
 
 	// fetchMu serializes ResolveRevision across Slots goroutines sharing one
 	// repoPath: concurrent `git fetch` calls race the refs/remotes/origin/*
@@ -99,6 +105,25 @@ var runnerExecCommand = exec.Command
 // `/bin/sh -c ...` in its place.
 var runnerEvalCommand = exec.CommandContext
 
+// runnerSignal is the signal seam: both forwardStop's fan-out and
+// RunChild's replay send through it rather than calling p.Signal directly.
+// OS-level delivery can't show the replay's sequence to a test — a child
+// born mid-fan-out hasn't installed its handler yet, so the first signal
+// kills it on the default disposition and the second is unobservable from
+// outside. Routing both call sites through one seam is the only way a test
+// can assert "two sends, distinct kinds" instead of just "process died".
+var runnerSignal = func(p *os.Process, sig os.Signal) error { return p.Signal(sig) }
+
+// stopSignalSequence is the ordered pair of signal kinds forwarded on the
+// first and second stop request: SIGTERM, then SIGINT. Two different
+// standard signals can't coalesce — the kernel keeps a separate pending
+// bit per signal number — whereas two SIGTERMs sent back-to-back collapse
+// into one pending signal if the child hasn't drained the first yet. The
+// kind is irrelevant to the child: main.go's relaySignals (#3521) counts
+// first-vs-second only, on either SIGTERM or SIGINT. A third request has no
+// third kind and forwards nothing — see forwardStop's bound.
+var stopSignalSequence = [...]os.Signal{syscall.SIGTERM, syscall.SIGINT}
+
 // SelfPath evaluates the daemon attribute's store path at revision via
 // `nix eval`, shelled out with a context-aware exec so a cancelled ctx tears
 // the evaluation down instead of hanging the daemon until SIGKILL — same
@@ -166,12 +191,24 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 
 	r.mu.Lock()
 	r.children[req.Slot] = cmd.Process
+	stopsForwarded := r.stopsForwarded
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		delete(r.children, req.Slot)
 		r.mu.Unlock()
 	}()
+	// Replay every stop request that landed before this child was published:
+	// forwardStop can run in the window between runSlot's cancellation check
+	// and this publish (Start already happened, but r.children didn't hold
+	// the process yet), fanning out over a map that doesn't yet include this
+	// child. Without the replay, that child runs its Box to completion
+	// unsignalled instead of draining. Replayed in order — SIGTERM before
+	// SIGINT — so a child born after two forwardStop calls sees the same
+	// sequence a live child would have seen.
+	for i := 0; i < stopsForwarded; i++ {
+		_ = runnerSignal(cmd.Process, stopSignalSequence[i])
+	}
 
 	var issues []string
 	seen := make(map[string]bool)
@@ -268,18 +305,31 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error
 	return 0, fmt.Errorf("daemon: run doctor: %w", waitErr)
 }
 
-// forwardStop sends SIGTERM to every currently running child, if any, so
-// each drains its in-flight Boxes rather than being abandoned — the same
-// gesture as dogfood.sh's request_stop and cmd/launcher/main.go's
-// notifyStopSignal. It never kills a child; a no-op when none is running.
+// forwardStop sends the Nth stop request's signal — stopSignalSequence[N-1]
+// — to every currently running child, if any: SIGTERM the first time,
+// SIGINT the second, an escalation the child itself distinguishes by
+// counting deliveries, not by kind (#3521) — so the daemon needs no
+// separate escalate method; calling forwardStop twice is the escalation.
+// Same gesture as dogfood.sh's request_stop and
+// cmd/launcher/main.go's notifyStopSignal. A third and later call forwards
+// nothing: stopSignalSequence has only two kinds, and a child that hasn't
+// exited after both has nothing left to distinguish (relaySignals stops
+// counting past two as well). Never kills a child; a no-op when none is
+// running or the sequence is spent.
 func (r *hostRunner) forwardStop() {
 	r.mu.Lock()
+	if r.stopsForwarded >= len(stopSignalSequence) {
+		r.mu.Unlock()
+		return
+	}
+	sig := stopSignalSequence[r.stopsForwarded]
+	r.stopsForwarded++
 	children := make([]*os.Process, 0, len(r.children))
 	for _, child := range r.children {
 		children = append(children, child)
 	}
 	r.mu.Unlock()
 	for _, child := range children {
-		_ = child.Signal(syscall.SIGTERM)
+		_ = runnerSignal(child, sig)
 	}
 }
