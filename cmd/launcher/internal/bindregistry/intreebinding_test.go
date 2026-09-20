@@ -1469,7 +1469,7 @@ func TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute(t *testin
 
 	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com"}
 	port := 27182
-	localURL := ecosystem.RouteLocalURL(route, port)
+	localURL := ecosystem.RouteLocalURL(route.Prefix, port)
 
 	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: route.UpstreamHost, LocalURL: localURL}})
 	if err != nil {
@@ -1498,7 +1498,7 @@ func TestApplyInTreeBindingMissingConfigUnderHostRootedRoute(t *testing.T) {
 	dir := newTestRepo(t)
 
 	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com"}
-	localURL := ecosystem.RouteLocalURL(route, 27182)
+	localURL := ecosystem.RouteLocalURL(route.Prefix, 27182)
 
 	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: route.UpstreamHost, LocalURL: localURL}})
 	if err != nil {
