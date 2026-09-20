@@ -333,6 +333,7 @@ in
           ${../../agent/bash-output-summary.sh} \
           ${../../ab-orchestrator.sh} \
           ${../../.github/actions/forgejo-label-swap/label-swap.sh} \
+          ${../../.github/actions/forgejo-issue-close/close-issue.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \

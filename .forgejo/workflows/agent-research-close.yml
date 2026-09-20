@@ -1,0 +1,56 @@
+name: Agent research close
+
+# `agent-research-reject` is a terminal research verdict (ADR 0022): the issue
+# is a false positive, not worth doing, or a duplicate named in the verdict
+# comment, and the lifecycle's next step is to close it. This workflow performs
+# that close, so the verdict label and the issue state cannot drift apart.
+#
+# The close is load-bearing beyond tidiness: the Filer treats a *closed* issue
+# carrying `agent-research-reject` as a suppressing match and never refiles a
+# finding matching one (see docs/reference.md, "Filer"). While closing depended
+# on a human remembering, every still-open rejection left the same false
+# positive free to be filed again.
+#
+# This is the Forgejo Actions mirror of
+# .github/workflows/agent-research-close.yml (issue #1967). Two differences
+# from the GitHub set, both forced by the platform: Forgejo issues have no
+# `state_reason`, so the close cannot be marked **not planned** the way the
+# GitHub mirror marks it — the `agent-research-reject` label left on the issue
+# is the record of why; and there is no ambient GITHUB_TOKEN, so the job
+# authenticates with the single `FORGEJO_TOKEN` repository secret (ADR 0038)
+# over REST. Requires a registered self-hosted runner (the `self-hosted`
+# label) — see docs/reference.md, "Forgejo Actions dispatch templates".
+on:
+  issues:
+    types: [labeled]
+
+# Serialise per issue so two rapid labelings cannot race. A group distinct from
+# `agent-research-<n>`, so this close never queues behind — or holds up — a
+# research dispatch on the same issue.
+concurrency:
+  group: agent-research-close-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  close:
+    # Label-only guard, unlike the GitHub mirror's extra `issue.state == 'open'`
+    # clause: the Forgejo payload is not guaranteed to carry that field, so the
+    # already-closed skip lives inside close-issue.sh instead.
+    if: github.event.label.name == 'agent-research-reject'
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      # Checkout must precede the local composite step below: Forgejo resolves
+      # ./.github/actions/* from the checked-out tree.
+      - uses: actions/checkout@v4
+
+      - name: Close the rejected issue
+        uses: ./.github/actions/forgejo-issue-close
+        with:
+          base-url: ${{ vars.FORGEJO_BASE_URL || 'https://codeberg.org' }}
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ github.event.issue.number }}

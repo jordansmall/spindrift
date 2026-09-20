@@ -1,0 +1,53 @@
+name: Agent research close
+
+# `agent-research-reject` is a terminal research verdict (ADR 0022): the issue
+# is a false positive, not worth doing, or a duplicate named in the verdict
+# comment, and the lifecycle's next step is to close it. This workflow performs
+# that close — as **not planned**, never as completed, since research lands no
+# code and nothing was built — so the verdict label and the issue state cannot
+# drift apart.
+#
+# The close is load-bearing beyond tidiness: the Filer treats a *closed* issue
+# carrying `agent-research-reject` as a suppressing match and never refiles a
+# finding matching one (see docs/reference.md, "Filer"). While closing depended
+# on a human remembering, every still-open rejection left the same false
+# positive free to be filed again.
+#
+# The trust boundary is the label, not the labeler (see CLAUDE.md, "Comment
+# injection trust boundary"): whoever can apply `agent-research-reject` — a
+# triage-role human, or the research App token writing the verdict — gets the
+# close. The other five research verdicts are untouched; only `reject` has a
+# mechanical next step.
+on:
+  issues:
+    types: [labeled]
+
+# Serialise per issue so two rapid labelings cannot race. A group distinct from
+# `agent-research-<n>`, so this close never queues behind — or holds up — a
+# research dispatch on the same issue.
+concurrency:
+  group: agent-research-close-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+# One `gh issue close` is the whole job, so the built-in GITHUB_TOKEN suffices:
+# no worker App mint, no SPINDRIFT_GH_TOKEN, no agent-setup, no image build.
+# That token also cannot loop this workflow — events it raises never trigger
+# further workflow runs.
+permissions:
+  issues: write
+
+jobs:
+  close:
+    # `state == 'open'` keeps the job off an already-closed issue: re-applying
+    # the label there is a no-op, not a reopen-and-reclose.
+    if: github.event.label.name == 'agent-research-reject' && github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Close the rejected issue as not planned
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue close "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --reason "not planned"
