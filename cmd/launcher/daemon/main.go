@@ -327,6 +327,76 @@ func handleStopSignal(sig <-chan os.Signal, cancel context.CancelFunc, forward f
 	forward()
 }
 
+// preflightRunner is the slice of the runner startupPreflight needs — a
+// narrow interface distinct from daemon.Runner (the *loop's* seam), so a
+// test can drive startupPreflight with a small fake without daemon.Runner
+// growing a RunDoctor method the loop itself never calls. *hostRunner
+// already satisfies it.
+type preflightRunner interface {
+	ResolveRevision(ctx context.Context) (string, error)
+	RunDoctor(ctx context.Context, revision string) (int, error)
+}
+
+// startupPreflight runs `doctor` exactly once, before the pool exists, and
+// reports why the daemon must not start — "" means it may. It always emits
+// one "preflight" event on every path — pass, refusal, seam failure, or an
+// operator's Ctrl-C — so a reader of the event stream can tell "ran and was
+// healthy" apart from "never ran"; every path but a pass also emits a
+// "halt" event carrying the same operator-facing reason returned here.
+func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter) string {
+	// Resolve at the same freshly fetched tip the first child will run at,
+	// so the preflight validates the build about to actually run rather
+	// than the operator's possibly-stale working tree.
+	revision, err := r.ResolveRevision(ctx)
+	// refuseCancelled reports an operator's Ctrl-C during the preflight. Its
+	// reason deliberately carries no HaltPreflightPrefix: mainRun's
+	// isOperatorStop tells a stop (exit 0) from a refusal (exit 11) by
+	// matching "context-cancelled" as a *prefix*, so putting anything in
+	// front of it would displace that match and turn a Ctrl-C into a refusal.
+	refuseCancelled := func() string {
+		return preflightRefusal(em, revision, "doctor-cancelled", "context-cancelled: "+ctx.Err().Error())
+	}
+	// Cancellation is checked against ctx rather than against err: a seam
+	// whose child was signal-killed can return any shape at all (including
+	// a nil error), and an operator's Ctrl-C must read as a clean stop
+	// however it surfaced.
+	if ctx.Err() != nil {
+		return refuseCancelled()
+	}
+	if err != nil {
+		return preflightRefusal(em, revision, "doctor-seam-error", daemon.HaltPreflightPrefix+"resolve-revision: "+err.Error())
+	}
+
+	exit, err := r.RunDoctor(ctx, revision)
+	if ctx.Err() != nil {
+		return refuseCancelled()
+	}
+	if err != nil {
+		return preflightRefusal(em, revision, "doctor-seam-error", daemon.HaltPreflightPrefix+"run-doctor: "+err.Error())
+	}
+
+	v := daemon.ClassifyPreflight(exit)
+	em.Emit(daemon.Event{Event: "preflight", Revision: revision, Exit: &exit, Outcome: v.Outcome})
+	if v.Healthy {
+		return ""
+	}
+	reason := v.HaltReason()
+	em.Emit(daemon.Event{Event: "halt", Reason: reason})
+	return reason
+}
+
+// preflightRefusal emits the event pair every startupPreflight path that
+// never got a doctor verdict emits — the "preflight" event proving doctor
+// was attempted, then the "halt" event — and returns reason for mainRun.
+// Neither carries an `exit` field, there being no exit code to report, and
+// outcome stays "doctor-"-prefixed like ClassifyPreflight's own labels so a
+// preflight outcome can never be read as a child_finish one.
+func preflightRefusal(em *daemon.Emitter, revision, outcome, reason string) string {
+	em.Emit(daemon.Event{Event: "preflight", Revision: revision, Outcome: outcome, Reason: reason})
+	em.Emit(daemon.Event{Event: "halt", Reason: reason})
+	return reason
+}
+
 // mainRun holds everything main() does: argv parse, input document load,
 // knob resolution, repo root, signal wiring, and daemon.Loop, returning the
 // exit code rather than calling os.Exit so tests can drive it repeatedly
@@ -451,6 +521,19 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go handleStopSignal(sig, cancel, r.forwardStop)
 
+	// After the signal wiring, so an operator's Ctrl-C during the preflight
+	// is honoured; before Loop, so a refusal happens before any slot, any
+	// claim, any Box. After AcquireCheckoutLock above, so a second daemon
+	// against the same checkout is still refused by the lock's own cheaper
+	// path rather than after a full doctor run.
+	if reason := startupPreflight(ctx, r, em); reason != "" {
+		fmt.Fprintf(stderr, "daemon: %s\n", reason)
+		if isOperatorStop(reason) {
+			return 0
+		}
+		return exitPreflightFailed
+	}
+
 	cfg := daemon.Config{
 		Kinds:               args.Kinds,
 		ResearchReservation: reservation,
@@ -480,6 +563,18 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 // cmd/launcher/internal/daemon/outcome.go) so the two taxonomies cannot
 // be confused when both appear in one log.
 const exitSelfChanged = 10
+
+// exitPreflightFailed is the daemon's own exit code for a refused start: the
+// startup doctor preflight found a Required-tier failure (missing triage
+// labels, an invalid config) or could not run at all. It is 11, not a
+// pass-through of doctor's own 1/2/3/4 (a different table where the same
+// integers mean something else) nor of the *child* launcher's 0-7 band
+// (Interpret) — sharing either would let a reader misattribute this halt to
+// the wrong process's contract. Unlike exitSelfChanged (10), which an
+// operator deliberately composes with a restart policy, a restart cannot
+// clear this one: nothing the daemon does fixes a missing label or an
+// undersized VM, so a supervisor must not treat this code as retryable.
+const exitPreflightFailed = 11
 
 // exitCodeFor maps daemon.Loop's halt reason to this process's exit code.
 func exitCodeFor(reason string) int {

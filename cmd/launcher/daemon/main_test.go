@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -854,5 +855,302 @@ func TestExitSelfChanged_OutsideChildExitBand(t *testing.T) {
 			t.Fatalf("exitSelfChanged (%d) collides with child exit code %d, which daemon.Interpret classifies as %q",
 				exitSelfChanged, exit, outcome)
 		}
+	}
+}
+
+// fakePreflightRunner is startupPreflight's test seam: a minimal
+// preflightRunner that never shells out, scripted per test.
+type fakePreflightRunner struct {
+	revision   string
+	resolveErr error
+	doctorExit int
+	doctorErr  error
+
+	mu          sync.Mutex
+	doctorCalls int
+}
+
+func (f *fakePreflightRunner) ResolveRevision(ctx context.Context) (string, error) {
+	if f.resolveErr != nil {
+		return "", f.resolveErr
+	}
+	return f.revision, nil
+}
+
+func (f *fakePreflightRunner) RunDoctor(ctx context.Context, revision string) (int, error) {
+	f.mu.Lock()
+	f.doctorCalls++
+	f.mu.Unlock()
+	if f.doctorErr != nil {
+		return 0, f.doctorErr
+	}
+	return f.doctorExit, nil
+}
+
+func (f *fakePreflightRunner) calls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.doctorCalls
+}
+
+// decodePreflightEvents parses buf's JSON-lines stream, one daemon.Event per
+// non-empty line, in emitted order.
+func decodePreflightEvents(t *testing.T, buf *bytes.Buffer) []daemon.Event {
+	t.Helper()
+	var events []daemon.Event
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev daemon.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("decode event line %q: %v", line, err)
+		}
+		events = append(events, ev)
+	}
+	return events
+}
+
+// TestStartupPreflight_Healthy is the "does not conflate looking healthy
+// with doing nothing" positive case: doctor exit 0 lets the daemon proceed
+// and stamps exactly one "preflight" event, no "halt" (issue #3544).
+func TestStartupPreflight_Healthy(t *testing.T) {
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 0}
+
+	reason := startupPreflight(context.Background(), r, em)
+	if reason != "" {
+		t.Fatalf("startupPreflight() = %q, want \"\"", reason)
+	}
+	if r.calls() != 1 {
+		t.Fatalf("RunDoctor called %d times, want 1", r.calls())
+	}
+
+	events := decodePreflightEvents(t, &buf)
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want exactly one", events)
+	}
+	ev := events[0]
+	if ev.Event != "preflight" {
+		t.Errorf("event = %q, want %q", ev.Event, "preflight")
+	}
+	if ev.Outcome != "doctor-healthy" {
+		t.Errorf("outcome = %q, want %q", ev.Outcome, "doctor-healthy")
+	}
+	if ev.Exit == nil || *ev.Exit != 0 {
+		t.Errorf("exit = %v, want pointer to 0", ev.Exit)
+	}
+	if ev.Revision != "deadbeef" {
+		t.Errorf("revision = %q, want %q", ev.Revision, "deadbeef")
+	}
+}
+
+// TestStartupPreflight_RequiredLabelsMissing pins the acceptance criterion
+// that the failure names what failed and its remedy, on doctor's own exit 4
+// (missing required triage labels).
+func TestStartupPreflight_RequiredLabelsMissing(t *testing.T) {
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 4}
+
+	reason := startupPreflight(context.Background(), r, em)
+	if !strings.HasPrefix(reason, daemon.HaltPreflightPrefix) {
+		t.Fatalf("reason = %q, want prefix %q", reason, daemon.HaltPreflightPrefix)
+	}
+	if !strings.Contains(reason, "required triage labels are missing") {
+		t.Errorf("reason = %q, want it to name what failed", reason)
+	}
+	if !strings.Contains(reason, "create the four triage labels") {
+		t.Errorf("reason = %q, want it to carry the remedy", reason)
+	}
+
+	events := decodePreflightEvents(t, &buf)
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want a preflight event and a halt event", events)
+	}
+	if events[0].Event != "preflight" || events[0].Outcome != "doctor-required-labels-missing" {
+		t.Errorf("events[0] = %+v, want preflight/doctor-required-labels-missing", events[0])
+	}
+	if events[1].Event != "halt" || events[1].Reason != reason {
+		t.Errorf("events[1] = %+v, want halt with reason %q", events[1], reason)
+	}
+}
+
+// TestStartupPreflight_ConfigInvalid covers doctor exit 2 — the exit an
+// undersized podman machine now arrives as (slice 2) — refusing to start.
+func TestStartupPreflight_ConfigInvalid(t *testing.T) {
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 2}
+
+	reason := startupPreflight(context.Background(), r, em)
+	if reason == "" {
+		t.Fatal("startupPreflight() = \"\", want a refusal for doctor exit 2")
+	}
+}
+
+// TestStartupPreflight_Connectivity covers doctor exit 3 refusing to start.
+func TestStartupPreflight_Connectivity(t *testing.T) {
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 3}
+
+	reason := startupPreflight(context.Background(), r, em)
+	if reason == "" {
+		t.Fatal("startupPreflight() = \"\", want a refusal for doctor exit 3")
+	}
+}
+
+// TestStartupPreflight_RunsExactlyOnce asserts RunDoctor is called exactly
+// once across a whole startupPreflight call. The stronger structural claim —
+// "called once per daemon startup, not once per Loop iteration" — is
+// established by inspection of mainRun's call site (placed before
+// daemon.Loop, outside any loop), not by this test alone.
+func TestStartupPreflight_RunsExactlyOnce(t *testing.T) {
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 0}
+
+	startupPreflight(context.Background(), r, em)
+	if r.calls() != 1 {
+		t.Fatalf("RunDoctor called %d times, want exactly 1", r.calls())
+	}
+}
+
+// TestStartupPreflight_ResolveRevisionFailure: a preflight that cannot run
+// is not a preflight that passed.
+func TestStartupPreflight_ResolveRevisionFailure(t *testing.T) {
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &fakePreflightRunner{resolveErr: errors.New("git fetch boom")}
+
+	reason := startupPreflight(context.Background(), r, em)
+	if reason == "" {
+		t.Fatal("startupPreflight() = \"\", want a refusal on a resolve failure")
+	}
+	if r.calls() != 0 {
+		t.Errorf("RunDoctor called %d times, want 0 (never reached)", r.calls())
+	}
+
+	events := decodePreflightEvents(t, &buf)
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want a preflight error event and a halt event", events)
+	}
+	if events[0].Event != "preflight" || events[0].Outcome != "doctor-seam-error" {
+		t.Errorf("events[0] = %+v, want preflight/doctor-seam-error", events[0])
+	}
+}
+
+// TestStartupPreflight_RunDoctorSeamFailure covers RunDoctor's own seam
+// error (distinct from a classified exit code) refusing to start likewise.
+func TestStartupPreflight_RunDoctorSeamFailure(t *testing.T) {
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &fakePreflightRunner{revision: "deadbeef", doctorErr: errors.New("exec boom")}
+
+	reason := startupPreflight(context.Background(), r, em)
+	if reason == "" {
+		t.Fatal("startupPreflight() = \"\", want a refusal on a RunDoctor seam failure")
+	}
+}
+
+// TestStartupPreflight_ContextCancelled covers both seams returning
+// ctx.Err(): the resulting reason must be one isOperatorStop accepts, so a
+// Ctrl-C during the preflight exits 0 rather than exitPreflightFailed.
+func TestStartupPreflight_ContextCancelled(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *fakePreflightRunner
+	}{
+		{name: "resolve", r: &fakePreflightRunner{}},
+		{name: "doctor", r: &fakePreflightRunner{revision: "deadbeef"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			if tt.name == "resolve" {
+				tt.r.resolveErr = ctx.Err()
+			} else {
+				tt.r.doctorErr = ctx.Err()
+			}
+
+			var buf bytes.Buffer
+			em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+			reason := startupPreflight(ctx, tt.r, em)
+			if !isOperatorStop(reason) {
+				t.Fatalf("isOperatorStop(%q) = false, want true", reason)
+			}
+
+			// A cancelled preflight must still reach the durable event
+			// stream (every other halt in this daemon does) — otherwise a
+			// Ctrl-C here leaves the stream showing nothing at all between
+			// process start and process exit.
+			events := decodePreflightEvents(t, &buf)
+			if len(events) != 2 {
+				t.Fatalf("events = %+v, want a preflight event and a halt event", events)
+			}
+			if events[0].Event != "preflight" || events[0].Outcome != "doctor-cancelled" {
+				t.Errorf("events[0] = %+v, want preflight/doctor-cancelled", events[0])
+			}
+			if events[1].Event != "halt" || events[1].Reason != reason {
+				t.Errorf("events[1] = %+v, want halt with reason %q", events[1], reason)
+			}
+		})
+	}
+}
+
+// TestExitPreflightFailed_DistinctFromOtherExitCodes guards exitPreflightFailed
+// against ever colliding with one of this binary's other exit codes, so a
+// later edit cannot make an operator-stop or a self-changed halt
+// indistinguishable from a refused start.
+func TestExitPreflightFailed_DistinctFromOtherExitCodes(t *testing.T) {
+	for _, other := range []int{0, 1, exitSelfChanged} {
+		if exitPreflightFailed == other {
+			t.Fatalf("exitPreflightFailed (%d) collides with exit code %d", exitPreflightFailed, other)
+		}
+	}
+}
+
+// TestStartupPreflight_SignalKilledDoctorOnCancelledContext is the Ctrl-C-
+// during-doctor path: the child is killed, so RunDoctor's result is no
+// verdict at all (here the worst case, a bare (-1, nil) from a seam that
+// failed to classify it). A cancelled ctx must still read as an operator
+// stop — exit 0 — never as a preflight refusal.
+func TestStartupPreflight_SignalKilledDoctorOnCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: -1}
+
+	reason := startupPreflight(ctx, r, em)
+	if !isOperatorStop(reason) {
+		t.Fatalf("startupPreflight() = %q, want an operator-stop reason", reason)
+	}
+	if got := exitCodeFor(reason); got != 0 {
+		t.Errorf("exitCodeFor(%q) = %d, want 0", reason, got)
+	}
+	if strings.Contains(reason, daemon.HaltPreflightPrefix) {
+		t.Errorf("startupPreflight() = %q, want no %q refusal", reason, daemon.HaltPreflightPrefix)
+	}
+
+	events := decodePreflightEvents(t, &buf)
+	var sawPreflight bool
+	for _, ev := range events {
+		if ev.Event == "preflight" {
+			sawPreflight = true
+			if !strings.HasPrefix(ev.Outcome, "doctor-") {
+				t.Errorf("preflight outcome = %q, want a doctor- prefixed label", ev.Outcome)
+			}
+			if ev.Exit != nil {
+				t.Errorf("preflight exit = %d, want no exit field (no doctor verdict)", *ev.Exit)
+			}
+		}
+	}
+	if !sawPreflight {
+		t.Errorf("events = %+v, want a preflight event among them", events)
 	}
 }
