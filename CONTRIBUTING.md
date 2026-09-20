@@ -153,7 +153,7 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
 - **`templates/default/`** — the consumer starter (`nix flake init -t`).
   spindrift dogfoods this very template, so changes here are load-bearing.
 
-Two invariants worth calling out:
+A few invariants worth calling out:
 
 - **The outcome line is a contract.** A Box's final `SPINDRIFT_OUTCOME issue=…`
   line on stdout is parsed by the launcher (`cmd/launcher/internal/outcome`).
@@ -170,6 +170,42 @@ Two invariants worth calling out:
   ```sh
   git worktree add ../spindrift-<task> -b <branch> origin/main
   ```
+
+- **A baked fragment's anchor line is pinned verbatim across languages.**
+  [`templates/default/prompts/fragments/tdd-baked.md`](templates/default/prompts/fragments/tdd-baked.md)
+  — currently ``Work test-first: run `/tdd` for each slice.`` — is the source
+  of truth; the same bytes recur as the Go literal `tddAnchorClause`
+  (`cmd/launcher/internal/promptassembly/assemble_test.go`), as `grep -qF`
+  assertions in `tests/entrypoint-skills.bats` and
+  `tests/entrypoint-prompt-fragments.bats` (some negated, so a half-done
+  reword leaves the `!` arms passing), in the goldens under
+  `tests/testdata/prompt-assembly-golden/`, and in this bullet's own quote.
+  The pair's other arm, `tdd-unbaked.md`, pins its opening line separately: a
+  full-sentence grep, a `Work test-first, one slice` prefix grep that resolves
+  a line number, a negated `commits\.Work test-first` regex that goes vacuous
+  the moment that prefix changes, goldens, and
+  `nix/checks/tdd-fragment-parity.nix`'s `one slice at a time` clause, which
+  that opening is the fragment's only occurrence of. `commit-baked.md` and
+  `code-review-baked.md` follow the same idiom with their own copies, and a
+  pin may cover only a leading clause — the Go and bats pins on
+  `code-review-baked.md` stop before the `${REVIEW_FANOUT_AGENT}`
+  interpolation, while its goldens hold the rendered sentence whole. So grep
+  both the whole sentence and its first few words before rewording any
+  anchor: it is a coordinated edit, not a one-line change.
+  `lib/fragments.nix` and [`MIGRATING.md`](MIGRATING.md) are near-misses —
+  they name the gate and the fragment **file**, never the phrase.
+
+  The Go literals and the bats greps fail loudly on a reword; the goldens do
+  not — the Linux-only `nix run .#regen-goldens` rewrites them (never
+  hand-edit), so they catch an unregenerated edit rather than a deliberate
+  one. The parity checks under `nix/checks/` mostly constrain an anchor's
+  shape, but each also requires it to still name its own skill, and
+  `nix/checks/code-review-fragment-parity.nix` pins the
+  `spawning ... as agent type` clause and the exact placeholder spelling
+  (issue #3447). `nix/checks/prompts.nix`'s grep-pin idiom
+  (`commit-unbaked-fragment-two-tier-subject-limit`, issue #3478) is the
+  model if that gap, or the prose copies no test reads at all, ever needs
+  closing.
 
 ## Decisions & the public contract
 
