@@ -766,7 +766,10 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 		if strings.Contains(result.Prompt, "Persist what it returns") {
 			t.Errorf("Prompt still contains scout-delegate.md's dropped persist-what-it-returns wording (issue #3449):\n%s", result.Prompt)
 		}
-		if strings.Contains(result.Prompt, "No `scout` subagent is provisioned") {
+		if strings.Contains(result.Prompt, "Scout the issue yourself before implementing") {
+			t.Errorf("Prompt contains scout-absent.md's lead directive, want absent (SCOUT_ABSENT gate off):\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "there is no brief waiting on disk") {
 			t.Errorf("Prompt contains scout-absent.md fragment text, want absent (SCOUT_ABSENT gate off):\n%s", result.Prompt)
 		}
 		// Issue #3449: COORDINATOR_SCOUT_BRIEF needs WorkerProvisioned too,
@@ -802,7 +805,12 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 			t.Fatalf("Assemble: %v", err)
 		}
 
-		if !strings.Contains(result.Prompt, "No `scout` subagent is provisioned") {
+		// The section leads with the work, so pin that lead directive and
+		// not just the trailing absence clause.
+		if !strings.Contains(result.Prompt, "Scout the issue yourself before implementing") {
+			t.Errorf("Prompt missing scout-absent.md's lead directive (issue #3168):\n%s", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "there is no brief waiting on disk") {
 			t.Errorf("Prompt missing scout-absent.md fragment text:\n%s", result.Prompt)
 		}
 		if strings.Contains(result.Prompt, "/tmp/brief.md") {
