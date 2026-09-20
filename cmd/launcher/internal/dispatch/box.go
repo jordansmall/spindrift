@@ -233,8 +233,9 @@ func (d *Dispatch) Close() {
 // runOnce opens logPath fresh, dispatches one box with env, and blocks until
 // it exits. A log already at logPath is rotated aside so os.Create cannot
 // truncate it away (issue #561). If a container or sandbox named for this
-// issue is already running, a live run (possibly orphaned by a killed
-// launcher) owns that log, so runOnce returns ErrAlreadyRunning first (#562).
+// issue is already live per Runner.IsRunning's contract (issue #3633) — a
+// live run (possibly orphaned by a killed launcher) owns that log, so
+// runOnce returns ErrAlreadyRunning first (#562).
 func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string) error {
 	if d.isKilled() {
 		return errKilled
@@ -514,7 +515,8 @@ func (e quarantineErr) Unwrap() error { return e.err }
 // quarantinePriorRunLogs renames every attempt log AllAttemptLogPaths finds
 // for this issue to "<path>.prior-run.N", a suffix its own "<path>.N" probe
 // never matches, so an earlier run's spend cannot fold into this run's usage
-// comment and budget gate (issue #2575). Skipped when the Box is running,
+// comment and budget gate (issue #2575). Skipped under the same IsRunning
+// guard as runOnce — live per Runner.IsRunning's contract (issue #3633) —
 // though IsRunning cannot see a run paused between attempts (issue #562).
 func quarantinePriorRunLogs(pwd, number string, r runner.Runner) error {
 	// A nil runner comes only from a test double that never wants the runner

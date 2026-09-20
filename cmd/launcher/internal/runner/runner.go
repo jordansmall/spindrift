@@ -95,19 +95,29 @@ type Runner interface {
 	Run(box Box) error
 
 	// Reap performs best-effort cleanup of a leftover sandbox by name. It
-	// never touches a running sandbox; Kill is the counterpart for that.
+	// never touches a live sandbox — one another launcher invocation may own
+	// per IsRunning's not-terminal-and-not-too-young check (issue #3633);
+	// Kill is the counterpart for that.
 	Reap(name string) error
 
 	// Kill force-stops and removes the sandbox named name, whether running or
 	// not (ADR 0024, issue #649). A sandbox already gone is not an error.
 	Kill(name string) error
 
-	// IsRunning reports whether a sandbox named name is currently running, so
-	// a caller can skip a dispatch before touching its artifacts (issue #562).
+	// IsRunning reports whether a sandbox exists here that another launcher
+	// invocation may own: it is not terminal, and — under OCI — either
+	// "running" or still young enough that a sibling launcher could be
+	// mid-`podman run` with it (issue #3633). A caller uses this to skip a
+	// dispatch before touching its artifacts (issue #562). The name stays
+	// even as the contract widens; bwrap's implementation still checks
+	// literal resident PIDs.
 	IsRunning(name string) bool
 
 	// ListRunning returns the names of every sandbox running under this
-	// runtime, for Console startup orphan detection (issue #651). bwrap has no
+	// runtime, for Console startup orphan detection (issue #651). Deliberately
+	// narrower than IsRunning: a container merely created and not yet started
+	// is a candidate owner under IsRunning but not listed here, since this
+	// display is only useful naming sandboxes actually running. bwrap has no
 	// daemon tracking sandboxes by name, so that adapter uses the named
 	// per-Box cgroup (issue #2669) and returns nothing without cgroup v2.
 	ListRunning() ([]string, error)
@@ -123,7 +133,12 @@ type Runner interface {
 // ErrAlreadyRunning is returned by Run when a sandbox for this box is already
 // running. It is a dispatch outcome, not a failure: the caller skips the issue
 // with no failure transition, leaving the live run's claim and log untouched
-// (issue #562).
+// (issue #562). A container merely created by a sibling launcher and not yet
+// started reports it too (issue #3633), as does the lost-create-race case
+// where the runtime itself refuses to create the container because the name
+// is taken (Run's inspect missed the sibling, but the runtime didn't), so an
+// issue whose Box never started keeps its in-progress claim untouched and is
+// never marked failed.
 var ErrAlreadyRunning = errors.New("box: a container/sandbox for this issue is already running")
 
 // RunError wraps a non-zero exit from a box.
