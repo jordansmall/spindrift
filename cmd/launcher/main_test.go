@@ -6018,3 +6018,40 @@ func TestNewIssue_CarriesFieldsFromForgeIssue(t *testing.T) {
 		t.Errorf("newIssue(%+v) = %+v, want %+v", fi, got, want)
 	}
 }
+
+// Issue #3544: a Required-tier row whose probe wrapped doctor.ErrDegraded
+// could not determine the answer, so it must not be reported as an invalid
+// configuration (issue #2962) -- while a genuinely failing Required row on
+// the same run still is.
+func TestValidateConfigChecks_DegradedRequiredRowIsNotAConfigError(t *testing.T) {
+	c := minimalValidConfig()
+	checks := []doctor.Check{{
+		Name:   "degraded-row",
+		Tier:   doctor.Required,
+		Remedy: "degraded-remedy",
+		Probe: func() (any, error) {
+			return nil, fmt.Errorf("could not read the thing: %w", doctor.ErrDegraded)
+		},
+	}}
+
+	if err := validateConfigChecks(c, checks); err != nil {
+		t.Fatalf("validateConfigChecks() = %v, want nil for a degraded Required row", err)
+	}
+
+	checks = append(checks, doctor.Check{
+		Name:   "broken-row",
+		Tier:   doctor.Required,
+		Remedy: "broken-remedy",
+		Probe:  func() (any, error) { return nil, errors.New("the thing is broken") },
+	})
+	err := validateConfigChecks(c, checks)
+	if err == nil {
+		t.Fatalf("validateConfigChecks() = nil, want an error for a genuinely failing Required row")
+	}
+	if !strings.Contains(err.Error(), "the thing is broken") || !strings.Contains(err.Error(), "broken-remedy") {
+		t.Errorf("validateConfigChecks() error = %q, want the failing row's probe text and remedy", err.Error())
+	}
+	if strings.Contains(err.Error(), "degraded-row") || strings.Contains(err.Error(), "degraded-remedy") {
+		t.Errorf("validateConfigChecks() error = %q, want no mention of the degraded row", err.Error())
+	}
+}

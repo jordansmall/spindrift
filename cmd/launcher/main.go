@@ -550,10 +550,12 @@ func validateConfig(c config) error {
 // classify half (issue #3144) rather than a fresh doctorExtraChecks(c) whose
 // Probes would Peek independently of runDoctor's. WithRemedy puts each failing
 // row's Remedy into the joined error, not only its probe text (issue #2886).
+// doctor.Blocking, not a bare Required-and-failing test, decides what counts
+// as a failure here, so a degraded row stays the advisory doctor prints it as.
 func validateConfigChecks(c config, checks []doctor.Check) error {
 	var errs []error
 	for _, r := range doctor.RunChecks(checks) {
-		if r.Check.Tier == doctor.Required && r.Err != nil {
+		if doctor.Blocking(r) {
 			errs = append(errs, doctor.WithRemedy(r))
 		}
 	}

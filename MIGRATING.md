@@ -1,5 +1,28 @@
 # Migration Guide
 
+## `spindrift doctor` now exits 2 on an undersized podman machine (issue #3544)
+
+The `podman-machine-memory` row has been Required tier since #3537, but it
+only ever reached doctor's report half, where the extra checks are
+informational by contract: a podman machine with less RAM than `MEMORY_LIMIT`
+x `MAX_PARALLEL` needs printed a `MISSING` line and `spindrift doctor` still
+exited 0. The row now also runs in the classify half, so it fails the run like
+any other Required row and the same host exits 2 (config invalid).
+
+This is what lets the daemon's startup preflight refuse to start on a machine
+whose VM would OOM-kill the first Box, but it changes `spindrift doctor`'s
+exit code for every caller, not only the daemon. If you gate CI, a
+provisioning script, or a pre-dispatch check on `spindrift doctor`, a host
+that was quietly under-provisioned now fails that gate where it used to pass.
+Fix the host rather than the gate: raise the machine's RAM (`podman machine
+set --memory <MiB>`, then restart the machine), lower `MAX_PARALLEL`, or lower
+`MEMORY_LIMIT` — the failing row names the figure it wants and the remedy
+spells out all three.
+
+Hosts with no active podman machine, a non-podman runtime, a bwrap harness, or
+an empty `MEMORY_LIMIT` (the documented opt-out) are unaffected: the row
+reports "not applicable" and passes exactly as before.
+
 ## The comment-discipline anchor is gone; the four prompts inline the `/code-comments` policy body verbatim (issue #3505)
 
 `${CODE_COMMENTS_STEP}` and `fragments/code-comments-default.md` are both
