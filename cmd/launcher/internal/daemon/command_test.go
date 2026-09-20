@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -11,6 +12,9 @@ func TestChildCommand(t *testing.T) {
 		spec    ChildSpec
 		want    []string
 		wantErr bool
+		// wantErrSubstr, when set, pins which of two possible errors a spec
+		// that is wrong in more than one way reports.
+		wantErrSubstr string
 	}{
 		{
 			name: "default attr",
@@ -77,6 +81,21 @@ func TestChildCommand(t *testing.T) {
 			spec:    ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#do&gfood", Revision: "abc123", Kind: KindDispatch},
 			wantErr: true,
 		},
+		{
+			name:          "unknown kind",
+			spec:          ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: Kind("sweep")},
+			wantErr:       true,
+			wantErrSubstr: "unknown kind",
+		},
+		{
+			// Both halves are wrong: ChildCommand's doc promises the
+			// flakeref error wins, so a future reorder that parses the kind
+			// first fails here rather than silently changing the message.
+			name:          "unpinned beats unknown kind",
+			spec:          ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "", Kind: Kind("sweep")},
+			wantErr:       true,
+			wantErrSubstr: "revision must not be empty",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,6 +103,9 @@ func TestChildCommand(t *testing.T) {
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("ChildCommand(%+v): want error, got %v", tc.spec, got)
+				}
+				if tc.wantErrSubstr != "" && !strings.Contains(err.Error(), tc.wantErrSubstr) {
+					t.Fatalf("ChildCommand(%+v): err = %v, want it to contain %q", tc.spec, err, tc.wantErrSubstr)
 				}
 				return
 			}
@@ -189,6 +211,88 @@ func TestSelfCommand(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("SelfCommand(%+v) = %v, want %v", tc.spec, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDoctorCommand(t *testing.T) {
+	cases := []struct {
+		name    string
+		spec    DoctorSpec
+		want    []string
+		wantErr bool
+	}{
+		{
+			name: "default attr",
+			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123"},
+			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor"},
+		},
+		{
+			name: "named attr",
+			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#dogfood-bwrap", Revision: "abc123"},
+			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1#dogfood-bwrap", "--", "doctor"},
+		},
+		{
+			name:    "empty revision",
+			spec:    DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: ""},
+			wantErr: true,
+		},
+		{
+			name:    "non-absolute repo path",
+			spec:    DoctorSpec{RepoPath: "relative/path", AppAttr: ".#", Revision: "abc123"},
+			wantErr: true,
+		},
+		{
+			name:    "app attr with hash",
+			spec:    DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#do#gfood", Revision: "abc123"},
+			wantErr: true,
+		},
+		{
+			name:    "app attr with question mark",
+			spec:    DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#do?gfood", Revision: "abc123"},
+			wantErr: true,
+		},
+		{
+			name:    "app attr with ampersand",
+			spec:    DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#do&gfood", Revision: "abc123"},
+			wantErr: true,
+		},
+		{
+			name:    "repo path with hash",
+			spec:    DoctorSpec{RepoPath: "/home/op/re#po", AppAttr: ".#", Revision: "abc123"},
+			wantErr: true,
+		},
+		{
+			name:    "repo path with question mark",
+			spec:    DoctorSpec{RepoPath: "/home/op/re?po", AppAttr: ".#", Revision: "abc123"},
+			wantErr: true,
+		},
+		{
+			name:    "repo path with ampersand",
+			spec:    DoctorSpec{RepoPath: "/home/op/re&po", AppAttr: ".#", Revision: "abc123"},
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := DoctorCommand(tc.spec)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("DoctorCommand(%+v): want error, got %v", tc.spec, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DoctorCommand(%+v): unexpected error: %v", tc.spec, err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("DoctorCommand(%+v) = %v, want %v", tc.spec, got, tc.want)
+			}
+			for _, arg := range got {
+				if arg == "--max-jobs" || arg == "--max-parallel" {
+					t.Fatalf("DoctorCommand(%+v) = %v: must not cap a wave doctor never dispatches", tc.spec, got)
+				}
 			}
 		})
 	}
