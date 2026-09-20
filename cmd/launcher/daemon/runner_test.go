@@ -50,6 +50,47 @@ func TestRunChild_ExitCodeAndIssues(t *testing.T) {
 	}
 }
 
+// TestRunChild_OnIssueFiresPerDistinctAnnounce asserts RunChild calls
+// ChildRequest.OnIssue once per distinct announced issue, in announce
+// order, and never for a repeat of one already seen — the live channel a
+// slot has no other way to learn "what is this child working on right now"
+// before it exits (issue #3545).
+func TestRunChild_OnIssueFiresPerDistinctAnnounce(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	script := `printf '    -> #101: fix bug\n    -> #102 (fix-pass-2): retry\n    -> #101: fix bug again\nplain line\n'; exit 2`
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", script)
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+
+	var mu sync.Mutex
+	var announced []string
+	req := daemon.ChildRequest{
+		Slot:     0,
+		Kind:     daemon.KindDispatch,
+		Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		OnIssue: func(issue string) {
+			mu.Lock()
+			defer mu.Unlock()
+			announced = append(announced, issue)
+		},
+	}
+	got, err := r.RunChild(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	want := []string{"101", "102"}
+	if !reflect.DeepEqual(got.Issues, want) {
+		t.Errorf("Issues = %v, want %v", got.Issues, want)
+	}
+	if !reflect.DeepEqual(announced, want) {
+		t.Errorf("OnIssue calls = %v, want %v (once per distinct issue, in order, no repeat)", announced, want)
+	}
+}
+
 // TestRunChild_ZeroExitNoAnnounce pins the other end of the same seam: a
 // clean exit with no announce lines reports Exit 0 and a nil Issues slice.
 func TestRunChild_ZeroExitNoAnnounce(t *testing.T) {
