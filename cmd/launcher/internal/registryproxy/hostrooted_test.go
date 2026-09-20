@@ -37,12 +37,12 @@ func TestNew_ThreadsEnforcedSubtreesWithoutError(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newWithEcosystemRows(t, AssignPrefixes([]Route{{
+	p, _ := newWithEcosystemRows(t, Route{
 		Upstream: upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
-	}}))
+	})
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/index-a/config.json", nil)
@@ -252,14 +252,13 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a", "/index-b"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}, {Ecosystem: "cargo", Path: "/index-b"}},
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	tests := []struct {
@@ -301,14 +300,13 @@ func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) 
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -342,14 +340,13 @@ func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -452,15 +449,14 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 		Credential:       "s3kr1t",
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
@@ -507,14 +503,13 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
@@ -548,14 +543,13 @@ func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
@@ -587,14 +581,13 @@ func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
@@ -635,14 +628,13 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a", "/index-b"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}, {Ecosystem: "cargo", Path: "/index-b"}},
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	for _, indexPath := range []string{"/index-a/config.json", "/index-b/config.json"} {
@@ -683,13 +675,12 @@ func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	handler, routes := newWithEcosystemRows(t, Route{
 		Upstream: upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
-	}})
-	handler := newWithEcosystemRows(t, routes)
+	})
 	h, ok := handler.(*routeLogHandler)
 	if !ok {
 		t.Fatalf("New returned %T, want *routeLogHandler", handler)
@@ -714,13 +705,12 @@ func TestRouteLogHandler_LearnEmptyPathNormalizesToRoot(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	handler, routes := newWithEcosystemRows(t, Route{
 		Upstream: upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
-	}})
-	handler := newWithEcosystemRows(t, routes)
+	})
 	h, ok := handler.(*routeLogHandler)
 	if !ok {
 		t.Fatalf("New returned %T, want *routeLogHandler", handler)
@@ -762,14 +752,13 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	handler, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
 		EnforcedPaths:    []string{"/index-a"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
-	}})
-	handler := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	p := &Proxy{Handler: handler}

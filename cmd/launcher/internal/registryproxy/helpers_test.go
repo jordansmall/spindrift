@@ -12,20 +12,32 @@ import (
 	// production, not a stand-in -- production code never imports ecosystem
 	// (see the import-graph check).
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// newWithEcosystemRows builds a handler over routes with every ecosystem's
-// real rewrite rows -- cargo's is the only one today -- so its callers
-// exercise the rows a production run uses. It fails the test on a
-// construction error: only the tests that assert on New rejecting a route
-// care which error comes back, and they call New directly.
-func newWithEcosystemRows(t *testing.T, routes []Route) http.Handler {
+// newProxy assigns prefixes over routes, builds a handler with rows, and
+// fails the test on a construction error. It is the shared constructor
+// behind newWithEcosystemRows and newPlainProxy.
+func newProxy(t *testing.T, rows []registryvocab.RewriteRow, routes []Route) (http.Handler, []Route) {
 	t.Helper()
-	handler, err := New(routes, ecosystem.ResponseRewriteRows())
+	assigned := AssignPrefixes(routes)
+	handler, err := New(assigned, rows)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return handler
+	return handler, assigned
+}
+
+// newWithEcosystemRows builds a handler over routes with every ecosystem's
+// real rewrite rows -- cargo's is the only one today -- so its callers
+// exercise the rows a production run uses. It returns the routes back
+// because AssignPrefixes mutates them in place -- callers need the assigned
+// Prefix to build request paths. It fails the test on a construction error:
+// only the tests that assert on New rejecting a route care which error
+// comes back, and they call New directly.
+func newWithEcosystemRows(t *testing.T, routes ...Route) (http.Handler, []Route) {
+	t.Helper()
+	return newProxy(t, ecosystem.ResponseRewriteRows(), routes)
 }
 
 // newUpstream starts a test upstream and registers its Close on cleanup, so
@@ -43,12 +55,7 @@ func newUpstream(t *testing.T, h http.HandlerFunc) *httptest.Server {
 // callers need the assigned Prefix to build request paths.
 func newPlainProxy(t *testing.T, routes ...Route) (http.Handler, []Route) {
 	t.Helper()
-	assigned := AssignPrefixes(routes)
-	handler, err := New(assigned, nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	return handler, assigned
+	return newProxy(t, nil, routes)
 }
 
 // serve drives a request through p and returns the recorded response.
