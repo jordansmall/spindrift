@@ -2319,6 +2319,30 @@ func captureStdoutDuring(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
+// captureStderrDuring is captureStdoutDuring's sibling for os.Stderr, with
+// the same deferred restore and w.Close: a warning written on the degrade
+// path is a stderr fact, and capturing it inline would strand os.Stderr on
+// the pipe if fn panicked.
+func captureStderrDuring(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+	func() {
+		defer w.Close()
+		fn()
+	}()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
 // ADR 0042 amendment (issue #3272): a failed pids.max write degrades only
 // that limit, not the whole cgroup. The dir survives, memory.max is still
 // attempted, and the warning names pids.max.

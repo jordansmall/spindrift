@@ -64,27 +64,65 @@ func NewOCI(cfg Config, pwd string) Runner {
 	}
 }
 
-// IsReady reports whether the OCI image is already loaded, without building it.
-func (a *ociAdapter) IsReady() error {
+// imagePresent inspects rather than asking `image exists`, which docker has
+// no verb for. Shared by IsReady's one-shot check and EnsureReady's
+// double-checked probe/re-probe around the realize lock.
+func (a *ociAdapter) imagePresent() bool {
 	inspect := exec.Command(a.cli, "image", "inspect", a.image)
 	inspect.Stdout = io.Discard
 	inspect.Stderr = io.Discard
-	if err := inspect.Run(); err != nil {
-		return fmt.Errorf("image absent; run `spindrift build`")
-	}
-	return nil
+	return inspect.Run() == nil
 }
 
-// EnsureReady checks that the OCI image is present and builds it if not. It
-// inspects rather than asking `image exists`, which docker has no verb for.
+// IsReady reports whether the OCI image is already loaded, without building it.
+func (a *ociAdapter) IsReady() error {
+	if a.imagePresent() {
+		return nil
+	}
+	return errors.New("image absent; run `spindrift build`")
+}
+
+// lockImage acquires the per-image realize lock (issue #3632) and returns a
+// closure that releases it. Neither a failed acquire nor a failed release
+// fails the realize: without the lock a child only duplicates the work every
+// child already duplicated before this issue, which beats refusing to build
+// outright, so both degrade to a stderr warning and unlocked operation.
+func (a *ociAdapter) lockImage() func() {
+	onWait := func() {
+		fmt.Printf("==> image '%s' is being realized elsewhere — waiting\n", a.image)
+	}
+	lock, err := acquireImageLock(a.image, onWait)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "==> WARNING: could not lock image '%s' for realize (%v); continuing unlocked\n", a.image, err)
+		return func() {}
+	}
+	return func() {
+		if err := lock.Release(); err != nil {
+			fmt.Fprintf(os.Stderr, "==> WARNING: could not release image lock for '%s': %v\n", a.image, err)
+		}
+	}
+}
+
+// EnsureReady checks that the OCI image is present and builds it if not. The
+// warm path (image already present) returns before ever touching the lock,
+// so a repeat dispatch that finds the image loaded pays no lock syscall. Once
+// absent, the lock is taken and the presence check repeated: a child that
+// lost the race and waited may find the winner already finished, in which
+// case it must not repeat the build, load and tag.
 func (a *ociAdapter) EnsureReady() error {
-	inspect := exec.Command(a.cli, "image", "inspect", a.image)
-	inspect.Stdout = io.Discard
-	inspect.Stderr = io.Discard
-	if err := inspect.Run(); err == nil {
+	if a.imagePresent() {
 		fmt.Printf("==> image '%s' already loaded\n", a.image)
 		return nil
 	}
+
+	release := a.lockImage()
+	defer release()
+
+	if a.imagePresent() {
+		fmt.Printf("==> image '%s' already realized elsewhere; skipping the build\n", a.image)
+		return nil
+	}
+
 	fmt.Printf("==> image '%s' not found — building first\n", a.image)
 
 	// Tee stderr so a failure is both visible and inspectable below.

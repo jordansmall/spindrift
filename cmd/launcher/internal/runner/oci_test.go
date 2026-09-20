@@ -2086,8 +2086,10 @@ func TestIsRunning_ScriptedStatuses(t *testing.T) {
 // emits the non-digest-pinned supply-chain warning for an unpinned builder
 // image.
 func TestEnsureReady_ImageAbsentFallsBackToContainerBuild(t *testing.T) {
+	redirectImageLockDir(t)
 	cliScript, _ := newFakeCLI(t,
-		fakeCall{exit: 1}, // image inspect: absent
+		fakeCall{exit: 1}, // image inspect: absent (outside the lock)
+		fakeCall{exit: 1}, // image inspect: still absent (re-probe under the lock)
 		fakeCall{},        // run (container build)
 		fakeCall{},        // load
 		fakeCall{},        // tag
@@ -2146,6 +2148,7 @@ func TestEnsureReady_ImageAbsentFallsBackToContainerBuild(t *testing.T) {
 // and a genuine (non-builder-missing) scripted failure returns an error without
 // falling back to the container build.
 func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
+	redirectImageLockDir(t)
 	cliScript, _ := newFakeCLI(t, fakeCall{exit: 1}) // image inspect: absent
 
 	nixScript, nixDir := newFakeCLI(t, fakeCall{exit: 1, stdout: "genuine derivation error"})
