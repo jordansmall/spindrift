@@ -4751,8 +4751,45 @@ independent daemon processes or a human's `dispatch` invocation would;
 daemon-side bookkeeping of who's working what would only be a second copy
 of that state to keep in sync. A non-positive `MAX_PARALLEL` fails daemon
 startup rather than being clamped to some default — a pool that runs
-nothing while looking healthy is worse than a daemon that refuses to
-start.
+nothing while looking healthy is worse than a daemon that refuses to start.
+
+**Cold-start gate.** The coordination-free design in **Pool** above holds
+only once the pool is warm: a pool that has just come up releases every slot
+into pickKind at once, so every slot builds its discovery snapshot from the
+same tracker state and two (or more) can independently select the same issue
+and both start a Box racing to claim it, and a shared image build makes the
+collision more likely rather than less, since it holds every waiting slot
+back and then releases them all at the same instant. On a cold start only
+slot 0 (the "leading" slot, `leadSlot`) runs discovery; every other slot
+parks on a gate (`awaitStartGate`/`openStartGate`, `pool.go`) until slot 0's
+first iteration resolves. No route out of that first iteration can strand the
+pool: a claim releases live, the moment the leader's child announces a Box,
+not at child exit, so the hold never spans a whole Box run; a failure on the
+leader's first round — whether or not a child ever ran — releases before
+the backoff sleep it would otherwise wait out; and the leader stopping
+releases on its way out. Every other way the first iteration can end — its
+first child finishing having claimed nothing, or a no-work `pickKind`
+result — is caught at the top of the leader's next iteration, ahead of
+the Awake-window wait, rather than inline where the first iteration ended.
+That placement matters on its own: a leader whose fetch outlasts the Awake
+window's close ends its first iteration without ever starting a child, and
+that top-of-loop release fires before it parks on the shut window rather than
+leaving the siblings pinned behind it for the whole shut span. A shut Awake
+window parks every slot anyway, so the gate is deliberately held across the
+park rather than released into the window's reopening instant, which is
+exactly when the wave would otherwise hit the tracker together; the leader's
+own first round runs when the window reopens and releases the gate then. The
+one operator-visible consequence: a sibling whose window read landed just
+before a close can sit in `gate_hold` for the shut span, with the
+`awake_close` between them explaining the span. The gate is a start-up
+condition only, scoped to one daemon process: once the first wave has
+resolved, every later iteration of every slot finds the gate already open and
+pays one non-blocking channel receive for it, and a fresh daemon process
+starts the whole cold-start sequence over. `MAX_PARALLEL=1` builds no gate at
+all — a single slot has no sibling to race, so it takes no wait for one.
+The gate sits after the Awake window wait, not before, so a cold start inside
+an already-shut window costs no extra wait: every slot is already parked on
+the window before any of them would reach the gate.
 
 **Instance lock.** Startup also takes a non-blocking exclusive `flock` on
 `spindrift-daemon.lock` (`AcquireCheckoutLock`,
@@ -5529,15 +5566,26 @@ slot's failure. `awake_close` and `awake_open` are pool-wide transitions,
 not per-slot events — however many slots park on one closing, the stream
 carries exactly one `awake_close`, and `awake_open` never appears without
 a preceding `awake_close` — but each still carries a `slot`: whichever
-slot happened to observe the transition. `halt` and `shutdown` are the only
-events with no `slot` at all, since neither belongs to one slot: `halt` is
-the pool-wide exit, and `shutdown` is emitted from the signal handler,
-which runs outside every slot's own goroutine.
+slot happened to observe the transition. `gate_hold` and `gate_open` are the
+cold-start pair (see **Pool** above): both carry a `slot`, `gate_hold`'s
+naming the slot held on the gate and `gate_open`'s naming the leading slot
+that released it; `gate_open` appears at most once per daemon process that
+has a gate at all, and every `gate_hold` is resolved by that one
+`gate_open` — though `awaitStartGate`'s non-blocking select means a
+sibling preempted right there can log its `gate_hold` after `gate_open`
+has already reached the stream, so the pairing is not a strict ordering,
+but it is still what lets an operator tell a gated cold start from a
+stalled one. `halt` and `shutdown` are the only events with no `slot` at
+all, since neither belongs to one slot: `halt` is the pool-wide exit, and
+`shutdown` is emitted from the signal handler, which runs outside every
+slot's own goroutine.
 
 | event | fields | when |
 |-------|--------|------|
 | `awake_close` | `time`, `kind`, `slot`, `wait`, `reason` | the first slot parks on a shut Awake window — not the close instant itself, so a pool still busy at the close reports the transition, and computes `wait` (how long until the next opening), at that later parking |
 | `awake_open` | `time`, `kind`, `slot`, `reason` | the Awake window reopens after a prior `awake_close`; never emitted for a daemon that starts inside an already-open window |
+| `gate_hold` | `time`, `slot`, `reason` | a non-leading slot reaches the cold-start gate (issue #3634) and finds the leading slot's first discovery round still unresolved, so it parks — one event per slot held, since each parks independently on its own pass through the loop; `reason` is the fixed `"waiting for the leading slot's first discovery round to resolve"`, matching the other wait events in this stream |
+| `gate_open` | `time`, `slot`, `reason` | the leading slot's first discovery round resolves, releasing every sibling parked in `gate_hold`; emitted at most once per daemon process that has a gate at all (`MAX_PARALLEL=1` has none, see **Pool** above); `openStartGate` enforces `slot` as always the leading slot, never whichever sibling happened to be waiting, structurally rather than by argument. `reason` names whichever release path actually fired first — a live claim (`"the leading slot claimed an issue: releasing the rest of the pool to discover in parallel"`, fired the instant the leader's child announces a Box, not at child exit), a failure on the leader's first round — a fetch failure, a self-build evaluation failure, a `RunChild` seam error, or an unrecognised child exit code — with the leader about to sleep out its own `FailureBackoff` alone (`"the leading slot's first discovery round failed: releasing the rest of the pool rather than holding it through backoff"`), the leader stopping before its first round resolved at all (`"the leading slot stopped before its first discovery round resolved: releasing the rest of the pool"`), or — caught at the top of the leader's next iteration rather than inline, so this one can follow the leader's own `box`/`child_finish` events in the stream instead of preceding them — its first discovery round resolving with nothing claimed (`"the leading slot's first discovery round resolved without a claim: releasing the rest of the pool"`) — so a failure on the leader's cold start can never strand the rest of the pool on a gate nothing else will open |
 | `preflight` | `time`, `revision`, `exit`, `outcome` (`reason` instead of `exit` on the paths with no doctor exit code to report — a seam failure, or an operator's stop) | emitted exactly once, at startup, before the first slot, on every path the preflight can take: a pass, a refusal, a seam failure, or an operator's Ctrl-C — so "ran and was healthy" and "never ran" cannot look identical the morning after; `outcome` is `ClassifyPreflight`'s own `doctor-`-prefixed label (`doctor-healthy`, `doctor-required-labels-missing`, `doctor-config-invalid`, `doctor-connectivity`, `doctor-unclassified`, `doctor-unknown`) or one of the two the daemon itself adds on the paths that never reached a verdict (`doctor-seam-error` for a failure resolving the tip or running doctor at all, `doctor-cancelled` for a stop signal during the preflight), never `Interpret`'s child-outcome vocabulary, so it can never be confused with a `child_finish` outcome |
 | `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched |
 | `box` | `time`, `kind`, `issue`, `revision`, `slot` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
