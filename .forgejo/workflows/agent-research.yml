@@ -1,13 +1,14 @@
 name: Agent research
 
-# Adding the `agent-research` label to an issue fires one research dispatch
-# against it (ADR 0022): claim the issue (swap `agent-research` ->
+# Adding the `agent-research-trigger` label to an issue fires one research
+# dispatch against it (ADR 0022): claim the issue (add
 # `agent-research-in-progress` up front), build the image, then run
 # `spindrift research` against that single issue — a fresh clone, a review of
 # the issue against the Target repo, and one posted verdict comment. Research
-# never lands code: no PR, no CI watch, no merge. The claim clears
-# `agent-research` before any build work, so the label self-clears and will
-# not re-fire.
+# never lands code: no PR, no CI watch, no merge. The claim clears the trigger
+# and the standing `agent-research` before any build work, so the trigger
+# self-clears and will not re-fire, and a claimed issue also drops out of the
+# queue a daemon polls for `agent-research`.
 #
 # This is the Forgejo Actions mirror of .github/workflows/agent-research.yml
 # (issue #1967). Forgejo has no GitHub App model, so there is no research-App
@@ -20,8 +21,8 @@ on:
     types: [labeled]
 
 # Serialise per kind per issue (ADR 0022): two labelings of the SAME issue
-# with `agent-research` queue behind each other (no double-dispatch), but a
-# research run on one issue and a work run on the same issue are separate
+# with `agent-research-trigger` queue behind each other (no double-dispatch),
+# but a research run on one issue and a work run on the same issue are separate
 # concurrency groups and may run simultaneously — permitted, operator's
 # responsibility, matching the existing dispatch rate-limit stance. Different
 # issues always run concurrently.
@@ -34,7 +35,7 @@ permissions:
 
 jobs:
   research:
-    if: github.event.label.name == 'agent-research'
+    if: github.event.label.name == 'agent-research-trigger'
     runs-on: self-hosted
     timeout-minutes: 180
     env:
@@ -51,15 +52,15 @@ jobs:
       # ./.github/actions/* from the checked-out tree.
       - uses: actions/checkout@v4
 
-      # Claim up front (agent-research -> agent-research-in-progress) through the
-      # forgejo-label-swap composite (Forgejo REST) — the GitHub workflow does
-      # this inside agent-setup via `gh issue edit`, but `gh` cannot
-      # authenticate against a Forgejo runner. Strip only the research-family
-      # labels (ADR 0022): the claim never touches
-      # ready-for-agent/agent-in-progress/agent-complete/agent-failed — an issue
-      # wearing a work lifecycle label keeps it through a research claim, since
-      # the two kinds are disjoint and a research dispatch may legitimately run
-      # alongside a work dispatch on the same issue.
+      # Claim up front (agent-research-trigger + agent-research ->
+      # agent-research-in-progress) through the forgejo-label-swap composite
+      # (Forgejo REST) — the GitHub workflow does this inside agent-setup via
+      # `gh issue edit`, but `gh` cannot authenticate against a Forgejo runner.
+      # Strip only the research-family labels (ADR 0022): the claim never
+      # touches ready-for-agent/agent-in-progress/agent-complete/agent-failed —
+      # an issue wearing a work lifecycle label keeps it through a research
+      # claim, since the two kinds are disjoint and a research dispatch may
+      # legitimately run alongside a work dispatch on the same issue.
       - name: Claim the issue
         uses: ./.github/actions/forgejo-label-swap
         with:
@@ -69,8 +70,8 @@ jobs:
           issue-number: ${{ github.event.issue.number }}
           add-labels: agent-research-in-progress
           remove-labels: >-
-            agent-research agent-research-recommend agent-research-reject
-            agent-research-unclear agent-research-failed
+            agent-research-trigger agent-research agent-research-recommend
+            agent-research-reject agent-research-unclear agent-research-failed
 
       # Install Nix and build — plus the plumbing env (RUNTIME + tokens) written
       # to the job env and the bot identity surfaced as step outputs for the

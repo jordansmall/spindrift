@@ -92,10 +92,10 @@ let
   triggerGuardExpectations = {
     "github:agent-dispatch.yml" = "agent-trigger";
     "github:agent-recover.yml" = "agent-recover";
-    "github:agent-research.yml" = "agent-research";
+    "github:agent-research.yml" = "agent-research-trigger";
     "forgejo:agent-dispatch.yml" = "agent-trigger";
     "forgejo:agent-recover.yml" = "agent-recover";
-    "forgejo:agent-research.yml" = "agent-research";
+    "forgejo:agent-research.yml" = "agent-research-trigger";
   };
   realTriggerGuardSrcs = {
     "github:agent-dispatch.yml" = builtins.readFile ../../.github/workflows/agent-dispatch.yml;
@@ -320,7 +320,7 @@ in
     let
       driftedResearchSrc =
         replaceStrings
-          [ "if: github.event.label.name == 'agent-research'" ]
+          [ "if: github.event.label.name == 'agent-research-trigger'" ]
           [ "if: github.event.label.name == 'agent-study'" ]
           realTriggerGuardSrcs."github:agent-research.yml";
       doctoredTriggerGuardSrcs = realTriggerGuardSrcs // {
@@ -329,7 +329,7 @@ in
       result = builtins.tryEval (assertTriggerGuardsPinned doctoredTriggerGuardSrcs);
     in
     assert assertMsg (!result.success)
-      "dispatch-labels-pinned-in-workflows-regression: expected assertTriggerGuardsPinned to reject a synthetic github agent-research.yml with the dispatch-trigger guard renamed from agent-research to agent-study, but it evaluated successfully";
+      "dispatch-labels-pinned-in-workflows-regression: expected assertTriggerGuardsPinned to reject a synthetic github agent-research.yml with the dispatch-trigger guard renamed from agent-research-trigger to agent-study, but it evaluated successfully";
     pkgs.runCommand "dispatch-labels-pinned-in-workflows-regression" { } "touch $out";
 
   # Proves assertLabelsPinned itself still rejects a rename (issue #2528 AC3).
