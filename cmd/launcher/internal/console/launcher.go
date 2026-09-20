@@ -92,7 +92,7 @@ type Launcher struct {
 	pollInterval time.Duration
 	// terminated is the shared registry Terminate marks and RunContinuous /
 	// Settle check at their loop checkpoints (ADR 0024, issue #649). Lazily
-	// created by registry().
+	// resolved by registry().
 	terminated *terminate.Registry
 	// terminatingNums tracks issue numbers with a TerminateAsync goroutine still
 	// in flight, so a second confirm cannot fire a duplicate Terminate (issue
@@ -255,18 +255,21 @@ func (l *Launcher) Resize(delta int) {
 	l.limiter().ResizeDelta(delta)
 }
 
-// registry lazily constructs l.terminated and wires it into l.Settle when that
-// Settle is a concrete *settle.Settle; a settle.Fake has no loop to check.
-// Termination keys on a per-number generation, not a bool (issue #743): a
-// re-pick's Begin must not clear a mark an in-flight settle from the terminated
-// incarnation has yet to see, or its stale setState lands on the re-pick's row.
+// registry returns the registry Terminate marks: the settler's own, so no
+// wiring order can leave the marker and the settle checkpoints reading
+// different registries (issue #3522). A settle.Fake owns none -- it has no loop
+// to check -- so the fallback mints one. Termination keys on a per-number
+// generation, not a bool (issue #743): a re-pick's Begin must not clear a mark
+// an in-flight settle from the terminated incarnation has yet to see, or its
+// stale setState lands on the re-pick's row.
 func (l *Launcher) registry() *terminate.Registry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.terminated == nil {
-		l.terminated = terminate.NewRegistry()
-		if s, ok := l.Settle.(*settle.Settle); ok {
-			s.SetTerminated(l.terminated)
+		if r, ok := l.Settle.(settle.Registrar); ok {
+			l.terminated = r.Registry()
+		} else {
+			l.terminated = terminate.NewRegistry()
 		}
 	}
 	return l.terminated

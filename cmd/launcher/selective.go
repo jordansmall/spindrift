@@ -19,9 +19,16 @@ import (
 // dependents. caps is the caller's resolved forge.Capabilities (issue #2946),
 // safe to reuse because cf is fixed for this whole call.
 func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.Settler, nums []string, forceYes bool, stdin io.Reader, stdout io.Writer) error {
+	// Installed once, ahead of the first fetch, the same placement run uses
+	// (#3522): every pre-wave early return below checks
+	// waves.SignalledStopAlready so a signal that already fired wins over any
+	// of them.
+	stopCh, abortCh, stopCleanup := installStopSignal()
+	defer stopCleanup()
+
 	issues, unlabeled, err := fetchSelectiveIssues(c, it, nums)
 	if err != nil {
-		return err
+		return signalledOr(stopCh, abortCh, err)
 	}
 
 	if len(unlabeled) > 0 {
@@ -29,13 +36,13 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			fmt.Fprintf(stdout, "⚠ #%s not ready-for-agent; dispatching anyway (explicit)\n", num)
 		}
 		if !confirmUnlabeled(len(unlabeled), forceYes, stdin, stdout) {
-			return fmt.Errorf("aborted: unlabeled issue(s) not confirmed")
+			return signalledOr(stopCh, abortCh, fmt.Errorf("aborted: unlabeled issue(s) not confirmed"))
 		}
 	}
 
 	readiness, err := waves.NewReadiness(it, toWaveIssues(issues))
 	if err != nil {
-		return err
+		return signalledOr(stopCh, abortCh, err)
 	}
 
 	issues, notices := evictUnmetBlockers(it, cf, caps, readiness, issues)
@@ -44,6 +51,9 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 
 	if len(issues) == 0 {
+		if waves.SignalledStopAlready(stopCh, abortCh) {
+			return waves.ErrSignalledStop
+		}
 		fmt.Fprintln(stdout, "no issues to dispatch after eviction")
 		return nil
 	}
@@ -51,8 +61,11 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	in := waves.NewInput(waves.OriginSelective, readiness, toWaveIssues(issues))
 	cfg := selectiveWavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
+	cfg.Stop = stopCh
+	cfg.Abort = abortCh
 	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
-	return waves.Dispatch(cfg, it, cf, pwd, f, s, in, claimer)
+	terminated := registryFor(s)
+	return waves.Dispatch(cfg, &waves.Session{Terminated: terminated}, it, cf, pwd, f, s, in, claimer)
 }
 
 // fetchSelectiveIssues returns the fetched issues plus the numbers of those
