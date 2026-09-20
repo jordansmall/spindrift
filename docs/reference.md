@@ -475,8 +475,11 @@ same way it already does for the model (issue #2427) — one mechanism instead
 of two.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
-requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
-at any directory to override it at runtime for zero-rebuild iteration.
+requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR` at
+any directory to override it at runtime for zero-rebuild iteration. The
+template an override directory replaces is internal — see
+[`VERSIONING.md`](../VERSIONING.md)'s prompt-template carve-out for what that
+buys you and what it does not.
 
 Opt-in prompt steps (the skill preamble, the caveman-default narration
 directive, `FILE ISSUES`, `AUTO-FORMAT`, `AUTO-LINT`, `CI FAILURE`, and the
@@ -1212,7 +1215,7 @@ exceptions.
 | `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); when set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to it. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
-| `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` / the env var |
+| `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` / the env var. The knob itself is a versioned surface; the template an override directory replaces is not — see [`VERSIONING.md`](../VERSIONING.md)'s prompt-template carve-out |
 | `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override skills at dispatch time: mounted to `/operator-skills` and merged over the baked `/agent/skills` set at box startup (not bakeable) |
 
 Every `settings`-baked knob above can be re-pointed at dispatch time with its
