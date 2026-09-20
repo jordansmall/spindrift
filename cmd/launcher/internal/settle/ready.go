@@ -49,10 +49,19 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 	}
 	for attempt := 0; ; attempt++ {
 		obs, gateReason := s.gateToGreen(num, gen, pr, requireRegistration && attempt == 0)
+		// A mark (Terminate or Reclaim) already released num back to
+		// Dispatchable by the time any check below sees it, so no arm past
+		// that point may commit tracker state or dispatch further work for
+		// num (issue #3523).
 		switch obs.outcome {
 		case gateAbandoned:
 			return landingAbandoned, ""
 		case gateGreen:
+			// Catches a mark landing during the gate's own confirm sleep,
+			// before MarkReady's idempotent ready flip below.
+			if s.terminated(num, gen) {
+				return landingAbandoned, ""
+			}
 			// The launcher, never the Driver, owns the draft to ready flip at
 			// green, inverting the old draft-until-ready invariant (issues
 			// #1651, #1653, #1654, #1614, #1625). MarkReady is idempotent, so
@@ -65,14 +74,12 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			if guardErr != nil {
 				fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
 				s.it.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
-				s.transitionState(num, forge.InProgress, forge.Complete)
-				return landingManual, ""
+				return s.completeLanding(num, gen, landingManual), ""
 			}
 			if len(matched) > 0 {
 				fmt.Printf("    #%s  landing=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
 				s.it.Comment(num, mergeGuardComment(matched))
-				s.transitionState(num, forge.InProgress, forge.Complete)
-				return landingManual, ""
+				return s.completeLanding(num, gen, landingManual), ""
 			}
 			if err := s.applyMergeMode(num, gen, pr, d); err != nil {
 				if errors.Is(err, errAbandoned) {
@@ -86,20 +93,28 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				}
 				fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
-				s.transitionState(num, forge.InProgress, forge.Complete)
-				return landingManual, ""
+				return s.completeLanding(num, gen, landingManual), ""
 			}
-			s.transitionState(num, forge.InProgress, forge.Complete)
 			if s.cfg.MergeMode == "immediate" {
-				return landingMerged, ""
+				return s.completeLanding(num, gen, landingMerged), ""
 			}
-			return landingManual, ""
+			return s.completeLanding(num, gen, landingManual), ""
 		case gateTerminal:
+			// Catches a mark landing mid-poll, before the Failed commit and
+			// comment below.
+			if s.terminated(num, gen) {
+				return landingAbandoned, ""
+			}
 			fmt.Printf("    #%s  landing=%s  status=gate-terminal  !! %s\n", num, pr, gateReason)
 			s.it.Comment(num, fmt.Sprintf("landing failed: %s", gateReason))
 			s.transitionState(num, forge.InProgress, forge.Failed)
 			return landingFailed, gateReason
 		case gateRedRetry:
+			// Catches a mark landing mid-poll, before the fix-exhausted and
+			// budget-exhausted Failed commits below.
+			if s.terminated(num, gen) {
+				return landingAbandoned, ""
+			}
 			if attempt >= s.cfg.MaxFixAttempts {
 				if s.cfg.MaxFixAttempts > 0 {
 					fmt.Printf("    #%s  landing=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
@@ -134,7 +149,13 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			if headErr != nil {
 				fmt.Printf("    #%s  landing=%s  status=head-sha-unavailable  !! %v\n", num, pr, headErr)
 			}
-			if result := d.Fix(attempt+1, detail); !result.Success {
+			result := d.Fix(attempt+1, detail)
+			// Catches d.Fix's own exit — a non-zero result can be Reclaim's
+			// SIGKILL — before the Failed commit or bundle relay below.
+			if s.terminated(num, gen) {
+				return landingAbandoned, ""
+			}
+			if !result.Success {
 				fmt.Printf("    #%s  landing=%s  status=fix-failed  !! fix pass %d exited non-zero — aborting self-heal\n", num, pr, attempt+1)
 				result.ReportFailureReason(num)
 				s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
@@ -159,6 +180,11 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 					s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 					confirmed, confirmErr := s.pr.HeadCommitSHA(pr)
 					if confirmErr == nil && confirmed == headBefore {
+						// Catches a mark landing during the confirm sleep,
+						// before the fix-no-op Failed commit below.
+						if s.terminated(num, gen) {
+							return landingAbandoned, ""
+						}
 						fmt.Printf("    #%s  landing=%s  status=fix-no-op  !! fix pass %d produced no new commit — aborting self-heal\n", num, pr, attempt+1)
 						s.it.Comment(num, fmt.Sprintf("fix pass %d produced no new commit — aborting self-heal", attempt+1))
 						s.transitionState(num, forge.InProgress, forge.Failed)
@@ -170,11 +196,31 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 	}
 }
 
+// completeLanding is the gateGreen arm's single Complete-commit gate. The
+// arm's top-of-switch check catches a mark that lands before MarkReady, but
+// the Registry mark is sticky (terminate/registry.go), so re-checking here
+// also catches one that lands during MarkReady's or applyMergeMode's own
+// round-trip: Reclaim already moved num to Dispatchable by then, and a
+// Complete commit here would leave the issue wearing agent-complete on top,
+// which Reconcile's InProgress-only sweep never clears (issue #3523).
+func (s *Settle) completeLanding(num string, gen uint64, landed landingResult) landingResult {
+	if s.terminated(num, gen) {
+		return landingAbandoned
+	}
+	s.transitionState(num, forge.InProgress, forge.Complete)
+	return landed
+}
+
 // landPushOnly lands a push-only forge, where there is no PR or CI to watch, so
 // the issue goes Complete immediately and MERGE_MODE applies straight against
 // the forge's Merge and Rebase. A merge failure leaves the issue Complete with
 // a merge-blocked note, never demoted to Failed (ADR 0012).
 func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResult {
+	// No CI watch here, so this is the only checkpoint before landing —
+	// an aborted run must not merge or commit Complete (issue #3523).
+	if s.terminated(num, gen) {
+		return landingAbandoned
+	}
 	s.transitionState(num, forge.InProgress, forge.Complete)
 	if err := s.applyMergeMode(num, gen, branch, nil); err != nil {
 		fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
@@ -395,7 +441,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 				return rbErr
 			}
 			if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
-				if crErr := s.resolveConflict(num, pr, d); crErr != nil {
+				if crErr := s.resolveConflict(num, gen, pr, d); crErr != nil {
 					return crErr
 				}
 				if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
@@ -462,7 +508,7 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 			}
 		}
 		if isConflict && d != nil {
-			if crErr := s.resolveConflict(num, pr, d); crErr != nil {
+			if crErr := s.resolveConflict(num, gen, pr, d); crErr != nil {
 				return crErr
 			}
 			// The ResolveConflict dispatch above is shared with the reactive loop
@@ -478,10 +524,23 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 }
 
 // resolveConflict dispatches a Box to resolve a genuine ErrMergeConflict hit by
-// a force-pushing rebase.
-func (s *Settle) resolveConflict(num, pr string, d dispatch.Dispatcher) error {
+// a force-pushing rebase. It returns errAbandoned when Reclaim reaps the Box
+// mid-dispatch, since its SIGKILL can surface as crErr indistinguishably from
+// a genuine dispatch failure (issue #3523).
+func (s *Settle) resolveConflict(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	fmt.Printf("    #%s  landing=%s  status=conflict-resolve\n", num, pr)
-	if crErr := d.ResolveConflict(pr); crErr != nil {
+	crErr := d.ResolveConflict(pr)
+	// Reclaim reaps this Box under num's own box name, so crErr can be its own
+	// SIGKILL, and the relay below would push a resolved-conflict bundle for
+	// an issue Terminate already released back to Dispatchable (issue #3523).
+	// This check runs ahead of the crErr handling below, so a genuine
+	// conflict-resolve failure racing a mark loses its
+	// status=conflict-resolve-failed log line — deliberate, since num is
+	// already released and nothing reads that log line for it.
+	if s.terminated(num, gen) {
+		return errAbandoned
+	}
+	if crErr != nil {
 		// Audited (issue #831): the OCI and bwrap adapters both wire the Box's
 		// stdout and stderr to the log file, not to the returned error, so crErr
 		// is only ever an *exec.ExitError or a start failure, never Box-internal
