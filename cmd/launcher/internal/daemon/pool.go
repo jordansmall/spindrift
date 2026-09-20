@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -65,6 +66,36 @@ func (p *pool) halt(reason, revision string) {
 
 	p.em.Emit(Event{Event: "halt", Kind: p.cfg.Kind, Revision: revision, Reason: reason})
 	p.cancel()
+}
+
+// backoffOrHalt is what a slot calls on an unclassified failure (a
+// ResolveRevision error, a RunChild seam error, or an unrecognised exit
+// code): it records the failure in the pool-wide breaker b and either
+// trips the pool (enough failures landed across the pool within the
+// window to look systemic — no per-slot retry clears that) or backs this
+// one slot off and lets it retry alone. Returns true if the pool halted
+// (the caller must stop), false if the caller should sleep out the backoff
+// and continue its own loop.
+func (p *pool) backoffOrHalt(ctx context.Context, slot int, clk Clock, b *breaker, revision, reason string) bool {
+	count, crossed := b.recordAndCheck(clk.Now())
+	if crossed {
+		haltReason := fmt.Sprintf("breaker: %d failures within %s reached threshold %d", count, p.cfg.BreakerWindow, p.cfg.BreakerThreshold)
+		p.em.Emit(Event{Event: "breaker_trip", Kind: p.cfg.Kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()})
+		p.halt(haltReason, revision)
+		return true
+	}
+
+	// This call did not cross the threshold itself, but a sibling racing
+	// concurrently through recordAndCheck might already have — check
+	// before backing off so a slot never sleeps out a fresh backoff
+	// against a pool that is already stopping.
+	if p.stopped() {
+		return true
+	}
+
+	p.em.Emit(Event{Event: "backoff", Kind: p.cfg.Kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason})
+	clk.Sleep(ctx, p.cfg.FailureBackoff)
+	return false
 }
 
 // haltReason returns the pool's recorded halt reason. Only meaningful after

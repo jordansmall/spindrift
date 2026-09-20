@@ -324,3 +324,18 @@ func TestRepoRoot_ResolvesToplevel(t *testing.T) {
 		t.Errorf("repoRoot(%q) = %q, want %q", sub, got, root)
 	}
 }
+
+// TestBreakerDefaults_TripReachableAtOneSlot pins the reachability the
+// breaker exists for at the smallest supported pool: at MAX_PARALLEL=1 a
+// systemic fault's failures are one slot's own retries, spaced
+// daemonFailureBackoff apart, so daemonBreakerThreshold of them must still
+// fit inside daemonBreakerWindow. Values that push that span past the
+// window leave a 1-slot daemon burning its only slot until morning with no
+// breaker_trip ever emitted.
+func TestBreakerDefaults_TripReachableAtOneSlot(t *testing.T) {
+	span := time.Duration(daemonBreakerThreshold-1) * daemonFailureBackoff
+	if span >= daemonBreakerWindow {
+		t.Fatalf("a single slot can never trip the breaker: %d failures at %s apart span %s, outside the %s window",
+			daemonBreakerThreshold, daemonFailureBackoff, span, daemonBreakerWindow)
+	}
+}

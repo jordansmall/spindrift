@@ -31,10 +31,9 @@ type ChildRequest struct {
 	Revision string
 }
 
-// Clock is the loop's time seam: Now for timestamping and reasoning about
-// elapsed time, Sleep for the idle wait. One interface rather than a bare
-// sleep func so a later breaker slice can read Now() off the same seam a
-// test already fakes.
+// Clock is the loop's time seam: Now for the breaker's window, Sleep for
+// the idle and backoff waits. One interface rather than a bare sleep func
+// so both read off a single seam a test fakes once.
 type Clock interface {
 	Now() time.Time
 	Sleep(ctx context.Context, d time.Duration)
@@ -49,21 +48,41 @@ type ChildResult struct {
 }
 
 // Config is the loop's tuning: which Dispatch kind to drive, how long to
-// wait on an empty queue, and how many slots (concurrent single-Box
-// children) the pool runs. Per-kind backoff, the Awake window and the
-// instance lock are later tickets.
+// wait on an empty queue, how many slots (concurrent single-Box children)
+// the pool runs, and the failure-backoff/breaker knobs below. Per-kind
+// backoff, the Awake window and the instance lock are later tickets.
 type Config struct {
 	Kind         Kind
 	IdleInterval time.Duration
 	Slots        int
+
+	// FailureBackoff is how long a slot sleeps before refilling itself
+	// after an unclassified failure (an unrecognised exit code, a
+	// RunChild seam error, or a ResolveRevision error): the bad
+	// slot backs off and retries alone, rather than the whole pool
+	// stopping over one issue. Must be non-negative.
+	FailureBackoff time.Duration
+	// BreakerThreshold and BreakerWindow bound the pool-wide breaker: if
+	// BreakerThreshold unclassified failures land (from any slot, in any
+	// mix) within a trailing BreakerWindow, the pool halts instead of
+	// every slot backing off forever — the signature of a systemic fault
+	// (an expired token, a forge outage) that no per-slot retry clears.
+	// Both must be positive.
+	BreakerThreshold int
+	BreakerWindow    time.Duration
 }
 
 // Loop runs cfg.Slots slot goroutines, each independently driving Dispatch
 // children through the same state machine, until something says halt: a
-// resolve failure, a RunChild error, an unrecognised or Halt-mapped exit
-// code, or a cancelled ctx. Whichever slot halts first wins — Loop emits
-// exactly one halt event per call, and returns that first reason, for a
-// caller to log or turn into a process exit code.
+// Halt-mapped exit code, the pool-wide breaker tripping, or a cancelled
+// ctx. Whichever slot halts first wins — Loop emits exactly one halt event
+// per call, and returns that first reason, for a caller to log or turn
+// into a process exit code.
+//
+// An unclassified failure is not one of those: a resolve failure, a
+// RunChild error or an unrecognised exit code backs its own slot off and
+// refills it, leaving the siblings working, and only reaches a halt by
+// tripping the breaker.
 //
 // It never kills a child it has started: once a slot calls RunChild, it
 // always waits for it to return and always emits that child's child_finish
@@ -81,16 +100,33 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) str
 		em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
 		return reason
 	}
+	if cfg.FailureBackoff < 0 {
+		reason := fmt.Sprintf("config-invalid: failure backoff must be non-negative, got %s", cfg.FailureBackoff)
+		em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
+		return reason
+	}
+	if cfg.BreakerThreshold <= 0 {
+		reason := fmt.Sprintf("config-invalid: breaker threshold must be a positive integer, got %d", cfg.BreakerThreshold)
+		em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
+		return reason
+	}
+	if cfg.BreakerWindow <= 0 {
+		reason := fmt.Sprintf("config-invalid: breaker window must be positive, got %s", cfg.BreakerWindow)
+		em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
+		return reason
+	}
 
 	p, pctx := newPool(ctx, cfg, em)
 	defer p.cancel()
+
+	b := newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow)
 
 	var wg sync.WaitGroup
 	wg.Add(cfg.Slots)
 	for slot := 0; slot < cfg.Slots; slot++ {
 		go func(slot int) {
 			defer wg.Done()
-			runSlot(pctx, slot, cfg, r, em, clk, p)
+			runSlot(pctx, slot, cfg, r, em, clk, p, b)
 		}(slot)
 	}
 	wg.Wait()
@@ -103,7 +139,7 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) str
 // pool's own derived context (not the caller's ctx directly): cancelling it
 // is how the pool tells every slot to stop promptly, including one asleep
 // in clk.Sleep or blocked inside ResolveRevision.
-func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, clk Clock, p *pool) {
+func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, clk Clock, p *pool, b *breaker) {
 	for {
 		if stopOnCancel(ctx, p) {
 			return
@@ -111,8 +147,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, c
 
 		revision, err := r.ResolveRevision(ctx)
 		if err != nil {
-			p.halt(fmt.Sprintf("resolve-revision: %v", err), "")
-			return
+			// A failed fetch is exactly the transient blip this slice's
+			// breaker exists for: back off and retry alone, unless enough
+			// failures have piled up pool-wide to say this is systemic
+			// (backoffOrHalt below).
+			if p.backoffOrHalt(ctx, slot, clk, b, "", fmt.Sprintf("resolve-revision: %v", err)) {
+				return
+			}
+			continue
 		}
 
 		if stopOnCancel(ctx, p) {
@@ -139,8 +181,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, c
 				em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
 			}
 			em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
-			p.halt(fmt.Sprintf("run-child: %v", err), revision)
-			return
+			if p.backoffOrHalt(ctx, slot, clk, b, revision, fmt.Sprintf("run-child: %v", err)) {
+				return
+			}
+			continue
 		}
 
 		for _, issue := range result.Issues {
@@ -158,6 +202,11 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, c
 			wait := cfg.IdleInterval
 			em.Emit(Event{Event: "idle", Kind: cfg.Kind, Wait: wait.String(), Slot: intPtr(slot)})
 			clk.Sleep(ctx, wait)
+			continue
+		case Backoff:
+			if p.backoffOrHalt(ctx, slot, clk, b, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit)) {
+				return
+			}
 			continue
 		default: // Halt
 			p.halt("outcome: "+outcome, revision)
