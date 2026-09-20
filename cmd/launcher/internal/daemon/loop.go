@@ -47,14 +47,22 @@ type ChildResult struct {
 	Issues []string
 }
 
-// Config is the loop's tuning: which Dispatch kind to drive, how long to
-// wait on an empty queue, how many slots (concurrent single-Box children)
-// the pool runs, and the failure-backoff/breaker knobs below. Per-kind
-// backoff, the Awake window and the instance lock are later tickets.
+// Config is the loop's tuning: which Dispatch kind to drive, how many
+// slots (concurrent single-Box children) the pool runs, and the
+// idle-backoff/failure-backoff/breaker knobs below. Per-kind backoff, the
+// Awake window and the instance lock are later tickets.
 type Config struct {
-	Kind         Kind
-	IdleInterval time.Duration
-	Slots        int
+	Kind  Kind
+	Slots int
+
+	// IdleFloor and IdleCap bound the pool-wide idle backoff: the first
+	// no-work check (exit 2 always, exit 3 when the pool is otherwise
+	// idle) waits IdleFloor, and each further consecutive no-work check
+	// doubles the wait, capped at IdleCap. Any check that actually
+	// dispatches or refreshes an image resets the wait back to IdleFloor.
+	// IdleFloor must be positive; IdleCap must be >= IdleFloor.
+	IdleFloor time.Duration
+	IdleCap   time.Duration
 
 	// FailureBackoff is how long a slot sleeps before refilling itself
 	// after an unclassified failure (an unrecognised exit code, a
@@ -97,6 +105,12 @@ type Config struct {
 func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) string {
 	if cfg.Slots <= 0 {
 		return invalidConfig(em, cfg.Kind, fmt.Sprintf("slots must be a positive integer, got %d", cfg.Slots))
+	}
+	if cfg.IdleFloor <= 0 {
+		return invalidConfig(em, cfg.Kind, fmt.Sprintf("idle floor must be positive, got %s", cfg.IdleFloor))
+	}
+	if cfg.IdleCap < cfg.IdleFloor {
+		return invalidConfig(em, cfg.Kind, fmt.Sprintf("idle cap must be >= idle floor, got cap %s < floor %s", cfg.IdleCap, cfg.IdleFloor))
 	}
 	if cfg.FailureBackoff < 0 {
 		return invalidConfig(em, cfg.Kind, fmt.Sprintf("failure backoff must be non-negative, got %s", cfg.FailureBackoff))
@@ -197,9 +211,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, p
 
 		switch action {
 		case Continue:
+			// Exit 0 (dispatched) or exit 4 (image-stale): the check
+			// answered something other than "nothing to do", so whatever
+			// streak of no-work checks the idle backoff was tracking is
+			// over.
+			p.idle.reset()
 			continue
 		case Wait:
-			wait := cfg.IdleInterval
+			wait := p.idle.next()
 			// "none-dispatchable" carries a second axis exit 2 doesn't: pool
 			// occupancy. With a sibling genuinely running, the issues this
 			// slot found "none dispatchable" were claimed or overlap-deferred

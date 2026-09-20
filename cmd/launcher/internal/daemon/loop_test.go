@@ -112,7 +112,14 @@ func eventNames(events []Event) []string {
 	return names
 }
 
-const testIdleInterval = time.Millisecond
+// testIdleCap is intentionally far above testIdleFloor: it lets tests that
+// only ever hit one no-work check still see the undoubled floor, while
+// tests that chain several consecutive no-work checks (and want to see
+// growth) are free to assert on the doubling explicitly.
+const (
+	testIdleFloor = time.Millisecond
+	testIdleCap   = time.Hour
+)
 
 // testFailureBackoff/testBreakerThreshold/testBreakerWindow are the
 // breaker knobs most tests don't care about but Loop now requires to be
@@ -127,11 +134,12 @@ const (
 )
 
 // testConfig builds the Config every test below shares apart from the slot
-// count: Kind, IdleInterval, and the three breaker knobs above.
+// count: Kind, IdleFloor/IdleCap, and the three breaker knobs above.
 func testConfig(slots int) Config {
 	return Config{
 		Kind:             KindDispatch,
-		IdleInterval:     testIdleInterval,
+		IdleFloor:        testIdleFloor,
+		IdleCap:          testIdleCap,
 		FailureBackoff:   testFailureBackoff,
 		BreakerThreshold: testBreakerThreshold,
 		BreakerWindow:    testBreakerWindow,
@@ -169,8 +177,8 @@ func TestLoopWaitThenHalt(t *testing.T) {
 	if len(r.runCalls) != 3 {
 		t.Fatalf("run calls = %d, want 3", len(r.runCalls))
 	}
-	if len(clk.waits) != 1 || clk.waits[0] != testIdleInterval {
-		t.Fatalf("waits = %v, want exactly one wait of %v", clk.waits, testIdleInterval)
+	if len(clk.waits) != 1 || clk.waits[0] != testIdleFloor {
+		t.Fatalf("waits = %v, want exactly one wait of %v", clk.waits, testIdleFloor)
 	}
 	if !strings.Contains(reason, "config-invalid") {
 		t.Errorf("halt reason = %q, want it to name config-invalid", reason)
@@ -190,8 +198,8 @@ func TestLoopExit3SingleSlotIsAJam(t *testing.T) {
 
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(clk.waits) != 1 || clk.waits[0] != testIdleInterval {
-		t.Fatalf("waits = %v, want exactly one wait of %v for exit 3", clk.waits, testIdleInterval)
+	if len(clk.waits) != 1 || clk.waits[0] != testIdleFloor {
+		t.Fatalf("waits = %v, want exactly one wait of %v for exit 3", clk.waits, testIdleFloor)
 	}
 
 	events := decodeEvents(t, &buf)
@@ -653,6 +661,86 @@ func TestLoopRejectsInvalidBreakerConfig(t *testing.T) {
 
 			if len(r.runCalls) != 0 {
 				t.Fatalf("run calls = %d, want 0: an invalid breaker config must halt before any child runs", len(r.runCalls))
+			}
+			if !strings.Contains(reason, "config-invalid") {
+				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
+			}
+		})
+	}
+}
+
+// TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork pins the pool-wide
+// growth this slice adds: consecutive no-work checks (exit 2) each double
+// the wait from the last one, bounded by IdleCap, rather than repeating the
+// same fixed interval forever.
+func TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork(t *testing.T) {
+	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{
+		{Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 5},
+	}}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.IdleFloor = time.Millisecond
+	cfg.IdleCap = 4 * time.Millisecond
+
+	Loop(context.Background(), cfg, r, em, clk)
+
+	want := []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond, 4 * time.Millisecond, 4 * time.Millisecond}
+	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v", clk.waits, want)
+	}
+}
+
+// TestLoopIdleBackoffResetsOnDispatch pins the reset rule this slice adds:
+// a check that actually dispatches (exit 0) is evidence the queue was not
+// really idle, so the very next no-work check must wait the floor again,
+// not the grown value the streak was on before the dispatch.
+func TestLoopIdleBackoffResetsOnDispatch(t *testing.T) {
+	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{
+		{Exit: 2}, {Exit: 2}, {Exit: 0}, {Exit: 2}, {Exit: 5},
+	}}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	want := []time.Duration{testIdleFloor, 2 * testIdleFloor, testIdleFloor}
+	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v (dispatch between the two no-work streaks resets to the floor)", clk.waits, want)
+	}
+}
+
+// TestLoopRejectsInvalidIdleConfig mirrors TestLoopRejectsInvalidBreakerConfig
+// for the idle-backoff knobs this slice adds: a non-positive floor or a cap
+// below the floor is a config error Loop rejects up front.
+func TestLoopRejectsInvalidIdleConfig(t *testing.T) {
+	invalid := func(mutate func(*Config)) Config {
+		cfg := testConfig(1)
+		mutate(&cfg)
+		return cfg
+	}
+	cases := []struct {
+		name string
+		cfg  Config
+	}{
+		{"zero floor", invalid(func(c *Config) { c.IdleFloor = 0 })},
+		{"negative floor", invalid(func(c *Config) { c.IdleFloor = -time.Millisecond })},
+		{"cap below floor", invalid(func(c *Config) { c.IdleCap = c.IdleFloor - time.Nanosecond })},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
+			clk := &fakeClock{}
+			var buf bytes.Buffer
+			em := newTestEmitter(&buf)
+
+			reason := Loop(context.Background(), tc.cfg, r, em, clk)
+
+			if len(r.runCalls) != 0 {
+				t.Fatalf("run calls = %d, want 0: an invalid idle config must halt before any child runs", len(r.runCalls))
 			}
 			if !strings.Contains(reason, "config-invalid") {
 				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
