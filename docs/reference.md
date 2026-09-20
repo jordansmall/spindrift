@@ -17,7 +17,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift dispatch my-slug`     | same, for a local-tracker slug ID — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal) |
 | `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
 | `spindrift dispatch --yes`       | skip the confirmation prompt when dispatching unlabeled issues (alias `--force`)|
-| `spindrift dispatch --continuous`| run dispatch as a continuous slot-refill loop; bare-flag alias for the `--continuous-dispatch` bool |
+| `spindrift dispatch --continuous`| **deprecated**, superseded by [Daemon](#daemon) (issue #3547) — run dispatch as a continuous slot-refill loop; bare-flag alias for the `--continuous-dispatch` bool |
 | `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](#research-dispatch) |
 | `spindrift research 42 57`       | research exactly these issues, same selective semantics as `dispatch <nums>`    |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
@@ -1316,7 +1316,7 @@ the authoritative list.
 | var                    | default | `settings` section | meaning                                                |
 | ---------------------- | ------- | ------------------ | ------------------------------------------------------ |
 | `MAX_JOBS`             | `0`     | `concurrency`      | caps the wave size (`0` = uncapped) |
-| `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the freshness probe before every launch; exits with a new documented code when the probe finds the loaded image or the loaded host launcher stale (see the [exit-code table](#dogfood-loop)) |
+| `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | **deprecated**, superseded by [Daemon](#daemon) (issue #3547) — opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the freshness probe before every launch; exits with a new documented code when the probe finds the loaded image or the loaded host launcher stale (see the [exit-code table](#dogfood-loop)) |
 | `DAEMON_APP`           | `.#`    | — (post-freeze; no legacy alias — set `dispatch.daemonApp`) | flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision — the Consumer's own CLI app, e.g. `.#` or `.#dogfood-bwrap`; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
 | `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host — see [Daemon](#daemon) |
 | `DAEMON_SELF_APP`      | `.#daemon` | — (post-freeze; no legacy alias — set `dispatch.daemonSelfApp`) | flake app attribute of the daemon itself, evaluated at each fetched tip to notice its own build changed and halt — distinct from `DAEMON_APP`, the child Dispatch app; a Consumer that re-exports the daemon under another top-level attribute (e.g. spindrift's own `.#dogfood-bwrap-daemon`) must set this to match, or the check would evaluate a different harness's daemon and report a permanent, spurious change; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
@@ -4380,6 +4380,18 @@ straight onto the already-loaded image so long as it's still fresh, and
 actually gone stale (build is a no-op unless the merged diff changed the
 image hash).
 
+**Deprecated.** Continuous dispatch is superseded by the daemon
+(`apps.daemon`, `nix run .#daemon` — see [Daemon](#daemon)), which holds the
+pool a different way: one single-Box launcher invocation per slot, each
+pinned to its own fetched revision, rather than one long-lived launcher
+process doing all the pool-holding itself. Freshness therefore stops being
+something one process must orchestrate across its whole pool lifetime —
+the very job the image-freshness probe, the hot-swap, and the stale-drain
+exit documented further down this section exist to do. It is **not
+removed**: the knob still works, it stays available for operators who want
+no daemon at all, and it remains the Console's engine unchanged (see
+[docs/console.md](console.md)). See issue #3547.
+
 **Parallel by default.** `MAX_JOBS` defaults to `MAX_PARALLEL` (default 3),
 so the slot pool holds that many Boxes at once. Set `MAX_JOBS` explicitly to
 run a larger or unbounded pool.
@@ -4514,13 +4526,14 @@ outlives the abort abandons at its next checkpoint rather than driving the
 issue to a terminal state behind it. `SIGKILL` remains uncatchable and abrupt
 — the last resort no code path can intercept.
 
-Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode in a
-driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
-`continuousDispatch` entry for the full behavior. On the command line
-`--continuous-dispatch` is a boolean flag: bare `--continuous-dispatch` — or
-its `--continuous` alias — turns the loop on, and `--continuous-dispatch=0`
-turns it off; both `spindrift dispatch` and `spindrift research` accept
-either form.
+`CONTINUOUS_DISPATCH` is deprecated — a new driving loop should reach for
+the daemon instead (see [Daemon](#daemon)). Set `CONTINUOUS_DISPATCH=1` to
+opt into the slot-refill dispatch mode in a driving loop other than
+`dogfood.sh`; see `lib/env-schema.nix`'s `continuousDispatch` entry for the
+full behavior. On the command line `--continuous-dispatch` is a boolean
+flag: bare `--continuous-dispatch` — or its `--continuous` alias — turns
+the loop on, and `--continuous-dispatch=0` turns it off; both `spindrift
+dispatch` and `spindrift research` accept either form.
 
 **Subagent roster.** The dogfood Consumer config's subagent models and
 efforts, and its orchestrator review effort, are all set via `roster` in
@@ -4654,7 +4667,10 @@ operator no longer has to choose between advancing the queue and enriching
 the backlog for later — a daemon left running just does both. Unlike a
 single `spindrift dispatch`/`research` invocation or `dogfood.sh`'s bounded
 batch, the daemon keeps working the queue after it drains, so work labelled
-later is picked up without a restart.
+later is picked up without a restart. It supersedes continuous dispatch as
+the way to hold a pool of Boxes, which is deprecated in its favour but not
+removed (issue #3547) — see **Deprecated** under
+[Dogfood loop](#dogfood-loop).
 
 The daemon is a separate binary (`cmd/launcher/daemon`), built from the same
 source tree and vendor hash as the launcher, and it's the only component
@@ -5297,9 +5313,15 @@ child is pinned to exactly one Box (`--max-jobs 1 --max-parallel 1`, see
 the daemon, not any one child, is what now decides how many Boxes run at
 once.
 
-Continuous dispatch (`CONTINUOUS_DISPATCH`, above) and `dogfood.sh` are
-unchanged by this ticket — the daemon is a new, separate driving loop, not a
-replacement for either.
+Continuous dispatch (`CONTINUOUS_DISPATCH`, above) is deprecated in the
+daemon's favour — the daemon is its replacement as the way to hold a pool
+of Boxes — but not removed: the knob still works for an operator who wants
+no daemon at all, and it remains the Console's engine unchanged, see
+**Deprecated** under [Dogfood loop](#dogfood-loop). `dogfood.sh` is itself
+a continuous-dispatch driver — it defaults `CONTINUOUS_DISPATCH` on (see
+[Dogfood loop](#dogfood-loop)) — and what this ticket leaves unchanged
+about it is exactly that: it keeps driving the deprecated engine, and
+porting it to the daemon is not part of this change.
 
 ## Shell completion
 

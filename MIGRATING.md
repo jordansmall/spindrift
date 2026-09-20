@@ -1,5 +1,29 @@
 # Migration Guide
 
+## Continuous dispatch is deprecated in favour of the daemon (issue #3547)
+
+`CONTINUOUS_DISPATCH`, the `--continuous-dispatch` flag (and its
+`--continuous` alias), and the `dispatch.continuous.enable` flake option are
+all deprecated. They still work today, nothing breaks, and none of them has
+a removal date.
+
+The daemon (`apps.daemon`, `nix run .#daemon`) replaces continuous dispatch
+as the recommended way to run an unattended pool. Continuous dispatch holds
+the pool inside one long-lived launcher process that re-discovers the queue
+and refills a freed slot itself; the daemon holds the same pool as one
+single-Box launcher invocation per slot, each pinned to its own fetched
+revision, so freshness is no longer something a single process has to
+orchestrate for its whole pool lifetime. See docs/reference.md's Daemon
+section for the full mechanism.
+
+If you drive spindrift with a headless loop, switch it to `nix run
+.#daemon`. `dogfood.sh` is spindrift's own in-repo loop; it still drives
+continuous dispatch and keeps working unchanged. If you have no such
+loop — you dispatch by hand, or use the Console — you are not required
+to do anything: the knob stays available for operators who want no
+daemon at all, and the Console keeps using the continuous engine as its
+own dispatch mechanism, unaffected by this deprecation.
+
 ## `spindrift doctor` now exits 2 on an undersized podman machine (issue #3544)
 
 The `podman-machine-memory` row has been Required tier since #3537, but it
