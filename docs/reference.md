@@ -4786,6 +4786,63 @@ deleting it would only reopen a race with a concurrent acquirer. A refused
 acquire is recorded in the event stream as well as on stderr: a `halt`
 event whose `reason` is prefixed `instance-lock:`, and the daemon exits 1.
 
+**Image realize lock.** `EnsureReady` (`cmd/launcher/internal/runner/oci.go`)
+takes its own lock around the realize/load/re-tag it does whenever the
+configured image is absent (issue #3632): without it, concurrent Dispatch
+children sharing a host — a daemon's own pool very much included — each
+independently realize, load and re-tag the same absent image at once,
+turning one build into as many concurrent builds as `MAX_PARALLEL`
+allows. The lock sits outside any checkout, at
+`<os.TempDir()>/spindrift-image-<sha256(image)[:16]>.lock`
+(`imageLockPath`, `cmd/launcher/internal/runner/imagelock.go`) — hashed
+because an image reference carries `/` and `:`, neither safe in a
+filename, and keyed on the image reference itself rather than on the
+checkout or the daemon's own instance lock, so two Consumers realizing two
+different images never contend, while two checkouts dispatching the same
+image tag — two separate daemons, or a daemon's pool alongside a hand-run
+`spindrift dispatch` — do. "One host" there is really "one
+`os.TempDir()`": `$TMPDIR` is per-user on macOS and `nix develop`
+relocates it, so two users on a host, or one user in and out of a dev
+shell, land on two different lock files and never contend. Unlike the
+daemon's own **Instance lock** above, or the accumulation lock under
+[Local code forge](#local-code-forge-code_forgelocal), which both fail
+fast rather than wait, this lock blocks with no timeout: a losing child
+must wait out however long the winner's build happens to take, because
+bailing with an error would only trade a slow success for an avoidable
+failure — the losing child needs the exact same image the winner is
+already producing.
+
+`EnsureReady` probes for the image outside the lock first, and only once
+it's found absent does it acquire the lock and re-probe once more inside
+it, in case the winner finished while this child was waiting to acquire.
+That means the warm path — every dispatch after the one that first
+realized the image — returns before ever calling `acquireImageLock`, so a
+lone `MAX_PARALLEL=1` daemon slot or a hand-run `spindrift dispatch` pays
+no lock syscall at all there. Its cold path does pay: the re-probe's own
+`image inspect`, plus the open and `flock`, on top of the build it was
+always going to run. That re-probe cannot be skipped just because this
+child never waited — the winner can release between this child's outside
+probe and its own uncontended acquire, and a child that skipped the
+re-probe would then rebuild an image that is already present. As with the
+accumulation lock's own edge case, a `SIGKILL`ed holder strands nobody:
+the lock lives on the holder's open file descriptor, and the kernel drops
+the underlying `flock` the instant those descriptors close, so the next
+child to probe reacquires it immediately with no manual cleanup. A lock
+the launcher cannot acquire, or cannot release, warns on stderr and lets
+the realize proceed unlocked rather than failing it outright
+(`lockImage`) — without the lock a child only duplicates the work every
+child duplicated before this issue, which beats refusing to build. The
+same lock guards `spindrift build`'s realize too, since `build` calls
+this identical `EnsureReady` rather than a separate code path. Neither
+bwrap adapter needs an image lock: `bwrapAdapter`'s `EnsureReady`
+realizes nothing at all, delegating to `IsReady`, and the one that does
+realize, `bwrapBuildAdapter`'s, runs `nix build` over store closures —
+never a runtime image load or re-tag. That realize takes no lock of its
+own either; the `lockSnapshotShared` it does take covers only the nix-var
+snapshot write that follows it (`snapshotStoreDB`, and only when a
+`nixConfigFileDrv` is configured), not the closure build. There is no
+image tag here for concurrent children to race over.
+
 **Startup preflight.** After the instance lock and the signal wiring, before
 any slot, claim, or Box, the daemon runs the pinned child's `doctor`
 subcommand exactly once (`startupPreflight`, `cmd/launcher/daemon/main.go`)
