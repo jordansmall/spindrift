@@ -17,7 +17,28 @@ import (
 // in flight, so Loop emits them before it halts.
 type Runner interface {
 	ResolveRevision(ctx context.Context) (string, error)
-	RunChild(ctx context.Context, kind Kind, revision string) (ChildResult, error)
+	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
+}
+
+// ChildRequest is one child invocation's parameters. Slot is the daemon
+// pool slot the child occupies (0-based); today the loop only ever runs
+// slot 0, but the production Runner is already keyed by it so it can track
+// several concurrent children for signal forwarding, and so the event
+// stream can say which slot was filled and refilled once a later slice
+// grows the pool past one.
+type ChildRequest struct {
+	Slot     int
+	Kind     Kind
+	Revision string
+}
+
+// Clock is the loop's time seam: Now for timestamping and reasoning about
+// elapsed time, Sleep for the idle wait. One interface rather than a bare
+// sleep func so a later breaker slice can read Now() off the same seam a
+// test already fakes.
+type Clock interface {
+	Now() time.Time
+	Sleep(ctx context.Context, d time.Duration)
 }
 
 // ChildResult is what one child invocation reports back. Issues holds the
@@ -47,7 +68,7 @@ type Config struct {
 // work" is enforced only between iterations and before RunChild: at the top
 // of the loop, after ResolveRevision returns, and after Interpret decides
 // to Wait.
-func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, sleep func(ctx context.Context, d time.Duration)) string {
+func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) string {
 	for {
 		if err := ctx.Err(); err != nil {
 			reason := "context-cancelled: " + err.Error()
@@ -72,9 +93,9 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, sleep func(ctx
 			return reason
 		}
 
-		em.Emit(Event{Event: "child_start", Kind: cfg.Kind, Revision: revision})
+		em.Emit(Event{Event: "child_start", Kind: cfg.Kind, Revision: revision, Slot: intPtr(0)})
 
-		result, err := r.RunChild(ctx, cfg.Kind, revision)
+		result, err := r.RunChild(ctx, ChildRequest{Slot: 0, Kind: cfg.Kind, Revision: revision})
 		if err != nil {
 			// The seam failed, not the child (e.g. it could not even be
 			// started), so there is no exit code to report — but a
@@ -85,29 +106,29 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, sleep func(ctx
 			// announced boxes), so emit those first: an announced Box must
 			// reach the durable stream even when the seam itself failed.
 			for _, issue := range result.Issues {
-				em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision})
+				em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(0)})
 			}
 			reason := fmt.Sprintf("run-child: %v", err)
-			em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Outcome: "error"})
+			em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Outcome: "error", Slot: intPtr(0)})
 			em.Emit(Event{Event: "halt", Kind: cfg.Kind, Revision: revision, Reason: reason})
 			return reason
 		}
 
 		for _, issue := range result.Issues {
-			em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision})
+			em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(0)})
 		}
 
 		exit := result.Exit
 		outcome, action := Interpret(exit)
-		em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Exit: &exit, Outcome: outcome})
+		em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(0)})
 
 		switch action {
 		case Continue:
 			continue
 		case Wait:
 			wait := cfg.IdleInterval
-			em.Emit(Event{Event: "idle", Kind: cfg.Kind, Wait: wait.String()})
-			sleep(ctx, wait)
+			em.Emit(Event{Event: "idle", Kind: cfg.Kind, Wait: wait.String(), Slot: intPtr(0)})
+			clk.Sleep(ctx, wait)
 			continue
 		default: // Halt
 			reason := "outcome: " + outcome
@@ -115,4 +136,11 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, sleep func(ctx
 			return reason
 		}
 	}
+}
+
+// intPtr returns a pointer to v. Event.Slot (like Event.Exit) is a pointer
+// so slot/exit 0 — a real value — survives the field's omitempty tag
+// instead of being elided as the zero value.
+func intPtr(v int) *int {
+	return &v
 }

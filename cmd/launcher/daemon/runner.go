@@ -24,12 +24,12 @@ type hostRunner struct {
 	appAttr    string
 	baseBranch string
 
-	mu    sync.Mutex
-	child *os.Process // the currently running child, for signal forwarding; nil when idle
+	mu       sync.Mutex
+	children map[int]*os.Process // slot -> currently running child, for signal forwarding; empty when idle
 }
 
 func newHostRunner(repoPath, appAttr, baseBranch string) *hostRunner {
-	return &hostRunner{repoPath: repoPath, appAttr: appAttr, baseBranch: baseBranch}
+	return &hostRunner{repoPath: repoPath, appAttr: appAttr, baseBranch: baseBranch, children: make(map[int]*os.Process)}
 }
 
 // ResolveRevision shells out to git fetch + rev-parse via CommandContext, not
@@ -60,12 +60,12 @@ func (r *hostRunner) ResolveRevision(ctx context.Context) (string, error) {
 // what the child actually is.
 var runnerExecCommand = exec.Command
 
-func (r *hostRunner) RunChild(ctx context.Context, kind daemon.Kind, revision string) (daemon.ChildResult, error) {
+func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
 	argv, err := daemon.ChildCommand(daemon.ChildSpec{
 		RepoPath: r.repoPath,
 		AppAttr:  r.appAttr,
-		Revision: revision,
-		Kind:     kind,
+		Revision: req.Revision,
+		Kind:     req.Kind,
 	})
 	if err != nil {
 		return daemon.ChildResult{}, err
@@ -96,11 +96,11 @@ func (r *hostRunner) RunChild(ctx context.Context, kind daemon.Kind, revision st
 	}
 
 	r.mu.Lock()
-	r.child = cmd.Process
+	r.children[req.Slot] = cmd.Process
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
-		r.child = nil
+		delete(r.children, req.Slot)
 		r.mu.Unlock()
 	}()
 
@@ -150,15 +150,18 @@ func (r *hostRunner) RunChild(ctx context.Context, kind daemon.Kind, revision st
 	return daemon.ChildResult{Issues: issues}, fmt.Errorf("daemon: wait child: %w", waitErr)
 }
 
-// forwardStop sends SIGTERM to the currently running child, if any, so it
-// drains its in-flight Boxes rather than being abandoned — the same gesture
-// as dogfood.sh's request_stop and cmd/launcher/main.go's notifyStopSignal.
-// It never kills the child; a no-op when none is running.
+// forwardStop sends SIGTERM to every currently running child, if any, so
+// each drains its in-flight Boxes rather than being abandoned — the same
+// gesture as dogfood.sh's request_stop and cmd/launcher/main.go's
+// notifyStopSignal. It never kills a child; a no-op when none is running.
 func (r *hostRunner) forwardStop() {
 	r.mu.Lock()
-	child := r.child
+	children := make([]*os.Process, 0, len(r.children))
+	for _, child := range r.children {
+		children = append(children, child)
+	}
 	r.mu.Unlock()
-	if child != nil {
+	for _, child := range children {
 		_ = child.Signal(syscall.SIGTERM)
 	}
 }

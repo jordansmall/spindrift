@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -49,8 +50,8 @@ func (f *fakeRunner) ResolveRevision(ctx context.Context) (string, error) {
 	return f.revisions[idx], nil
 }
 
-func (f *fakeRunner) RunChild(ctx context.Context, kind Kind, revision string) (ChildResult, error) {
-	f.runCalls = append(f.runCalls, runCall{Kind: kind, Revision: revision})
+func (f *fakeRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	f.runCalls = append(f.runCalls, runCall{Kind: req.Kind, Revision: req.Revision})
 	call := len(f.runCalls)
 	if f.runErrAt != 0 && call == f.runErrAt {
 		return ChildResult{Issues: f.runErrIssues}, f.runErr
@@ -62,14 +63,27 @@ func (f *fakeRunner) RunChild(ctx context.Context, kind Kind, revision string) (
 	return f.results[idx], nil
 }
 
-// recordingSleep never actually sleeps; it records the durations it was
-// asked to wait so tests run instantly and can assert on wait behaviour.
-type recordingSleep struct {
+// fakeClock is the test Clock: Sleep never actually sleeps, just records the
+// durations it was asked to wait so tests run instantly and can assert on
+// wait behaviour, and advances a virtual now by each one. Guarded by a
+// mutex: a later slice runs several slots concurrently against one clock.
+type fakeClock struct {
+	mu    sync.Mutex
+	now   time.Time
 	waits []time.Duration
 }
 
-func (r *recordingSleep) sleep(ctx context.Context, d time.Duration) {
-	r.waits = append(r.waits, d)
+func (c *fakeClock) Sleep(ctx context.Context, d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.waits = append(c.waits, d)
+	c.now = c.now.Add(d)
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
 }
 
 func newTestEmitter(buf *bytes.Buffer) *Emitter {
@@ -102,11 +116,11 @@ const testIdleInterval = time.Millisecond
 
 func TestLoopContinueThenHalt(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if len(r.runCalls) != 2 {
 		t.Fatalf("run calls = %d, want 2", len(r.runCalls))
@@ -121,11 +135,11 @@ func TestLoopContinueThenHalt(t *testing.T) {
 
 func TestLoopWaitThenHalt(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 2}, {Exit: 0}, {Exit: 6}}}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if len(r.runCalls) != 3 {
 		t.Fatalf("run calls = %d, want 3", len(r.runCalls))
@@ -140,11 +154,11 @@ func TestLoopWaitThenHalt(t *testing.T) {
 
 func TestLoopExit3WaitsLikeExit2(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 3}, {Exit: 5}}}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if len(rs.waits) != 1 {
 		t.Fatalf("waits = %v, want exactly one wait for exit 3", rs.waits)
@@ -153,11 +167,11 @@ func TestLoopExit3WaitsLikeExit2(t *testing.T) {
 
 func TestLoopExit4ContinuesWithoutSleeping(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 4}, {Exit: 5}}}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if len(rs.waits) != 0 {
 		t.Fatalf("waits = %v, want none for exit 4 (image-stale continues at once)", rs.waits)
@@ -169,11 +183,11 @@ func TestLoopExit4ContinuesWithoutSleeping(t *testing.T) {
 
 func TestLoopExit7Halts(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 7}}}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Errorf("halt reason = %q, want it to name signalled-stop", reason)
@@ -183,11 +197,11 @@ func TestLoopExit7Halts(t *testing.T) {
 func TestLoopUnknownExitHalts(t *testing.T) {
 	for _, exit := range []int{1, 99} {
 		r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: exit}}}
-		rs := &recordingSleep{}
+		rs := &fakeClock{}
 		var buf bytes.Buffer
 		em := newTestEmitter(&buf)
 
-		reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+		reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 		if !strings.Contains(reason, "error") {
 			t.Errorf("exit %d: halt reason = %q, want it to name the error outcome", exit, reason)
@@ -198,11 +212,11 @@ func TestLoopUnknownExitHalts(t *testing.T) {
 func TestLoopResolveErrorHaltsBeforeAnyChildRuns(t *testing.T) {
 	wantErr := errors.New("boom: no such revision")
 	r := &fakeRunner{resolveAt: 1, resolveErr: wantErr}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if len(r.runCalls) != 0 {
 		t.Fatalf("run calls = %d, want 0: a resolve failure must halt before any child runs", len(r.runCalls))
@@ -220,11 +234,11 @@ func TestLoopResolveErrorHaltsBeforeAnyChildRuns(t *testing.T) {
 func TestLoopRunChildErrorHaltsAndEmitsChildFinish(t *testing.T) {
 	wantErr := errors.New("exec: nix not found")
 	r := &fakeRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if !strings.Contains(reason, wantErr.Error()) {
 		t.Errorf("halt reason = %q, want it to name %v", reason, wantErr)
@@ -251,11 +265,11 @@ func TestLoopRunChildErrorHaltsAndEmitsChildFinish(t *testing.T) {
 func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 	wantErr := errors.New("wait: signal: killed")
 	r := &fakeRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, runErrIssues: []string{"42"}}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	events := decodeEvents(t, &buf)
 	names := eventNames(events)
@@ -276,11 +290,11 @@ func TestLoopEventStreamSequenceAndFields(t *testing.T) {
 			{Exit: 5},
 		},
 	}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	events := decodeEvents(t, &buf)
 	wantNames := []string{"child_start", "box", "box", "child_finish", "child_start", "child_finish", "halt"}
@@ -316,11 +330,11 @@ func TestLoopKeepsGoingAfterQueueDrainsThenPicksUpWork(t *testing.T) {
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 2}, {Exit: 2}, {Exit: 0}, {Exit: 5}},
 	}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if len(r.runCalls) != 4 {
 		t.Fatalf("run calls = %d, want 4: the loop must keep going after the queue drains and pick work back up without a restart", len(r.runCalls))
@@ -338,11 +352,11 @@ func TestLoopPinsEachChildToTheResolvedRevisionEvenWhenItChanges(t *testing.T) {
 		revisions: []string{"rev1", "rev2", "rev3"},
 		results:   []ChildResult{{Exit: 0}, {Exit: 0}, {Exit: 5}},
 	}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	want := []runCall{
 		{Kind: KindDispatch, Revision: "rev1"},
@@ -359,11 +373,11 @@ func TestLoopCancelledContextHaltsBeforeStartingNewWork(t *testing.T) {
 	cancel()
 
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if len(r.runCalls) != 0 {
 		t.Fatalf("run calls = %d, want 0: an already-cancelled ctx must halt before starting any child", len(r.runCalls))
@@ -381,11 +395,11 @@ func TestLoopCancelledDuringResolveRevisionHaltsBeforeStartingNewWork(t *testing
 	// that nothing will ever signal.
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &cancellingResolveRunner{cancel: cancel, revision: "rev1", result: ChildResult{Exit: 0}}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if r.runCalls != 0 {
 		t.Fatalf("run calls = %d, want 0: a ctx cancelled during resolve must halt before starting any child", r.runCalls)
@@ -408,11 +422,11 @@ func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
 	// re-checks ctx and halts, never killing the child itself.
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &cancellingRunner{cancel: cancel, revision: "rev1", result: ChildResult{Exit: 0}}
-	rs := &recordingSleep{}
+	rs := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs.sleep)
+	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
 
 	if r.runCalls != 1 {
 		t.Fatalf("run calls = %d, want 1", r.runCalls)
@@ -439,7 +453,7 @@ func (r *cancellingRunner) ResolveRevision(ctx context.Context) (string, error) 
 	return r.revision, nil
 }
 
-func (r *cancellingRunner) RunChild(ctx context.Context, kind Kind, revision string) (ChildResult, error) {
+func (r *cancellingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
 	r.runCalls++
 	r.cancel()
 	return r.result, nil
@@ -457,7 +471,7 @@ func (r *cancellingResolveRunner) ResolveRevision(ctx context.Context) (string, 
 	return r.revision, nil
 }
 
-func (r *cancellingResolveRunner) RunChild(ctx context.Context, kind Kind, revision string) (ChildResult, error) {
+func (r *cancellingResolveRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
 	r.runCalls++
 	return r.result, nil
 }
