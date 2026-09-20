@@ -35,7 +35,7 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
 		{Number: "2", Title: "unblocked issue"},
-	}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
+	}, edges, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "overlapping issue"},
 		{Number: "2", Title: "clean issue"},
-	}, map[string][]string{}, nil, nil, OriginDiscovered, claimer); err != nil {
+	}, map[string][]string{}, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "dependent"},
 			{Number: "2", Title: "unblocked"},
-		}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
+		}, edges, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -171,7 +171,7 @@ func TestDrainMaxJobs_PriorityOrderDoesNotBypassBlocker(t *testing.T) {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "2", Title: "dependent", Priority: forge.PriorityCritical},
 			{Number: "1", Title: "blocker", Priority: forge.PriorityLow},
-		}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
+		}, edges, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -210,7 +210,7 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
 		{Number: "3", Title: "third"},
-	}, map[string][]string{}, nil, nil, OriginDiscovered, claimer); err != nil {
+	}, map[string][]string{}, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -245,7 +245,7 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked(t *testing.T
 			{Number: "1", Title: "first"},
 			{Number: "2", Title: "second"},
 			{Number: "3", Title: "third"},
-		}, map[string][]string{}, nil, nil, OriginDiscovered, claimer); err != nil {
+		}, map[string][]string{}, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -281,7 +281,7 @@ func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
 		{Number: "3", Title: "third"},
-	}, map[string][]string{}, nil, nil, OriginDiscovered, claimer); err != nil {
+	}, map[string][]string{}, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -317,7 +317,7 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "unblocked"},
 			{Number: "2", Title: "dependent"},
-		}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
+		}, edges, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -353,7 +353,7 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
-	}, edges, nil, nil, OriginDiscovered, claimer)
+	}, edges, nil, nil, OriginDiscovered, claimer, nil)
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Errorf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", err)
@@ -389,7 +389,7 @@ func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *te
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "12", Title: "blocker"},
 			{Number: "15", Title: "dependent"},
-		}, edges, nil, nil, OriginSelective, claimer); err != nil {
+		}, edges, nil, nil, OriginSelective, claimer, nil); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -447,7 +447,7 @@ func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		runErr = drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "10", Title: "candidate"},
-		}, map[string][]string{}, nil, nil, OriginSelective, claimer)
+		}, map[string][]string{}, nil, nil, OriginSelective, claimer, nil)
 	})
 
 	if !errors.Is(runErr, ErrOpenNoneDispatchable) {
@@ -487,7 +487,7 @@ func TestDrainMaxJobs_BlockedLineNamesBlockers(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "blocked issue"},
-		}, edges, nil, nil, OriginDiscovered, claimer)
+		}, edges, nil, nil, OriginDiscovered, claimer, nil)
 		if !errors.Is(err, ErrOpenNoneDispatchable) {
 			t.Fatalf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", err)
 		}
@@ -527,7 +527,7 @@ func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	for round := 1; round <= 2; round++ {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "dependent"},
-		}, edges, nil, nil, OriginDiscovered, claimer); err != ErrOpenNoneDispatchable {
+		}, edges, nil, nil, OriginDiscovered, claimer, nil); err != ErrOpenNoneDispatchable {
 			t.Fatalf("round %d: drainMaxJobs: got %v, want ErrOpenNoneDispatchable", round, err)
 		}
 	}
@@ -547,7 +547,7 @@ func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}, State: "CLOSED"})
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "dependent"},
-	}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
+	}, edges, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 		t.Fatalf("round 3: drainMaxJobs: %v", err)
 	}
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
@@ -580,7 +580,7 @@ func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, sources, nil, OriginClaimed, claimer); err != nil {
+	}, edges, sources, nil, OriginClaimed, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -618,7 +618,7 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	// ErrOpenNoneDispatchable and not a cascade-fail.
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, nil, nil, OriginClaimed, claimer); err != nil {
+	}, edges, nil, nil, OriginClaimed, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -661,7 +661,7 @@ func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "deps-of-failed issue"},
 			{Number: "2", Title: "clean issue"},
-		}, map[string][]string{}, nil, failed, OriginDiscovered, claimer); err != nil {
+		}, map[string][]string{}, nil, failed, OriginDiscovered, claimer, nil); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -705,7 +705,7 @@ func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker(t *testing.T) {
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, map[string][]string{}, nil, failed, OriginClaimed, claimer); err != nil {
+	}, map[string][]string{}, nil, failed, OriginClaimed, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
