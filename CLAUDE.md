@@ -58,8 +58,11 @@ one label from each family at once:
 - `agent-research-recommend` — relevant and enriched with context for a
   worker — promote it to `ready-for-agent`.
 - `agent-research-reject` — false positive, not worth doing, or a duplicate
-  (named in the comment) — close it. This is a *successful* conclusion
-  (`Complete`), never `agent-research-failed`.
+  (named in the comment). Applying it **closes the issue as not planned**,
+  automatically: `agent-research-close.yml` fires on the label and does the
+  close, so the verdict and the issue state never drift, and the Filer's
+  closed-`agent-research-reject` suppression actually holds. This is a
+  *successful* conclusion (`Complete`), never `agent-research-failed`.
 - `agent-research-unclear` — relevance needs an answer only a human has —
   answer the researcher's questions in the comment, then re-apply
   `agent-research`.
