@@ -2150,21 +2150,25 @@ outside the repo, deliberately never a file in the working tree, and a
 deliberate departure from issue #3157's original "in the workspace" wording
 (a workspace file would need a gitignore entry and still risk a stray
 `git add -A`, defeating the requirement that the brief never reach the
-branch, diff, or PR) — so it survives coordinator context compaction. The
+branch, diff, or PR) — so it survives session context compaction. The
 `scout` writes that file itself before returning (`scout-prompt.md`); the
-coordinator only reads it back from disk before delegating, and never writes
-or appends to it (`fragments/scout-delegate.md`). When a `worker` is
-provisioned too, the coordinator quotes the brief's Map entries, Invariants &
-gotchas, and Suggested-approach step for that slice into the delegation
-verbatim — scoped to the slice, never the whole brief
-(`fragments/coordinator-scout-brief.md`) — and the worker's own prompt
-directs it to work from that quoted excerpt first, opening the full brief
-at `/tmp/brief.md` only when the excerpt is missing, wrong, or silent
-(`fragments/worker-scout-brief.md`), so a delegated worker starts from the
-scout's map instead of re-deriving it. The verbatim excerpt is deliberate
-insurance: a few KB in a worker's small starting context is far cheaper
-than exploration turns late in a long worker run, each of which replays the
-worker's whole accumulated context.
+session that dispatched it only reads the file back from disk before it
+starts work, and never writes or appends to it
+(`fragments/scout-delegate.md`). That fragment is deliberately
+delegation-free: it renders on `SCOUT_PROVISIONED` alone, so its wording
+has to stay true on a scout-present, worker-absent roster, where nothing
+is ever delegated (issue #3163). When a `worker` is provisioned too,
+the coordinator quotes the brief's Map entries, Invariants & gotchas, and
+Suggested-approach step for that slice into the delegation verbatim — scoped
+to the slice, never the whole brief (`fragments/coordinator-scout-brief.md`,
+gated on `COORDINATOR_SCOUT_BRIEF`, worker && scout && the default dispatch
+kind) — and the worker's own prompt directs it to work from that quoted
+excerpt first, opening the full brief at `/tmp/brief.md` only when the
+excerpt is missing, wrong, or silent (`fragments/worker-scout-brief.md`), so
+a delegated worker starts from the scout's map instead of re-deriving it.
+The verbatim excerpt is deliberate insurance: a few KB in a worker's small
+starting context is far cheaper than exploration turns late in a long
+worker run, each of which replays the worker's whole accumulated context.
 
 Issue #3216 pushes that same excerpt format one step upstream, into the
 brief itself: every load-bearing Map claim — a seam, signature, invariant,
