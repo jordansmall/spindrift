@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -292,19 +293,99 @@ func (a *ociAdapter) buildInContainer() error {
 	return a.loadImage(filepath.Join(tmpDir, "image.tar"))
 }
 
-// IsRunning reports whether name is in the "running" state. Absent, exited, or
-// a failed inspect all report false, and in each of those the caller may safely
-// proceed with rm -f.
-func (a *ociAdapter) IsRunning(name string) bool {
-	out, err := exec.Command(a.cli, "inspect", "--format={{.State.Status}}", name).Output()
+// container is one inspectContainer observation: ID, status and creation
+// time together, so a caller can classify and act from a single observation
+// (see inspectContainer).
+type container struct {
+	id      string
+	status  string
+	created time.Time
+}
+
+// midCreationGrace bounds how long a non-terminal, non-running container (most
+// commonly "created", the window between `podman run`'s create and start) is
+// treated as a sibling launcher's in-flight container rather than abandoned.
+// create→start is sub-second under normal load; two minutes is far past any
+// real one, so anything older was left behind by a launcher that died
+// mid-create, not one that is merely slow (issue #3633).
+const midCreationGrace = 2 * time.Minute
+
+// reapable reports whether c is safe to rm -f as of now. Terminal states are
+// always safe regardless of age. "running" is never safe. Everything else —
+// "created" and any other transient or unrecognised status — is safe only
+// once it has outlived midCreationGrace: within the window it may belong to a
+// sibling launcher about to start it, so failing safe means treating it as
+// live, not reapable.
+func (c container) reapable(now time.Time) bool {
+	switch c.status {
+	case "exited", "stopped", "dead":
+		return true
+	case "running":
+		return false
+	default:
+		// A zero created — an unparseable timestamp, see inspectContainer —
+		// reads as arbitrarily old and so reaps, restoring the pre-#3633
+		// behaviour of clearing a container this launcher cannot classify
+		// rather than wedging the issue permanently undispatchable.
+		return now.Sub(c.created) > midCreationGrace
+	}
+}
+
+// inspectContainer runs a single inspect and decodes it into a container, so
+// a caller that both classifies and acts on one (Run, Reap, Kill) does it
+// from one observation instead of two: acting on the ID this call returns,
+// rather than re-resolving the name later, is what keeps a removal from
+// landing on a container a sibling launcher created in between (issue #3633).
+// ok means the container exists — true whenever the inspect command itself
+// succeeded, even if the body will not decode, since a successful inspect
+// proves existence and reporting absent would send Run straight into the name
+// collision this issue is about. Podman and docker both emit Created as an
+// RFC3339Nano string under `--format={{json .}}`, which the space-separated
+// template this replaced could not carry (podman renders a Go time.Time
+// there, docker a string).
+func (a *ociAdapter) inspectContainer(name string) (container, bool) {
+	out, err := exec.Command(a.cli, "inspect", "--format={{json .}}", name).Output()
 	if err != nil {
+		return container{}, false
+	}
+	var raw struct {
+		ID      string
+		Created string
+		State   struct {
+			Status string
+		}
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		fmt.Fprintf(os.Stderr, "==> WARNING: container %s: inspect output did not decode as JSON: %v\n", name, err)
+		return container{}, true
+	}
+	c := container{id: raw.ID, status: raw.State.Status}
+	if t, err := time.Parse(time.RFC3339Nano, raw.Created); err == nil {
+		c.created = t
+	} else {
+		fmt.Fprintf(os.Stderr, "==> WARNING: container %s: unparseable Created timestamp %q: %v\n", name, raw.Created, err)
+	}
+	return c, true
+}
+
+// IsRunning reports whether a container named name exists, is not terminal,
+// and — if not yet "running" — is still young enough that a sibling launcher
+// could be mid-`podman run` with it (within midCreationGrace, issue #3633),
+// so it may be owned by another launcher invocation. Absent or a failed
+// inspect reports false.
+func (a *ociAdapter) IsRunning(name string) bool {
+	c, ok := a.inspectContainer(name)
+	if !ok {
 		return false
 	}
-	return strings.TrimSpace(string(out)) == "running"
+	return !c.reapable(time.Now())
 }
 
 // ListRunning returns the names of every running container under this runtime,
-// for Console startup orphan detection (issue #651).
+// for Console startup orphan detection (issue #651). Deliberately narrower
+// than IsRunning's not-terminal-and-not-too-young check: a display of
+// probably-orphaned sandboxes is only useful naming containers actually
+// running, not one still mid-creation and possibly about to start cleanly.
 func (a *ociAdapter) ListRunning() ([]string, error) {
 	out, err := exec.Command(a.cli, "ps", "--filter", "status=running", "--format", "{{.Names}}").Output()
 	if err != nil {
@@ -734,30 +815,96 @@ func ociRunEnv(boxEnv map[string]string) []string {
 // Run launches a single issue into a podman/docker container.
 func (a *ociAdapter) Run(box Box) error {
 	reapOrphanedRebaseDirs(os.TempDir())
-	// Never touch a running container: a concurrent launcher invocation may
-	// own it, and a force-remove would destroy that run's work silently. A
-	// running container would also collide on the name, so report
-	// ErrAlreadyRunning instead of launching (issue #562).
-	if a.IsRunning(box.Name) {
-		return ErrAlreadyRunning
+	// Never touch a live container: a concurrent launcher invocation may own
+	// one that is not terminal and still within midCreationGrace, and a
+	// force-remove would destroy that run's work silently. A live container
+	// would also collide on the name, so report ErrAlreadyRunning instead of
+	// launching (issue #562, widened for mid-creation siblings by issue
+	// #3633). The removal below targets the ID inspectContainer observed
+	// (see its doc comment), not the name.
+	c, ok := a.inspectContainer(box.Name)
+	if ok {
+		if !c.reapable(time.Now()) {
+			return ErrAlreadyRunning
+		}
+		_ = a.remove(c)
 	}
-	reap := exec.Command(a.cli, "rm", "-f", box.Name)
-	_ = reap.Run()
 
 	out := box.Output
 	if out == nil {
 		out = io.Discard
 	}
 
+	// A lost create race: our inspect above missed the container (daemon
+	// blip, or a sibling launcher's create not yet visible to us), but the
+	// runtime still refuses to create it because the name is taken. That
+	// refusal is itself the concurrency signal — issue #3633 — so retain a
+	// bounded head of the run output to check for it, without ever removing
+	// by name (that would race a sibling's in-flight create).
+	head := &headTee{w: out, limit: collisionHeadLimit}
 	cmd := exec.Command(a.cli, a.buildRunArgs(box)...)
 	cmd.Env = ociRunEnv(box.Env)
-	cmd.Stdout = out
-	cmd.Stderr = out
+	cmd.Stdout = head
+	cmd.Stderr = head
 	err := cmd.Run()
+	// Collision text alone is not proof: the Box's own transcript flows
+	// through this same tee and may echo an untrusted issue comment quoting
+	// the refusal. Only a fresh inspect finding the name still held by a live
+	// container proves the runtime refused the create — a Box that did start
+	// and then failed leaves its own container exited or gone, so it reaps
+	// through to RunError whatever it printed (issue #3633).
+	if err != nil && looksLikeNameCollision(head.String(), box.Name) {
+		if c, ok := a.inspectContainer(box.Name); ok && !c.reapable(time.Now()) {
+			return ErrAlreadyRunning
+		}
+	}
 	if reapAfterSuccess(err) {
 		_ = a.Reap(box.Name)
 	}
 	return asRunError(err)
+}
+
+// collisionHeadLimit bounds headTee's retained prefix: enough to hold the
+// runtime's pre-launch name-collision refusal line, small enough that
+// retaining it costs nothing.
+const collisionHeadLimit = 4096
+
+// headTee forwards every write to w unchanged while retaining up to limit
+// bytes of what passed through, for post-hoc inspection (e.g. matching the
+// runtime's name-collision refusal, which it prints before any Box output).
+type headTee struct {
+	w     io.Writer
+	limit int
+	head  bytes.Buffer
+}
+
+func (h *headTee) Write(p []byte) (int, error) {
+	if room := h.limit - h.head.Len(); room > 0 {
+		n := room
+		if n > len(p) {
+			n = len(p)
+		}
+		h.head.Write(p[:n])
+	}
+	return h.w.Write(p)
+}
+
+// String returns the retained head. Only the shape mirrors
+// boundedWriter.String(): that one keeps the tail, because a nix failure
+// prints at the end, while this keeps the prefix, because the runtime's
+// refusal prints before anything else.
+func (h *headTee) String() string {
+	return h.head.String()
+}
+
+// looksLikeNameCollision reports whether out could be the runtime refusing to
+// create a container named name because the name is already taken. Podman and
+// docker word this differently, but both include "is already in use" and both
+// print the name itself, so this keys on the pair rather than either
+// runtime's exact prose. This is only a cheap pre-filter over Box-controlled
+// text — Run treats it as a hint to check, never as proof on its own.
+func looksLikeNameCollision(out, name string) bool {
+	return strings.Contains(out, "is already in use") && strings.Contains(out, name)
 }
 
 // reapAfterSuccess reports whether to reap the container after cmd.Run. Any
@@ -766,23 +913,45 @@ func reapAfterSuccess(err error) bool {
 	return err == nil
 }
 
-// Reap removes a named container (best-effort). Never removes a running container.
+// Reap removes a named container (best-effort). Never removes a live
+// container — one another launcher may own, per the same not-terminal-and-
+// not-too-young check as IsRunning (issue #3633) — and removes only the ID
+// inspectContainer observed (see its doc comment).
 func (a *ociAdapter) Reap(name string) error {
-	if !a.IsRunning(name) {
-		reap := exec.Command(a.cli, "rm", "-f", name)
-		_ = reap.Run()
+	c, ok := a.inspectContainer(name)
+	if ok && c.reapable(time.Now()) {
+		_ = a.remove(c)
 	}
 	return nil
 }
 
 // Kill force-stops and removes name once confirmed to exist; `rm -f` stops a
-// running container first, so Kill needs no running/exited distinction the way
-// Reap's IsRunning guard does. A container that no longer exists is not an
-// error, matching the Runner.Kill contract; that is the common settle-phase
-// case, where reapAfterSuccess already removed the Box.
+// running container first, so Kill does not need the running/exited
+// distinction Reap's reapable check draws. Unlike Reap, Kill is
+// unconditional — an operator-driven terminate (ADR 0024, issue #649) removes
+// a live container too — but it still pins the removal to the ID
+// inspectContainer observed, not name, for the same reason Run and Reap do.
+// A container that no longer exists is not an error, matching the
+// Runner.Kill contract; that is the common settle-phase case, where
+// reapAfterSuccess already removed the Box.
 func (a *ociAdapter) Kill(name string) error {
-	if err := exec.Command(a.cli, "inspect", name).Run(); err != nil {
+	c, ok := a.inspectContainer(name)
+	if !ok {
 		return nil
 	}
-	return exec.Command(a.cli, "rm", "-f", name).Run()
+	return a.remove(c)
+}
+
+// remove force-removes an observed container by ID, the single removal path
+// behind Run, Reap and Kill. An observation carrying no ID came from an
+// inspect whose body would not decode (see inspectContainer): there is
+// nothing safe to target, and falling back to the name would race a sibling
+// launcher's in-flight create, so this removes nothing and leaves Run's
+// name-collision path to report ErrAlreadyRunning, which skips the issue
+// rather than failing it (issue #3633).
+func (a *ociAdapter) remove(c container) error {
+	if c.id == "" {
+		return nil
+	}
+	return exec.Command(a.cli, "rm", "-f", c.id).Run()
 }
