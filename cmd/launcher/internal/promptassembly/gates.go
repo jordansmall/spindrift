@@ -52,9 +52,9 @@ func Gates(e Env) map[string]bool {
 	g["REVIEW_LOOP_INLINE"] = reviewLoopInline
 	g["REVIEW_LOOP_ORCHESTRATOR"] = reviewLoopOrchestrator
 
-	// Nix resolves FILER_ENABLED and WORKER_PROVISIONED at eval time (issue
-	// #2533), but SCOUT_PROVISIONED keys off roster membership directly, because
-	// opencode provisions scout outside AgentsJSONTemplate.
+	// FILER_ENABLED and WORKER_PROVISIONED come from agentsJsonTemplate's
+	// rendered output (issue #2533); SCOUT_PROVISIONED keys off roster
+	// membership instead — see lib/mkHarness.nix's scoutProvisioned comment.
 	g["FILER_ENABLED"] = e.FilerEnabled
 	g["WORKER_PROVISIONED"] = e.WorkerProvisioned
 	g["SCOUT_PROVISIONED"] = e.ScoutProvisioned

@@ -460,8 +460,10 @@ func resolveAgentPresenceSignals(driver string) agentPresence {
 
 	// opencode provisions subagents from on-disk agents/*.md rather than
 	// agentsJsonTemplate, so nix bakes both false for that Driver whatever the
-	// configured models say (issue #2533). Scout skips this branch: opencode
-	// does bake it, from finalRoster via agentFilesTemplate.
+	// configured models say (issue #2533). Scout skips this branch because
+	// opencode does provision it too, so a non-empty SCOUT_MODEL decides
+	// scout's fallback under every Driver — see lib/mkHarness.nix's
+	// scoutProvisioned comment.
 	if driver == "opencode" {
 		filerEnabled, workerProvisioned = false, false
 	} else {
