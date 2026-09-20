@@ -136,8 +136,10 @@ type Settle struct {
 	readOnly bool
 	// Every CI-watch, fix-pass, and merge-gate checkpoint checks term, so a
 	// Terminate that lands mid-settle (ADR 0024, issue #649) abandons the settle
-	// instead of corrupting issue state Terminate already reclaimed. Nil means
-	// never terminated, and terminate.Registry is nil-safe.
+	// instead of corrupting issue state Terminate already reclaimed.
+	// New builds it and nothing ever writes it again, so the settle goroutines
+	// reading it concurrently need no lock and no later caller can displace it
+	// mid-run (issue #3522).
 	term *terminate.Registry
 	// cfForNum defaults to returning cf when Config.CodeForgeForIssue is nil
 	// (issue #1734).
@@ -146,11 +148,21 @@ type Settle struct {
 	clock dispatch.Clock
 }
 
-// SetTerminated wires reg as this Settle's termination registry, called once by
-// the Console's launcher wiring (issue #649).
-func (s *Settle) SetTerminated(reg *terminate.Registry) {
-	s.term = reg
+// Registrar is the "settler that owns a termination registry" seam: a caller
+// holding a Settler or WorkSettler asks for the registry it must mark through
+// without asserting a concrete type. Settler and WorkSettler stay narrower on
+// purpose, since settle.Fake and ResearchSettle own no registry.
+type Registrar interface {
+	Registry() *terminate.Registry
 }
+
+// Registry returns this Settle's own termination registry. Every caller that
+// marks a termination -- the Console's Terminate, the shutdown gate's abort --
+// and every settle checkpoint that reads one must reach this registry and no
+// other: a mark written into a registry the settler does not read lets an
+// already-reclaimed issue settle on to agent-complete anyway, merging its PR
+// out from under the reclaim (issues #649, #743, #3522).
+func (s *Settle) Registry() *terminate.Registry { return s.term }
 
 // terminated reports whether num was marked terminated at generation gen
 // specifically (issue #743), not whether some other generation of num was.
@@ -164,6 +176,7 @@ func (s *Settle) Fail(num string, gen uint64, result dispatch.Result) {}
 
 var _ Settler = (*Settle)(nil)
 var _ WorkSettler = (*Settle)(nil)
+var _ Registrar = (*Settle)(nil)
 
 // New constructs a Settle, reading pr and landing from cfg.Capabilities rather
 // than re-deriving them here (issue #2945).
@@ -179,5 +192,5 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if clock.Sleep == nil {
 		clock = dispatch.RealClock()
 	}
-	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock}
+	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
 }

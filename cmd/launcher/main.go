@@ -33,6 +33,7 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/shutdown"
 	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/waves"
 )
@@ -1301,12 +1302,55 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 	}
 }
 
+// registryFor returns s's own termination registry, or a fresh one when s owns
+// none (settle.Fake, ResearchSettle). Getting one rather than installing one is
+// the point: RunContinuous, both waves.Dispatch call sites, and recoverByNumber
+// each reach the same registry as their settler, so a Console recover gesture
+// cannot replace the session's registry and strand the operator's later marks
+// where no settle goroutine looks (#3522). An abort (second signal) and a
+// settle goroutine already polling CI therefore agree on an issue's fate:
+// observeAbort's Reclaim marks it here and the settler checks that same mark at
+// its next checkpoint, abandoning rather than driving the reclaimed issue to a
+// terminal state out from under the abort (#3521).
+func registryFor(s any) *terminate.Registry {
+	if r, ok := s.(settle.Registrar); ok {
+		return r.Registry()
+	}
+	return terminate.NewRegistry()
+}
+
 // recoverByNumber resolves the open PR for issueNum, draft or not, and drives
 // it through the adopt-and-gate path: the sole way an agent-in-progress issue
 // is adopted, gated on the operator's explicit agent-recover label rather than
 // any automatic sweep (#600). With no open PR it falls back to adopting a
 // relayed finished branch out of the outbox (issue #2225).
 func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string) error {
+	// Installed once, ahead of it.Issue, exactly as run() places its own
+	// install ahead of discoverIssues (#3522): a signal that fired before this
+	// call must win over recoverFailed below, not just over an adopt already
+	// in flight.
+	stopCh, abortCh, stopCleanup := installStopSignal()
+	defer stopCleanup()
+
+	terminated := registryFor(s)
+	reaper := f.AsReaper()
+	gate := shutdown.NewGate(stopCh, abortCh, it, cf, reaper, terminated)
+	gate.Watch()
+	// Settle is idempotent (gate.go), so deferring it here reaches every one
+	// of this function's early returns, not just the two happy-path arms that
+	// also call it inline before their own final gate.Signalled() check.
+	// Registered right after Watch so this defer runs after d.Close()'s below
+	// (LIFO) -- the watcher must outlive the Dispatch it might still need to
+	// reclaim through.
+	defer gate.Settle()
+
+	// First checkpoint: nothing is adopted yet, so a signal here must not
+	// reach recoverFailed below — a requested stop is not a recover failure
+	// and must never park the issue on agent-failed.
+	if !gate.Allowed(issueNum) {
+		return waves.ErrSignalledStop
+	}
+
 	fi, err := it.Issue(issueNum)
 	if err != nil {
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, err))
@@ -1333,7 +1377,17 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 			return fmt.Errorf("mkdir logs: %w", err)
 		}
-		d := f.New(iss.number, iss.title)
+		// New arms this issue's kill latch, so it must run under Gate's own
+		// lock and before the in-flight registration, or a concurrent abort
+		// could snapshot the in-flight set without it (#3522).
+		var d *dispatch.Dispatch
+		if !gate.Launch(iss.number, func() { d = f.New(iss.number, iss.title) }) {
+			// A signal arrived between Allowed and here. Recover never calls
+			// gate.Hold -- the agent-recover workflow holds this issue's claim
+			// and its PR may still be open -- so Launch's decline releases
+			// nothing, leaving the issue in-progress for a later recover.
+			return waves.ErrSignalledStop
+		}
 		defer d.Close()
 		// Same reason as the SettleAdopted arm below: this Dispatch never calls
 		// Run, so it needs the lineage guarantee stated explicitly (#2575).
@@ -1342,7 +1396,21 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		}
 		result := dispatch.Result{Resolved: resolved}
 		sit := s.SituationFor(iss.number, res.Found, result)
-		if s.SettleRelayedBranch(d, iss.number, 0, sit, result) {
+		settled := s.SettleRelayedBranch(d, iss.number, 0, sit, result)
+		// Leave must run before Settle's final abort re-check, or a signal
+		// landing the instant after settling finishes would still find this
+		// issue in-flight and reclaim it right back to Dispatchable (#3522).
+		gate.Leave(iss.number)
+		gate.Settle()
+		// Second checkpoint: a mid-flight abort reclaims the in-flight issue
+		// off in-progress on its own (the watcher), and the settle above
+		// abandoned at its next checkpoint through the shared registry's
+		// mark — this wins over the settle's own verdict, recoverFailed
+		// included, exactly as run()'s signalledOr does for a wave (#3522).
+		if gate.Signalled() {
+			return waves.ErrSignalledStop
+		}
+		if settled {
 			return nil
 		}
 		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
@@ -1351,7 +1419,10 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return fmt.Errorf("mkdir logs: %w", err)
 	}
-	d := f.New(iss.number, iss.title)
+	var d *dispatch.Dispatch
+	if !gate.Launch(iss.number, func() { d = f.New(iss.number, iss.title) }) {
+		return waves.ErrSignalledStop
+	}
 	defer d.Close()
 	// This Dispatch adopts an already-open PR and never calls Run, so it does
 	// not get Run's quarantine-prior-run-logs guarantee for free.
@@ -1361,6 +1432,13 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		fmt.Fprintf(os.Stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 	}
 	s.SettleAdopted(d, iss.number, 0, res.URL)
+	// Same reordering as the SettleRelayedBranch arm above, and for the same
+	// reason (#3522): Leave before Settle, not after.
+	gate.Leave(iss.number)
+	gate.Settle()
+	if gate.Signalled() {
+		return waves.ErrSignalledStop
+	}
 	return nil
 }
 
@@ -1415,12 +1493,25 @@ func run(lc *launchContext) error {
 		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{}, runner.NixRealizer{}, lp)
 	}
 
+	// Installed once, ahead of discoverIssues, mirroring
+	// runContinuousDispatch's own placement (#3522): a signal arriving before
+	// any issue is even discovered must still win over errQueueEmpty and
+	// ErrOpenNoneDispatchable below, not just over a wave already in flight.
+	stopCh, abortCh, stopCleanup := installStopSignal()
+	defer stopCleanup()
+
 	issues, origin, err := discoverIssues(c, it)
 	if err != nil {
-		return err
+		return signalledOr(stopCh, abortCh, err)
 	}
 
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
+		// A signal that already fired wins here too: the operator asked to
+		// stop, so a reconcile sweep is more work, not teardown (mirrors the
+		// completion path below).
+		if waves.SignalledStopAlready(stopCh, abortCh) {
+			return waves.ErrSignalledStop
+		}
 		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
 		if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout); err != nil {
 			return err
@@ -1430,18 +1521,37 @@ func run(lc *launchContext) error {
 
 	readiness, err := waves.NewReadiness(it, toWaveIssues(issues))
 	if err != nil {
-		return err
+		return signalledOr(stopCh, abortCh, err)
 	}
 	in := waves.NewInput(origin, readiness, toWaveIssues(issues))
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
+	cfg.Stop = stopCh
+	cfg.Abort = abortCh
 	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
-	if err := waves.Dispatch(cfg, it, cf, pwd, f, s, in, claimer); err != nil {
+	terminated := registryFor(s)
+	if err := waves.Dispatch(cfg, &waves.Session{Terminated: terminated}, it, cf, pwd, f, s, in, claimer); err != nil {
 		return err
 	}
 
 	fmt.Print(dispatchCompletionBanner(c))
 	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout)
+}
+
+// signalledOr returns waves.ErrSignalledStop when a stop or abort has already
+// fired, and err unchanged otherwise. run and selectiveListDispatch apply it at
+// every early return that precedes waves.Dispatch -- an empty queue, a
+// discovery error, or a NewReadiness error never reaches waves.Dispatch at all,
+// so without the check a signal that fired first would flatten into
+// errQueueEmpty or another pre-Dispatch error instead of winning as
+// ErrSignalledStop (#3522). Returns that follow waves.Dispatch need no such
+// check: the engine applies the same override to its own return, covering every
+// path through it including a bare nil.
+func signalledOr(stop, abort <-chan struct{}, err error) error {
+	if waves.SignalledStopAlready(stop, abort) {
+		return waves.ErrSignalledStop
+	}
+	return err
 }
 
 // continuousDispatchErr picks runContinuousDispatch's terminal error: a
@@ -1628,16 +1738,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return waves.CountReady(cfg, it, cf, batch, claimed), nil
 	}
 	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.label, c.inProgressLabel), pending, pwd)
-	// terminated is shared between RunContinuous and the settler so an abort
-	// (second signal) and a settle goroutine already polling CI agree on an
-	// issue's fate: observeAbort's Reclaim marks it here, and the settler
-	// checks the same mark at its next checkpoint and abandons rather than
-	// driving the reclaimed issue to a terminal state out from under the
-	// abort (#3521).
-	terminated := terminate.NewRegistry()
-	if st, ok := s.(*settle.Settle); ok {
-		st.SetTerminated(terminated)
-	}
+	terminated := registryFor(s)
 	if err := waves.RunContinuous(cfg, &waves.Session{Terminated: terminated}, it, cf, f, s, queue, fresh); err != nil {
 		// No reachable path leaves both err and firstQueryErr non-nil: #2780
 		// proved a genuine first-discover error cannot reach a later staleness
@@ -1757,18 +1858,26 @@ func writeGithubOutput(key, value string) error {
 }
 
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open PR
-// with no outcome line and drive it through the merge gate. Tests pass a spy
-// cleanup to exercise the cleanup-on-every-exit contract.
+// with no outcome line and drive it through the merge gate, honouring the
+// two-stage operator-shutdown latch the same as every other Box-launching
+// path (#3522) — a signalled stop maps to exitSignalledStop ahead of the
+// blanket failure return below, writing neither the recover-reason output nor
+// a stderr line, since a requested stop is not a recover failure. Tests pass
+// a spy cleanup to exercise the cleanup-on-every-exit contract.
 func cmdRecover(lc *launchContext, issueNum string) int {
 	defer lc.cleanup()
-	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), issueNum); err != nil {
-		if writeErr := writeGithubOutput("recover-reason", err.Error()); writeErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: writing recover-reason output: %v\n", writeErr)
-		}
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
+	err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), issueNum)
+	if err == nil {
+		return 0
 	}
-	return 0
+	if errors.Is(err, waves.ErrSignalledStop) {
+		return exitSignalledStop
+	}
+	if writeErr := writeGithubOutput("recover-reason", err.Error()); writeErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: writing recover-reason output: %v\n", writeErr)
+	}
+	fmt.Fprintf(os.Stderr, "%s\n", err)
+	return 1
 }
 
 // cmdPreview is the `preview` subcommand: report what dispatch would do
@@ -1782,13 +1891,19 @@ func cmdPreview(issueNums []string) int {
 }
 
 // selectiveDispatchExitCode translates selectiveListDispatch's result into an
-// exit code: 3 when open issues exist but none are dispatchable (a selective
-// wave can defer every listed issue, just as a queue drain can), 1 for any
-// other error, 0 on success. Split out so it is testable without bootstrap.
+// exit code: 7 for an operator stop request (SIGTERM), ahead of every other
+// verdict below (issue #3522, mirrors exitCodeFor/runExitCode -- not printed
+// to stderr, since a requested stop is not a failure), 3 when open issues
+// exist but none are dispatchable (a selective wave can defer every listed
+// issue, just as a queue drain can), 1 for any other error, 0 on success.
+// Split out so it is testable without bootstrap.
 func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool) int {
 	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout)
 	if err == nil {
 		return 0
+	}
+	if errors.Is(err, waves.ErrSignalledStop) {
+		return exitSignalledStop
 	}
 	if errors.Is(err, waves.ErrOpenNoneDispatchable) {
 		return 3
@@ -1810,7 +1925,9 @@ func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool) int {
 // host-tainted stale image that no rebuild can fix, so the driving loop must
 // stop rather than loop on exit 4 forever (issue #2113), 7 for an operator
 // stop request (SIGTERM) that drained outstanding work and wants no rebuild
-// (issue #3520), 1 otherwise.
+// (issue #3520) -- reachable from both run's one-shot dispatch and
+// runContinuousDispatch, not a CONTINUOUS_DISPATCH-only verdict (#3522) --
+// 1 otherwise.
 func exitCodeFor(err error) int {
 	switch {
 	case err == nil:

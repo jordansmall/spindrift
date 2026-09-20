@@ -374,7 +374,8 @@ func TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp(t *testing.T) {
 
 // TestLauncher_Terminate_MarksRegistry pins the mark in the shared
 // termination registry, which is how an in-flight settle loop (via
-// Settle.SetTerminated) notices the terminate on its next checkpoint.
+// the settle.Registrar seam, reading the same registry) notices the terminate
+// on its next checkpoint.
 func TestLauncher_Terminate_MarksRegistry(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
 	gen := launch.registry().Begin("42")
@@ -400,5 +401,31 @@ func TestLauncher_terminating_LazilyConstructsMap(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("terminating() = %v, want empty map", got)
+	}
+}
+
+// TestLauncher_registry_UsesSettlersOwnRegistry pins that the Console's handle
+// and its settler's are one registry. main.go's recover path acquires the
+// settler's registry independently of the session; when that acquisition
+// installed a registry instead of reading one, a later operator Terminate
+// marked a registry no in-flight settle goroutine ever checked, and the settle
+// drove the reclaimed issue to agent-complete out from under it (#3522).
+func TestLauncher_registry_UsesSettlersOwnRegistry(t *testing.T) {
+	launch, _, _, _ := newTermTestLauncher(t)
+	st, ok := launch.Settle.(*settle.Settle)
+	if !ok {
+		t.Fatalf("Settle = %T, want *settle.Settle", launch.Settle)
+	}
+
+	gen := launch.registry().Begin("42")
+	launch.registry().Mark("42")
+	if !st.Registry().Marked("42", gen) {
+		t.Error("settler registry: want #42 marked through the Console's handle")
+	}
+
+	gen43 := st.Registry().Begin("43")
+	st.Registry().Mark("43")
+	if !launch.registry().Marked("43", gen43) {
+		t.Error("Console registry: want #43 marked through the settler's handle")
 	}
 }

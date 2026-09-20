@@ -59,8 +59,7 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
-	reg := terminate.NewRegistry()
-	s.SetTerminated(reg)
+	reg := s.Registry()
 	reg.Mark("1")
 
 	got, _ := s.gateToGreen("1", 0, testPR, false)
@@ -81,10 +80,9 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight(t *testing
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetNeedsUpdate(testPR, true)
-	reg := terminate.NewRegistry()
-	tf := terminatingForge{Fake: fc, reg: reg, num: "1"}
+	tf := &terminatingForge{Fake: fc, num: "1"}
 	s := newTestSettle(c, tf, tf)
-	s.SetTerminated(reg)
+	tf.reg = s.Registry()
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -112,8 +110,7 @@ func TestMergeImmediate_TerminatedStopsRebaseRetry(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	s := newTestSettle(c, fc, fc)
-	reg := terminate.NewRegistry()
-	s.SetTerminated(reg)
+	reg := s.Registry()
 	reg.Mark("1")
 
 	err := s.mergeImmediate("1", 0, testPR, dispatch.NewFake())
@@ -142,8 +139,7 @@ func TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase(t *testing
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetNeedsUpdate(testPR, true)
 	s := newTestSettle(c, fc, fc)
-	reg := terminate.NewRegistry()
-	s.SetTerminated(reg)
+	reg := s.Registry()
 	reg.Mark("1")
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
@@ -195,11 +191,10 @@ func TestGateToGreen_TerminatedMidPollAbandonsPromptly(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	reg := terminate.NewRegistry()
 	const markAfterCall = 5
-	tf := &terminatingAfterPolls{Fake: fc, reg: reg, num: "1", markAfter: markAfterCall}
+	tf := &terminatingAfterPolls{Fake: fc, num: "1", markAfter: markAfterCall}
 	s := newTestSettle(c, tf, tf)
-	s.SetTerminated(reg)
+	tf.reg = s.Registry()
 
 	got, _ := s.gateToGreen("1", 0, testPR, false)
 
@@ -223,8 +218,6 @@ func TestGateToGreen_NeverTerminatedRunsFullDeadline(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	s := newTestSettle(c, fc, fc)
-	reg := terminate.NewRegistry()
-	s.SetTerminated(reg)
 
 	got, _ := s.gateToGreen("1", 0, testPR, false)
 
@@ -262,10 +255,9 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
-	reg := terminate.NewRegistry()
-	tf := terminatingForge{Fake: fc, reg: reg, num: "1"}
+	tf := &terminatingForge{Fake: fc, num: "1"}
 	s := newTestSettle(c, tf, tf)
-	s.SetTerminated(reg)
+	tf.reg = s.Registry()
 
 	err := s.mergeImmediate("1", 0, testPR, dispatch.NewFake())
 
@@ -306,9 +298,8 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve(t *testing.T)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrMergeConflict
-	reg := terminate.NewRegistry()
 	s := newTestSettle(c, fc, fc)
-	s.SetTerminated(reg)
+	reg := s.Registry()
 	d := terminatingConflictResolver{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
 	err := s.mergeImmediate("1", 0, testPR, d)
@@ -356,8 +347,7 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
 	})
 	s := newTestSettle(c, fc, fc)
-	reg := terminate.NewRegistry()
-	s.SetTerminated(reg)
+	reg := s.Registry()
 	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -382,10 +372,9 @@ func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testi
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
-	reg := terminate.NewRegistry()
-	tf := terminatingForge{Fake: fc, reg: reg, num: "1"}
+	tf := &terminatingForge{Fake: fc, num: "1"}
 	s := newTestSettle(c, tf, tf)
-	s.SetTerminated(reg)
+	tf.reg = s.Registry()
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
@@ -407,10 +396,9 @@ func TestSelfHeal_TerminatedFixPassReaped_ReportsAbandonedNotFailed(t *testing.T
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	fk := dispatch.NewFake()
 	fk.FixResult = dispatch.Result{Success: false}
-	reg := terminate.NewRegistry()
-	d := terminatingDispatcher{Fake: fk, reg: reg, num: "1"}
 	s := newTestSettle(c, fc, fc)
-	s.SetTerminated(reg)
+	reg := s.Registry()
+	d := terminatingDispatcher{Fake: fk, reg: reg, num: "1"}
 
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
 
@@ -431,10 +419,9 @@ func TestSelfHeal_TerminatedDuringFixNoOpConfirmSleep_ReportsAbandoned(t *testin
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	fc.SetHeadCommitSHAs(testPR, []string{"sha-unchanged", "sha-unchanged", "sha-unchanged"})
-	reg := terminate.NewRegistry()
-	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { reg.Mark("1") }}
-	s := newTestSettle(c, fc, fc)
-	s.SetTerminated(reg)
+	var s *Settle
+	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.Registry().Mark("1") }}
+	s = newTestSettle(c, fc, fc)
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
@@ -452,10 +439,9 @@ func TestSelfHeal_TerminatedGateTerminal_ReportsAbandonedNotFailed(t *testing.T)
 	c.MergePollTimeout = 0
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	reg := terminate.NewRegistry()
-	tf := &terminatingAfterPolls{Fake: fc, reg: reg, num: "1", markAfter: 1}
+	tf := &terminatingAfterPolls{Fake: fc, num: "1", markAfter: 1}
 	s := newTestSettle(c, tf, tf)
-	s.SetTerminated(reg)
+	tf.reg = s.Registry()
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
@@ -473,10 +459,9 @@ func TestSelfHeal_TerminatedRedRetryFixExhausted_ReportsAbandonedNotFailed(t *te
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
-	reg := terminate.NewRegistry()
-	tf := &terminatingAfterPolls{Fake: fc, reg: reg, num: "1", markAfter: 1}
+	tf := &terminatingAfterPolls{Fake: fc, num: "1", markAfter: 1}
 	s := newTestSettle(c, tf, tf)
-	s.SetTerminated(reg)
+	tf.reg = s.Registry()
 
 	d := dispatch.NewFake()
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -500,11 +485,10 @@ func TestSelfHeal_TerminatedFixPassSucceeded_SkipsRelay(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
-	reg := terminate.NewRegistry()
-	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 	cf := fc.AsGithubReadOnly()
 	s := newTestSettle(c, fc, cf)
-	s.SetTerminated(reg)
+	reg := s.Registry()
+	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
 
@@ -528,8 +512,7 @@ func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
-	reg := terminate.NewRegistry()
-	s.SetTerminated(reg)
+	reg := s.Registry()
 
 	oldGen := reg.Begin("1")
 	reg.Mark("1")
@@ -556,8 +539,7 @@ func TestSettle_AbandonedSkipsUsageComment(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
-	reg := terminate.NewRegistry()
-	s.SetTerminated(reg)
+	reg := s.Registry()
 	reg.Mark("1")
 
 	d := dispatch.NewFake()
@@ -608,9 +590,8 @@ func TestMergeImmediate_ConflictResolveBoxReaped_ReportsAbandonedNotNeverGreen(t
 	fc.RebaseErr = forge.ErrMergeConflict
 	fk := dispatch.NewFake()
 	fk.ResolveConflictErr = errors.New("exit status 137")
-	reg := terminate.NewRegistry()
 	s := newTestSettle(c, fc, fc)
-	s.SetTerminated(reg)
+	reg := s.Registry()
 	d := terminatingConflictResolver{Fake: fk, reg: reg, num: "1"}
 
 	err := s.mergeImmediate("1", 0, testPR, d)
@@ -639,9 +620,8 @@ func TestSelfHeal_ConflictResolveBoxReaped_ReportsAbandonedNotFailed(t *testing.
 	fc.RebaseErr = forge.ErrMergeConflict
 	fk := dispatch.NewFake()
 	fk.ResolveConflictErr = errors.New("exit status 137")
-	reg := terminate.NewRegistry()
 	s := newTestSettle(c, fc, fc)
-	s.SetTerminated(reg)
+	reg := s.Registry()
 	d := terminatingConflictResolver{Fake: fk, reg: reg, num: "1"}
 
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -664,9 +644,8 @@ func TestMergeImmediate_ConflictResolveBoxReapedDuringStaleBasePreflight_Reports
 	fc.RebaseErr = forge.ErrMergeConflict
 	fk := dispatch.NewFake()
 	fk.ResolveConflictErr = errors.New("exit status 137")
-	reg := terminate.NewRegistry()
 	s := newTestSettle(c, fc, fc)
-	s.SetTerminated(reg)
+	reg := s.Registry()
 	d := terminatingConflictResolver{Fake: fk, reg: reg, num: "1"}
 
 	err := s.mergeImmediate("1", 0, testPR, d)
@@ -699,10 +678,9 @@ func TestSelfHeal_TerminatedDuringSuccessConfirmSleep_ManualMode_ReportsAbandone
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	reg := terminate.NewRegistry()
-	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { reg.Mark("1") }}
-	s := newTestSettle(c, fc, fc)
-	s.SetTerminated(reg)
+	var s *Settle
+	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.Registry().Mark("1") }}
+	s = newTestSettle(c, fc, fc)
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
@@ -739,10 +717,9 @@ func TestSelfHeal_TerminatedDuringMarkReady_ReportsAbandoned(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	reg := terminate.NewRegistry()
-	tf := terminatingMarkReady{Fake: fc, reg: reg, num: "1"}
+	tf := &terminatingMarkReady{Fake: fc, num: "1"}
 	s := newTestSettle(c, tf, tf)
-	s.SetTerminated(reg)
+	tf.reg = s.Registry()
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
@@ -783,15 +760,40 @@ func TestSelfHeal_TerminatedDuringMergeGuardHit_ReportsAbandoned(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
-	reg := terminate.NewRegistry()
-	tf := terminatingListPRFiles{Fake: fc, reg: reg, num: "1"}
+	tf := &terminatingListPRFiles{Fake: fc, num: "1"}
 	s := newTestSettle(c, tf, tf)
-	s.SetTerminated(reg)
+	tf.reg = s.Registry()
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionState must not be called after termination; got %+v", fc.TransitionStateCalls)
+	}
+}
+
+// Registry is the Settle's own and never changes identity, so a mark written
+// through the handle any caller took is the mark the settle checkpoints read
+// (#3522): before this, a second caller could install a registry of its own
+// and strand the first caller's marks where nothing checks them.
+func TestRegistry_StableHandleIsWhatCheckpointsRead(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := newTestSettle(c, fc, fc)
+
+	if s.Registry() != s.Registry() {
+		t.Fatal("Registry: want the same registry on every call")
+	}
+	s.Registry().Mark("1")
+
+	got, _ := s.gateToGreen("1", 0, testPR, false)
+
+	if got.outcome != gateAbandoned {
+		t.Errorf("gateToGreen = %v, want gateAbandoned", got.outcome)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionState must not be called after termination; got %+v", fc.TransitionStateCalls)
@@ -811,9 +813,7 @@ func TestSelfHeal_LandPushOnly_TerminatedSkipsCompleteAndMerge(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	branch := "agent/issue-1"
 	s := newTestSettle(c, fc, fc.AsPushOnly())
-	reg := terminate.NewRegistry()
-	s.SetTerminated(reg)
-	reg.Mark("1")
+	s.Registry().Mark("1")
 
 	got := s.landPushOnly("1", 0, branch)
 
