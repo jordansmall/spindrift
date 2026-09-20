@@ -1888,10 +1888,9 @@ in
       touch $out
     '';
 
-  # Issue #3157 review: scoutProvisioned does NOT follow the opencode=false rule
-  # pinned above. Unlike filer and worker, opencode provisions scout via
-  # agentFilesTemplate (lib/drivers/opencode.nix), so lib/mkHarness.nix keys
-  # scoutProvisioned off finalRoster membership rather than agentsJsonTemplate.
+  # Scout diverges from the opencode=false rule pinned above (#3157 review):
+  # see lib/mkHarness.nix's scoutProvisioned comment for why. FILER_ENABLED
+  # and WORKER_PROVISIONED stay false here.
   mkharness-scout-provisioned-true-for-opencode-driver =
     let
       roster = [
@@ -1957,10 +1956,11 @@ in
       touch $out
     '';
 
-  # Issue #3157: the intersection of the two fixtures above. Keying
-  # scoutProvisioned off finalRoster is what lets it read true for opencode, so
-  # the opt-out direction needs its own pin there. WORKER_PROVISIONED is false
-  # for every opencode roster, so the scout-only assertion reads finalRoster.
+  # The intersection of the two fixtures above, an opted-out scout under the
+  # opencode Driver (#3157). See lib/mkHarness.nix's scoutProvisioned comment
+  # for why membership in finalRoster is what decides. WORKER_PROVISIONED is
+  # false for every opencode roster, so the scout-only assertion reads
+  # direct.internals.roster rather than a sibling gate in the run doc.
   mkharness-scout-provisioned-false-for-opencode-opted-out-scout =
     let
       inherit (pkgs.lib) assertMsg any all;
