@@ -21,9 +21,14 @@ var emitErrW io.Writer = os.Stderr
 // machine-readable record of every child started and finished, and every
 // halt with its reason.
 type Event struct {
-	Time     string `json:"time"`
-	Event    string `json:"event"`
-	Kind     Kind   `json:"kind,omitempty"`
+	Time  string `json:"time"`
+	Event string `json:"event"`
+	Kind  Kind   `json:"kind,omitempty"`
+	// Kinds is tip_moved's own field, naming the kinds whose backoff the
+	// reset actually ended (see pool.go's pollSlices) — plural because a
+	// moved tip is evidence for every jammed kind at once, not just
+	// whichever kind Kind would have named.
+	Kinds    []Kind `json:"kinds,omitempty"`
 	Issue    string `json:"issue,omitempty"`
 	Revision string `json:"revision,omitempty"`
 	Slot     *int   `json:"slot,omitempty"`

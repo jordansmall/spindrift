@@ -39,6 +39,12 @@ const (
 	Backoff
 )
 
+// outcomeNoneDispatchable is exit 3's outcome label: work exists but every
+// issue found was claimed or overlap-deferred, distinct from exit 2's
+// "queue-empty" (no work exists at all) — loop.go uses it to decide whether
+// a Wait is a pool-wide jam or a routine idle.
+const outcomeNoneDispatchable = "none-dispatchable"
+
 // Interpret maps a child's exit code to a stable outcome label for the event
 // stream and the loop's next action. It mirrors cmd/launcher/main.go's
 // exitCodeFor taxonomy (main.go:1774-1798, exitConfigInvalid/exitSignalledStop
@@ -51,7 +57,7 @@ func Interpret(exit int) (outcome string, action Action) {
 	case 2:
 		return "queue-empty", Wait
 	case 3:
-		return "none-dispatchable", Wait
+		return outcomeNoneDispatchable, Wait
 	case 4:
 		// Every child here is born from its own evaluation at a freshly
 		// resolved revision, so a stale image is answered by the next

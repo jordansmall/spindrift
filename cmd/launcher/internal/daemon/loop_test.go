@@ -41,6 +41,7 @@ type fakeRunner struct {
 type runCall struct {
 	Kind     Kind
 	Revision string
+	Slot     int
 }
 
 func (f *fakeRunner) ResolveRevision(ctx context.Context) (string, error) {
@@ -74,7 +75,7 @@ func (f *fakeRunner) SelfPath(ctx context.Context, revision string) (string, err
 }
 
 func (f *fakeRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	f.runCalls = append(f.runCalls, runCall{Kind: req.Kind, Revision: req.Revision})
+	f.runCalls = append(f.runCalls, runCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot})
 	call := len(f.runCalls)
 	if f.runErrAt != 0 && call == f.runErrAt {
 		return ChildResult{Issues: f.runErrIssues}, f.runErr
@@ -160,7 +161,7 @@ const (
 // count: Kind, IdleFloor/IdleCap, and the three breaker knobs above.
 func testConfig(slots int) Config {
 	return Config{
-		Kind:             KindDispatch,
+		Kinds:            []Kind{KindDispatch},
 		IdleFloor:        testIdleFloor,
 		IdleCap:          testIdleCap,
 		FailureBackoff:   testFailureBackoff,
@@ -781,6 +782,45 @@ func TestLoopRejectsInvalidBreakerConfig(t *testing.T) {
 
 			if len(r.runCalls) != 0 {
 				t.Fatalf("run calls = %d, want 0: an invalid breaker config must halt before any child runs", len(r.runCalls))
+			}
+			if !strings.Contains(reason, "config-invalid") {
+				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
+			}
+		})
+	}
+}
+
+// TestLoopRejectsInvalidKindsConfig mirrors TestLoopRejectsInvalidBreakerConfig
+// for the Kinds/ResearchReservation knobs issue #3541 adds: an empty Kinds, an
+// unknown or duplicate kind, or a ResearchReservation outside [0, Slots] is a
+// config error Loop rejects up front.
+func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
+	invalid := func(mutate func(*Config)) Config {
+		cfg := testConfig(2)
+		mutate(&cfg)
+		return cfg
+	}
+	cases := []struct {
+		name string
+		cfg  Config
+	}{
+		{"empty kinds", invalid(func(c *Config) { c.Kinds = nil })},
+		{"unknown kind", invalid(func(c *Config) { c.Kinds = []Kind{Kind("bogus")} })},
+		{"duplicate kind", invalid(func(c *Config) { c.Kinds = []Kind{KindDispatch, KindDispatch} })},
+		{"negative reservation", invalid(func(c *Config) { c.ResearchReservation = -1 })},
+		{"reservation above slots", invalid(func(c *Config) { c.ResearchReservation = 3 })},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
+			clk := &fakeClock{}
+			var buf bytes.Buffer
+			em := newTestEmitter(&buf)
+
+			reason := Loop(context.Background(), tc.cfg, r, em, clk)
+
+			if len(r.runCalls) != 0 {
+				t.Fatalf("run calls = %d, want 0: an invalid kinds config must halt before any child runs", len(r.runCalls))
 			}
 			if !strings.Contains(reason, "config-invalid") {
 				t.Errorf("halt reason = %q, want it to name config-invalid", reason)

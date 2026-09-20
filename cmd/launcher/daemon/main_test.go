@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -244,6 +245,10 @@ func TestMainRun_ValidAwakeWindowReachesRepoRoot(t *testing.T) {
 	}
 	doc := validKnobDocument()
 	doc.Settings["DAEMON_AWAKE_WINDOW"] = "22:00-06:00 Europe/London"
+	// A bare invocation draws from both kinds, which makes
+	// RESEARCH_RESERVATION a required knob: without it startup fails there,
+	// short of the repoRoot check this test reads as its proxy.
+	doc.Settings["RESEARCH_RESERVATION"] = "0"
 	path := writeInputDocument(t, doc)
 
 	dir := t.TempDir()
@@ -302,23 +307,31 @@ func TestParseSlots(t *testing.T) {
 
 func TestParseArgs(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		wantPath string
-		wantKind daemon.Kind
-		wantErr  bool
+		name      string
+		args      []string
+		wantPath  string
+		wantKinds []daemon.Kind
+		wantErr   bool
 	}{
 		{
-			name:     "default kind is dispatch",
-			args:     []string{"--input", "/tmp/in.json"},
-			wantPath: "/tmp/in.json",
-			wantKind: daemon.KindDispatch,
+			// No positional verb draws from both kinds off one pool (issue
+			// #3541) — the headline behaviour change of this slice.
+			name:      "no positional verb defaults to both kinds",
+			args:      []string{"--input", "/tmp/in.json"},
+			wantPath:  "/tmp/in.json",
+			wantKinds: []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
 		},
 		{
-			name:     "explicit research",
-			args:     []string{"--input", "/tmp/in.json", "research"},
-			wantPath: "/tmp/in.json",
-			wantKind: daemon.KindResearch,
+			name:      "explicit dispatch is work-only",
+			args:      []string{"--input", "/tmp/in.json", "dispatch"},
+			wantPath:  "/tmp/in.json",
+			wantKinds: []daemon.Kind{daemon.KindDispatch},
+		},
+		{
+			name:      "explicit research",
+			args:      []string{"--input", "/tmp/in.json", "research"},
+			wantPath:  "/tmp/in.json",
+			wantKinds: []daemon.Kind{daemon.KindResearch},
 		},
 		{
 			name:    "unknown kind rejected",
@@ -348,8 +361,59 @@ func TestParseArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseArgs(%v) unexpected error: %v", tt.args, err)
 			}
-			if got.InputPath != tt.wantPath || got.Kind != tt.wantKind {
-				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kind:%q}", tt.args, got, tt.wantPath, tt.wantKind)
+			if got.InputPath != tt.wantPath || !slices.Equal(got.Kinds, tt.wantKinds) {
+				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kinds:%v}", tt.args, got, tt.wantPath, tt.wantKinds)
+			}
+		})
+	}
+}
+
+// TestParseResearchReservation pins RESEARCH_RESERVATION's parse step:
+// lib/env-schema.nix declares it intKind = "nonneg" and bounds it at
+// MAX_PARALLEL, so anything else — unparsable, negative, or over the slot
+// count — must fail startup with a diagnostic naming both numbers, rather
+// than reach daemon.Loop's own out-of-range halt.
+func TestParseResearchReservation(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		slots      int
+		want       int
+		wantErr    bool
+		wantErrHas []string
+	}{
+		{name: "zero is valid", raw: "0", slots: 3, want: 0},
+		{name: "equal to slots is valid", raw: "3", slots: 3, want: 3},
+		{name: "between zero and slots is valid", raw: "1", slots: 3, want: 1},
+		{name: "non-numeric rejected", raw: "many", slots: 3, wantErr: true},
+		{name: "negative rejected", raw: "-1", slots: 3, wantErr: true},
+		{
+			name:       "greater than slots rejected, names both values",
+			raw:        "5",
+			slots:      3,
+			wantErr:    true,
+			wantErrHas: []string{"5", "3"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseResearchReservation(tt.raw, tt.slots)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseResearchReservation(%q, %d) = %d, nil; want an error", tt.raw, tt.slots, got)
+				}
+				for _, want := range tt.wantErrHas {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("parseResearchReservation(%q, %d) error = %q, want it to contain %q", tt.raw, tt.slots, err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseResearchReservation(%q, %d) unexpected error: %v", tt.raw, tt.slots, err)
+			}
+			if got != tt.want {
+				t.Errorf("parseResearchReservation(%q, %d) = %d, want %d", tt.raw, tt.slots, got, tt.want)
 			}
 		})
 	}
@@ -501,6 +565,89 @@ func TestMainRun_MissingInputDocument(t *testing.T) {
 	}
 }
 
+// writeInputDocT writes an inputDocument with the given settings to a fresh
+// file in t.TempDir() and returns its path.
+func writeInputDocT(t *testing.T, settings map[string]string) string {
+	t.Helper()
+	data, err := json.Marshal(inputDocument{Settings: settings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "in.json")
+	writeFileT(t, path, string(data))
+	return path
+}
+
+// clearKnobEnvT clears the daemon's knob env vars for the duration of the
+// test, so an ambient export in the host/CI environment cannot shadow the
+// input document values these tests set up.
+func clearKnobEnvT(t *testing.T) {
+	t.Helper()
+	for _, v := range []string{"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION"} {
+		t.Setenv(v, "")
+	}
+}
+
+// TestMainRun_WorkOnlyIgnoresExcessiveReservation asserts a `dispatch`
+// invocation is never failed by RESEARCH_RESERVATION, however it is set:
+// the knob is inert for a single-kind daemon, so mainRun must not even
+// resolve or validate it there. The input document's MAX_PARALLEL=1 with
+// RESEARCH_RESERVATION=5 would fail parseResearchReservation outright if it
+// ran; running cwd from a non-git tempdir instead surfaces repoRoot's "not
+// a git checkout" failure, proving startup got past knob resolution.
+func TestMainRun_WorkOnlyIgnoresExcessiveReservation(t *testing.T) {
+	clearKnobEnvT(t)
+	docPath := writeInputDocT(t, map[string]string{
+		"DAEMON_APP":           ".#dogfood",
+		"BASE_BRANCH":          "main",
+		"MAX_PARALLEL":         "1",
+		"RESEARCH_RESERVATION": "5",
+	})
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", docPath, "dispatch"}, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("mainRun() = %d, want 1", got)
+	}
+	if strings.Contains(stderr.String(), "RESEARCH_RESERVATION") {
+		t.Errorf("stderr = %q, RESEARCH_RESERVATION must be inert for a work-only daemon", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "not a git checkout") {
+		t.Errorf("stderr = %q, want the repoRoot failure (proves knob resolution completed)", stderr.String())
+	}
+}
+
+// TestMainRun_BothKindsValidatesReservation is the both-kinds counterpart:
+// with no positional verb the daemon draws from both kinds (parseArgs'
+// default), so the same RESEARCH_RESERVATION=5/MAX_PARALLEL=1 document must
+// now fail startup at the reservation check, before ever reaching
+// repoRoot — this is the seam the brief's "input document's
+// RESEARCH_RESERVATION reaches daemon.Config" requirement is covered at,
+// since mainRun has no seam to observe the daemon.Config value itself.
+func TestMainRun_BothKindsValidatesReservation(t *testing.T) {
+	clearKnobEnvT(t)
+	docPath := writeInputDocT(t, map[string]string{
+		"DAEMON_APP":           ".#dogfood",
+		"BASE_BRANCH":          "main",
+		"MAX_PARALLEL":         "1",
+		"RESEARCH_RESERVATION": "5",
+	})
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", docPath}, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("mainRun() = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), "RESEARCH_RESERVATION") {
+		t.Errorf("stderr = %q, want it to mention RESEARCH_RESERVATION", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "not a git checkout") {
+		t.Errorf("stderr = %q, want startup to fail at the reservation check, before repoRoot", stderr.String())
+	}
+}
+
 // TestRepoRoot_NotAGitCheckout asserts repoRoot fails fast (rather than
 // handing back a subdirectory path that only breaks the first child) when
 // dir is not inside any git checkout.
@@ -607,17 +754,21 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 
 	// Hold the lock ourselves, in-process, standing in for "another daemon
 	// already running against this checkout".
-	lock, err := daemon.AcquireCheckoutLock(gitDirPath, daemon.KindDispatch)
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindDispatch})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: %v", err)
 	}
 	t.Cleanup(func() { _ = lock.Release() })
 
 	inputPath := filepath.Join(t.TempDir(), "input.json")
+	// A bare invocation draws from both kinds, which makes
+	// RESEARCH_RESERVATION a required knob: without it startup fails there,
+	// short of the lock acquire this test exists to exercise.
 	doc := inputDocument{Settings: map[string]string{
-		"DAEMON_APP":   ".#dogfood",
-		"BASE_BRANCH":  "main",
-		"MAX_PARALLEL": "1",
+		"DAEMON_APP":           ".#dogfood",
+		"BASE_BRANCH":          "main",
+		"MAX_PARALLEL":         "1",
+		"RESEARCH_RESERVATION": "0",
 	}}
 	data, err := json.Marshal(doc)
 	if err != nil {

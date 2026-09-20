@@ -34,13 +34,20 @@ type inputDocument struct {
 }
 
 // parsedArgs is the result of parsing argv: `--input <path>` plus an
-// optional positional Dispatch kind (dispatch|research, default dispatch).
+// optional positional kind-set selector (dispatch|research, default both —
+// see parseArgs).
 type parsedArgs struct {
 	InputPath string
-	Kind      daemon.Kind
+	Kinds     []daemon.Kind
 }
 
-// parseArgs parses `daemon --input <path> [dispatch|research]`.
+// parseArgs parses `daemon --input <path> [dispatch|research]`. With no
+// positional verb the daemon draws from both kinds off one pool (issue
+// #3541) — an operator stops having to choose between advancing work and
+// enriching the backlog. `dispatch` alone keeps work-only operation, which
+// is how an operator who has not created the research labels on their
+// target repo runs the daemon; `research` alone restricts it to advise-only
+// research.
 func parseArgs(args []string) (parsedArgs, error) {
 	var inputPath string
 	var havePath bool
@@ -67,11 +74,11 @@ func parseArgs(args []string) (parsedArgs, error) {
 	if len(positional) == 1 {
 		kindArg = positional[0]
 	}
-	kind, err := daemon.ParseKind(kindArg)
+	kinds, err := daemon.ParseKinds(kindArg)
 	if err != nil {
 		return parsedArgs{}, err
 	}
-	return parsedArgs{InputPath: inputPath, Kind: kind}, nil
+	return parsedArgs{InputPath: inputPath, Kinds: kinds}, nil
 }
 
 // loadInputDocument reads and parses the Launcher input document at path.
@@ -130,21 +137,42 @@ func resolveKnobOptional(doc *inputDocument, envVar string, stderr io.Writer) st
 	return v
 }
 
-// parseSlots turns MAX_PARALLEL's resolved string value into the daemon's
-// pool size. lib/env-schema.nix declares MAX_PARALLEL with
-// intKind = "positive", so the document always carries a valid value, but
-// resolveKnob can still hand back an ambient env override of anything — a
-// malformed or non-positive value fails startup here with a clear
-// diagnostic rather than reaching daemon.Loop's own "reject non-positive
-// Slots" halt, which is meant for a genuine programming error, not an
-// operator's mistyped env var.
-func parseSlots(raw string) (int, error) {
+// parseIntKnob parses raw as a base-10 integer no smaller than min, both
+// callers' shared shape: resolveKnob can hand back an ambient env override
+// of anything, so a malformed or out-of-range knob must fail startup here
+// with a clear diagnostic rather than reaching daemon.Loop's own halt, which
+// is meant for a genuine programming error, not an operator's mistyped env
+// var. label names the constraint in the error text (e.g. "positive
+// integer"); it must read correctly next to both "got %q" (unparsable) and
+// "got %d" (out of range).
+func parseIntKnob(name, label, raw string, min int) (int, error) {
 	n, err := strconv.Atoi(raw)
 	if err != nil {
-		return 0, fmt.Errorf("MAX_PARALLEL must be a positive integer, got %q", raw)
+		return 0, fmt.Errorf("%s must be a %s, got %q", name, label, raw)
 	}
-	if n <= 0 {
-		return 0, fmt.Errorf("MAX_PARALLEL must be a positive integer, got %d", n)
+	if n < min {
+		return 0, fmt.Errorf("%s must be a %s, got %d", name, label, n)
+	}
+	return n, nil
+}
+
+// parseSlots turns MAX_PARALLEL's resolved string value into the daemon's
+// pool size. lib/env-schema.nix declares it intKind = "positive".
+func parseSlots(raw string) (int, error) {
+	return parseIntKnob("MAX_PARALLEL", "positive integer", raw, 1)
+}
+
+// parseResearchReservation turns RESEARCH_RESERVATION's resolved string
+// value into the daemon's research slot floor. lib/env-schema.nix declares
+// it intKind = "nonneg" and bounds it at MAX_PARALLEL; the upper bound is
+// this knob's own, since parseIntKnob only ever enforces a lower one.
+func parseResearchReservation(raw string, slots int) (int, error) {
+	n, err := parseIntKnob("RESEARCH_RESERVATION", "non-negative integer", raw, 0)
+	if err != nil {
+		return 0, err
+	}
+	if n > slots {
+		return 0, fmt.Errorf("RESEARCH_RESERVATION (%d) must not exceed MAX_PARALLEL (%d)", n, slots)
 	}
 	return n, nil
 }
@@ -362,6 +390,24 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// RESEARCH_RESERVATION is inert for a single-kind daemon (both the
+	// schema doc and daemon.Config say so), so it is resolved and validated
+	// only when the positional verb actually put both kinds in play. A
+	// work-only operator (no research labels created yet) must not be
+	// failed at startup by a reservation value that happens to exceed their
+	// MAX_PARALLEL — the knob simply does not apply to their run.
+	var reservation int
+	if len(args.Kinds) > 1 {
+		researchReservationRaw, err := resolveKnob(doc, "RESEARCH_RESERVATION", stderr)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		reservation, err = parseResearchReservation(researchReservationRaw, slots)
+		if err != nil {
+			return fail(stderr, err)
+		}
+	}
+
 	wd, err := os.Getwd()
 	if err != nil {
 		return fail(stderr, err)
@@ -378,11 +424,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	lock, err := daemon.AcquireCheckoutLock(gitDirPath, args.Kind)
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, args.Kinds)
 	if err != nil {
 		// Report both to the operator (stderr, via fail below) and to the
 		// durable event stream, so a reader of either sees the same halt.
-		em.Emit(daemon.Event{Event: "halt", Kind: args.Kind, Reason: daemon.HaltInstanceLockPrefix + err.Error()})
+		em.Emit(daemon.Event{Event: "halt", Reason: daemon.HaltInstanceLockPrefix + err.Error()})
 		return fail(stderr, err)
 	}
 	// No cleanup on the crash path: the kernel drops the flock when the
@@ -406,15 +452,16 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	go handleStopSignal(sig, cancel, r.forwardStop)
 
 	cfg := daemon.Config{
-		Kind:             args.Kind,
-		IdleFloor:        daemonIdleFloor,
-		IdleCap:          daemonIdleCap,
-		Slots:            slots,
-		SelfProgram:      selfProgram,
-		FailureBackoff:   daemonFailureBackoff,
-		BreakerThreshold: daemonBreakerThreshold,
-		BreakerWindow:    daemonBreakerWindow,
-		Awake:            awake,
+		Kinds:               args.Kinds,
+		ResearchReservation: reservation,
+		IdleFloor:           daemonIdleFloor,
+		IdleCap:             daemonIdleCap,
+		Slots:               slots,
+		SelfProgram:         selfProgram,
+		FailureBackoff:      daemonFailureBackoff,
+		BreakerThreshold:    daemonBreakerThreshold,
+		BreakerWindow:       daemonBreakerWindow,
+		Awake:               awake,
 	}
 
 	reason := daemon.Loop(ctx, cfg, r, em, clk)

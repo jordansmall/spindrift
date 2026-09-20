@@ -15,12 +15,12 @@ import (
 // idle wait or blocked in ResolveRevision stops promptly instead of riding
 // out the full interval or fetch.
 type pool struct {
-	cfg  Config
-	r    Runner
-	em   *Emitter
-	clk  Clock
-	b    *breaker
-	idle *idleBackoff
+	cfg   Config
+	r     Runner
+	em    *Emitter
+	clk   Clock
+	b     *breaker
+	kinds map[Kind]*kindBackoff
 
 	cancel context.CancelFunc
 
@@ -37,22 +37,69 @@ type pool struct {
 // RunChild is already contractually drain-safe under a cancelled ctx (see
 // loop.go's own doc), and hostRunner.RunChild uses exec.Command rather than
 // CommandContext, so cancelling it can never kill a running child. r, clk,
-// the breaker, and the idle backoff are all pool-wide policy, not
+// the breaker, and the per-kind backoffs are all pool-wide policy, not
 // slot-tracking state, but they live here so backoffOrHalt and runSlot stop
 // threading them as parameters.
 func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) (*pool, context.Context) {
 	pctx, cancel := context.WithCancel(ctx)
+	kinds := make(map[Kind]*kindBackoff, len(cfg.Kinds))
+	for _, k := range cfg.Kinds {
+		kinds[k] = newKindBackoff(cfg.IdleFloor, cfg.IdleCap)
+	}
 	p := &pool{
 		cfg:      cfg,
 		r:        r,
 		em:       em,
 		clk:      clk,
 		b:        newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
-		idle:     newIdleBackoff(cfg.IdleFloor, cfg.IdleCap),
+		kinds:    kinds,
 		cancel:   cancel,
 		occupied: make(map[int]struct{}),
 	}
 	return p, pctx
+}
+
+// slotOrder returns the kinds slot tries, most preferred first: slots below
+// the reservation prefer research, the rest prefer every other kind ahead of
+// it. The order is derived from kinds — only research's position moves, so a
+// third kind added later keeps its configured place instead of silently
+// inheriting one half of a hardcoded pair. Static, decided once from cfg
+// rather than a live count of who is running what: the floor is exact without
+// lock-step counting, and two slots choosing concurrently can never both claim
+// the same reserved slot (each computes its own answer independently, off its
+// own slot number, not off shared mutable state).
+func slotOrder(kinds []Kind, reservation, slot int) []Kind {
+	if len(kinds) < 2 {
+		return kinds
+	}
+	research := make([]Kind, 0, 1)
+	rest := make([]Kind, 0, len(kinds))
+	for _, k := range kinds {
+		if k == KindResearch {
+			research = append(research, k)
+			continue
+		}
+		rest = append(rest, k)
+	}
+	order := make([]Kind, 0, len(kinds))
+	if slot < reservation {
+		return append(append(order, research...), rest...)
+	}
+	return append(append(order, rest...), research...)
+}
+
+// pickKind returns the Dispatch kind slot should fill itself with now: the
+// first kind in its preference order that is not currently backed off. ok is
+// false when every configured kind has backed off into an empty result — the
+// daemon is genuinely idle, and the caller sleeps instead of dispatching.
+func (p *pool) pickKind(slot int) (Kind, bool) {
+	now := p.clk.Now()
+	for _, kind := range slotOrder(p.cfg.Kinds, p.cfg.ResearchReservation, slot) {
+		if p.kinds[kind].runnable(now) {
+			return kind, true
+		}
+	}
+	return "", false
 }
 
 // occupy marks slot as having a child running right now. A slot calls this
@@ -123,7 +170,7 @@ func (p *pool) noteAwakeClose(slot int, wait time.Duration) {
 	p.awakeShut = true
 
 	if first {
-		p.em.Emit(Event{Event: "awake_close", Kind: p.cfg.Kind, Slot: intPtr(slot), Wait: wait.String(), Reason: "outside the Awake window"})
+		p.em.Emit(Event{Event: "awake_close", Slot: intPtr(slot), Wait: wait.String(), Reason: "outside the Awake window"})
 	}
 }
 
@@ -141,7 +188,7 @@ func (p *pool) noteAwakeOpen(slot int) {
 	p.awakeShut = false
 
 	if was {
-		p.em.Emit(Event{Event: "awake_open", Kind: p.cfg.Kind, Slot: intPtr(slot), Reason: "the Awake window reopened"})
+		p.em.Emit(Event{Event: "awake_open", Slot: intPtr(slot), Reason: "the Awake window reopened"})
 	}
 }
 
@@ -158,7 +205,7 @@ func (p *pool) stopped() bool {
 // Idempotent: once the pool has halted, later calls (racing siblings, or a
 // slot that merely rediscovers the same cancellation) are no-ops — the
 // first reason wins and no second halt event is ever emitted.
-func (p *pool) halt(reason, revision string) {
+func (p *pool) halt(kind Kind, reason, revision string) {
 	p.mu.Lock()
 	if p.halted {
 		p.mu.Unlock()
@@ -168,7 +215,7 @@ func (p *pool) halt(reason, revision string) {
 	p.reason = reason
 	p.mu.Unlock()
 
-	p.em.Emit(Event{Event: "halt", Kind: p.cfg.Kind, Revision: revision, Reason: reason})
+	p.em.Emit(Event{Event: "halt", Kind: kind, Revision: revision, Reason: reason})
 	p.cancel()
 }
 
@@ -180,12 +227,12 @@ func (p *pool) halt(reason, revision string) {
 // off and lets it retry alone. Returns true if the pool halted (the caller
 // must stop), false if the caller should sleep out the backoff and
 // continue its own loop.
-func (p *pool) backoffOrHalt(ctx context.Context, slot int, revision, reason string) bool {
+func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision, reason string) bool {
 	count, crossed := p.b.recordAndCheck(p.clk.Now())
 	if crossed {
 		haltReason := fmt.Sprintf("breaker: %d failures within %s reached threshold %d", count, p.cfg.BreakerWindow, p.cfg.BreakerThreshold)
-		p.em.Emit(Event{Event: "breaker_trip", Kind: p.cfg.Kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()})
-		p.halt(haltReason, revision)
+		p.em.Emit(Event{Event: "breaker_trip", Kind: kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()})
+		p.halt(kind, haltReason, revision)
 		return true
 	}
 
@@ -197,7 +244,7 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, revision, reason str
 		return true
 	}
 
-	p.em.Emit(Event{Event: "backoff", Kind: p.cfg.Kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason})
+	p.em.Emit(Event{Event: "backoff", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason})
 	p.clk.Sleep(ctx, p.cfg.FailureBackoff)
 	return false
 }
@@ -233,7 +280,7 @@ const (
 // cancels the pool's context — the same "stop starting new work, wait out
 // whatever is running" halt every other reason already uses (see halt) —
 // so a freshly merged but broken daemon cannot auto-load with nobody awake.
-func (p *pool) checkSelfBuild(ctx context.Context, slot int, revision string) selfVerdict {
+func (p *pool) checkSelfBuild(ctx context.Context, slot int, kind Kind, revision string) selfVerdict {
 	if p.cfg.SelfProgram == "" {
 		return selfOK
 	}
@@ -243,10 +290,10 @@ func (p *pool) checkSelfBuild(ctx context.Context, slot int, revision string) se
 		// SIGTERM racing this evaluation) is an ordinary stop, not evidence
 		// of a broken evaluation — recording it as a breaker failure could
 		// trip the breaker on a clean shutdown and turn a 0 exit into a 1.
-		if stopOnCancel(ctx, p) {
+		if stopOnCancel(ctx, kind, p) {
 			return selfStop
 		}
-		if p.backoffOrHalt(ctx, slot, revision, HaltSelfBuildPrefix+err.Error()) {
+		if p.backoffOrHalt(ctx, slot, kind, revision, HaltSelfBuildPrefix+err.Error()) {
 			return selfStop
 		}
 		return selfRetry
@@ -255,24 +302,72 @@ func (p *pool) checkSelfBuild(ctx context.Context, slot int, revision string) se
 		return selfOK
 	}
 	reason := fmt.Sprintf("%s: daemon build at %s is %s, running %s", HaltSelfChanged, revision, path, p.cfg.SelfProgram)
-	p.halt(reason, revision)
+	p.halt(kind, reason, revision)
 	return selfStop
 }
 
-// idleWait sleeps out a none-dispatchable wait in IdleFloor-sized slices,
-// polling ResolveRevision between slices so a merge that unblocks a jammed
-// queue is noticed instead of riding out the rest of a long backoff. A
-// queue-empty wait (exit 2) never comes here: it stays the plain, single
-// p.clk.Sleep it always was, since a merge cannot create new work in an
-// empty queue and polling there would only spend a query for nothing.
+// idleSleep is what a slot calls when pickKind finds every configured kind
+// backed off: a genuine drought, not just a kind this slot doesn't prefer
+// right now. It sleeps until the nearest gated kind's deadline (the pool as
+// a whole can move the instant any one kind's gate lifts, even though this
+// slot only picks up work once it wakes and re-runs pickKind), polling for a
+// moved tip along the way only if a jammed kind is among those gated — a
+// merge can unblock a jammed queue, but it cannot create new work in a kind
+// that is merely queue-empty, so polling there would only spend a query for
+// nothing.
 //
-// revision is the revision this slot's child just ran at; a poll result
-// that differs from it is the "tip moved" signal. On that signal, idleWait
-// emits tip_moved, resets the idle backoff (the observed change ends the
-// no-work streak same as real work would), and returns immediately so the
-// slot starts its next iteration at once rather than sleeping out the rest
-// of the wait.
-func (p *pool) idleWait(ctx context.Context, slot int, wait time.Duration, revision string) {
+// lastRevision is the revision this slot's last child ran at (empty if this
+// slot has never yet resolved one); a poll result that differs from it is
+// the "tip moved" signal.
+func (p *pool) idleSleep(ctx context.Context, slot int, lastRevision string) {
+	now := p.clk.Now()
+	var earliest time.Time
+	jammedGate := false
+	for _, k := range p.kinds {
+		at, gated := k.readyAt()
+		if !gated {
+			continue
+		}
+		if earliest.IsZero() || at.Before(earliest) {
+			earliest = at
+		}
+		if k.jammedNow() {
+			jammedGate = true
+		}
+	}
+	if earliest.IsZero() {
+		// Every kind is runnable after all — a sibling's reset() raced in
+		// between pickKind's failed pass and this call. Nothing to sleep
+		// for; the caller loops back around to pickKind at once.
+		return
+	}
+
+	wait := earliest.Sub(now)
+	if wait <= 0 {
+		return
+	}
+
+	if jammedGate && lastRevision != "" {
+		p.pollSlices(ctx, slot, wait, lastRevision)
+		return
+	}
+	p.clk.Sleep(ctx, wait)
+}
+
+// pollSlices sleeps wait in IdleFloor-sized slices, polling ResolveRevision
+// between slices so a merge that unblocks a jammed queue is noticed instead
+// of riding out the rest of a long backoff. Only idleSleep's jammed case
+// reaches here; a queue-empty gate stays the plain, single p.clk.Sleep in
+// idleSleep itself.
+//
+// revision is idleSleep's lastRevision; a poll result that differs from it
+// is the "tip moved" signal. On that signal, pollSlices emits tip_moved,
+// resets every currently-jammed kind's backoff (the observed change ends
+// each of their no-work streaks same as real work would — a queue-empty
+// kind's streak is untouched, since a moved tip is not evidence an empty
+// queue refilled), and returns immediately so the slot starts its next
+// iteration at once rather than sleeping out the rest of the wait.
+func (p *pool) pollSlices(ctx context.Context, slot int, wait time.Duration, revision string) {
 	remaining := wait
 	for remaining > 0 {
 		slice := p.cfg.IdleFloor
@@ -303,8 +398,19 @@ func (p *pool) idleWait(ctx context.Context, slot int, wait time.Duration, revis
 			continue
 		}
 		if newRevision != revision {
-			p.em.Emit(Event{Event: "tip_moved", Kind: p.cfg.Kind, Slot: intPtr(slot), Revision: newRevision, Reason: "a merge can unblock a jammed queue"})
-			p.idle.reset()
+			// No single Kind names this: several kinds can be jammed at
+			// once, and the tip that moved is evidence for all of them, not
+			// whichever this slot happened to be running. Kinds names the
+			// set actually reset below; iterating cfg.Kinds rather than the
+			// p.kinds map keeps that set's order deterministic.
+			var reset []Kind
+			for _, kind := range p.cfg.Kinds {
+				if k := p.kinds[kind]; k.jammedNow() {
+					k.reset()
+					reset = append(reset, kind)
+				}
+			}
+			p.em.Emit(Event{Event: "tip_moved", Slot: intPtr(slot), Revision: newRevision, Reason: "a merge can unblock a jammed queue", Kinds: reset})
 			return
 		}
 	}
