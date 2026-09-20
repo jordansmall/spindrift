@@ -129,6 +129,8 @@
             #   };
             #   # declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check)
             #   overlapGate = "defer";
+            #   # how many of the daemon's MAX_PARALLEL slots prefer research Dispatches over work -- a floor, not a ceiling: those slots take research only while research has queued work, and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope
+            #   researchReservation = 1;
             #   retry = {
             #     # jitter seconds added to 429 hold duration to spread re-dispatch
             #     holdJitter = 5;
