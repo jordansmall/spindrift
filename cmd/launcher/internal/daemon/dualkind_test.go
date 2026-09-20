@@ -153,6 +153,8 @@ func (c *cancelOnSleepClock) Sleep(ctx context.Context, d time.Duration) {
 func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 	const slots = 3
 	r := newBlockingRunner("rev1", slots)
+	// Restores this test's pre-gate concurrent first wave (issue #3634).
+	r.announce = true
 	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)

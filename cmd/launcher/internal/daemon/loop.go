@@ -253,8 +253,25 @@ func invalidConfig(em *Emitter, cfg Config, detail string) string {
 // result and loops back around, and it is the next pickKind that decides
 // whether that means switching kinds or genuinely idling.
 func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
+	// Covers the one route the other release sites miss: the leader
+	// stopping (stopOnCancel or selfStop) before a second iteration ever
+	// starts to run the top-of-loop release below. openStartGate no-ops
+	// for a non-leader slot, so this defer needs no leader guard.
+	defer p.openStartGate(slot, gateOpenStopped)
 	var lastRevision string // the revision this slot's last child ran at; the "tip moved" baseline
+	firstRound := true
 	for {
+		if !firstRound {
+			// Covers a first round that resolved with no claim while the
+			// window is still open, so awaitWindow below returns without
+			// parking. A leader that instead parks on a shut window holds
+			// the gate across the whole shut span (issue #3634): the
+			// siblings are parked on the window or on the gate either way,
+			// and this same release fires once the window reopens and the
+			// leader's first round actually resolves.
+			p.openStartGate(slot, gateOpenRoundResolved)
+		}
+		firstRound = false
 		if stopOnCancel(ctx, "", p) {
 			return
 		}
@@ -264,6 +281,17 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// A signal can arrive while the slot was parked in
 			// awaitWindow; nothing else re-checks ctx between there and
 			// ResolveRevision, so this is that check.
+			return
+		}
+
+		// Gated after the Awake window, not before: a shut window already
+		// parks every slot, so a cold start inside a shut window costs no
+		// extra wait, and the gate only ever spans the leader's actual
+		// discovery once the window is open (issue #3634).
+		p.awaitStartGate(ctx, slot)
+		if stopOnCancel(ctx, "", p) {
+			// awaitStartGate returns on ctx cancellation same as any other
+			// wait; nothing else re-checks before pickKind.
 			return
 		}
 
@@ -340,6 +368,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			OnIssue: func(issue string) {
 				p.noteIssue(slot, issue)
 				p.publish()
+				// A claim settles the race the gate exists to prevent
+				// (issue #3634) the moment it happens, live, rather than
+				// waiting for this child to exit.
+				p.openStartGate(slot, gateOpenClaimed)
 			},
 		}
 		result, err := p.r.RunChild(ctx, req)
