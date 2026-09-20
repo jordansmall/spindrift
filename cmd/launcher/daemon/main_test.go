@@ -95,6 +95,44 @@ func TestResolveKnob(t *testing.T) {
 	}
 }
 
+// TestParseSlots pins MAX_PARALLEL's parse step: the schema declares it
+// intKind = "positive" (lib/env-schema.nix), so anything else — unparsable,
+// zero, or negative — must fail startup with a clear diagnostic rather than
+// reach daemon.Loop's own non-positive-Slots halt, which is for a
+// programming error, not an operator's env var.
+func TestParseSlots(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    int
+		wantErr bool
+	}{
+		{name: "positive integer", raw: "3", want: 3},
+		{name: "one", raw: "1", want: 1},
+		{name: "zero rejected", raw: "0", wantErr: true},
+		{name: "negative rejected", raw: "-1", wantErr: true},
+		{name: "non-numeric rejected", raw: "many", wantErr: true},
+		{name: "empty rejected", raw: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSlots(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseSlots(%q) = %d, nil; want an error", tt.raw, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseSlots(%q) unexpected error: %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Errorf("parseSlots(%q) = %d, want %d", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseArgs(t *testing.T) {
 	tests := []struct {
 		name     string

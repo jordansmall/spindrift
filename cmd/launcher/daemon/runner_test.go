@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -253,6 +255,74 @@ func TestResolveRevision_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 	}
 }
 
+// TestResolveRevision_ConcurrentCallsDoNotRace drives several concurrent
+// ResolveRevision calls on one hostRunner against a repo whose origin/main
+// has genuinely advanced since dirConsumer's clone, so each `git fetch` must
+// actually move (re-lock) refs/remotes/origin/main rather than finding it
+// already at the wanted tip — the scenario where unsynchronized concurrent
+// fetches raced that ref lock and interleaved on the FETCH_HEAD file one
+// fetch writes and the next rev-parse reads (issue #3539). Every call must
+// return the same advanced tip with no error.
+func TestResolveRevision_ConcurrentCallsDoNotRace(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	root := t.TempDir()
+	bare := filepath.Join(root, "origin.git")
+	dirConsumer := filepath.Join(root, "consumer")
+	dirAdvancer := filepath.Join(root, "advancer")
+
+	gitRunT(t, "", "init", "--bare", bare)
+
+	gitRunT(t, "", "clone", bare, dirConsumer)
+	gitRunT(t, dirConsumer, "checkout", "-B", "main")
+	gitRunT(t, dirConsumer, "config", "user.email", "consumer@example.com")
+	gitRunT(t, dirConsumer, "config", "user.name", "Consumer")
+	writeFileT(t, filepath.Join(dirConsumer, "a.txt"), "a\n")
+	gitRunT(t, dirConsumer, "add", "a.txt")
+	gitRunT(t, dirConsumer, "commit", "-m", "base")
+	gitRunT(t, dirConsumer, "push", "-u", "origin", "main")
+
+	// Advance origin's tip from a second clone, so dirConsumer's cached
+	// origin/main ref (set up by the clone above) is now stale and every
+	// fetch below must genuinely re-lock it.
+	gitRunT(t, "", "clone", bare, dirAdvancer)
+	gitRunT(t, dirAdvancer, "checkout", "main")
+	gitRunT(t, dirAdvancer, "config", "user.email", "advancer@example.com")
+	gitRunT(t, dirAdvancer, "config", "user.name", "Advancer")
+	writeFileT(t, filepath.Join(dirAdvancer, "b.txt"), "b\n")
+	gitRunT(t, dirAdvancer, "add", "b.txt")
+	gitRunT(t, dirAdvancer, "commit", "-m", "advance")
+	gitRunT(t, dirAdvancer, "push", "origin", "main")
+	wantTip := strings.TrimSpace(gitOutputT(t, dirAdvancer, "rev-parse", "HEAD"))
+
+	const n = 5
+	r := newHostRunner(dirConsumer, ".#", "main")
+	var wg sync.WaitGroup
+	results := make([]string, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			got, err := r.ResolveRevision(context.Background())
+			results[i] = got
+			errs[i] = err
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Errorf("call %d: ResolveRevision() error: %v", i, errs[i])
+		}
+		if results[i] != wantTip {
+			t.Errorf("call %d: ResolveRevision() = %q, want %q", i, results[i], wantTip)
+		}
+	}
+}
+
 // TestResolveRevision_CancelledContext guards against the ctx-discarding bug
 // (issue #3538): ResolveRevision must wire ctx into the underlying
 // git invocations so a caller who cancels (SIGINT/SIGTERM with no child to
@@ -298,6 +368,33 @@ func TestResolveRevision_CancelledContext(t *testing.T) {
 	}
 }
 
+// waitForArmed polls until hostRunner has published nChildren children and
+// every path in armed exists. Both halves are load-bearing: r.children is
+// what forwardStop fans out over, so a child not yet published is one it
+// would silently skip; and the armed file is touched only after the script's
+// `trap` has run, so a SIGTERM landing before that finds the default
+// disposition and kills the child outright (Exit -1, not 7).
+func waitForArmed(t *testing.T, r *hostRunner, nChildren int, armed ...string) {
+	t.Helper()
+	published := 0
+	for i := 0; i < 1000; i++ {
+		r.mu.Lock()
+		published = len(r.children)
+		r.mu.Unlock()
+		ready := published == nChildren
+		for _, path := range armed {
+			if _, err := os.Stat(path); err != nil {
+				ready = false
+			}
+		}
+		if ready {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("children never started and armed their SIGTERM traps: %d of %d published", published, nChildren)
+}
+
 // TestForwardStop_DeliversSIGTERMToChild drives the exec seam at a script
 // that traps SIGTERM and exits with a distinct code, so a forwarded stop
 // proves the signal reached the child specifically (child.Signal(pid) never
@@ -308,11 +405,6 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 	dir := t.TempDir()
-	// The script touches this only after `trap` has run, so its existence is
-	// proof the child can honour a SIGTERM. r.children[0] alone is not: RunChild
-	// publishes it the instant cmd.Start() returns, which is before /bin/sh
-	// has even exec'd, and a SIGTERM landing then finds the default
-	// disposition and kills the child outright (Exit -1, not 7).
 	armed := filepath.Join(dir, "trap-armed")
 	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("/bin/sh", "-c", `trap 'exit 7' TERM; : >"$0"; while :; do sleep 0.05; done`, armed)
@@ -330,22 +422,7 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 		resultCh <- got
 	}()
 
-	trapped := false
-	for i := 0; i < 1000 && !trapped; i++ {
-		r.mu.Lock()
-		started := r.children[0] != nil
-		r.mu.Unlock()
-		if started {
-			_, err := os.Stat(armed)
-			trapped = err == nil
-		}
-		if !trapped {
-			time.Sleep(2 * time.Millisecond)
-		}
-	}
-	if !trapped {
-		t.Fatal("child never started and armed its SIGTERM trap")
-	}
+	waitForArmed(t, r, 1, armed)
 
 	r.forwardStop()
 
@@ -358,6 +435,66 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("forwardStop did not cause the child to exit promptly (killed instead of drained, or signal never delivered)")
+	}
+}
+
+// TestForwardStop_DeliversSIGTERMToEveryChild is TestForwardStop_DeliversSIGTERMToChild
+// at more than one slot: a single-child-only fan-out (indexing r.children[0]
+// instead of ranging over the whole map) would leave slots 1 and 2 abandoned
+// rather than drained — exactly the multi-slot gap AC 8 (issue #3539) closes.
+func TestForwardStop_DeliversSIGTERMToEveryChild(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+	dir := t.TempDir()
+
+	const nChildren = 3
+	armed := make([]string, nChildren)
+	for i := range armed {
+		armed[i] = filepath.Join(dir, fmt.Sprintf("trap-armed-%d", i))
+	}
+	// Every slot's argv is identical (RunChild doesn't thread req.Slot into
+	// argv), so the seam hands out the armed files by call order — which call
+	// belongs to which slot is unspecified and nothing here depends on it, the
+	// counter only has to give each of the three children a distinct file.
+	var callN int
+	var callMu sync.Mutex
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		callMu.Lock()
+		n := callN
+		callN++
+		callMu.Unlock()
+		return exec.Command("/bin/sh", "-c", `trap 'exit 7' TERM; : >"$0"; while :; do sleep 0.05; done`, armed[n])
+	}
+
+	r := newHostRunner(dir, ".#", "main")
+	resultCh := make(chan daemon.ChildResult, nChildren)
+	errCh := make(chan error, nChildren)
+	for slot := 0; slot < nChildren; slot++ {
+		go func() {
+			got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: slot, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+			if err != nil {
+				errCh <- err
+				return
+			}
+			resultCh <- got
+		}()
+	}
+
+	waitForArmed(t, r, nChildren, armed...)
+
+	r.forwardStop()
+
+	for i := 0; i < nChildren; i++ {
+		select {
+		case err := <-errCh:
+			t.Fatalf("RunChild() unexpected error: %v", err)
+		case got := <-resultCh:
+			if got.Exit != 7 {
+				t.Errorf("Exit = %d, want 7 (child trapped SIGTERM and exited on its own terms, not SIGKILLed)", got.Exit)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("forwardStop did not cause every child to exit promptly (some abandoned, not drained)")
+		}
 	}
 }
 
