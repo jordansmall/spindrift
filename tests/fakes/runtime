@@ -92,17 +92,21 @@ case "$runtime" in
         fi
         ;;
       inspect)
-        # Container liveness probe: returns "running" when the named container
-        # state var is set to "running".
+        # Container liveness probe: the container exists only when the named
+        # container state var is set, and the body is the `--format={{json .}}`
+        # object both runtimes emit, since the launcher classifies on
+        # State.Status and removes by Id (issue #3633). Created is stamped now,
+        # so a "created" state reads as a sibling launcher's in-flight
+        # container, inside the launcher's mid-creation grace window.
         name=""
         for arg in "$@"; do name="$arg"; done
         norm="${name//-/_}"
         state_var="FAKE_${rt}_CONTAINER_STATE_${norm}"
-        if [ "${!state_var:-}" = "running" ]; then
-          echo "running"
-          exit 0
-        fi
-        exit 1
+        state="${!state_var:-}"
+        [ -n "$state" ] || exit 1
+        printf '{"Id":"%s-id","Created":"%s","State":{"Status":"%s"}}\n' \
+          "$name" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$state"
+        exit 0
         ;;
       run)
         issue_num=""

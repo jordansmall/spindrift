@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,10 +19,13 @@ import (
 )
 
 // fakeCall scripts one invocation of a fake CLI binary: the exit code it
-// returns and the stdout it prints.
+// returns and the stdout/stderr it prints. Real podman/docker print their
+// name-collision refusal to stderr, not stdout, so a test pinning that
+// refusal must use stderr to actually exercise the stream Run tees.
 type fakeCall struct {
 	exit   int
 	stdout string
+	stderr string
 }
 
 // newFakeCLI writes a stub runtime binary that records each invocation's argv
@@ -47,7 +51,7 @@ func newFakeCLI(t *testing.T, calls ...fakeCall) (script, dir string) {
 		if i == len(calls)-1 {
 			pattern += "|*"
 		}
-		fmt.Fprintf(&b, "%s) printf '%%s' %q; exit %d ;;\n", pattern, c.stdout, c.exit)
+		fmt.Fprintf(&b, "%s) printf '%%s' %q; printf '%%s' %q >&2; exit %d ;;\n", pattern, c.stdout, c.stderr, c.exit)
 	}
 	b.WriteString("esac\n")
 
@@ -55,6 +59,29 @@ func newFakeCLI(t *testing.T, calls ...fakeCall) (script, dir string) {
 		t.Fatal(err)
 	}
 	return script, dir
+}
+
+// inspectJSONStdout builds the stdout inspectContainer now expects from
+// `inspect --format={{json .}}`: an object with Id, Created (RFC3339Nano,
+// what both podman and docker emit) and a nested State.Status. The field
+// stays spelled `Id` against production's `ID` on purpose — that mismatch is
+// what exercises encoding/json's case-insensitive match against the key the
+// runtimes actually emit, so do not "fix" it to match the Go initialism.
+func inspectJSONStdout(t *testing.T, id, status string, created time.Time) string {
+	t.Helper()
+	body := struct {
+		Id      string
+		Created string
+		State   struct {
+			Status string
+		}
+	}{Id: id, Created: created.Format(time.RFC3339Nano)}
+	body.State.Status = status
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 // readCall returns the argv (split on newline) recorded for the n-th
@@ -233,6 +260,71 @@ func TestIsRuntimeUnusableError(t *testing.T) {
 		if got := isRuntimeUnusableError(tc.stderr); got != tc.want {
 			t.Errorf("isRuntimeUnusableError(%q) = %v, want %v", tc.stderr, got, tc.want)
 		}
+	}
+}
+
+// looksLikeNameCollision gates the whole name-collision classification path
+// in Run, so its true/false boundary needs a direct pin rather than only the
+// end-to-end coverage the Run tests give it. Both short-circuit arms of the
+// pre-filter are pinned, including the substring over-match a bare
+// strings.Contains accepts — deliberate, since Run proves the collision with
+// a post-failure inspect and never trusts this on its own.
+func TestLooksLikeNameCollision(t *testing.T) {
+	cases := []struct {
+		name string
+		out  string
+		box  string
+		want bool
+	}{
+		{
+			name: "podman refusal for the right name",
+			out:  `Error: creating container storage: the container name "agent-issue-1" is already in use by abc123`,
+			box:  "agent-issue-1",
+			want: true,
+		},
+		{
+			name: "docker refusal for the right name",
+			out:  `docker: Error response from daemon: Conflict. The container name "/agent-issue-1" is already in use by container "abc123def456". You have to remove (or rename) that container to be able to reuse that name.`,
+			box:  "agent-issue-1",
+			want: true,
+		},
+		{
+			name: "refusal naming a different box",
+			out:  `Error: creating container storage: the container name "agent-issue-2" is already in use by abc123`,
+			box:  "agent-issue-1",
+			want: false,
+		},
+		{
+			name: "arbitrary output mentioning the name but not the phrase",
+			out:  "starting agent-issue-1: pulling image",
+			box:  "agent-issue-1",
+			want: false,
+		},
+		{
+			name: "refusal carrying the phrase but no name at all",
+			out:  "Error: creating container storage: the container name is already in use",
+			box:  "agent-issue-1",
+			want: false,
+		},
+		{
+			name: "refusal naming a box this one's name is a prefix of",
+			out:  `Error: creating container storage: the container name "agent-issue-10" is already in use by abc123`,
+			box:  "agent-issue-1",
+			want: true, // accepted over-match: Run confirms with a real inspect
+		},
+		{
+			name: "empty output",
+			out:  "",
+			box:  "agent-issue-1",
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := looksLikeNameCollision(tc.out, tc.box); got != tc.want {
+				t.Errorf("looksLikeNameCollision(%q, %q) = %v, want %v", tc.out, tc.box, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1784,17 +1876,9 @@ func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
 // ErrAlreadyRunning without ever invoking `podman/docker run`: the collision
 // must not be attempted, only recognized (issue #562).
 func TestRun_AlreadyRunningContainerSkipsLaunch(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "run-invoked")
-	script := filepath.Join(dir, "fake-podman")
-	scriptContent := "#!/bin/sh\ncase \"$1\" in\n" +
-		"  inspect) echo running ;;\n" +
-		"  run) touch " + marker + " ;;\n" +
-		"esac\n"
-	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "cid-1", "running", time.Now())},
+	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 
@@ -1802,39 +1886,186 @@ func TestRun_AlreadyRunningContainerSkipsLaunch(t *testing.T) {
 	if !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
-	if _, statErr := os.Stat(marker); statErr == nil {
-		t.Error("Run: launched the container despite it already running")
+	if calls := callCount(t, dir); calls != 1 {
+		t.Errorf("Run: want 1 call (inspect only), got %d", calls)
 	}
 }
 
-// The non-collision case: a stale (exited or created, not running) same-named
-// container is reaped with `rm -f`, and the launch proceeds normally (issue
-// #562 acceptance criterion 3).
+// The non-collision case: a genuinely stale (exited, not merely created) same-
+// named container is reaped with `rm -f`, and the launch proceeds normally
+// (issue #562 acceptance criterion 3).
 func TestRun_ExitedContainerReapedThenLaunches(t *testing.T) {
-	dir := t.TempDir()
-	rmMarker := filepath.Join(dir, "rm-invoked")
-	runMarker := filepath.Join(dir, "run-invoked")
-	script := filepath.Join(dir, "fake-podman")
-	scriptContent := "#!/bin/sh\ncase \"$1\" in\n" +
-		"  inspect) echo exited ;;\n" +
-		"  rm) touch " + rmMarker + " ;;\n" +
-		"  run) touch " + runMarker + " ;;\n" +
-		"esac\n"
-	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "stale-id", "exited", time.Now())},
+		fakeCall{},        // rm
+		fakeCall{},        // run
+		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if _, statErr := os.Stat(rmMarker); statErr != nil {
-		t.Error("Run: did not reap the stale exited container")
+	rm := readCall(t, dir, 1)
+	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-id") {
+		t.Errorf("Run: did not reap the stale exited container: %v", rm)
 	}
-	if _, statErr := os.Stat(runMarker); statErr != nil {
-		t.Error("Run: did not launch after reaping the stale container")
+	run := readCall(t, dir, 2)
+	if !containsArg(run, "run") {
+		t.Errorf("Run: did not launch after reaping the stale container, call 2 was %v", run)
+	}
+}
+
+// Run must target the ID a single inspect observed, not the box name, when
+// reaping a stale container — the ID-pinning invariant inspectContainer's
+// doc comment explains (issue #3633 acceptance criterion).
+func TestRun_ReapsByIDNotByName(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "stale-id-42", "exited", time.Now())},
+		fakeCall{},        // rm
+		fakeCall{},        // run
+		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	rm := readCall(t, dir, 1)
+	if !containsArg(rm, "stale-id-42") {
+		t.Errorf("rm target: got %v, want the inspected ID stale-id-42", rm)
+	}
+	if containsArg(rm, box.Name) {
+		t.Errorf("rm target: got %v, want it not to target the name %q", rm, box.Name)
+	}
+}
+
+// The headline regression: a sibling's container still being created (state
+// "created", not yet "running") must not be force-removed while it is still
+// within midCreationGrace of its creation timestamp. The guard keyed on the
+// literal "running" status before issue #3633, so a sibling mid-creation was
+// invisible to it, silently destroyed, and this launcher's own `run` collided
+// on the name anyway.
+func TestRun_RecentlyCreatedContainerSkipsLaunchWithoutReap(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "cid-created", "created", time.Now().Add(-5*time.Second))},
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	err := a.Run(box)
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Run: want ErrAlreadyRunning for a container still being created, got %v", err)
+	}
+	if calls := callCount(t, dir); calls != 1 {
+		t.Errorf("Run: want 1 call (inspect only, no rm or run), got %d", calls)
+	}
+}
+
+// A "created" container older than midCreationGrace was abandoned by a
+// launcher that died between `podman run`'s create and start, not owned by a
+// sibling about to start it. Pre-diff, an unconditional `rm -f <name>`
+// cleared exactly this; the fix must still clear it, or the issue becomes
+// permanently undispatchable (blocking finding, issue #3633).
+func TestRun_StaleCreatedContainerReapedThenLaunches(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "stale-created-id", "created", time.Now().Add(-3*time.Hour))},
+		fakeCall{},        // rm
+		fakeCall{},        // run
+		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	rm := readCall(t, dir, 1)
+	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-created-id") {
+		t.Errorf("Run: want `rm -f stale-created-id`, got %v", rm)
+	}
+	run := readCall(t, dir, 2)
+	if !containsArg(run, "run") {
+		t.Errorf("Run: did not launch after reaping the stale created container, call 2 was %v", run)
+	}
+}
+
+// An inspect that exits 0 but whose Created field cannot parse must still be
+// treated as "container exists": a successful inspect proves that, regardless
+// of whether every field parsed. But with no usable created timestamp,
+// reapable's age check treats the age as infinite and reaps — restoring the
+// pre-#3633 behaviour of clearing a container this launcher cannot classify,
+// rather than wedging the issue permanently undispatchable (issue #3633).
+func TestRun_UnparseableInspectOutputReapedThenLaunches(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: `{"Id":"cid-only","Created":"not-a-timestamp","State":{"Status":"created"}}`},
+		fakeCall{},        // rm
+		fakeCall{},        // run
+		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	rm := readCall(t, dir, 1)
+	if !containsArg(rm, "cid-only") {
+		t.Errorf("Run: want the container reaped by its ID, got rm call %v", rm)
+	}
+	run := readCall(t, dir, 2)
+	if !containsArg(run, "run") {
+		t.Errorf("Run: did not launch after reaping the unparseable-timestamp container, call 2 was %v", run)
+	}
+}
+
+// A body that does not decode at all leaves no ID to remove. Removing by name
+// instead would race a sibling launcher's in-flight create, so Run removes
+// nothing and launches; if the name really was taken, the runtime's own
+// refusal — confirmed by a fresh post-failure inspect finding the name still
+// live — surfaces as ErrAlreadyRunning, so the issue is skipped rather than
+// failed (issue #3633).
+func TestRun_UndecodableInspectBodyRemovesNothing(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: "not json at all"},
+		fakeCall{
+			stderr: `Error: creating container storage: the container name "agent-issue-1" is already in use by abc123`,
+			exit:   125,
+		},
+		fakeCall{stdout: inspectJSONStdout(t, "abc123", "running", time.Now())},
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	if err := a.Run(box); !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
+	}
+	if call := readCall(t, dir, 1); containsArg(call, "rm") {
+		t.Errorf("Run: removed a container it could not identify, call 1 was %v", call)
+	}
+}
+
+// No container at all: Run launches straight through, no rm invoked.
+func TestRun_NoContainerLaunchesDirectly(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 1}, // inspect: absent
+		fakeCall{},        // run
+		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	run := readCall(t, dir, 1)
+	if !containsArg(run, "run") {
+		t.Errorf("Run: want the second call to launch, call 1 was %v", run)
+	}
+	if calls := callCount(t, dir); calls != 3 {
+		t.Errorf("Run: want 3 calls (inspect, run, reapAfterSuccess re-inspect; no rm), got %d", calls)
 	}
 }
 
@@ -1843,17 +2074,11 @@ func TestRun_ExitedContainerReapedThenLaunches(t *testing.T) {
 // exit codes (128+N) through a runtime-agnostic type instead of a raw
 // *exec.ExitError.
 func TestRun_ExitCodeSurfacedAsRunError(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "fake-podman")
-	scriptContent := "#!/bin/sh\ncase \"$1\" in\n" +
-		"  inspect) echo exited ;;\n" +
-		"  rm) : ;;\n" +
-		"  run) exit 143 ;;\n" +
-		"esac\n"
-	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	script, _ := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "cid-1", "exited", time.Now())},
+		fakeCall{},          // rm
+		fakeCall{exit: 143}, // run
+	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 
@@ -1867,6 +2092,132 @@ func TestRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 	}
 	if runErr.ExitCode != 143 {
 		t.Errorf("RunError.ExitCode: want 143, got %d", runErr.ExitCode)
+	}
+}
+
+// When inspect can't see the container (transient daemon blip, or a sibling
+// launcher's create is mid-flight and not yet visible) but the runtime still
+// refuses to create it because the name is taken, that refusal is itself the
+// concurrency signal: Run must report ErrAlreadyRunning, not a RunError, and
+// must never rm -f the name (issue #3633).
+func TestRun_LostCreateRacePodmanRefusalIsAlreadyRunning(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 1}, // inspect: container invisible to us
+		fakeCall{exit: 125, stderr: `Error: creating container storage: the container name "agent-issue-1" is already in use by 0123456789ab`},
+		// post-failure inspect: the sibling that actually won the race is live
+		fakeCall{stdout: inspectJSONStdout(t, "0123456789ab", "running", time.Now())},
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	err := a.Run(box)
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
+	}
+	if calls := callCount(t, dir); calls != 3 {
+		t.Errorf("Run: want 3 calls (inspect, run, post-failure inspect), got %d", calls)
+	}
+	for i := 0; i < callCount(t, dir); i++ {
+		if argv := readCall(t, dir, i); len(argv) > 0 && argv[0] == "rm" {
+			t.Errorf("Run: call %d issued rm -f on a name-collision refusal: %v", i, argv)
+		}
+	}
+}
+
+// Same as above but with docker's wording of the same refusal.
+func TestRun_LostCreateRaceDockerRefusalIsAlreadyRunning(t *testing.T) {
+	script, _ := newFakeCLI(t,
+		fakeCall{exit: 1}, // inspect: container invisible to us
+		fakeCall{exit: 125, stderr: `docker: Error response from daemon: Conflict. The container name "/agent-issue-1" is already in use by container "0123456789ab". You have to remove (or rename) that container to be able to reuse that name.`},
+		// post-failure inspect: the sibling that actually won the race is live
+		fakeCall{stdout: inspectJSONStdout(t, "0123456789ab", "running", time.Now())},
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	err := a.Run(box)
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
+	}
+}
+
+// The genuine-failure regression the blocking finding calls out: a Box that
+// starts, echoes attacker-controlled text quoting the runtime's own
+// "is already in use" refusal, and then exits non-zero must not be
+// reclassified as ErrAlreadyRunning on text alone. The post-failure inspect
+// proves this Box's own container ended up exited (reapable), not held live
+// by a sibling, so the collision text is exposed as forged and Run must
+// still surface a RunError.
+func TestRun_EchoedCollisionTextWithGenuineFailureIsRunError(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 1}, // inspect: no pre-existing container
+		fakeCall{
+			exit:   7,
+			stdout: `the container name "agent-issue-1" is already in use`,
+		},
+		// post-failure inspect: this Box's own container, now exited
+		fakeCall{stdout: inspectJSONStdout(t, "own-id", "exited", time.Now())},
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	err := a.Run(box)
+	if errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Run: attacker-echoed collision text steered classification to ErrAlreadyRunning, want RunError")
+	}
+	var runErr *RunError
+	if !errors.As(err, &runErr) {
+		t.Fatalf("Run: want *RunError, got %v (%T)", err, err)
+	}
+	if calls := callCount(t, dir); calls != 3 {
+		t.Errorf("Run: want 3 calls (inspect, run, post-failure inspect), got %d", calls)
+	}
+}
+
+// The real lost-create-race, restated with the post-failure inspect proof
+// this issue adds: the pre-run inspect misses the container, the run itself
+// is refused by name, and the post-failure inspect finds it freshly
+// "created" (not yet "running") — still a live claim on the name, so Run
+// must report ErrAlreadyRunning.
+func TestRun_LostCreateRacePostFailureInspectSeesCreated(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 1}, // inspect: container invisible to us
+		fakeCall{exit: 125, stderr: `Error: creating container storage: the container name "agent-issue-1" is already in use by 0123456789ab`},
+		fakeCall{stdout: inspectJSONStdout(t, "0123456789ab", "created", time.Now())},
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	err := a.Run(box)
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
+	}
+	if calls := callCount(t, dir); calls != 3 {
+		t.Errorf("Run: want 3 calls (inspect, run, post-failure inspect), got %d", calls)
+	}
+}
+
+// The tee must forward the Box's run output to box.Output unchanged, even
+// past the retained head's bound, so callers relying on the full log
+// (waves/engine.go) are unaffected by the ErrAlreadyRunning detection added
+// for issue #3633.
+func TestRun_TeesFullOutputToBoxOutput(t *testing.T) {
+	big := strings.Repeat("x", 8192) + "-tail-marker"
+	script, _ := newFakeCLI(t,
+		fakeCall{exit: 1}, // inspect: container absent
+		fakeCall{exit: 0, stdout: big},
+		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	var buf bytes.Buffer
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, Output: &buf}
+
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+	if got := buf.String(); got != big {
+		t.Errorf("Run: box.Output mismatch: want %d bytes ending %q, got %d bytes ending %q",
+			len(big), big[len(big)-16:], len(got), got[max(0, len(got)-16):])
 	}
 }
 
@@ -1916,7 +2267,7 @@ func wantTriple(args []string, a0, a1, a2 string) bool {
 // must not issue `rm -f`.
 func TestReap_NeverRemovesRunningContainer(t *testing.T) {
 	script, dir := newFakeCLI(t,
-		fakeCall{stdout: "running"},
+		fakeCall{stdout: inspectJSONStdout(t, "cid-1", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script}
 
@@ -1929,11 +2280,30 @@ func TestReap_NeverRemovesRunningContainer(t *testing.T) {
 	}
 }
 
-// The other side of the guard: when the fake CLI reports the container is not
-// running, Reap issues `rm -f`.
+// The mid-creation case (issue #3633): a container still in the "created"
+// state, not yet running, and still within midCreationGrace of its creation
+// timestamp, must also be left alone — a sibling launcher may own it.
+func TestReap_NeverRemovesCreatedContainer(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "cid-1", "created", time.Now().Add(-5*time.Second))},
+	)
+	a := &ociAdapter{cli: script}
+
+	if err := a.Reap("agent-issue-1"); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+
+	if calls := callCount(t, dir); calls != 1 {
+		t.Errorf("Reap: want 1 call (inspect only), got %d", calls)
+	}
+}
+
+// The other side of the guard: when the fake CLI reports the container is
+// exited (reapable), Reap issues `rm -f` against the inspected ID, not the
+// name passed in (issue #3633). A terminal status reaps regardless of age.
 func TestReap_RemovesStaleContainer(t *testing.T) {
 	script, dir := newFakeCLI(t,
-		fakeCall{stdout: "exited"},
+		fakeCall{stdout: inspectJSONStdout(t, "stale-cid", "exited", time.Now())},
 		fakeCall{},
 	)
 	a := &ociAdapter{cli: script}
@@ -1943,8 +2313,31 @@ func TestReap_RemovesStaleContainer(t *testing.T) {
 	}
 
 	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "agent-issue-1") {
-		t.Errorf("Reap: want `rm -f agent-issue-1`, got %v", rm)
+	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-cid") {
+		t.Errorf("Reap: want `rm -f stale-cid`, got %v", rm)
+	}
+	if containsArg(rm, "agent-issue-1") {
+		t.Errorf("Reap: rm targeted the name, not the inspected ID: %v", rm)
+	}
+}
+
+// A "created" container older than midCreationGrace was abandoned mid-create,
+// not owned by a sibling about to start it, so Reap clears it just as it does
+// a terminal container (issue #3633).
+func TestReap_RemovesStaleCreatedContainer(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "stale-created-cid", "created", time.Now().Add(-3*time.Hour))},
+		fakeCall{},
+	)
+	a := &ociAdapter{cli: script}
+
+	if err := a.Reap("agent-issue-1"); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+
+	rm := readCall(t, dir, 1)
+	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-created-cid") {
+		t.Errorf("Reap: want `rm -f stale-created-cid`, got %v", rm)
 	}
 }
 
@@ -1968,7 +2361,10 @@ func TestKill_MissingContainer_ReturnsNilNotError(t *testing.T) {
 // issues `rm -f` unconditionally once existence is confirmed, so it reaches a
 // genuinely live container Reap would refuse to touch.
 func TestKill_RemovesExistingContainerRegardlessOfRunningState(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{}, fakeCall{}) // inspect: found; rm -f: ok
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "kill-existing-id", "running", time.Now())},
+		fakeCall{}, // rm -f
+	)
 	a := &ociAdapter{cli: script}
 
 	if err := a.Kill("agent-issue-1"); err != nil {
@@ -1979,15 +2375,40 @@ func TestKill_RemovesExistingContainerRegardlessOfRunningState(t *testing.T) {
 		t.Errorf("Kill: want 2 calls (inspect then rm -f), got %d", calls)
 	}
 	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "agent-issue-1") {
-		t.Errorf("Kill: want `rm -f agent-issue-1`, got %v", rm)
+	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "kill-existing-id") {
+		t.Errorf("Kill: want `rm -f kill-existing-id`, got %v", rm)
+	}
+}
+
+// Kill must target the ID inspectContainer observed, not the name passed in
+// — the same ID-pinning invariant Run and Reap apply — so a sibling that
+// replaced the container between inspect and rm is untouched (issue #3633).
+func TestKill_RemovesByIDNotByName(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "kill-target-id", "running", time.Now())},
+		fakeCall{}, // rm -f
+	)
+	a := &ociAdapter{cli: script}
+
+	if err := a.Kill("agent-issue-1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	rm := readCall(t, dir, 1)
+	if !containsArg(rm, "kill-target-id") {
+		t.Errorf("rm target: got %v, want the inspected ID kill-target-id", rm)
+	}
+	if containsArg(rm, "agent-issue-1") {
+		t.Errorf("rm target: got %v, want it not to target the name %q", rm, "agent-issue-1")
 	}
 }
 
 // A scripted rm failure against a container confirmed to exist is returned, not
 // swallowed: Terminate needs to know a genuine reap failure happened.
 func TestKill_RemovalFailureOnExistingContainer_ReturnsError(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{}, fakeCall{exit: 1}) // inspect: found; rm -f: fails
+	script, _ := newFakeCLI(t,
+		fakeCall{stdout: inspectJSONStdout(t, "kill-failure-id", "running", time.Now())},
+		fakeCall{exit: 1}, // rm -f: fails
+	)
 	a := &ociAdapter{cli: script}
 
 	if err := a.Kill("agent-issue-1"); err == nil {
@@ -2061,23 +2482,86 @@ func TestIsReady_ImagePresentReturnsNil(t *testing.T) {
 	}
 }
 
-// IsRunning reports true only for the exact "running" status string.
+// IsRunning reports true for any live (non-reapable) status, not just the
+// exact "running" string, and false for a reapable status or a failed
+// inspect (issue #3633).
 func TestIsRunning_ScriptedStatuses(t *testing.T) {
-	script, _ := newFakeCLI(t,
-		fakeCall{stdout: "running"},
-		fakeCall{stdout: "exited"},
-		fakeCall{exit: 1},
-	)
-	a := &ociAdapter{cli: script}
+	t.Run("running reports true regardless of age", func(t *testing.T) {
+		script, _ := newFakeCLI(t, fakeCall{stdout: inspectJSONStdout(t, "cid", "running", time.Now().Add(-3*time.Hour))})
+		a := &ociAdapter{cli: script}
+		if !a.IsRunning("c") {
+			t.Error(`IsRunning: want true for "running" status`)
+		}
+	})
 
-	if !a.IsRunning("c") {
-		t.Error(`IsRunning: want true for "running" status`)
+	t.Run("recently created reports true (mid-creation sibling)", func(t *testing.T) {
+		script, _ := newFakeCLI(t, fakeCall{stdout: inspectJSONStdout(t, "cid", "created", time.Now().Add(-5*time.Second))})
+		a := &ociAdapter{cli: script}
+		if !a.IsRunning("c") {
+			t.Error(`IsRunning: want true for a recently "created" status, issue #3633`)
+		}
+	})
+
+	t.Run("stale created reports false (abandoned mid-create)", func(t *testing.T) {
+		script, _ := newFakeCLI(t, fakeCall{stdout: inspectJSONStdout(t, "cid", "created", time.Now().Add(-3*time.Hour))})
+		a := &ociAdapter{cli: script}
+		if a.IsRunning("c") {
+			t.Error(`IsRunning: want false for a "created" status older than midCreationGrace`)
+		}
+	})
+
+	t.Run("exited reports false", func(t *testing.T) {
+		script, _ := newFakeCLI(t, fakeCall{stdout: inspectJSONStdout(t, "cid", "exited", time.Now())})
+		a := &ociAdapter{cli: script}
+		if a.IsRunning("c") {
+			t.Error(`IsRunning: want false for "exited" status`)
+		}
+	})
+
+	t.Run("failed inspect reports false", func(t *testing.T) {
+		script, _ := newFakeCLI(t, fakeCall{exit: 1})
+		a := &ociAdapter{cli: script}
+		if a.IsRunning("c") {
+			t.Error("IsRunning: want false when inspect fails (exit 1)")
+		}
+	})
+}
+
+// container.reapable allowlists exited/stopped/dead as safe to rm -f
+// regardless of age; "running" is never safe; every other status —
+// recognised transient states and anything unrecognised — is safe only once
+// it has outlived midCreationGrace, so a sibling launcher's container that is
+// merely slow to start fails safe toward "do not destroy" while a genuinely
+// abandoned one is still cleared (issue #3633).
+func TestContainerReapable(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		name    string
+		status  string
+		created time.Time
+		want    bool
+	}{
+		{"exited, just created", "exited", now, true},
+		{"exited, hours old", "exited", now.Add(-3 * time.Hour), true},
+		{"stopped, just created", "stopped", now, true},
+		{"dead, just created", "dead", now, true},
+		{"running, just created", "running", now, false},
+		{"running, hours old", "running", now.Add(-3 * time.Hour), false},
+		{"created, within grace", "created", now.Add(-5 * time.Second), false},
+		{"created, past grace", "created", now.Add(-3 * time.Hour), true},
+		{"configuring, within grace", "configuring", now.Add(-5 * time.Second), false},
+		{"configuring, past grace", "configuring", now.Add(-3 * time.Hour), true},
+		{"unrecognised status, within grace", "some-unrecognised-future-status", now.Add(-5 * time.Second), false},
+		{"unrecognised status, past grace", "some-unrecognised-future-status", now.Add(-3 * time.Hour), true},
+		{"zero created timestamp reaps", "created", time.Time{}, true},
 	}
-	if a.IsRunning("c") {
-		t.Error(`IsRunning: want false for "exited" status`)
-	}
-	if a.IsRunning("c") {
-		t.Error("IsRunning: want false when inspect fails (exit 1)")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := container{status: c.status, created: c.created}.reapable(now)
+			if got != c.want {
+				t.Errorf("container{status: %q, created: %v}.reapable(now) = %v, want %v", c.status, c.created, got, c.want)
+			}
+		})
 	}
 }
 
