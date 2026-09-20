@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/shutdown"
 	"spindrift.dev/launcher/internal/terminate"
 )
 
@@ -43,7 +43,9 @@ var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 // precedence over ErrImageStale and ErrOpenNoneDispatchable in the terminal
 // switch below, whichever detection races first, since an operator's explicit
 // wind-down request should never be masked by a stale-image or empty-queue
-// verdict discovered in the same drain (#3520).
+// verdict discovered in the same drain (#3520). Dispatch's one-shot wave
+// returns it too (#3522), by the same precedence, once its own
+// shutdown.Gate reports signalled.
 var ErrSignalledStop = errors.New("stop requested; drained outstanding work")
 
 // Discoverer re-queries the dispatchable Batch. RunContinuous calls it at
@@ -204,13 +206,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		// marks it), so no non-abort path changes.
 		terminated = terminate.NewRegistry()
 	}
-	// reaper is f boxed into the Reaper interface only when non-nil: a nil
-	// *dispatch.Factory boxed unconditionally would compare non-nil, defeating
-	// Reclaim's own nil guard (mirrors console.Launcher.Terminate, #3521).
-	var reaper terminate.Reaper
-	if f != nil {
-		reaper = f
-	}
+	reaper := f.AsReaper()
 
 	// mu also guards stale, dispatchedAny, claimed, and outstanding below
 	// (#653): every refill call, whether from the bootstrap loop, a completing
@@ -304,31 +300,21 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 	}
 
-	// reclaimInFlight prints one line, then calls terminate.Reclaim for every
-	// still-launched, not-yet-finished issue (#3521). Caller holds mu on entry
-	// and exit, the reportStaleDrainReleasingMu idiom above: the snapshot is
-	// sorted (deterministic output) and taken before mu drops, so Reclaim's
-	// tracker/reaper I/O never runs with mu held, and mu is retaken before
-	// returning so the caller's own critical section continues unbroken.
-	// observeAbort below is its only caller, guarded so it runs exactly once.
+	// reclaimInFlight snapshots inflight, drops mu for shutdown.AbortInFlight's
+	// I/O, and retakes it before returning -- the reportStaleDrainReleasingMu
+	// idiom above: mu is held on entry and exit, and observeAbort below is its
+	// only caller, guarded so it runs exactly once. AbortInFlight (#3522) is
+	// the same sort/print/Reclaim-loop dispatchWave's shutdown.Gate uses for
+	// its own abort path, so the two Box-launching paths share one loop that
+	// actually talks to the tracker and reaper.
 	reclaimInFlight := func() {
 		nums := make([]string, 0, len(inflight))
 		for num := range inflight {
 			nums = append(nums, num)
 		}
-		sort.Strings(nums)
-		if len(nums) == 0 {
-			fmt.Println("==> abort requested; nothing in flight")
-			return
-		}
-		fmt.Printf("==> abort requested; terminating %d outstanding Box(es)\n", len(nums))
 		aborting = true
 		mu.Unlock()
-		for _, num := range nums {
-			if err := terminate.Reclaim(it, cf, reaper, terminated, num); err != nil {
-				fmt.Fprintf(os.Stderr, "continuous: abort: reclaim #%s: %v\n", num, err)
-			}
-		}
+		shutdown.AbortInFlight(it, cf, reaper, terminated, nums)
 		mu.Lock()
 		aborting = false
 		idle.Broadcast()

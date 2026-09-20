@@ -34,7 +34,7 @@ func TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T)
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
-	}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
+	}, edges, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -67,7 +67,7 @@ func TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade(t *testing.T) {
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "dependent issue"},
-	}, edges, nil, nil, OriginDiscovered, claimer); err != nil {
+	}, edges, nil, nil, OriginDiscovered, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "10", Title: "first"},
 			{Number: "15", Title: "second"},
-		}, nil, nil, nil, OriginSelective, claimer); err != nil {
+		}, nil, nil, nil, OriginSelective, claimer, nil); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -134,7 +134,7 @@ func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testin
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, nil, nil, OriginClaimed, claimer); err != nil {
+	}, edges, nil, nil, OriginClaimed, claimer, nil); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 

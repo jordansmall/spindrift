@@ -82,10 +82,10 @@ func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	waveDone := make(chan struct{})
 	go func() {
-		dispatchWave(c, fc, f, s, []Issue{
+		dispatchWave(c, fc, fc, f, s, []Issue{
 			{Number: "1", Title: "first"},
 			{Number: "2", Title: "second"},
-		}, claimer)
+		}, OriginDiscovered, claimer, nil)
 		close(waveDone)
 	}()
 
@@ -157,10 +157,10 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 	f := testFactory(t, dir, fr)
 	s := newSettle(cfc, cfc)
 	claimer := NewLabelClaimer(cfc, label, testInProgressLabel)
-	dispatchWave(c, cfc, f, s, []Issue{
+	dispatchWave(c, cfc, cfc, f, s, []Issue{
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
-	}, claimer)
+	}, OriginDiscovered, claimer, nil)
 
 	if got := atomic.LoadInt32(&count); got != 2 {
 		t.Errorf("total claims after dispatchWave with failing first box: got %d, want 2", got)
@@ -204,7 +204,7 @@ func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) 
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	out := testutil.CaptureStdout(t, func() {
-		dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
+		dispatchWave(c, fc, fc, f, s, []Issue{{Number: "1", Title: "first"}}, OriginDiscovered, claimer, nil)
 	})
 
 	iss, err := fc.Issue("1")
@@ -246,7 +246,7 @@ func TestDispatchWave_FailedBoxWithEmptyLogPrintsErrToStderr(t *testing.T) {
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	errOut := testutil.CaptureStderr(t, func() {
-		dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
+		dispatchWave(c, fc, fc, f, s, []Issue{{Number: "1", Title: "first"}}, OriginDiscovered, claimer, nil)
 	})
 
 	if !strings.Contains(errOut, "?? #1: ") || !strings.Contains(errOut, boxErr.Error()) {
@@ -276,7 +276,7 @@ func TestDispatchWave_FailedBoxWithLogOutputPrintsNoExtraStderr(t *testing.T) {
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	errOut := testutil.CaptureStderr(t, func() {
-		dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
+		dispatchWave(c, fc, fc, f, s, []Issue{{Number: "1", Title: "first"}}, OriginDiscovered, claimer, nil)
 	})
 
 	if strings.Contains(errOut, "?? #1") {
@@ -312,7 +312,7 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
-	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
+	dispatchWave(c, fc, fc, f, s, []Issue{{Number: "1", Title: "first"}}, OriginDiscovered, claimer, nil)
 
 	iss, err := fc.Issue("1")
 	if err != nil {
@@ -354,7 +354,7 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc.AsPushOnly())
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
-	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
+	dispatchWave(c, fc, fc, f, s, []Issue{{Number: "1", Title: "first"}}, OriginDiscovered, claimer, nil)
 
 	iss, err := fc.Issue("1")
 	if err != nil {
@@ -400,7 +400,7 @@ func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc.AsPushOnly())
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
-	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
+	dispatchWave(c, fc, fc, f, s, []Issue{{Number: "1", Title: "first"}}, OriginDiscovered, claimer, nil)
 
 	iss, err := fc.Issue("1")
 	if err != nil {

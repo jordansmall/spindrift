@@ -41,7 +41,7 @@ func TestRun_Selective_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	if err := run(c, fc, fc, dir, f, s, plan, claimer); !errors.Is(err, ErrOpenNoneDispatchable) {
+	if err := run(c, nil, fc, fc, dir, f, s, plan, claimer); !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("Run: got %v, want ErrOpenNoneDispatchable", err)
 	}
 	if len(fr.RunCalls) != 0 {
@@ -81,7 +81,7 @@ func TestRun_Discovered_MaxJobsZero_DependencyEdge_DispatchesOnlyUnblockedWave(t
 	if plan.Mode != ModeDrain {
 		t.Fatalf("Mode = %v, want ModeDrain", plan.Mode)
 	}
-	if err := run(c, fc, fc, dir, f, s, plan, claimer); err != nil {
+	if err := run(c, nil, fc, fc, dir, f, s, plan, claimer); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -134,7 +134,7 @@ func TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	err = run(c, fc, fc, dir, f, s, plan, claimer)
+	err = run(c, nil, fc, fc, dir, f, s, plan, claimer)
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("Run: got %v, want ErrOpenNoneDispatchable", err)
 	}
@@ -185,7 +185,7 @@ func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testin
 		t.Fatalf("NewPlan: %v", err)
 	}
 
-	if err := run(c, fc, fc, dir, f, s, plan, claimer); !errors.Is(err, ErrOpenNoneDispatchable) {
+	if err := run(c, nil, fc, fc, dir, f, s, plan, claimer); !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("first Run: got %v, want ErrOpenNoneDispatchable", err)
 	}
 	if len(fr.RunCalls) != 0 {
@@ -193,7 +193,7 @@ func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testin
 	}
 
 	fc.TransitionState("20", forge.InProgress, forge.Complete)
-	if err := run(c, fc, fc, dir, f, s, plan, claimer); err != nil {
+	if err := run(c, nil, fc, fc, dir, f, s, plan, claimer); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
 	if len(fr.RunCalls) != 1 {
