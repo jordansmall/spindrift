@@ -150,7 +150,7 @@ func fakeManifestRow(rewrite func([]byte, registryvocab.RewriteContext) registry
 func TestFakeRewriteRow_MatchesAndLearns(t *testing.T) {
 	const assetBody = `{"asset":"https://widget.example.com/downloads/pkg-1.0.tar.gz"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index/manifest.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -160,34 +160,27 @@ func TestFakeRewriteRow_MatchesAndLearns(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer upstream.Close()
+	})
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newProxy(t, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeSingleAsset)}, []Route{{
 		MatchHost:        "widget.example.com",
 		EnforcedPaths:    []string{"/index"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/index"}},
 		Upstream:         upstream.URL,
 	}})
-	p, err := New(routes, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeSingleAsset)})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	prefix := routes[0].Prefix
 
 	// The static enforced set is "/index" only, so "/downloads/..." must start
 	// out refused, or a later 200 there would prove nothing.
-	preRR := httptest.NewRecorder()
 	preReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/downloads/pkg-1.0.tar.gz", nil)
-	p.ServeHTTP(preRR, preReq)
+	preRR := serve(p, preReq)
 	if preRR.Code != http.StatusForbidden {
 		t.Fatalf("before learning: status = %d, want %d (refused)", preRR.Code, http.StatusForbidden)
 	}
 
-	manifestRR := httptest.NewRecorder()
 	manifestReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index/manifest.json", nil)
 	manifestReq.Host = "forwarder.example:9999"
-	p.ServeHTTP(manifestRR, manifestReq)
+	manifestRR := serve(p, manifestReq)
 	if manifestRR.Code != http.StatusOK {
 		t.Fatalf("manifest fetch: status = %d, want %d", manifestRR.Code, http.StatusOK)
 	}
@@ -196,9 +189,8 @@ func TestFakeRewriteRow_MatchesAndLearns(t *testing.T) {
 		t.Errorf("manifest body = %s, want %s", got, wantBody)
 	}
 
-	postRR := httptest.NewRecorder()
 	postReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/downloads/pkg-1.0.tar.gz", nil)
-	p.ServeHTTP(postRR, postReq)
+	postRR := serve(p, postReq)
 	if postRR.Code != http.StatusOK {
 		t.Fatalf("after learning: status = %d, want %d (admitted)", postRR.Code, http.StatusOK)
 	}
@@ -214,32 +206,26 @@ func TestFakeRewriteRow_MatchesAndLearns(t *testing.T) {
 func TestFakeRewriteRow_EcosystemTagMismatchNeverMatches(t *testing.T) {
 	const assetBody = `{"asset":"https://widget.example.com/downloads/pkg-1.0.tar.gz"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(assetBody))
-	}))
-	defer upstream.Close()
+	})
 
 	// The route's subtree is tagged "widget" and the row below "gadget": same
 	// method, same path shape, different ecosystem.
-	routes := AssignPrefixes([]Route{{
+	row := fakeManifestRow(rewriteFakeSingleAsset)
+	row.Ecosystem = "gadget"
+	p, routes := newProxy(t, []registryvocab.RewriteRow{row}, []Route{{
 		MatchHost:        "widget.example.com",
 		EnforcedPaths:    []string{"/index"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/index"}},
 		Upstream:         upstream.URL,
 	}})
-	row := fakeManifestRow(rewriteFakeSingleAsset)
-	row.Ecosystem = "gadget"
-	p, err := New(routes, []registryvocab.RewriteRow{row})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index/manifest.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -255,7 +241,7 @@ func TestFakeRewriteRow_EcosystemTagMismatchNeverMatches(t *testing.T) {
 func TestFakeRewriteRow_MultipleEditsAllLoggedAndAllLearned(t *testing.T) {
 	const manifestBody = `{"primary":"https://widget.example.com/primary/pkg.tar.gz","secondary":"https://widget.example.com/mirror/pkg.tar.gz"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index/manifest.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -263,27 +249,21 @@ func TestFakeRewriteRow_MultipleEditsAllLoggedAndAllLearned(t *testing.T) {
 		default:
 			_, _ = w.Write([]byte("asset bytes for " + r.URL.Path))
 		}
-	}))
-	defer upstream.Close()
+	})
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newProxy(t, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeDualAssets)}, []Route{{
 		MatchHost:        "widget.example.com",
 		EnforcedPaths:    []string{"/index"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/index"}},
 		Upstream:         upstream.URL,
 	}})
-	p, err := New(routes, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeDualAssets)})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index/manifest.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -294,9 +274,8 @@ func TestFakeRewriteRow_MultipleEditsAllLoggedAndAllLearned(t *testing.T) {
 	}
 
 	for _, relPath := range []string{"/primary/pkg.tar.gz", "/mirror/pkg.tar.gz"} {
-		followRR := httptest.NewRecorder()
 		followReq := httptest.NewRequest(http.MethodGet, "/"+prefix+relPath, nil)
-		p.ServeHTTP(followRR, followReq)
+		followRR := serve(p, followReq)
 		if followRR.Code != http.StatusOK {
 			t.Errorf("follow-up %s: status = %d, want %d (learned path must be admitted)", relPath, followRR.Code, http.StatusOK)
 		}
@@ -309,30 +288,24 @@ func TestFakeRewriteRow_MultipleEditsAllLoggedAndAllLearned(t *testing.T) {
 func TestFakeRewriteRow_SkipWithNoEditsLogsAsASkip(t *testing.T) {
 	const manifestBody = `{"asset":"https://widget.example.com/downloads/pkg-1.0.tar.gz"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(manifestBody))
-	}))
-	defer upstream.Close()
+	})
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newProxy(t, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeSkipNoEdits)}, []Route{{
 		MatchHost:        "widget.example.com",
 		EnforcedPaths:    []string{"/index"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/index"}},
 		Upstream:         upstream.URL,
 	}})
-	p, err := New(routes, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeSkipNoEdits)})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index/manifest.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -356,7 +329,7 @@ func TestFakeRewriteRow_SkipWithNoEditsLogsAsASkip(t *testing.T) {
 func TestFakeRewriteRow_MixedAppliedAndDeclinedEdits(t *testing.T) {
 	const manifestBody = `{"primary":"https://widget.example.com/primary/pkg.tar.gz","secondary":"https://cdn.example.com/mirror/pkg.tar.gz"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index/manifest.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -364,27 +337,21 @@ func TestFakeRewriteRow_MixedAppliedAndDeclinedEdits(t *testing.T) {
 		default:
 			_, _ = w.Write([]byte("asset bytes for " + r.URL.Path))
 		}
-	}))
-	defer upstream.Close()
+	})
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newProxy(t, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeMixedAssets)}, []Route{{
 		MatchHost:        "widget.example.com",
 		EnforcedPaths:    []string{"/index"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/index"}},
 		Upstream:         upstream.URL,
 	}})
-	p, err := New(routes, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeMixedAssets)})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index/manifest.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -402,18 +369,16 @@ func TestFakeRewriteRow_MixedAppliedAndDeclinedEdits(t *testing.T) {
 		t.Errorf("declined edit logged as if it had been rewritten: %q", logged)
 	}
 
-	primaryRR := httptest.NewRecorder()
 	primaryReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/primary/pkg.tar.gz", nil)
-	p.ServeHTTP(primaryRR, primaryReq)
+	primaryRR := serve(p, primaryReq)
 	if primaryRR.Code != http.StatusOK {
 		t.Errorf("applied edit's path: status = %d, want %d (learned path must be admitted)", primaryRR.Code, http.StatusOK)
 	}
 
 	// Nothing was learned from the declined edit, so its path must still be
 	// refused rather than falling back to admitting the root subtree.
-	mirrorRR := httptest.NewRecorder()
 	mirrorReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/mirror/pkg.tar.gz", nil)
-	p.ServeHTTP(mirrorRR, mirrorReq)
+	mirrorRR := serve(p, mirrorReq)
 	if mirrorRR.Code != http.StatusForbidden {
 		t.Errorf("declined edit's path: status = %d, want %d (nothing learned from a declined edit)", mirrorRR.Code, http.StatusForbidden)
 	}
@@ -433,28 +398,22 @@ func TestFakeRewriteRow_ForeignHostAndNoneBothRelayUntouched(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(tc.body))
-			}))
-			defer upstream.Close()
+			})
 
-			routes := AssignPrefixes([]Route{{
+			p, routes := newProxy(t, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeSingleAsset)}, []Route{{
 				MatchHost:        "widget.example.com",
 				EnforcedPaths:    []string{"/index"},
 				EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/index"}},
 				Upstream:         upstream.URL,
 			}})
-			p, err := New(routes, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeSingleAsset)})
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
 			prefix := routes[0].Prefix
 
-			rr := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index/manifest.json", nil)
 			req.Host = "forwarder.example:9999"
-			p.ServeHTTP(rr, req)
+			rr := serve(p, req)
 
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)

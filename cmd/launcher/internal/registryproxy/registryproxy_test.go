@@ -384,15 +384,10 @@ func TestNew_UnknownPrefixReturns404WithoutDialingUpstream(t *testing.T) {
 	upstream.Start()
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes, nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, routes := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL})
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/not-"+routes[0].Prefix+"/pkg", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
@@ -422,14 +417,10 @@ func TestNew_RootAndEmptySegmentPathsReturn404WithoutDialingUpstream(t *testing.
 			upstream.Start()
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL}}), nil)
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
+			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL})
 
-			rr := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, path, nil)
-			p.ServeHTTP(rr, req)
+			rr := serve(p, req)
 
 			if rr.Code != http.StatusNotFound {
 				t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
@@ -572,15 +563,11 @@ func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	upstream.Start()
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"})
 	ct := countUpstreamAttempts(t, p)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/crates/foo", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
@@ -955,18 +942,14 @@ func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
 
 	// Silence the default error handler's log line for the expected handshake
 	// failure.
 	captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d (untrusted upstream certificate must fail the handshake)", rr.Code, http.StatusBadGateway)
@@ -1227,10 +1210,7 @@ func TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream(t *tes
 			upstream.Start()
 			defer upstream.Close()
 
-			handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "real-credential"}}), nil)
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
+			handler, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "real-credential"})
 
 			p := &Proxy{Handler: handler}
 			if err := p.ListenAndServeTCP("127.0.0.1:0", secret); err != nil {
@@ -1403,10 +1383,7 @@ func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstrea
 	upstream.Start()
 	defer upstream.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	handler, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"})
 
 	p := &Proxy{Handler: handler}
 	if err := p.ListenAndServeTCP("127.0.0.1:0", secret); err != nil {
@@ -1451,10 +1428,9 @@ func TestAssignPrefixes_EmptyMatchHostFallsBackToIndex(t *testing.T) {
 // An empty Prefix makes the route unroutable, so New must refuse it rather
 // than accept it silently.
 func TestNew_RejectsEmptyPrefix(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
 	if _, err := New([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: ""}}, nil); err == nil {
 		t.Fatal("New with empty Prefix = nil error, want error")
@@ -1463,10 +1439,9 @@ func TestNew_RejectsEmptyPrefix(t *testing.T) {
 
 // A request naming a shared prefix would have no unique route to select.
 func TestNew_RejectsDuplicatePrefix(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
 	_, err := New([]Route{
 		{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: "dup"},
@@ -1480,10 +1455,9 @@ func TestNew_RejectsDuplicatePrefix(t *testing.T) {
 // The Prefix becomes the first URL path segment a request selects a route by,
 // so a character outside [a-z0-9-] must be refused.
 func TestNew_RejectsInvalidPrefixChars(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
 	for _, prefix := range []string{"Registry", "registry_a", "registry/a", "registry a"} {
 		t.Run(prefix, func(t *testing.T) {
@@ -1571,22 +1545,20 @@ func TestNew_NeverLogsCredentialForRefusedPath(t *testing.T) {
 // the proxy (req.Host), with the route's prefix re-inserted and the dl's own
 // path preserved.
 func TestModifyResponse_CargoConfigJSON_RewritesDL(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/config.json" {
 			t.Errorf("upstream got path %q, want /config.json", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates"}`))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1607,21 +1579,19 @@ func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me"
 	const body = `{"dl":"https://cdn.example.com/api/v1/crates"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential})
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1651,22 +1621,20 @@ func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *test
 	const body = `{"dl":"https://cdn.example.com/api/v1/crates"}`
 
 	var gotAcceptEncoding string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		gotAcceptEncoding = r.Header.Get("Accept-Encoding")
 		w.Header().Set("Content-Type", "application/json")
 		// This upstream would gzip had the client's Accept-Encoding survived
 		// the Rewrite hook; it did not.
 		_, _ = w.Write([]byte(body))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1682,20 +1650,17 @@ func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *test
 func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
 	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
 	// The cargo download endpoint names no rewrite row, even though this
 	// fixture body carries a "dl" field naming the route's own match-host.
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0.0/download", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1717,18 +1682,15 @@ func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
 
 	for _, path := range []string{"/api/v1/crates", "/index/co/nf/config"} {
 		t.Run(path, func(t *testing.T) {
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(body))
-			}))
-			defer upstream.Close()
+			})
 
 			p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 			prefix := routes[0].Prefix
 
-			rr := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/"+prefix+path, nil)
-			p.ServeHTTP(rr, req)
+			rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+prefix+path, nil))
 
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1743,22 +1705,19 @@ func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
 // Guards issue #2854's HEAD-crash defect: a HEAD response has no body for
 // ModifyResponse to read, and the reverted hook crashed parsing one anyway.
 func TestModifyResponse_HeadForCargoConfigJSONUntouched(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Test", "head-response")
 		w.WriteHeader(http.StatusOK)
 		// net/http strips any body for a HEAD request, so none is written
 		// here even though Content-Type is set. That is the shape a real
 		// HEAD /config.json response has.
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodHead, "/"+prefix+"/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, httptest.NewRequest(http.MethodHead, "/"+prefix+"/config.json", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1776,19 +1735,17 @@ func TestModifyResponse_HeadForCargoConfigJSONUntouched(t *testing.T) {
 func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
 	const credential = "s3kr1t-do-not-leak-me"
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates"}`))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1806,7 +1763,7 @@ func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
 func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 	const rawBody = `{"dl":"https://crates.example.com/api/v1/crates"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			w.Header().Set("Content-Encoding", "gzip")
@@ -1816,17 +1773,15 @@ func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(rawBody))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1848,19 +1803,17 @@ func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 // Accept-Encoding.
 func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
 	var gotAcceptEncoding string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		gotAcceptEncoding = r.Header.Get("Accept-Encoding")
 		_, _ = w.Write([]byte("ok"))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0.0/download", nil)
 	req.Header.Set("Accept-Encoding", "gzip, deflate")
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1878,21 +1831,19 @@ func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t
 	const credential = "s3kr1t-do-not-log-me"
 	const body = `{"not-a-dl-field":"nothing to rewrite here"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential})
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1923,21 +1874,19 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 	const sentinelValue = "sentinel-unrelated-value"
 	rawBody := `{"dl":"https://crates.example.com/api/v1/crates","` + sentinelField + `":"` + sentinelValue + `"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(rawBody))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential})
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1967,19 +1916,17 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 func TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten(t *testing.T) {
 	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Host = "" // no Host header, so selectedRoute.forwarder stays nil
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1997,20 +1944,18 @@ func TestModifyResponse_NonOKStatusSkipsRewrite(t *testing.T) {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
 
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(status)
 				_, _ = w.Write([]byte(body))
-			}))
-			defer upstream.Close()
+			})
 
 			p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 			prefix := routes[0].Prefix
 
-			rr := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 			req.Host = "forwarder.example:9999"
-			p.ServeHTTP(rr, req)
+			rr := serve(p, req)
 
 			if rr.Code != status {
 				t.Fatalf("status = %d, want %d", rr.Code, status)
@@ -2036,21 +1981,19 @@ func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
 	}
 	copy(body[maxRewriteBodyBytes-len(straddle)/2:], straddle)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(body)
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -2072,7 +2015,7 @@ func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
 // mid-body, so io.ReadAll inside modifyResponse errors. The client must see a
 // 502 rather than a hang or a panic.
 func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		if !ok {
 			t.Fatalf("upstream ResponseWriter does not support hijacking")
@@ -2084,16 +2027,14 @@ func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 		defer conn.Close()
 		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{\"dl\":")
 		_ = buf.Flush()
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d (body read error must become 502, not a hang or panic)", rr.Code, http.StatusBadGateway)
@@ -2105,21 +2046,15 @@ func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusInternalServerError} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(status)
-			}))
-			defer upstream.Close()
+			})
 
-			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
+			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
 
 			logBuf := captureLog(t)
 
-			rr := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-			p.ServeHTTP(rr, req)
+			rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 
 			if rr.Code != status {
 				t.Fatalf("status = %d, want %d", rr.Code, status)
@@ -2134,21 +2069,15 @@ func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
 }
 
 func TestNew_NoLogForSuccessfulUpstreamStatus(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -2161,22 +2090,16 @@ func TestNew_NoLogForSuccessfulUpstreamStatus(t *testing.T) {
 // Pins ADR 0044's single-hop behaviour for the failure log line too: a
 // redirect is not a failure, so it is relayed intact and never logged as one.
 func TestNew_RedirectStatusNeitherLoggedNorFollowed(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "https://cdn.example.com/artifact")
 		w.WriteHeader(http.StatusFound)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 
 	if rr.Code != http.StatusFound {
 		t.Fatalf("status = %d, want %d (single-hop: redirect relayed, never followed)", rr.Code, http.StatusFound)
@@ -2194,21 +2117,15 @@ func TestNew_RedirectStatusNeitherLoggedNorFollowed(t *testing.T) {
 func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
 	const body = "not found here"
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Upstream-Marker", "present")
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(body))
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
@@ -2225,15 +2142,11 @@ func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
 // distinct ones are suppressed until Close flushes their summary, and a
 // repeat of the first is neither re-logged nor double-counted.
 func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
 
 	logBuf := captureLog(t)
 
@@ -2244,9 +2157,7 @@ func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 		"/r0/config.json", // repeat of the first, neither logged nor counted
 	}
 	for _, path := range paths {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		p.ServeHTTP(rr, req)
+		rr := serve(p, httptest.NewRequest(http.MethodGet, path, nil))
 		if rr.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
 		}
@@ -2273,22 +2184,17 @@ func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 // Each route accumulates and flushes its own failure state, and the summaries
 // come out in route-table order (issue #3125).
 func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
-	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstreamA := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer upstreamA.Close()
-	upstreamB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})
+	upstreamB := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer upstreamB.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{
-		{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
-		{EnforcedPaths: []string{"/"}, Upstream: upstreamB.URL, Credential: ""},
-	}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t,
+		Route{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
+		Route{EnforcedPaths: []string{"/"}, Upstream: upstreamB.URL, Credential: ""},
+	)
 	proxy := &Proxy{Handler: p}
 
 	logBuf := captureLog(t)
@@ -2301,9 +2207,7 @@ func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 		"/r1/third.json",
 	}
 	for _, path := range requests {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		proxy.Handler.ServeHTTP(rr, req)
+		serve(proxy.Handler, httptest.NewRequest(http.MethodGet, path, nil))
 	}
 
 	if err := proxy.Close(); err != nil {
@@ -2328,21 +2232,15 @@ func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 func TestNew_NeverLogsCredentialForUpstreamFailure(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me-either"
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential})
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnauthorized)
@@ -2356,20 +2254,15 @@ func TestNew_NeverLogsCredentialForUpstreamFailure(t *testing.T) {
 // route-relative path, distinct from the HTTP-status one, and the client
 // still gets ReverseProxy's usual 502.
 func TestNew_LogsUpstreamTransportFailure(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {})
 	upstreamURL := upstream.URL
 	upstream.Close() // now refuses connections
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""})
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadGateway)
@@ -2387,29 +2280,23 @@ func TestNew_LogsUpstreamTransportFailure(t *testing.T) {
 // One route answers 401, the other is unreachable. The HTTP-status line names
 // a status code and the transport line never does.
 func TestNew_DistinguishesTransportFailureFromHTTPStatusFailure(t *testing.T) {
-	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstreamA := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	defer upstreamA.Close()
+	})
 
-	upstreamB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	upstreamB := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {})
 	upstreamBURL := upstreamB.URL
 	upstreamB.Close()
 
-	p, err := New(AssignPrefixes([]Route{
-		{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
-		{EnforcedPaths: []string{"/"}, Upstream: upstreamBURL, Credential: ""},
-	}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t,
+		Route{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
+		Route{EnforcedPaths: []string{"/"}, Upstream: upstreamBURL, Credential: ""},
+	)
 
 	logBuf := captureLog(t)
 
-	rrA := httptest.NewRecorder()
-	p.ServeHTTP(rrA, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
-	rrB := httptest.NewRecorder()
-	p.ServeHTTP(rrB, httptest.NewRequest(http.MethodGet, "/r1/config.json", nil))
+	serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	serve(p, httptest.NewRequest(http.MethodGet, "/r1/config.json", nil))
 
 	logged := logBuf.String()
 	wantA := "registryproxy: r0: upstream error status: GET /config.json 401"
@@ -2427,20 +2314,15 @@ func TestNew_DistinguishesTransportFailureFromHTTPStatusFailure(t *testing.T) {
 func TestNew_NeverLogsCredentialForTransportFailure(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me-transport"
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {})
 	upstreamURL := upstream.URL
 	upstream.Close() // now refuses connections
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: credential}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: credential})
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadGateway)
@@ -2454,28 +2336,23 @@ func TestNew_NeverLogsCredentialForTransportFailure(t *testing.T) {
 // happens first logs in full, the other is suppressed, and Close's teardown
 // summary is one count covering both.
 func TestNew_SharesSuppressionAcrossTransportAndStatusFailures(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-	}))
+	})
 	upstreamURL := upstream.URL
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""})
 
 	logBuf := captureLog(t)
 
-	rr1 := httptest.NewRecorder()
-	p.ServeHTTP(rr1, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr1 := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 	if rr1.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", rr1.Code, http.StatusNotFound)
 	}
 
 	upstream.Close() // now refuses connections, for the transport leg below
 
-	rr2 := httptest.NewRecorder()
-	p.ServeHTTP(rr2, httptest.NewRequest(http.MethodGet, "/r0/other.json", nil))
+	rr2 := serve(p, httptest.NewRequest(http.MethodGet, "/r0/other.json", nil))
 	if rr2.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d", rr2.Code, http.StatusBadGateway)
 	}
@@ -2502,21 +2379,15 @@ func TestNew_SharesSuppressionAcrossTransportAndStatusFailures(t *testing.T) {
 }
 
 func TestNew_NoTransportOrStatusLogForSuccessfulRequest(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -2532,16 +2403,12 @@ func TestNew_NoTransportOrStatusLogForSuccessfulRequest(t *testing.T) {
 // context.Canceled, but nothing upstream failed, so nothing is logged.
 func TestNew_ClientAbortNotLoggedAsUpstreamFailure(t *testing.T) {
 	received := make(chan struct{})
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		close(received)
 		<-r.Context().Done()
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
 
 	logBuf := captureLog(t)
 
@@ -2552,9 +2419,7 @@ func TestNew_ClientAbortNotLoggedAsUpstreamFailure(t *testing.T) {
 		cancel()
 	}()
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil).WithContext(ctx)
-	p.ServeHTTP(rr, req)
+	serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil).WithContext(ctx))
 
 	logged := logBuf.String()
 	if strings.Contains(logged, "upstream request failed") || strings.Contains(logged, "upstream error status") {
@@ -2567,20 +2432,16 @@ func TestNew_ClientAbortNotLoggedAsUpstreamFailure(t *testing.T) {
 // method, path and status rather than an anonymous suppressed count.
 func TestNew_ClientAbortLeavesFirstFailureSlotForGenuineFailure(t *testing.T) {
 	received := make(chan struct{})
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/hang" {
 			close(received)
 			<-r.Context().Done()
 			return
 		}
 		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
 
 	logBuf := captureLog(t)
 
@@ -2591,11 +2452,9 @@ func TestNew_ClientAbortLeavesFirstFailureSlotForGenuineFailure(t *testing.T) {
 		cancel()
 	}()
 
-	rrAbort := httptest.NewRecorder()
-	p.ServeHTTP(rrAbort, httptest.NewRequest(http.MethodGet, "/r0/hang", nil).WithContext(ctx))
+	serve(p, httptest.NewRequest(http.MethodGet, "/r0/hang", nil).WithContext(ctx))
 
-	rr401 := httptest.NewRecorder()
-	p.ServeHTTP(rr401, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
+	rr401 := serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
 
 	if rr401.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rr401.Code, http.StatusUnauthorized)

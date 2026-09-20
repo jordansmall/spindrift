@@ -27,7 +27,7 @@ func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t 
 	const tarballBytes = "totally a tgz"
 
 	var gotAuthorization string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/registry/pkg":
 			w.Header().Set("Content-Type", "application/json")
@@ -38,8 +38,7 @@ func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t 
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer upstream.Close()
+	})
 
 	// EnforcedPaths covers only "/registry" (the packument's own subtree),
 	// not "/downloads". Otherwise the tarball path would already be admitted
@@ -53,17 +52,15 @@ func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t 
 	})
 	prefix := routes[0].Prefix
 
-	preRR := httptest.NewRecorder()
 	preReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/downloads/pkg-1.0.0.tgz", nil)
-	p.ServeHTTP(preRR, preReq)
+	preRR := serve(p, preReq)
 	if preRR.Code != http.StatusForbidden {
 		t.Fatalf("before learning: status = %d, want %d (refused)", preRR.Code, http.StatusForbidden)
 	}
 
-	packumentRR := httptest.NewRecorder()
 	packumentReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/registry/pkg", nil)
 	packumentReq.Host = "forwarder.example:9999"
-	p.ServeHTTP(packumentRR, packumentReq)
+	packumentRR := serve(p, packumentReq)
 	if packumentRR.Code != http.StatusOK {
 		t.Fatalf("packument fetch: status = %d, want %d", packumentRR.Code, http.StatusOK)
 	}
@@ -75,9 +72,8 @@ func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t 
 		t.Errorf("Content-Length = %q, want %q", got, strconv.Itoa(len(wantBody)))
 	}
 
-	postRR := httptest.NewRecorder()
 	postReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/downloads/pkg-1.0.0.tgz", nil)
-	p.ServeHTTP(postRR, postReq)
+	postRR := serve(p, postReq)
 	if postRR.Code != http.StatusOK {
 		t.Fatalf("after learning: status = %d, want %d (admitted)", postRR.Code, http.StatusOK)
 	}
@@ -95,22 +91,20 @@ func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t 
 func TestModifyResponse_NpmPackument_ScopedNameMatches(t *testing.T) {
 	const packument = `{"versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}}}}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/@scope/name" {
 			t.Errorf("upstream got path %q, want /@scope/name", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(packument))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/%40scope%2Fname", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -128,19 +122,17 @@ func TestModifyResponse_NpmPackument_ScopedNameMatches(t *testing.T) {
 func TestModifyResponse_NpmPackument_TarballShapedTwoSegmentPathDoesNotMatch(t *testing.T) {
 	const body = `{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/pkg/download", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -160,11 +152,10 @@ func TestModifyResponse_NpmPackument_MixedHostsOnlyRewritesSameHostAndLearnsNoth
 	const cdnTarball = "https://cdn.example.com/assets/pkg-2.0.0.tgz"
 	packument := fmt.Sprintf(`{"versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}},"2.0.0":{"dist":{"tarball":%q}}}}`, cdnTarball)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(packument))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost:        "registry.example.com",
@@ -177,10 +168,9 @@ func TestModifyResponse_NpmPackument_MixedHostsOnlyRewritesSameHostAndLearnsNoth
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/registry/pkg", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -202,9 +192,8 @@ func TestModifyResponse_NpmPackument_MixedHostsOnlyRewritesSameHostAndLearnsNoth
 		t.Errorf("log output contained the credential: %q", logged)
 	}
 
-	followRR := httptest.NewRecorder()
 	followReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/assets/pkg-2.0.0.tgz", nil)
-	p.ServeHTTP(followRR, followReq)
+	followRR := serve(p, followReq)
 	if followRR.Code != http.StatusForbidden {
 		t.Errorf("follow-up to the CDN's own path: status = %d, want %d (nothing must have been learned from a declined edit)", followRR.Code, http.StatusForbidden)
 	}
@@ -216,21 +205,19 @@ func TestModifyResponse_NpmPackument_MixedHostsOnlyRewritesSameHostAndLearnsNoth
 func TestModifyResponse_NpmPackument_HeadNeverMatches(t *testing.T) {
 	const packument = `{"versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}}}}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(packument))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodHead, "/"+prefix+"/pkg", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -249,22 +236,20 @@ func TestModifyResponse_NpmPackument_HeadNeverMatches(t *testing.T) {
 func TestModifyResponse_NpmPackument_NonOKStatusNeverMatches(t *testing.T) {
 	const body = `{"versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}}}}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(body))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/pkg", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
