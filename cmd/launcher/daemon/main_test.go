@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,6 +93,171 @@ func TestResolveKnob(t *testing.T) {
 				t.Errorf("resolveKnob() warning %q missing %s=", stderr.String(), tt.envVar)
 			}
 		})
+	}
+}
+
+// TestResolveKnobOptional pins the absent-is-normal shape DAEMON_AWAKE_WINDOW
+// needs: an absent knob resolves to "" without an error and without a
+// diagnostic, while the ambient-env-wins provenance warning (lookupKnob's
+// whole reason for existing) still fires when the document also carries a
+// value.
+func TestResolveKnobOptional(t *testing.T) {
+	tests := []struct {
+		name       string
+		env        map[string]string
+		doc        *inputDocument
+		envVar     string
+		want       string
+		wantWarned bool
+	}{
+		{
+			name:   "absent from both is not an error",
+			doc:    &inputDocument{Settings: map[string]string{}},
+			envVar: "DAEMON_AWAKE_WINDOW",
+			want:   "",
+		},
+		{
+			name:   "nil document, no env",
+			doc:    nil,
+			envVar: "DAEMON_AWAKE_WINDOW",
+			want:   "",
+		},
+		{
+			name:   "document only",
+			doc:    &inputDocument{Settings: map[string]string{"DAEMON_AWAKE_WINDOW": "22:00-06:00 Europe/London"}},
+			envVar: "DAEMON_AWAKE_WINDOW",
+			want:   "22:00-06:00 Europe/London",
+		},
+		{
+			name:       "env overrides document, warns provenance",
+			env:        map[string]string{"DAEMON_AWAKE_WINDOW": "20:00-05:00 UTC"},
+			doc:        &inputDocument{Settings: map[string]string{"DAEMON_AWAKE_WINDOW": "22:00-06:00 Europe/London"}},
+			envVar:     "DAEMON_AWAKE_WINDOW",
+			want:       "20:00-05:00 UTC",
+			wantWarned: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			var stderr bytes.Buffer
+			got := resolveKnobOptional(tt.doc, tt.envVar, &stderr)
+			if got != tt.want {
+				t.Errorf("resolveKnobOptional() = %q, want %q", got, tt.want)
+			}
+			warned := stderr.Len() > 0
+			if warned != tt.wantWarned {
+				t.Errorf("resolveKnobOptional() stderr = %q, wantWarned %v", stderr.String(), tt.wantWarned)
+			}
+		})
+	}
+}
+
+// validKnobDocument builds the minimal input document mainRun needs to get
+// past every required knob (DAEMON_APP, BASE_BRANCH, MAX_PARALLEL) and reach
+// the DAEMON_AWAKE_WINDOW parse step, so awake-window tests below fail (or
+// don't) for the reason they're actually testing rather than an earlier
+// missing-knob error.
+func validKnobDocument() *inputDocument {
+	return &inputDocument{Settings: map[string]string{
+		"DAEMON_APP":   ".#dogfood",
+		"BASE_BRANCH":  "main",
+		"MAX_PARALLEL": "1",
+	}}
+}
+
+// writeInputDocument writes doc as JSON to a temp file and returns its path,
+// the shape mainRun's --input flag expects.
+func writeInputDocument(t *testing.T, doc *inputDocument) string {
+	t.Helper()
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "input.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	return path
+}
+
+// TestMainRun_BadAwakeWindow pins that a malformed DAEMON_AWAKE_WINDOW from
+// the environment is rejected at startup: exit 1, with stderr naming the
+// knob and quoting the bad value, for both a malformed span and a bad zone
+// name.
+func TestMainRun_BadAwakeWindow(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "malformed span", raw: "bad-window"},
+		{name: "bad zone", raw: "22:00-06:00 Not/AZone"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("DAEMON_AWAKE_WINDOW", tt.raw)
+			path := writeInputDocument(t, validKnobDocument())
+			var stdout, stderr bytes.Buffer
+			got := mainRun([]string{"--input", path}, &stdout, &stderr)
+			if got != 1 {
+				t.Errorf("mainRun() = %d, want 1", got)
+			}
+			if !strings.Contains(stderr.String(), "DAEMON_AWAKE_WINDOW") {
+				t.Errorf("stderr = %q, want it to name DAEMON_AWAKE_WINDOW", stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.raw) {
+				t.Errorf("stderr = %q, want it to quote %q", stderr.String(), tt.raw)
+			}
+		})
+	}
+}
+
+// TestMainRun_AbsentAwakeWindowIsNotAnError asserts an absent
+// DAEMON_AWAKE_WINDOW proceeds exactly as startup does today: no
+// "no value for DAEMON_AWAKE_WINDOW" diagnostic, and mainRun fails for the
+// same reason it already does without this knob at all (no --input, so
+// parseArgs fails first) rather than for a DAEMON_AWAKE_WINDOW complaint.
+func TestMainRun_AbsentAwakeWindowIsNotAnError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"dispatch"}, &stdout, &stderr)
+	if got != 1 {
+		t.Errorf("mainRun() = %d, want 1", got)
+	}
+	if strings.Contains(stderr.String(), "DAEMON_AWAKE_WINDOW") {
+		t.Errorf("stderr = %q, want no mention of DAEMON_AWAKE_WINDOW", stderr.String())
+	}
+}
+
+// TestMainRun_ValidAwakeWindowReachesRepoRoot asserts a valid
+// DAEMON_AWAKE_WINDOW resolved from the document's settings parses cleanly
+// and mainRun proceeds past knob resolution. There is no seam onto
+// daemon.Config from here, so this uses repoRoot's own fast-failing check as
+// an observable proxy: chdir into a non-git directory and confirm the
+// failure is repoRoot's "not a git checkout", not a DAEMON_AWAKE_WINDOW
+// diagnostic — proof the window resolved and parsed before mainRun moved on.
+func TestMainRun_ValidAwakeWindowReachesRepoRoot(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	doc := validKnobDocument()
+	doc.Settings["DAEMON_AWAKE_WINDOW"] = "22:00-06:00 Europe/London"
+	path := writeInputDocument(t, doc)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", path}, &stdout, &stderr)
+	if got != 1 {
+		t.Errorf("mainRun() = %d, want 1", got)
+	}
+	if strings.Contains(stderr.String(), "DAEMON_AWAKE_WINDOW") {
+		t.Errorf("stderr = %q, want no DAEMON_AWAKE_WINDOW diagnostic", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "not a git checkout") {
+		t.Errorf("stderr = %q, want repoRoot's not-a-git-checkout error", stderr.String())
 	}
 }
 
