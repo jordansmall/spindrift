@@ -4677,15 +4677,29 @@ Each child's exit code is interpreted the same way `spindrift`'s own exit
 codes are (see the [exit-code table](#dogfood-loop) in Dogfood loop above,
 which this table's meanings link back to) — but the daemon's *action* on
 each code is its own, distinct from dogfood.sh's pull-and-rebuild loop.
-`IdleInterval` below is a fixed 5 minutes (`daemonIdleInterval`,
-`cmd/launcher/daemon/main.go`), the same for every slot:
+The wait below is no longer a fixed interval: it is a pool-wide idle
+backoff (`idleBackoff`, `cmd/launcher/internal/daemon/backoff.go`). The
+first no-work check waits `IdleFloor` (`daemonIdleFloor`, default 5
+minutes, `cmd/launcher/daemon/main.go`); each further *consecutive*
+no-work check doubles the wait, capped at `IdleCap` (`daemonIdleCap`,
+default 30 minutes) — 5m → 10m → 20m → 30m, which takes a drought from
+12 checks an hour down to 2, at the price of waiting out at most that
+half hour before the next check notices work that arrived just after a
+capped wait began. The streak is pool-wide,
+not per slot, the same shape as the breaker below: the quantity it bounds
+is the pool's aggregate rate-limit spend against the forge, since an idle
+check still costs a fetch, an evaluation, a bootstrap and a discovery
+query to learn "nothing to do" again. A check that answers something
+else — exit 0 or exit 4, below — resets the wait back to `IdleFloor`, on
+the theory that a check finding real work is evidence the drought is
+over.
 
 | exit | meaning | daemon action |
 |------|---------|----------------|
-| 0    | dispatched work | go again at once |
-| 2    | queue empty | wait `IdleInterval`, then go again |
-| 3    | none dispatchable | with a sibling slot's child running, routine — emit `idle` and wait `IdleInterval` as usual; with the whole pool otherwise idle, nothing can start — emit a distinct `jam` event instead, then still wait `IdleInterval` and retry (a single-slot daemon therefore reports every exit 3 as a jam) |
-| 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke |
+| 0    | dispatched work | go again at once; resets the idle backoff to `IdleFloor` |
+| 2    | queue empty | wait the current backoff in one uninterrupted sleep, then go again — a merge cannot create work in an empty queue, so polling mid-wait would only spend a query for nothing |
+| 3    | none dispatchable | with a sibling slot's child running, routine — emit `idle` and wait the current backoff as usual; with the whole pool otherwise idle, nothing can start — emit a distinct `jam` event instead, then wait the current backoff and retry (a single-slot daemon therefore reports every exit 3 as a jam). Either way the wait is slept in `IdleFloor`-sized slices with a `ResolveRevision` poll between slices, since a merge here *can* unblock the jam — the first no-work wait is exactly one `IdleFloor` slice and so polls nothing, with mid-wait polling starting only once the backoff has grown past the floor; if the tip has moved, the slot emits `tip_moved`, resets the backoff to `IdleFloor`, and goes again at once instead of riding out the rest of the wait. A poll that errors is treated as no change observed — it never feeds the breaker, since the next iteration's own top-of-loop fetch is what reports a broken fetch |
+| 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke; resets the idle backoff to `IdleFloor` |
 | 5    | host-tainted | halt the pool |
 | 6    | config-invalid | halt the pool |
 | 7    | signalled stop | halt the pool |
@@ -4808,8 +4822,9 @@ since it belongs to no one slot.
 | `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched |
 | `box` | `time`, `kind`, `issue`, `revision`, `slot` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
 | `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
-| `idle` | `time`, `kind`, `wait`, `slot` | entering an `IdleInterval` wait after `queue-empty`, or after `none-dispatchable` with a sibling slot's child running |
-| `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | entering an `IdleInterval` wait after `none-dispatchable` with the whole pool otherwise idle — nothing running and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it |
+| `idle` | `time`, `kind`, `wait`, `slot` | entering an idle wait after `queue-empty`, or after `none-dispatchable` with a sibling slot's child running; `wait` carries the current pool-wide idle backoff, so a widening `wait` across successive `idle` events is how a growing backoff reaches the stream |
+| `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | entering an idle wait after `none-dispatchable` with the whole pool otherwise idle — nothing running and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries the current pool-wide idle backoff, same as `idle` above |
+| `tip_moved` | `time`, `kind`, `revision`, `slot`, `reason` | a none-dispatchable wait (exit 3) was cut short: a poll between its `IdleFloor`-sized sleep slices found `BASE_BRANCH`'s tip had moved since this slot's last child ran, so the slot reset its idle backoff and started its next iteration at once instead of sleeping out the rest of the wait. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the loop is about to return and the process is about to exit |
