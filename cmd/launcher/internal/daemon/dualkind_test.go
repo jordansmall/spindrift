@@ -512,7 +512,7 @@ func TestPoolPerKindBackoffGrowsIndependently(t *testing.T) {
 		// Research dispatching (Continue -> reset) between each of dispatch's
 		// empty checks must never touch dispatch's own streak.
 		p.kinds[KindResearch].reset()
-		if until, gated := p.kinds[KindResearch].readyAt(); gated || !until.IsZero() {
+		if until, gated := p.kinds[KindResearch].readyAt(clk.Now()); gated || !until.IsZero() {
 			t.Fatalf("research readyAt() = (%v, %v) after reset, want (zero, false)", until, gated)
 		}
 	}

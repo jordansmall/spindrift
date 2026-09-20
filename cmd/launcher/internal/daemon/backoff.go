@@ -75,6 +75,12 @@ func newKindBackoff(floor, cap time.Duration) *kindBackoff {
 // wait it returns has elapsed. jammed records whether the gating result was
 // "none dispatchable" (exit 3) rather than "queue empty" (exit 2): only a jam
 // is worth polling a moved tip for.
+//
+// Deliberately exit-3-alone: sibling occupancy plays no part. jammed doubles
+// as idleSleep's tip-poll gate (jammedGate, pool.go) as well as status data,
+// and a sibling that actually drains the queue clears it through reset() on
+// its own next Continue — so occupancy is the jam *event*'s narrower
+// predicate (loop.go's poolJammed, an operator alarm), not this flag's.
 func (k *kindBackoff) markNoWork(now time.Time, jammed bool) time.Duration {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -84,21 +90,30 @@ func (k *kindBackoff) markNoWork(now time.Time, jammed bool) time.Duration {
 	return wait
 }
 
-// runnable reports whether this kind may be tried at now.
-func (k *kindBackoff) runnable(now time.Time) bool {
-	k.mu.Lock()
-	defer k.mu.Unlock()
+// runnableLocked is runnable's predicate, shared with readyAt so the two
+// can never drift apart on the deadline boundary. Caller must hold k.mu.
+func (k *kindBackoff) runnableLocked(now time.Time) bool {
 	// !Before, not After: a fake clock that advances by exactly the slept
 	// duration must land on the deadline as runnable, not one tick short.
 	return k.until.IsZero() || !now.Before(k.until)
 }
 
-// readyAt returns the instant this kind may next be tried, and whether it is
-// currently gated at all.
-func (k *kindBackoff) readyAt() (time.Time, bool) {
+// runnable reports whether this kind may be tried at now.
+func (k *kindBackoff) runnable(now time.Time) bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	return k.until, !k.until.IsZero()
+	return k.runnableLocked(now)
+}
+
+// readyAt returns the instant this kind may next be tried, and whether it is
+// gated at now — false once a deadline that was set has already elapsed,
+// matching runnable's own boundary exactly (see runnableLocked). A caller
+// must never publish an until from a gated=false result: it may be a stale
+// deadline from a since-elapsed gate, not a live one.
+func (k *kindBackoff) readyAt(now time.Time) (time.Time, bool) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.until, !k.runnableLocked(now)
 }
 
 // jammedNow reports whether this kind is currently gated by a

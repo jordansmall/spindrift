@@ -27,8 +27,15 @@ type pool struct {
 	mu        sync.Mutex
 	halted    bool
 	reason    string
-	occupied  map[int]struct{}
+	occupied  map[int]slotFlight
 	awakeShut bool // true once awake_close has fired, until the matching awake_open
+}
+
+// slotFlight is what one occupied slot currently has in flight.
+type slotFlight struct {
+	kind     Kind
+	revision string
+	issues   []string
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -54,7 +61,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		b:        newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
 		kinds:    kinds,
 		cancel:   cancel,
-		occupied: make(map[int]struct{}),
+		occupied: make(map[int]slotFlight),
 	}
 	return p, pctx
 }
@@ -108,9 +115,9 @@ func (p *pool) pickKind(slot int) (Kind, bool) {
 // point: a slot must clear its own occupancy before it ever asks
 // siblingsOccupied, or it would count itself as a running sibling and "none
 // dispatchable, pool otherwise idle" could never be true for a lone slot.
-func (p *pool) occupy(slot int) {
+func (p *pool) occupy(slot int, kind Kind, revision string) {
 	p.mu.Lock()
-	p.occupied[slot] = struct{}{}
+	p.occupied[slot] = slotFlight{kind: kind, revision: revision}
 	p.mu.Unlock()
 }
 
@@ -119,6 +126,22 @@ func (p *pool) unoccupy(slot int) {
 	p.mu.Lock()
 	delete(p.occupied, slot)
 	p.mu.Unlock()
+}
+
+// noteIssue appends issue to slot's in-flight issue list, for a snapshot to
+// report while the child is still running. A no-op if slot is not occupied:
+// the child announced after the slot cleared, which can only be a race
+// (RunChild already returned), not a state worth publishing. Dedupe is
+// already done by the runner, so this never re-dedupes.
+func (p *pool) noteIssue(slot int, issue string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	fl, ok := p.occupied[slot]
+	if !ok {
+		return
+	}
+	fl.issues = append(fl.issues, issue)
+	p.occupied[slot] = fl
 }
 
 // siblingsOccupied reports whether any slot other than slot currently has a
@@ -144,10 +167,21 @@ func (p *pool) awaitWindow(ctx context.Context, slot int) {
 	for {
 		wait := p.cfg.Awake.Until(p.clk.Now())
 		if wait <= 0 {
-			p.noteAwakeOpen(slot)
+			if p.noteAwakeOpen(slot) {
+				// noteAwakeOpen emits under p.mu (see its own doc), so it
+				// can never call publish itself; publish the transition
+				// here, a hair after the emit — the status file is
+				// advisory, the event stream is the ordered record. Gated
+				// on the transition itself: a slot that finds the window
+				// already open (or every sibling racing the same open)
+				// must not repeat a publish nothing changed.
+				p.publish()
+			}
 			return
 		}
-		p.noteAwakeClose(slot, wait)
+		if p.noteAwakeClose(slot, wait) {
+			p.publish()
+		}
 		p.clk.Sleep(ctx, wait)
 		if p.stopped() || ctx.Err() != nil {
 			return
@@ -161,9 +195,12 @@ func (p *pool) awaitWindow(ctx context.Context, slot int) {
 // to flip awakeShut reports it, so the stream carries exactly one
 // awake_close per closing however many slots are waiting on it. The emit
 // happens while p.mu is still held so the flag flip and the emit are one
-// atomic step -- otherwise two slots whose clk.Now() calls straddle the
-// opening instant could publish awake_open before awake_close.
-func (p *pool) noteAwakeClose(slot int, wait time.Duration) {
+// atomic step — otherwise two slots whose clk.Now() calls straddle the
+// opening instant could publish awake_open before awake_close. Returns
+// whether this call was the one that observed the transition, so
+// awaitWindow can skip the publish too on every iteration that finds the
+// window still shut with nothing new to report.
+func (p *pool) noteAwakeClose(slot int, wait time.Duration) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	first := !p.awakeShut
@@ -172,6 +209,7 @@ func (p *pool) noteAwakeClose(slot int, wait time.Duration) {
 	if first {
 		p.em.Emit(Event{Event: "awake_close", Slot: intPtr(slot), Wait: wait.String(), Reason: "outside the Awake window"})
 	}
+	return first
 }
 
 // noteAwakeOpen is noteAwakeClose's counterpart: it fires awake_open only
@@ -180,8 +218,9 @@ func (p *pool) noteAwakeClose(slot int, wait time.Duration) {
 // matching close. As in noteAwakeClose, the emit happens under p.mu so the
 // flag flip and the emit stay one atomic step: an awake_open therefore
 // never reaches the stream ahead of the awake_close whose flag flip it
-// observed.
-func (p *pool) noteAwakeOpen(slot int) {
+// observed. Returns whether this call was the one that observed the
+// transition (see noteAwakeClose).
+func (p *pool) noteAwakeOpen(slot int) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	was := p.awakeShut
@@ -190,6 +229,7 @@ func (p *pool) noteAwakeOpen(slot int) {
 	if was {
 		p.em.Emit(Event{Event: "awake_open", Slot: intPtr(slot), Reason: "the Awake window reopened"})
 	}
+	return was
 }
 
 // stopped reports whether the pool has already recorded a halt reason —
@@ -215,7 +255,7 @@ func (p *pool) halt(kind Kind, reason, revision string) {
 	p.reason = reason
 	p.mu.Unlock()
 
-	p.em.Emit(Event{Event: "halt", Kind: kind, Revision: revision, Reason: reason})
+	p.emit(Event{Event: "halt", Kind: kind, Revision: revision, Reason: reason})
 	p.cancel()
 }
 
@@ -231,7 +271,7 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 	count, crossed := p.b.recordAndCheck(p.clk.Now())
 	if crossed {
 		haltReason := fmt.Sprintf("breaker: %d failures within %s reached threshold %d", count, p.cfg.BreakerWindow, p.cfg.BreakerThreshold)
-		p.em.Emit(Event{Event: "breaker_trip", Kind: kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()})
+		p.emit(Event{Event: "breaker_trip", Kind: kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()})
 		p.halt(kind, haltReason, revision)
 		return true
 	}
@@ -244,7 +284,7 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 		return true
 	}
 
-	p.em.Emit(Event{Event: "backoff", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason})
+	p.emit(Event{Event: "backoff", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason})
 	p.clk.Sleep(ctx, p.cfg.FailureBackoff)
 	return false
 }
@@ -324,9 +364,13 @@ func (p *pool) idleSleep(ctx context.Context, slot int, lastRevision string) {
 	var earliest time.Time
 	jammedGate := false
 	for _, k := range p.kinds {
-		at, gated := k.readyAt()
+		at, gated := k.readyAt(now)
 		if !gated {
-			continue
+			// This kind is runnable at now — a sibling's reset() raced in
+			// between pickKind's failed pass and this call, or its own
+			// deadline has already elapsed. Either way there is nothing to
+			// sleep for; the caller loops back around to pickKind at once.
+			return
 		}
 		if earliest.IsZero() || at.Before(earliest) {
 			earliest = at
@@ -336,16 +380,14 @@ func (p *pool) idleSleep(ctx context.Context, slot int, lastRevision string) {
 		}
 	}
 	if earliest.IsZero() {
-		// Every kind is runnable after all — a sibling's reset() raced in
-		// between pickKind's failed pass and this call. Nothing to sleep
-		// for; the caller loops back around to pickKind at once.
+		// p.kinds is empty, so the loop above never ran at all — Loop's own
+		// validation (len(cfg.Kinds) == 0) rejects this before a pool is
+		// ever built, but newPool itself doesn't enforce that, so this
+		// guards a caller (a test, say) that builds a pool directly.
 		return
 	}
 
 	wait := earliest.Sub(now)
-	if wait <= 0 {
-		return
-	}
 
 	if jammedGate && lastRevision != "" {
 		p.pollSlices(ctx, slot, wait, lastRevision)
@@ -410,11 +452,160 @@ func (p *pool) pollSlices(ctx context.Context, slot int, wait time.Duration, rev
 					reset = append(reset, kind)
 				}
 			}
-			p.em.Emit(Event{Event: "tip_moved", Slot: intPtr(slot), Revision: newRevision, Reason: "a merge can unblock a jammed queue", Kinds: reset})
+			p.emit(Event{Event: "tip_moved", Slot: intPtr(slot), Revision: newRevision, Reason: "a merge can unblock a jammed queue", Kinds: reset})
 			return
 		}
 	}
 }
+
+// snapshot builds a Status from pool state alone, for publish to hand to
+// StatusWriter.Publish as its snap func. Takes p.mu for the whole build so a
+// reader never sees state from two different instants stitched together, and
+// calls p.clk.Now() under that lock — safe, since no Clock implementation
+// takes p.mu — so readyAt can tell a kind whose deadline has already elapsed
+// from one still gated, the same now-aware check idleSleep makes outside the
+// lock. It also calls kindBackoff.readyAt/jammedNow, which take kindBackoff's
+// own separate mutex — that nesting is safe (nothing under kindBackoff's
+// mutex ever takes p.mu), but noteAwakeClose/noteAwakeOpen emit while
+// holding p.mu, so they must never call publish (and therefore never call
+// snapshot); see awaitWindow, which publishes after they return instead, and
+// publish's own doc for the w.mu → p.mu order snapshot also runs under.
+func (p *pool) snapshot() Status {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	slots := make([]SlotStatus, p.cfg.Slots)
+	for i := range slots {
+		slots[i] = SlotStatus{Slot: i}
+		fl, ok := p.occupied[i]
+		if !ok {
+			continue
+		}
+		slots[i].Busy = true
+		slots[i].Kind = fl.kind
+		slots[i].Revision = fl.revision
+		if len(fl.issues) > 0 {
+			// A snapshot handed to a writer must not alias state this slot
+			// keeps appending to.
+			issues := make([]string, len(fl.issues))
+			copy(issues, fl.issues)
+			slots[i].Issues = issues
+		}
+	}
+
+	now := p.clk.Now()
+	// A shut Awake window gates every kind whatever its own backoff says:
+	// no slot starts a child until awaitWindow returns. Until is 0 both
+	// while the window is open and for the nil always-awake window, so
+	// this stays the zero Time in the ordinary case.
+	var windowOpensAt time.Time
+	if d := p.cfg.Awake.Until(now); d > 0 {
+		windowOpensAt = now.Add(d)
+	}
+	checks := make([]KindCheck, 0, len(p.cfg.Kinds))
+	allGated := true
+	anyJammed := false
+	for _, k := range p.cfg.Kinds {
+		kb := p.kinds[k]
+		at, gated := kb.readyAt(now)
+		kc := KindCheck{Kind: k}
+		if gated {
+			if kb.jammedNow() {
+				anyJammed = true
+				kc.Jammed = true
+			}
+		} else {
+			at = time.Time{} // an ungated at may be a stale deadline; see readyAt
+			allGated = false
+		}
+		if windowOpensAt.After(at) {
+			at = windowOpensAt
+		}
+		if !at.IsZero() {
+			kc.NextCheck = at.UTC().Format(time.RFC3339)
+		}
+		checks = append(checks, kc)
+	}
+
+	// Precedence, most urgent first: halted outranks everything, since the
+	// pool is already on its way out regardless of what else is true.
+	// Working outranks asleep, since a child started before the Awake
+	// window closed is still genuinely running even though the window has
+	// since shut — "working" is the honest state, not "asleep". Jammed vs
+	// waiting only applies once every kind is gated, and only jammedNow (a
+	// none-dispatchable result) tells them apart; checking is the default
+	// when nothing is gated and nothing is running.
+	//
+	// Asleep is keyed off windowOpensAt (the same now-aware Awake.Until
+	// check nextCheck already floors on above), not p.awakeShut: awakeShut
+	// is edge-triggered by whichever slot's awaitWindow observes the
+	// close, so a pool built outside its window and snapshotted before any
+	// slot parks would still read awakeShut false and disagree with a
+	// nextCheck already naming the reopening. p.awakeShut therefore has no
+	// reader left outside the note*Awake* pair itself, which still needs
+	// it to edge-trigger awake_close/awake_open.
+	state := StateChecking
+	reason := ""
+	switch {
+	case p.halted:
+		state = StateHalted
+		reason = p.reason
+	case len(p.occupied) > 0:
+		state = StateWorking
+	case !windowOpensAt.IsZero():
+		state = StateAsleep
+	case allGated && anyJammed:
+		state = StateJammed
+	case allGated:
+		state = StateWaiting
+	}
+
+	// Copied, not aliased, matching the fl.issues copy above: nothing
+	// mutates cfg.Kinds today, but a returned Status must never assume a
+	// future writer keeps that true.
+	kinds := make([]Kind, len(p.cfg.Kinds))
+	copy(kinds, p.cfg.Kinds)
+
+	return Status{
+		Kinds:  kinds,
+		State:  state,
+		Reason: reason,
+		Slots:  slots,
+		Checks: checks,
+	}
+}
+
+// publish writes the pool's current snapshot to Config.Status, if
+// configured. A nil Status is the deliberate opt-out — a daemon that never
+// located a git dir to publish into, or an operator who chose not to
+// publish — not a swallowed error, so publish is silently a no-op rather
+// than reporting anything. A write failure is advisory-only and must never
+// fail the daemon: it is reported to emitErrW and otherwise ignored.
+//
+// Publish, not Write, so p.snapshot runs under StatusWriter.mu: that is what
+// stops two slot goroutines publishing concurrently from sampling in one
+// order and writing in the other. Lock order is therefore w.mu → p.mu, which
+// is deadlock-free only because nothing calls publish while already holding
+// p.mu.
+func (p *pool) publish() {
+	if p.cfg.Status == nil {
+		return
+	}
+	if err := p.cfg.Status.Publish(p.snapshot); err != nil {
+		fmt.Fprintf(emitErrW, "daemon: status file write failed: %v\n", err)
+	}
+}
+
+// emit writes ev to the event stream and republishes the status file:
+// folding the publish in makes "on state change" structural for every event
+// routed through emit, rather than one more call site to remember. It does
+// not cover every state change, though: the note*Awake* pair emits directly
+// under p.mu, where calling emit (and its own publish) would deadlock, and
+// hand-places a publish once the lock is released (awaitWindow); occupy,
+// unoccupy, noteIssue, and kindBackoff.reset change pool state with no
+// event of their own to ride, so their callers hand-place a publish too
+// (loop.go).
+func (p *pool) emit(ev Event) { p.em.Emit(ev); p.publish() }
 
 // haltReason returns the pool's recorded halt reason. Only meaningful after
 // every slot goroutine has returned (Loop calls it after its WaitGroup

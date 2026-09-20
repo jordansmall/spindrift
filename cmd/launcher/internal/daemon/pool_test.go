@@ -3,6 +3,10 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -754,6 +758,78 @@ func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing
 	}
 }
 
+// TestAwaitWindowSkipsPublishOnNonTransitionIteration pins that awaitWindow
+// only writes the status file on a real awake_close/awake_open transition
+// (review finding pool.go:169-180): a second iteration that still finds the
+// window shut, with nothing new to report, must perform no additional
+// write, even though noteAwakeClose runs again on every iteration.
+func TestAwaitWindowSkipsPublishOnNonTransitionIteration(t *testing.T) {
+	win, err := ParseWindow("22:00-06:00 UTC")
+	if err != nil {
+		t.Fatalf("ParseWindow: %v", err)
+	}
+	clk := newStepClock(time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), 1)
+
+	// A counting now func: every StatusWriter.Publish call advances the
+	// stamped Time by one, whatever the sampled Status otherwise says, so
+	// reading Time back after each parking tells write-count apart from
+	// content equality (which a repeated "still shut" write would share).
+	var writes int
+	dir := t.TempDir()
+	sw := NewStatusWriter(dir, func() time.Time {
+		writes++
+		return time.Unix(int64(writes), 0).UTC()
+	})
+
+	cfg := testConfig(1)
+	cfg.Awake = win
+	cfg.Status = sw
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, pctx := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+	defer p.cancel()
+
+	readTime := func() string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(dir, statusFileName))
+		if err != nil {
+			t.Fatalf("read status file: %v", err)
+		}
+		var s Status
+		if err := json.Unmarshal(data, &s); err != nil {
+			t.Fatalf("unmarshal status: %v", err)
+		}
+		return s.Time
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.awaitWindow(pctx, 0)
+	}()
+
+	<-clk.sleeping // first iteration: noteAwakeClose observes the transition
+	afterClose := readTime()
+
+	// Advance to a still-shut instant: a second iteration, still no
+	// transition (awakeShut was already true), must publish nothing new.
+	clk.advance(time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC))
+	<-clk.sleeping
+	afterSecondShutIteration := readTime()
+	if afterSecondShutIteration != afterClose {
+		t.Fatalf("status Time changed on a non-transition iteration: got %q, want unchanged %q", afterSecondShutIteration, afterClose)
+	}
+
+	// Advance past the reopening: the transition back to open must still
+	// publish.
+	clk.advance(time.Date(2026, 1, 1, 22, 0, 0, 0, time.UTC))
+	<-done
+	afterOpen := readTime()
+	if afterOpen == afterSecondShutIteration {
+		t.Fatalf("status Time did not change on the awake_open transition")
+	}
+}
+
 // TestPollSlicesTipMovedStampsJammedKinds pins tip_moved's Kinds field
 // (issue #3541 review finding) to exactly the kinds jammed at the moment the
 // tip moved, in cfg.Kinds order, whether that's one kind or several — and
@@ -875,6 +951,472 @@ func TestSlotOrderDerivesFromKinds(t *testing.T) {
 			}
 			if !reflect.DeepEqual(tc.kinds, orig) {
 				t.Fatalf("slotOrder mutated its kinds argument: got %v, want %v", tc.kinds, orig)
+			}
+		})
+	}
+}
+
+// shutWindow builds an Awake window guaranteed shut at now: opening two
+// hours out and closing three, so a test can drive State off a real window
+// rather than poking the edge-triggered awakeShut flag directly.
+func shutWindow(t *testing.T, now time.Time) *Window {
+	t.Helper()
+	open := now.Add(2 * time.Hour).UTC()
+	shut := now.Add(3 * time.Hour).UTC()
+	spec := fmt.Sprintf("%02d:%02d-%02d:%02d UTC", open.Hour(), open.Minute(), shut.Hour(), shut.Minute())
+	w, err := ParseWindow(spec)
+	if err != nil {
+		t.Fatalf("ParseWindow(%q): %v", spec, err)
+	}
+	return w
+}
+
+// TestPoolSnapshotState pins snapshot's State precedence (issue #3545):
+// halted outranks everything, working outranks asleep (a child started
+// before the window closed is still running), then jammed vs waiting is
+// distinguished by whether any gated kind is jammedNow, and checking is the
+// default when nothing is gated and nothing is running.
+func TestPoolSnapshotState(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(p *pool, clk *fakeClock)
+		want  State
+	}{
+		{
+			name:  "checking when nothing gated and nothing running",
+			setup: func(p *pool, clk *fakeClock) {},
+			want:  StateChecking,
+		},
+		{
+			name: "waiting when every kind gated queue-empty",
+			setup: func(p *pool, clk *fakeClock) {
+				for _, k := range p.cfg.Kinds {
+					p.kinds[k].markNoWork(clk.Now(), false)
+				}
+			},
+			want: StateWaiting,
+		},
+		{
+			name: "jammed when every kind gated and one jammed",
+			setup: func(p *pool, clk *fakeClock) {
+				p.kinds[KindDispatch].markNoWork(clk.Now(), true)
+				p.kinds[KindResearch].markNoWork(clk.Now(), false)
+			},
+			want: StateJammed,
+		},
+		{
+			// A pool built outside its Awake window and snapshotted before
+			// any slot's awaitWindow has parked (p.awakeShut still false):
+			// state must derive from the window itself, not the
+			// edge-triggered flag, or it would disagree with nextCheck
+			// (already naming the reopening) and read checking instead.
+			name: "asleep from a shut window even before any slot parks",
+			setup: func(p *pool, clk *fakeClock) {
+				p.cfg.Awake = shutWindow(t, clk.Now())
+			},
+			want: StateAsleep,
+		},
+		{
+			name: "working outranks asleep",
+			setup: func(p *pool, clk *fakeClock) {
+				p.cfg.Awake = shutWindow(t, clk.Now())
+				p.occupy(0, KindDispatch, "rev1")
+			},
+			want: StateWorking,
+		},
+		{
+			name: "halted outranks everything",
+			setup: func(p *pool, clk *fakeClock) {
+				p.cfg.Awake = shutWindow(t, clk.Now())
+				p.occupy(0, KindDispatch, "rev1")
+				p.halted = true
+				p.reason = "boom"
+			},
+			want: StateHalted,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := &fakeClock{}
+			cfg := testConfig(2)
+			cfg.Kinds = []Kind{KindDispatch, KindResearch}
+			var buf bytes.Buffer
+			em := newTestEmitter(&buf)
+			p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+
+			tc.setup(p, clk)
+
+			s := p.snapshot()
+			if s.State != tc.want {
+				t.Fatalf("state = %q, want %q", s.State, tc.want)
+			}
+			if tc.want == StateHalted && s.Reason != "boom" {
+				t.Fatalf("reason = %q, want %q", s.Reason, "boom")
+			}
+		})
+	}
+}
+
+// TestPoolSnapshotSlots pins that snapshot names each slot's kind, revision
+// and in-flight issues from occupancy, leaving an unoccupied slot bare.
+func TestPoolSnapshotSlots(t *testing.T) {
+	clk := &fakeClock{}
+	cfg := testConfig(2)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+
+	p.occupy(0, KindDispatch, "rev1")
+	p.noteIssue(0, "7")
+
+	snap := p.snapshot()
+	if len(snap.Slots) != 2 {
+		t.Fatalf("slots = %d, want 2", len(snap.Slots))
+	}
+	if !snap.Slots[0].Busy || snap.Slots[0].Kind != KindDispatch || snap.Slots[0].Revision != "rev1" {
+		t.Fatalf("slot 0 = %+v, want busy dispatch@rev1", snap.Slots[0])
+	}
+	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"7"}) {
+		t.Fatalf("slot 0 issues = %v, want [7]", snap.Slots[0].Issues)
+	}
+	if snap.Slots[1].Busy {
+		t.Fatalf("slot 1 = %+v, want unoccupied", snap.Slots[1])
+	}
+}
+
+// TestPoolSnapshotCopiesIssuesSlice pins that a snapshot's Issues slice is a
+// copy, not an alias onto the slot's live state: mutating the pool after
+// taking the snapshot must never change what was already handed out.
+func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
+	clk := &fakeClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+
+	p.occupy(0, KindDispatch, "rev1")
+	p.noteIssue(0, "42")
+
+	snap := p.snapshot()
+	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
+		t.Fatalf("issues = %v, want [42]", snap.Slots[0].Issues)
+	}
+
+	p.noteIssue(0, "99") // mutate the pool's copy after snapshotting
+
+	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
+		t.Fatalf("snapshot issues changed after mutating pool state: got %v, want [42]", snap.Slots[0].Issues)
+	}
+}
+
+// TestPoolSnapshotCopiesKindsSlice pins that snapshot's Kinds is a copy of
+// cfg.Kinds, not an alias: mutating the caller's slice after snapshot must
+// never change what was already handed out (mirrors
+// TestPoolSnapshotCopiesIssuesSlice's contract for the Issues slice above).
+func TestPoolSnapshotCopiesKindsSlice(t *testing.T) {
+	clk := &fakeClock{}
+	cfg := testConfig(1)
+	cfg.Kinds = []Kind{KindDispatch, KindResearch}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+
+	snap := p.snapshot()
+	if !reflect.DeepEqual(snap.Kinds, []Kind{KindDispatch, KindResearch}) {
+		t.Fatalf("kinds = %v, want [dispatch research]", snap.Kinds)
+	}
+
+	cfg.Kinds[0] = "mutated" // mutate the caller's slice after snapshotting
+
+	if !reflect.DeepEqual(snap.Kinds, []Kind{KindDispatch, KindResearch}) {
+		t.Fatalf("snapshot kinds changed after mutating caller's slice: got %v, want [dispatch research]", snap.Kinds)
+	}
+}
+
+// TestPoolSnapshotChecksOrderAndNextCheck pins that Checks is built in
+// cfg.Kinds order (not the p.kinds map's undefined order) and carries a
+// nextCheck only for a gated kind.
+func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
+	clk := &fakeClock{}
+	cfg := testConfig(1)
+	cfg.Kinds = []Kind{KindResearch, KindDispatch}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+
+	p.kinds[KindResearch].markNoWork(clk.Now(), false)
+
+	snap := p.snapshot()
+	if len(snap.Checks) != 2 || snap.Checks[0].Kind != KindResearch || snap.Checks[1].Kind != KindDispatch {
+		t.Fatalf("checks = %+v, want research then dispatch", snap.Checks)
+	}
+	if snap.Checks[0].NextCheck == "" {
+		t.Fatalf("research nextCheck empty, want gated (non-empty)")
+	}
+	if snap.Checks[1].NextCheck != "" {
+		t.Fatalf("dispatch nextCheck = %q, want empty (runnable now)", snap.Checks[1].NextCheck)
+	}
+}
+
+// TestPoolSnapshotElapsedGateReadsAsCheckingNotWaiting pins the fix for the
+// finding at backoff.go:98: once a gated kind's deadline has passed, a
+// snapshot taken before anything re-runs pickKind must report the kind as
+// runnable now (empty NextCheck) and the pool as StateChecking, never a
+// stale past NextCheck under StateWaiting — the seven-hours-stale
+// awake_open publish from the finding's own reproduction.
+func TestPoolSnapshotElapsedGateReadsAsCheckingNotWaiting(t *testing.T) {
+	clk := &fakeClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+
+	wait := p.kinds[KindDispatch].markNoWork(clk.Now(), false)
+	clk.now = clk.now.Add(wait + time.Millisecond) // past the deadline
+
+	snap := p.snapshot()
+	if snap.Checks[0].NextCheck != "" {
+		t.Fatalf("nextCheck = %q, want empty: the gate elapsed before this snapshot", snap.Checks[0].NextCheck)
+	}
+	if snap.State != StateChecking {
+		t.Fatalf("state = %q, want %q (elapsed gate reads as runnable, not waiting)", snap.State, StateChecking)
+	}
+}
+
+// TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears pins the
+// reviewer's rejected fix that would key jammedNow off runSlot's own
+// poolJammed predicate instead of markNoWork's outcome flag: it drives the
+// real runSlot call site rather than calling markNoWork directly, so a future regression back
+// to the rejected poolJammed predicate would fail this test. Slot 1 has a
+// research child running when slot 0's dispatch check returns exit 3 —
+// siblingsOccupied is true at that exact instant — and the dispatch kind's
+// jammed flag must still flip true, unaffected by occupancy. It must also
+// stay true once the sibling clears, so the pool-level state reads jammed,
+// never waiting: an open, none-dispatchable queue must never be reported as
+// "every queue empty".
+func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing.T) {
+	const slots = 2
+	r := newBlockingRunner("rev1", slots)
+	clk := newGateClock()
+	nw := newNotifyWriter()
+	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	cfg := testConfig(slots)
+	cfg.Kinds = []Kind{KindDispatch, KindResearch}
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	// Research starts already gated (idle, not jammed): with two kinds
+	// configured, an ungated research would have slot 0's own loop retry
+	// it the moment dispatch backs off, rather than parking in idleSleep —
+	// this test's synchronization point.
+	p.kinds[KindResearch].markNoWork(clk.Now(), false)
+	p.occupy(1, KindResearch, "rev1")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runSlot(pctx, 0, cfg, p)
+	}()
+
+	if got := <-r.started; got != 0 {
+		t.Fatalf("started slot = %d, want 0", got)
+	}
+	r.release[0] <- ChildResult{Exit: 3}
+	// Slot 0 parking in its idle wait is the synchronization point:
+	// markNoWork has run by then, so the flag read below is settled state
+	// rather than a sample taken mid-iteration.
+	<-clk.sleeping
+
+	if !p.kinds[KindDispatch].jammedNow() {
+		t.Fatalf("dispatch jammedNow = false with a sibling occupied, want true (exit 3 alone gates this)")
+	}
+
+	// A busy slot outranks jammed/waiting in snapshot's precedence, so the
+	// sibling has to clear before the state under test is observable.
+	p.unoccupy(1)
+
+	if !p.kinds[KindDispatch].jammedNow() {
+		t.Fatalf("dispatch jammedNow = false after the sibling cleared, want still true")
+	}
+	if s := p.snapshot().State; s != StateJammed {
+		t.Fatalf("state = %q, want %q (never %q)", s, StateJammed, StateWaiting)
+	}
+
+	p.cancel()
+	<-done
+}
+
+// TestPoolSnapshotChecksCarryPerKindJammed pins the standing finding on
+// KindCheck.Jammed: which kind is jammed must be recoverable from the
+// published Checks, not just the pool-level State.
+func TestPoolSnapshotChecksCarryPerKindJammed(t *testing.T) {
+	clk := &fakeClock{}
+	cfg := testConfig(2)
+	cfg.Kinds = []Kind{KindDispatch, KindResearch}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+
+	p.kinds[KindDispatch].markNoWork(clk.Now(), true)
+	p.kinds[KindResearch].markNoWork(clk.Now(), false)
+
+	snap := p.snapshot()
+	var dispatch, research KindCheck
+	for _, kc := range snap.Checks {
+		switch kc.Kind {
+		case KindDispatch:
+			dispatch = kc
+		case KindResearch:
+			research = kc
+		}
+	}
+	if !dispatch.Jammed {
+		t.Fatalf("dispatch Jammed = false, want true")
+	}
+	if research.Jammed {
+		t.Fatalf("research Jammed = true, want false")
+	}
+}
+
+// TestPoolPublishReportsWriteFailureDiagnostic pins the review finding on
+// pool.publish: a status write that fails must report the
+// "daemon: status file write failed" diagnostic to emitErrW rather than
+// silently vanishing, and must never panic or halt the daemon — mirrors
+// TestEmitterEncodeFailureReportsDiagnosticAndDoesNotPanic's precedent for
+// the sibling failure path. The write is made to fail by pointing
+// NewStatusWriter at a directory that does not exist, so os.CreateTemp
+// fails; chmod 0500 is avoided because the Nix check sandbox may run as
+// root, where mode bits do not deny writes.
+func TestPoolPublishReportsWriteFailureDiagnostic(t *testing.T) {
+	var errBuf bytes.Buffer
+	orig := emitErrW
+	emitErrW = &errBuf
+	t.Cleanup(func() { emitErrW = orig })
+
+	clk := &fakeClock{}
+	cfg := testConfig(1)
+	cfg.Status = NewStatusWriter(filepath.Join(t.TempDir(), "no-such-dir"), time.Now)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+
+	p.publish() // must not panic despite the write failure
+
+	if got := errBuf.String(); !strings.Contains(got, "daemon: status file write failed") {
+		t.Fatalf("emitErrW = %q, want it to contain %q", got, "daemon: status file write failed")
+	}
+}
+
+// TestPoolSnapshotNextCheckFloorsOnAwakeWindow pins the review finding on
+// pool.snapshot: with the Awake window shut no slot starts a child until
+// awaitWindow returns, so every kind's nextCheck must be the later of its
+// own backoff deadline and the window's reopening — never empty, which
+// means "runnable now".
+func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
+	const (
+		reopen   = "2026-01-01T22:00:00Z"
+		farLater = "2026-01-03T08:00:00Z"
+	)
+	longFloor := 48 * time.Hour
+
+	tests := []struct {
+		name      string
+		window    string
+		awakeShut bool
+		floor     time.Duration
+		gate      []Kind
+		want      []string
+		wantState State
+	}{
+		{
+			name:      "shut window floors every ungated kind",
+			window:    "22:00-06:00 UTC",
+			awakeShut: true,
+			want:      []string{reopen, reopen},
+			wantState: StateAsleep,
+		},
+		{
+			// The review fix this test pins: a pool built outside its
+			// Awake window and snapshotted before any slot's awaitWindow
+			// has parked never flips awakeShut, so state must derive from
+			// the window itself (same as nextCheck already does) rather
+			// than reading checking while nextCheck names a reopening ten
+			// hours out.
+			name:      "shut window reports asleep even before awakeShut flips",
+			window:    "22:00-06:00 UTC",
+			awakeShut: false,
+			want:      []string{reopen, reopen},
+			wantState: StateAsleep,
+		},
+		{
+			name:      "shut window outranks an earlier backoff deadline",
+			window:    "22:00-06:00 UTC",
+			awakeShut: true,
+			gate:      []Kind{KindDispatch},
+			want:      []string{reopen, reopen},
+			wantState: StateAsleep,
+		},
+		{
+			name:      "a backoff deadline past the reopening wins",
+			window:    "22:00-06:00 UTC",
+			awakeShut: true,
+			floor:     longFloor,
+			gate:      []Kind{KindDispatch},
+			want:      []string{farLater, reopen},
+			wantState: StateAsleep,
+		},
+		{
+			name:      "open window leaves each kind's own deadline",
+			window:    "06:00-22:00 UTC",
+			floor:     longFloor,
+			gate:      []Kind{KindDispatch},
+			want:      []string{farLater, ""},
+			wantState: StateChecking,
+		},
+		{
+			name:      "nil always-awake window leaves each kind's own deadline",
+			window:    "",
+			floor:     longFloor,
+			gate:      []Kind{KindDispatch},
+			want:      []string{farLater, ""},
+			wantState: StateChecking,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w, err := ParseWindow(tc.window)
+			if err != nil {
+				t.Fatalf("ParseWindow(%q) err = %v, want nil", tc.window, err)
+			}
+			clk := &fakeClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)}
+			cfg := testConfig(1)
+			cfg.Kinds = []Kind{KindDispatch, KindResearch}
+			cfg.Awake = w
+			if tc.floor > 0 {
+				cfg.IdleFloor = tc.floor
+				cfg.IdleCap = tc.floor
+			}
+			var buf bytes.Buffer
+			p, _ := newPool(context.Background(), cfg, &fakeRunner{}, newTestEmitter(&buf), clk)
+			p.awakeShut = tc.awakeShut
+			for _, k := range tc.gate {
+				p.kinds[k].markNoWork(clk.Now(), false)
+			}
+
+			snap := p.snapshot()
+
+			if len(snap.Checks) != len(tc.want) {
+				t.Fatalf("checks = %+v, want %d entries", snap.Checks, len(tc.want))
+			}
+			for i, want := range tc.want {
+				if snap.Checks[i].NextCheck != want {
+					t.Fatalf("checks[%d] (%s) nextCheck = %q, want %q", i, snap.Checks[i].Kind, snap.Checks[i].NextCheck, want)
+				}
+			}
+			if snap.State != tc.wantState {
+				t.Fatalf("state = %q, want %q", snap.State, tc.wantState)
 			}
 		})
 	}
