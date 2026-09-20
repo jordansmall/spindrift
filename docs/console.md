@@ -104,19 +104,19 @@ unreviewed transcript.
 ## Pick
 
 **Pick** is the launch button. An unlabeled issue is promoted through the
-normal `Dispatchable` transition first — recorded durably on the tracker
-— then queued; an already-`Dispatchable` issue queues directly. The pick
+normal `Dispatchable` transition first — recorded durably on the tracker —
+then queued; an already-`Dispatchable` issue queues directly. The pick
 launches through the same continuous engine the headless loops use, up to
 the session's live parallelism cap at once (starting at `MAX_PARALLEL`, the
-same knob `run`'s wave dispatch honors, and resizable in-session with
-`+`/`-`): its queue row tracks `queued` → `claiming` → `running` →
-`settled`, and as each running pick settles, the next queued pick fills the
-slot it freed — the session's queue drains continuously without
-re-invocation. Queued-but-unlaunched picks hold at `Dispatchable` on the
-tracker, never `InProgress` — the claim to `InProgress` only happens when
-the pick's turn to launch actually arrives. If that claim races (another
-loop, the issue closed, a relabel), the pick dissolves and its row shows
-why, instead of launching a Box for a stale listing.
+same knob `run`'s wave dispatch honors, and resizable in-session with `+`/`-`):
+its queue row tracks `queued` → `claiming` → `running` → `settled`, and as
+each running pick settles, the next queued pick fills the slot it freed — the
+session's queue drains continuously without re-invocation. Queued-but-
+unlaunched picks hold at `Dispatchable` on the tracker, never `InProgress` —
+the claim to `InProgress` only happens when the pick's turn to launch
+actually arrives. If that claim races (another loop, the issue closed, a
+relabel), the pick dissolves and its row shows why, instead of launching a
+Box for a stale listing.
 
 The engine behind every pick is continuous dispatch, which is deprecated as
 an operator's own driving loop and superseded by the daemon (issue #3547) —
