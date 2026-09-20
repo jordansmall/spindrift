@@ -115,6 +115,8 @@
             #   };
             #   # flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision -- the Consumer's own CLI app, e.g. .# or .#dogfood-bwrap; read by the daemon only, the launcher itself ignores it
             #   daemonApp = ".#";
+            #   # daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host
+            #   daemonAwakeWindow = "";
             #   # caps the wave size; 0 means uncapped
             #   maxJobs = 0;
             #   # maximum concurrent agent containers
