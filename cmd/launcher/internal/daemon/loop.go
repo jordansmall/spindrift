@@ -96,37 +96,27 @@ type Config struct {
 // as a halt-shaped config error instead.
 func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) string {
 	if cfg.Slots <= 0 {
-		reason := fmt.Sprintf("config-invalid: slots must be a positive integer, got %d", cfg.Slots)
-		em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
-		return reason
+		return invalidConfig(em, cfg.Kind, fmt.Sprintf("slots must be a positive integer, got %d", cfg.Slots))
 	}
 	if cfg.FailureBackoff < 0 {
-		reason := fmt.Sprintf("config-invalid: failure backoff must be non-negative, got %s", cfg.FailureBackoff)
-		em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
-		return reason
+		return invalidConfig(em, cfg.Kind, fmt.Sprintf("failure backoff must be non-negative, got %s", cfg.FailureBackoff))
 	}
 	if cfg.BreakerThreshold <= 0 {
-		reason := fmt.Sprintf("config-invalid: breaker threshold must be a positive integer, got %d", cfg.BreakerThreshold)
-		em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
-		return reason
+		return invalidConfig(em, cfg.Kind, fmt.Sprintf("breaker threshold must be a positive integer, got %d", cfg.BreakerThreshold))
 	}
 	if cfg.BreakerWindow <= 0 {
-		reason := fmt.Sprintf("config-invalid: breaker window must be positive, got %s", cfg.BreakerWindow)
-		em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
-		return reason
+		return invalidConfig(em, cfg.Kind, fmt.Sprintf("breaker window must be positive, got %s", cfg.BreakerWindow))
 	}
 
-	p, pctx := newPool(ctx, cfg, em)
+	p, pctx := newPool(ctx, cfg, em, clk)
 	defer p.cancel()
-
-	b := newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow)
 
 	var wg sync.WaitGroup
 	wg.Add(cfg.Slots)
 	for slot := 0; slot < cfg.Slots; slot++ {
 		go func(slot int) {
 			defer wg.Done()
-			runSlot(pctx, slot, cfg, r, em, clk, p, b)
+			runSlot(pctx, slot, cfg, r, em, p)
 		}(slot)
 	}
 	wg.Wait()
@@ -134,12 +124,20 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) str
 	return p.haltReason()
 }
 
+// invalidConfig emits and returns a "config-invalid: " + detail halt reason,
+// the shape shared by every cfg field Loop rejects before starting a pool.
+func invalidConfig(em *Emitter, kind Kind, detail string) string {
+	reason := "config-invalid: " + detail
+	em.Emit(Event{Event: "halt", Kind: kind, Reason: reason})
+	return reason
+}
+
 // runSlot drives one pool slot's children until the pool halts, either
 // because this slot decided to halt it or because a sibling did. ctx is the
 // pool's own derived context (not the caller's ctx directly): cancelling it
 // is how the pool tells every slot to stop promptly, including one asleep
 // in clk.Sleep or blocked inside ResolveRevision.
-func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, clk Clock, p *pool, b *breaker) {
+func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, p *pool) {
 	for {
 		if stopOnCancel(ctx, p) {
 			return
@@ -151,7 +149,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, c
 			// breaker exists for: back off and retry alone, unless enough
 			// failures have piled up pool-wide to say this is systemic
 			// (backoffOrHalt below).
-			if p.backoffOrHalt(ctx, slot, clk, b, "", fmt.Sprintf("resolve-revision: %v", err)) {
+			if p.backoffOrHalt(ctx, slot, "", fmt.Sprintf("resolve-revision: %v", err)) {
 				return
 			}
 			continue
@@ -167,7 +165,9 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, c
 
 		em.Emit(Event{Event: "child_start", Kind: cfg.Kind, Revision: revision, Slot: intPtr(slot)})
 
+		p.occupy(slot)
 		result, err := r.RunChild(ctx, ChildRequest{Slot: slot, Kind: cfg.Kind, Revision: revision})
+		p.unoccupy(slot)
 		if err != nil {
 			// The seam failed, not the child (e.g. it could not even be
 			// started), so there is no exit code to report — but a
@@ -181,7 +181,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, c
 				em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
 			}
 			em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
-			if p.backoffOrHalt(ctx, slot, clk, b, revision, fmt.Sprintf("run-child: %v", err)) {
+			if p.backoffOrHalt(ctx, slot, revision, fmt.Sprintf("run-child: %v", err)) {
 				return
 			}
 			continue
@@ -200,11 +200,21 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, c
 			continue
 		case Wait:
 			wait := cfg.IdleInterval
-			em.Emit(Event{Event: "idle", Kind: cfg.Kind, Wait: wait.String(), Slot: intPtr(slot)})
-			clk.Sleep(ctx, wait)
+			// "none-dispatchable" carries a second axis exit 2 doesn't: pool
+			// occupancy. With a sibling genuinely running, the issues this
+			// slot found "none dispatchable" were claimed or overlap-deferred
+			// against that very sibling — routine, reported like any other
+			// idle wait. With every sibling parked too, nothing is running
+			// and nothing can start: a jam an operator may need to clear.
+			if outcome == "none-dispatchable" && !p.siblingsOccupied(slot) {
+				em.Emit(Event{Event: "jam", Kind: cfg.Kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is running"})
+			} else {
+				em.Emit(Event{Event: "idle", Kind: cfg.Kind, Wait: wait.String(), Slot: intPtr(slot)})
+			}
+			p.clk.Sleep(ctx, wait)
 			continue
 		case Backoff:
-			if p.backoffOrHalt(ctx, slot, clk, b, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit)) {
+			if p.backoffOrHalt(ctx, slot, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit)) {
 				return
 			}
 			continue

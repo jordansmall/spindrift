@@ -16,12 +16,15 @@ import (
 type pool struct {
 	cfg Config
 	em  *Emitter
+	clk Clock
+	b   *breaker
 
 	cancel context.CancelFunc
 
-	mu     sync.Mutex
-	halted bool
-	reason string
+	mu       sync.Mutex
+	halted   bool
+	reason   string
+	occupied map[int]struct{}
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -29,20 +32,58 @@ type pool struct {
 // slot runs against the derived one, never the caller's directly, so
 // RunChild is already contractually drain-safe under a cancelled ctx (see
 // loop.go's own doc), and hostRunner.RunChild uses exec.Command rather than
-// CommandContext, so cancelling it can never kill a running child.
-func newPool(ctx context.Context, cfg Config, em *Emitter) (*pool, context.Context) {
+// CommandContext, so cancelling it can never kill a running child. clk and
+// the breaker are both breaker policy, not slot-tracking state, but they
+// live here so backoffOrHalt and runSlot stop threading them as parameters.
+func newPool(ctx context.Context, cfg Config, em *Emitter, clk Clock) (*pool, context.Context) {
 	pctx, cancel := context.WithCancel(ctx)
-	return &pool{cfg: cfg, em: em, cancel: cancel}, pctx
+	p := &pool{
+		cfg:      cfg,
+		em:       em,
+		clk:      clk,
+		b:        newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
+		cancel:   cancel,
+		occupied: make(map[int]struct{}),
+	}
+	return p, pctx
 }
 
-// stopped reports whether the pool has already recorded a halt reason. It
-// is deliberately not "is the derived ctx cancelled" — that ctx is also
-// cancelled as a side effect of halt() itself, so a raw ctx.Err() check
-// cannot distinguish "I am the slot that just discovered the real
-// cancellation" from "a sibling already halted for some other reason and
-// cancelled me as a side effect". stopped() answers only the latter
-// question, which is exactly what a slot needs before deciding whether a
-// cancelled ctx is news worth reporting.
+// occupy marks slot as having a child running right now. A slot calls this
+// immediately before RunChild, and unoccupy immediately after RunChild
+// returns — before the result is interpreted. That ordering is the whole
+// point: a slot must clear its own occupancy before it ever asks
+// siblingsOccupied, or it would count itself as a running sibling and "none
+// dispatchable, pool otherwise idle" could never be true for a lone slot.
+func (p *pool) occupy(slot int) {
+	p.mu.Lock()
+	p.occupied[slot] = struct{}{}
+	p.mu.Unlock()
+}
+
+// unoccupy clears slot's occupancy (see occupy's doc for the ordering).
+func (p *pool) unoccupy(slot int) {
+	p.mu.Lock()
+	delete(p.occupied, slot)
+	p.mu.Unlock()
+}
+
+// siblingsOccupied reports whether any slot other than slot currently has a
+// child running. Callers use it only after their own unoccupy(slot) has
+// already run, so any entry found here is a genuine sibling, never the
+// caller counting itself.
+func (p *pool) siblingsOccupied(slot int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for s := range p.occupied {
+		if s != slot {
+			return true
+		}
+	}
+	return false
+}
+
+// stopped reports whether the pool has already recorded a halt reason —
+// deliberately not a raw ctx.Err() check; see stopOnCancel (loop.go) for why.
 func (p *pool) stopped() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -70,14 +111,14 @@ func (p *pool) halt(reason, revision string) {
 
 // backoffOrHalt is what a slot calls on an unclassified failure (a
 // ResolveRevision error, a RunChild seam error, or an unrecognised exit
-// code): it records the failure in the pool-wide breaker b and either
-// trips the pool (enough failures landed across the pool within the
-// window to look systemic — no per-slot retry clears that) or backs this
-// one slot off and lets it retry alone. Returns true if the pool halted
-// (the caller must stop), false if the caller should sleep out the backoff
-// and continue its own loop.
-func (p *pool) backoffOrHalt(ctx context.Context, slot int, clk Clock, b *breaker, revision, reason string) bool {
-	count, crossed := b.recordAndCheck(clk.Now())
+// code): it records the failure in the pool-wide breaker and either trips
+// the pool (enough failures landed across the pool within the window to
+// look systemic — no per-slot retry clears that) or backs this one slot
+// off and lets it retry alone. Returns true if the pool halted (the caller
+// must stop), false if the caller should sleep out the backoff and
+// continue its own loop.
+func (p *pool) backoffOrHalt(ctx context.Context, slot int, revision, reason string) bool {
+	count, crossed := p.b.recordAndCheck(p.clk.Now())
 	if crossed {
 		haltReason := fmt.Sprintf("breaker: %d failures within %s reached threshold %d", count, p.cfg.BreakerWindow, p.cfg.BreakerThreshold)
 		p.em.Emit(Event{Event: "breaker_trip", Kind: p.cfg.Kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()})
@@ -94,7 +135,7 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, clk Clock, b *breake
 	}
 
 	p.em.Emit(Event{Event: "backoff", Kind: p.cfg.Kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason})
-	clk.Sleep(ctx, p.cfg.FailureBackoff)
+	p.clk.Sleep(ctx, p.cfg.FailureBackoff)
 	return false
 }
 
