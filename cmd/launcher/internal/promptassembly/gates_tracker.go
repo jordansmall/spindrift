@@ -20,11 +20,9 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	// ADR 0041 / issue #2593: a research dispatch with the Filer provisioned
 	// always uses the relay form, with no ORCHESTRATOR_ENABLED condition and
 	// regardless of BOX_WRITE_ENABLED. Env forwards DispatchKind as the empty
-	// string by default, so it needs the same defaulting assemble.go applies.
-	kind := e.DispatchKind
-	if kind == "" {
-		kind = defaultDispatchKind
-	}
+	// string by default, so the comparison has to resolve that default the
+	// same way every other reader of the field does.
+	kind := e.kind()
 	researchForceRelay := kind == "research" && e.FilerEnabled
 
 	// Exactly one of these three ever fires.

@@ -66,10 +66,7 @@ func Gates(e Env) map[string]bool {
 	// would dangle a "read the brief" instruction on a file research never
 	// writes. The fragment registry allows one gate per row, so both
 	// conjunctions are computed here rather than nested inside their fragments.
-	kind := e.DispatchKind
-	if kind == "" {
-		kind = defaultDispatchKind
-	}
+	kind := e.kind()
 	g["COORDINATOR_SCOUT_BRIEF"] = e.WorkerProvisioned && e.ScoutProvisioned && kind == defaultDispatchKind
 	g["WORKER_SCOUT_BRIEF"] = e.ScoutProvisioned && kind == defaultDispatchKind
 

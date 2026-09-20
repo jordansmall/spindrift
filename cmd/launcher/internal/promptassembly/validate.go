@@ -72,10 +72,7 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 // gating Assemble used, and dispatches on row data rather than id (#2318).
 func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string, err error) {
 	gates := Gates(e)
-	kind := e.DispatchKind
-	if kind == "" {
-		kind = defaultDispatchKind
-	}
+	kind := e.kind()
 
 	for _, row := range rows {
 		var gateActive bool
