@@ -1,45 +1,21 @@
 # Drift parity between the code-review fallback fragment and the upstream
 # `/code-review` skill (issue #3222, same pattern as #3219). See
-# nix/checks/tdd-fragment-parity.nix for the full rationale; this file
+# nix/checks/mk-fragment-parity.nix for the full rationale; this file
 # repeats only what differs.
-{ pkgs, fixtures, ... }:
+{ pkgs, mkFragmentParity, ... }:
 let
-  inherit (pkgs.lib)
-    assertMsg
-    concatStringsSep
-    hasInfix
-    toLower
-    ;
+  inherit (pkgs.lib) assertMsg concatStringsSep;
 
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
 
-  skillRowByName =
-    name:
-    let
-      matches = builtins.filter (r: r.name == name) fixtures.dogfoodSkills;
-    in
-    if matches == [ ] then
-      throw "nix/checks/code-review-fragment-parity.nix: no dogfood skill named \"${name}\" (nix/dogfood-skills.nix row may have been renamed or dropped)"
-    else
-      builtins.head matches;
-
-  normalize =
-    text:
-    let
-      words = builtins.filter (w: builtins.isString w && w != "") (builtins.split "[[:space:]]+" text);
-    in
-    toLower (concatStringsSep " " words);
-
-  skillText = normalize (skillRowByName "code-review").src;
+  skillDesc = "the upstream code-review SKILL.md (pinned `matt-skills` flake input, read via nix/dogfood-skills.nix)";
+  fallbackDesc = "templates/default/prompts/review-prompt.md";
+  anchorDesc = "templates/default/prompts/fragments/code-review-baked.md";
   # Issue #3226 moved the four hunt dimensions into review-prompt.md as
   # unconditional inline text, since they must render whether or not the
   # skill is baked. The drift target follows the prose there.
-  fallbackText = normalize (builtins.readFile ../../templates/default/prompts/review-prompt.md);
+  fallbackText = builtins.readFile ../../templates/default/prompts/review-prompt.md;
   anchorText = builtins.readFile ../../templates/default/prompts/fragments/code-review-baked.md;
-
-  skillDesc = "the upstream code-review SKILL.md (pinned `matt-skills` flake input, read via nix/dogfood-skills.nix)";
-  fallbackDesc = "templates/default/prompts/review-prompt.md";
-  remedy = "either re-sync the fallback with the skill, or -- if the skill's discipline genuinely changed -- update this check's clause list to match.";
 
   # Only two clauses. The skill's Standards/Spec two-axis model and
   # review-prompt.md's four hunt dimensions are different shapes by design:
@@ -63,19 +39,6 @@ let
     }
   ];
 
-  clauseCheck = c: {
-    name = "code-review-fragment-parity-clause-${c.name}";
-    value =
-      let
-        needle = normalize c.clause;
-      in
-      assert assertMsg (hasInfix needle skillText)
-        "code-review fallback drift: ${skillDesc} no longer states \"${c.clause}\", which ${fallbackDesc} restates -- ${remedy}";
-      assert assertMsg (hasInfix needle fallbackText)
-        "code-review fallback drift: ${fallbackDesc} no longer states \"${c.clause}\", which ${skillDesc} teaches -- ${remedy}";
-      pkgs.runCommand "code-review-fragment-parity-clause-${c.name}" { } "touch $out";
-  };
-
   # Phrases that belong only to review-prompt.md's always-inline dimension
   # prose, never to the gated baked arm.
   stepProseMarkers = [
@@ -84,18 +47,25 @@ let
     "code smells"
     "standards & smells"
   ];
-  normalizedAnchor = normalize anchorText;
-  leakedMarkers = builtins.filter (m: hasInfix m normalizedAnchor) stepProseMarkers;
-  anchorLines = builtins.filter (l: builtins.isString l && normalize l != "") (
-    builtins.split "\n" anchorText
-  );
 
-  # Issue #3447: the skill's fan-out step defaults both axis subagents to
-  # `general-purpose`, which defaultRoster does not govern, and this baked
-  # anchor is the only override. It cannot name a roster entry literally: a
-  # Consumer roster may omit that entry, or opt out of it with `model = ""`
-  # (#392), so the anchor names a placeholder the box substitutes.
-  anchorLine = if anchorLines == [ ] then "" else builtins.head anchorLines;
+  parity = mkFragmentParity {
+    skillName = "code-review";
+    sourceFile = "nix/checks/code-review-fragment-parity.nix";
+    inherit
+      skillDesc
+      fallbackText
+      fallbackDesc
+      anchorText
+      anchorDesc
+      sharedClauses
+      stepProseMarkers
+      ;
+    proseKind = "dimension prose";
+    carriedKind = "discipline";
+    discipline = "review discipline";
+  };
+
+  anchorLine = if parity.anchorLines == [ ] then "" else builtins.head parity.anchorLines;
   # Anchored on the "spawning ... as agent type `x`" phrase, not on "agent
   # type" alone: a bare match reads the last such clause on the line, so an
   # appended negation ("never agent type `general-purpose`") would fail the
@@ -116,17 +86,8 @@ let
   goAgentType = if goAgentMatches == [ ] then null else builtins.head (builtins.head goAgentMatches);
   rosterNames = map (e: e.name) (rosterLib.defaultRoster { });
 in
-builtins.listToAttrs (map clauseCheck sharedClauses)
+parity.checks
 // {
-  code-review-fragment-parity-baked-anchor-omits-step-prose =
-    assert assertMsg (leakedMarkers == [ ])
-      "templates/default/prompts/fragments/code-review-baked.md restates the unbaked arm's dimension prose (${concatStringsSep ", " leakedMarkers}) -- the baked arm must name the `/code-review` skill and stop, since the skill itself carries that discipline in-box; move any wording worth keeping into ${fallbackDesc}.";
-    assert assertMsg (builtins.length anchorLines == 1)
-      "templates/default/prompts/fragments/code-review-baked.md is ${toString (builtins.length anchorLines)} non-empty lines, want 1 -- the baked arm is an anchor line, not a paragraph; prose belongs in ${fallbackDesc}.";
-    assert assertMsg (hasInfix "/code-review" anchorText)
-      "templates/default/prompts/fragments/code-review-baked.md no longer names the `/code-review` skill -- the baked arm's entire job is to point at the baked skill, so with the name gone the prompt says nothing about review discipline at all.";
-    pkgs.runCommand "code-review-fragment-parity-baked-anchor-omits-step-prose" { } "touch $out";
-
   # Issue #3447: pins the substitution seam end to end, so an edit that
   # drops or misspells any link in it cannot silently regress to the skill's
   # ungoverned `general-purpose` default.
