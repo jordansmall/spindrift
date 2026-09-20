@@ -226,6 +226,13 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 		if issue, ok := daemon.ParseAnnouncedIssue(line); ok && !seen[issue] {
 			seen[issue] = true
 			issues = append(issues, issue)
+			// Fires as the announce line is read, not after the child
+			// exits: ChildResult.Issues below only arrives post-exit, so
+			// it can never name the issue a slot has in flight right now
+			// (ChildRequest.OnIssue's own doc, issue #3545).
+			if req.OnIssue != nil {
+				req.OnIssue(issue)
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {

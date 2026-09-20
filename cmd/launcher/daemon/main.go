@@ -250,6 +250,87 @@ func fail(stderr io.Writer, err error) int {
 	return 1
 }
 
+// cmdStatus implements `daemon status`: read-only, so unlike the rest of
+// mainRun it needs only the git dir — never the --input document, a knob,
+// or the repo root. An operator querying a checkout has no work to
+// configure, so requiring any of those would be a needless barrier to
+// asking "what is running".
+func cmdStatus(wd string, stdout, stderr io.Writer) int {
+	gitDirPath, err := gitDir(wd)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	report, err := daemon.ReadStatus(gitDirPath)
+	if err != nil {
+		// ReadStatus's contract: on error the report still carries
+		// whatever the lock probe established, so an operator learns a
+		// daemon holds the checkout even though a garbage status file
+		// makes the exit code 1.
+		fmt.Fprintln(stderr, summarizeStatus(report))
+		return fail(stderr, err)
+	}
+
+	// stdout is the machine-readable answer, one JSON object plus a
+	// newline: this binary's existing contract is "stdout is the machine
+	// stream only" (the durable event-JSON-lines stream, elsewhere in this
+	// file; a child's own stdout/stderr and every human-facing message go
+	// to stderr instead), and status keeps that line rather than carving
+	// an exception for itself.
+	data, err := json.Marshal(report)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stdout, "%s\n", data)
+
+	fmt.Fprintln(stderr, summarizeStatus(report))
+
+	// 0 whenever an answer was produced, including "no daemon running":
+	// the JSON's `live` field is the answer a scripting caller reads, not
+	// the exit code, and this binary's own exit-code taxonomy
+	// (exitCodeFor) already spends 1 on a genuine failure — reusing it
+	// here for "nothing is running" would conflate the two.
+	return 0
+}
+
+// summarizeSlot renders one SlotStatus compactly for summarizeStatus's
+// stderr line: idle slots need only their number, a busy slot names its
+// kind and, when the child has announced any, the issues it is in flight
+// on.
+func summarizeSlot(s daemon.SlotStatus) string {
+	if !s.Busy {
+		return fmt.Sprintf("%d:idle", s.Slot)
+	}
+	if len(s.Issues) == 0 {
+		return fmt.Sprintf("%d:busy(%s)", s.Slot, s.Kind)
+	}
+	return fmt.Sprintf("%d:busy(%s #%s)", s.Slot, s.Kind, strings.Join(s.Issues, ",#"))
+}
+
+// summarizeStatus renders cmdStatus's one human sentence for stderr. It
+// covers all four cases ReadStatus's doc distinguishes, checked in this
+// order because the lock, not the status file, is the liveness truth: a
+// held lock always wins over what the (possibly stale or absent) status
+// file says, and only an unheld lock lets a present file mean "stale".
+func summarizeStatus(report daemon.StatusReport) string {
+	switch {
+	case report.Live:
+		status := report.Status
+		slots := make([]string, 0, len(status.Slots))
+		for _, s := range status.Slots {
+			slots = append(slots, summarizeSlot(s))
+		}
+		return fmt.Sprintf("daemon: live, state=%s, pid=%d, slots=[%s]", status.State, status.Pid, strings.Join(slots, " "))
+	case report.LockHeld && report.Status == nil:
+		return fmt.Sprintf("daemon: a daemon holds this checkout but has not published its status yet (%s)", report.Holder)
+	case report.LockHeld:
+		return fmt.Sprintf("daemon: a daemon holds this checkout, but the published status file is a predecessor's leftover (pid=%d, state=%s), not this holder's (%s)", report.Status.Pid, report.Status.State, report.Holder)
+	case report.Stale:
+		return fmt.Sprintf("daemon: stale — no daemon is running; last published state=%s at %s", report.Status.State, report.Status.Time)
+	default:
+		return "daemon: no daemon has run in this checkout"
+	}
+}
+
 // daemonIdleFloor and daemonIdleCap are the shipped defaults for the
 // pool-wide idle backoff; the backoff's mechanics live in backoff.go and
 // the operator-facing writeup is in docs/reference.md's daemon exit-code
@@ -423,11 +504,38 @@ func preflightRefusal(em *daemon.Emitter, revision, outcome, reason string) stri
 	return reason
 }
 
+// publishHaltedStatus writes a StateHalted status naming reason directly to
+// sw, for a caller with no pool yet to snapshot through — the preflight
+// refusal below, before daemon.Loop (and therefore any pool) ever exists. A
+// write failure is reported to stderr and otherwise ignored, matching
+// pool.publish's own advisory-only handling.
+func publishHaltedStatus(stderr io.Writer, sw *daemon.StatusWriter, kinds []daemon.Kind, reason string) {
+	if err := sw.Write(daemon.Status{Kinds: kinds, State: daemon.StateHalted, Reason: reason}); err != nil {
+		fmt.Fprintf(stderr, "daemon: status file write failed: %v\n", err)
+	}
+}
+
 // mainRun holds everything main() does: argv parse, input document load,
 // knob resolution, repo root, signal wiring, and daemon.Loop, returning the
 // exit code rather than calling os.Exit so tests can drive it repeatedly
 // with different argv (mirrors cmd/launcher/driver-exec/main.go's mainRun).
 func mainRun(argv []string, stdout, stderr io.Writer) int {
+	// `status` is dispatched here, ahead of parseArgs, not folded into it:
+	// parseArgs's one positional slot is the kind selector (dispatch |
+	// research, see its own doc), and overloading that same slot with a
+	// verb would make `daemon status dispatch` parse as a kind selector of
+	// "status dispatch" rather than the status verb it plainly reads as.
+	if len(argv) > 0 && argv[0] == "status" {
+		if len(argv) > 1 {
+			return fail(stderr, fmt.Errorf("status takes no arguments, got: %v", argv[1:]))
+		}
+		wd, err := os.Getwd()
+		if err != nil {
+			return fail(stderr, err)
+		}
+		return cmdStatus(wd, stdout, stderr)
+	}
+
 	args, err := parseArgs(argv)
 	if err != nil {
 		return fail(stderr, err)
@@ -532,6 +640,18 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// needs to cover the ordinary return path.
 	defer func() { _ = lock.Release() }()
 
+	// Built only now, after the lock acquire above succeeded: the status
+	// file belongs to the daemon that actually holds the checkout, and a
+	// refused second instance (the branch above) must never stomp the
+	// live holder's file. There is no matching cleanup on the ordinary
+	// return path below, and that is deliberate, not a missing defer: the
+	// last state this writer publishes is StateHalted with its Reason, and
+	// a reader who finds the lock unheld (ReadStatus) already reports the
+	// file stale — its contents are then a last-known record of how this
+	// run ended, not a lie, so deleting it on exit would only destroy
+	// information a stale read is designed to surface.
+	statusWriter := daemon.NewStatusWriter(gitDirPath, clk.Now)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -558,6 +678,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// path rather than after a full doctor run.
 	if reason := startupPreflight(ctx, r, em); reason != "" {
 		fmt.Fprintf(stderr, "daemon: %s\n", reason)
+		publishHaltedStatus(stderr, statusWriter, args.Kinds, reason)
 		if isOperatorStop(reason) {
 			return 0
 		}
@@ -575,6 +696,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		BreakerThreshold:    daemonBreakerThreshold,
 		BreakerWindow:       daemonBreakerWindow,
 		Awake:               awake,
+		Status:              statusWriter,
 	}
 
 	reason := daemon.Loop(ctx, cfg, r, em, clk)

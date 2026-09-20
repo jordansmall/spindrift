@@ -1008,6 +1008,243 @@ func TestBreakerDefaults_TripReachableAtOneSlot(t *testing.T) {
 	}
 }
 
+// TestMainRun_StatusDoesNotRequireInput is the regression the pre-parseArgs
+// dispatch in mainRun exists to prevent: `daemon status` with no --input
+// must never hit parseArgs's "flag --input is required" error, since
+// reading status is not running a daemon.
+func TestMainRun_StatusDoesNotRequireInput(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	gitRunT(t, root, "-c", "init.defaultBranch=main", "init")
+	t.Chdir(root)
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"status"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("mainRun() = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "--input") {
+		t.Errorf("stderr = %q, want no mention of --input", stderr.String())
+	}
+}
+
+// TestCmdStatus_NeverRan covers the no-daemon-ever-ran case: exit 0, a
+// StatusReport that unmarshals with Live false and no Status, and a stderr
+// sentence saying so.
+func TestCmdStatus_NeverRan(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	gitRunT(t, root, "-c", "init.defaultBranch=main", "init")
+
+	var stdout, stderr bytes.Buffer
+	got := cmdStatus(root, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdStatus() = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	var report daemon.StatusReport
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &report); err != nil {
+		t.Fatalf("decode stdout %q: %v", stdout.String(), err)
+	}
+	if report.Live {
+		t.Errorf("report.Live = true, want false")
+	}
+	if report.Status != nil {
+		t.Errorf("report.Status = %+v, want nil", report.Status)
+	}
+	if !strings.Contains(stderr.String(), "no daemon has run") {
+		t.Errorf("stderr = %q, want it to say no daemon has run", stderr.String())
+	}
+}
+
+// TestCmdStatus_Live covers the happy path: a lock held in-process (standing
+// in for a running daemon) plus a status file published by a StatusWriter
+// in the same process, so the pids match and ReadStatus reports Live.
+func TestCmdStatus_Live(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	gitRunT(t, root, "-c", "init.defaultBranch=main", "init")
+	gitDirPath, err := gitDir(root)
+	if err != nil {
+		t.Fatalf("gitDir(%q): %v", root, err)
+	}
+
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindDispatch})
+	if err != nil {
+		t.Fatalf("AcquireCheckoutLock: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+
+	sw := daemon.NewStatusWriter(gitDirPath, time.Now)
+	if err := sw.Write(daemon.Status{
+		State: daemon.StateWorking,
+		Slots: []daemon.SlotStatus{
+			{Slot: 0, Busy: true, Kind: daemon.KindDispatch, Issues: []string{"101"}},
+		},
+	}); err != nil {
+		t.Fatalf("StatusWriter.Write: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := cmdStatus(root, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdStatus() = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	var report daemon.StatusReport
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &report); err != nil {
+		t.Fatalf("decode stdout %q: %v", stdout.String(), err)
+	}
+	if !report.Live {
+		t.Errorf("report.Live = false, want true")
+	}
+	if !strings.Contains(stderr.String(), string(daemon.StateWorking)) {
+		t.Errorf("stderr = %q, want it to name the state %q", stderr.String(), daemon.StateWorking)
+	}
+}
+
+// TestCmdStatus_Stale covers a status file whose pid names a different
+// process while the lock is unheld: ReadStatus must report Stale, never
+// Live, and cmdStatus's stderr must say so plainly.
+func TestCmdStatus_Stale(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	gitRunT(t, root, "-c", "init.defaultBranch=main", "init")
+	gitDirPath, err := gitDir(root)
+	if err != nil {
+		t.Fatalf("gitDir(%q): %v", root, err)
+	}
+
+	sw := daemon.NewStatusWriter(gitDirPath, time.Now)
+	if err := sw.Write(daemon.Status{State: daemon.StateHalted, Reason: "operator stop"}); err != nil {
+		t.Fatalf("StatusWriter.Write: %v", err)
+	}
+	// No lock held: NewStatusWriter does not acquire one, and this test
+	// never calls AcquireCheckoutLock — the published Pid is this test
+	// process's own pid, but with the lock unheld ReadStatus's liveness
+	// probe fails regardless of whose pid is in the file.
+
+	var stdout, stderr bytes.Buffer
+	got := cmdStatus(root, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdStatus() = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	var report daemon.StatusReport
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &report); err != nil {
+		t.Fatalf("decode stdout %q: %v", stdout.String(), err)
+	}
+	if report.Live {
+		t.Errorf("report.Live = true, want false")
+	}
+	if !report.Stale {
+		t.Errorf("report.Stale = false, want true")
+	}
+	if !strings.Contains(stderr.String(), "stale") {
+		t.Errorf("stderr = %q, want it to say stale", stderr.String())
+	}
+}
+
+// TestCmdStatus_GarbageStatusFileStillReportsLiveness pins the review
+// finding at cmdStatus: a genuinely held lock beside a garbage status file
+// must not suppress the liveness truth just because the advisory file
+// failed to parse. cmdStatus must still exit 1 (the ReadStatus error is
+// real), but must print summarizeStatus's liveness sentence to stderr
+// before the failure line.
+func TestCmdStatus_GarbageStatusFileStillReportsLiveness(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	gitRunT(t, root, "-c", "init.defaultBranch=main", "init")
+	gitDirPath, err := gitDir(root)
+	if err != nil {
+		t.Fatalf("gitDir(%q): %v", root, err)
+	}
+
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindDispatch})
+	if err != nil {
+		t.Fatalf("AcquireCheckoutLock: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+
+	statusPath := filepath.Join(gitDirPath, "spindrift-daemon.status")
+	if err := os.WriteFile(statusPath, []byte("not json"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := cmdStatus(root, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("cmdStatus() = %d, want 1; stderr=%q", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "holds this checkout") {
+		t.Errorf("stderr = %q, want it to report the held lock despite the parse error", stderr.String())
+	}
+}
+
+// TestSummarizeStatus_LockHeldDistinguishesNoStatusFromUncorrelated pins the
+// review finding that the LockHeld branch used one wording ("has not
+// published its status yet") even when a status file was present but named
+// a predecessor, not the current holder — the two cases must read
+// differently.
+func TestSummarizeStatus_LockHeldDistinguishesNoStatusFromUncorrelated(t *testing.T) {
+	noStatus := daemon.StatusReport{LockHeld: true, Holder: "pid=1 host=h kind=dispatch started=x"}
+	got := summarizeStatus(noStatus)
+	if !strings.Contains(got, "has not published its status yet") {
+		t.Errorf("summarizeStatus(no status) = %q, want it to say the holder has not published yet", got)
+	}
+
+	uncorrelated := daemon.StatusReport{
+		LockHeld: true,
+		Holder:   "pid=1 host=h kind=dispatch started=x",
+		Status:   &daemon.Status{Pid: 999, State: daemon.StateWorking},
+	}
+	got = summarizeStatus(uncorrelated)
+	if strings.Contains(got, "has not published its status yet") {
+		t.Errorf("summarizeStatus(uncorrelated status) = %q, want it to distinguish a predecessor's leftover status", got)
+	}
+	if !strings.Contains(got, "999") {
+		t.Errorf("summarizeStatus(uncorrelated status) = %q, want it to name the leftover status's own pid", got)
+	}
+}
+
+// TestMainRun_StatusExtraArgument asserts an extra positional argument
+// after "status" is a usage error, not silently ignored.
+func TestMainRun_StatusExtraArgument(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"status", "dispatch"}, &stdout, &stderr)
+	if got != 1 {
+		t.Errorf("mainRun() = %d, want 1", got)
+	}
+	if stderr.String() == "" {
+		t.Error("stderr is empty, want a usage error")
+	}
+}
+
+// TestMainRun_StatusOutsideGitCheckout asserts `daemon status` fails with
+// gitDir's own error, exit 1, outside any checkout.
+func TestMainRun_StatusOutsideGitCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"status"}, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("mainRun() = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), "not a git checkout") {
+		t.Errorf("stderr = %q, want it to name the gitDir failure", stderr.String())
+	}
+}
+
 // TestExitSelfChanged_OutsideChildExitBand pins the invariant exitSelfChanged's
 // own doc comment claims but nothing enforces: it must fall outside the 0-7
 // band a *child* launcher's exit codes occupy (daemon.Interpret), so an
@@ -1064,6 +1301,37 @@ func (f *fakePreflightRunner) calls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.doctorCalls
+}
+
+// TestPublishHaltedStatus pins what mainRun's preflight-refusal branch relies
+// on: with no pool yet to snapshot through, a direct Write still lands a
+// StateHalted status naming the same reason and kinds the caller passed.
+func TestPublishHaltedStatus(t *testing.T) {
+	dir := t.TempDir()
+	sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
+	var stderr bytes.Buffer
+
+	publishHaltedStatus(&stderr, sw, []daemon.Kind{daemon.KindDispatch}, "preflight: doctor-config-invalid")
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty on a successful write", stderr.String())
+	}
+	report, err := daemon.ReadStatus(dir)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if report.Status == nil {
+		t.Fatal("status file missing after publishHaltedStatus")
+	}
+	if report.Status.State != daemon.StateHalted {
+		t.Errorf("state = %q, want %q", report.Status.State, daemon.StateHalted)
+	}
+	if report.Status.Reason != "preflight: doctor-config-invalid" {
+		t.Errorf("reason = %q, want %q", report.Status.Reason, "preflight: doctor-config-invalid")
+	}
+	if len(report.Status.Kinds) != 1 || report.Status.Kinds[0] != daemon.KindDispatch {
+		t.Errorf("kinds = %v, want [dispatch]", report.Status.Kinds)
+	}
 }
 
 // decodePreflightEvents parses buf's JSON-lines stream, one daemon.Event per
