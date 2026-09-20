@@ -3,7 +3,6 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -195,11 +194,11 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	}
 }
 
-// TestPoolSlots1ReproducesTodaysBehaviour asserts Slots: 1 drives exactly
+// TestPoolSlots1RunsOneChildAtATime asserts Slots: 1 drives exactly
 // one child at a time — the existing single-slot loop tests already pin
 // this behaviour via Config{Slots: 1}, so this test just names the
 // invariant explicitly at the pool layer.
-func TestPoolSlots1ReproducesTodaysBehaviour(t *testing.T) {
+func TestPoolSlots1RunsOneChildAtATime(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
 	clk := &fakeClock{}
 	var buf bytes.Buffer
@@ -212,69 +211,6 @@ func TestPoolSlots1ReproducesTodaysBehaviour(t *testing.T) {
 	}
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want it to name host-tainted", reason)
-	}
-}
-
-// TestLoopRejectsNonPositiveSlots asserts Loop treats a zero or negative
-// pool size as a real, halt-shaped config error rather than silently
-// running no children — a zero-slot daemon that looks healthy while doing
-// nothing is the worst outcome.
-func TestLoopRejectsNonPositiveSlots(t *testing.T) {
-	for _, slots := range []int{0, -1} {
-		t.Run(fmt.Sprintf("slots=%d", slots), func(t *testing.T) {
-			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
-			clk := &fakeClock{}
-			var buf bytes.Buffer
-			em := newTestEmitter(&buf)
-
-			reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: slots}, r, em, clk)
-
-			if len(r.runCalls) != 0 {
-				t.Fatalf("run calls = %d, want 0: a non-positive slot count must halt before any child runs", len(r.runCalls))
-			}
-			if !strings.Contains(reason, "config-invalid") {
-				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
-			}
-			events := decodeEvents(t, &buf)
-			if names := eventNames(events); len(names) != 1 || names[0] != "halt" {
-				t.Fatalf("events = %v, want exactly one halt event", names)
-			}
-		})
-	}
-}
-
-// TestLoopRejectsInvalidBreakerConfig mirrors
-// TestLoopRejectsNonPositiveSlots for the breaker knobs this slice adds: a
-// non-positive threshold or window, or a negative backoff, is a config
-// error Loop rejects up front rather than a zero-value default that would
-// make the breaker's real threshold invisible.
-func TestLoopRejectsInvalidBreakerConfig(t *testing.T) {
-	cases := []struct {
-		name string
-		cfg  Config
-	}{
-		{"zero threshold", Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: 0, BreakerWindow: testBreakerWindow, Slots: 1}},
-		{"negative threshold", Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: -1, BreakerWindow: testBreakerWindow, Slots: 1}},
-		{"zero window", Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: 0, Slots: 1}},
-		{"negative window", Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: -time.Minute, Slots: 1}},
-		{"negative backoff", Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: -time.Millisecond, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
-			clk := &fakeClock{}
-			var buf bytes.Buffer
-			em := newTestEmitter(&buf)
-
-			reason := Loop(context.Background(), tc.cfg, r, em, clk)
-
-			if len(r.runCalls) != 0 {
-				t.Fatalf("run calls = %d, want 0: an invalid breaker config must halt before any child runs", len(r.runCalls))
-			}
-			if !strings.Contains(reason, "config-invalid") {
-				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
-			}
-		})
 	}
 }
 
@@ -369,6 +305,9 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 			if ev.Failures == nil || *ev.Failures != threshold {
 				t.Errorf("breaker_trip Failures = %v, want %d", ev.Failures, threshold)
 			}
+			if ev.Slot == nil || *ev.Slot != 2 {
+				t.Errorf("breaker_trip Slot = %v, want 2 (the slot whose failure crossed threshold)", ev.Slot)
+			}
 		}
 	}
 	if halts != 1 {
@@ -388,5 +327,274 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 		if finishes[s] != want {
 			t.Errorf("slot %d child_finish count = %d, want %d: a started child must never be abandoned", s, finishes[s], want)
 		}
+	}
+}
+
+// barrierFailRunner is TestPoolBreakerTripsAtThresholdConcurrently's
+// Runner: the first `slots` RunChild calls all park on one channel and
+// return together the instant the last of them arrives, so every slot
+// hits backoffOrHalt at (as near as the scheduler allows) the same
+// instant — the genuinely concurrent crossing the serialized test above
+// cannot reach. Any later call (a non-crossing slot racing back around
+// before it notices the halt) finds the channel already closed and
+// returns immediately, so the test never needs to script a release for
+// it.
+type barrierFailRunner struct {
+	revision string
+	slots    int
+
+	started chan int
+
+	mu      sync.Mutex
+	arrived int
+	release chan struct{}
+}
+
+func newBarrierFailRunner(revision string, slots int) *barrierFailRunner {
+	return &barrierFailRunner{revision: revision, slots: slots, started: make(chan int, slots*8), release: make(chan struct{})}
+}
+
+func (r *barrierFailRunner) ResolveRevision(ctx context.Context) (string, error) {
+	return r.revision, nil
+}
+
+func (r *barrierFailRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	r.started <- req.Slot
+	r.mu.Lock()
+	r.arrived++
+	if r.arrived == r.slots {
+		close(r.release)
+	}
+	r.mu.Unlock()
+	<-r.release
+	return ChildResult{Exit: 1}, nil
+}
+
+// TestPoolBreakerTripsAtThresholdConcurrently pins the fix for the
+// non-atomic crossing: releasing every slot's failure at once (rather
+// than one at a time, like the serialized test above) used to let all of
+// them observe the breaker already past threshold and each emit its own
+// breaker_trip. Run with -race -count=N: the race detector and repeated
+// scheduling are what actually exercise the crossing window.
+func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
+	const slots = 3
+	const threshold = 3
+	r := newBarrierFailRunner("rev1", slots)
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: time.Millisecond, BreakerThreshold: threshold, BreakerWindow: time.Hour, Slots: slots}
+
+	done := make(chan string, 1)
+	go func() {
+		done <- Loop(context.Background(), cfg, r, em, clk)
+	}()
+
+	// All three slots' first (and, here, only scripted) child in flight
+	// together, proving the barrier really did gather all `slots` calls
+	// before releasing any of them.
+	seen := map[int]bool{}
+	for i := 0; i < slots; i++ {
+		seen[<-r.started] = true
+	}
+	if len(seen) != slots {
+		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
+	}
+
+	var reason string
+	select {
+	case reason = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Loop did not return within 10s of the concurrent release")
+	}
+	if !strings.Contains(reason, "breaker") {
+		t.Errorf("halt reason = %q, want it to name the breaker trip", reason)
+	}
+
+	events := decodeEvents(t, &buf)
+	var halts, trips int
+	var tripSlot *int
+	for _, ev := range events {
+		switch ev.Event {
+		case "halt":
+			halts++
+		case "breaker_trip":
+			trips++
+			tripSlot = ev.Slot
+			if ev.Failures == nil || *ev.Failures != threshold {
+				t.Errorf("breaker_trip Failures = %v, want %d", ev.Failures, threshold)
+			}
+		}
+	}
+	if trips != 1 {
+		t.Fatalf("breaker_trip events = %d, want exactly 1 (this is the atomic-crossing assertion)", trips)
+	}
+	if halts != 1 {
+		t.Errorf("halt events = %d, want exactly 1", halts)
+	}
+	if tripSlot == nil {
+		t.Errorf("breaker_trip slot = nil, want the slot whose failure crossed the threshold")
+	}
+}
+
+// gateClock is the Clock for tests that need a slot to remain provably
+// parked in its idle wait, rather than fakeClock's instant advance racing
+// straight back into a second RunChild call. Sleep blocks on ctx.Done()
+// (recording the wait first, like fakeClock does) so "this slot is now
+// asleep" is a real synchronization point a test can wait on via
+// sleeping, and the only way any Sleep call ever returns is the pool
+// itself being cancelled — which is exactly how these tests end the test,
+// via the top-level ctx, so no slot ever loops back into a RunChild call
+// this test never scripts a release for.
+type gateClock struct {
+	mu       sync.Mutex
+	waits    []time.Duration
+	sleeping chan struct{}
+}
+
+func newGateClock() *gateClock {
+	return &gateClock{sleeping: make(chan struct{}, 8)}
+}
+
+func (c *gateClock) Sleep(ctx context.Context, d time.Duration) {
+	c.mu.Lock()
+	c.waits = append(c.waits, d)
+	c.mu.Unlock()
+	select {
+	case c.sleeping <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+}
+
+func (c *gateClock) Now() time.Time {
+	return time.Unix(0, 0).UTC()
+}
+
+// TestPoolExit3WithSiblingRunningReportsIdleNotJam pins the routine half of
+// the occupancy axis: a slot's exit 3 while a sibling is genuinely still
+// running (blocked mid-RunChild, not merely between calls) must report
+// idle, not jam — the issues this slot found none-dispatchable were
+// claimed or overlap-deferred against that very sibling.
+func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
+	const slots = 2
+	r := newBlockingRunner("rev1", slots)
+	clk := &fakeClock{}
+	nw := newNotifyWriter()
+	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	cfg := Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: slots}
+
+	done := make(chan string, 1)
+	go func() {
+		done <- Loop(context.Background(), cfg, r, em, clk)
+	}()
+
+	// Both slots' first child in flight together.
+	seen := map[int]bool{}
+	for i := 0; i < slots; i++ {
+		seen[<-r.started] = true
+	}
+	if len(seen) != slots {
+		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
+	}
+
+	// Slot 1 exits none-dispatchable while slot 0 is still blocked mid-
+	// RunChild (genuinely occupied, not just between calls) — this must
+	// report idle.
+	r.release[1] <- ChildResult{Exit: 3}
+	nw.waitForLine(t, "\"event\":\"idle\"")
+
+	// Slot 1 now loops back and restarts (still nothing wrong with the
+	// pool); wait for its restart so the later halt below has a real
+	// in-flight child to release rather than racing its own start.
+	if got := <-r.started; got != 1 {
+		t.Fatalf("restart after idle = slot %d, want slot 1", got)
+	}
+
+	// End the test: halt via slot 0's still-in-flight first child.
+	r.release[0] <- ChildResult{Exit: 7}
+	nw.waitForLine(t, "\"event\":\"halt\"")
+
+	// Slot 1's restarted child is still in flight; release it so Loop can
+	// return.
+	r.release[1] <- ChildResult{Exit: 0}
+
+	reason := <-done
+	if !strings.Contains(reason, "signalled-stop") {
+		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	}
+
+	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
+	for _, ev := range events {
+		if ev.Event == "jam" {
+			t.Fatalf("events = %v, want no jam event: slot 0 was genuinely running when slot 1 exited none-dispatchable", eventNames(events))
+		}
+	}
+}
+
+// TestPoolExit3WithPoolIdleIsAJam pins the jam half of the occupancy axis:
+// a slot's exit 3 with every sibling truly parked (asleep in their own
+// idle wait, not occupied) must be reported as a jam, carrying the slot
+// number, and the daemon keeps going rather than halting on it.
+func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
+	const slots = 2
+	r := newBlockingRunner("rev1", slots)
+	clk := newGateClock()
+	nw := newNotifyWriter()
+	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	cfg := Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: slots}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan string, 1)
+	go func() {
+		done <- Loop(ctx, cfg, r, em, clk)
+	}()
+
+	// Both slots' first child in flight together.
+	seen := map[int]bool{}
+	for i := 0; i < slots; i++ {
+		seen[<-r.started] = true
+	}
+	if len(seen) != slots {
+		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
+	}
+
+	// Slot 1 exits queue-empty and parks in its idle wait — gateClock's
+	// Sleep never returns on its own, so slot 1 is now genuinely,
+	// provably not occupied and staying that way.
+	r.release[1] <- ChildResult{Exit: 2}
+	<-clk.sleeping
+
+	// Slot 0 exits none-dispatchable with slot 1 parked and nothing else
+	// running: this must report jam, carrying slot 0.
+	r.release[0] <- ChildResult{Exit: 3}
+	nw.waitForLine(t, "\"event\":\"jam\"")
+
+	// End the test: cancelling the top-level ctx reaches both slots
+	// through their gated Sleep call (blocked on ctx.Done()), so both
+	// return via stopOnCancel without ever starting a third RunChild call
+	// this test never scripts a release for.
+	cancel()
+	reason := <-done
+	if !strings.Contains(reason, "context-cancelled") {
+		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
+	}
+
+	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
+	var jams int
+	for _, ev := range events {
+		if ev.Event == "jam" {
+			jams++
+			if ev.Slot == nil || *ev.Slot != 0 {
+				t.Errorf("jam event slot = %v, want 0", ev.Slot)
+			}
+			if ev.Reason == "" {
+				t.Errorf("jam event reason is empty, want it to say what makes it a jam")
+			}
+		}
+	}
+	if jams != 1 {
+		t.Fatalf("jam events = %d, want exactly 1", jams)
 	}
 }

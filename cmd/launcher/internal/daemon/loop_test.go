@@ -126,19 +126,32 @@ const (
 	testBreakerWindow    = time.Hour
 )
 
+// testConfig builds the Config every test below shares apart from the slot
+// count: Kind, IdleInterval, and the three breaker knobs above.
+func testConfig(slots int) Config {
+	return Config{
+		Kind:             KindDispatch,
+		IdleInterval:     testIdleInterval,
+		FailureBackoff:   testFailureBackoff,
+		BreakerThreshold: testBreakerThreshold,
+		BreakerWindow:    testBreakerWindow,
+		Slots:            slots,
+	}
+}
+
 func TestLoopContinueThenHalt(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
 	if len(r.runCalls) != 2 {
 		t.Fatalf("run calls = %d, want 2", len(r.runCalls))
 	}
-	if len(rs.waits) != 0 {
-		t.Fatalf("waits = %v, want none (exit 0 continues at once)", rs.waits)
+	if len(clk.waits) != 0 {
+		t.Fatalf("waits = %v, want none (exit 0 continues at once)", clk.waits)
 	}
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want it to name host-tainted", reason)
@@ -147,46 +160,97 @@ func TestLoopContinueThenHalt(t *testing.T) {
 
 func TestLoopWaitThenHalt(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 2}, {Exit: 0}, {Exit: 6}}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
 	if len(r.runCalls) != 3 {
 		t.Fatalf("run calls = %d, want 3", len(r.runCalls))
 	}
-	if len(rs.waits) != 1 || rs.waits[0] != testIdleInterval {
-		t.Fatalf("waits = %v, want exactly one wait of %v", rs.waits, testIdleInterval)
+	if len(clk.waits) != 1 || clk.waits[0] != testIdleInterval {
+		t.Fatalf("waits = %v, want exactly one wait of %v", clk.waits, testIdleInterval)
 	}
 	if !strings.Contains(reason, "config-invalid") {
 		t.Errorf("halt reason = %q, want it to name config-invalid", reason)
 	}
 }
 
-func TestLoopExit3WaitsLikeExit2(t *testing.T) {
+// TestLoopExit3SingleSlotIsAJam pins the occupancy-axis contract for a
+// single-slot daemon: with Slots: 1 there is never a sibling to explain
+// away a "none dispatchable" exit, so every exit 3 is a jam, not routine
+// idle — it still waits like exit 2 (below), it just no longer reports
+// like it.
+func TestLoopExit3SingleSlotIsAJam(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 3}, {Exit: 5}}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(rs.waits) != 1 {
-		t.Fatalf("waits = %v, want exactly one wait for exit 3", rs.waits)
+	if len(clk.waits) != 1 || clk.waits[0] != testIdleInterval {
+		t.Fatalf("waits = %v, want exactly one wait of %v for exit 3", clk.waits, testIdleInterval)
+	}
+
+	events := decodeEvents(t, &buf)
+	var sawJam bool
+	for _, ev := range events {
+		if ev.Event == "idle" {
+			t.Errorf("single-slot exit 3 must report jam, not idle: got %+v", ev)
+		}
+		if ev.Event == "jam" {
+			sawJam = true
+			if ev.Slot == nil || *ev.Slot != 0 {
+				t.Errorf("jam event slot = %v, want 0", ev.Slot)
+			}
+			if ev.Reason == "" {
+				t.Errorf("jam event reason is empty, want it to say what makes it a jam")
+			}
+		}
+	}
+	if !sawJam {
+		t.Fatalf("events = %v, want a jam event for single-slot exit 3", eventNames(events))
+	}
+}
+
+// TestLoopExit2NeverEmitsJam pins that the occupancy axis applies only to
+// exit 3: an empty queue (exit 2) is empty whatever the siblings are
+// doing, so it always reports idle, never jam.
+func TestLoopExit2NeverEmitsJam(t *testing.T) {
+	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 2}, {Exit: 2}, {Exit: 5}}}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	events := decodeEvents(t, &buf)
+	idleCount := 0
+	for _, ev := range events {
+		if ev.Event == "jam" {
+			t.Fatalf("exit 2 must never emit jam: got %+v", ev)
+		}
+		if ev.Event == "idle" {
+			idleCount++
+		}
+	}
+	if idleCount != 2 {
+		t.Errorf("idle events = %d, want 2", idleCount)
 	}
 }
 
 func TestLoopExit4ContinuesWithoutSleeping(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 4}, {Exit: 5}}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(rs.waits) != 0 {
-		t.Fatalf("waits = %v, want none for exit 4 (image-stale continues at once)", rs.waits)
+	if len(clk.waits) != 0 {
+		t.Fatalf("waits = %v, want none for exit 4 (image-stale continues at once)", clk.waits)
 	}
 	if len(r.runCalls) != 2 {
 		t.Fatalf("run calls = %d, want 2", len(r.runCalls))
@@ -195,11 +259,11 @@ func TestLoopExit4ContinuesWithoutSleeping(t *testing.T) {
 
 func TestLoopExit7Halts(t *testing.T) {
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 7}}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Errorf("halt reason = %q, want it to name signalled-stop", reason)
@@ -213,17 +277,17 @@ func TestLoopExit7Halts(t *testing.T) {
 func TestLoopUnknownExitBacksOffThenHalts(t *testing.T) {
 	for _, exit := range []int{1, 99} {
 		r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: exit}, {Exit: 5}}}
-		rs := &fakeClock{}
+		clk := &fakeClock{}
 		var buf bytes.Buffer
 		em := newTestEmitter(&buf)
 
-		reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+		reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
 		if !strings.Contains(reason, "host-tainted") {
 			t.Errorf("exit %d: halt reason = %q, want the follow-up host-tainted halt, not the unclassified exit itself", exit, reason)
 		}
-		if len(rs.waits) != 1 || rs.waits[0] != testFailureBackoff {
-			t.Errorf("exit %d: waits = %v, want exactly one wait of %v (FailureBackoff)", exit, rs.waits, testFailureBackoff)
+		if len(clk.waits) != 1 || clk.waits[0] != testFailureBackoff {
+			t.Errorf("exit %d: waits = %v, want exactly one wait of %v (FailureBackoff)", exit, clk.waits, testFailureBackoff)
 		}
 
 		events := decodeEvents(t, &buf)
@@ -250,11 +314,11 @@ func TestLoopUnknownExitBacksOffThenHalts(t *testing.T) {
 func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 	wantErr := errors.New("boom: no such revision")
 	r := &fakeRunner{revisions: []string{"rev1"}, resolveAt: 1, resolveErr: wantErr, results: []ChildResult{{Exit: 5}}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
 	if len(r.runCalls) != 1 {
 		t.Fatalf("run calls = %d, want 1: the slot must retry after backing off from the resolve failure", len(r.runCalls))
@@ -262,8 +326,8 @@ func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want the follow-up host-tainted halt, not the resolve failure itself", reason)
 	}
-	if len(rs.waits) != 1 || rs.waits[0] != testFailureBackoff {
-		t.Fatalf("waits = %v, want exactly one wait of %v (FailureBackoff)", rs.waits, testFailureBackoff)
+	if len(clk.waits) != 1 || clk.waits[0] != testFailureBackoff {
+		t.Fatalf("waits = %v, want exactly one wait of %v (FailureBackoff)", clk.waits, testFailureBackoff)
 	}
 
 	events := decodeEvents(t, &buf)
@@ -285,11 +349,11 @@ func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 func TestLoopRunChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 	wantErr := errors.New("exec: nix not found")
 	r := &fakeRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, results: []ChildResult{{Exit: 5}}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want the follow-up host-tainted halt, not the run-child failure itself", reason)
@@ -316,11 +380,11 @@ func TestLoopRunChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 	wantErr := errors.New("wait: signal: killed")
 	r := &fakeRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, runErrIssues: []string{"42"}, results: []ChildResult{{Exit: 5}}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	Loop(context.Background(), testConfig(1), r, em, clk)
 
 	events := decodeEvents(t, &buf)
 	names := eventNames(events)
@@ -341,11 +405,11 @@ func TestLoopEventStreamSequenceAndFields(t *testing.T) {
 			{Exit: 5},
 		},
 	}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	Loop(context.Background(), testConfig(1), r, em, clk)
 
 	events := decodeEvents(t, &buf)
 	wantNames := []string{"child_start", "box", "box", "child_finish", "child_start", "child_finish", "halt"}
@@ -381,17 +445,17 @@ func TestLoopKeepsGoingAfterQueueDrainsThenPicksUpWork(t *testing.T) {
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 2}, {Exit: 2}, {Exit: 0}, {Exit: 5}},
 	}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
 	if len(r.runCalls) != 4 {
 		t.Fatalf("run calls = %d, want 4: the loop must keep going after the queue drains and pick work back up without a restart", len(r.runCalls))
 	}
-	if len(rs.waits) != 2 {
-		t.Fatalf("waits = %v, want exactly two (one per empty-queue exit)", rs.waits)
+	if len(clk.waits) != 2 {
+		t.Fatalf("waits = %v, want exactly two (one per empty-queue exit)", clk.waits)
 	}
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want it to name host-tainted", reason)
@@ -403,11 +467,11 @@ func TestLoopPinsEachChildToTheResolvedRevisionEvenWhenItChanges(t *testing.T) {
 		revisions: []string{"rev1", "rev2", "rev3"},
 		results:   []ChildResult{{Exit: 0}, {Exit: 0}, {Exit: 5}},
 	}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	Loop(context.Background(), testConfig(1), r, em, clk)
 
 	want := []runCall{
 		{Kind: KindDispatch, Revision: "rev1"},
@@ -424,11 +488,11 @@ func TestLoopCancelledContextHaltsBeforeStartingNewWork(t *testing.T) {
 	cancel()
 
 	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	reason := Loop(ctx, testConfig(1), r, em, clk)
 
 	if len(r.runCalls) != 0 {
 		t.Fatalf("run calls = %d, want 0: an already-cancelled ctx must halt before starting any child", len(r.runCalls))
@@ -446,11 +510,11 @@ func TestLoopCancelledDuringResolveRevisionHaltsBeforeStartingNewWork(t *testing
 	// that nothing will ever signal.
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &cancellingResolveRunner{cancel: cancel, revision: "rev1", result: ChildResult{Exit: 0}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	reason := Loop(ctx, testConfig(1), r, em, clk)
 
 	if r.runCalls != 0 {
 		t.Fatalf("run calls = %d, want 0: a ctx cancelled during resolve must halt before starting any child", r.runCalls)
@@ -473,11 +537,11 @@ func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
 	// re-checks ctx and halts, never killing the child itself.
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &cancellingRunner{cancel: cancel, revision: "rev1", result: ChildResult{Exit: 0}}
-	rs := &fakeClock{}
+	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, rs)
+	reason := Loop(ctx, testConfig(1), r, em, clk)
 
 	if r.runCalls != 1 {
 		t.Fatalf("run calls = %d, want 1", r.runCalls)
@@ -525,4 +589,74 @@ func (r *cancellingResolveRunner) ResolveRevision(ctx context.Context) (string, 
 func (r *cancellingResolveRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
 	r.runCalls++
 	return r.result, nil
+}
+
+// TestLoopRejectsNonPositiveSlots asserts Loop treats a zero or negative
+// pool size as a real, halt-shaped config error rather than silently
+// running no children — a zero-slot daemon that looks healthy while doing
+// nothing is the worst outcome.
+func TestLoopRejectsNonPositiveSlots(t *testing.T) {
+	for _, slots := range []int{0, -1} {
+		t.Run(fmt.Sprintf("slots=%d", slots), func(t *testing.T) {
+			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
+			clk := &fakeClock{}
+			var buf bytes.Buffer
+			em := newTestEmitter(&buf)
+
+			reason := Loop(context.Background(), testConfig(slots), r, em, clk)
+
+			if len(r.runCalls) != 0 {
+				t.Fatalf("run calls = %d, want 0: a non-positive slot count must halt before any child runs", len(r.runCalls))
+			}
+			if !strings.Contains(reason, "config-invalid") {
+				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
+			}
+			events := decodeEvents(t, &buf)
+			if names := eventNames(events); len(names) != 1 || names[0] != "halt" {
+				t.Fatalf("events = %v, want exactly one halt event", names)
+			}
+		})
+	}
+}
+
+// TestLoopRejectsInvalidBreakerConfig mirrors
+// TestLoopRejectsNonPositiveSlots for the breaker knobs this slice adds: a
+// non-positive threshold or window, or a negative backoff, is a config
+// error Loop rejects up front rather than a zero-value default that would
+// make the breaker's real threshold invisible.
+func TestLoopRejectsInvalidBreakerConfig(t *testing.T) {
+	// Each case is the valid single-slot config with exactly one knob made
+	// invalid, so what the case rejects is the only thing it states.
+	invalid := func(mutate func(*Config)) Config {
+		cfg := testConfig(1)
+		mutate(&cfg)
+		return cfg
+	}
+	cases := []struct {
+		name string
+		cfg  Config
+	}{
+		{"zero threshold", invalid(func(c *Config) { c.BreakerThreshold = 0 })},
+		{"negative threshold", invalid(func(c *Config) { c.BreakerThreshold = -1 })},
+		{"zero window", invalid(func(c *Config) { c.BreakerWindow = 0 })},
+		{"negative window", invalid(func(c *Config) { c.BreakerWindow = -time.Minute })},
+		{"negative backoff", invalid(func(c *Config) { c.FailureBackoff = -time.Millisecond })},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
+			clk := &fakeClock{}
+			var buf bytes.Buffer
+			em := newTestEmitter(&buf)
+
+			reason := Loop(context.Background(), tc.cfg, r, em, clk)
+
+			if len(r.runCalls) != 0 {
+				t.Fatalf("run calls = %d, want 0: an invalid breaker config must halt before any child runs", len(r.runCalls))
+			}
+			if !strings.Contains(reason, "config-invalid") {
+				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
+			}
+		})
+	}
 }
