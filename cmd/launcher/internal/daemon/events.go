@@ -31,6 +31,10 @@ type Event struct {
 	Outcome  string `json:"outcome,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Wait     string `json:"wait,omitempty"`
+	// Failures is the breaker's failure count, stamped on breaker_trip so
+	// the event names the transition without cross-referencing an earlier
+	// backoff event.
+	Failures *int `json:"failures,omitempty"`
 }
 
 // Emitter writes Events as JSON-lines to an injected io.Writer.

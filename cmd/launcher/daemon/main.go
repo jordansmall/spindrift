@@ -164,6 +164,26 @@ func fail(stderr io.Writer, err error) int {
 // (Awake window, per-kind backoff) is a later ticket (loop.go's Config doc).
 const daemonIdleInterval = 5 * time.Minute
 
+// daemonFailureBackoff, daemonBreakerThreshold and daemonBreakerWindow are
+// a defensible first cut, not a tuned final answer (final values are out
+// of scope for the issue that added them) — expect to revisit them against
+// a real unattended run. A systemic fault (an expired token, a forge
+// outage) fails every slot's child immediately, so the pool crosses
+// daemonBreakerThreshold within about one backoff at the default 3 slots,
+// and after (daemonBreakerThreshold-1) backoffs — about four minutes — at
+// MAX_PARALLEL=1, where the pool-wide count is one slot's own retries. A
+// lone slot reaching the threshold by itself is deliberate rather than a
+// gap: a failed child's issue has already left the ready queue (dispatch
+// claims it by label swap), so consecutive unclassified failures read as
+// systemic rather than as one bad issue retried, and a 1-slot pool has no
+// sibling still doing useful work for a spared breaker to protect (see
+// TestBreakerDefaults_TripReachableAtOneSlot).
+const (
+	daemonFailureBackoff   = 1 * time.Minute
+	daemonBreakerThreshold = 5
+	daemonBreakerWindow    = 15 * time.Minute
+)
+
 // hostClock is the production daemon.Clock: Now is time.Now, Sleep waits d
 // or returns early on ctx cancellation, so an operator stop during the idle
 // wait is honoured immediately rather than after the full interval.
@@ -257,7 +277,14 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	clk := hostClock{}
 	em := daemon.NewEmitter(stdout, clk.Now)
-	cfg := daemon.Config{Kind: args.Kind, IdleInterval: daemonIdleInterval, Slots: slots}
+	cfg := daemon.Config{
+		Kind:             args.Kind,
+		IdleInterval:     daemonIdleInterval,
+		Slots:            slots,
+		FailureBackoff:   daemonFailureBackoff,
+		BreakerThreshold: daemonBreakerThreshold,
+		BreakerWindow:    daemonBreakerWindow,
+	}
 
 	reason := daemon.Loop(ctx, cfg, r, em, clk)
 

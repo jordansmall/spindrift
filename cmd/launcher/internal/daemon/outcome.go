@@ -8,6 +8,11 @@ const (
 	Continue Action = iota
 	Wait
 	Halt
+	// Backoff means the exit is unclassified: back off this slot alone
+	// (Config.FailureBackoff) and refill it, rather than halting the whole
+	// pool — an unrecognised exit code from one child is not evidence the
+	// rest of the pool is broken.
+	Backoff
 )
 
 // Interpret maps a child's exit code to a stable outcome label for the event
@@ -36,6 +41,6 @@ func Interpret(exit int) (outcome string, action Action) {
 	case 7:
 		return "signalled-stop", Halt
 	default:
-		return "error", Halt
+		return "error", Backoff
 	}
 }

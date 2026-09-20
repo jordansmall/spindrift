@@ -15,9 +15,9 @@ func TestInterpret(t *testing.T) {
 		{5, "host-tainted", Halt},
 		{6, "config-invalid", Halt},
 		{7, "signalled-stop", Halt},
-		{1, "error", Halt},
-		{42, "error", Halt},
-		{-1, "error", Halt},
+		{1, "error", Backoff},
+		{42, "error", Backoff},
+		{-1, "error", Backoff},
 	}
 	for _, tc := range cases {
 		outcome, action := Interpret(tc.exit)
