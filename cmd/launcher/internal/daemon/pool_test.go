@@ -365,7 +365,7 @@ type barrierFailRunner struct {
 }
 
 func newBarrierFailRunner(revision string, slots int) *barrierFailRunner {
-	return &barrierFailRunner{revision: revision, slots: slots, started: make(chan int, slots*8), release: make(chan struct{})}
+	return &barrierFailRunner{revision: revision, slots: slots, started: make(chan int, slots), release: make(chan struct{})}
 }
 
 func (r *barrierFailRunner) ResolveRevision(ctx context.Context) (string, error) {
@@ -379,7 +379,16 @@ func (r *barrierFailRunner) SelfPath(ctx context.Context, revision string) (stri
 }
 
 func (r *barrierFailRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	r.started <- req.Slot
+	// Non-blocking, because the number of later calls is unbounded: a
+	// non-crossing slot races around through its backoff and back into
+	// RunChild as many times as the scheduler allows while the crossing
+	// slot sits between recordAndCheck and halt. Only the first `slots`
+	// sends are ever read, so a blocking send fills the buffer and parks
+	// a slot goroutine forever, and Loop never returns.
+	select {
+	case r.started <- req.Slot:
+	default:
+	}
 	r.mu.Lock()
 	r.arrived++
 	if r.arrived == r.slots {
