@@ -49,11 +49,18 @@ type ChildResult struct {
 
 // Config is the loop's tuning: which Dispatch kind to drive, how many
 // slots (concurrent single-Box children) the pool runs, and the
-// idle-backoff/failure-backoff/breaker knobs below. Per-kind backoff, the
-// Awake window and the instance lock are later tickets.
+// idle-backoff/failure-backoff/breaker knobs below. Per-kind backoff and
+// the instance lock are later tickets.
 type Config struct {
 	Kind  Kind
 	Slots int
+
+	// Awake gates when a slot may start a new child: nil means no window
+	// is configured, so the daemon is always awake. When set, it only
+	// gates the moment a slot is about to start a child — a child already
+	// running when the window closes is never touched, however long it
+	// outlasts the close.
+	Awake *Window
 
 	// IdleFloor and IdleCap bound the pool-wide idle backoff: the first
 	// no-work check (exit 2 always, exit 3 when the pool is otherwise
@@ -157,6 +164,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 			return
 		}
 
+		p.awaitWindow(ctx, slot)
+		if stopOnCancel(ctx, p) {
+			// A signal can arrive while the slot was parked in
+			// awaitWindow; nothing else re-checks ctx between there and
+			// ResolveRevision, so this is that check.
+			return
+		}
+
 		revision, err := p.r.ResolveRevision(ctx)
 		if err != nil {
 			// A failed fetch is exactly the transient blip this slice's
@@ -175,6 +190,15 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 			// launches a child that forwardStop never gets a chance to
 			// signal.
 			return
+		}
+
+		if !cfg.Awake.Open(p.clk.Now()) {
+			// ResolveRevision (a git fetch) can outlast the window's own
+			// close; re-check here so that fetch never launches a child
+			// outside the window. No event here: awaitWindow's
+			// edge-triggered noteAwakeClose reports the transition when
+			// the slot parks on the next iteration.
+			continue
 		}
 
 		em.Emit(Event{Event: "child_start", Kind: cfg.Kind, Revision: revision, Slot: intPtr(slot)})
@@ -218,6 +242,16 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 			p.idle.reset()
 			continue
 		case Wait:
+			if !cfg.Awake.Open(p.clk.Now()) {
+				// The window closed while the child ran, so this wait is
+				// the window's, not the idle backoff's: idleWait would
+				// consume a backoff step and poll ResolveRevision straight
+				// through a closed window that is supposed to cost
+				// nothing. awaitWindow, at the top, parks the whole
+				// remaining span in one sleep instead, and the idle streak
+				// stays untouched so it resumes where it left off.
+				continue
+			}
 			wait := p.idle.next()
 			// "none-dispatchable" carries a second axis exit 2 doesn't: pool
 			// occupancy. With a sibling genuinely running, the issues this

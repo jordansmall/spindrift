@@ -954,3 +954,202 @@ func TestLoopIdleWaitSwallowsMidWaitPollFailure(t *testing.T) {
 		t.Fatalf("run calls = %d, want 3", len(r.runCalls))
 	}
 }
+
+// TestLoopAwakeWindowClosedAtStartSleepsFullSpanThenStarts pins the
+// sleep-to-next-opening shape: a daemon started outside its window starts no
+// child, sleeps exactly the whole remaining span in one Sleep call (not an
+// idle-backoff-sized poll), and reports the transition as awake_close then
+// awake_open before the first child_start.
+func TestLoopAwakeWindowClosedAtStartSleepsFullSpanThenStarts(t *testing.T) {
+	win, err := ParseWindow("09:00-17:00 UTC")
+	if err != nil {
+		t.Fatalf("ParseWindow: %v", err)
+	}
+	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
+	clk := &fakeClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Awake = win
+
+	Loop(context.Background(), cfg, r, em, clk)
+
+	if len(clk.waits) != 1 {
+		t.Fatalf("waits = %v, want exactly one sleep to the next opening, not a poll loop", clk.waits)
+	}
+	if clk.waits[0] != time.Hour {
+		t.Fatalf("waits = %v, want the one wait = 1h, the whole remaining span to 09:00", clk.waits)
+	}
+
+	names := eventNames(decodeEvents(t, &buf))
+	wantPrefix := []string{"awake_close", "awake_open", "child_start"}
+	if len(names) < len(wantPrefix) || fmt.Sprint(names[:len(wantPrefix)]) != fmt.Sprint(wantPrefix) {
+		t.Fatalf("events = %v, want to start with %v", names, wantPrefix)
+	}
+}
+
+// TestLoopAwakeWindowWraparoundOpenStartsImmediately pins the wraparound
+// case (a window crossing midnight) and the "already open at start" case
+// together: at 23:00 inside a 22:00-06:00 window, the daemon starts its
+// first child at once, with no awake_close/awake_open pair at all.
+func TestLoopAwakeWindowWraparoundOpenStartsImmediately(t *testing.T) {
+	win, err := ParseWindow("22:00-06:00 UTC")
+	if err != nil {
+		t.Fatalf("ParseWindow: %v", err)
+	}
+	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
+	clk := &fakeClock{now: time.Date(2026, 1, 1, 23, 0, 0, 0, time.UTC)}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Awake = win
+
+	Loop(context.Background(), cfg, r, em, clk)
+
+	if len(clk.waits) != 0 {
+		t.Fatalf("waits = %v, want none: the window is already open at start", clk.waits)
+	}
+	if len(r.runCalls) != 1 {
+		t.Fatalf("run calls = %d, want 1", len(r.runCalls))
+	}
+	for _, ev := range decodeEvents(t, &buf) {
+		if ev.Event == "awake_close" || ev.Event == "awake_open" {
+			t.Fatalf("events = %v, want no awake_close/awake_open when the window starts open", eventNames(decodeEvents(t, &buf)))
+		}
+	}
+}
+
+// windowAdvancingRunner is a single-slot Runner whose RunChild advances the
+// shared fakeClock by advance before returning, simulating a Box that
+// outlasts the Awake window: the window can close mid-run without anything
+// in the loop noticing until the child itself returns.
+type windowAdvancingRunner struct {
+	clk      *fakeClock
+	revision string
+	advance  time.Duration
+	results  []ChildResult
+	calls    int
+}
+
+func (r *windowAdvancingRunner) ResolveRevision(ctx context.Context) (string, error) {
+	return r.revision, nil
+}
+
+func (r *windowAdvancingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	r.clk.mu.Lock()
+	r.clk.now = r.clk.now.Add(r.advance)
+	r.clk.mu.Unlock()
+
+	r.calls++
+	idx := r.calls - 1
+	if idx >= len(r.results) {
+		idx = len(r.results) - 1
+	}
+	return r.results[idx], nil
+}
+
+// TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks pins the "a Box
+// running when the window closes finishes, and so does its Settle" criterion
+// at the loop layer: a child already in flight when the window's close time
+// passes still gets its child_finish, and only the *next* iteration parks
+// (awake_close) rather than a second child starting straight away.
+func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
+	win, err := ParseWindow("09:00-17:00 UTC")
+	if err != nil {
+		t.Fatalf("ParseWindow: %v", err)
+	}
+	clk := &fakeClock{now: time.Date(2026, 1, 1, 16, 0, 0, 0, time.UTC)}
+	r := &windowAdvancingRunner{
+		clk:      clk,
+		revision: "rev1",
+		advance:  2 * time.Hour, // 16:00 -> 18:00, past the 17:00 close
+		results:  []ChildResult{{Exit: 3}, {Exit: 5}},
+	}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Awake = win
+
+	Loop(context.Background(), cfg, r, em, clk)
+
+	if r.calls != 2 {
+		t.Fatalf("run calls = %d, want 2: the in-flight child finishes, and a second starts once the window reopens", r.calls)
+	}
+
+	names := eventNames(decodeEvents(t, &buf))
+	want := []string{"child_start", "child_finish", "awake_close", "awake_open", "child_start", "child_finish", "halt"}
+	if fmt.Sprint(names) != fmt.Sprint(want) {
+		t.Fatalf("events = %v, want %v: no idle/jam step consumed for the wait the closed window owns", names, want)
+	}
+}
+
+// resolveWindowAdvancingRunner is a single-slot Runner whose ResolveRevision
+// advances the shared fakeClock by advance before returning, simulating a
+// fetch that spans the window's close: the decision to run was made while
+// still open, but time has moved on by the time the revision comes back.
+// The advance only fires once, so a slot that parks and retries sees a
+// steady clock on its second pass.
+type resolveWindowAdvancingRunner struct {
+	clk      *fakeClock
+	revision string
+	advance  time.Duration
+	advanced bool
+	result   ChildResult
+	calls    int
+}
+
+func (r *resolveWindowAdvancingRunner) ResolveRevision(ctx context.Context) (string, error) {
+	if !r.advanced {
+		r.clk.mu.Lock()
+		r.clk.now = r.clk.now.Add(r.advance)
+		r.clk.mu.Unlock()
+		r.advanced = true
+	}
+	return r.revision, nil
+}
+
+func (r *resolveWindowAdvancingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	r.calls++
+	return r.result, nil
+}
+
+// TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting pins
+// a blocking review finding on runSlot: awaitWindow only decides the
+// window is open once, and ResolveRevision's git fetch can outlast that
+// decision, so runSlot re-checks the window after ResolveRevision returns.
+// A child must never start once the fetch comes back outside the window --
+// the slot should park (awake_close/awake_open) and try again, not launch
+// straight away.
+func TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting(t *testing.T) {
+	win, err := ParseWindow("09:00-17:00 UTC")
+	if err != nil {
+		t.Fatalf("ParseWindow: %v", err)
+	}
+	clk := &fakeClock{now: time.Date(2026, 1, 1, 16, 58, 0, 0, time.UTC)}
+	r := &resolveWindowAdvancingRunner{
+		clk:      clk,
+		revision: "rev1",
+		advance:  4 * time.Minute, // 16:58 -> 17:02, past the 17:00 close
+		result:   ChildResult{Exit: 5},
+	}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Awake = win
+
+	Loop(context.Background(), cfg, r, em, clk)
+
+	if r.calls != 1 {
+		t.Fatalf("run calls = %d, want 1: the closed-window fetch must not start a child, only the retry after the slot parks", r.calls)
+	}
+
+	names := eventNames(decodeEvents(t, &buf))
+	want := []string{"awake_close", "awake_open", "child_start", "child_finish", "halt"}
+	if fmt.Sprint(names) != fmt.Sprint(want) {
+		t.Fatalf("events = %v, want %v: no child_start until the slot has parked and reopened", names, want)
+	}
+}

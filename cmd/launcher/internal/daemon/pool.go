@@ -24,10 +24,11 @@ type pool struct {
 
 	cancel context.CancelFunc
 
-	mu       sync.Mutex
-	halted   bool
-	reason   string
-	occupied map[int]struct{}
+	mu        sync.Mutex
+	halted    bool
+	reason    string
+	occupied  map[int]struct{}
+	awakeShut bool // true once awake_close has fired, until the matching awake_open
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -86,6 +87,62 @@ func (p *pool) siblingsOccupied(slot int) bool {
 		}
 	}
 	return false
+}
+
+// awaitWindow parks slot until the Awake window is open. It sleeps the
+// whole remaining span in one clk.Sleep rather than polling: nothing about
+// a fixed daily window can change before its own clock-computed opening
+// arrives, so a shut window costs one sleep, not a poll loop through it.
+func (p *pool) awaitWindow(ctx context.Context, slot int) {
+	for {
+		wait := p.cfg.Awake.Until(p.clk.Now())
+		if wait <= 0 {
+			p.noteAwakeOpen(slot)
+			return
+		}
+		p.noteAwakeClose(slot, wait)
+		p.clk.Sleep(ctx, wait)
+		if p.stopped() || ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+// noteAwakeClose records the pool-wide transition into a shut window and
+// emits awake_close, but only for the caller that actually observes the
+// transition: with several slots parking on the same close, only the first
+// to flip awakeShut reports it, so the stream carries exactly one
+// awake_close per closing however many slots are waiting on it. The emit
+// happens while p.mu is still held so the flag flip and the emit are one
+// atomic step -- otherwise two slots whose clk.Now() calls straddle the
+// opening instant could publish awake_open before awake_close.
+func (p *pool) noteAwakeClose(slot int, wait time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	first := !p.awakeShut
+	p.awakeShut = true
+
+	if first {
+		p.em.Emit(Event{Event: "awake_close", Kind: p.cfg.Kind, Slot: intPtr(slot), Wait: wait.String(), Reason: "outside the Awake window"})
+	}
+}
+
+// noteAwakeOpen is noteAwakeClose's counterpart: it fires awake_open only
+// when a close was already reported, so a daemon that starts (or every
+// slot merely finds the window already open) never emits an open with no
+// matching close. As in noteAwakeClose, the emit happens under p.mu so the
+// flag flip and the emit stay one atomic step: an awake_open therefore
+// never reaches the stream ahead of the awake_close whose flag flip it
+// observed.
+func (p *pool) noteAwakeOpen(slot int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	was := p.awakeShut
+	p.awakeShut = false
+
+	if was {
+		p.em.Emit(Event{Event: "awake_open", Kind: p.cfg.Kind, Slot: intPtr(slot), Reason: "the Awake window reopened"})
+	}
 }
 
 // stopped reports whether the pool has already recorded a halt reason —
