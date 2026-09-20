@@ -57,5 +57,12 @@ func ChildCommand(s ChildSpec) ([]string, error) {
 	return []string{
 		"nix", "run", flakeref, "--",
 		string(kind),
+		// The pool cap now lives in the daemon (one slot, one child), so
+		// each child must itself be exactly one Box: --max-jobs 1 caps the
+		// wave to a single issue and --max-parallel 1 caps concurrency
+		// within it. Pinning both means the guarantee does not depend on
+		// which of the two knobs a given dispatch path happens to honour.
+		"--max-jobs", "1",
+		"--max-parallel", "1",
 	}, nil
 }
