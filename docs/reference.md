@@ -4449,11 +4449,31 @@ A signalled stop (exit 7) is a drain too, but not a stale drain — unless a
 stale drain was already under way when the signal arrived, in which case it
 still finishes and reports its `STALE_DRAIN` line before the run exits 7;
 absent that, no `STALE_DRAIN` line is written. The first signal stops the
-launcher claiming anything new and waits only on the Boxes already in
-flight, so stopping is bounded by the slowest of those Boxes rather than by
-the whole queue. The launcher prints a line when a drain begins, so an
-operator can tell a drain from a hang. Behavior is identical under the OCI
-and bwrap runtimes — nothing in the signal path branches on runtime.
+launcher claiming anything new and waits on the Boxes already in flight —
+including each one's settle, the merge gate's CI watch, which a graceful
+drain deliberately does not interrupt: interrupting it would throw away a
+landing that is one poll from done. So the real bound on stopping is not
+the slowest in-flight Box's runtime alone but that runtime *plus* its
+whole settle, and a settle is not a single CI wait. Every CI wait inside
+a settle takes a *fresh* `MERGE_POLL_TIMEOUT` deadline (default `3600`
+seconds — see [Advanced tuning](#advanced-tuning)), and one settle can
+enter several: one wait per self-heal attempt, so `MAX_FIX_ATTEMPTS`
+(default `3`) red gates cost four waits in all, plus one more after every
+force-push, since a rebase resets the PR's required checks and the
+launcher re-waits for green on the new head — once per
+`MAX_REBASE_ATTEMPTS` (default `3`) conflict pass, and once more when
+`PREFLIGHT_STALE_BASE` is on. The ceiling is therefore
+`MAX_FIX_ATTEMPTS + MAX_REBASE_ATTEMPTS + 1` poll windows: seven at the
+defaults, about seven hours of polling alone, or eight windows with the
+stale-base preflight enabled. Each red gate and each conflict a rebase
+cannot resolve also dispatches its own Box — up to three fix Boxes and up
+to three conflict-resolve Boxes, or four with the stale-base preflight
+enabled, which keeps its own retry budget — and those runtimes land on top
+of the polling. The floor is the other end of the same range: a settle
+that confirms green on its first poll and merges adds only seconds to the
+Box's runtime. The launcher prints a line when a drain begins, so an
+operator can tell a drain from a hang. Behavior is identical under the
+OCI and bwrap runtimes — nothing in the signal path branches on runtime.
 
 A **second** signal abandons that wait: the launcher reaps every in-flight
 Box, releases each of their issues off the in-progress label back to
@@ -4695,12 +4715,66 @@ foreground process group — which would otherwise deliver a group-wide
 SIGINT straight to the child — spares it; only the explicit forwarded
 SIGTERM reaches it.
 
-A second `SIGINT`/`SIGTERM` is deliberately a no-op: the daemon only ever
-consumes one signal (`handleStopSignal`, `cmd/launcher/daemon/main.go`), so
-a repeat has nothing listening for it. The guarantee is that a running Box
-is never killed, so the only escalation is `SIGKILL` on the daemon itself —
-which, because the child's process group is isolated from the daemon's
-own, orphans the child rather than killing it.
+A `systemctl stop` sends the daemon a `SIGTERM`, which the daemon
+forwards as that same drain request — but only under a unit that keeps
+systemd's own `SIGTERM` away from the child. The default
+`KillMode=control-group` signals *every* process in the unit's cgroup,
+and the process-group isolation above isolates a process group, not a
+cgroup, so the child launcher receives systemd's `SIGTERM` as well as the
+daemon's forwarded one. Two signals is the abort escalation, so under the
+default `KillMode` a plain `systemctl stop` reaps the in-flight Boxes
+instead of draining them — the opposite of the intent. Set
+`KillMode=mixed`, which sends the stop signal to the main process alone,
+leaving the forwarded drain request as the child's only signal:
+
+```
+[Service]
+KillMode=mixed
+TimeoutStopSec=infinity
+```
+
+The daemon always waits out a started child before exiting
+(`daemon.Loop`), so by the time systemd sees the main process go there is
+nothing left in the cgroup for the final `SIGKILL` `KillMode=mixed`
+sends.
+
+`TimeoutStopSec` has to cover that whole drain: the in-flight Box's
+runtime *and that Box's settle*. Size it against the settle's *ceiling*,
+not the Box runtime alone and not the Box runtime plus a single
+`MERGE_POLL_TIMEOUT`. At the defaults that ceiling is
+`MAX_FIX_ATTEMPTS + MAX_REBASE_ATTEMPTS + 1` fresh `MERGE_POLL_TIMEOUT`
+windows — seven of them, about seven hours of polling, or eight with the
+stale-base preflight enabled — plus the runtimes of up to three fix Boxes
+and up to three conflict-resolve Boxes, or four with that same preflight;
+see the signalled-stop drain under [Dogfood loop](#dogfood-loop) for the
+breakdown. systemd's own default `TimeoutStopSec` is `90` seconds, far
+below even the floor, so leaving it at the default means `SIGKILL` lands
+mid-drain — the exact stranding (orphaned Boxes, a leaked registry-proxy
+socket, an issue stuck on the in-progress label) this whole drain exists
+to avoid. `TimeoutStopSec=infinity` is the honest setting for a unit that
+must never strand a Box; any finite value is a bet that no drain enters
+self-heal or hits a merge conflict.
+
+An operator unwilling to wait out that ceiling has the same escalation
+described above, but it has to reach the *child launcher*, and a second
+`systemctl stop` does not: the unit is already stopping, and a second
+signal to the daemon is a deliberate no-op (below).
+`systemctl kill -s TERM <unit>` signals every process in the unit's
+cgroup, the child included, and `kill -TERM <child pid>` does the same
+for a daemon started outside systemd. Under `KillMode=mixed` that is the
+child's second signal, so it aborts the drain, reaping the in-flight
+Boxes and releasing their issues rather than waiting out the timeout.
+Under the default `KillMode` there is no escalation left to give: the
+child consumed both of its signals at `systemctl stop` and ignores every
+later one.
+
+A second `SIGINT`/`SIGTERM` to the *daemon* is deliberately a no-op: it
+only ever consumes one signal (`handleStopSignal`,
+`cmd/launcher/daemon/main.go`), so a repeat has nothing listening for it.
+The guarantee is that a running Box is never killed, which is why the
+escalation above is aimed at the child rather than at the daemon:
+`SIGKILL` on the daemon leaves the child's isolated process group behind,
+orphaning it rather than killing it.
 
 **Event stream.** The daemon writes one JSON object per line to stdout — a
 JSON-lines stream, so a service manager captures the run's history without
