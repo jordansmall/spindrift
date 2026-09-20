@@ -56,6 +56,14 @@ func newPlainProxy(t *testing.T, routes ...Route) (http.Handler, []Route) {
 	return newProxy(t, nil, routes)
 }
 
+// plainRoute builds the single-path, no-credential Route shape most tests
+// route through -- everything else on Route left at its zero value. A shape
+// only one ecosystem's tests repeat gets its constructor beside those tests
+// instead, the way npmRoute sits in npmpackument_test.go.
+func plainRoute(upstream string) Route {
+	return Route{EnforcedPaths: []string{"/"}, Upstream: upstream}
+}
+
 // serve drives a request through p and returns the recorded response.
 func serve(p http.Handler, req *http.Request) *httptest.ResponseRecorder {
 	rr := httptest.NewRecorder()

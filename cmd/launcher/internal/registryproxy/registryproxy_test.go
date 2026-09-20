@@ -37,7 +37,7 @@ func TestNew_ForwardsGET(t *testing.T) {
 		_, _ = w.Write([]byte("hello from upstream"))
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
 
@@ -65,7 +65,7 @@ func TestNew_ForwardsHEAD(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	rr := serve(p, httptest.NewRequest(http.MethodHead, "/r0/crates/foo", nil))
 
@@ -107,7 +107,7 @@ func TestNew_ForwardsQueryString(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			})
 
-			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+			p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 			target := "/r0/crates/foo"
 			if tc.query != "" {
@@ -160,7 +160,7 @@ func TestNew_CombinesUpstreamAndInboundQueryStrings(t *testing.T) {
 				upstreamURL += "?" + tc.upstreamQuery
 			}
 
-			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""})
+			p, _ := newPlainProxy(t, plainRoute(upstreamURL))
 
 			target := "/r0/crates/foo"
 			if tc.inboundQuery != "" {
@@ -191,7 +191,7 @@ func TestNew_SetsXForwardedForHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	req := httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil)
 	req.RemoteAddr = "203.0.113.7:12345"
@@ -214,7 +214,7 @@ func TestServe_UnixSocket(t *testing.T) {
 		_, _ = w.Write([]byte("via socket"))
 	})
 
-	handler, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	handler, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	socketPath := filepath.Join(t.TempDir(), "proxy.sock")
 	p := &Proxy{Handler: handler}
@@ -270,7 +270,7 @@ func TestServe_RemovesStaleSocket(t *testing.T) {
 	}
 	stale.Close()
 
-	handler, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: "http://127.0.0.1:0", Credential: ""})
+	handler, _ := newPlainProxy(t, plainRoute("http://127.0.0.1:0"))
 	p := &Proxy{Handler: handler}
 	if err := p.ListenAndServe(socketPath); err != nil {
 		t.Fatalf("ListenAndServe: %v", err)
@@ -299,7 +299,7 @@ func TestNew_MalformedUpstream(t *testing.T) {
 	}
 	for _, upstream := range cases {
 		t.Run(upstream, func(t *testing.T) {
-			if _, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream, Credential: ""}}), nil); err == nil {
+			if _, err := New(AssignPrefixes([]Route{plainRoute(upstream)}), nil); err == nil {
 				t.Errorf("New(%q) = nil error, want error", upstream)
 			}
 		})
@@ -384,7 +384,7 @@ func TestNew_UnknownPrefixReturns404WithoutDialingUpstream(t *testing.T) {
 	upstream.Start()
 	defer upstream.Close()
 
-	p, routes := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL})
+	p, routes := newPlainProxy(t, plainRoute(upstream.URL))
 
 	req := httptest.NewRequest(http.MethodGet, "/not-"+routes[0].Prefix+"/pkg", nil)
 	rr := serve(p, req)
@@ -417,7 +417,7 @@ func TestNew_RootAndEmptySegmentPathsReturn404WithoutDialingUpstream(t *testing.
 			upstream.Start()
 			defer upstream.Close()
 
-			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL})
+			p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			rr := serve(p, req)
@@ -442,7 +442,7 @@ func TestNew_EscapedRemainderPreserved(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	p, routes := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL})
+	p, routes := newPlainProxy(t, plainRoute(upstream.URL))
 
 	rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+routes[0].Prefix+"/@types%2fnode", nil))
 
@@ -627,7 +627,7 @@ func TestCountingTransport_RecordsUpstreamAttemptAbandonedBeforeResponse(t *test
 		conn.Close()
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 	ct := countUpstreamAttempts(t, p)
 
 	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
@@ -895,7 +895,7 @@ func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
 
@@ -942,7 +942,7 @@ func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	// Silence the default error handler's log line for the expected handshake
 	// failure.
@@ -1087,7 +1087,7 @@ func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	captureLog(t)
 
@@ -1250,7 +1250,7 @@ func TestListenAndServeTCP_CorrectSecretForwardsToUpstream(t *testing.T) {
 		_, _ = w.Write([]byte("via tcp"))
 	})
 
-	handler, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	handler, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	p := &Proxy{Handler: handler}
 	if err := p.ListenAndServeTCP("127.0.0.1:0", secret); err != nil {
@@ -1353,7 +1353,7 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 // default, so a listener bound with one would accept everything. Fail closed
 // instead (issue #3111).
 func TestListenAndServeTCP_RejectsEmptySecret_NeverListens(t *testing.T) {
-	handler, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: "http://127.0.0.1:1", Credential: ""})
+	handler, _ := newPlainProxy(t, plainRoute("http://127.0.0.1:1"))
 
 	p := &Proxy{Handler: handler}
 	if err := p.ListenAndServeTCP("127.0.0.1:0", ""); err == nil {
@@ -2050,7 +2050,7 @@ func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
 				w.WriteHeader(status)
 			})
 
-			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+			p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 			logBuf := captureLog(t)
 
@@ -2073,7 +2073,7 @@ func TestNew_NoLogForSuccessfulUpstreamStatus(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	logBuf := captureLog(t)
 
@@ -2095,7 +2095,7 @@ func TestNew_RedirectStatusNeitherLoggedNorFollowed(t *testing.T) {
 		w.WriteHeader(http.StatusFound)
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	logBuf := captureLog(t)
 
@@ -2123,7 +2123,7 @@ func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
 		_, _ = w.Write([]byte(body))
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
 
@@ -2146,7 +2146,7 @@ func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	logBuf := captureLog(t)
 
@@ -2192,8 +2192,8 @@ func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 	})
 
 	p, _ := newPlainProxy(t,
-		Route{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
-		Route{EnforcedPaths: []string{"/"}, Upstream: upstreamB.URL, Credential: ""},
+		plainRoute(upstreamA.URL),
+		plainRoute(upstreamB.URL),
 	)
 	proxy := &Proxy{Handler: p}
 
@@ -2258,7 +2258,7 @@ func TestNew_LogsUpstreamTransportFailure(t *testing.T) {
 	upstreamURL := upstream.URL
 	upstream.Close() // now refuses connections
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstreamURL))
 
 	logBuf := captureLog(t)
 
@@ -2289,8 +2289,8 @@ func TestNew_DistinguishesTransportFailureFromHTTPStatusFailure(t *testing.T) {
 	upstreamB.Close()
 
 	p, _ := newPlainProxy(t,
-		Route{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
-		Route{EnforcedPaths: []string{"/"}, Upstream: upstreamBURL, Credential: ""},
+		plainRoute(upstreamA.URL),
+		plainRoute(upstreamBURL),
 	)
 
 	logBuf := captureLog(t)
@@ -2341,7 +2341,7 @@ func TestNew_SharesSuppressionAcrossTransportAndStatusFailures(t *testing.T) {
 	})
 	upstreamURL := upstream.URL
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstreamURL))
 
 	logBuf := captureLog(t)
 
@@ -2383,7 +2383,7 @@ func TestNew_NoTransportOrStatusLogForSuccessfulRequest(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	logBuf := captureLog(t)
 
@@ -2408,7 +2408,7 @@ func TestNew_ClientAbortNotLoggedAsUpstreamFailure(t *testing.T) {
 		<-r.Context().Done()
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	logBuf := captureLog(t)
 
@@ -2441,7 +2441,7 @@ func TestNew_ClientAbortLeavesFirstFailureSlotForGenuineFailure(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	})
 
-	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""})
+	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
 	logBuf := captureLog(t)
 
