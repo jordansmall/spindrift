@@ -57,6 +57,38 @@ func TestRun_ConnectivityAndRecoverableIssuesProbesSucceed(t *testing.T) {
 	}
 }
 
+// TestRun_MissingResearchLabelsAreAdvisoryNotFatal pins doctor's advisory
+// treatment of the research-label family (ADR 0022) directly, rather than
+// leaving it incidental to a test named for something else. This matters
+// beyond doctor itself: the daemon's startup preflight (issue #3544) reads
+// doctor's exit code before letting a daemon start at all, so if a research
+// label were ever promoted to Required here, that promotion alone would
+// start refusing daemon startups for a family ADR 0022 deliberately keeps
+// optional.
+func TestRun_MissingResearchLabelsAreAdvisoryNotFatal(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	var buf bytes.Buffer
+	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	for _, label := range ResearchLabelNames() {
+		wantAdvisory := "advisory: label \"" + label + "\" missing"
+		if !strings.Contains(out, wantAdvisory) {
+			t.Errorf("output missing advisory line for %q, got:\n%s", label, out)
+		}
+		wantFatal := "MISSING: label \"" + label + "\" missing"
+		if strings.Contains(out, wantFatal) {
+			t.Errorf("output reports research label %q as MISSING (fatal), want advisory only:\n%s", label, out)
+		}
+	}
+}
+
 func TestRun_IssueTrackerAuthFailure_CodeForgeProbeDoesNotRun(t *testing.T) {
 	it := forge.NewFake()
 	it.ProbeErr = forge.ErrAuthFailure
