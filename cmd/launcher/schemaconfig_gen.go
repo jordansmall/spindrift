@@ -64,6 +64,7 @@ type schemaConfig struct {
 	preflightStaleBase           bool
 	registryProxyRoutesFile      string
 	repoSlug                     string
+	researchReservation          int
 	researchVerdicts             string
 	spindriftPromptDir           string
 	spindriftSkillsDir           string
@@ -132,6 +133,7 @@ func loadSchemaConfig() schemaConfig {
 		preflightStaleBase:      getenvSchema("PREFLIGHT_STALE_BASE") != "",
 		registryProxyRoutesFile: getenvSchema("REGISTRY_PROXY_ROUTES_FILE"),
 		repoSlug:                getenvSchema("REPO_SLUG"),
+		researchReservation:     atoiNonnegSchema("RESEARCH_RESERVATION"),
 		researchVerdicts:        getenvSchema("RESEARCH_VERDICTS"),
 		spindriftPromptDir:      getenvSchema("SPINDRIFT_PROMPT_DIR"),
 		spindriftSkillsDir:      getenvSchema("SPINDRIFT_SKILLS_DIR"),
