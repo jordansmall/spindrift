@@ -1487,6 +1487,16 @@ let
       true
     else
       builtins.seq (jiraStatusMapping.parse (mergedDefaults.jiraStatusMapping or "")) true;
+
+  # lib/awake-window.nix's `parse` mirrors the runtime validation in
+  # awake.go's ParseWindow (issue #3542). Unlike jiraStatusMappingOk this
+  # needs no backend gate -- the knob is valid or not regardless of
+  # tracker/forge. `builtins.seq` forces the result so the `assert` below
+  # triggers a throw.
+  awakeWindow = import ./awake-window.nix;
+  daemonAwakeWindowOk = builtins.seq (awakeWindow.parse (
+    mergedDefaults.daemonAwakeWindow or ""
+  )) true;
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
@@ -1499,6 +1509,7 @@ else
   assert networkModeCoherenceOk;
   assert readOnlyCapabilityOk;
   assert jiraStatusMappingOk;
+  assert daemonAwakeWindowOk;
   warnAll {
     inherit
       image

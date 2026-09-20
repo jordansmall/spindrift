@@ -626,6 +626,17 @@ in
     legacySettingsExempt = true;
     boxEnv = false;
   };
+  daemonAwakeWindow = {
+    env = "DAEMON_AWAKE_WINDOW";
+    group = "dispatch";
+    default = "";
+    doc = "daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host";
+    flakeOption = true;
+    # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
+    # alias to preserve, so no lib/legacy-settings-section.nix row.
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
   mergePollInterval = {
     env = "MERGE_POLL_INTERVAL";
     group = "git";

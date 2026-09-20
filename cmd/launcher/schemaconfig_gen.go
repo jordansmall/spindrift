@@ -22,6 +22,7 @@ type schemaConfig struct {
 	completeLabel                string
 	continuousDispatch           bool
 	daemonApp                    string
+	daemonAwakeWindow            string
 	failedLabel                  string
 	forgejoBaseURL               string
 	forgejoToken                 string
@@ -90,6 +91,7 @@ func loadSchemaConfig() schemaConfig {
 		completeLabel:           getenvSchema("COMPLETE_LABEL"),
 		continuousDispatch:      getenvSchema("CONTINUOUS_DISPATCH") != "",
 		daemonApp:               getenvSchema("DAEMON_APP"),
+		daemonAwakeWindow:       getenvSchema("DAEMON_AWAKE_WINDOW"),
 		failedLabel:             getenvSchema("FAILED_LABEL"),
 		forgejoBaseURL:          getenvSchema("FORGEJO_BASE_URL"),
 		forgejoToken:            os.Getenv("FORGEJO_TOKEN"),
