@@ -1362,6 +1362,25 @@ let
         coreutils
       ];
       text = runShellBody + ''
+        # The daemon compares its own program store path against what the daemon
+        # attribute evaluates to at the fetched tip (issue #3543). It has to come
+        # from $0 at runtime: a derivation cannot interpolate its own store path
+        # into its own text without infinite recursion. Unset means the daemon
+        # cannot know its own build, and the check is simply skipped. No
+        # readlink -f: `nix eval --raw` returns the uncanonicalised store path,
+        # so resolving symlinks here would make a legitimate store diverge from
+        # what it is compared against. That trades one edge case for the other —
+        # a wrapper invoked through a symlink or a relative path (./result/bin/…,
+        # a hand-written shim) exports a non-store $0 that can never match, so
+        # the daemon halts self-changed on iteration 1 forever — and this is the
+        # cheaper hazard: daemonWrapper is reachable only as apps.daemon.program
+        # (never a package, so never `nix profile`-installable), and `nix run`
+        # execs that exact store path, making $0 byte-identical to what
+        # `nix eval --raw` returns. Not a SPINDRIFT_* knob in env-schema.nix:
+        # it is set by this wrapper from $0, not resolved from the run-input
+        # document, so an operator could only use it to lie to the self check.
+        SPINDRIFT_DAEMON_PROGRAM="$0"
+        export SPINDRIFT_DAEMON_PROGRAM
         exec ${daemonBin}/bin/daemon --input ${runInputDocumentFile} "$@"
       '';
     }).overrideAttrs
