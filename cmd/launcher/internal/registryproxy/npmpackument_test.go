@@ -44,14 +44,13 @@ func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t 
 	// EnforcedPaths covers only "/registry" (the packument's own subtree),
 	// not "/downloads". Otherwise the tarball path would already be admitted
 	// and a later 200 there would prove nothing was learned.
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost:        "registry.example.com",
 		EnforcedPaths:    []string{"/registry"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/registry"}},
 		Upstream:         upstream.URL,
 		Credential:       credential,
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	preRR := httptest.NewRecorder()
@@ -105,8 +104,7 @@ func TestModifyResponse_NpmPackument_ScopedNameMatches(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL}})
-	p := newWithEcosystemRows(t, routes)
+	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -136,8 +134,7 @@ func TestModifyResponse_NpmPackument_TarballShapedTwoSegmentPathDoesNotMatch(t *
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL}})
-	p := newWithEcosystemRows(t, routes)
+	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -169,14 +166,13 @@ func TestModifyResponse_NpmPackument_MixedHostsOnlyRewritesSameHostAndLearnsNoth
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{
+	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost:        "registry.example.com",
 		EnforcedPaths:    []string{"/registry"},
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/registry"}},
 		Upstream:         upstream.URL,
 		Credential:       credential,
-	}})
-	p := newWithEcosystemRows(t, routes)
+	})
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
@@ -226,8 +222,7 @@ func TestModifyResponse_NpmPackument_HeadNeverMatches(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL}})
-	p := newWithEcosystemRows(t, routes)
+	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
@@ -261,8 +256,7 @@ func TestModifyResponse_NpmPackument_NonOKStatusNeverMatches(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL}})
-	p := newWithEcosystemRows(t, routes)
+	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
