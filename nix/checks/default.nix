@@ -58,6 +58,7 @@ let
     // (import ./fragment-pairs.nix common)
     // (import ./tdd-fragment-parity.nix common)
     // (import ./commit-fragment-parity.nix common)
+    // (import ./mk-fragment-parity-rejects.nix common)
     // (import ./nix-checks-lore-parity.nix common)
     // (import ./scout-rationale-parity.nix common)
     // (import ./code-review-fragment-parity.nix common)
