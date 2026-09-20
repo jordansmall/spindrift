@@ -149,19 +149,24 @@ func (r *blockingRunner) peakConcurrency() int {
 // simulating a live Box announcement while that child is still blocked in
 // RunChild. Callers must wait for slot's value on started first, or there
 // is no callback captured yet to call.
-func (r *blockingRunner) fireOnIssue(slot int, issue string) {
+func (r *blockingRunner) fireOnIssue(t *testing.T, slot int, issue string) {
+	t.Helper()
 	r.mu.Lock()
 	fn := r.onIssue[slot]
 	r.mu.Unlock()
+	if fn == nil {
+		t.Fatalf("fireOnIssue: no OnIssue captured for slot %d (did the test wait on started first?)", slot)
+	}
 	fn(issue)
 }
 
 // TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild pins the two
-// guarantees a pool of slots exists for: with Slots: N, N children really
-// do run at once (not N sequential calls that merely look concurrent from
-// the outside), and once every slot's child has started, halting one slot
-// still lets every sibling's already-started child return and emit its own
-// child_finish rather than being abandoned mid-run.
+// guarantees a pool of slots exists for: with Slots: N and the cold-start
+// gate released (r.announce below), N children really do run at once (not
+// N sequential calls that merely look concurrent from the outside), and
+// once every slot's child has started, halting one slot still lets every
+// sibling's already-started child return and emit its own child_finish
+// rather than being abandoned mid-run.
 func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	const slots = 3
 	r := newBlockingRunner("rev1", slots)

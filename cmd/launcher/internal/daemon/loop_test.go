@@ -36,6 +36,19 @@ type fakeRunner struct {
 	selfErrAt int      // 1-based call index that returns selfErr instead of a path
 	selfErr   error
 
+	// mu does not guard the scripting fields above (revisions, resolveAt,
+	// resolveErr, results, runErrAt, runErr, runErrIssues, selfPaths,
+	// selfErrAt, selfErr): every test writes those once, before Loop
+	// starts, and never mutates them again, so they are read-only for the
+	// life of the run. mu instead guards the call-recording fields below
+	// (and the concurrent reads of the scripting fields above): most
+	// tests drive fakeRunner from a single slot's goroutine and never
+	// contend on it, but the start-gate tests (startgate_test.go)
+	// deliberately run it under a multi-slot pool once the gate releases,
+	// and two slots' goroutines really do call these methods concurrently
+	// at that point.
+	mu sync.Mutex
+
 	resolveCalls int
 	runCalls     []runCall
 	selfCalls    int
@@ -48,6 +61,8 @@ type runCall struct {
 }
 
 func (f *fakeRunner) ResolveRevision(ctx context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.resolveCalls++
 	if f.resolveAt != 0 && f.resolveCalls == f.resolveAt {
 		return "", f.resolveErr
@@ -63,6 +78,8 @@ func (f *fakeRunner) ResolveRevision(ctx context.Context) (string, error) {
 // order (last value repeating once exhausted), selfErrAt/selfErr standing in
 // for a 1-based call index that fails instead.
 func (f *fakeRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.selfCalls++
 	if f.selfErrAt != 0 && f.selfCalls == f.selfErrAt {
 		return "", f.selfErr
@@ -78,6 +95,8 @@ func (f *fakeRunner) SelfPath(ctx context.Context, revision string) (string, err
 }
 
 func (f *fakeRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.runCalls = append(f.runCalls, runCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot})
 	call := len(f.runCalls)
 	if f.runErrAt != 0 && call == f.runErrAt {
