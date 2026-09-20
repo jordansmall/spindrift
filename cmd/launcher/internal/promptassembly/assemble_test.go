@@ -755,13 +755,13 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 		if !strings.Contains(result.Prompt, "/tmp/brief.md") {
 			t.Errorf("Prompt missing /tmp/brief.md reference:\n%s", result.Prompt)
 		}
-		// Issue #3449: the scout writes the brief itself; the coordinator
+		// Issue #3449: the scout writes the brief itself; the session
 		// reads it back from disk and never persists it.
 		if !strings.Contains(result.Prompt, "The scout writes that brief itself, to `/tmp/brief.md`") {
 			t.Errorf("Prompt missing scout-delegate.md's scout-writes-it wording (issue #3449):\n%s", result.Prompt)
 		}
-		if !strings.Contains(result.Prompt, "read it back from disk before you delegate any slice") {
-			t.Errorf("Prompt missing scout-delegate.md's coordinator-reads-from-disk wording (issue #3449):\n%s", result.Prompt)
+		if !strings.Contains(result.Prompt, "read it back from disk before you start work") {
+			t.Errorf("Prompt missing scout-delegate.md's reads-from-disk wording (issue #3163):\n%s", result.Prompt)
 		}
 		if strings.Contains(result.Prompt, "Persist what it returns") {
 			t.Errorf("Prompt still contains scout-delegate.md's dropped persist-what-it-returns wording (issue #3449):\n%s", result.Prompt)
@@ -774,6 +774,22 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 		// carry the brief-absent degradation clause.
 		if !strings.Contains(result.Prompt, "If `/tmp/brief.md` isn't there, explore the repo yourself as usual") {
 			t.Errorf("Prompt missing scout-delegate.md's brief-missing degradation clause (issue #3449):\n%s", result.Prompt)
+		}
+		// Issue #3163: scout-delegate.md renders on SCOUT_PROVISIONED alone,
+		// independent of WorkerProvisioned (which coveredEnv() leaves false),
+		// so its wording must never assert a delegation-to-worker step that
+		// this scout-only roster never runs.
+		scoutStart := strings.Index(result.Prompt, "# SCOUT")
+		implementStart := strings.Index(result.Prompt, "# IMPLEMENT")
+		if scoutStart == -1 || implementStart == -1 || implementStart < scoutStart {
+			t.Fatalf("could not locate # SCOUT..# IMPLEMENT span in prompt:\n%s", result.Prompt)
+		}
+		scoutSection := result.Prompt[scoutStart:implementStart]
+		if strings.Contains(scoutSection, "before you delegate any slice") {
+			t.Errorf("scout-only # SCOUT section still contains the dropped delegation wording (issue #3163):\n%s", scoutSection)
+		}
+		if strings.Contains(strings.ToLower(scoutSection), "worker") {
+			t.Errorf("scout-only # SCOUT section references a worker, but WorkerProvisioned is false in this cell (issue #3163):\n%s", scoutSection)
 		}
 	})
 
