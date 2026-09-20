@@ -4632,7 +4632,18 @@ Consumer beside `apps.default` (`lib/mkHarness.nix`), it's run as `nix run
 selecting which Dispatch kinds it draws from: `dispatch` restricts it to
 work, `research` restricts it to advise-only research, and omitting the
 argument (the default, issue #3541) draws from both, off the single pool
-described under **Pool** below. Both alone still run: `dispatch` is how an
+described under **Pool** below. `status` is the other positional, and it is
+dispatched ahead of that kind-selector parse rather than sharing its slot —
+`nix run .#daemon -- status` prints the checkout's current daemon state and
+exits without starting anything, needing no `--input` document (reading
+status is not running a daemon). stdout is the machine-readable
+`StatusReport` JSON, one object (`lockHeld`, `holder`, `live`, `stale`,
+`status`), holding this binary's "stdout is the machine stream only" line
+(**Event stream**, below); stderr gets one human sentence. It exits 0
+whenever it produced an answer, "no daemon running" included — a scripting
+caller reads `.live`, not the exit code, and this binary's own exit-code
+table already spends 1 on a genuine failure. See **Status file** below for
+what it reads. Both `dispatch`/`research` alone still run: `dispatch` is how an
 operator who has not created the research labels runs the daemon, work-only,
 exactly as before this ticket. The default flipped to both because an
 operator no longer has to choose between advancing the queue and enriching
@@ -4701,9 +4712,11 @@ against one checkout is what a single dual-kind daemon drawing from one
 pool (**Reservation** below) already does; two daemon processes still mean
 two checkouts.
 
-The lock never blocks and never retries: a second instance finds it
-already held and exits at once rather than waiting, so an operator sees
-"already running" immediately instead of a hang. Its diagnostic names the
+The lock never blocks: a second instance finds it already held and exits
+at once rather than waiting, so an operator sees "already running"
+immediately instead of a hang. It does retry for a few milliseconds
+first, so that a status reader's momentary lock probe cannot be mistaken
+for a second daemon — see **Status file** below. Its diagnostic names the
 holder — the identity line the holder stamped into the lock file
 (`pid=`, `host=`, `kind=`, `started=`, `exe=`) — with enough to go find
 the process. The lock lives on the open file descriptor, so the kernel
@@ -4746,6 +4759,101 @@ clean stop — exit 0, the same as any other operator-requested stop — not a
 refusal: a doctor child killed by the signal has no exit code at all, so the
 daemon reads the cancelled context rather than trying to classify the dead
 child's status as a verdict.
+
+**Status file.** Beside `spindrift-daemon.lock`, in the same git dir, the
+daemon publishes `spindrift-daemon.status` (`statusFileName`,
+`cmd/launcher/internal/daemon/status.go`): one JSON object, rewritten on
+every state change and never on a timer. The event stream answers what
+happened overnight; the status file answers what is happening right now,
+without a reader having to replay the stream (issue #3545).
+
+Every publish stamps the same envelope onto the object regardless of what
+changed: `pid` and `host` (`os.Hostname`; the literal string `unknown` if
+that fails) identify the writing process, `started` and `time` are both
+RFC3339 UTC — `started` fixed at process start, `time` moving on every
+publish — and `kinds` names the configured kind set. `state`, `reason`,
+`slots[]` and `checks[]` (below) are what actually varies between
+publishes.
+
+The lock is the liveness truth and the status file is advisory data. A
+killed daemon cannot clean up its status file — that is exactly the path
+with no cleanup — but the kernel does drop its `flock` regardless, so a
+reader probes the lock before believing the file (`ReadStatus`), and the
+file records the writing daemon's `pid` and `host` so the two can be
+correlated against the lock's own identity line — both, because a pid
+alone collides across the hosts a shared checkout can be mounted on: a
+lock held by a *fresh* daemon that has not published yet, beside a dead
+predecessor's leftover file, reads as that predecessor's leftover rather
+than live.
+A stale file never reads as a live daemon. The probe takes a **shared**
+`flock`, not an exclusive one — it still conflicts with the holder's
+exclusive lock, so success proves nobody holds it, but two concurrent
+readers never refuse each other — and it never creates the lock file it
+probes (`probeCheckoutLock`). A starting daemon in turn retries its own
+exclusive acquire for a few milliseconds before declaring the lock held
+(`AcquireCheckoutLock`), so a reader's momentary probe window can never
+read as a second daemon and stop the real one from starting.
+
+The file survives a clean stop on purpose: the last thing a stopping
+daemon publishes is `halted` with its `reason`, and a reader that finds
+the lock unheld already reports the file stale, so its contents are a
+last-known record of how the run ended rather than a lie. Deleting it on
+exit would destroy exactly that.
+
+Writes are atomic — a temp file in the same dir, then `os.Rename` — so a
+reader never sees a half-written object, and a failed write is reported to
+stderr and otherwise ignored: advisory data must never fail the daemon.
+It is rewritten on state change rather than on a timer because every
+state change the daemon makes already emits an event, so the publish is
+folded into the emit (`pool.emit`) — "on state change" is structural, not
+a list of call sites to keep in sync.
+
+The most load-bearing part of the file is `state`, and specifically the
+two ways of being idle that look identical from outside and mean
+opposites:
+
+| `state` | meaning |
+|---------|---------|
+| `working` | at least one slot has a child running |
+| `waiting` | nothing is running, every configured kind is gated, and none of them by a none-dispatchable result — every queue is empty, ordinary overnight quiet |
+| `jammed` | nothing is running, every configured kind is gated, and at least one of them by a none-dispatchable result — open issues exist and nothing can dispatch them |
+| `asleep` | nothing is running and the Awake window is shut |
+| `checking` | nothing is running but at least one kind is runnable — a slot is between iterations, about to check the queue |
+| `halted` | the pool has halted; `reason` says why |
+
+`waiting` and `jammed` are indistinguishable to an outside observer — both
+mean "nothing running, nothing to do right now" — but the first is
+healthy and the second needs an operator (merging a blocker, relabelling
+an issue). Only the daemon sees each kind's last check outcome — "queue
+empty" versus "open issues, none dispatchable" — and nothing downstream
+could recover the distinction if the daemon did not report it (issue
+#3545; see also `jam` in **Event stream**, below).
+
+Precedence, most urgent first: `halted` outranks everything, since the
+pool is already on its way out regardless of what else is true; `working`
+outranks `asleep`, since a child started before the window closed is
+still genuinely running even though the window has since shut; `jammed`
+vs `waiting` only applies once every kind is gated; `checking` is the
+fallback when nothing is gated and nothing is running.
+
+Per-slot, `slots[]` carries `slot`, `busy`, and for a busy slot the
+`kind`, the `revision` it is pinned to, and the `issues` its child has
+announced so far — enough to correlate a running Box with the commit that
+produced it. The issues arrive live, appended via `ChildRequest.OnIssue`
+as each announce line is read (`pool.noteIssue`), because
+`ChildResult.Issues` only lands after the child exits and so can only
+ever say what a slot *had*, never what it currently has. Per-kind,
+`checks[]` carries each configured kind's `nextCheck` (RFC3339, empty
+when the kind is runnable now) and `jammed` (true when this kind's last
+check found open issues none of which were dispatchable, and it is still
+gated on that result) — this is what makes the pool-level `jammed` state
+above recoverable down to the specific kind, rather than only "some kind
+is jammed", so "nothing is happening" reads as legible rather than
+alarming. A shut Awake window pushes every kind's
+`nextCheck` out to the instant the window reopens, whatever that kind's
+own backoff says — no slot starts a child until the window is open
+again — so an `asleep` daemon says when it will next look rather than
+reading as runnable now.
 
 **Reservation.** `RESEARCH_RESERVATION` (default 1) is how many of the
 pool's `MAX_PARALLEL` slots prefer research over work (`slotOrder`,
@@ -5140,7 +5248,9 @@ JSON-lines stream, so a service manager captures the run's history without
 the daemon owning a log format or a rotation policy. stdout is the machine
 stream only; human-facing output and the child's own stdout/stderr go to
 stderr instead. Event names and fields (`cmd/launcher/internal/daemon/events.go`,
-`loop.go`):
+`loop.go`). The stream is the history; the **Status file** (above) is the
+present — a reader wanting only "what is happening right now" reads that
+file instead of replaying the stream from the top:
 
 Every per-slot event — `child_start`, `box`, `child_finish`, `idle`, `jam`,
 `tip_moved`, `backoff`, `breaker_trip` — carries a `slot` (0-based, the pool slot the
@@ -5172,8 +5282,9 @@ which runs outside every slot's own goroutine.
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`, never started; `reason` is prefixed by cause, now including `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal instead carries the same `context-cancelled: …` reason a context cancellation anywhere else in the loop does), and `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above) alongside a halt-mapped child outcome, a context cancellation, a tripped breaker, or an invalid startup config |
 
-**What this first cut doesn't do.** The instance lock, the self-change halt
-(issue #3543, above) and per-kind backoff are all in now, alongside the
+**What this first cut doesn't do.** The instance lock, the queryable status
+file (issue #3545, above), the self-change halt (issue #3543, above) and
+per-kind backoff are all in now, alongside the
 pool concurrency this daemon does own (`MAX_PARALLEL`, above) and does
 override the Consumer's own
 `dispatch.maxJobs`/`dispatch.maxParallel` for every child it starts — each
