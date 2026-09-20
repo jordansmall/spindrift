@@ -16,6 +16,12 @@ import (
 // use, so npm's dist.tarball rewrite (issue #3401) is pinned against the rows
 // a production run wires up, not a stand-in.
 
+// npmRoute builds the registry.example.com/npm-subtree Route shape these
+// tests repeat, matching every packument path under the root.
+func npmRoute(upstream string) Route {
+	return Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream}
+}
+
 // npm install fetches a tarball straight off the packument's dist.tarball, not
 // off any registry setting, so this row is the only thing that keeps that
 // download on the credentialed path instead of leaving the proxy. The test
@@ -99,7 +105,7 @@ func TestModifyResponse_NpmPackument_ScopedNameMatches(t *testing.T) {
 		_, _ = w.Write([]byte(packument))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithEcosystemRows(t, npmRoute(upstream.URL))
 	prefix := routes[0].Prefix
 
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/%40scope%2Fname", nil)
@@ -127,7 +133,7 @@ func TestModifyResponse_NpmPackument_TarballShapedTwoSegmentPathDoesNotMatch(t *
 		_, _ = w.Write([]byte(body))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithEcosystemRows(t, npmRoute(upstream.URL))
 	prefix := routes[0].Prefix
 
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/pkg/download", nil)
@@ -210,7 +216,7 @@ func TestModifyResponse_NpmPackument_HeadNeverMatches(t *testing.T) {
 		_, _ = w.Write([]byte(packument))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithEcosystemRows(t, npmRoute(upstream.URL))
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
@@ -242,7 +248,7 @@ func TestModifyResponse_NpmPackument_NonOKStatusNeverMatches(t *testing.T) {
 		_, _ = w.Write([]byte(body))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithEcosystemRows(t, npmRoute(upstream.URL))
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
