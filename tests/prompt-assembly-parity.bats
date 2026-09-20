@@ -215,6 +215,10 @@ AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; re
 # worker-provisioned and scout-absent combination no other cell here pins.
 AGENTS_ROSTER_NO_SCOUT='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
+# issue #3163: the roster minus its "worker" key, isolating the
+# scout-provisioned and worker-absent combination no other cell here pins.
+AGENTS_ROSTER_NO_WORKER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+
 # issue #2353: AGENTS_ROSTER plus a "filer" entry, so the filer-on cells below
 # actually flip the FILER_ENABLED gate that plain AGENTS_ROSTER leaves off.
 AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]},"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
@@ -285,6 +289,17 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
   # worker-on path the no-roster cell does not cover.
 
   assert_cell_golden "worker-no-scout" initial
+}
+
+@test "production path matches the golden fixture for a scout-provisioned, worker-absent roster" {
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_NO_WORKER"
+  export BOX_SCOUT_PROVISIONED=1
+  # BOX_WORKER_PROVISIONED deliberately unset (issue #3163): pins the whole
+  # scout-solo prompt — the # SCOUT section alongside the absent coordinator
+  # and worker blocks — which is the scout-on path the no-scout cell above
+  # does not cover.
+
+  assert_cell_golden "scout-no-worker" initial
 }
 
 @test "production path matches the golden fixture for omitting the agents flag entirely with no roster" {
