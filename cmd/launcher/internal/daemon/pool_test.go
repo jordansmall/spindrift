@@ -634,3 +634,109 @@ func TestIdleWaitLastSliceClampsToRemaining(t *testing.T) {
 		}
 	}
 }
+
+// stepClock is a Clock for testing concurrent parking: unlike fakeClock,
+// whose Sleep additively advances a virtual now (fine for one goroutine at
+// a time, but unsound once several Sleep calls race the same shared clock
+// -- their durations stack instead of overlapping), stepClock only changes
+// now when the test calls advance, which also releases every Sleep blocked
+// so far at once. That models "N slots are all asleep waiting for the same
+// instant" exactly, with no additive artifact.
+type stepClock struct {
+	mu       sync.Mutex
+	now      time.Time
+	waits    []time.Duration
+	barrier  chan struct{}
+	sleeping chan struct{}
+}
+
+func newStepClock(now time.Time, slots int) *stepClock {
+	return &stepClock{now: now, barrier: make(chan struct{}), sleeping: make(chan struct{}, slots)}
+}
+
+func (c *stepClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *stepClock) Sleep(ctx context.Context, d time.Duration) {
+	c.mu.Lock()
+	c.waits = append(c.waits, d)
+	barrier := c.barrier
+	c.mu.Unlock()
+
+	c.sleeping <- struct{}{}
+	select {
+	case <-barrier:
+	case <-ctx.Done():
+	}
+}
+
+// advance sets now and releases every Sleep call parked so far, as if all
+// of them woke at once.
+func (c *stepClock) advance(now time.Time) {
+	c.mu.Lock()
+	c.now = now
+	old := c.barrier
+	c.barrier = make(chan struct{})
+	c.mu.Unlock()
+	close(old)
+}
+
+// TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots pins the
+// edge-triggered contract: with several slots all parking on the same
+// closed window, the stream carries exactly one awake_close and one
+// awake_open, never one per parked slot.
+func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing.T) {
+	win, err := ParseWindow("09:00-17:00 UTC")
+	if err != nil {
+		t.Fatalf("ParseWindow: %v", err)
+	}
+	const slots = 3
+	r := &fakeRunner{revisions: []string{"rev1"}}
+	clk := newStepClock(time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), slots)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(slots)
+	cfg.Awake = win
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(slots)
+	for s := 0; s < slots; s++ {
+		go func(s int) {
+			defer wg.Done()
+			p.awaitWindow(pctx, s)
+		}(s)
+	}
+
+	for i := 0; i < slots; i++ {
+		select {
+		case <-clk.sleeping:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for slot %d to park on the closed window", i)
+		}
+	}
+	clk.advance(time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)) // window opens, releases all three
+	wg.Wait()
+
+	events := decodeEvents(t, &buf)
+	closes, opens := 0, 0
+	for _, ev := range events {
+		switch ev.Event {
+		case "awake_close":
+			closes++
+		case "awake_open":
+			opens++
+		}
+	}
+	if closes != 1 {
+		t.Fatalf("awake_close events = %d, want exactly 1 (%v)", closes, eventNames(events))
+	}
+	if opens != 1 {
+		t.Fatalf("awake_open events = %d, want exactly 1 (%v)", opens, eventNames(events))
+	}
+}
