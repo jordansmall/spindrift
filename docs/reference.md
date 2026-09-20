@@ -4605,12 +4605,37 @@ that invokes `nix` at runtime: it cannot exec the launcher store path it was
 built against, since that path is precisely the stale one a rebuild exists
 to replace, so each child Dispatch runs through `nix run` instead.
 
-Each iteration fetches — never pulls — and resolves the tip of
-`BASE_BRANCH` from `FETCH_HEAD`, then pins one child Dispatch to that
+Each slot's own iteration fetches — never pulls — and resolves the tip of
+`BASE_BRANCH` from `FETCH_HEAD`, then pins its next child Dispatch to that
 revision via a `git+file://...?rev=...` flakeref. The operator's working
 tree is never mutated, so they can keep editing while the daemon runs. The
 pin also means a checkout landing mid-evaluation can't produce a build of a
-tree that never existed as a commit.
+tree that never existed as a commit, and a child started an hour into the
+night is still pinned to the tip as it was when that slot came free, not
+the tip at daemon startup.
+
+**Pool.** `MAX_PARALLEL` is the daemon's own pool size (`Config.Slots`,
+`cmd/launcher/internal/daemon/loop.go`): `Loop` runs that many slot
+goroutines, each independently fetching, resolving, and driving its own
+children, rather than one loop iterating a single child. The cap still
+covers everything the daemon runs — one child means one Box
+(`ChildCommand` appends `--max-jobs 1 --max-parallel 1` to every
+invocation, `cmd/launcher/internal/daemon/command.go`), so a slot can never
+itself fan out into a second, uncounted wave, and an operator's
+`MEMORY_LIMIT` × `MAX_PARALLEL` sizing (`spindrift doctor`'s
+`podman-machine-memory` check, above) still bounds the daemon's real peak
+just as it bounds a single `spindrift dispatch` invocation's. Nothing coordinates
+which issue each slot picks up, and nothing needs to: the overlap gate
+already builds its snapshot from the tracker's in-progress set plus
+declared touches and open-PR changed files, and claiming already tolerates
+a concurrent claimant by design (`cmd/launcher/internal/daemon/pool.go`).
+Independent slots therefore coordinate through the tracker the same way
+independent daemon processes or a human's `dispatch` invocation would;
+daemon-side bookkeeping of who's working what would only be a second copy
+of that state to keep in sync. A non-positive `MAX_PARALLEL` fails daemon
+startup rather than being clamped to some default — a pool that runs
+nothing while looking healthy is worse than a daemon that refuses to
+start.
 
 `DAEMON_APP` (default `.#`) is the flake app attribute the daemon
 re-invokes for each child — see the `DAEMON_APP` row in [Advanced
@@ -4619,24 +4644,52 @@ tuning](#advanced-tuning).
 Each child's exit code is interpreted the same way `spindrift`'s own exit
 codes are (see the [exit-code table](#dogfood-loop) in Dogfood loop above,
 which this table's meanings link back to) — but the daemon's *action* on
-each code is its own, distinct from dogfood.sh's pull-and-rebuild loop:
+each code is its own, distinct from dogfood.sh's pull-and-rebuild loop.
+`IdleInterval` below is a fixed 5 minutes (`daemonIdleInterval`,
+`cmd/launcher/daemon/main.go`), the same for every slot:
 
 | exit | meaning | daemon action |
 |------|---------|----------------|
 | 0    | dispatched work | go again at once |
 | 2    | queue empty | wait `IdleInterval`, then go again |
-| 3    | none dispatchable | wait `IdleInterval`, then go again |
+| 3    | none dispatchable | with a sibling slot's child running, routine — emit `idle` and wait `IdleInterval` as usual; with the whole pool otherwise idle, nothing can start — emit a distinct `jam` event instead, then still wait `IdleInterval` and retry (a single-slot daemon therefore reports every exit 3 as a jam) |
 | 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke |
-| 5    | host-tainted | halt |
-| 6    | config-invalid | halt |
-| 7    | signalled stop | halt |
-| anything else | unrecognised | halt |
+| 5    | host-tainted | halt the pool |
+| 6    | config-invalid | halt the pool |
+| 7    | signalled stop | halt the pool |
+| anything else | unrecognised (an unclassified exit code, a `RunChild` seam error, or a `ResolveRevision`/fetch error all land here) | back this slot off alone for `FailureBackoff` and refill it — see **Failures** below |
+
+**Failures.** An unclassified failure — an exit code `Interpret`
+(`cmd/launcher/internal/daemon/outcome.go`) doesn't recognise, a `RunChild`
+seam error, or a `ResolveRevision` fetch error — no longer halts the pool
+by itself: the failing slot backs off for `daemonFailureBackoff` (default 1
+minute, `cmd/launcher/daemon/main.go`) and refills itself, and the sibling
+slots never notice. That alone would burn every slot on a fault no retry
+clears, so these failures are also counted pool-wide by a circuit breaker
+(`cmd/launcher/internal/daemon/breaker.go`): `daemonBreakerThreshold`
+(default 5) of them within a trailing `daemonBreakerWindow` (default 15
+minutes) halts the whole daemon and emits a `breaker_trip` event, on the
+theory that a systemic fault (an expired token, a forge outage) fails every
+slot's child immediately. At the default 3 slots that crosses the threshold
+within about one backoff; at `MAX_PARALLEL=1` the count is one slot's own
+retries, so it crosses after four backoffs instead — slower, but still well
+inside the window, because a lone slot that keeps failing has no sibling
+doing useful work for a spared breaker to protect. All three defaults are a
+defensible first cut, not a tuned answer — they want a real unattended run
+to argue with them. The halt-mapped exits (5/6/7) are untouched by the
+breaker: a tainted host, an invalid config, and a signalled stop still halt
+the pool at once, since no retry clears the first two and the third is the
+operator's own request.
 
 **Halting.** A `SIGINT` or `SIGTERM` to the daemon cancels the loop between
 iterations and forwards a `SIGTERM` to any running child, as a drain
 request — the same gesture as `dogfood.sh`'s `request_stop` and the
 launcher's own `notifyStopSignal`. It never kills a Box: the child chooses
-to drain. The child is started in its own process group
+to drain, and a pool halt is the same courtesy at pool scale — halting
+cancels a context shared by every slot, so a sibling asleep in its idle
+wait or blocked in a fetch stops promptly, but any child already running
+is always waited out and always gets its `child_finish` before the process
+exits, never abandoned mid-run. The child is started in its own process group
 (`cmd/launcher/daemon/runner.go`), so a Ctrl-C aimed at the daemon's own
 foreground process group — which would otherwise deliver a group-wide
 SIGINT straight to the child — spares it; only the explicit forwarded
@@ -4656,20 +4709,33 @@ stream only; human-facing output and the child's own stdout/stderr go to
 stderr instead. Event names and fields (`cmd/launcher/internal/daemon/events.go`,
 `loop.go`):
 
+Every per-slot event — `child_start`, `box`, `child_finish`, `idle`, `jam`,
+`backoff`, `breaker_trip` — carries a `slot` (0-based, the pool slot the
+event belongs to); `breaker_trip`'s `slot` is whichever slot's failure was
+the one that crossed `BreakerThreshold`, since the breaker itself counts
+across the whole pool but the crossing is always attributable to one
+slot's failure. `halt` is the one pool-level event and carries no `slot`,
+since it belongs to no one slot.
+
 | event | fields | when |
 |-------|--------|------|
-| `child_start` | `time`, `kind`, `revision` | just before a child is launched |
-| `box` | `time`, `kind`, `issue`, `revision` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
-| `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
-| `idle` | `time`, `kind`, `wait` | entering an `IdleInterval` wait after `queue-empty`/`none-dispatchable` |
+| `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched |
+| `box` | `time`, `kind`, `issue`, `revision`, `slot` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
+| `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
+| `idle` | `time`, `kind`, `wait`, `slot` | entering an `IdleInterval` wait after `queue-empty`, or after `none-dispatchable` with a sibling slot's child running |
+| `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | entering an `IdleInterval` wait after `none-dispatchable` with the whole pool otherwise idle — nothing running and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it |
+| `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself |
+| `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the loop is about to return and the process is about to exit |
 
-**What this first cut doesn't do.** Pool concurrency, per-kind backoff, the
-Awake window, and the instance lock are later tickets; this
-cut runs one child Dispatch at a time, at a fixed idle interval
-(`daemonIdleInterval`, `cmd/launcher/daemon/main.go`, 5 minutes); how many
-Boxes that child fans out to is the Consumer's own `dispatch.maxJobs`, not
-something the daemon overrides.
+**What this first cut doesn't do.** Per-kind backoff, the Awake window,
+and the instance lock are later tickets; the daemon does now own pool
+concurrency (`MAX_PARALLEL`, above) and does override the Consumer's own
+`dispatch.maxJobs`/`dispatch.maxParallel` for every child it starts — each
+child is pinned to exactly one Box (`--max-jobs 1 --max-parallel 1`, see
+**Pool** above) regardless of the Consumer's configured wave size, since
+the daemon, not any one child, is what now decides how many Boxes run at
+once.
 
 Continuous dispatch (`CONTINUOUS_DISPATCH`, above) and `dogfood.sh` are
 unchanged by this ticket — the daemon is a new, separate driving loop, not a
