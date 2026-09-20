@@ -1,5 +1,5 @@
 # Drift parity between the in-repo `/nix-checks` skill and the "## Nix edits"
-# section of CLAUDE.md (issue #3448). See nix/checks/tdd-fragment-parity.nix for
+# section of CLAUDE.md (issue #3448). See nix/checks/mk-fragment-parity.nix for
 # the shared two-surface rationale. There is no verbatim comparison: CLAUDE.md's
 # section is longer, cites things the skill never mentions, and wraps narrower,
 # so this asserts only the vocabulary any faithful rewording would keep.
@@ -29,7 +29,9 @@ let
   # This strips backticks and `*` as well, because the two texts mark up the
   # same phrases with different emphasis (`**scoped**` in CLAUDE.md, plain
   # `scoped` in the skill) and several shared clauses below are the emphasized
-  # ones, so they cannot dodge emphasis the way tdd-fragment-parity.nix does.
+  # ones, so they cannot dodge emphasis the way the fragment-parity call sites
+  # do -- those pick clauses that never straddle a `**...**` wrapper, which is
+  # why mk-fragment-parity.nix's own `normalize` strips no emphasis at all.
   normalize =
     text:
     let

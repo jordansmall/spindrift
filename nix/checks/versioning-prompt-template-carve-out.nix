@@ -21,10 +21,10 @@
       # VERSIONING.md is hard-wrapped prose, so the cited heading phrase can
       # straddle a line break; collapse all whitespace (including newlines) to
       # a single space before testing so the check doesn't dictate the wrap.
-      # Same shape the parity checks carry locally (nix-checks-lore-parity.nix,
-      # tdd-fragment-parity.nix, ...), minus their `toLower` — the phrase is a
-      # heading here, so case is part of what the check pins. No shared home
-      # for the idiom yet.
+      # Same shape as the shared `normalize` in nix/checks/mk-fragment-parity.nix
+      # (also carried locally by nix-checks-lore-parity.nix), minus its
+      # `toLower` — the phrase is a heading here, so case is part of what the
+      # check pins.
       normalize =
         text:
         let
