@@ -411,9 +411,11 @@ let
   filerEnabled = agentsJsonAttrs ? filer;
   workerProvisioned = agentsJsonAttrs ? worker;
 
-  # This one keys off finalRoster instead, for the mirror-image reason:
-  # opencode provisions scout through driverAgentFiles, so agentsJsonAttrs
-  # would wrongly read false for an opencode box that does carry scout.
+  # scoutProvisioned keys off finalRoster instead of agentsJsonAttrs, the
+  # mirror image of filerEnabled/workerProvisioned above: opencode provisions
+  # scout through driverAgentFiles (rendered by lib/drivers/opencode.nix's
+  # agentFilesTemplate), so agentsJsonAttrs would wrongly read false for an
+  # opencode box that does carry scout.
   scoutProvisioned = lib.any (e: e.name == "scout") finalRoster;
   reviewLoopInline = !mergedDefaults.orchestratorEnabled;
   reviewLoopOrchestrator = mergedDefaults.orchestratorEnabled;
