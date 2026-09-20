@@ -64,7 +64,7 @@ func TestKindBackoffFreshIsRunnable(t *testing.T) {
 	if !k.runnable(time.Now()) {
 		t.Fatalf("fresh kindBackoff: want runnable, got gated")
 	}
-	if until, gated := k.readyAt(); gated || !until.IsZero() {
+	if until, gated := k.readyAt(time.Now()); gated || !until.IsZero() {
 		t.Fatalf("fresh kindBackoff: readyAt() = (%v, %v), want (zero, false)", until, gated)
 	}
 	if k.jammedNow() {
@@ -93,9 +93,31 @@ func TestKindBackoffGatesUntilDeadline(t *testing.T) {
 		t.Fatalf("runnable(now+wait): want runnable")
 	}
 
-	until, gated := k.readyAt()
+	until, gated := k.readyAt(now)
 	if !gated || !until.Equal(now.Add(wait)) {
 		t.Fatalf("readyAt() = (%v, %v), want (%v, true)", until, gated, now.Add(wait))
+	}
+}
+
+// TestKindBackoffReadyAtElapsedDeadline pins the fix for the finding at
+// backoff.go:98: once the deadline itself has passed, readyAt must report
+// not-gated (matching runnable), never a stale `until` a caller could go on
+// to publish as a future nextCheck.
+func TestKindBackoffReadyAtElapsedDeadline(t *testing.T) {
+	k := newKindBackoff(time.Second, 8*time.Second)
+	now := time.Now()
+
+	wait := k.markNoWork(now, false)
+	deadline := now.Add(wait)
+
+	if until, gated := k.readyAt(deadline.Add(-1)); !gated || !until.Equal(deadline) {
+		t.Fatalf("readyAt(deadline-1ns) = (%v, %v), want (%v, true)", until, gated, deadline)
+	}
+	if _, gated := k.readyAt(deadline); gated {
+		t.Fatalf("readyAt(deadline): want not gated, the deadline itself is runnable")
+	}
+	if _, gated := k.readyAt(deadline.Add(1)); gated {
+		t.Fatalf("readyAt(deadline+1ns): want not gated")
 	}
 }
 
@@ -146,7 +168,7 @@ func TestKindBackoffReset(t *testing.T) {
 	if k.jammedNow() {
 		t.Fatalf("jammedNow() after reset: want false")
 	}
-	if until, gated := k.readyAt(); gated || !until.IsZero() {
+	if until, gated := k.readyAt(now); gated || !until.IsZero() {
 		t.Fatalf("readyAt() after reset = (%v, %v), want (zero, false)", until, gated)
 	}
 	if got := k.markNoWork(now, false); got != time.Second {

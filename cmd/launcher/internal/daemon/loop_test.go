@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1614,5 +1617,148 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 	}
 	if !sawFinish {
 		t.Fatalf("events = %v, want a child_finish for the drained child", names)
+	}
+}
+
+// statusProbeRunner is a single-purpose Runner for
+// TestLoopPublishesLiveStatus: its RunChild announces one issue through
+// req.OnIssue and, while still inside RunChild (the child is still
+// "running" from the pool's point of view), reads the status file straight
+// back so the assertion is genuinely about the in-flight file, not the one
+// left behind after the child returns.
+type statusProbeRunner struct {
+	revision string
+	dir      string
+
+	report StatusReport
+	err    error
+}
+
+func (r *statusProbeRunner) ResolveRevision(ctx context.Context) (string, error) {
+	return r.revision, nil
+}
+
+func (r *statusProbeRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	return "", nil
+}
+
+func (r *statusProbeRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	req.OnIssue("42")
+	r.report, r.err = ReadStatus(r.dir)
+	return ChildResult{Exit: 5}, nil // host-tainted: Loop halts promptly after this call
+}
+
+// TestLoopPublishesLiveStatus drives a Loop run with Config.Status pointed
+// at a temp dir and asserts the status file names the in-flight child's
+// kind/revision/issues while RunChild is still running, and that a valid
+// status file survives the run (issue #3545).
+func TestLoopPublishesLiveStatus(t *testing.T) {
+	dir := t.TempDir()
+	clk := &fakeClock{}
+	sw := NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &statusProbeRunner{revision: "rev1", dir: dir}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Status = sw
+
+	reason := Loop(context.Background(), cfg, r, em, clk)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
+	}
+
+	if r.err != nil {
+		t.Fatalf("ReadStatus during RunChild: %v", r.err)
+	}
+	if r.report.Status == nil {
+		t.Fatalf("status was nil while the child was still running")
+	}
+	st := r.report.Status
+	if st.State != StateWorking {
+		t.Fatalf("in-flight state = %q, want %q", st.State, StateWorking)
+	}
+	if len(st.Slots) != 1 || !st.Slots[0].Busy || st.Slots[0].Kind != KindDispatch || st.Slots[0].Revision != "rev1" {
+		t.Fatalf("in-flight slot = %+v, want busy dispatch@rev1", st.Slots)
+	}
+	if !reflect.DeepEqual(st.Slots[0].Issues, []string{"42"}) {
+		t.Fatalf("in-flight issues = %v, want [42]", st.Slots[0].Issues)
+	}
+
+	report, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatalf("ReadStatus after Loop returned: %v", err)
+	}
+	if report.Status == nil {
+		t.Fatalf("status file missing after Loop finished")
+	}
+}
+
+// TestLoopNilStatusPublishesNothing pins Config.Status == nil as the
+// deliberate opt-out: Loop must run to completion without panicking and
+// must never create a status file. The check against dir would be vacuous
+// on its own — nothing ties dir to cfg when Status is nil, so no run could
+// ever write there — so the second half re-runs the same shape with
+// cfg.Status wired to a StatusWriter over that same dir, proving a file
+// does land there when Status is non-nil and making the first half's
+// absence assertion load-bearing rather than a check against thin air.
+func TestLoopNilStatusPublishesNothing(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, statusFileName)
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	// cfg.Status is left nil deliberately.
+	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
+	Loop(context.Background(), cfg, r, em, clk)
+
+	if _, err := os.Stat(statusPath); !os.IsNotExist(err) {
+		t.Fatalf("status file exists at %s despite nil Config.Status: err=%v", dir, err)
+	}
+
+	cfg.Status = NewStatusWriter(dir, clk.Now)
+	r2 := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
+	Loop(context.Background(), cfg, r2, em, clk)
+
+	if _, err := os.Stat(statusPath); err != nil {
+		t.Fatalf("status file missing at %s once Config.Status was wired: %v", dir, err)
+	}
+}
+
+// TestLoopInvalidConfigPublishesHaltedStatus pins invalidConfig's Write:
+// Loop rejects a bad config before any pool exists, so there is no
+// pool.snapshot to publish through, yet a wired Status must still end up
+// holding a StateHalted record naming the same reason returned to the
+// caller — otherwise a checkout's status file is left at whatever a
+// predecessor run last published, under a lock this run now holds.
+func TestLoopInvalidConfigPublishesHaltedStatus(t *testing.T) {
+	dir := t.TempDir()
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(0) // Slots <= 0 is rejected before a pool is built
+	cfg.Status = NewStatusWriter(dir, clk.Now)
+	r := &fakeRunner{}
+
+	reason := Loop(context.Background(), cfg, r, em, clk)
+	if !strings.Contains(reason, "config-invalid") {
+		t.Fatalf("halt reason = %q, want it to name config-invalid", reason)
+	}
+
+	report, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if report.Status == nil {
+		t.Fatalf("status file missing after an invalid-config halt")
+	}
+	if report.Status.State != StateHalted {
+		t.Errorf("state = %q, want %q", report.Status.State, StateHalted)
+	}
+	if report.Status.Reason != reason {
+		t.Errorf("status reason = %q, want %q", report.Status.Reason, reason)
 	}
 }

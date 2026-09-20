@@ -51,6 +51,11 @@ type KindCheck struct {
 	// shut Awake window reopens, so an asleep daemon never reports a kind
 	// as runnable now.
 	NextCheck string `json:"nextCheck,omitempty"`
+	// Jammed is true when this kind's last check found open issues none of
+	// which were dispatchable (exit 3), and it is still gated on that
+	// result. Without this, which kind is jammed is unrecoverable once
+	// State collapses several kinds into one word (issue #3545).
+	Jammed bool `json:"jammed,omitempty"`
 }
 
 // State is the daemon's published operator-facing state; the pool computes
@@ -65,13 +70,11 @@ const (
 	// every queue is empty and the daemon is waiting for work. This is
 	// the ordinary overnight-quiet state.
 	StateWaiting State = "waiting"
-	// StateJammed means nothing is running, every configured kind is
-	// gated, and at least one of them is gated by a none-dispatchable
-	// result: there are open issues and nothing can dispatch them. Looks
-	// identical to StateWaiting from outside and means the opposite —
-	// only the daemon has the pool occupancy that tells them apart, so
-	// this distinction cannot be recovered downstream if the daemon does
-	// not report it (issue #3545).
+	// StateJammed is derived from the per-kind Jammed flags (KindCheck):
+	// nothing is running, every configured kind is gated, and at least one
+	// KindCheck carries Jammed true. Looks identical to StateWaiting from
+	// outside and means the opposite; see docs/reference.md for the full
+	// rationale.
 	StateJammed State = "jammed"
 	// StateAsleep means nothing is running and the Awake window is shut.
 	StateAsleep State = "asleep"

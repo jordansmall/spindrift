@@ -9,12 +9,14 @@ import (
 	"time"
 )
 
-// emitErrW is where Emit reports a failed Encode. A package-level var rather
-// than an Emitter field so NewEmitter keeps its two-argument shape and its
-// call sites stay put; tests swap it to assert on the diagnostic. Carrying
-// mainRun's own stderr here instead — so this diagnostic lands where every
-// other one does — needs the field and the signature change, and is left to
-// a follow-up.
+// emitErrW is where Emit reports a failed Encode, and where pool.publish
+// (pool.go) reports a failed status file write (issue #3545) — both are
+// advisory-write failures that must never fail the daemon, just get
+// surfaced somewhere. A package-level var rather than an Emitter field so
+// NewEmitter keeps its two-argument shape and its call sites stay put;
+// tests swap it to assert on the diagnostic. Carrying mainRun's own stderr
+// here instead — so this diagnostic lands where every other one does —
+// needs the field and the signature change, and is left to a follow-up.
 var emitErrW io.Writer = os.Stderr
 
 // Event is one JSON-lines record in the daemon's event stream: the durable,
