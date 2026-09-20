@@ -313,17 +313,43 @@ func isOperatorStop(reason string) bool {
 	return strings.HasPrefix(reason, "context-cancelled") || reason == "outcome: signalled-stop"
 }
 
-// handleStopSignal waits for a single signal on sig, then cancels ctx and
-// calls forward once. Loop only checks ctx.Err() between iterations and
-// always waits out a started child (daemon.Loop's doc), so cancelling here
-// already gets "stop starting new work, let anything running drain".
-// Forwarding SIGTERM on top makes the running child itself start draining
-// right away instead of only being noticed once it exits on its own — the
-// same gesture as dogfood.sh's request_stop and cmd/launcher/main.go's
-// notifyStopSignal. It is never a kill: the child chooses to drain.
-func handleStopSignal(sig <-chan os.Signal, cancel context.CancelFunc, forward func()) {
-	<-sig
+// handleStopSignals waits for the first two signals on sig and forwards
+// each: the first stops the daemon from filling any more slots (cancel) and
+// forwards a SIGTERM so anything already running starts draining right away
+// instead of only being noticed once it exits on its own; the second
+// forwards again, which hostRunner.forwardStop's own count turns into the
+// escalation (issue #3521's child launcher aborts a drain on its second
+// signal). The daemon implements no drain or reap of its own — Loop only
+// checks ctx.Err() between iterations and always waits out a started child
+// (daemon.Loop's doc), and it is daemon.Loop's own wg.Wait() that waits the
+// children out, here and after escalation alike. The kind of signal never
+// matters, only first versus second — same contract as
+// cmd/launcher/main.go's relaySignals/notifyStopSignal. A third and later
+// signal is a no-op: this function returns after the second and nothing
+// else ever reads sig again.
+//
+// quit lets a caller unpark this goroutine when no second signal ever
+// arrives — mainRun is driven repeatedly under test, and without a way out
+// each call would leak a goroutine blocked on <-sig forever. signal.Stop is
+// deliberately not called: Go's own handler stays installed, so the third
+// signal above is swallowed in the buffer rather than killing the daemon
+// outright.
+func handleStopSignals(sig <-chan os.Signal, quit <-chan struct{}, cancel context.CancelFunc, forward func(), em *daemon.Emitter) {
+	select {
+	case <-sig:
+	case <-quit:
+		return
+	}
+	em.Emit(daemon.Event{Event: "shutdown", Reason: daemon.ShutdownDrain})
 	cancel()
+	forward()
+
+	select {
+	case <-sig:
+	case <-quit:
+		return
+	}
+	em.Emit(daemon.Event{Event: "shutdown", Reason: daemon.ShutdownEscalate})
 	forward()
 }
 
@@ -517,9 +543,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		nixSystem:  nixSystem,
 	})
 
-	sig := make(chan os.Signal, 1)
+	// Buffered at 2, not 1, so a signal isn't dropped for want of room
+	// between receives — see notifyStopSignal's buffer-of-2 reasoning.
+	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	go handleStopSignal(sig, cancel, r.forwardStop)
+	quit := make(chan struct{})
+	defer close(quit)
+	go handleStopSignals(sig, quit, cancel, r.forwardStop, em)
 
 	// After the signal wiring, so an operator's Ctrl-C during the preflight
 	// is honoured; before Loop, so a refusal happens before any slot, any

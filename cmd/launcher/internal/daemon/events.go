@@ -42,6 +42,20 @@ type Event struct {
 	Failures *int `json:"failures,omitempty"`
 }
 
+// ShutdownDrain is the reason on the shutdown event the daemon emits for the
+// first stop signal: docs/reference.md documents this exact string as
+// operator-facing grammar, so changing it is a documented-behaviour change,
+// not a rename (see HaltSelfBuildPrefix in outcome.go for the same
+// convention).
+const ShutdownDrain = "signalled stop: forwarding a drain request to every running child"
+
+// ShutdownEscalate is the reason on the shutdown event the daemon emits for
+// the second stop signal — the escalation forwarded to every running child
+// so each reaps and releases (issue #3521 handles the escalation itself;
+// the daemon only forwards it). Same documented-string convention as
+// ShutdownDrain.
+const ShutdownEscalate = "second signal: forwarding the escalation so every child reaps and releases"
+
 // Emitter writes Events as JSON-lines to an injected io.Writer.
 type Emitter struct {
 	mu  sync.Mutex

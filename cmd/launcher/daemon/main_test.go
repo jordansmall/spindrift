@@ -493,12 +493,157 @@ func TestExitCodeFor(t *testing.T) {
 	}
 }
 
-// TestHandleStopSignal asserts one signal cancels ctx and invokes forward
-// exactly once — the daemon's signal-wiring goroutine, extracted out of main
-// so the halt path is exercised without sending the test process a real
-// signal (issue #3538).
-func TestHandleStopSignal(t *testing.T) {
-	sig := make(chan os.Signal, 1)
+// TestHandleStopSignals asserts the first signal cancels ctx and forwards
+// once, the second forwards again (the escalation) without cancelling twice
+// or panicking, and a third is a no-op — the daemon's signal-wiring
+// goroutine, extracted out of main so the halt path is exercised without
+// sending the test process a real signal (issue #3538, escalation #3546).
+// Table-driven over signal-kind combinations because only first-vs-second
+// matters, never which kind (mirrors cmd/launcher/main.go's relaySignals
+// contract).
+func TestHandleStopSignals(t *testing.T) {
+	tests := []struct {
+		name   string
+		first  os.Signal
+		second os.Signal
+	}{
+		{"term-term", syscall.SIGTERM, syscall.SIGTERM},
+		{"term-int", syscall.SIGTERM, syscall.SIGINT},
+		{"int-int", syscall.SIGINT, syscall.SIGINT},
+		{"int-term", syscall.SIGINT, syscall.SIGTERM},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sig := make(chan os.Signal, 2)
+			quit := make(chan struct{})
+			ctx, cancel := context.WithCancel(context.Background())
+
+			var mu sync.Mutex
+			forwardCalls := 0
+			forward := func() {
+				mu.Lock()
+				forwardCalls++
+				mu.Unlock()
+			}
+
+			var buf bytes.Buffer
+			em := daemon.NewEmitter(&buf, time.Now)
+
+			done := make(chan struct{})
+			go func() {
+				handleStopSignals(sig, quit, cancel, forward, em)
+				close(done)
+			}()
+
+			sig <- tt.first
+			sig <- tt.second
+
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("handleStopSignals did not return after two signals")
+			}
+
+			if ctx.Err() == nil {
+				t.Error("ctx.Err() = nil, want context cancelled")
+			}
+			mu.Lock()
+			got := forwardCalls
+			mu.Unlock()
+			if got != 2 {
+				t.Errorf("forward called %d times, want 2", got)
+			}
+
+			// A third signal, sent after the handler has already
+			// returned (done is closed above), must never bump
+			// forwardCalls: the handler drains sig only twice and
+			// nothing else reads it, so there is no race to wait out.
+			sig <- syscall.SIGTERM
+			mu.Lock()
+			got = forwardCalls
+			mu.Unlock()
+			if got != 2 {
+				t.Errorf("forward called %d times after a third signal, want 2 (third must be a no-op)", got)
+			}
+
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("event stream has %d lines, want 2: %q", len(lines), buf.String())
+			}
+			var drain, escalate daemon.Event
+			if err := json.Unmarshal([]byte(lines[0]), &drain); err != nil {
+				t.Fatalf("decode drain event %q: %v", lines[0], err)
+			}
+			if err := json.Unmarshal([]byte(lines[1]), &escalate); err != nil {
+				t.Fatalf("decode escalate event %q: %v", lines[1], err)
+			}
+			if drain.Event != "shutdown" || drain.Reason != daemon.ShutdownDrain {
+				t.Errorf("first event = %+v, want event=shutdown reason=%q", drain, daemon.ShutdownDrain)
+			}
+			if escalate.Event != "shutdown" || escalate.Reason != daemon.ShutdownEscalate {
+				t.Errorf("second event = %+v, want event=shutdown reason=%q", escalate, daemon.ShutdownEscalate)
+			}
+		})
+	}
+}
+
+// TestHandleStopSignals_QuitBeforeFirstSignal asserts that closing quit
+// before any signal arrives unparks handleStopSignals rather than leaving it
+// blocked on <-sig forever — the leak mainRun's repeated test-driving would
+// otherwise accumulate one goroutine per call (issue #3546).
+func TestHandleStopSignals_QuitBeforeFirstSignal(t *testing.T) {
+	sig := make(chan os.Signal, 2)
+	quit := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	forwardCalls := 0
+	forward := func() {
+		mu.Lock()
+		forwardCalls++
+		mu.Unlock()
+	}
+
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, time.Now)
+
+	done := make(chan struct{})
+	go func() {
+		handleStopSignals(sig, quit, cancel, forward, em)
+		close(done)
+	}()
+
+	close(quit)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handleStopSignals did not return after quit closed before any signal")
+	}
+
+	if ctx.Err() != nil {
+		t.Errorf("ctx.Err() = %v, want nil: quit before a signal must not cancel", ctx.Err())
+	}
+	mu.Lock()
+	got := forwardCalls
+	mu.Unlock()
+	if got != 0 {
+		t.Errorf("forward called %d times, want 0", got)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("event stream = %q, want empty", buf.String())
+	}
+}
+
+// TestHandleStopSignals_QuitAfterFirstSignal asserts that closing quit after
+// the first signal but before the second still returns handleStopSignals,
+// with the first signal's cancel/forward/shutdown-event side effects already
+// applied — the second select's quit case must unpark it just as the
+// first's does.
+func TestHandleStopSignals_QuitAfterFirstSignal(t *testing.T) {
+	sig := make(chan os.Signal, 2)
+	quit := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var mu sync.Mutex
@@ -509,28 +654,56 @@ func TestHandleStopSignal(t *testing.T) {
 		mu.Unlock()
 	}
 
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, time.Now)
+
 	done := make(chan struct{})
 	go func() {
-		handleStopSignal(sig, cancel, forward)
+		handleStopSignals(sig, quit, cancel, forward, em)
 		close(done)
 	}()
 
 	sig <- syscall.SIGTERM
 
+	// Give the goroutine a chance to consume the first signal and apply its
+	// side effects before quit closes, so this test observes "quit while
+	// waiting on the second" rather than racing the first receive itself.
+	for i := 0; i < 1000; i++ {
+		mu.Lock()
+		forwarded := forwardCalls != 0
+		mu.Unlock()
+		if forwarded {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(quit)
+
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("handleStopSignal did not return after a signal")
+		t.Fatal("handleStopSignals did not return after quit closed between signals")
 	}
 
 	if ctx.Err() == nil {
-		t.Error("ctx.Err() = nil, want context cancelled")
+		t.Error("ctx.Err() = nil, want context cancelled from the first signal")
 	}
 	mu.Lock()
 	got := forwardCalls
 	mu.Unlock()
 	if got != 1 {
 		t.Errorf("forward called %d times, want 1", got)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("event stream has %d lines, want 1: %q", len(lines), buf.String())
+	}
+	var drain daemon.Event
+	if err := json.Unmarshal([]byte(lines[0]), &drain); err != nil {
+		t.Fatalf("decode drain event %q: %v", lines[0], err)
+	}
+	if drain.Event != "shutdown" || drain.Reason != daemon.ShutdownDrain {
+		t.Errorf("event = %+v, want event=shutdown reason=%q", drain, daemon.ShutdownDrain)
 	}
 }
 
