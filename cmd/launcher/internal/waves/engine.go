@@ -79,7 +79,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 	}
 	limiter := NewLimiter(cfg.MaxParallel)
 	reaper := f.AsReaper()
-	gate := shutdown.NewGate(cfg.Stop, cfg.Abort, it, cf, reaper, terminated)
+	gate := shutdown.NewGate(cfg.Stop, cfg.Abort, it, cf, reaper, terminated, cfg.CompleteLabel)
 	gate.Watch()
 	var wg sync.WaitGroup
 	for _, iss := range batch {
