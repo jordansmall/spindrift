@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -21,11 +22,9 @@ type Runner interface {
 }
 
 // ChildRequest is one child invocation's parameters. Slot is the daemon
-// pool slot the child occupies (0-based); today the loop only ever runs
-// slot 0, but the production Runner is already keyed by it so it can track
-// several concurrent children for signal forwarding, and so the event
-// stream can say which slot was filled and refilled once a later slice
-// grows the pool past one.
+// pool slot the child occupies (0-based): it is how the production Runner
+// tracks several concurrent children for signal forwarding, and how the
+// event stream says which slot a child filled.
 type ChildRequest struct {
 	Slot     int
 	Kind     Kind
@@ -49,53 +48,84 @@ type ChildResult struct {
 	Issues []string
 }
 
-// Config is the loop's tuning: which Dispatch kind to drive and how long to
-// wait on an empty queue. Pool concurrency, per-kind backoff, the Awake
-// window and the instance lock are later tickets.
+// Config is the loop's tuning: which Dispatch kind to drive, how long to
+// wait on an empty queue, and how many slots (concurrent single-Box
+// children) the pool runs. Per-kind backoff, the Awake window and the
+// instance lock are later tickets.
 type Config struct {
 	Kind         Kind
 	IdleInterval time.Duration
+	Slots        int
 }
 
-// Loop drives Dispatch children until something says halt: a resolve
-// failure, a RunChild error, an unrecognised or Halt-mapped exit code, or a
-// cancelled ctx. It returns the reason it halted, for a caller to log or
-// turn into a process exit code.
+// Loop runs cfg.Slots slot goroutines, each independently driving Dispatch
+// children through the same state machine, until something says halt: a
+// resolve failure, a RunChild error, an unrecognised or Halt-mapped exit
+// code, or a cancelled ctx. Whichever slot halts first wins — Loop emits
+// exactly one halt event per call, and returns that first reason, for a
+// caller to log or turn into a process exit code.
 //
-// It never kills a child it has started: once RunChild is called, the loop
+// It never kills a child it has started: once a slot calls RunChild, it
 // always waits for it to return and always emits that child's child_finish
-// before halting, even if ctx was cancelled mid-run. "Stop starting new
-// work" is enforced only between iterations and before RunChild: at the top
-// of the loop, after ResolveRevision returns, and after Interpret decides
-// to Wait.
+// before halting, even if ctx was cancelled mid-run or a sibling slot
+// halted the pool in the meantime. "Stop starting new work" is enforced
+// only between iterations and before RunChild: at the top of a slot's loop,
+// after ResolveRevision returns, and after Interpret decides to Wait.
+//
+// cfg.Slots must be positive: a zero or negative pool size would silently
+// run no children while looking like a healthy daemon, so Loop rejects it
+// as a halt-shaped config error instead.
 func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) string {
+	if cfg.Slots <= 0 {
+		reason := fmt.Sprintf("config-invalid: slots must be a positive integer, got %d", cfg.Slots)
+		em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
+		return reason
+	}
+
+	p, pctx := newPool(ctx, cfg, em)
+	defer p.cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(cfg.Slots)
+	for slot := 0; slot < cfg.Slots; slot++ {
+		go func(slot int) {
+			defer wg.Done()
+			runSlot(pctx, slot, cfg, r, em, clk, p)
+		}(slot)
+	}
+	wg.Wait()
+
+	return p.haltReason()
+}
+
+// runSlot drives one pool slot's children until the pool halts, either
+// because this slot decided to halt it or because a sibling did. ctx is the
+// pool's own derived context (not the caller's ctx directly): cancelling it
+// is how the pool tells every slot to stop promptly, including one asleep
+// in clk.Sleep or blocked inside ResolveRevision.
+func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, clk Clock, p *pool) {
 	for {
-		if err := ctx.Err(); err != nil {
-			reason := "context-cancelled: " + err.Error()
-			em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
-			return reason
+		if stopOnCancel(ctx, p) {
+			return
 		}
 
 		revision, err := r.ResolveRevision(ctx)
 		if err != nil {
-			reason := fmt.Sprintf("resolve-revision: %v", err)
-			em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
-			return reason
+			p.halt(fmt.Sprintf("resolve-revision: %v", err), "")
+			return
 		}
 
-		if err := ctx.Err(); err != nil {
+		if stopOnCancel(ctx, p) {
 			// ResolveRevision (a git fetch) can outlast a SIGTERM sent
 			// while it was in flight; re-check here so that fetch never
 			// launches a child that forwardStop never gets a chance to
 			// signal.
-			reason := "context-cancelled: " + err.Error()
-			em.Emit(Event{Event: "halt", Kind: cfg.Kind, Reason: reason})
-			return reason
+			return
 		}
 
-		em.Emit(Event{Event: "child_start", Kind: cfg.Kind, Revision: revision, Slot: intPtr(0)})
+		em.Emit(Event{Event: "child_start", Kind: cfg.Kind, Revision: revision, Slot: intPtr(slot)})
 
-		result, err := r.RunChild(ctx, ChildRequest{Slot: 0, Kind: cfg.Kind, Revision: revision})
+		result, err := r.RunChild(ctx, ChildRequest{Slot: slot, Kind: cfg.Kind, Revision: revision})
 		if err != nil {
 			// The seam failed, not the child (e.g. it could not even be
 			// started), so there is no exit code to report — but a
@@ -106,36 +136,54 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) str
 			// announced boxes), so emit those first: an announced Box must
 			// reach the durable stream even when the seam itself failed.
 			for _, issue := range result.Issues {
-				em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(0)})
+				em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
 			}
-			reason := fmt.Sprintf("run-child: %v", err)
-			em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Outcome: "error", Slot: intPtr(0)})
-			em.Emit(Event{Event: "halt", Kind: cfg.Kind, Revision: revision, Reason: reason})
-			return reason
+			em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
+			p.halt(fmt.Sprintf("run-child: %v", err), revision)
+			return
 		}
 
 		for _, issue := range result.Issues {
-			em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(0)})
+			em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
 		}
 
 		exit := result.Exit
 		outcome, action := Interpret(exit)
-		em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(0)})
+		em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
 
 		switch action {
 		case Continue:
 			continue
 		case Wait:
 			wait := cfg.IdleInterval
-			em.Emit(Event{Event: "idle", Kind: cfg.Kind, Wait: wait.String(), Slot: intPtr(0)})
+			em.Emit(Event{Event: "idle", Kind: cfg.Kind, Wait: wait.String(), Slot: intPtr(slot)})
 			clk.Sleep(ctx, wait)
 			continue
 		default: // Halt
-			reason := "outcome: " + outcome
-			em.Emit(Event{Event: "halt", Kind: cfg.Kind, Revision: revision, Reason: reason})
-			return reason
+			p.halt("outcome: "+outcome, revision)
+			return
 		}
 	}
+}
+
+// stopOnCancel reports whether the slot should stop starting new work: true
+// if the pool has already halted (a sibling got there first — this slot
+// returns quietly, nothing more to emit) or if ctx is freshly cancelled (the
+// caller's own ctx, e.g. an operator signal — this slot is the one that
+// discovers it, so it records the reason via p.halt). Checking p.stopped()
+// first is what makes the distinction possible: p.halt's own cancel() also
+// cancels ctx, so a raw ctx.Err() check alone cannot tell "I am first to
+// notice real cancellation" from "a sibling already halted for some other
+// reason and cancelled me as a side effect".
+func stopOnCancel(ctx context.Context, p *pool) bool {
+	if p.stopped() {
+		return true
+	}
+	if err := ctx.Err(); err != nil {
+		p.halt("context-cancelled: "+err.Error(), "")
+		return true
+	}
+	return false
 }
 
 // intPtr returns a pointer to v. Event.Slot (like Event.Exit) is a pointer

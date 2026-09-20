@@ -120,7 +120,7 @@ func TestLoopContinueThenHalt(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if len(r.runCalls) != 2 {
 		t.Fatalf("run calls = %d, want 2", len(r.runCalls))
@@ -139,7 +139,7 @@ func TestLoopWaitThenHalt(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if len(r.runCalls) != 3 {
 		t.Fatalf("run calls = %d, want 3", len(r.runCalls))
@@ -158,7 +158,7 @@ func TestLoopExit3WaitsLikeExit2(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if len(rs.waits) != 1 {
 		t.Fatalf("waits = %v, want exactly one wait for exit 3", rs.waits)
@@ -171,7 +171,7 @@ func TestLoopExit4ContinuesWithoutSleeping(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if len(rs.waits) != 0 {
 		t.Fatalf("waits = %v, want none for exit 4 (image-stale continues at once)", rs.waits)
@@ -187,7 +187,7 @@ func TestLoopExit7Halts(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Errorf("halt reason = %q, want it to name signalled-stop", reason)
@@ -201,7 +201,7 @@ func TestLoopUnknownExitHalts(t *testing.T) {
 		var buf bytes.Buffer
 		em := newTestEmitter(&buf)
 
-		reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+		reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 		if !strings.Contains(reason, "error") {
 			t.Errorf("exit %d: halt reason = %q, want it to name the error outcome", exit, reason)
@@ -216,7 +216,7 @@ func TestLoopResolveErrorHaltsBeforeAnyChildRuns(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if len(r.runCalls) != 0 {
 		t.Fatalf("run calls = %d, want 0: a resolve failure must halt before any child runs", len(r.runCalls))
@@ -238,7 +238,7 @@ func TestLoopRunChildErrorHaltsAndEmitsChildFinish(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if !strings.Contains(reason, wantErr.Error()) {
 		t.Errorf("halt reason = %q, want it to name %v", reason, wantErr)
@@ -269,7 +269,7 @@ func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	events := decodeEvents(t, &buf)
 	names := eventNames(events)
@@ -294,7 +294,7 @@ func TestLoopEventStreamSequenceAndFields(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	events := decodeEvents(t, &buf)
 	wantNames := []string{"child_start", "box", "box", "child_finish", "child_start", "child_finish", "halt"}
@@ -334,7 +334,7 @@ func TestLoopKeepsGoingAfterQueueDrainsThenPicksUpWork(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if len(r.runCalls) != 4 {
 		t.Fatalf("run calls = %d, want 4: the loop must keep going after the queue drains and pick work back up without a restart", len(r.runCalls))
@@ -356,7 +356,7 @@ func TestLoopPinsEachChildToTheResolvedRevisionEvenWhenItChanges(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	want := []runCall{
 		{Kind: KindDispatch, Revision: "rev1"},
@@ -377,7 +377,7 @@ func TestLoopCancelledContextHaltsBeforeStartingNewWork(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if len(r.runCalls) != 0 {
 		t.Fatalf("run calls = %d, want 0: an already-cancelled ctx must halt before starting any child", len(r.runCalls))
@@ -399,7 +399,7 @@ func TestLoopCancelledDuringResolveRevisionHaltsBeforeStartingNewWork(t *testing
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if r.runCalls != 0 {
 		t.Fatalf("run calls = %d, want 0: a ctx cancelled during resolve must halt before starting any child", r.runCalls)
@@ -426,7 +426,7 @@ func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval}, r, em, rs)
+	reason := Loop(ctx, Config{Kind: KindDispatch, IdleInterval: testIdleInterval, Slots: 1}, r, em, rs)
 
 	if r.runCalls != 1 {
 		t.Fatalf("run calls = %d, want 1", r.runCalls)

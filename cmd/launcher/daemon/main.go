@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -109,6 +110,25 @@ func resolveKnob(doc *inputDocument, envVar string, stderr io.Writer) (string, e
 		}
 	}
 	return "", fmt.Errorf("daemon: no value for %s (not in environment or --input document settings)", envVar)
+}
+
+// parseSlots turns MAX_PARALLEL's resolved string value into the daemon's
+// pool size. lib/env-schema.nix declares MAX_PARALLEL with
+// intKind = "positive", so the document always carries a valid value, but
+// resolveKnob can still hand back an ambient env override of anything — a
+// malformed or non-positive value fails startup here with a clear
+// diagnostic rather than reaching daemon.Loop's own "reject non-positive
+// Slots" halt, which is meant for a genuine programming error, not an
+// operator's mistyped env var.
+func parseSlots(raw string) (int, error) {
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("MAX_PARALLEL must be a positive integer, got %q", raw)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("MAX_PARALLEL must be a positive integer, got %d", n)
+	}
+	return n, nil
 }
 
 // repoRoot resolves the git checkout root containing dir via `git rev-parse
@@ -208,6 +228,14 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
+	maxParallelRaw, err := resolveKnob(doc, "MAX_PARALLEL", stderr)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	slots, err := parseSlots(maxParallelRaw)
+	if err != nil {
+		return fail(stderr, err)
+	}
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -229,7 +257,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	clk := hostClock{}
 	em := daemon.NewEmitter(stdout, clk.Now)
-	cfg := daemon.Config{Kind: args.Kind, IdleInterval: daemonIdleInterval}
+	cfg := daemon.Config{Kind: args.Kind, IdleInterval: daemonIdleInterval, Slots: slots}
 
 	reason := daemon.Loop(ctx, cfg, r, em, clk)
 

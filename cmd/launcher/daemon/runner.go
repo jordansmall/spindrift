@@ -26,6 +26,16 @@ type hostRunner struct {
 
 	mu       sync.Mutex
 	children map[int]*os.Process // slot -> currently running child, for signal forwarding; empty when idle
+
+	// fetchMu serializes ResolveRevision across Slots goroutines sharing one
+	// repoPath: concurrent `git fetch` calls race the refs/remotes/origin/*
+	// ref lock the instant the remote tip actually moves, and even past that,
+	// one call's fetch+rev-parse can interleave with another's on the single
+	// FETCH_HEAD file fetch writes and rev-parse reads (issue #3539). Not the
+	// same mutex as mu: mu guards children and forwardStop takes it while a
+	// child is running, so sharing it here would block a SIGTERM fan-out
+	// behind an in-flight fetch.
+	fetchMu sync.Mutex
 }
 
 func newHostRunner(repoPath, appAttr, baseBranch string) *hostRunner {
@@ -37,6 +47,9 @@ func newHostRunner(repoPath, appAttr, baseBranch string) *hostRunner {
 // to) tears the fetch down instead of hanging the daemon until SIGKILL
 // (issue #3538).
 func (r *hostRunner) ResolveRevision(ctx context.Context) (string, error) {
+	r.fetchMu.Lock()
+	defer r.fetchMu.Unlock()
+
 	const remote = "origin" // nothing varies this yet; inline until a caller needs it (issue #3538 review)
 	fetch := exec.CommandContext(ctx, "git", "-C", r.repoPath, "fetch", remote, r.baseBranch)
 	var stderr bytes.Buffer
