@@ -31,8 +31,26 @@ moment it claims an issue, not a durable state like the four triage names
 above.
 
 Everything else is internal and may change without a version bump:
-`cmd/launcher/internal/*`, prompt wording, log formatting, image layer layout,
-and any unexported Nix helpers.
+`cmd/launcher/internal/*`, prompt wording (the whole prompt template — see
+below), log formatting, image layer layout, and any unexported Nix helpers.
+
+### Prompt templates are internal, but owe a migration note
+
+"Prompt wording" covers the whole prompt template, not just its prose. The
+template variable names an override prompt substitutes (`${TDD_BAKED_STEP}`,
+`${COMMIT_BAKED_STEP}`, ...) and the `fragments/*.md` paths it copies or
+references are internal on the same terms: renaming or removing either breaks
+an override prompt directory supplied via `--prompt-dir` /
+`SPINDRIFT_PROMPT_DIR` / `perSystem.spindrift.agents.promptDir`, and that is
+still not a breaking change under this policy. The versioned surface is the
+option that points at a prompt directory, not the template that directory
+overrides — overriding the prompt is opting into an internal surface.
+Such a commit takes no `!` marker and no `BREAKING CHANGE:` footer.
+
+What it does owe is a migration note: a commit that renames or removes a
+template variable or a fragment file adds a "What breaks in an override prompt
+directory" entry to MIGRATING.md naming the replacement. Issues #3219 and #3222
+set that precedent; this makes it the rule.
 
 ## Pre-1.0 policy
 
