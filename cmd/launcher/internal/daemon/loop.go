@@ -55,12 +55,24 @@ type ChildResult struct {
 	Issues []string
 }
 
-// Config is the loop's tuning: which Dispatch kind to drive, how many
+// Config is the loop's tuning: which Dispatch kinds to draw from, how many
 // slots (concurrent single-Box children) the pool runs, and the
-// idle-backoff/failure-backoff/breaker knobs below. Per-kind backoff is a
-// later ticket.
+// idle-backoff/failure-backoff/breaker knobs below.
 type Config struct {
-	Kind  Kind
+	// Kinds is the set of Dispatch kinds this pool draws from (issue #3541).
+	// One pool rather than one per kind: research runs through the full Box and
+	// costs what work costs, so two pools would quietly invalidate the operator's
+	// MEMORY_LIMIT x MAX_PARALLEL sizing. Must be non-empty.
+	Kinds []Kind
+
+	// ResearchReservation is the number of slots that prefer research over work.
+	// It is a floor, not a ceiling: those slots take research only while research
+	// has queued work, and either kind bursts into the whole pool when the other
+	// has backed off into an empty result. Zero is work-first with research on
+	// the leftovers; Slots is research-first. Must be 0 <= ResearchReservation <=
+	// Slots.
+	ResearchReservation int
+
 	Slots int
 
 	// Awake gates when a slot may start a new child: nil means no window
@@ -88,7 +100,7 @@ type Config struct {
 	// cannot make.
 	SelfProgram string
 
-	// IdleFloor and IdleCap bound the pool-wide idle backoff: the first
+	// IdleFloor and IdleCap bound each kind's own idle backoff: the first
 	// no-work check (exit 2 always, exit 3 when the pool is otherwise
 	// idle) waits IdleFloor, and each further consecutive no-work check
 	// doubles the wait, capped at IdleCap. Any check that actually
@@ -113,8 +125,9 @@ type Config struct {
 	BreakerWindow    time.Duration
 }
 
-// Loop runs cfg.Slots slot goroutines, each independently driving Dispatch
-// children through the same state machine, until something says halt: a
+// Loop runs cfg.Slots slot goroutines, each independently driving children of
+// whichever configured Dispatch kind it currently picks (pickKind, pool.go)
+// through the same state machine, until something says halt: a
 // Halt-mapped exit code, the pool-wide breaker tripping, or a cancelled
 // ctx. Whichever slot halts first wins — Loop emits exactly one halt event
 // per call, and returns that first reason, for a caller to log or turn
@@ -137,22 +150,38 @@ type Config struct {
 // as a halt-shaped config error instead.
 func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) string {
 	if cfg.Slots <= 0 {
-		return invalidConfig(em, cfg.Kind, fmt.Sprintf("slots must be a positive integer, got %d", cfg.Slots))
+		return invalidConfig(em, fmt.Sprintf("slots must be a positive integer, got %d", cfg.Slots))
+	}
+	if len(cfg.Kinds) == 0 {
+		return invalidConfig(em, "kinds must be non-empty")
+	}
+	seenKinds := make(map[Kind]bool, len(cfg.Kinds))
+	for _, k := range cfg.Kinds {
+		if k != KindDispatch && k != KindResearch {
+			return invalidConfig(em, fmt.Sprintf("unknown kind %q", k))
+		}
+		if seenKinds[k] {
+			return invalidConfig(em, fmt.Sprintf("duplicate kind %q", k))
+		}
+		seenKinds[k] = true
+	}
+	if cfg.ResearchReservation < 0 || cfg.ResearchReservation > cfg.Slots {
+		return invalidConfig(em, fmt.Sprintf("research reservation must be between 0 and slots (%d), got %d", cfg.Slots, cfg.ResearchReservation))
 	}
 	if cfg.IdleFloor <= 0 {
-		return invalidConfig(em, cfg.Kind, fmt.Sprintf("idle floor must be positive, got %s", cfg.IdleFloor))
+		return invalidConfig(em, fmt.Sprintf("idle floor must be positive, got %s", cfg.IdleFloor))
 	}
 	if cfg.IdleCap < cfg.IdleFloor {
-		return invalidConfig(em, cfg.Kind, fmt.Sprintf("idle cap must be >= idle floor, got cap %s < floor %s", cfg.IdleCap, cfg.IdleFloor))
+		return invalidConfig(em, fmt.Sprintf("idle cap must be >= idle floor, got cap %s < floor %s", cfg.IdleCap, cfg.IdleFloor))
 	}
 	if cfg.FailureBackoff < 0 {
-		return invalidConfig(em, cfg.Kind, fmt.Sprintf("failure backoff must be non-negative, got %s", cfg.FailureBackoff))
+		return invalidConfig(em, fmt.Sprintf("failure backoff must be non-negative, got %s", cfg.FailureBackoff))
 	}
 	if cfg.BreakerThreshold <= 0 {
-		return invalidConfig(em, cfg.Kind, fmt.Sprintf("breaker threshold must be a positive integer, got %d", cfg.BreakerThreshold))
+		return invalidConfig(em, fmt.Sprintf("breaker threshold must be a positive integer, got %d", cfg.BreakerThreshold))
 	}
 	if cfg.BreakerWindow <= 0 {
-		return invalidConfig(em, cfg.Kind, fmt.Sprintf("breaker window must be positive, got %s", cfg.BreakerWindow))
+		return invalidConfig(em, fmt.Sprintf("breaker window must be positive, got %s", cfg.BreakerWindow))
 	}
 
 	p, pctx := newPool(ctx, cfg, r, em, clk)
@@ -173,9 +202,11 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) str
 
 // invalidConfig emits and returns a "config-invalid: " + detail halt reason,
 // the shape shared by every cfg field Loop rejects before starting a pool.
-func invalidConfig(em *Emitter, kind Kind, detail string) string {
+// No Kind is stamped: this rejection happens before any pool exists to have
+// picked one.
+func invalidConfig(em *Emitter, detail string) string {
 	reason := "config-invalid: " + detail
-	em.Emit(Event{Event: "halt", Kind: kind, Reason: reason})
+	em.Emit(Event{Event: "halt", Reason: reason})
 	return reason
 }
 
@@ -184,18 +215,35 @@ func invalidConfig(em *Emitter, kind Kind, detail string) string {
 // pool's own derived context (not the caller's ctx directly): cancelling it
 // is how the pool tells every slot to stop promptly, including one asleep
 // in clk.Sleep or blocked inside ResolveRevision.
+//
+// All waiting lives at the top of the loop, via pickKind/idleSleep, rather
+// than inline in the Wait case below: with two kinds sharing a slot, a Wait
+// on one kind must never sleep in place, since "an empty work queue does not
+// slow research down" (issue #3541) — the Wait case only records the no-work
+// result and loops back around, and it is the next pickKind that decides
+// whether that means switching kinds or genuinely idling.
 func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
+	var lastRevision string // the revision this slot's last child ran at; the "tip moved" baseline
 	for {
-		if stopOnCancel(ctx, p) {
+		if stopOnCancel(ctx, "", p) {
 			return
 		}
 
 		p.awaitWindow(ctx, slot)
-		if stopOnCancel(ctx, p) {
+		if stopOnCancel(ctx, "", p) {
 			// A signal can arrive while the slot was parked in
 			// awaitWindow; nothing else re-checks ctx between there and
 			// ResolveRevision, so this is that check.
 			return
+		}
+
+		kind, ok := p.pickKind(slot)
+		if !ok {
+			// Every configured kind has backed off into an empty result:
+			// this is the daemon genuinely idling, not merely a kind this
+			// slot happens not to prefer right now.
+			p.idleSleep(ctx, slot, lastRevision)
+			continue
 		}
 
 		revision, err := p.r.ResolveRevision(ctx)
@@ -205,20 +253,21 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 			// breaker below exists for — recording it as a breaker failure
 			// could trip the breaker on a clean shutdown and turn a 0 exit
 			// into a 1.
-			if stopOnCancel(ctx, p) {
+			if stopOnCancel(ctx, kind, p) {
 				return
 			}
 			// A failed fetch is exactly the transient blip this slice's
 			// breaker exists for: back off and retry alone, unless enough
 			// failures have piled up pool-wide to say this is systemic
 			// (backoffOrHalt below).
-			if p.backoffOrHalt(ctx, slot, "", fmt.Sprintf("resolve-revision: %v", err)) {
+			if p.backoffOrHalt(ctx, slot, kind, "", fmt.Sprintf("resolve-revision: %v", err)) {
 				return
 			}
 			continue
 		}
+		lastRevision = revision
 
-		switch p.checkSelfBuild(ctx, slot, revision) {
+		switch p.checkSelfBuild(ctx, slot, kind, revision) {
 		case selfStop:
 			return
 		case selfRetry:
@@ -231,7 +280,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 			continue
 		}
 
-		if stopOnCancel(ctx, p) {
+		if stopOnCancel(ctx, kind, p) {
 			// ResolveRevision (a git fetch) can outlast a SIGTERM sent
 			// while it was in flight; re-check here so that fetch never
 			// launches a child that forwardStop never gets a chance to
@@ -248,10 +297,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 			continue
 		}
 
-		em.Emit(Event{Event: "child_start", Kind: cfg.Kind, Revision: revision, Slot: intPtr(slot)})
+		em.Emit(Event{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot)})
 
 		p.occupy(slot)
-		result, err := p.r.RunChild(ctx, ChildRequest{Slot: slot, Kind: cfg.Kind, Revision: revision})
+		result, err := p.r.RunChild(ctx, ChildRequest{Slot: slot, Kind: kind, Revision: revision})
 		p.unoccupy(slot)
 		if err != nil {
 			// The seam failed, not the child (e.g. it could not even be
@@ -263,73 +312,67 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 			// announced boxes), so emit those first: an announced Box must
 			// reach the durable stream even when the seam itself failed.
 			for _, issue := range result.Issues {
-				em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
+				em.Emit(Event{Event: "box", Kind: kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
 			}
-			em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
-			if p.backoffOrHalt(ctx, slot, revision, fmt.Sprintf("run-child: %v", err)) {
+			em.Emit(Event{Event: "child_finish", Kind: kind, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
+			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err)) {
 				return
 			}
 			continue
 		}
 
 		for _, issue := range result.Issues {
-			em.Emit(Event{Event: "box", Kind: cfg.Kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
+			em.Emit(Event{Event: "box", Kind: kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
 		}
 
 		exit := result.Exit
 		outcome, action := Interpret(exit)
-		em.Emit(Event{Event: "child_finish", Kind: cfg.Kind, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
+		em.Emit(Event{Event: "child_finish", Kind: kind, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
 
 		switch action {
 		case Continue:
 			// Exit 0 (dispatched) or exit 4 (image-stale): the check
 			// answered something other than "nothing to do", so whatever
-			// streak of no-work checks the idle backoff was tracking is
-			// over.
-			p.idle.reset()
+			// streak of no-work checks this kind's backoff was tracking is
+			// over. The other kind's own timer, if any, is untouched.
+			p.kinds[kind].reset()
 			continue
 		case Wait:
 			if !cfg.Awake.Open(p.clk.Now()) {
 				// The window closed while the child ran, so this wait is
-				// the window's, not the idle backoff's: idleWait would
-				// consume a backoff step and poll ResolveRevision straight
-				// through a closed window that is supposed to cost
-				// nothing. awaitWindow, at the top, parks the whole
-				// remaining span in one sleep instead, and the idle streak
-				// stays untouched so it resumes where it left off.
+				// the window's, not the idle backoff's: recording a no-work
+				// result here would spend a backoff step on a span the shut
+				// window already covers. awaitWindow, at the top, parks the
+				// whole remaining span in one sleep instead, and this kind's
+				// idle streak stays untouched so it resumes where it left
+				// off.
 				continue
 			}
-			wait := p.idle.next()
 			// "none-dispatchable" carries a second axis exit 2 doesn't: pool
 			// occupancy. With a sibling genuinely running, the issues this
 			// slot found "none dispatchable" were claimed or overlap-deferred
 			// against that very sibling — routine, reported like any other
 			// idle wait. With every sibling parked too, nothing is running
 			// and nothing can start: a jam an operator may need to clear.
-			if outcome == "none-dispatchable" && !p.siblingsOccupied(slot) {
-				em.Emit(Event{Event: "jam", Kind: cfg.Kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is running"})
+			poolJammed := outcome == outcomeNoneDispatchable && !p.siblingsOccupied(slot)
+			wait := p.kinds[kind].markNoWork(p.clk.Now(), outcome == outcomeNoneDispatchable)
+			if poolJammed {
+				em.Emit(Event{Event: "jam", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is running"})
 			} else {
-				em.Emit(Event{Event: "idle", Kind: cfg.Kind, Wait: wait.String(), Slot: intPtr(slot)})
+				em.Emit(Event{Event: "idle", Kind: kind, Wait: wait.String(), Slot: intPtr(slot)})
 			}
-			// The short-circuit is keyed on the outcome, not on which event
-			// fired above: a none-dispatchable wait polls for a moved tip
-			// even when a sibling running makes it report "idle" rather than
-			// "jam". A queue-empty wait (exit 2) never polls — a merge
-			// cannot put new work in an empty queue, so noticing one mid-wait
-			// would only cost a query for nothing.
-			if outcome == "none-dispatchable" {
-				p.idleWait(ctx, slot, wait, revision)
-			} else {
-				p.clk.Sleep(ctx, wait)
-			}
+			// No sleep here: this kind is now gated until its markNoWork
+			// deadline, and the top of the loop's pickKind/idleSleep decides
+			// whether that means switching to the other kind at once or
+			// genuinely idling.
 			continue
 		case Backoff:
-			if p.backoffOrHalt(ctx, slot, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit)) {
+			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit)) {
 				return
 			}
 			continue
 		default: // Halt
-			p.halt("outcome: "+outcome, revision)
+			p.halt(kind, "outcome: "+outcome, revision)
 			return
 		}
 	}
@@ -344,12 +387,17 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 // cancels ctx, so a raw ctx.Err() check alone cannot tell "I am first to
 // notice real cancellation" from "a sibling already halted for some other
 // reason and cancelled me as a side effect".
-func stopOnCancel(ctx context.Context, p *pool) bool {
+//
+// kind is the halt event's Kind, if the caller has picked one yet: the
+// top-of-loop call races cancellation against pickKind itself and so has
+// none to give (pass ""), while the post-ResolveRevision call already knows
+// which kind this iteration is running.
+func stopOnCancel(ctx context.Context, kind Kind, p *pool) bool {
 	if p.stopped() {
 		return true
 	}
 	if err := ctx.Err(); err != nil {
-		p.halt("context-cancelled: "+err.Error(), "")
+		p.halt(kind, "context-cancelled: "+err.Error(), "")
 		return true
 	}
 	return false

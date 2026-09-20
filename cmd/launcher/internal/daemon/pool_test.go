@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -618,7 +619,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 }
 
 // TestIdleWaitLastSliceClampsToRemaining pins the clamp at the tail of
-// idleWait's slicing loop: when IdleFloor does not evenly divide the
+// pollSlices's slicing loop: when IdleFloor does not evenly divide the
 // requested wait, the final slice must shrink to what's left rather than
 // overshoot it. That is a legal config — IdleCap need not be a multiple of
 // IdleFloor — but the shipped 5m/30m pair always divides evenly, so nothing
@@ -634,7 +635,7 @@ func TestIdleWaitLastSliceClampsToRemaining(t *testing.T) {
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
 
-	p.idleWait(pctx, 0, 10*time.Millisecond, "rev1")
+	p.pollSlices(pctx, 0, 10*time.Millisecond, "rev1")
 
 	want := []time.Duration{3 * time.Millisecond, 3 * time.Millisecond, 3 * time.Millisecond, time.Millisecond}
 	if len(clk.waits) != len(want) {
@@ -750,5 +751,131 @@ func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing
 	}
 	if opens != 1 {
 		t.Fatalf("awake_open events = %d, want exactly 1 (%v)", opens, eventNames(events))
+	}
+}
+
+// TestPollSlicesTipMovedStampsJammedKinds pins tip_moved's Kinds field
+// (issue #3541 review finding) to exactly the kinds jammed at the moment the
+// tip moved, in cfg.Kinds order, whether that's one kind or several — and
+// proves a queue-empty (non-jammed) kind is never included.
+func TestPollSlicesTipMovedStampsJammedKinds(t *testing.T) {
+	cases := []struct {
+		name string
+		jam  []Kind
+		want []Kind
+	}{
+		{"only dispatch jammed", []Kind{KindDispatch}, []Kind{KindDispatch}},
+		{"both kinds jammed", []Kind{KindDispatch, KindResearch}, []Kind{KindDispatch, KindResearch}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fakeRunner{revisions: []string{"rev2"}}
+			clk := &fakeClock{}
+			var buf bytes.Buffer
+			em := newTestEmitter(&buf)
+
+			cfg := dualKindConfig(1, 0)
+			p, pctx := newPool(context.Background(), cfg, r, em, clk)
+			defer p.cancel()
+
+			for _, k := range tc.jam {
+				p.kinds[k].markNoWork(clk.Now(), true)
+			}
+
+			p.pollSlices(pctx, 0, 2*cfg.IdleFloor, "rev1")
+
+			events := decodeEvents(t, &buf)
+			var tipMoved *Event
+			for i := range events {
+				if events[i].Event == "tip_moved" {
+					tipMoved = &events[i]
+				}
+			}
+			if tipMoved == nil {
+				t.Fatalf("events = %v, want a tip_moved event", eventNames(events))
+			}
+			if !reflect.DeepEqual(tipMoved.Kinds, tc.want) {
+				t.Fatalf("tip_moved kinds = %v, want %v", tipMoved.Kinds, tc.want)
+			}
+		})
+	}
+}
+
+// TestSlotOrderDerivesFromKinds pins slotOrder to the kinds argument rather
+// than a hardcoded two-kind pair (issue #3541 review finding): a slot below
+// the reservation puts KindResearch first and keeps every other kind in its
+// given relative order, a slot at or above the reservation keeps kinds in
+// its given order with KindResearch moved last, and the input slice must
+// never be mutated.
+func TestSlotOrderDerivesFromKinds(t *testing.T) {
+	const kindOther Kind = "other"
+
+	tests := []struct {
+		name        string
+		kinds       []Kind
+		reservation int
+		slot        int
+		want        []Kind
+	}{
+		{
+			name:        "single kind unchanged",
+			kinds:       []Kind{KindDispatch},
+			reservation: 0,
+			slot:        0,
+			want:        []Kind{KindDispatch},
+		},
+		{
+			name:        "two kinds below reservation prefers research",
+			kinds:       []Kind{KindDispatch, KindResearch},
+			reservation: 1,
+			slot:        0,
+			want:        []Kind{KindResearch, KindDispatch},
+		},
+		{
+			name:        "two kinds at reservation prefers work",
+			kinds:       []Kind{KindDispatch, KindResearch},
+			reservation: 1,
+			slot:        1,
+			want:        []Kind{KindDispatch, KindResearch},
+		},
+		{
+			name:        "three kinds below reservation keeps non-research relative order",
+			kinds:       []Kind{kindOther, KindDispatch, KindResearch},
+			reservation: 1,
+			slot:        0,
+			want:        []Kind{KindResearch, kindOther, KindDispatch},
+		},
+		{
+			// A reserved slot in a research-less set must not invent a
+			// preference for a kind the pool has no backoff entry for —
+			// pickKind would nil-deref on it.
+			name:        "no research kind below reservation keeps given order",
+			kinds:       []Kind{KindDispatch, kindOther},
+			reservation: 1,
+			slot:        0,
+			want:        []Kind{KindDispatch, kindOther},
+		},
+		{
+			name:        "three kinds at reservation keeps given order with research last",
+			kinds:       []Kind{KindResearch, kindOther, KindDispatch},
+			reservation: 1,
+			slot:        1,
+			want:        []Kind{kindOther, KindDispatch, KindResearch},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := append([]Kind(nil), tc.kinds...)
+
+			got := slotOrder(tc.kinds, tc.reservation, tc.slot)
+
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("slotOrder(%v, %d, %d) = %v, want %v", tc.kinds, tc.reservation, tc.slot, got, tc.want)
+			}
+			if !reflect.DeepEqual(tc.kinds, orig) {
+				t.Fatalf("slotOrder mutated its kinds argument: got %v, want %v", tc.kinds, orig)
+			}
+		})
 	}
 }

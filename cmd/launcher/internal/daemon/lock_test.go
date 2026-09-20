@@ -14,7 +14,7 @@ import (
 func TestAcquireCheckoutLock_WritesHolderIdentity(t *testing.T) {
 	dir := t.TempDir()
 
-	lock, err := AcquireCheckoutLock(dir, KindDispatch)
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -36,13 +36,13 @@ func TestAcquireCheckoutLock_SecondAcquireInSameProcessRefused(t *testing.T) {
 	// conflicts. That makes this a cheap, in-process refusal test.
 	dir := t.TempDir()
 
-	first, err := AcquireCheckoutLock(dir, KindDispatch)
+	first, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
 	if err != nil {
 		t.Fatalf("first AcquireCheckoutLock: unexpected error: %v", err)
 	}
 	defer first.Release()
 
-	_, err = AcquireCheckoutLock(dir, KindResearch)
+	_, err = AcquireCheckoutLock(dir, []Kind{KindResearch})
 	if err == nil {
 		t.Fatalf("second AcquireCheckoutLock: want error, got nil")
 	}
@@ -59,7 +59,7 @@ func TestAcquireCheckoutLock_SecondAcquireInSameProcessRefused(t *testing.T) {
 func TestCheckoutLock_ReleaseAllowsFreshAcquireSameProcess(t *testing.T) {
 	dir := t.TempDir()
 
-	first, err := AcquireCheckoutLock(dir, KindDispatch)
+	first, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
 	if err != nil {
 		t.Fatalf("first AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestCheckoutLock_ReleaseAllowsFreshAcquireSameProcess(t *testing.T) {
 		t.Fatalf("Release: unexpected error: %v", err)
 	}
 
-	second, err := AcquireCheckoutLock(dir, KindDispatch)
+	second, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
 	if err != nil {
 		t.Fatalf("second AcquireCheckoutLock after release: unexpected error: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestCheckoutLockHolderHelper(t *testing.T) {
 		return
 	}
 
-	lock, err := AcquireCheckoutLock(dir, KindDispatch)
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "helper: AcquireCheckoutLock: %v\n", err)
 		os.Exit(1)
@@ -144,7 +144,7 @@ func TestAcquireCheckoutLock_ReleasedAfterHolderKilled(t *testing.T) {
 	}
 
 	// Sanity: helper genuinely holds the lock now.
-	if _, err := AcquireCheckoutLock(dir, KindDispatch); err == nil {
+	if _, err := AcquireCheckoutLock(dir, []Kind{KindDispatch}); err == nil {
 		t.Fatalf("AcquireCheckoutLock: want refusal while helper holds lock, got nil error")
 	}
 
@@ -166,7 +166,7 @@ func TestAcquireCheckoutLock_ReleasedAfterHolderKilled(t *testing.T) {
 	acquired := make(chan struct{})
 	acquireErr := make(chan error, 1)
 	go func() {
-		lock, err := AcquireCheckoutLock(dir, KindDispatch)
+		lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
 		if err != nil {
 			acquireErr <- err
 			return

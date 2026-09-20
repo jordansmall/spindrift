@@ -34,7 +34,7 @@ type CheckoutLock struct {
 //
 // The lock never blocks and never retries: an operator running a second
 // daemon by mistake must see "already running" at once, not a hang.
-func AcquireCheckoutLock(dir string, kind Kind) (*CheckoutLock, error) {
+func AcquireCheckoutLock(dir string, kinds []Kind) (*CheckoutLock, error) {
 	lockPath := filepath.Join(dir, checkoutLockFileName)
 
 	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
@@ -58,7 +58,7 @@ func AcquireCheckoutLock(dir string, kind Kind) (*CheckoutLock, error) {
 		return nil, fmt.Errorf("another spindrift daemon already holds this checkout (lock file %s): %s", lockPath, holder)
 	}
 
-	if err := writeHolderIdentity(file, kind); err != nil {
+	if err := writeHolderIdentity(file, kinds); err != nil {
 		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		_ = file.Close()
 		return nil, fmt.Errorf("write checkout lock identity to %s: %w", lockPath, err)
@@ -81,7 +81,7 @@ func (l *CheckoutLock) Release() error {
 // into the just-acquired lock file, for a refused second acquirer to read
 // back and report. A failing Hostname/Executable must not fail the acquire
 // itself — the identity line is a diagnostic, not the lock.
-func writeHolderIdentity(file *os.File, kind Kind) error {
+func writeHolderIdentity(file *os.File, kinds []Kind) error {
 	host, err := os.Hostname()
 	if err != nil {
 		host = "unknown"
@@ -92,8 +92,13 @@ func writeHolderIdentity(file *os.File, kind Kind) error {
 		exePart = " exe=" + exe
 	}
 
+	names := make([]string, len(kinds))
+	for i, k := range kinds {
+		names[i] = string(k)
+	}
+
 	line := fmt.Sprintf("pid=%d host=%s kind=%s started=%s%s\n",
-		os.Getpid(), host, kind, time.Now().UTC().Format(time.RFC3339), exePart)
+		os.Getpid(), host, strings.Join(names, ","), time.Now().UTC().Format(time.RFC3339), exePart)
 
 	if err := file.Truncate(0); err != nil {
 		return err
