@@ -2798,15 +2798,17 @@ relying on it.
 
 #### Forgejo Actions dispatch templates
 
-`.forgejo/workflows/agent-dispatch.yml`, `agent-recover.yml`, and
-`agent-research.yml` are the Forgejo Actions mirror of the
+`.forgejo/workflows/agent-dispatch.yml`, `agent-recover.yml`,
+`agent-research.yml`, and `agent-research-close.yml` are the Forgejo Actions
+mirror of the
 `.github/workflows/` control plane described in the [Label
 lifecycle](#label-lifecycle) section and the [GitHub App installation
 token](#github-app-installation-token-recommended) / [Research
 token](#research-token-least-privilege-optional) sections above — same
 `issues: labeled` trigger, same label vocabulary (`agent-trigger` fires
-dispatch, `agent-recover` fires recover, `agent-research` fires research;
-the same lifecycle and research label families apply unchanged). What
+dispatch, `agent-recover` fires recover, `agent-research` fires research,
+`agent-research-reject` closes the rejected issue; the same lifecycle and
+research label families apply unchanged). What
 differs is authentication: Forgejo has no GitHub App model, so there is no
 worker-App mint and no `gh-token-refresher` on this backend ([ADR
 0038](adr/0038-the-forgejo-backend-decision-set.md)) — each workflow
@@ -2828,8 +2830,9 @@ when the repo variable is unset) and `FORGEJO_TOKEN` from the secret.
    runner is required; provision it with Nix build capability plus `curl`
    and `jq` on `PATH` (the up-front claim, the blocked-release, and the
    park-on-failure steps all talk to the Forgejo REST API through the
-   `forgejo-label-swap` composite, which shells `curl`/`jq`, because `fj`
-   has no label verb and is not guaranteed on the runner). If your runner
+   `forgejo-label-swap` composite, and the research-reject close through
+   `forgejo-issue-close`, both of which shell `curl`/`jq`, because `fj` has
+   no label or issue verb and is not guaranteed on the runner). If your runner
    carries a different label, edit each workflow's `runs-on: self-hosted`
    to match.
 3. **Create the `FORGEJO_TOKEN` repository secret** (Actions secret) — the
@@ -2984,7 +2987,9 @@ filer:
   `agent-research-reject` as suppressing matches — a closed finding is a
   human triage decision (won't-fix, duplicate, already fixed), and a closed
   research rejection is the same class of deliberate dismissal
-  (false-positive, not-worth-doing, duplicate); neither is ever refiled. A
+  (false-positive, not-worth-doing, duplicate) — and is closed for you, by
+  [`agent-research-close.yml`](#closing-a-rejected-research-issue), the moment
+  the verdict lands; neither is ever refiled. A
   plain closed issue carrying neither label does **not** suppress filing — a
   problem that was fixed and later regressed can still be refiled;
 - files one issue per surviving finding (merging only findings that are the
@@ -4119,7 +4124,7 @@ issue can legitimately wear both a work label and a research label at once:
 | `agent-research` | dual-role: standing state and trigger — apply it to fire a research dispatch |
 | `agent-research-in-progress` | a Box is reviewing the issue |
 | `agent-research-recommend` | relevant and enriched — promote it |
-| `agent-research-reject` | false positive, not worth doing, or a duplicate (named in the comment) — close it |
+| `agent-research-reject` | false positive, not worth doing, or a duplicate (named in the comment) — applying it closes the issue as not planned, automatically (see [Closing a rejected research issue](#closing-a-rejected-research-issue)) |
 | `agent-research-unclear` | relevance needs an answer only a human has — answer, then re-apply `agent-research` |
 | `agent-research-failed` | the Box crashed or produced no verdict — a human triage queue, distinct from `agent-research-reject` (a *successful* "this is a false positive" conclusion is `Complete`, never `Failed`) |
 | `agent-research-finding` | filed by the Filer from a research finding (ADR 0041) — never carries a dispatch label; a human promotes it to `ready-for-agent` like any other issue |
@@ -4145,6 +4150,37 @@ run on the same issue. It takes an optional second least-privilege token — see
 [Research token](#research-token-least-privilege-optional) for the scopes and
 what the fallback gives up. Labels must exist on the Target repo before first
 use — see [Create the research labels](#create-the-research-labels-on-the-target-repo).
+
+### Closing a rejected research issue
+
+`agent-research-reject` is the one verdict with a mechanical next step, and
+`.github/workflows/agent-research-close.yml` takes it: applying the label
+closes the issue **as not planned** — never as completed, since research lands
+no code and nothing was built. Nothing else about the verdict changes; the
+label stays on the issue as the record of why it closed, and the researcher's
+verdict comment stays as the record of what it found.
+
+Automating the close is not tidiness. The Filer treats a *closed* issue
+carrying `agent-research-reject` as a suppressing match and never refiles a
+finding that matches one (see [Filer](#filer)), so while the close depended on
+a human remembering, every still-open rejection left the same false positive
+free to be filed again.
+
+The workflow is deliberately thin: one `gh issue close --reason "not planned"`
+on the built-in `GITHUB_TOKEN`, with `issues: write` and nothing else. It
+claims no issue, builds no image, and needs neither the worker App nor
+`SPINDRIFT_GH_TOKEN` — and because `GITHUB_TOKEN` events never trigger further
+workflow runs, it cannot loop. Re-applying the label to an already-closed issue
+is a no-op, not a reopen-and-reclose. The trust boundary is the same one the
+rest of the control plane uses: the label, not the labeler — whoever can apply
+`agent-research-reject` (a triage-role human, or the research App token writing
+the verdict) gets the close.
+
+`.forgejo/workflows/agent-research-close.yml` is the Forgejo Actions mirror,
+closing over REST through the `forgejo-issue-close` composite action on the
+`FORGEJO_TOKEN` secret. One platform difference: Forgejo issues have no
+`state_reason`, so the close cannot be marked *not planned* there — the label
+left on the issue carries that meaning instead.
 
 ### Self-contained research mode
 
