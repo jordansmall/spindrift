@@ -29,7 +29,7 @@ func TestRunChild_ExitCodeAndIssues(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", script)
 	}
 
-	r := newHostRunner(t.TempDir(), ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
@@ -60,7 +60,7 @@ func TestRunChild_ZeroExitNoAnnounce(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", `printf 'nothing to see\n'; exit 0`)
 	}
 
-	r := newHostRunner(t.TempDir(), ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindResearch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
@@ -87,7 +87,7 @@ func TestRunChild_OversizedLineDoesNotHang(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", "head -c 2000000 /dev/zero | tr '\\0' 'a'; exit 5")
 	}
 
-	r := newHostRunner(t.TempDir(), ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	resultCh := make(chan daemon.ChildResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
@@ -124,7 +124,7 @@ func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", "sleep 0.3")
 	}
 
-	r := newHostRunner(t.TempDir(), ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -235,7 +235,7 @@ func TestResolveRevision_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 	gitRunT(t, dirAdvancer, "push", "origin", "main")
 	wantTip := strings.TrimSpace(gitOutputT(t, dirAdvancer, "rev-parse", "HEAD"))
 
-	r := newHostRunner(dirConsumer, ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	got, err := r.ResolveRevision(context.Background())
 	if err != nil {
 		t.Fatalf("ResolveRevision() error: %v", err)
@@ -298,7 +298,7 @@ func TestResolveRevision_ConcurrentCallsDoNotRace(t *testing.T) {
 	wantTip := strings.TrimSpace(gitOutputT(t, dirAdvancer, "rev-parse", "HEAD"))
 
 	const n = 5
-	r := newHostRunner(dirConsumer, ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	var wg sync.WaitGroup
 	results := make([]string, n)
 	errs := make([]error, n)
@@ -351,7 +351,7 @@ func TestResolveRevision_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	r := newHostRunner(dirConsumer, ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	done := make(chan error, 1)
 	go func() {
 		_, err := r.ResolveRevision(ctx)
@@ -410,7 +410,7 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", `trap 'exit 7' TERM; : >"$0"; while :; do sleep 0.05; done`, armed)
 	}
 
-	r := newHostRunner(dir, ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	resultCh := make(chan daemon.ChildResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
@@ -466,7 +466,7 @@ func TestForwardStop_DeliversSIGTERMToEveryChild(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", `trap 'exit 7' TERM; : >"$0"; while :; do sleep 0.05; done`, armed[n])
 	}
 
-	r := newHostRunner(dir, ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	resultCh := make(chan daemon.ChildResult, nChildren)
 	errCh := make(chan error, nChildren)
 	for slot := 0; slot < nChildren; slot++ {
@@ -501,12 +501,51 @@ func TestForwardStop_DeliversSIGTERMToEveryChild(t *testing.T) {
 // TestForwardStop_Noop asserts forwardStop is a no-op when no child is
 // running: it must not panic, and r.children must stay empty.
 func TestForwardStop_Noop(t *testing.T) {
-	r := newHostRunner(t.TempDir(), ".#", "main")
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
 	r.forwardStop()
 	r.mu.Lock()
 	child := r.children[0]
 	r.mu.Unlock()
 	if child != nil {
 		t.Errorf("child = %v, want nil", child)
+	}
+}
+
+// TestSelfPath_HappyPath points the eval seam at a scripted shell command
+// instead of nix, and asserts the trimmed stdout comes back with no error.
+func TestSelfPath_HappyPath(t *testing.T) {
+	orig := runnerEvalCommand
+	t.Cleanup(func() { runnerEvalCommand = orig })
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf '/nix/store/abc-daemon\n'`)
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	got, err := r.SelfPath(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err != nil {
+		t.Fatalf("SelfPath() unexpected error: %v", err)
+	}
+	if want := "/nix/store/abc-daemon"; got != want {
+		t.Errorf("SelfPath() = %q, want %q", got, want)
+	}
+}
+
+// TestSelfPath_EvalFailureCarriesStderr asserts a failing evaluation's error
+// folds in the captured stderr rather than reducing to a bare "exit status
+// 1" — the same shape ResolveRevision's git fetch error takes.
+func TestSelfPath_EvalFailureCarriesStderr(t *testing.T) {
+	orig := runnerEvalCommand
+	t.Cleanup(func() { runnerEvalCommand = orig })
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf 'error: attribute missing\n' >&2; exit 1`)
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	_, err := r.SelfPath(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err == nil {
+		t.Fatal("SelfPath() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "attribute missing") {
+		t.Errorf("SelfPath() error = %q, want it to contain the captured stderr", err.Error())
 	}
 }

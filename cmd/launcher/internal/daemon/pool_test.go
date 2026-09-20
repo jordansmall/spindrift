@@ -92,6 +92,12 @@ func (r *blockingRunner) ResolveRevision(ctx context.Context) (string, error) {
 	return r.revision, nil
 }
 
+// SelfPath is unused by every test using blockingRunner (Config.SelfProgram
+// stays empty), but must exist to satisfy Runner.
+func (r *blockingRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	return "", nil
+}
+
 func (r *blockingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
 	r.mu.Lock()
 	r.inFlight[req.Slot] = true
@@ -359,6 +365,12 @@ func newBarrierFailRunner(revision string, slots int) *barrierFailRunner {
 
 func (r *barrierFailRunner) ResolveRevision(ctx context.Context) (string, error) {
 	return r.revision, nil
+}
+
+// SelfPath is unused by every test using barrierFailRunner (Config.SelfProgram
+// stays empty), but must exist to satisfy Runner.
+func (r *barrierFailRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	return "", nil
 }
 
 func (r *barrierFailRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {

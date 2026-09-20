@@ -202,6 +202,63 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, revision, reason str
 	return false
 }
 
+// selfVerdict is what checkSelfBuild tells a slot to do next.
+type selfVerdict int
+
+const (
+	// selfOK: the daemon's own build is unchanged at revision (or the check
+	// is disabled), so the slot starts this iteration's child.
+	selfOK selfVerdict = iota
+	// selfRetry: the evaluation itself failed and this slot has already
+	// backed off; the slot restarts its iteration from the fetch.
+	selfRetry
+	// selfStop: the pool halted (a changed build, or a persistent
+	// evaluation failure that tripped the breaker) or the caller's ctx was
+	// cancelled; the slot returns.
+	selfStop
+)
+
+// checkSelfBuild compares the daemon's own build against what the daemon
+// attribute evaluates to at revision, the freshly fetched tip, and reports
+// what the slot should do next. cfg.SelfProgram == "" skips the check
+// entirely — SelfPath is never called.
+//
+// A SelfPath error is treated as an unclassified per-slot failure, the same
+// class as a ResolveRevision or RunChild seam error (backoffOrHalt):
+// silently ignoring it would disable this safety property for as long as
+// the evaluation stays broken, so instead this one slot backs off and
+// retries alone, and only a persistent failure reaches the breaker.
+//
+// A mismatch never re-execs the daemon: it only records a halt reason and
+// cancels the pool's context — the same "stop starting new work, wait out
+// whatever is running" halt every other reason already uses (see halt) —
+// so a freshly merged but broken daemon cannot auto-load with nobody awake.
+func (p *pool) checkSelfBuild(ctx context.Context, slot int, revision string) selfVerdict {
+	if p.cfg.SelfProgram == "" {
+		return selfOK
+	}
+	path, err := p.r.SelfPath(ctx, revision)
+	if err != nil {
+		// A ctx cancelled out from under an in-flight SelfPath (an operator
+		// SIGTERM racing this evaluation) is an ordinary stop, not evidence
+		// of a broken evaluation — recording it as a breaker failure could
+		// trip the breaker on a clean shutdown and turn a 0 exit into a 1.
+		if stopOnCancel(ctx, p) {
+			return selfStop
+		}
+		if p.backoffOrHalt(ctx, slot, revision, HaltSelfBuildPrefix+err.Error()) {
+			return selfStop
+		}
+		return selfRetry
+	}
+	if path == p.cfg.SelfProgram {
+		return selfOK
+	}
+	reason := fmt.Sprintf("%s: daemon build at %s is %s, running %s", HaltSelfChanged, revision, path, p.cfg.SelfProgram)
+	p.halt(reason, revision)
+	return selfStop
+}
+
 // idleWait sleeps out a none-dispatchable wait in IdleFloor-sized slices,
 // polling ResolveRevision between slices so a merge that unblocks a jammed
 // queue is noticed instead of riding out the rest of a long backoff. A

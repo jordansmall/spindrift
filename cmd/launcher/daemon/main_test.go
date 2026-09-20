@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -373,6 +374,60 @@ func TestIsOperatorStop(t *testing.T) {
 	}
 }
 
+func TestNixSystemDouble(t *testing.T) {
+	tests := []struct {
+		goos    string
+		goarch  string
+		want    string
+		wantErr bool
+	}{
+		{goos: "linux", goarch: "amd64", want: "x86_64-linux"},
+		{goos: "linux", goarch: "arm64", want: "aarch64-linux"},
+		{goos: "darwin", goarch: "arm64", want: "aarch64-darwin"},
+		{goos: "windows", goarch: "amd64", wantErr: true},
+		{goos: "linux", goarch: "riscv64", wantErr: true},
+	}
+	for _, tt := range tests {
+		got, err := nixSystemDouble(tt.goos, tt.goarch)
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("nixSystemDouble(%q, %q) = %q, want error", tt.goos, tt.goarch, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("nixSystemDouble(%q, %q) unexpected error: %v", tt.goos, tt.goarch, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("nixSystemDouble(%q, %q) = %q, want %q", tt.goos, tt.goarch, got, tt.want)
+		}
+	}
+}
+
+// TestExitCodeFor pins the daemon process's exit-code contract: 0 for an
+// operator stop, exitSelfChanged (10) for — and only for — a self-changed
+// halt, 1 for everything else (issue #3543).
+func TestExitCodeFor(t *testing.T) {
+	tests := []struct {
+		reason string
+		want   int
+	}{
+		{"context-cancelled: context canceled", 0},
+		{"outcome: signalled-stop", 0},
+		{"self-changed: /nix/store/old-daemon != /nix/store/new-daemon", exitSelfChanged},
+		{"outcome: host-tainted", 1},
+		{"outcome: config-invalid", 1},
+		{"resolve-revision: boom", 1},
+		{"run-child: boom", 1},
+	}
+	for _, tt := range tests {
+		if got := exitCodeFor(tt.reason); got != tt.want {
+			t.Errorf("exitCodeFor(%q) = %d, want %d", tt.reason, got, tt.want)
+		}
+	}
+}
+
 // TestHandleStopSignal asserts one signal cancels ctx and invokes forward
 // exactly once — the daemon's signal-wiring goroutine, extracted out of main
 // so the halt path is exercised without sending the test process a real
@@ -491,6 +546,128 @@ func TestRepoRoot_ResolvesToplevel(t *testing.T) {
 	}
 }
 
+// TestGitDir_ResolvesAbsoluteGitDir asserts gitDir run from a subdirectory
+// of a checkout resolves to the checkout's own .git dir, not the working
+// tree root — the checkout lock (issue #3543) must land there so it never
+// touches the operator's working tree.
+func TestGitDir_ResolvesAbsoluteGitDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	gitRunT(t, root, "-c", "init.defaultBranch=main", "init")
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := gitDir(sub)
+	if err != nil {
+		t.Fatalf("gitDir() unexpected error: %v", err)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("gitDir() = %q, want an absolute path", got)
+	}
+	if !strings.HasSuffix(got, ".git") {
+		t.Errorf("gitDir() = %q, want a path ending in .git", got)
+	}
+}
+
+// TestGitDir_NotAGitCheckout mirrors TestRepoRoot_NotAGitCheckout: gitDir
+// must fail fast, naming the offending dir, outside any checkout.
+func TestGitDir_NotAGitCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	_, err := gitDir(dir)
+	if err == nil {
+		t.Fatal("gitDir() error = nil, want an error for a non-git directory")
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Errorf("gitDir() error = %q, want it to name %q", err, dir)
+	}
+}
+
+// TestMainRun_InstanceLockRefusal is the acceptance-criterion test: a
+// second daemon against a checkout whose lock is already held must refuse
+// before ever reaching daemon.Loop (no child, no network, no nix — fully
+// deterministic), reporting the refusal both on stderr (naming the holder)
+// and as a "halt" event on stdout's durable JSON-lines stream (issue #3543).
+func TestMainRun_InstanceLockRefusal(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	gitRunT(t, root, "-c", "init.defaultBranch=main", "init")
+
+	gitDirPath, err := gitDir(root)
+	if err != nil {
+		t.Fatalf("gitDir(%q): %v", root, err)
+	}
+
+	// Hold the lock ourselves, in-process, standing in for "another daemon
+	// already running against this checkout".
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, daemon.KindDispatch)
+	if err != nil {
+		t.Fatalf("AcquireCheckoutLock: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+
+	inputPath := filepath.Join(t.TempDir(), "input.json")
+	doc := inputDocument{Settings: map[string]string{
+		"DAEMON_APP":   ".#dogfood",
+		"BASE_BRANCH":  "main",
+		"MAX_PARALLEL": "1",
+	}}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal input document: %v", err)
+	}
+	if err := os.WriteFile(inputPath, data, 0o644); err != nil {
+		t.Fatalf("write input document: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Fatalf("restore Chdir: %v", err)
+		}
+	})
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir(%q): %v", root, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", inputPath}, &stdout, &stderr)
+	if got != 1 {
+		t.Errorf("mainRun() = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), "pid=") {
+		t.Errorf("stderr = %q, want it to name the lock holder (pid=...)", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), strconv.Itoa(os.Getpid())) {
+		t.Errorf("stderr = %q, want it to contain the holding pid %d", stderr.String(), os.Getpid())
+	}
+
+	line := strings.TrimSpace(stdout.String())
+	if line == "" {
+		t.Fatal("stdout is empty, want a halt event line")
+	}
+	var ev daemon.Event
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		t.Fatalf("decode stdout halt event %q: %v", line, err)
+	}
+	if ev.Event != "halt" {
+		t.Errorf("event = %q, want %q", ev.Event, "halt")
+	}
+	if !strings.HasPrefix(ev.Reason, "instance-lock:") {
+		t.Errorf("reason = %q, want it to start with %q", ev.Reason, "instance-lock:")
+	}
+}
+
 // TestBreakerDefaults_TripReachableAtOneSlot pins the reachability the
 // breaker exists for at the smallest supported pool: at MAX_PARALLEL=1 a
 // systemic fault's failures are one slot's own retries, spaced
@@ -503,5 +680,28 @@ func TestBreakerDefaults_TripReachableAtOneSlot(t *testing.T) {
 	if span >= daemonBreakerWindow {
 		t.Fatalf("a single slot can never trip the breaker: %d failures at %s apart span %s, outside the %s window",
 			daemonBreakerThreshold, daemonFailureBackoff, span, daemonBreakerWindow)
+	}
+}
+
+// TestExitSelfChanged_OutsideChildExitBand pins the invariant exitSelfChanged's
+// own doc comment claims but nothing enforces: it must fall outside the 0-7
+// band a *child* launcher's exit codes occupy (daemon.Interpret), so an
+// operator restarting a service unit on exitSelfChanged alone can never be
+// triggered by a child's exit leaking through. Fails if exitSelfChanged is
+// ever lowered into that band.
+func TestExitSelfChanged_OutsideChildExitBand(t *testing.T) {
+	for exit := 0; exit < 256; exit++ {
+		outcome, action := daemon.Interpret(exit)
+		// The band is two things, and neither alone is all of it: the 0-7 span
+		// the doc names (exit 1 is a child's generic failure, which Interpret
+		// leaves unclassified), plus every code Interpret *does* classify, so a
+		// `case 10:` added there later collides here instead of silently.
+		if exit > 7 && action == daemon.Backoff {
+			continue
+		}
+		if exitSelfChanged == exit {
+			t.Fatalf("exitSelfChanged (%d) collides with child exit code %d, which daemon.Interpret classifies as %q",
+				exitSelfChanged, exit, outcome)
+		}
 	}
 }

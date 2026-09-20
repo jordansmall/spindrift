@@ -8,9 +8,12 @@ import (
 )
 
 // Runner is the daemon's one seam onto the outside world: resolve the
-// revision to pin the next child to, and run a child of a given Dispatch
-// kind at that revision. Both fold behind one seam so a later "tip moved
-// between iterations" test needs no second one.
+// revision to pin the next child to, run a child of a given Dispatch kind
+// at that revision, and evaluate what the daemon's own program would be if
+// rebuilt from that revision. All three fold behind one seam: the self
+// check (SelfPath) is the same kind of outside-world question as the other
+// two — an evaluation at the fetched tip — so it belongs behind this seam
+// rather than a second one a test would need to fake separately.
 //
 // RunChild may return a ChildResult carrying Issues alongside a non-nil
 // error: a child can announce Boxes and only then fail the seam itself (a
@@ -19,6 +22,11 @@ import (
 type Runner interface {
 	ResolveRevision(ctx context.Context) (string, error)
 	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
+
+	// SelfPath returns the store path the daemon's own app attribute
+	// evaluates to at revision — what this daemon's program would be if
+	// it were rebuilt from the fetched tip.
+	SelfPath(ctx context.Context, revision string) (string, error)
 }
 
 // ChildRequest is one child invocation's parameters. Slot is the daemon
@@ -49,8 +57,8 @@ type ChildResult struct {
 
 // Config is the loop's tuning: which Dispatch kind to drive, how many
 // slots (concurrent single-Box children) the pool runs, and the
-// idle-backoff/failure-backoff/breaker knobs below. Per-kind backoff and
-// the instance lock are later tickets.
+// idle-backoff/failure-backoff/breaker knobs below. Per-kind backoff is a
+// later ticket.
 type Config struct {
 	Kind  Kind
 	Slots int
@@ -61,6 +69,24 @@ type Config struct {
 	// running when the window closes is never touched, however long it
 	// outlasts the close.
 	Awake *Window
+
+	// SelfProgram is the running daemon's own program store path — what
+	// its build resolved to when it started. At each iteration boundary,
+	// before starting a child, the loop compares this against what the
+	// daemon attribute evaluates to at the freshly fetched tip
+	// (Runner.SelfPath): a mismatch means a newer daemon has already
+	// merged, so continuing to orchestrate fresh Boxes from this stale
+	// build risks running work under code nobody has actually loaded. On
+	// a mismatch the loop finishes what is running and halts at the
+	// boundary — it never re-execs itself; a freshly merged but broken
+	// daemon must not auto-load with nobody awake. An operator who wants
+	// self-update composes that halt with an ordinary service restart
+	// policy and gets the behaviour by choice, not by default.
+	//
+	// Empty disables the check entirely: a daemon that cannot know its
+	// own build must not guess, and must never halt on a comparison it
+	// cannot make.
+	SelfProgram string
 
 	// IdleFloor and IdleCap bound the pool-wide idle backoff: the first
 	// no-work check (exit 2 always, exit 3 when the pool is otherwise
@@ -174,6 +200,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 
 		revision, err := p.r.ResolveRevision(ctx)
 		if err != nil {
+			// A ctx cancelled out from under an in-flight fetch (an operator
+			// SIGTERM) is an ordinary stop, not the transient blip the
+			// breaker below exists for — recording it as a breaker failure
+			// could trip the breaker on a clean shutdown and turn a 0 exit
+			// into a 1.
+			if stopOnCancel(ctx, p) {
+				return
+			}
 			// A failed fetch is exactly the transient blip this slice's
 			// breaker exists for: back off and retry alone, unless enough
 			// failures have piled up pool-wide to say this is systemic
@@ -181,6 +215,19 @@ func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 			if p.backoffOrHalt(ctx, slot, "", fmt.Sprintf("resolve-revision: %v", err)) {
 				return
 			}
+			continue
+		}
+
+		switch p.checkSelfBuild(ctx, slot, revision) {
+		case selfStop:
+			return
+		case selfRetry:
+			// The evaluation failed and this slot has already backed off.
+			// Restart the iteration rather than re-checking against the
+			// revision resolved before that wait: every other backoff on
+			// this path re-fetches too, and pinning a child to a tip
+			// resolved a backoff ago is the staleness the per-iteration
+			// fetch exists to avoid.
 			continue
 		}
 

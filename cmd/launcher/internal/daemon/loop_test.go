@@ -29,8 +29,13 @@ type fakeRunner struct {
 	// seam itself failed.
 	runErrIssues []string
 
+	selfPaths []string // one per SelfPath call; last value repeats once exhausted
+	selfErrAt int      // 1-based call index that returns selfErr instead of a path
+	selfErr   error
+
 	resolveCalls int
 	runCalls     []runCall
+	selfCalls    int
 }
 
 type runCall struct {
@@ -48,6 +53,24 @@ func (f *fakeRunner) ResolveRevision(ctx context.Context) (string, error) {
 		idx = len(f.revisions) - 1
 	}
 	return f.revisions[idx], nil
+}
+
+// SelfPath scripts the same way ResolveRevision does: selfPaths consumed in
+// order (last value repeating once exhausted), selfErrAt/selfErr standing in
+// for a 1-based call index that fails instead.
+func (f *fakeRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	f.selfCalls++
+	if f.selfErrAt != 0 && f.selfCalls == f.selfErrAt {
+		return "", f.selfErr
+	}
+	if len(f.selfPaths) == 0 {
+		return "", nil
+	}
+	idx := f.selfCalls - 1
+	if idx >= len(f.selfPaths) {
+		idx = len(f.selfPaths) - 1
+	}
+	return f.selfPaths[idx], nil
 }
 
 func (f *fakeRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
@@ -565,6 +588,95 @@ func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
 	}
 }
 
+// TestLoopSelfPathCtxCancelledIsNotABreakerFailure asserts that a SelfPath
+// call whose ctx is cancelled out from under it (an operator SIGTERM racing
+// the evaluation) reports a plain context-cancelled halt, not a breaker
+// failure: with MAX_PARALLEL >= the breaker threshold, several slots hitting
+// this on one SIGTERM could otherwise trip the breaker and turn a clean
+// stop's exit 0 into exit 1 (issue #3543).
+func TestLoopSelfPathCtxCancelledIsNotABreakerFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &cancelErrRunner{cancel: cancel, cancelIn: seamSelfPath, revision: "rev1"}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.SelfProgram = "/nix/store/old-path"
+
+	reason := Loop(ctx, cfg, r, em, clk)
+
+	assertCancelledStopNoBreaker(t, reason, &buf)
+}
+
+// TestLoopResolveRevisionCtxCancelledIsNotABreakerFailure is
+// TestLoopSelfPathCtxCancelledIsNotABreakerFailure's sibling for the
+// ResolveRevision error path in runSlot (loop.go), which has had this same
+// hazard since before this diff.
+func TestLoopResolveRevisionCtxCancelledIsNotABreakerFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &cancelErrRunner{cancel: cancel, cancelIn: seamResolveRevision}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	reason := Loop(ctx, testConfig(1), r, em, clk)
+
+	assertCancelledStopNoBreaker(t, reason, &buf)
+}
+
+// assertCancelledStopNoBreaker fails unless Loop stopped on the cancellation
+// itself and left none of the bookkeeping a real seam failure would.
+func assertCancelledStopNoBreaker(t *testing.T, reason string, buf *bytes.Buffer) {
+	t.Helper()
+	if !strings.HasPrefix(reason, "context-cancelled:") {
+		t.Fatalf("halt reason = %q, want prefix %q", reason, "context-cancelled:")
+	}
+	events := decodeEvents(t, buf)
+	for _, e := range events {
+		if e.Event == "backoff" || e.Event == "breaker_trip" {
+			t.Fatalf("events = %v, want no backoff/breaker_trip event on an ordinary operator stop", events)
+		}
+	}
+}
+
+type cancelSeam string
+
+const (
+	seamResolveRevision cancelSeam = "resolve-revision"
+	seamSelfPath        cancelSeam = "self-path"
+)
+
+// cancelErrRunner models an operator SIGTERM landing inside one seam: the
+// seam cancelIn names cancels the parent ctx and returns its ctx.Err(), and
+// every seam the loop must not reach afterwards errors loudly rather than
+// handing back a zero value the loop would read as a real answer.
+type cancelErrRunner struct {
+	cancel   context.CancelFunc
+	cancelIn cancelSeam
+	revision string
+}
+
+func (r *cancelErrRunner) ResolveRevision(ctx context.Context) (string, error) {
+	if r.cancelIn == seamResolveRevision {
+		r.cancel()
+		return "", ctx.Err()
+	}
+	return r.revision, nil
+}
+
+func (r *cancelErrRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	if r.cancelIn == seamSelfPath {
+		r.cancel()
+		return "", ctx.Err()
+	}
+	return "", fmt.Errorf("must not be called: the %s seam cancels before the self check runs", r.cancelIn)
+}
+
+func (r *cancelErrRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	return ChildResult{}, fmt.Errorf("must not be called: a cancelled %s must halt before a child ever starts", r.cancelIn)
+}
+
 type cancellingRunner struct {
 	cancel   context.CancelFunc
 	revision string
@@ -574,6 +686,10 @@ type cancellingRunner struct {
 
 func (r *cancellingRunner) ResolveRevision(ctx context.Context) (string, error) {
 	return r.revision, nil
+}
+
+func (r *cancellingRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	return "", nil
 }
 
 func (r *cancellingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
@@ -592,6 +708,10 @@ type cancellingResolveRunner struct {
 func (r *cancellingResolveRunner) ResolveRevision(ctx context.Context) (string, error) {
 	r.cancel()
 	return r.revision, nil
+}
+
+func (r *cancellingResolveRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	return "", nil
 }
 
 func (r *cancellingResolveRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
@@ -1037,6 +1157,10 @@ func (r *windowAdvancingRunner) ResolveRevision(ctx context.Context) (string, er
 	return r.revision, nil
 }
 
+func (r *windowAdvancingRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	return "", nil
+}
+
 func (r *windowAdvancingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
 	r.clk.mu.Lock()
 	r.clk.now = r.clk.now.Add(r.advance)
@@ -1110,6 +1234,9 @@ func (r *resolveWindowAdvancingRunner) ResolveRevision(ctx context.Context) (str
 	}
 	return r.revision, nil
 }
+func (r *resolveWindowAdvancingRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	return "", nil
+}
 
 func (r *resolveWindowAdvancingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
 	r.calls++
@@ -1151,5 +1278,253 @@ func TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting(t *tes
 	want := []string{"awake_close", "awake_open", "child_start", "child_finish", "halt"}
 	if fmt.Sprint(names) != fmt.Sprint(want) {
 		t.Fatalf("events = %v, want %v: no child_start until the slot has parked and reopened", names, want)
+	}
+}
+
+// TestLoopSelfChangeHaltsAtIterationBoundary asserts the loop halts before
+// starting a child when Runner.SelfPath reports the daemon's own build
+// changed at the fetched tip, and that the halt reason names it.
+func TestLoopSelfChangeHaltsAtIterationBoundary(t *testing.T) {
+	r := &fakeRunner{revisions: []string{"rev1"}, selfPaths: []string{"/nix/store/new-path"}}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.SelfProgram = "/nix/store/old-path"
+
+	reason := Loop(context.Background(), cfg, r, em, clk)
+
+	if !strings.HasPrefix(reason, HaltSelfChanged) {
+		t.Fatalf("halt reason = %q, want prefix %q", reason, HaltSelfChanged)
+	}
+	if len(r.runCalls) != 0 {
+		t.Fatalf("run calls = %d, want 0: the halt must land before a child is launched", len(r.runCalls))
+	}
+
+	events := decodeEvents(t, &buf)
+	names := eventNames(events)
+	if fmt.Sprint(names) != fmt.Sprint([]string{"halt"}) {
+		t.Fatalf("events = %v, want exactly one halt event", names)
+	}
+	if events[0].Reason != reason {
+		t.Errorf("halt event reason = %q, want %q", events[0].Reason, reason)
+	}
+}
+
+// TestLoopSelfChangeNeverReExecs asserts that once a self-change halt has
+// fired, Loop returns without ever calling RunChild again — no re-exec, no
+// further iteration, whatever ran before the halt is all that ever runs.
+func TestLoopSelfChangeNeverReExecs(t *testing.T) {
+	r := &fakeRunner{
+		revisions: []string{"rev1", "rev2"},
+		results:   []ChildResult{{Exit: 0}},
+		selfPaths: []string{"/nix/store/old-path", "/nix/store/new-path"},
+	}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.SelfProgram = "/nix/store/old-path"
+
+	reason := Loop(context.Background(), cfg, r, em, clk)
+
+	if !strings.HasPrefix(reason, HaltSelfChanged) {
+		t.Fatalf("halt reason = %q, want prefix %q", reason, HaltSelfChanged)
+	}
+	if len(r.runCalls) != 1 {
+		t.Fatalf("run calls = %d, want 1: the first iteration's matching self-path should run its child, the second iteration's mismatch must halt before any further child", len(r.runCalls))
+	}
+}
+
+// TestLoopSelfPathMatchDoesNotHalt asserts a SelfPath result equal to
+// Config.SelfProgram is a no-op: the loop proceeds to run children as
+// normal.
+func TestLoopSelfPathMatchDoesNotHalt(t *testing.T) {
+	r := &fakeRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 0}, {Exit: 5}},
+		selfPaths: []string{"/nix/store/same-path"},
+	}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.SelfProgram = "/nix/store/same-path"
+
+	reason := Loop(context.Background(), cfg, r, em, clk)
+
+	if strings.HasPrefix(reason, HaltSelfChanged) {
+		t.Fatalf("halt reason = %q, want no self-changed halt: the self path matched", reason)
+	}
+	if len(r.runCalls) != 2 {
+		t.Fatalf("run calls = %d, want 2: a matching self path must not stop children from running", len(r.runCalls))
+	}
+}
+
+// TestLoopEmptySelfProgramSkipsCheck asserts Config.SelfProgram == "" never
+// calls Runner.SelfPath at all — the check is fully disabled, not merely
+// non-halting.
+func TestLoopEmptySelfProgramSkipsCheck(t *testing.T) {
+	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	if r.selfCalls != 0 {
+		t.Fatalf("selfCalls = %d, want 0: an empty SelfProgram must never call SelfPath", r.selfCalls)
+	}
+}
+
+// TestLoopSelfPathErrorBacksOff asserts a SelfPath error is treated like any
+// other unclassified iteration-boundary failure: this slot backs off
+// (reason prefixed self-build:) and retries, rather than halting the pool.
+func TestLoopSelfPathErrorBacksOff(t *testing.T) {
+	r := &fakeRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 5}},
+		selfPaths: []string{"/nix/store/same-path"},
+		selfErrAt: 1,
+		selfErr:   errors.New("eval boom"),
+	}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.SelfProgram = "/nix/store/same-path"
+	cfg.FailureBackoff = 5 * time.Millisecond
+
+	reason := Loop(context.Background(), cfg, r, em, clk)
+
+	if strings.HasPrefix(reason, HaltSelfChanged) {
+		t.Fatalf("halt reason = %q, want no self-changed halt: SelfPath only errored once, then matched", reason)
+	}
+	if r.selfCalls != 2 {
+		t.Fatalf("selfCalls = %d, want 2: the errored call plus the retry", r.selfCalls)
+	}
+	if len(r.runCalls) != 1 {
+		t.Fatalf("run calls = %d, want 1: the slot must retry after backing off", len(r.runCalls))
+	}
+
+	events := decodeEvents(t, &buf)
+	found := false
+	for _, ev := range events {
+		if ev.Event == "backoff" {
+			found = true
+			if !strings.HasPrefix(ev.Reason, "self-build:") {
+				t.Errorf("backoff reason = %q, want prefix %q", ev.Reason, "self-build:")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("events = %v, want a backoff event for the SelfPath error", eventNames(events))
+	}
+}
+
+// drainSelfRunner is a hand-rolled Runner for
+// TestLoopSelfChangeDrainsRunningChild: one slot's RunChild blocks on a
+// channel the test controls (a long-running child), while the other slot's
+// SelfPath call — deliberately made to wait until the child has actually
+// started — reports a changed build and halts the pool. Whichever slot's
+// SelfPath call lands first "wins" the matching path and goes on to run the
+// child; call order between the two goroutines is otherwise unconstrained,
+// so the test does not assume which slot number plays which role.
+type drainSelfRunner struct {
+	mu        sync.Mutex
+	selfCalls int
+	runCalls  int
+
+	started   chan struct{} // closed by RunChild the moment it starts
+	release   chan struct{} // closed by the test to let RunChild return
+	matchPath string
+	newPath   string
+}
+
+func (r *drainSelfRunner) ResolveRevision(ctx context.Context) (string, error) {
+	return "rev1", nil
+}
+
+func (r *drainSelfRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	r.mu.Lock()
+	r.selfCalls++
+	first := r.selfCalls == 1
+	r.mu.Unlock()
+	if first {
+		return r.matchPath, nil
+	}
+	// Not first: wait for the other slot's child to actually be running
+	// before reporting the mismatch, so the halt this triggers is
+	// guaranteed to race a genuinely in-flight child, not an imagined one.
+	<-r.started
+	return r.newPath, nil
+}
+
+func (r *drainSelfRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	r.mu.Lock()
+	r.runCalls++
+	r.mu.Unlock()
+	close(r.started)
+	<-r.release
+	return ChildResult{Exit: 0}, nil
+}
+
+// TestLoopSelfChangeDrainsRunningChild asserts the "drains running children
+// rather than killing them" criterion for the self-change halt specifically:
+// with one slot's child already running when a sibling slot's self-check
+// halts the pool, the running child's child_finish is still emitted and
+// Loop only returns once that child has actually returned.
+func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
+	r := &drainSelfRunner{
+		started:   make(chan struct{}),
+		release:   make(chan struct{}),
+		matchPath: "/nix/store/old-path",
+		newPath:   "/nix/store/new-path",
+	}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(2)
+	cfg.SelfProgram = "/nix/store/old-path"
+
+	done := make(chan string, 1)
+	go func() {
+		done <- Loop(context.Background(), cfg, r, em, clk)
+	}()
+
+	<-r.started      // the long-running child is confirmed running
+	close(r.release) // let it finish now that it is known to have been running
+
+	reason := <-done
+
+	if !strings.HasPrefix(reason, HaltSelfChanged) {
+		t.Fatalf("halt reason = %q, want prefix %q", reason, HaltSelfChanged)
+	}
+	if r.runCalls != 1 {
+		t.Fatalf("run calls = %d, want 1: only the already-running child ever runs", r.runCalls)
+	}
+
+	events := decodeEvents(t, &buf)
+	names := eventNames(events)
+	haltCount := 0
+	sawFinish := false
+	for _, n := range names {
+		switch n {
+		case "halt":
+			haltCount++
+		case "child_finish":
+			sawFinish = true
+		}
+	}
+	if haltCount != 1 {
+		t.Fatalf("halt events = %d, want exactly 1: events = %v", haltCount, names)
+	}
+	if !sawFinish {
+		t.Fatalf("events = %v, want a child_finish for the drained child", names)
 	}
 }

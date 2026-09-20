@@ -4,6 +4,30 @@ package daemon
 // code.
 type Action int
 
+// HaltSelfChanged is the prefix of the halt reason Loop returns when the
+// daemon attribute's store path at the fetched tip no longer matches the
+// daemon's own running build (Config.SelfProgram): the pool finishes what
+// is already running and halts at the iteration boundary rather than
+// orchestrating fresh Boxes from stale code. It never re-execs itself —
+// composing this halt with a service restart policy is how an operator
+// opts into self-update.
+const HaltSelfChanged = "self-changed"
+
+// HaltSelfBuildPrefix is the halt-reason prefix a SelfPath seam error backs
+// off or halts under (pool.go's checkSelfBuild): docs/reference.md's
+// **Self-change halt** section and its `backoff`/`halt` event rows document
+// this exact string as operator-facing grammar, so changing it is a
+// documented-behaviour change, not a rename.
+const HaltSelfBuildPrefix = "self-build: "
+
+// HaltInstanceLockPrefix is the sibling of HaltSelfBuildPrefix for the
+// per-checkout instance lock's halt reason, emitted by
+// cmd/launcher/daemon/main.go's AcquireCheckoutLock failure path.
+// docs/reference.md's **Instance lock** section and its `halt` event row
+// document this exact string as operator-facing grammar, so changing it is a
+// documented-behaviour change, not a rename.
+const HaltInstanceLockPrefix = "instance-lock: "
+
 const (
 	Continue Action = iota
 	Wait

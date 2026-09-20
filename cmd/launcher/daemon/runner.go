@@ -17,12 +17,14 @@ import (
 )
 
 // hostRunner is the production daemon.Runner: ResolveRevision shells out to
-// git, RunChild shells out to nix. It is the only place in this binary that
-// touches either.
+// git, RunChild and SelfPath shell out to nix. It is the only place in this
+// binary that touches either.
 type hostRunner struct {
 	repoPath   string
 	appAttr    string
 	baseBranch string
+	selfAttr   string
+	nixSystem  string
 
 	mu       sync.Mutex
 	children map[int]*os.Process // slot -> currently running child, for signal forwarding; empty when idle
@@ -38,8 +40,27 @@ type hostRunner struct {
 	fetchMu sync.Mutex
 }
 
-func newHostRunner(repoPath, appAttr, baseBranch string) *hostRunner {
-	return &hostRunner{repoPath: repoPath, appAttr: appAttr, baseBranch: baseBranch, children: make(map[int]*os.Process)}
+// hostRunnerConfig is everything one hostRunner needs, grouped into a
+// struct (rather than five positional strings) so each argument is named at
+// the call site: a transposed pair of same-typed fields — appAttr for
+// selfAttr, say — is visible there instead of compiling silently.
+type hostRunnerConfig struct {
+	repoPath   string
+	appAttr    string
+	baseBranch string
+	selfAttr   string
+	nixSystem  string
+}
+
+func newHostRunner(cfg hostRunnerConfig) *hostRunner {
+	return &hostRunner{
+		repoPath:   cfg.repoPath,
+		appAttr:    cfg.appAttr,
+		baseBranch: cfg.baseBranch,
+		selfAttr:   cfg.selfAttr,
+		nixSystem:  cfg.nixSystem,
+		children:   make(map[int]*os.Process),
+	}
 }
 
 // ResolveRevision shells out to git fetch + rev-parse via CommandContext, not
@@ -72,6 +93,41 @@ func (r *hostRunner) ResolveRevision(ctx context.Context) (string, error) {
 // behaviour (exit code passthrough, issue-line scanning) doesn't depend on
 // what the child actually is.
 var runnerExecCommand = exec.Command
+
+// runnerEvalCommand is SelfPath's exec seam: a test overrides it the same
+// way runnerExecCommand is overridden, to skip nix and run a scripted
+// `/bin/sh -c ...` in its place.
+var runnerEvalCommand = exec.CommandContext
+
+// SelfPath evaluates the daemon attribute's store path at revision via
+// `nix eval`, shelled out with a context-aware exec so a cancelled ctx tears
+// the evaluation down instead of hanging the daemon until SIGKILL — same
+// reasoning as ResolveRevision above.
+//
+// It does not take r.fetchMu: that mutex only serializes the FETCH_HEAD race
+// between concurrent git fetch/rev-parse pairs (see its doc above), and nix
+// eval touches neither, so sharing it here would only add latency behind an
+// unrelated slot's in-flight fetch.
+func (r *hostRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	argv, err := daemon.SelfCommand(daemon.SelfSpec{
+		RepoPath: r.repoPath,
+		SelfAttr: r.selfAttr,
+		Revision: revision,
+		System:   r.nixSystem,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	cmd := runnerEvalCommand(ctx, argv[0], argv[1:]...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("nix eval %s: %w: %s", strings.Join(argv[1:], " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
 
 func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
 	argv, err := daemon.ChildCommand(daemon.ChildSpec{

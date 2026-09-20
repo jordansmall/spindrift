@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -148,14 +149,39 @@ func parseSlots(raw string) (int, error) {
 	return n, nil
 }
 
-// repoRoot resolves the git checkout root containing dir via `git rev-parse
-// --show-toplevel`, run in dir. Failing fast here — rather than letting a
-// subdirectory-relative repoPath reach the first child — turns a
-// misconfigured working directory into a startup error instead of a
-// git+file:// flakeref pointing at a non-root that only breaks the first
-// child invocation.
-func repoRoot(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
+// nixSystemDouble maps Go's GOOS/GOARCH to the nix system double the self
+// check's flake attribute path needs (daemon.SelfSpec.System). It takes both
+// as parameters, rather than reading runtime.GOOS/runtime.GOARCH itself, so
+// the mapping is testable without build tags. An unmapped pair returns an
+// error naming it rather than guessing: a wrong double would evaluate a
+// system that does not exist and report a phantom self-change.
+func nixSystemDouble(goos, goarch string) (string, error) {
+	unmapped := func() error {
+		return fmt.Errorf("daemon: no nix system double for GOOS/GOARCH %s/%s", goos, goarch)
+	}
+	var arch string
+	switch goarch {
+	case "amd64":
+		arch = "x86_64"
+	case "arm64":
+		arch = "aarch64"
+	default:
+		return "", unmapped()
+	}
+	// The OS half needs no translation — nix spells these two exactly as Go
+	// does — but it still needs screening, or an unmapped GOOS would sail
+	// through the join below as a double no flake output exists for.
+	if goos != "linux" && goos != "darwin" {
+		return "", unmapped()
+	}
+	return arch + "-" + goos, nil
+}
+
+// gitRevParse runs `git rev-parse <flag>` in dir and returns its trimmed
+// stdout, folding git's own stderr into the error on failure. Shared by
+// repoRoot and gitDir so the exec+stderr-capture plumbing exists once.
+func gitRevParse(dir, flag string) (string, error) {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", flag)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -167,6 +193,26 @@ func repoRoot(dir string) (string, error) {
 		return "", fmt.Errorf("not a git checkout: %s: %w: %s", dir, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// repoRoot resolves the git checkout root containing dir via `git rev-parse
+// --show-toplevel`, run in dir. Failing fast here — rather than letting a
+// subdirectory-relative repoPath reach the first child — turns a
+// misconfigured working directory into a startup error instead of a
+// git+file:// flakeref pointing at a non-root that only breaks the first
+// child invocation.
+func repoRoot(dir string) (string, error) {
+	return gitRevParse(dir, "--show-toplevel")
+}
+
+// gitDir resolves dir's checkout git dir via `git rev-parse
+// --absolute-git-dir`, run in dir. The checkout lock (issue #3543) lands
+// there rather than under repoRoot: the daemon's contract is that it never
+// mutates the operator's working tree (docs/reference.md), and
+// --absolute-git-dir is also per-checkout for a linked `git worktree`,
+// which is exactly the granularity "one daemon per checkout" needs.
+func gitDir(dir string) (string, error) {
+	return gitRevParse(dir, "--absolute-git-dir")
 }
 
 // fail prints one daemon diagnostic and yields mainRun's error exit code, so
@@ -294,6 +340,28 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	// SPINDRIFT_DAEMON_PROGRAM is exported by the generated wrapper
+	// (lib/mkHarness.nix's daemonWrapper) as this daemon's own store path,
+	// read at runtime because a derivation cannot interpolate its own store
+	// path into its own text. A daemon started any other way (e.g. `go run`
+	// during development) cannot know its own build, so it must not guess:
+	// the self check stays off, but visibly so — a safety property silently
+	// off is worse than one an operator can see is off.
+	selfProgram := os.Getenv("SPINDRIFT_DAEMON_PROGRAM")
+	var selfAttr, nixSystem string
+	if selfProgram == "" {
+		fmt.Fprintln(stderr, "daemon: SPINDRIFT_DAEMON_PROGRAM is unset, so the self-change check is disabled (not started through the generated wrapper)")
+	} else {
+		selfAttr, err = resolveKnob(doc, "DAEMON_SELF_APP", stderr)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		nixSystem, err = nixSystemDouble(runtime.GOOS, runtime.GOARCH)
+		if err != nil {
+			return fail(stderr, err)
+		}
+	}
+
 	wd, err := os.Getwd()
 	if err != nil {
 		return fail(stderr, err)
@@ -303,22 +371,46 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	clk := hostClock{}
+	em := daemon.NewEmitter(stdout, clk.Now)
+
+	gitDirPath, err := gitDir(wd)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, args.Kind)
+	if err != nil {
+		// Report both to the operator (stderr, via fail below) and to the
+		// durable event stream, so a reader of either sees the same halt.
+		em.Emit(daemon.Event{Event: "halt", Kind: args.Kind, Reason: daemon.HaltInstanceLockPrefix + err.Error()})
+		return fail(stderr, err)
+	}
+	// No cleanup on the crash path: the kernel drops the flock when the
+	// holder dies (including SIGKILL), so a deferred Release here only
+	// needs to cover the ordinary return path.
+	defer func() { _ = lock.Release() }()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	r := newHostRunner(repoPath, appAttr, baseBranch)
+	r := newHostRunner(hostRunnerConfig{
+		repoPath:   repoPath,
+		appAttr:    appAttr,
+		baseBranch: baseBranch,
+		selfAttr:   selfAttr,
+		nixSystem:  nixSystem,
+	})
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go handleStopSignal(sig, cancel, r.forwardStop)
 
-	clk := hostClock{}
-	em := daemon.NewEmitter(stdout, clk.Now)
 	cfg := daemon.Config{
 		Kind:             args.Kind,
 		IdleFloor:        daemonIdleFloor,
 		IdleCap:          daemonIdleCap,
 		Slots:            slots,
+		SelfProgram:      selfProgram,
 		FailureBackoff:   daemonFailureBackoff,
 		BreakerThreshold: daemonBreakerThreshold,
 		BreakerWindow:    daemonBreakerWindow,
@@ -327,8 +419,28 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	reason := daemon.Loop(ctx, cfg, r, em, clk)
 
+	return exitCodeFor(reason)
+}
+
+// exitSelfChanged is the daemon's own exit code for the one halt an
+// operator may want to act on automatically: its build changed at the
+// fetched tip. It is deliberately distinct from every other code this
+// binary returns (0 clean stop, 1 anything else) so a service unit can
+// restart on it alone — the daemon never re-execs itself, so composing
+// this exit with a restart policy is how an operator opts into
+// self-update, by choice rather than by default. It sits outside the
+// 0-7 band the *child* launcher's exit codes occupy (Interpret,
+// cmd/launcher/internal/daemon/outcome.go) so the two taxonomies cannot
+// be confused when both appear in one log.
+const exitSelfChanged = 10
+
+// exitCodeFor maps daemon.Loop's halt reason to this process's exit code.
+func exitCodeFor(reason string) int {
 	if isOperatorStop(reason) {
 		return 0
+	}
+	if strings.HasPrefix(reason, daemon.HaltSelfChanged+":") {
+		return exitSelfChanged
 	}
 	// A plain non-zero exit: the event stream already carries the specific
 	// halt reason as structured JSON, so stderr/exit code need only say
