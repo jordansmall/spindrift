@@ -22,6 +22,9 @@ let
   # regen-postsplice-dispatch-guard below exercises the exact per-row
   # postSplice dispatch `nix run .#regen` uses (issue #2949 review finding).
   regen = import ../regen.nix { inherit pkgs; };
+  # Shared with nix/checks/promptassembly.nix's regen-goldens-app-wiring so
+  # the two app-wiring guards cannot fork hand-copied variants (issue #3192).
+  mkAppWiringCheck = import ../../lib/app-wiring-check.nix { inherit pkgs; };
   # One import shared by all three consumers of the byName and roster worked
   # examples instead of three copies (issue #2572 round 2).
   structuralTemplateExamples = import ../../lib/structural-template-examples.nix {
@@ -1975,22 +1978,13 @@ checkedMerge {
   # script forces this check to build it, including writeShellApplication's
   # shellcheck pass, so a broken regen script fails `nix build .#checks-inbox`
   # instead of only `nix run .#regen` (issue #3128).
-  regen-app-wiring =
-    let
-      inherit (pkgs.lib) assertMsg;
-      expectedProgram = "${regen}/bin/regen";
-    in
-    assert assertMsg (config.apps ? regen)
-      "flake.nix must expose apps.regen at the top level so \`nix run .#regen\` actually resolves, got top-level app names: ${builtins.toJSON (builtins.attrNames config.apps)}";
-    assert assertMsg (
-      config.apps.regen.type == "app"
-    ) "flake.nix's top-level apps.regen must be a real app, got: ${builtins.toJSON config.apps.regen}";
-    assert assertMsg (config.apps.regen.program == expectedProgram)
-      "flake.nix's top-level apps.regen must be built from nix/regen.nix with the SAME pkgs this check uses -- otherwise \`nix run .#regen\` silently regenerates against a foreign env: ${config.apps.regen.program} != ${expectedProgram}";
-    pkgs.runCommand "regen-app-wiring" { } ''
-      [ -x ${regen}/bin/regen ]
-      touch $out
-    '';
+  regen-app-wiring = mkAppWiringCheck {
+    name = "regen";
+    apps = config.apps;
+    package = regen;
+    exposedReason = "flake.nix must expose apps.regen at the top level so \`nix run .#regen\` actually resolves";
+    sameEnvReason = "flake.nix's top-level apps.regen must be built from nix/regen.nix with the SAME pkgs this check uses -- otherwise \`nix run .#regen\` silently regenerates against a foreign env";
+  };
 
   # write_between must preserve the target file's mode across its `mv`:
   # `splice` writes $file.regen-tmp fresh under the default umask, so a plain

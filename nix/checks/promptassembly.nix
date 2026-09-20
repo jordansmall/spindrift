@@ -17,6 +17,9 @@ let
   # regeneration runs in the environment this check verifies against.
   parity = import ../parity-env.nix { inherit pkgs fixtures; };
   inherit (parity) registry fragmentsRegistryJsonFile;
+  # Shared with nix/checks/schema-drift.nix's regen-app-wiring so the two
+  # app-wiring guards cannot fork hand-copied variants (issue #3192).
+  mkAppWiringCheck = import ../../lib/app-wiring-check.nix { inherit pkgs; };
 
   protectedIdentifiers = unique (map (r: r.fragment) registry ++ map (r: r.var) registry);
 
@@ -132,18 +135,13 @@ in
   # writeShellApplication's shellcheck pass.
   regen-goldens-app-wiring =
     let
-      inherit (pkgs.lib) assertMsg;
       regenGoldensApp = import ../regen-goldens.nix { inherit pkgs fixtures; };
-      expectedProgram = "${regenGoldensApp}/bin/regen-goldens";
     in
-    assert assertMsg (config.apps ? regen-goldens)
-      "flake.nix must expose apps.regen-goldens at the top level (issue #2951) so `nix run .#regen-goldens` actually resolves, got top-level app names: ${builtins.toJSON (builtins.attrNames config.apps)}";
-    assert assertMsg (config.apps.regen-goldens.type == "app")
-      "flake.nix's top-level apps.regen-goldens must be a real app, got: ${builtins.toJSON config.apps.regen-goldens}";
-    assert assertMsg (config.apps.regen-goldens.program == expectedProgram)
-      "flake.nix's top-level apps.regen-goldens must be built from nix/regen-goldens.nix with the SAME pkgs/fixtures this check uses (issue #2951) -- otherwise `nix run .#regen-goldens` silently regenerates goldens against a foreign env: ${config.apps.regen-goldens.program} != ${expectedProgram}";
-    pkgs.runCommand "regen-goldens-app-wiring" { } ''
-      [ -x ${regenGoldensApp}/bin/regen-goldens ]
-      touch $out
-    '';
+    mkAppWiringCheck {
+      name = "regen-goldens";
+      apps = config.apps;
+      package = regenGoldensApp;
+      exposedReason = "flake.nix must expose apps.regen-goldens at the top level (issue #2951) so `nix run .#regen-goldens` actually resolves";
+      sameEnvReason = "flake.nix's top-level apps.regen-goldens must be built from nix/regen-goldens.nix with the SAME pkgs/fixtures this check uses (issue #2951) -- otherwise `nix run .#regen-goldens` silently regenerates goldens against a foreign env";
+    };
 }
