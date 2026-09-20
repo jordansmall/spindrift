@@ -73,7 +73,7 @@ let
   # check uses per-surface extraction instead, because this shape filter fails
   # open on a de-prefixed rename and broadening it false-positives.
   isLabelShaped = s: builtins.match "agent-[a-z-]+" s != null;
-  # Pins the three dispatch-trigger guards (issue #2528 AC3). A file-wide token
+  # Pins each workflow's own `if:` label guard (issue #2528 AC3). A file-wide token
   # check cannot catch a rename of the agent-research guard: the literal
   # legitimately reappears dozens of times in the same file, so the token
   # survives the guard pointing elsewhere. This reads the guard's own line.
@@ -96,6 +96,11 @@ let
     "forgejo:agent-dispatch.yml" = "agent-trigger";
     "forgejo:agent-recover.yml" = "agent-recover";
     "forgejo:agent-research.yml" = "agent-research-trigger";
+    # Not a dispatch trigger: the reject verdict is what fires the close, so
+    # this guard is pinned to a *verdict* label. Renaming the verdict without
+    # updating the workflow would leave rejected issues silently unclosed.
+    "github:agent-research-close.yml" = "agent-research-reject";
+    "forgejo:agent-research-close.yml" = "agent-research-reject";
   };
   realTriggerGuardSrcs = {
     "github:agent-dispatch.yml" = builtins.readFile ../../.github/workflows/agent-dispatch.yml;
@@ -104,6 +109,8 @@ let
     "forgejo:agent-dispatch.yml" = builtins.readFile ../../.forgejo/workflows/agent-dispatch.yml;
     "forgejo:agent-recover.yml" = builtins.readFile ../../.forgejo/workflows/agent-recover.yml;
     "forgejo:agent-research.yml" = builtins.readFile ../../.forgejo/workflows/agent-research.yml;
+    "github:agent-research-close.yml" = builtins.readFile ../../.github/workflows/agent-research-close.yml;
+    "forgejo:agent-research-close.yml" = builtins.readFile ../../.forgejo/workflows/agent-research-close.yml;
   };
   # Takes triggerGuardSrcs as a parameter so the regression check below can
   # exercise this assertion path against a doctored source map without touching
@@ -116,7 +123,7 @@ let
       ) (builtins.attrNames triggerGuardExpectations);
     in
     assert assertMsg (mismatches == [ ])
-      "workflow dispatch-trigger guard(s) don't match their expected label: ${
+      "workflow label guard(s) don't match their expected label: ${
         concatStringsSep "; " (
           map (
             name:

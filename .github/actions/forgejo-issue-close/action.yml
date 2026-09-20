@@ -1,0 +1,34 @@
+name: Forgejo issue close
+description: >-
+  Close one Forgejo issue over the REST API, skipping an issue that is already
+  closed. The .forgejo/workflows control-plane set (issue #1967) uses this to
+  act on the `agent-research-reject` verdict, since no `fj`/`gh` issue verb is
+  guaranteed on a self-hosted runner and a Forgejo token cannot authenticate
+  against api.github.com. The close logic lives in close-issue.sh so the repo
+  shellcheck sweep covers it.
+
+inputs:
+  base-url:
+    description: Forgejo base URL (e.g. https://codeberg.org)
+    required: true
+  token:
+    description: Forgejo API token (the FORGEJO_TOKEN repository secret)
+    required: true
+  repo:
+    description: owner/repo slug
+    required: true
+  issue-number:
+    description: Issue index to close
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Close the issue over the Forgejo REST API
+      shell: bash
+      env:
+        CLOSE_BASE_URL: ${{ inputs.base-url }}
+        CLOSE_TOKEN: ${{ inputs.token }}
+        CLOSE_REPO: ${{ inputs.repo }}
+        CLOSE_ISSUE: ${{ inputs.issue-number }}
+      run: bash "$GITHUB_ACTION_PATH/close-issue.sh"

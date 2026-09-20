@@ -3,6 +3,10 @@
 # maintained, so this guard pins both against silent regression (issue #1967).
 # The GitHub set never sets `forge`, which is how it keeps agent-setup's
 # `gh api rate_limit` smoke test and `gh issue edit` claim.
+#
+# agent-research-close.yml is deliberately absent from both sets: it claims no
+# issue and builds no image, so it has nothing to reach agent-setup for. Its
+# label guard is pinned in nix/checks/dispatch-labels.nix instead.
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
