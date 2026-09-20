@@ -28,7 +28,7 @@ func TestRunChild_ExitCodeAndIssues(t *testing.T) {
 	}
 
 	r := newHostRunner(t.TempDir(), ".#", "main")
-	got, err := r.RunChild(context.Background(), daemon.KindDispatch, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestRunChild_ExitCodeAndIssues(t *testing.T) {
 	}
 
 	r.mu.Lock()
-	child := r.child
+	child := r.children[0]
 	r.mu.Unlock()
 	if child != nil {
 		t.Errorf("child = %v, want nil once RunChild has returned", child)
@@ -59,7 +59,7 @@ func TestRunChild_ZeroExitNoAnnounce(t *testing.T) {
 	}
 
 	r := newHostRunner(t.TempDir(), ".#", "main")
-	got, err := r.RunChild(context.Background(), daemon.KindResearch, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindResearch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestRunChild_OversizedLineDoesNotHang(t *testing.T) {
 	resultCh := make(chan daemon.ChildResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		got, err := r.RunChild(context.Background(), daemon.KindDispatch, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+		got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 		if err != nil {
 			errCh <- err
 			return
@@ -112,7 +112,7 @@ func TestRunChild_OversizedLineDoesNotHang(t *testing.T) {
 // TestRunChild_ChildInOwnProcessGroup asserts the child started through the
 // runnerExecCommand seam is isolated into its own process group (Setpgid),
 // so a group-wide Ctrl-C SIGINT never reaches it — only the daemon's own
-// forwarded SIGTERM does (issue #3538). Polls for r.child rather than
+// forwarded SIGTERM does (issue #3538). Polls for r.children[0] rather than
 // racing cmd.Start() from outside RunChild, since RunChild only publishes
 // the started process after starting it.
 func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
@@ -126,7 +126,7 @@ func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if _, err := r.RunChild(context.Background(), daemon.KindDispatch, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"); err != nil {
+		if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
 			t.Errorf("RunChild() unexpected error: %v", err)
 		}
 	}()
@@ -134,8 +134,8 @@ func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
 	var pid int
 	for i := 0; i < 100; i++ {
 		r.mu.Lock()
-		if r.child != nil {
-			pid = r.child.Pid
+		if r.children[0] != nil {
+			pid = r.children[0].Pid
 		}
 		r.mu.Unlock()
 		if pid != 0 {
@@ -309,7 +309,7 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 	t.Cleanup(func() { runnerExecCommand = orig })
 	dir := t.TempDir()
 	// The script touches this only after `trap` has run, so its existence is
-	// proof the child can honour a SIGTERM. r.child alone is not: RunChild
+	// proof the child can honour a SIGTERM. r.children[0] alone is not: RunChild
 	// publishes it the instant cmd.Start() returns, which is before /bin/sh
 	// has even exec'd, and a SIGTERM landing then finds the default
 	// disposition and kills the child outright (Exit -1, not 7).
@@ -322,7 +322,7 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 	resultCh := make(chan daemon.ChildResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		got, err := r.RunChild(context.Background(), daemon.KindDispatch, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+		got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 		if err != nil {
 			errCh <- err
 			return
@@ -333,7 +333,7 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 	trapped := false
 	for i := 0; i < 1000 && !trapped; i++ {
 		r.mu.Lock()
-		started := r.child != nil
+		started := r.children[0] != nil
 		r.mu.Unlock()
 		if started {
 			_, err := os.Stat(armed)
@@ -362,12 +362,12 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 }
 
 // TestForwardStop_Noop asserts forwardStop is a no-op when no child is
-// running: it must not panic, and r.child must stay nil.
+// running: it must not panic, and r.children must stay empty.
 func TestForwardStop_Noop(t *testing.T) {
 	r := newHostRunner(t.TempDir(), ".#", "main")
 	r.forwardStop()
 	r.mu.Lock()
-	child := r.child
+	child := r.children[0]
 	r.mu.Unlock()
 	if child != nil {
 		t.Errorf("child = %v, want nil", child)

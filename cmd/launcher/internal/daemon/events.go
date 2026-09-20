@@ -26,6 +26,7 @@ type Event struct {
 	Kind     Kind   `json:"kind,omitempty"`
 	Issue    string `json:"issue,omitempty"`
 	Revision string `json:"revision,omitempty"`
+	Slot     *int   `json:"slot,omitempty"`
 	Exit     *int   `json:"exit,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`
 	Reason   string `json:"reason,omitempty"`

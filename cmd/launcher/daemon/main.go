@@ -144,10 +144,14 @@ func fail(stderr io.Writer, err error) int {
 // (Awake window, per-kind backoff) is a later ticket (loop.go's Config doc).
 const daemonIdleInterval = 5 * time.Minute
 
-// ctxSleep is daemon.Loop's sleep seam: it waits d or returns early on ctx
-// cancellation, so an operator stop during the idle wait is honoured
-// immediately rather than after the full interval.
-func ctxSleep(ctx context.Context, d time.Duration) {
+// hostClock is the production daemon.Clock: Now is time.Now, Sleep waits d
+// or returns early on ctx cancellation, so an operator stop during the idle
+// wait is honoured immediately rather than after the full interval.
+type hostClock struct{}
+
+func (hostClock) Now() time.Time { return time.Now() }
+
+func (hostClock) Sleep(ctx context.Context, d time.Duration) {
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
@@ -223,10 +227,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go handleStopSignal(sig, cancel, r.forwardStop)
 
-	em := daemon.NewEmitter(stdout, time.Now)
+	clk := hostClock{}
+	em := daemon.NewEmitter(stdout, clk.Now)
 	cfg := daemon.Config{Kind: args.Kind, IdleInterval: daemonIdleInterval}
 
-	reason := daemon.Loop(ctx, cfg, r, em, ctxSleep)
+	reason := daemon.Loop(ctx, cfg, r, em, clk)
 
 	if isOperatorStop(reason) {
 		return 0
