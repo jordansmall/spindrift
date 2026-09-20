@@ -569,6 +569,38 @@ canonical Dispatch lifecycle; on the `github` tracker each kind maps the
 states to its own label family.
 _Avoid_: mode, dispatch type, pipeline.
 
+**Driving loop**:
+Whatever keeps invoking Dispatches against the queue unattended, across many
+invocations — the [[Daemon]] today, `dogfood.sh` before it. The thing that
+outlives a single Launcher invocation.
+_Avoid_: scheduler, cron, orchestrator (the in-box review role).
+
+**Daemon**:
+The shipped [[Driving loop]] (`apps.daemon`): a long-lived host process holding
+a pool of slots, each filled with one single-Box Dispatch invocation pinned to
+a fetched revision, drawing from both Dispatch kinds. It supervises and
+re-invokes; it never runs a Box itself.
+_Avoid_: continuous dispatch (the deprecated in-process pool), dogfood loop,
+service, supervisor.
+
+**Awake window**:
+The daily local-time span, in an explicit zone, during which the Daemon may
+start a new Box. A Box already running when the window closes finishes; the
+window gates starting, never stopping.
+_Avoid_: schedule, quiet hours, cron window.
+
+**Stop signal**:
+The first operator signal to a Launcher or a Daemon: launch nothing further,
+let in-flight work drain to its own conclusion.
+_Avoid_: drain (the effect, not the request), graceful shutdown, SIGTERM (the
+mechanism).
+
+**Abort signal**:
+The second operator signal, after a [[Stop signal]]: reap every in-flight Box
+and release its claim.
+_Avoid_: escalation (the transition from Stop to Abort, not the request),
+kill, SIGINT (the mechanism).
+
 **Research dispatch**:
 A Dispatch whose Agent (the "researcher") reviews a posted issue from inside
 the Box — exploring the Target repo for real context — then posts an
