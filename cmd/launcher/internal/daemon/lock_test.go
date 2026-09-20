@@ -4,12 +4,48 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
+
+// TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe pins the
+// issue #3545 review finding: a status reader's probeCheckoutLock takes
+// LOCK_SH for a few syscalls then releases it, and a daemon starting in
+// that window must not mistake it for a second daemon. This simulates that
+// probe directly (LOCK_SH, not via AcquireCheckoutLock) and releases it
+// from a goroutine so AcquireCheckoutLock's retry has to actually win the
+// race rather than succeeding trivially on the first attempt.
+func TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, checkoutLockFileName)
+
+	probeFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open lock file for simulated probe: %v", err)
+	}
+	if err := syscall.Flock(int(probeFile.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
+		t.Fatalf("take LOCK_SH for simulated probe: %v", err)
+	}
+
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(acquireGraceStep)
+		_ = syscall.Flock(int(probeFile.Fd()), syscall.LOCK_UN)
+		_ = probeFile.Close()
+		close(released)
+	}()
+	t.Cleanup(func() { <-released })
+
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	if err != nil {
+		t.Fatalf("AcquireCheckoutLock: want success once the simulated probe releases, got error: %v", err)
+	}
+	defer lock.Release()
+}
 
 func TestAcquireCheckoutLock_WritesHolderIdentity(t *testing.T) {
 	dir := t.TempDir()
@@ -42,9 +78,19 @@ func TestAcquireCheckoutLock_SecondAcquireInSameProcessRefused(t *testing.T) {
 	}
 	defer first.Release()
 
+	// first genuinely holds LOCK_EX for the rest of the test, so the
+	// second acquire must exhaust the retry added for issue #3545 and
+	// still refuse — bound the refusal against acquireGraceTotal itself
+	// (with slack for scheduling), not a magic duration, so the test
+	// keeps tracking whatever the const is tuned to.
+	start := time.Now()
 	_, err = AcquireCheckoutLock(dir, []Kind{KindResearch})
+	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("second AcquireCheckoutLock: want error, got nil")
+	}
+	if elapsed > 3*acquireGraceTotal {
+		t.Fatalf("second AcquireCheckoutLock took %v, want at most ~%v (3x acquireGraceTotal for scheduling slack)", elapsed, 3*acquireGraceTotal)
 	}
 
 	want := fmt.Sprintf("pid=%d", os.Getpid())

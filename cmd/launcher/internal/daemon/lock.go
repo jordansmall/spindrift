@@ -27,13 +27,31 @@ type CheckoutLock struct {
 	file *os.File
 }
 
+// acquireGraceTotal bounds how long AcquireCheckoutLock retries a
+// LOCK_EX|LOCK_NB attempt that failed with EWOULDBLOCK before it gives up
+// and reports the lock held. It exists to tell a status reader's momentary
+// LOCK_SH probe (held for a few syscalls, then released — see
+// probeCheckoutLock) from a genuine daemon, which holds LOCK_EX for its
+// whole life and so still exhausts the full grace period and gets
+// reported. Kept short: an operator's mistaken second daemon must still
+// see "already running" promptly, not a hang.
+const acquireGraceTotal = 50 * time.Millisecond
+
+// acquireGraceStep is the sleep between retries within acquireGraceTotal.
+const acquireGraceStep = 2 * time.Millisecond
+
 // AcquireCheckoutLock takes a non-blocking exclusive lock on
 // filepath.Join(dir, "spindrift-daemon.lock") and stamps the holder's
 // identity into the file. dir is expected to already exist (the caller
 // passes a git dir); a missing dir is a real error, not silently created.
 //
-// The lock never blocks and never retries: an operator running a second
-// daemon by mistake must see "already running" at once, not a hang.
+// Every attempt uses LOCK_NB, so it never blocks the kernel-level way; an
+// operator running a second daemon by mistake still sees "already running"
+// within acquireGraceTotal, not a hang. But a lone EWOULDBLOCK is retried
+// for up to acquireGraceTotal before being reported, because a status
+// reader's LOCK_SH probe can transiently hold the lock across a few
+// syscalls — without the retry, that window would make a starting daemon
+// mistake a passing reader for a second daemon and refuse to start.
 func AcquireCheckoutLock(dir string, kinds []Kind) (*CheckoutLock, error) {
 	lockPath := filepath.Join(dir, checkoutLockFileName)
 
@@ -42,16 +60,26 @@ func AcquireCheckoutLock(dir string, kinds []Kind) (*CheckoutLock, error) {
 		return nil, fmt.Errorf("open checkout lock file %s: %w", lockPath, err)
 	}
 
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	deadline := time.Now().Add(acquireGraceTotal)
+	var flockErr error
+	for {
+		flockErr = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if flockErr == nil || !errors.Is(flockErr, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(acquireGraceStep)
+	}
+
+	if flockErr != nil {
 		// Only EWOULDBLOCK means "someone else holds it". Anything else —
 		// ENOLCK on a filesystem without locking, say — would be reported
 		// as a phantom second daemon if it shared that message, sending an
 		// operator hunting for a process that does not exist. Check the
 		// errno before reading: the 4 KiB identity read is only worth
 		// paying for when the result will actually be used.
-		if !errors.Is(err, syscall.EWOULDBLOCK) {
+		if !errors.Is(flockErr, syscall.EWOULDBLOCK) {
 			_ = file.Close()
-			return nil, fmt.Errorf("lock checkout lock file %s: %w", lockPath, err)
+			return nil, fmt.Errorf("lock checkout lock file %s: %w", lockPath, flockErr)
 		}
 		holder := readHolderIdentity(file)
 		_ = file.Close()
