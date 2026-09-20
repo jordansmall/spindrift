@@ -22,6 +22,7 @@ in
   nix-fmt = pkgs.runCommand "nix-fmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
     nixfmt --check \
       ${../../flake.nix} \
+      ${../../lib/app-wiring-check.nix} \
       ${../../lib/builtins-compat.nix} \
       ${../../lib/default-model-fixture.nix} \
       ${../../lib/env-schema.nix} \
