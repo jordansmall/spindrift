@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -101,6 +102,100 @@ func TestDiscoverIssues_PriorityPropagatesToWaveIssues(t *testing.T) {
 	waveIssues := toWaveIssues(issues)
 	if len(waveIssues) != 1 || waveIssues[0].Priority != forge.PriorityCritical {
 		t.Fatalf("toWaveIssues priority = %+v, want PriorityCritical", waveIssues)
+	}
+}
+
+// TestQueryOpenIssues covers the cross-family in-progress filter added for
+// issue #3541 (a work dispatch must skip an issue a researcher already has
+// in flight, and vice versa) plus the no-op cases that prove the filter
+// stays out of the way otherwise.
+func TestQueryOpenIssues(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func() (config, *forge.Fake)
+		want  []string
+	}{
+		{
+			// The two families must never run on the same issue at once,
+			// while an unrelated sibling issue is unaffected.
+			name: "work skips research in progress",
+			setup: func() (config, *forge.Fake) {
+				c := baseConfig()
+				c = applyDispatchKind(c, dispatchKindWork)
+				c.label = "ready-for-agent"
+				fc := forge.NewFake(testDispatchLabels)
+				fc.SetIssue(forge.Issue{Number: "1", Title: "researcher has this one", Labels: []string{c.label, "agent-research-in-progress"}})
+				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.label}})
+				return c, fc
+			},
+			want: []string{"2"},
+		},
+		{
+			// Uses the configured work in-progress label rather than a
+			// hardcoded "agent-in-progress" — proves applyDispatchKind
+			// captures c.inProgressLabel before swapping it for the
+			// research family's.
+			name: "research skips work in progress",
+			setup: func() (config, *forge.Fake) {
+				c := baseConfig()
+				c.inProgressLabel = "custom-work-in-progress"
+				c = applyDispatchKind(c, dispatchKindResearch)
+				fc := forge.NewFake(forge.ResearchDispatchLabels())
+				fc.SetIssue(forge.Issue{Number: "1", Title: "worker has this one", Labels: []string{c.label, "custom-work-in-progress"}})
+				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.label}})
+				return c, fc
+			},
+			want: []string{"2"},
+		},
+		{
+			// Work-only operation — no research labels defined anywhere —
+			// must discover normally: the filter is a no-op when no issue
+			// carries the label it checks for.
+			name: "work only, no research labels anywhere",
+			setup: func() (config, *forge.Fake) {
+				c := baseConfig()
+				c = applyDispatchKind(c, dispatchKindWork)
+				c.label = "ready-for-agent"
+				fc := forge.NewFake(testDispatchLabels)
+				fc.SetIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{c.label}})
+				fc.SetIssue(forge.Issue{Number: "2", Title: "two", Labels: []string{c.label}})
+				return c, fc
+			},
+			want: []string{"1", "2"},
+		},
+		{
+			// An issue carrying the *same* family's in-progress label
+			// (rather than the other family's) is excluded already,
+			// upstream, by the dispatchable-label ListIssues query — this
+			// filter has no opinion on it one way or the other.
+			name: "same family in progress excluded upstream not by this filter",
+			setup: func() (config, *forge.Fake) {
+				c := baseConfig()
+				c = applyDispatchKind(c, dispatchKindWork)
+				c.label = "ready-for-agent"
+				fc := forge.NewFake(testDispatchLabels)
+				fc.SetIssue(forge.Issue{Number: "1", Title: "already claimed by a worker", Labels: []string{c.inProgressLabel}})
+				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.label}})
+				return c, fc
+			},
+			want: []string{"2"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, fc := tc.setup()
+			issues, err := queryOpenIssues(c, fc)
+			if err != nil {
+				t.Fatalf("queryOpenIssues: %v", err)
+			}
+			got := make([]string, len(issues))
+			for i, iss := range issues {
+				got[i] = iss.number
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 

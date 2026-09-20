@@ -138,6 +138,13 @@ type config struct {
 	// validation permits the no-REPO_SLUG/no-GH_TOKEN configuration. validate
 	// rejects it for any other kind.
 	selfContained bool
+
+	// otherFamilyInProgressLabel is the other Dispatch kind's in-progress
+	// label (issue #3541): set via applyDispatchKind alongside dispatchKind,
+	// never read from the environment directly, same as dispatchKind above.
+	// queryOpenIssues skips a discovered issue carrying it, so a researcher
+	// and a worker never run on the same issue at once.
+	otherFamilyInProgressLabel string
 }
 
 // The two Dispatch kinds (ADR 0022). Both share the four canonical
@@ -156,11 +163,17 @@ const (
 func applyDispatchKind(c config, kind string) config {
 	c.dispatchKind = kind
 	if kind == dispatchKindResearch {
+		// Read the configured work in-progress label before the swap below
+		// overwrites c.inProgressLabel with the research family's — this is
+		// the only chance to capture it (issue #3541).
+		c.otherFamilyInProgressLabel = c.inProgressLabel
 		rl := forge.ResearchDispatchLabels()
 		c.label = rl.Dispatchable
 		c.inProgressLabel = rl.InProgress
 		c.completeLabel = rl.Complete
 		c.failedLabel = rl.Failed
+	} else {
+		c.otherFamilyInProgressLabel = forge.ResearchDispatchLabels().InProgress
 	}
 	return c
 }
@@ -1262,6 +1275,19 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
 	}
 	var issues []issue
 	for _, fi := range rawIssues {
+		// Filtering on the tracker-returned Labels, rather than adding a
+		// -label: qualifier to the ListIssues query, is what makes this
+		// tracker-derived: it sees in-progress work started by a Console
+		// session, CI, or a human, not just this launcher's own claims. It
+		// also keeps work-only operation working with no research labels
+		// defined — an absent label is a label no issue carries, so the
+		// filter is a no-op and containsLabel never has to special-case "".
+		// Silent like the Dispatchable filter above: an issue held back by
+		// the other family's in-progress label is no more newsworthy than
+		// one that never had the dispatchable label to begin with.
+		if c.otherFamilyInProgressLabel != "" && containsLabel(fi.Labels, c.otherFamilyInProgressLabel) {
+			continue
+		}
 		issues = append(issues, newIssue(fi))
 	}
 	return issues, nil
