@@ -19,6 +19,11 @@ let
   batsShards = import ./bats-shards.nix { inherit pkgs; };
   batsShardNames = batsShards.shardNames;
 
+  # Shared machinery behind the fragment-parity checks (issue #3240), imported
+  # once so commit/tdd/code-review-fragment-parity.nix each pick it up from
+  # `common` instead of re-deriving it.
+  mkFragmentParity = import ./mk-fragment-parity.nix { inherit pkgs fixtures; };
+
   # Every check module that reconstructs a launcher tree (go.nix,
   # baked-skills.nix) shares this one vendor tree instead of deriving its own
   # (issue #784).
@@ -40,6 +45,7 @@ let
       flake-parts
       launcherGoModules
       batsShards
+      mkFragmentParity
       ;
   };
   sourceChecks =

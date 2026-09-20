@@ -48,6 +48,7 @@ in
       ${./go.nix} \
       ${./image.nix} \
       ${./jira-status-mapping.nix} \
+      ${./mk-fragment-parity.nix} \
       ${./nix-checks-lore-parity.nix} \
       ${./prompts.nix} \
       ${./quickstart-golden.nix} \
