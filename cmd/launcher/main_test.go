@@ -2151,10 +2151,10 @@ func TestResolveAgentPresenceSignals_ScoutMissingArtifactKeyFallsBackIndependent
 	}
 }
 
-// Scout is decoupled from the filer/worker opencode=false rule:
-// lib/drivers/opencode.nix provisions scout via agentFilesTemplate keyed off
-// finalRoster, so opencode's fallback tracks SCOUT_MODEL like every other
-// driver even while filerEnabled/workerProvisioned stay false.
+// Scout is decoupled from the filer/worker opencode=false rule — see
+// lib/mkHarness.nix's scoutProvisioned comment — so opencode's fallback tracks
+// SCOUT_MODEL like every other driver even while filerEnabled and
+// workerProvisioned stay false.
 func TestResolveAgentPresenceSignals_ScoutNoDocumentOpencodeDriverFallsBackToScoutModel(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
@@ -2165,7 +2165,7 @@ func TestResolveAgentPresenceSignals_ScoutNoDocumentOpencodeDriverFallsBackToSco
 
 	presence := resolveAgentPresenceSignals("opencode")
 	if !presence.scoutProvisioned {
-		t.Errorf("scoutProvisioned = false, want true (opencode provisions scout via agentFilesTemplate regardless of agentsJsonTemplate)")
+		t.Errorf("scoutProvisioned = false, want true (SCOUT_MODEL is set, no document)")
 	}
 	if presence.filerEnabled || presence.workerProvisioned {
 		t.Errorf("filerEnabled=%v workerProvisioned=%v, want both false (opencode Driver always bakes these false)", presence.filerEnabled, presence.workerProvisioned)
