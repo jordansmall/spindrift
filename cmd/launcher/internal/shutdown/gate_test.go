@@ -88,7 +88,7 @@ func TestAllowed_StopClosed_DeniesAndSignalsWithoutReclaim(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil)
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
 
 	if g.Allowed("1") {
 		t.Fatal("Allowed: want false once stop is closed")
@@ -110,7 +110,7 @@ func TestAbort_ReclaimsEveryInFlightIssueExactlyOnce(t *testing.T) {
 	reaper := &stubReaper{}
 	abort := make(chan struct{})
 
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil)
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
 
 	if !g.Launch("1", func() {}) {
 		t.Fatal("Launch #1: want true before abort")
@@ -144,7 +144,7 @@ func TestLeave_BeforeAbort_IssueNotReclaimed(t *testing.T) {
 	reaper := &stubReaper{}
 	abort := make(chan struct{})
 
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil)
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
 
 	if !g.Launch("1", func() {}) {
 		t.Fatal("Launch #1: want true")
@@ -169,13 +169,50 @@ func TestLeave_BeforeAbort_IssueNotReclaimed(t *testing.T) {
 	}
 }
 
+// TestAbort_SettledIssueNotReclaimed pins the window Leave alone cannot
+// close: a settler writes its complete label and returns, and the abort lands
+// before the caller's next statement (Leave) runs, so the issue is still in
+// the in-flight snapshot. Reclaiming it would drag a merged issue back to
+// dispatchable, which is what the recover path saw flake (#3522).
+func TestAbort_SettledIssueNotReclaimed(t *testing.T) {
+	fc := newFakeForge(t, "1", "2")
+	fc.SetIssue(forge.Issue{Number: "1", Title: "issue 1", Labels: []string{"agent-complete"}})
+	reaper := &stubReaper{}
+	abort := make(chan struct{})
+
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
+
+	if !g.Launch("1", func() {}) {
+		t.Fatal("Launch #1: want true")
+	}
+	if !g.Launch("2", func() {}) {
+		t.Fatal("Launch #2: want true")
+	}
+
+	close(abort)
+	g.Settle()
+
+	if got := inProgressToDispatchableCount(fc, "1"); got != 0 {
+		t.Errorf("#1 (already settled): InProgress->Dispatchable transitions = %d, want 0", got)
+	}
+	if got := reclaimCommentCount(fc, "1"); got != 0 {
+		t.Errorf("#1 (already settled): reclaim comments = %d, want 0", got)
+	}
+	if got := reaper.killCount("1"); got != 0 {
+		t.Errorf("#1 (already settled): kill count = %d, want 0", got)
+	}
+	if got := inProgressToDispatchableCount(fc, "2"); got != 1 {
+		t.Errorf("#2 (still in flight): InProgress->Dispatchable transitions = %d, want 1", got)
+	}
+}
+
 func TestLaunch_DecliningAfterSignal_ReclaimsHeldClaimAndSkipsArm(t *testing.T) {
 	fc := newFakeForge(t, "1")
 	reaper := &stubReaper{}
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil)
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
 	g.Hold("1")
 
 	armed := false
@@ -201,7 +238,7 @@ func TestGate_BothChannelsNil_IsInert(t *testing.T) {
 	fc := newFakeForge(t)
 	reaper := &stubReaper{}
 
-	g := shutdown.NewGate(nil, nil, fc, fc, reaper, nil)
+	g := shutdown.NewGate(nil, nil, fc, fc, reaper, nil, "agent-complete")
 
 	if !g.Allowed("1") {
 		t.Fatal("Allowed: want true when both channels are nil")
@@ -222,7 +259,7 @@ func TestWatch_AbortAfterStart_ReclaimsPromptly(t *testing.T) {
 	reaper := &stubReaper{killSignal: killed}
 	abort := make(chan struct{})
 
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil)
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
 	if !g.Launch("1", func() {}) {
 		t.Fatal("Launch #1: want true before abort")
 	}
@@ -257,7 +294,7 @@ func TestSettle_CalledTwice_DoesNotPanic(t *testing.T) {
 	reaper := &stubReaper{}
 	abort := make(chan struct{})
 
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil)
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
 	g.Watch()
 
 	g.Settle()
@@ -275,7 +312,7 @@ func TestLaunch_DecliningUnheldIssue_TouchesNothing(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil)
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
 
 	if g.Launch("1", func() { t.Error("arm: must not be called when Launch declines") }) {
 		t.Fatal("Launch: want false once stop is closed")
@@ -299,7 +336,7 @@ func TestAllowed_DecliningHeldIssue_ReleasesClaim(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil)
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
 	g.Hold("1")
 
 	if g.Allowed("1") {
@@ -329,7 +366,7 @@ func TestAllowed_DecliningUnheldIssue_TouchesNothing(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil)
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
 
 	if g.Allowed("1") {
 		t.Fatal("Allowed: want false once stop is closed")
@@ -353,7 +390,7 @@ func TestWatch_CalledTwice_LeavesNoWatcherBehind(t *testing.T) {
 	abort := make(chan struct{})
 
 	before := runtime.NumGoroutine()
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil)
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
 	g.Watch()
 	g.Watch()
 

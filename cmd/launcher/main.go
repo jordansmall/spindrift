@@ -1360,7 +1360,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 
 	terminated := registryFor(s)
 	reaper := f.AsReaper()
-	gate := shutdown.NewGate(stopCh, abortCh, it, cf, reaper, terminated)
+	gate := shutdown.NewGate(stopCh, abortCh, it, cf, reaper, terminated, c.completeLabel)
 	gate.Watch()
 	// Settle is idempotent (gate.go), so deferring it here reaches every one
 	// of this function's early returns, not just the two happy-path arms that

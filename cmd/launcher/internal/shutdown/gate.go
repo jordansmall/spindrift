@@ -11,6 +11,7 @@ package shutdown
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 
@@ -33,6 +34,9 @@ type Gate struct {
 	cf     forge.CodeForge
 	reaper terminate.Reaper
 	reg    *terminate.Registry
+	// completeLabel is the label a settle writes once it has merged and
+	// landed, the one unsettled below reads. Empty disables that check.
+	completeLabel string
 
 	// mu also guards signalled, aborted, aborting, inflight, and claimed
 	// below.
@@ -69,7 +73,9 @@ type Gate struct {
 
 // NewGate returns a Gate reading stop/abort. Either channel may be nil,
 // meaning the caller offers no such request (the Gate is then inert).
-func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry) *Gate {
+// completeLabel is the caller's configured complete label, which unsettled
+// reads; pass "" to leave that check off.
+func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, completeLabel string) *Gate {
 	if reg == nil {
 		// A fresh Registry behaves exactly like the nil one it replaces
 		// (Marked reports false until something marks it), mirroring
@@ -77,14 +83,15 @@ func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeFo
 		reg = terminate.NewRegistry()
 	}
 	g := &Gate{
-		stop:     stop,
-		abort:    abort,
-		it:       it,
-		cf:       cf,
-		reaper:   reaper,
-		reg:      reg,
-		inflight: map[string]bool{},
-		claimed:  map[string]bool{},
+		stop:          stop,
+		abort:         abort,
+		it:            it,
+		cf:            cf,
+		reaper:        reaper,
+		reg:           reg,
+		completeLabel: completeLabel,
+		inflight:      map[string]bool{},
+		claimed:       map[string]bool{},
 	}
 	g.idle = sync.NewCond(&g.mu)
 	return g
@@ -141,7 +148,7 @@ func (g *Gate) reclaimInFlight() {
 	}
 	g.aborting = true
 	g.mu.Unlock()
-	AbortInFlight(g.it, g.cf, g.reaper, g.reg, nums)
+	AbortInFlight(g.it, g.cf, g.reaper, g.reg, g.completeLabel, nums)
 	g.mu.Lock()
 	g.aborting = false
 	g.idle.Broadcast()
@@ -307,7 +314,10 @@ func reclaimOne(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reap
 // AbortInFlight announces the abort, then calls terminate.Reclaim for each
 // num in sorted order, logging each failure to stderr rather than returning
 // it. Exported so RunContinuous's own abort path runs the same loop (#3522).
-func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, nums []string) {
+// completeLabel is the caller's configured complete label, which unsettled
+// reads; pass "" to leave that check off.
+func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, completeLabel string, nums []string) {
+	nums = unsettled(it, completeLabel, nums)
 	if len(nums) == 0 {
 		fmt.Println("==> abort requested; nothing in flight")
 		return
@@ -318,4 +328,29 @@ func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.R
 	for _, num := range sorted {
 		reclaimOne(it, cf, reaper, reg, num)
 	}
+}
+
+// unsettled drops the issues whose settle already wrote completeLabel. Both
+// abort paths forget an issue only once its settler has returned, so an abort
+// landing in the window between that settler's own terminal write and the
+// forgetting still finds a finished issue in the in-flight snapshot -- and
+// reclaiming one undoes a merge that already landed (#3522). Deciding it from
+// the tracker is what closes the race: the write is the settler's, not the
+// caller's, so the tracker holds the answer before the abort is even
+// observable. It fails open, keeping an issue in the reap when the lookup
+// errors or when the tracker does not carry dispatch state as a label at all
+// (Jira's statuses), since a missed reap strands a live Box while a redundant
+// one only repeats what Reclaim already does idempotently.
+func unsettled(it forge.IssueTracker, completeLabel string, nums []string) []string {
+	if completeLabel == "" {
+		return nums
+	}
+	var live []string
+	for _, num := range nums {
+		if iss, err := it.Issue(num); err == nil && slices.Contains(iss.Labels, completeLabel) {
+			continue
+		}
+		live = append(live, num)
+	}
+	return live
 }
