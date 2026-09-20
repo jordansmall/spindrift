@@ -162,3 +162,28 @@ func TestFactory_AppendTerminalLine_NoPassesYetCreatesInitialLog(t *testing.T) {
 		t.Errorf("initial log = %q, want it to contain the terminal line", got)
 	}
 }
+
+// AsReaper must return a nil interface for a nil *Factory, not a typed nil
+// (#3521/#3522): a typed nil boxed into terminate.Reaper compares non-nil and
+// defeats terminate.Reclaim's own nil guard.
+func TestFactory_AsReaper_NilFactoryYieldsNilInterface(t *testing.T) {
+	var f *Factory
+	if reaper := f.AsReaper(); reaper != nil {
+		t.Errorf("AsReaper() on nil *Factory = %v, want nil interface", reaper)
+	}
+}
+
+func TestFactory_AsReaper_RealFactoryYieldsItself(t *testing.T) {
+	f, err := NewFactory(Config{}, tempLogDir(t), runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+
+	reaper := f.AsReaper()
+	if reaper == nil {
+		t.Fatal("AsReaper() on real *Factory = nil, want non-nil")
+	}
+	if got, ok := reaper.(*Factory); !ok || got != f {
+		t.Errorf("AsReaper() = %v, want the same *Factory", reaper)
+	}
+}

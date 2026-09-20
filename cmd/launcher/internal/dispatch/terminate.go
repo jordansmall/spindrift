@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // boxNamePrefix is the prefix both BoxName and OrphanedIssues use, so the two
@@ -111,4 +113,15 @@ func (f *Factory) AppendTerminalLine(number, note string) error {
 	defer file.Close()
 	_, err = fmt.Fprintf(file, "\n[terminate] %s\n", note)
 	return err
+}
+
+// AsReaper boxes f into terminate.Reaper, returning a nil interface rather
+// than a typed nil for a nil Factory: a nil *Factory boxed unconditionally
+// compares non-nil and defeats terminate.Reclaim's own nil guard
+// (#3521/#3522).
+func (f *Factory) AsReaper() terminate.Reaper {
+	if f == nil {
+		return nil
+	}
+	return f
 }
