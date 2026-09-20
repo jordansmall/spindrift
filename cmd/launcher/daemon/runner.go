@@ -219,6 +219,55 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	return daemon.ChildResult{Issues: issues}, fmt.Errorf("daemon: wait child: %w", waitErr)
 }
 
+// runnerDoctorCommand is RunDoctor's exec seam: a test overrides it to skip
+// nix and run a scripted `/bin/sh -c ...` in its place — the same gesture
+// runnerExecCommand and runnerEvalCommand already make for RunChild and
+// SelfPath.
+var runnerDoctorCommand = exec.CommandContext
+
+// RunDoctor shells out to the pinned child's "doctor" subcommand as the
+// daemon's own startup preflight. It uses runnerDoctorCommand (context-aware)
+// so a cancelled ctx (SIGINT/SIGTERM during the preflight, before any Box is
+// running) tears the child down instead of hanging until SIGKILL — same
+// reasoning as SelfPath/ResolveRevision above.
+func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error) {
+	argv, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision})
+	if err != nil {
+		return 0, err
+	}
+
+	cmd := runnerDoctorCommand(ctx, argv[0], argv[1:]...)
+	// Both stdout and stderr go straight to the daemon's own stderr: the
+	// daemon's stdout is the JSON-lines event stream, so a doctor report
+	// written there would corrupt it, and the report itself is where the
+	// operator reads which row failed and its remedy. Unlike RunChild there
+	// are no announce lines to scan, so no pipe/scanner is needed here.
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	// cmd.Stdin left nil (os/exec gives the child /dev/null) so doctor takes
+	// its non-interactive path rather than sitting on a create-labels prompt
+	// nobody in a daemon context can answer; no Setpgid either, unlike
+	// RunChild — a Ctrl-C during the preflight should kill exactly it.
+
+	waitErr := cmd.Run()
+	if waitErr == nil {
+		return 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		// A non-zero exit is the preflight's own result, not a seam failure —
+		// the caller classifies what the code means. ExitCode() -1 is not an
+		// exit code at all: the child was ended by a signal (an operator's
+		// Ctrl-C, or ctx tearing it down), so there is no doctor verdict to
+		// classify and handing -1 to the caller would report it as one.
+		if code := exitErr.ExitCode(); code >= 0 {
+			return code, nil
+		}
+		return 0, fmt.Errorf("daemon: doctor ended without an exit code: %w", waitErr)
+	}
+	return 0, fmt.Errorf("daemon: run doctor: %w", waitErr)
+}
+
 // forwardStop sends SIGTERM to every currently running child, if any, so
 // each drains its in-flight Boxes rather than being abandoned — the same
 // gesture as dogfood.sh's request_stop and cmd/launcher/main.go's

@@ -549,3 +549,175 @@ func TestSelfPath_EvalFailureCarriesStderr(t *testing.T) {
 		t.Errorf("SelfPath() error = %q, want it to contain the captured stderr", err.Error())
 	}
 }
+
+// TestRunDoctor_ZeroExit points the doctor seam at a scripted shell command
+// instead of nix, and asserts a clean exit comes back as (0, nil).
+func TestRunDoctor_ZeroExit(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err != nil {
+		t.Fatalf("RunDoctor() unexpected error: %v", err)
+	}
+	if exit != 0 {
+		t.Errorf("exit = %d, want 0", exit)
+	}
+}
+
+// TestRunDoctor_NonZeroExitIsNotAnError asserts doctor's required-labels-
+// missing exit code (4) comes back as (4, nil): the caller, not the seam,
+// classifies what the code means.
+func TestRunDoctor_NonZeroExitIsNotAnError(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 4")
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err != nil {
+		t.Fatalf("RunDoctor() unexpected error: %v", err)
+	}
+	if exit != 4 {
+		t.Errorf("exit = %d, want 4", exit)
+	}
+}
+
+// TestRunDoctor_SeamFailure asserts a seam that cannot even start (a
+// non-existent executable) surfaces a non-nil error rather than folding into
+// the exit-code path above.
+func TestRunDoctor_SeamFailure(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/no/such/executable-doctor-seam")
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	_, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err == nil {
+		t.Fatal("RunDoctor() error = nil, want non-nil")
+	}
+}
+
+// TestRunDoctor_ArgvIsDoctorCommand captures the argv the seam receives and
+// asserts it is exactly what daemon.DoctorCommand builds: a pinned flakeref
+// carrying the revision, ending in "-- doctor", with no --max-jobs or
+// --max-parallel (those cap a child's dispatch wave; doctor dispatches
+// nothing to cap).
+func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+
+	var gotName string
+	var gotArgs []string
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		gotName = name
+		gotArgs = append([]string(nil), args...)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	r := newHostRunner(hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	if _, err := r.RunDoctor(context.Background(), revision); err != nil {
+		t.Fatalf("RunDoctor() unexpected error: %v", err)
+	}
+
+	want, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: "/repo", AppAttr: ".#", Revision: revision})
+	if err != nil {
+		t.Fatalf("daemon.DoctorCommand() unexpected error: %v", err)
+	}
+
+	got := append([]string{gotName}, gotArgs...)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("argv = %v, want %v", got, want)
+	}
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, revision) {
+		t.Errorf("argv %v does not carry revision %q", got, revision)
+	}
+	if !strings.HasSuffix(joined, "-- doctor") {
+		t.Errorf("argv %v does not end in %q", got, "-- doctor")
+	}
+	if strings.Contains(joined, "--max-jobs") || strings.Contains(joined, "--max-parallel") {
+		t.Errorf("argv %v carries a max-jobs/max-parallel flag, want neither", got)
+	}
+}
+
+// TestRunDoctor_CancelledContextTearsDownChild asserts a cancelled ctx tears
+// the child down rather than waiting it out, mirroring
+// TestResolveRevision_CancelledContext's shape for a different seam.
+func TestRunDoctor_CancelledContextTearsDownChild(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "sleep 30")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.RunDoctor(ctx, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("RunDoctor(cancelled ctx) error = nil, want non-nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunDoctor(cancelled ctx) did not return promptly")
+	}
+}
+
+// TestRunDoctor_UnparseableSpecSkipsSeam asserts an empty revision surfaces
+// DoctorCommand's own error without ever invoking the seam.
+func TestRunDoctor_UnparseableSpecSkipsSeam(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+	called := false
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		called = true
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	_, err := r.RunDoctor(context.Background(), "")
+	if err == nil {
+		t.Fatal("RunDoctor(empty revision) error = nil, want non-nil")
+	}
+	if called {
+		t.Error("RunDoctor(empty revision) invoked the seam, want it skipped")
+	}
+}
+
+// TestRunDoctor_SignalKilledIsSeamFailure asserts a doctor ended by a signal
+// (Ctrl-C reaching it, or ctx tearing it down) is a seam error, not the
+// pseudo-exit-code -1: there is no doctor verdict to classify, and a caller
+// handed (-1, nil) would report "doctor exit -1" at a Ctrl-C.
+func TestRunDoctor_SignalKilledIsSeamFailure(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "kill -TERM $$")
+	}
+
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err == nil {
+		t.Fatalf("RunDoctor() = (%d, nil), want a non-nil error for a signal-killed child", exit)
+	}
+	if !strings.Contains(err.Error(), "signal") {
+		t.Errorf("RunDoctor() error = %q, want it to name the signal that ended the child", err.Error())
+	}
+}
