@@ -1,7 +1,10 @@
 package registryproxy
 
 import (
+	"bytes"
+	"log"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	// ecosystem is test-only here: it supplies the real rewrite rows so the
@@ -23,4 +26,46 @@ func newWithEcosystemRows(t *testing.T, routes []Route) http.Handler {
 		t.Fatalf("New: %v", err)
 	}
 	return handler
+}
+
+// newUpstream starts a test upstream and registers its Close on cleanup, so
+// callers that deliberately close it early (e.g. to force a dial failure)
+// don't need their own defer -- Close is idempotent.
+func newUpstream(t *testing.T, h http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(func() { srv.Close() })
+	return srv
+}
+
+// newPlainProxy assigns prefixes and builds a handler with no rewrite rows.
+// It returns the routes back because AssignPrefixes mutates them in place --
+// callers need the assigned Prefix to build request paths.
+func newPlainProxy(t *testing.T, routes ...Route) (http.Handler, []Route) {
+	t.Helper()
+	assigned := AssignPrefixes(routes)
+	handler, err := New(assigned, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return handler, assigned
+}
+
+// serve drives a request through p and returns the recorded response.
+func serve(p http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	return rr
+}
+
+// captureLog redirects the standard logger into a buffer for the rest of t.
+// The package under test logs through the standard logger with no injectable
+// seam, so this swap is process-wide: no test using it may call t.Parallel().
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prevOutput) })
+	return &buf
 }

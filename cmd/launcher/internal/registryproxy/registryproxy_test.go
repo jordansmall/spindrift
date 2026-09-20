@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1092,10 +1091,7 @@ func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 
 	// Silence the default error handler's log line for the expected handshake
 	// failure.
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
+	captureLog(t)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil)
@@ -1122,10 +1118,7 @@ func TestNew_NeverLogsCredential(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
+	logBuf := captureLog(t)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil)
@@ -1262,10 +1255,7 @@ func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
+	captureLog(t)
 
 	paths := []string{
 		"/r0/config.json",
@@ -1322,10 +1312,7 @@ func TestNew_ConcurrentRequestsAcrossRoutesNoRace(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
+	captureLog(t)
 
 	var paths []string
 	for _, r := range assigned {
@@ -1741,10 +1728,7 @@ func TestNew_NeverLogsCredentialForRefusedPath(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
+	logBuf := captureLog(t)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
@@ -1809,10 +1793,7 @@ func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
 	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	t.Cleanup(func() { log.SetOutput(prevOutput) })
+	logBuf := captureLog(t)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
@@ -2091,10 +2072,7 @@ func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t
 	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	t.Cleanup(func() { log.SetOutput(prevOutput) })
+	logBuf := captureLog(t)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
@@ -2140,10 +2118,7 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	t.Cleanup(func() { log.SetOutput(prevOutput) })
+	logBuf := captureLog(t)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
@@ -2313,18 +2288,6 @@ func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d (body read error must become 502, not a hang or panic)", rr.Code, http.StatusBadGateway)
 	}
-}
-
-// captureLog redirects the standard logger into a buffer for the rest of t.
-// The package under test logs through the standard logger with no injectable
-// seam, so this swap is process-wide: no test using it may call t.Parallel().
-func captureLog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(prevOutput) })
-	return &buf
 }
 
 // The line names the route prefix, method, route-relative path and status, so
