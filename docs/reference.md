@@ -4861,7 +4861,13 @@ seam error, a `ResolveRevision` fetch error, or a `SelfPath` self-build
 evaluation error (see **Self-change halt** below) — no longer halts the pool
 by itself: the failing slot backs off for `daemonFailureBackoff` (default 1
 minute, `cmd/launcher/daemon/main.go`) and refills itself, and the sibling
-slots never notice. That alone would burn every slot on a fault no retry
+slots never notice. A `RunChild` seam error or an unrecognised exit code
+that lands once a stop has already been requested — a child killed on
+SIGTERM's default disposition before it installed its own handler, or one
+that raced the seam's own teardown — is carved out first and never counted
+at all: it is an ordinary shutdown, not evidence of a systemic fault, so it
+can no longer trip the breaker and turn a clean operator stop into a
+non-zero exit. That alone would burn every slot on a fault no retry
 clears, so these failures are also counted pool-wide by a circuit breaker
 (`cmd/launcher/internal/daemon/breaker.go`): `daemonBreakerThreshold`
 (default 5) of them within a trailing `daemonBreakerWindow` (default 15
@@ -4955,19 +4961,63 @@ a restart does fixes a missing label or an undersized podman machine, so a
 supervisor must treat 11 as a standing refusal to fix by hand, not a
 transient fault to bounce past.
 
-**Halting.** A `SIGINT` or `SIGTERM` to the daemon cancels the loop between
-iterations and forwards a `SIGTERM` to any running child, as a drain
-request — the same gesture as `dogfood.sh`'s `request_stop` and the
-launcher's own `notifyStopSignal`. It never kills a Box: the child chooses
-to drain, and a pool halt is the same courtesy at pool scale — halting
-cancels a context shared by every slot, so a sibling asleep in its idle
-wait or blocked in a fetch stops promptly, but any child already running
-is always waited out and always gets its `child_finish` before the process
-exits, never abandoned mid-run. The child is started in its own process group
+**Halting.** A `SIGINT` or `SIGTERM` to the daemon is the first of two
+signals it consumes (`handleStopSignals`, `cmd/launcher/daemon/main.go`):
+it cancels the loop between iterations and forwards a `SIGTERM` to any
+running child, as a drain request — the same gesture as `dogfood.sh`'s
+`request_stop` and the launcher's own `notifyStopSignal`. It never kills a
+child that is already running its Boxes: the child chooses to drain, and a
+pool halt is the same courtesy at pool scale — halting cancels a context
+shared by every slot, so a sibling asleep in its idle wait or blocked in a
+fetch stops promptly, but any child already running is always waited out
+and always gets its `child_finish` before the process exits, never
+abandoned mid-run — the race window just below is the one exception to that
+courtesy. The daemon implements no drain or reap of its own: it only
+forwards signals and waits, since
+`daemon.Loop`'s own `wg.Wait()` is what waits every child out, before and
+after the escalation below alike — the launcher, not the daemon, is what
+holds the in-flight Boxes. The child is started in its own process group
 (`cmd/launcher/daemon/runner.go`), so a Ctrl-C aimed at the daemon's own
 foreground process group — which would otherwise deliver a group-wide
-SIGINT straight to the child — spares it; only the explicit forwarded
-SIGTERM reaches it.
+SIGINT straight to the child — spares it; only a signal the daemon forwards
+explicitly reaches it.
+
+A child that starts in the race window between the loop's last
+cancellation check and its own publication into the children map is still
+signalled: `forwardStop` counts every stop request it has forwarded, and
+`RunChild` replays that count onto the child the moment it publishes
+(`cmd/launcher/daemon/runner.go`). But that replay fires the instant
+`RunChild` publishes — in production, microseconds after `nix run` starts
+and long before the launcher has gotten far enough to install its own
+handler — so a child caught in this window typically dies on the signal's
+default disposition instead of draining: an abrupt end for a Box that had
+only just started, chosen over the alternative of a Box that runs to
+completion after the operator asked everything to stop. That is also why
+a signalled child's exit is spared the circuit breaker (`stopOnCancel`,
+`cmd/launcher/internal/daemon/loop.go`): an unrecognised exit reaching that
+guard is this race, not evidence of a systemic fault.
+
+A second `SIGINT`/`SIGTERM` to the daemon is the escalation:
+`handleStopSignals` forwards it too, but as a `SIGINT` this time rather
+than a repeat `SIGTERM` — two identical signals sent back-to-back can
+coalesce into a single delivery (the kernel keeps one pending bit per
+signal number, not a queue), so `forwardStop` escalates by switching kind
+on the second call rather than repeating the first. The child counts
+deliveries, not kinds (issue #3521), so whichever kind lands as its second
+signal is what makes it abort the drain — reap its in-flight Boxes and
+release their issues back to the dispatchable pool — instead of waiting
+the drain out to completion. The daemon's own signal channel is buffered
+at 2 so that an already-delivered second signal is never dropped for want
+of room while the handler goroutine is between receives — it cannot buy
+back a repeat of the same signal number arriving in the same instant, since
+that coalescing happens earlier, in the kernel, before either delivery
+reaches the channel; an operator wanting a reliable escalation should send
+the other kind, or leave a gap between the two. A third and later signal
+is a genuine no-op: `handleStopSignals` returns after the second, `signal.Stop`
+is never called, and nothing else ever reads the channel again — a
+persistent operator has no further escalation to give past the second
+signal, only a `SIGKILL` on the daemon itself, which orphans the child's
+isolated process group rather than killing it.
 
 A `systemctl stop` sends the daemon a `SIGTERM`, which the daemon
 forwards as that same drain request — but only under a unit that keeps
@@ -4975,11 +5025,17 @@ systemd's own `SIGTERM` away from the child. The default
 `KillMode=control-group` signals *every* process in the unit's cgroup,
 and the process-group isolation above isolates a process group, not a
 cgroup, so the child launcher receives systemd's `SIGTERM` as well as the
-daemon's forwarded one. Two signals is the abort escalation, so under the
-default `KillMode` a plain `systemctl stop` reaps the in-flight Boxes
-instead of draining them — the opposite of the intent. Set
-`KillMode=mixed`, which sends the stop signal to the main process alone,
-leaving the forwarded drain request as the child's only signal:
+daemon's own forwarded one — and the daemon's first forwarded signal is
+always a `SIGTERM` too, so these two are the same kind, sent close
+together — the very coalescing the escalation above switches kind to avoid.
+The kernel may fold the two into a single delivery, in which case the child
+sees one signal and drains, or it may keep them distinct, in which case the
+child counts two and aborts. Under the default `KillMode` a plain
+`systemctl stop` is therefore a race between draining and reaping rather
+than a reliable path to either — unpredictable, which is its own reason to
+avoid it. Set `KillMode=mixed`, which sends the stop signal to the main
+process alone, leaving the forwarded drain request as the child's only
+signal:
 
 ```
 [Service]
@@ -5009,26 +5065,25 @@ to avoid. `TimeoutStopSec=infinity` is the honest setting for a unit that
 must never strand a Box; any finite value is a bet that no drain enters
 self-heal or hits a merge conflict.
 
-An operator unwilling to wait out that ceiling has the same escalation
-described above, but it has to reach the *child launcher*, and a second
-`systemctl stop` does not: the unit is already stopping, and a second
-signal to the daemon is a deliberate no-op (below).
-`systemctl kill -s TERM <unit>` signals every process in the unit's
-cgroup, the child included, and `kill -TERM <child pid>` does the same
-for a daemon started outside systemd. Under `KillMode=mixed` that is the
-child's second signal, so it aborts the drain, reaping the in-flight
-Boxes and releasing their issues rather than waiting out the timeout.
-Under the default `KillMode` there is no escalation left to give: the
-child consumed both of its signals at `systemctl stop` and ignores every
-later one.
-
-A second `SIGINT`/`SIGTERM` to the *daemon* is deliberately a no-op: it
-only ever consumes one signal (`handleStopSignal`,
-`cmd/launcher/daemon/main.go`), so a repeat has nothing listening for it.
-The guarantee is that a running Box is never killed, which is why the
-escalation above is aimed at the child rather than at the daemon:
-`SIGKILL` on the daemon leaves the child's isolated process group behind,
-orphaning it rather than killing it.
+An operator unwilling to wait out that ceiling now reaches the same
+escalation by signalling the daemon's own main process a second time —
+it no longer has to reach the *child launcher* directly. `systemctl kill
+-s TERM --kill-whom=main <unit>` under systemd, or a second `kill -TERM
+<daemon pid>` outside it, is the daemon's second signal; a second
+`systemctl stop` is not, since systemd treats a unit already deactivating
+as a no-op and never resends the stop signal. `--kill-whom=main` matters
+under `KillMode=mixed`: it targets the daemon alone, which then forwards
+that second stop request as the child's second signal — a `SIGINT` this
+time, since `forwardStop` escalates by switching kind rather than
+repeating `SIGTERM` — the signal the child counts as its own abort
+escalation. Under the default `KillMode=control-group`, though, there is
+nothing reliable left to escalate: the first `systemctl stop` already
+delivered systemd's own `SIGTERM` to the child alongside the daemon's own
+first forwarded `SIGTERM`, the same coalescing race described above, so
+whether that single `systemctl stop` already aborted the drain depends on
+whether the kernel folded those two `SIGTERM`s into one delivery or kept
+them distinct — the same reason `KillMode=mixed` is the recommended
+setting above.
 
 **Awake window.** `DAEMON_AWAKE_WINDOW` (default empty, `lib/env-schema.nix`)
 names a daily local-time span the daemon may start a new Box in, as
@@ -5096,8 +5151,10 @@ slot's failure. `awake_close` and `awake_open` are pool-wide transitions,
 not per-slot events — however many slots park on one closing, the stream
 carries exactly one `awake_close`, and `awake_open` never appears without
 a preceding `awake_close` — but each still carries a `slot`: whichever
-slot happened to observe the transition. `halt` is the only event with no
-`slot` at all, since it belongs to no one slot.
+slot happened to observe the transition. `halt` and `shutdown` are the only
+events with no `slot` at all, since neither belongs to one slot: `halt` is
+the pool-wide exit, and `shutdown` is emitted from the signal handler,
+which runs outside every slot's own goroutine.
 
 | event | fields | when |
 |-------|--------|------|
@@ -5112,6 +5169,7 @@ slot happened to observe the transition. `halt` is the only event with no
 | `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | a poll during the shared idle sleep, entered because every configured kind was gated and at least one of them was jammed, found `BASE_BRANCH`'s tip had moved since this slot's last child ran, so the slot reset every currently-jammed kind's backoff and started its next iteration at once instead of sleeping out the rest of the wait. `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
+| `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`, never started; `reason` is prefixed by cause, now including `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal instead carries the same `context-cancelled: …` reason a context cancellation anywhere else in the loop does), and `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above) alongside a halt-mapped child outcome, a context cancellation, a tripped breaker, or an invalid startup config |
 
 **What this first cut doesn't do.** The instance lock, the self-change halt
