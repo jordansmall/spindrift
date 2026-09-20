@@ -162,3 +162,12 @@ type Env struct {
 	ReviewModelOverride  string // dispatch.go: $BOX_REVIEW_MODEL_OVERRIDE
 	ReviewEffortOverride string // dispatch.go: $BOX_REVIEW_EFFORT_OVERRIDE
 }
+
+// kind is the DispatchKind fallback every reader of the field must apply
+// identically: empty defaults to defaultDispatchKind.
+func (e Env) kind() string {
+	if e.DispatchKind == "" {
+		return defaultDispatchKind
+	}
+	return e.DispatchKind
+}
