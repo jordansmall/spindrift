@@ -1319,6 +1319,7 @@ the authoritative list.
 | `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the freshness probe before every launch; exits with a new documented code when the probe finds the loaded image or the loaded host launcher stale (see the [exit-code table](#dogfood-loop)) |
 | `DAEMON_APP`           | `.#`    | — (post-freeze; no legacy alias — set `dispatch.daemonApp`) | flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision — the Consumer's own CLI app, e.g. `.#` or `.#dogfood-bwrap`; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
 | `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host — see [Daemon](#daemon) |
+| `DAEMON_SELF_APP`      | `.#daemon` | — (post-freeze; no legacy alias — set `dispatch.daemonSelfApp`) | flake app attribute of the daemon itself, evaluated at each fetched tip to notice its own build changed and halt — distinct from `DAEMON_APP`, the child Dispatch app; a Consumer that re-exports the daemon under another top-level attribute (e.g. spindrift's own `.#dogfood-bwrap-daemon`) must set this to match, or the check would evaluate a different harness's daemon and report a permanent, spurious change; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
 | `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap); also forwarded into the Box, where the orchestrator's own review loop applies the same threshold to its own fresh, Box-local sum (implement/fix/review passes plus dispatched workers in *this* Box only, not the host's cross-Box figure) to commit to a terminal land pass instead of a further BLOCK-triggered review round |
@@ -4670,9 +4671,40 @@ startup rather than being clamped to some default — a pool that runs
 nothing while looking healthy is worse than a daemon that refuses to
 start.
 
+**Instance lock.** Startup also takes a non-blocking exclusive `flock` on
+`spindrift-daemon.lock` (`AcquireCheckoutLock`,
+`cmd/launcher/internal/daemon/lock.go`) — not under the checkout's working
+tree, but inside its git dir (`git rev-parse --absolute-git-dir`,
+`cmd/launcher/daemon/main.go`'s `gitDir`), since the daemon's own contract
+is that it never mutates the operator's tree, and `--absolute-git-dir` is
+itself per-checkout for a linked `git worktree`, exactly the granularity
+"one daemon per checkout" means. Two daemons against one checkout would
+each hold `MAX_PARALLEL` slots, doubling the real concurrency and making
+the `MEMORY_LIMIT` × `MAX_PARALLEL` sizing above a lie; the lock is what
+keeps that arithmetic honest. It covers both Dispatch kinds — a `dispatch`
+daemon and a `research` daemon against the same checkout is exactly the
+doubled concurrency the lock refuses, so running both against one checkout
+needs two checkouts, which is the supported way to do it.
+
+The lock never blocks and never retries: a second instance finds it
+already held and exits at once rather than waiting, so an operator sees
+"already running" immediately instead of a hang. Its diagnostic names the
+holder — the identity line the holder stamped into the lock file
+(`pid=`, `host=`, `kind=`, `started=`, `exe=`) — with enough to go find
+the process. The lock lives on the open file descriptor, so the kernel
+drops it the instant the holder's process ends, including an uncatchable
+`SIGKILL`: a fresh daemon can always reacquire it with no manual cleanup,
+and the lock file itself is deliberately never deleted on release —
+deleting it would only reopen a race with a concurrent acquirer. A refused
+acquire is recorded in the event stream as well as on stderr: a `halt`
+event whose `reason` is prefixed `instance-lock:`, and the daemon exits 1.
+
 `DAEMON_APP` (default `.#`) is the flake app attribute the daemon
 re-invokes for each child — see the `DAEMON_APP` row in [Advanced
-tuning](#advanced-tuning).
+tuning](#advanced-tuning). `DAEMON_SELF_APP` (default `.#daemon`) is its
+sibling: the flake app attribute of the daemon itself, evaluated against
+each fetched tip to notice its own build changed — see the
+`DAEMON_SELF_APP` row in the same table and **Self-change halt** below.
 
 Each child's exit code is interpreted the same way `spindrift`'s own exit
 codes are (see the [exit-code table](#dogfood-loop) in Dogfood loop above,
@@ -4708,7 +4740,8 @@ over.
 
 **Failures.** An unclassified failure — an exit code `Interpret`
 (`cmd/launcher/internal/daemon/outcome.go`) doesn't recognise, a `RunChild`
-seam error, or a `ResolveRevision` fetch error — no longer halts the pool
+seam error, a `ResolveRevision` fetch error, or a `SelfPath` self-build
+evaluation error (see **Self-change halt** below) — no longer halts the pool
 by itself: the failing slot backs off for `daemonFailureBackoff` (default 1
 minute, `cmd/launcher/daemon/main.go`) and refills itself, and the sibling
 slots never notice. That alone would burn every slot on a fault no retry
@@ -4727,6 +4760,74 @@ to argue with them. The halt-mapped exits (5/6/7) are untouched by the
 breaker: a tainted host, an invalid config, and a signalled stop still halt
 the pool at once, since no retry clears the first two and the third is the
 operator's own request.
+
+**Self-change halt.** At each slot's iteration boundary — after that
+iteration's own fetch resolves the tip, before any child is launched — the
+daemon evaluates its own app attribute at the fetched revision and compares
+the resulting program store path against its own (`checkSelfBuild`,
+`cmd/launcher/internal/daemon/pool.go`). The attribute is `DAEMON_SELF_APP`
+(default `.#daemon`), the daemon's own app, distinct from `DAEMON_APP`, the
+child Dispatch app the slot is about to launch — see the `DAEMON_APP` note
+above. A Consumer that re-exports the daemon under a different top-level
+name must set it to match; spindrift's own bwrap harness does exactly that
+(`.#dogfood-bwrap-daemon`, `nix/fixtures.nix`), and without it the check
+would evaluate a different harness's daemon entirely and report a
+permanent, spurious change on every iteration.
+
+The evaluation is `nix eval --raw
+git+file://<checkout>?rev=<tip>&allRefs=1#apps.<system>.<attr>.program`
+(`SelfCommand`, `cmd/launcher/internal/daemon/command.go`) — the same
+pinned flakeref shape every child gets, with the attribute path spelled out
+in full because `nix eval`'s own fragment resolution searches
+`packages`/`legacyPackages`, not `apps`. The daemon's own path comes from
+`SPINDRIFT_DAEMON_PROGRAM`, an env var the generated wrapper
+(`lib/mkHarness.nix`'s `daemonWrapper`) exports from its own `$0` at
+runtime — a derivation cannot interpolate its own store path into its own
+build text. A daemon started any other way (`go run` during development,
+say) cannot know its own build, so rather than guess, the check disables
+itself and says so on stderr.
+
+On a mismatch the pool halts through the same machinery every other halt
+uses (below): any child already running is waited out and still gets its
+`child_finish`, never killed — the halting slot simply starts no new
+child. **It never re-execs itself**: a freshly merged but broken daemon
+must not auto-load with nobody awake. The halt carries its own exit code
+(below) precisely so an operator who *does* want self-update can compose
+it with an ordinary service restart policy and get that behaviour by
+choice, not by default:
+
+```
+[Service]
+Restart=on-failure
+RestartForceExitStatus=10
+```
+
+— with the obvious caveat that under that policy the daemon started next
+is whatever just merged, so a broken merge restarts straight into the
+broken build, which is exactly why this is opt-in rather than the default.
+
+An evaluation that *fails* — a broken flake, a network blip reaching `nix
+eval` — is not treated as a change: it is the same class of unclassified
+iteration-boundary failure as a fetch error (see **Failures** above), so
+the slot backs off for `FailureBackoff` (a `backoff` event whose `reason`
+is prefixed `self-build:`) and retries from a fresh fetch, and only a
+persistent failure reaches the pool-wide breaker. It isn't simply ignored,
+because silently swallowing it would leave this safety property off for as
+long as the evaluation stays broken.
+
+The daemon *process*'s own exit code is a separate, smaller taxonomy from
+the child's table above — worth keeping apart, since both can appear in
+the same log:
+
+| exit | meaning |
+|------|---------|
+| 0    | a clean stop — an operator signal, or a child that drained and reported a signalled stop |
+| 10   | the daemon's own build changed at the fetched tip and it halted at an iteration boundary |
+| 1    | anything else: a startup failure (including a refused instance lock), or any other halt — the event stream carries the specific reason |
+
+10 sits deliberately outside the 0–7 band the *child* launcher's exit codes
+occupy, so the two taxonomies can never be confused when both appear in one
+log (`exitSelfChanged`, `cmd/launcher/daemon/main.go`).
 
 **Halting.** A `SIGINT` or `SIGTERM` to the daemon cancels the loop between
 iterations and forwards a `SIGTERM` to any running child, as a drain
@@ -4882,13 +4983,14 @@ slot happened to observe the transition. `halt` is the only event with no
 | `idle` | `time`, `kind`, `wait`, `slot` | entering an idle wait after `queue-empty`, or after `none-dispatchable` with a sibling slot's child running; `wait` carries the current pool-wide idle backoff, so a widening `wait` across successive `idle` events is how a growing backoff reaches the stream |
 | `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | entering an idle wait after `none-dispatchable` with the whole pool otherwise idle — nothing running and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries the current pool-wide idle backoff, same as `idle` above |
 | `tip_moved` | `time`, `kind`, `revision`, `slot`, `reason` | a none-dispatchable wait (exit 3) was cut short: a poll between its `IdleFloor`-sized sleep slices found `BASE_BRANCH`'s tip had moved since this slot's last child ran, so the slot reset its idle backoff and started its next iteration at once instead of sleeping out the rest of the wait. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
-| `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself |
+| `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
-| `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the loop is about to return and the process is about to exit |
+| `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`, never started; `reason` is prefixed by cause, now including `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above) and `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above) alongside a halt-mapped child outcome, a context cancellation, a tripped breaker, or an invalid startup config |
 
-**What this first cut doesn't do.** Per-kind backoff and the instance
-lock are later tickets; the daemon does now own pool concurrency
-(`MAX_PARALLEL`, above) and does override the Consumer's own
+**What this first cut doesn't do.** Per-kind backoff is a later ticket; the
+instance lock and the self-change halt (issue #3543, above) are already in,
+alongside the pool concurrency this daemon does now own (`MAX_PARALLEL`,
+above) and does override the Consumer's own
 `dispatch.maxJobs`/`dispatch.maxParallel` for every child it starts — each
 child is pinned to exactly one Box (`--max-jobs 1 --max-parallel 1`, see
 **Pool** above) regardless of the Consumer's configured wave size, since
