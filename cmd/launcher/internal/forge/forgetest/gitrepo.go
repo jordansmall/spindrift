@@ -35,13 +35,27 @@ func NewGitRepoFixture(t *testing.T, base string) *GitRepoFixture {
 	// whose own post-receive gc obeys receive.autogc, so both need disabling.
 	g.run(bare, "config", "gc.auto", "0")
 	g.run(bare, "config", "receive.autogc", "false")
-	g.run("", "clone", bare, work)
+	g.clone(work)
 	g.run(work, "checkout", "-B", base)
 	g.writeFile(filepath.Join(work, "base.txt"), "base\n")
 	g.run(work, "add", "base.txt")
 	g.run(work, "commit", "-m", "base")
 	g.run(work, "push", "-u", "origin", base)
 	return g
+}
+
+// clone disables auto-gc in the clone's own config, the way NewGitRepoFixture
+// does for the bare repo: a detached `git gc --auto`, forked by any of the
+// commands the adapter under test runs directly in that clone, can still be
+// writing into .git/objects when t.TempDir()'s RemoveAll runs, failing the
+// test with "directory not empty". The knobs differ from the bare side's
+// because the commands do — a clone receives no pushes, so receive.autogc has
+// nothing to cover here, while `git maintenance`'s own auto-run, which
+// ordinary commands like commit and fetch trigger and which gc.auto alone does
+// not cover, does.
+func (g *GitRepoFixture) clone(work string) {
+	g.t.Helper()
+	g.run("", "clone", "--config", "gc.auto=0", "--config", "maintenance.auto=false", g.Bare, work)
 }
 
 func (g *GitRepoFixture) run(dir string, args ...string) {
@@ -64,7 +78,7 @@ func (g *GitRepoFixture) writeFile(path, contents string) {
 func (g *GitRepoFixture) SeedBranch(branch, num string) {
 	g.t.Helper()
 	work := g.t.TempDir()
-	g.run("", "clone", g.Bare, work)
+	g.clone(work)
 	g.run(work, "checkout", g.base)
 	g.run(work, "checkout", "-b", branch)
 	g.writeFile(filepath.Join(work, "feature-"+num+".txt"), "feature\n")
@@ -78,7 +92,7 @@ func (g *GitRepoFixture) SeedBranch(branch, num string) {
 func (g *GitRepoFixture) AdvanceBranch(branch, marker string) {
 	g.t.Helper()
 	work := g.t.TempDir()
-	g.run("", "clone", g.Bare, work)
+	g.clone(work)
 	g.run(work, "checkout", branch)
 	g.writeFile(filepath.Join(work, "advance-"+marker+".txt"), "advance\n")
 	g.run(work, "add", "advance-"+marker+".txt")
@@ -102,7 +116,7 @@ func (g *GitRepoFixture) BranchSHA(branch string) string {
 func (g *GitRepoFixture) AdvanceBase() {
 	g.t.Helper()
 	work := g.t.TempDir()
-	g.run("", "clone", g.Bare, work)
+	g.clone(work)
 	g.run(work, "checkout", g.base)
 	g.writeFile(filepath.Join(work, "later.txt"), "later\n")
 	g.run(work, "add", "later.txt")
@@ -116,7 +130,7 @@ func (g *GitRepoFixture) AdvanceBase() {
 func (g *GitRepoFixture) Landed(num string) bool {
 	g.t.Helper()
 	work := g.t.TempDir()
-	g.run("", "clone", g.Bare, work)
+	g.clone(work)
 	g.run(work, "checkout", g.base)
 	got, err := os.ReadFile(filepath.Join(work, "feature-"+num+".txt"))
 	return err == nil && string(got) == "feature\n"
@@ -127,7 +141,7 @@ func (g *GitRepoFixture) Landed(num string) bool {
 func (g *GitRepoFixture) Rebased(ref string) bool {
 	g.t.Helper()
 	work := g.t.TempDir()
-	g.run("", "clone", g.Bare, work)
+	g.clone(work)
 	cmd := exec.Command("git", "-C", work, "merge-base", "--is-ancestor", "origin/"+g.base, "origin/"+ref)
 	return cmd.Run() == nil
 }
@@ -137,7 +151,7 @@ func (g *GitRepoFixture) Rebased(ref string) bool {
 func (g *GitRepoFixture) ConflictBase(num string) {
 	g.t.Helper()
 	work := g.t.TempDir()
-	g.run("", "clone", g.Bare, work)
+	g.clone(work)
 	g.run(work, "checkout", g.base)
 	g.writeFile(filepath.Join(work, "feature-"+num+".txt"), "conflicting base change\n")
 	g.run(work, "add", "feature-"+num+".txt")
