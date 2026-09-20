@@ -69,6 +69,7 @@ let
     // (import ./gh-token-intervals.nix common)
     // (import ./agent-workflow-smoke.nix common)
     // (import ./changelog.nix common)
+    // (import ./versioning-prompt-template-carve-out.nix common)
     // (import ./go.nix common)
     // (import ./roster.nix common)
     // (import ./promptassembly.nix common)
