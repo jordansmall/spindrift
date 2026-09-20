@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -2943,6 +2944,19 @@ func waitOn[T any](t *testing.T, ch <-chan T, msg string) T {
 	}
 }
 
+// assertReclaimedToDispatchable fails t unless fc.TransitionStateCalls
+// contains a num InProgress->Dispatchable transition, the reclaim check
+// three of the abort tests below share.
+func assertReclaimedToDispatchable(t *testing.T, fc *forge.Fake, num string) {
+	t.Helper()
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == num && call.From == forge.InProgress && call.To == forge.Dispatchable {
+			return
+		}
+	}
+	t.Fatalf("TransitionStateCalls: got %+v, want #%s InProgress->Dispatchable", fc.TransitionStateCalls, num)
+}
+
 // TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons covers
 // #3521 items 1 and 2: an Abort closed while one Box is in flight reclaims it
 // (kill + tracker back to Dispatchable) rather than waiting for it to finish
@@ -3455,15 +3469,7 @@ func TestRunContinuous_AbortReclaimInFlight_HoldsReturnUntilTransitioned(t *test
 	if !errors.Is(err, ErrSignalledStop) {
 		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
 	}
-	var reclaimed bool
-	for _, call := range fc.TransitionStateCalls {
-		if call.Num == "1" && call.From == forge.InProgress && call.To == forge.Dispatchable {
-			reclaimed = true
-		}
-	}
-	if !reclaimed {
-		t.Fatalf("TransitionStateCalls: got %+v, want #1 InProgress->Dispatchable", fc.TransitionStateCalls)
-	}
+	assertReclaimedToDispatchable(t, fc, "1")
 	if !strings.Contains(out, "==> abort requested; terminating 1 outstanding Box(es)") {
 		t.Fatalf("stdout: got %q, want the abort-terminating line for #1 alone", out)
 	}
@@ -3561,19 +3567,205 @@ func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *t
 	if len(gate.Fake.KillCalls) != 1 || gate.Fake.KillCalls[0] != "agent-issue-1" {
 		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-1]", gate.Fake.KillCalls)
 	}
-	var reclaimed bool
-	for _, call := range fc.TransitionStateCalls {
-		if call.Num == "1" && call.From == forge.InProgress && call.To == forge.Dispatchable {
-			reclaimed = true
-		}
-	}
-	if !reclaimed {
-		t.Fatalf("TransitionStateCalls: got %+v, want #1 InProgress->Dispatchable", fc.TransitionStateCalls)
-	}
+	assertReclaimedToDispatchable(t, fc, "1")
 	if len(s.FailCalls) != 0 || len(s.SettleCalls) != 0 {
 		t.Fatalf("Fail/Settle calls: got %+v / %+v, want none (abort abandons)", s.FailCalls, s.SettleCalls)
 	}
 	if !strings.Contains(out, "terminated by operator; abandoning") {
 		t.Fatalf("stdout: got %q, want the abandon line from the reclaimed Box's own goroutine", out)
+	}
+}
+
+// awaitingSettle wraps settle.Fake so a Settle call behaves like a real
+// in-flight settle that is genuinely still polling when the abort lands
+// (#3523), mirroring how the real settle.Settle's watch.poll loop rechecks
+// s.terminated() at every checkpoint. The poll (see Settle below) never
+// sleeps, so there is no timer for a test to hide timing assumptions behind.
+// release lets a test end a Settle call the other way, covering the
+// graceful-drain case where nothing interrupts it.
+type awaitingSettle struct {
+	*settle.Fake
+	reg *terminate.Registry
+
+	started chan string
+	release chan struct{}
+
+	mu      sync.Mutex
+	outcome map[string]string
+}
+
+func newAwaitingSettle(reg *terminate.Registry) *awaitingSettle {
+	return &awaitingSettle{
+		Fake:    settle.NewFake(),
+		reg:     reg,
+		started: make(chan string, 4),
+		release: make(chan struct{}),
+		outcome: map[string]string{},
+	}
+}
+
+// awaitingSettleSpinDeadline bounds the busy-spin in Settle below well past
+// every caller's own 2s waitOn timeout, so a regression that never marks the
+// registry or closes release stops this goroutine instead of pinning a core
+// for the rest of the package run.
+const awaitingSettleSpinDeadline = 10 * time.Second
+
+// Settle spins on reg.Marked via runtime.Gosched rather than a channel
+// receive because terminate.Registry exposes no notification seam
+// (Begin/Mark/Marked only), and adding one would be production code grown
+// solely for this test's need.
+func (a *awaitingSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
+	a.started <- num
+	deadline := time.Now().Add(awaitingSettleSpinDeadline)
+	for {
+		if a.reg.Marked(num, gen) {
+			a.recordOutcome(num, "marked")
+			a.Fake.Settle(d, num, gen, result)
+			return
+		}
+		select {
+		case <-a.release:
+			a.recordOutcome(num, "released")
+			a.Fake.Settle(d, num, gen, result)
+			return
+		default:
+			if time.Now().After(deadline) {
+				a.recordOutcome(num, "spin-deadline-exceeded")
+				return
+			}
+			runtime.Gosched()
+		}
+	}
+}
+
+func (a *awaitingSettle) recordOutcome(num, why string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.outcome[num] = why
+}
+
+func (a *awaitingSettle) outcomeFor(num string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.outcome[num]
+}
+
+// setupAbortDrainSettleTest builds the shared fixture for the abort and
+// drain settle tests below: a single dispatchable issue #1, a Box that
+// finishes immediately (so it is Settle, not the Box, still in flight when
+// termination lands), and an awaitingSettle wired to a fresh registry.
+func setupAbortDrainSettleTest(t *testing.T) (c Config, session *Session, fc *forge.Fake, f *dispatch.Factory, as *awaitingSettle, fake *FakeQueue, fresh func() (bool, bool, string)) {
+	c = baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc = forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fake = NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}}
+	fresh = func() (bool, bool, string) { return true, true, "fresh" }
+
+	// RunFunc unset: the Box finishes immediately, so it is Settle, not the
+	// Box, that is still running when termination lands.
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f = testFactory(t, dir, fr)
+
+	reg := terminate.NewRegistry()
+	as = newAwaitingSettle(reg)
+	session = &Session{Terminated: reg}
+	return c, session, fc, f, as, fake, fresh
+}
+
+// TestRunContinuous_AbortWhileSettleInFlight_StopsPromptlyAndReleasesIssue
+// covers #3523's end-to-end case none of #3521's own abort tests exercise:
+// the Box has already finished and it is the *settle*, not the Box, still in
+// flight when Abort closes. continuous.go calls s.Settle before
+// delete(inflight, num), so a still-polling settle's issue is still in
+// reclaimInFlight's snapshot — this pins that the reclaim's mark is what lets
+// the polling settle stop, not some unrelated timeout or race.
+func TestRunContinuous_AbortWhileSettleInFlight_StopsPromptlyAndReleasesIssue(t *testing.T) {
+	c, session, fc, f, as, fake, fresh := setupAbortDrainSettleTest(t)
+
+	abort := make(chan struct{})
+	c.Abort = abort
+
+	var err error
+	out := captureStdout(t, func() {
+		resultCh := make(chan error, 1)
+		go func() {
+			resultCh <- RunContinuous(c, session, fc, fc, f, as, fake, fresh)
+		}()
+
+		waitOn(t, as.started, "settle was never invoked for issue #1")
+		close(abort)
+
+		err = waitOn(t, resultCh, "RunContinuous did not return")
+	})
+
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if got := as.outcomeFor("1"); got != "marked" {
+		t.Fatalf("settle outcome: got %q, want %q (it must stop because it observed the abort's mark, not for any other reason)", got, "marked")
+	}
+	assertReclaimedToDispatchable(t, fc, "1")
+	iss, _ := fc.Issue("1")
+	if containsLabel(iss.Labels, c.CompleteLabel) {
+		t.Fatalf("labels: got %v, want no %s label (settle was abandoned, not completed)", iss.Labels, c.CompleteLabel)
+	}
+	if containsLabel(iss.Labels, c.FailedLabel) {
+		t.Fatalf("labels: got %v, want no %s label (abort never fails an issue)", iss.Labels, c.FailedLabel)
+	}
+	if !strings.Contains(out, "==> abort requested; terminating 1 outstanding Box(es)") {
+		t.Fatalf("stdout: got %q, want the abort-terminating line", out)
+	}
+}
+
+// TestRunContinuous_DrainDuringSettle_NotInterruptedRunsToCompletion is the
+// negative case #3523 pins alongside the abort test above: a graceful drain
+// (cfg.Stop alone, never cfg.Abort) must let an in-flight settle finish on
+// its own, never cutting it short the way an abort does. If a future change
+// ever made a drain interrupt a settle, this fails.
+func TestRunContinuous_DrainDuringSettle_NotInterruptedRunsToCompletion(t *testing.T) {
+	c, session, fc, f, as, fake, fresh := setupAbortDrainSettleTest(t)
+
+	stop := make(chan struct{})
+	c.Stop = stop
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- RunContinuous(c, session, fc, fc, f, as, fake, fresh)
+	}()
+
+	waitOn(t, as.started, "settle was never invoked for issue #1")
+	close(stop)
+
+	// RunContinuous joins on outstanding dropping to 0 before it can return
+	// (continuous.go's `for outstanding > 0 { idle.Wait() }`), and outstanding
+	// only drops once Settle returns, so it still being outstanding here,
+	// well after Stop closed, is itself proof the drain did not cut the
+	// settle short.
+	select {
+	case got := <-resultCh:
+		t.Fatalf("RunContinuous returned (%v) while the settle was still in flight after Stop alone", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(as.release)
+
+	err := waitOn(t, resultCh, "RunContinuous did not return after the settle was released")
+
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if got := as.outcomeFor("1"); got != "released" {
+		t.Fatalf("settle outcome: got %q, want %q (a graceful drain must never mark the registry)", got, "released")
+	}
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == "1" && call.To == forge.Dispatchable {
+			t.Fatalf("TransitionStateCalls: got a Dispatchable transition of #1 under a plain drain: %+v", call)
+		}
 	}
 }
