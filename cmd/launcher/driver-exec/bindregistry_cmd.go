@@ -461,7 +461,7 @@ func buildIntreeHostRewrites(routes []registrymanifest.Route, port int) ([]bindr
 		route := group[0]
 		rewrites = append(rewrites, bindregistry.HostRewrite{
 			UpstreamHost: route.UpstreamHost,
-			LocalURL:     ecosystem.RouteLocalURL(route, port),
+			LocalURL:     ecosystem.RouteLocalURL(route.Prefix, port),
 		})
 	}
 	return rewrites, collisions
