@@ -52,6 +52,7 @@ in
       ${./prompts.nix} \
       ${./quickstart-golden.nix} \
       ${./schema-drift.nix} \
+      ${./scout-rationale-parity.nix} \
       ${./tdd-fragment-parity.nix}
     touch $out
   '';
