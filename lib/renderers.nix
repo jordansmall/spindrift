@@ -1430,7 +1430,7 @@ rec {
         }
         {
           flag = "continuous";
-          doc = "bare-flag alias for --continuous-dispatch 1 (which stays available, deprecated)";
+          doc = "bare-flag alias for the deprecated --continuous-dispatch bool (still available, spelled --continuous-dispatch=1)";
         }
         {
           flag = "help";
@@ -1517,7 +1517,7 @@ rec {
         "    '--no-build:fail fast if the image is absent instead of building it'\n"
         "    '--yes:skip the confirmation prompt when dispatching unlabeled issues'\n"
         "    '--force:alias for --yes'\n"
-        "    '--continuous:bare-flag alias for --continuous-dispatch 1 (which stays available, deprecated)'\n"
+        "    '--continuous:bare-flag alias for the deprecated --continuous-dispatch bool (still available, spelled --continuous-dispatch=1)'\n"
         "    '--help:show usage'\n"
         "    '--version:show version'\n"
         "    '--secret-cmd:templated secret-fetch command; {name} substitutes the kebab-case env name (lowest precedence)'\n"
@@ -1704,9 +1704,10 @@ rec {
         .BR \-\-force .
         .TP
         .B \-\-continuous
-        Bare-flag alias for
-        .B \-\-continuous-dispatch 1
-        (which stays available, deprecated).
+        Bare-flag alias for the deprecated
+        .B \-\-continuous-dispatch
+        bool (still available, spelled
+        .BR \-\-continuous-dispatch=1 ).
         .SH OPTIONS
         Flags take precedence over the Consumer flake's settings (carried by the
         Launcher input document, ADR 0020), which take precedence over baked

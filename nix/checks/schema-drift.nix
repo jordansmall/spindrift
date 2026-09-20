@@ -748,6 +748,14 @@ checkedMerge {
       "lib/env-schema.nix: continuousDispatch.doc must point at docs/reference.md's exit-code table (issue #1879), got: ${doc}";
     assert assertMsg (hasInfix "Dogfood loop" doc)
       "lib/env-schema.nix: continuousDispatch.doc must name docs/reference.md's Dogfood loop section, not just the file (issue #1879), got: ${doc}";
+    # The deprecation notice rides this one doc string, which is what renders
+    # it onto --help, the man page, and docs/flake-options.md (issue #3547).
+    assert assertMsg (hasInfix "DEPRECATED" doc)
+      "lib/env-schema.nix: continuousDispatch.doc must mark the knob DEPRECATED now that the daemon supersedes it (issue #3547), got: ${doc}";
+    assert assertMsg (hasInfix "nix run .#daemon" doc)
+      "lib/env-schema.nix: continuousDispatch.doc must name nix run .#daemon as the replacement (issue #3547), got: ${doc}";
+    assert assertMsg (hasInfix "not removed" doc)
+      "lib/env-schema.nix: continuousDispatch.doc must say plainly it is not removed — it stays for no-daemon operators and remains the Console's engine (issue #3547), got: ${doc}";
     pkgs.runCommand "continuous-dispatch-doc-reference" { } "touch $out";
 
   # A knob's `choices` must be a non-empty list of strings and its `default` a

@@ -89,7 +89,7 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 }
 
 // The bare `--continuous` flag sets CONTINUOUS_DISPATCH the same way
-// `--continuous-dispatch 1` does (issue #2033). `dispatch` routes a
+// `--continuous-dispatch=1` does (issue #2033). `dispatch` routes a
 // config-invalid bootstrap error through bootstrapExitCode, so the expected
 // code is exitConfigInvalid rather than the generic 1 (issue #2568 slice 2).
 func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {

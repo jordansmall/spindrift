@@ -1832,7 +1832,7 @@ func TestPrintHelp_ShowsNoBuildFlag(t *testing.T) {
 }
 
 // Issue #2033 added --continuous as the bare-flag alias for
-// --continuous-dispatch 1.
+// --continuous-dispatch=1.
 func TestPrintHelpFull_ShowsContinuousFlag(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
