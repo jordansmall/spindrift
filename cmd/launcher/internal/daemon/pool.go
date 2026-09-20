@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // pool is the shared state behind Loop's slot goroutines. It owns the one
@@ -15,6 +16,7 @@ import (
 // out the full interval or fetch.
 type pool struct {
 	cfg  Config
+	r    Runner
 	em   *Emitter
 	clk  Clock
 	b    *breaker
@@ -33,14 +35,15 @@ type pool struct {
 // slot runs against the derived one, never the caller's directly, so
 // RunChild is already contractually drain-safe under a cancelled ctx (see
 // loop.go's own doc), and hostRunner.RunChild uses exec.Command rather than
-// CommandContext, so cancelling it can never kill a running child. clk, the
-// breaker, and the idle backoff are all pool-wide policy, not slot-tracking
-// state, but they live here so backoffOrHalt and runSlot stop threading
-// them as parameters.
-func newPool(ctx context.Context, cfg Config, em *Emitter, clk Clock) (*pool, context.Context) {
+// CommandContext, so cancelling it can never kill a running child. r, clk,
+// the breaker, and the idle backoff are all pool-wide policy, not
+// slot-tracking state, but they live here so backoffOrHalt and runSlot stop
+// threading them as parameters.
+func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) (*pool, context.Context) {
 	pctx, cancel := context.WithCancel(ctx)
 	p := &pool{
 		cfg:      cfg,
+		r:        r,
 		em:       em,
 		clk:      clk,
 		b:        newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
@@ -140,6 +143,57 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, revision, reason str
 	p.em.Emit(Event{Event: "backoff", Kind: p.cfg.Kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason})
 	p.clk.Sleep(ctx, p.cfg.FailureBackoff)
 	return false
+}
+
+// idleWait sleeps out a none-dispatchable wait in IdleFloor-sized slices,
+// polling ResolveRevision between slices so a merge that unblocks a jammed
+// queue is noticed instead of riding out the rest of a long backoff. A
+// queue-empty wait (exit 2) never comes here: it stays the plain, single
+// p.clk.Sleep it always was, since a merge cannot create new work in an
+// empty queue and polling there would only spend a query for nothing.
+//
+// revision is the revision this slot's child just ran at; a poll result
+// that differs from it is the "tip moved" signal. On that signal, idleWait
+// emits tip_moved, resets the idle backoff (the observed change ends the
+// no-work streak same as real work would), and returns immediately so the
+// slot starts its next iteration at once rather than sleeping out the rest
+// of the wait.
+func (p *pool) idleWait(ctx context.Context, slot int, wait time.Duration, revision string) {
+	remaining := wait
+	for remaining > 0 {
+		slice := p.cfg.IdleFloor
+		if slice > remaining {
+			slice = remaining
+		}
+		p.clk.Sleep(ctx, slice)
+		remaining -= slice
+
+		if p.stopped() || ctx.Err() != nil {
+			// A sibling halted the pool, or the caller's ctx was cancelled,
+			// while this slot slept. Stop polling and return: the slot's own
+			// top-of-loop stopOnCancel does the halt bookkeeping next.
+			return
+		}
+		if remaining <= 0 {
+			return
+		}
+
+		newRevision, err := p.r.ResolveRevision(ctx)
+		if err != nil {
+			// This poll is opportunistic, not the loop's own per-iteration
+			// fetch: a failure here just means no change was observed, so
+			// keep sleeping out the remaining slices rather than treating it
+			// as a failure. The next iteration's top-of-loop ResolveRevision
+			// is the one that properly reports and backs off on a broken
+			// fetch.
+			continue
+		}
+		if newRevision != revision {
+			p.em.Emit(Event{Event: "tip_moved", Kind: p.cfg.Kind, Slot: intPtr(slot), Revision: newRevision, Reason: "a merge can unblock a jammed queue"})
+			p.idle.reset()
+			return
+		}
+	}
 }
 
 // haltReason returns the pool's recorded halt reason. Only meaningful after

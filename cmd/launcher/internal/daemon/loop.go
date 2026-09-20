@@ -122,7 +122,7 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) str
 		return invalidConfig(em, cfg.Kind, fmt.Sprintf("breaker window must be positive, got %s", cfg.BreakerWindow))
 	}
 
-	p, pctx := newPool(ctx, cfg, em, clk)
+	p, pctx := newPool(ctx, cfg, r, em, clk)
 	defer p.cancel()
 
 	var wg sync.WaitGroup
@@ -130,7 +130,7 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) str
 	for slot := 0; slot < cfg.Slots; slot++ {
 		go func(slot int) {
 			defer wg.Done()
-			runSlot(pctx, slot, cfg, r, em, p)
+			runSlot(pctx, slot, cfg, em, p)
 		}(slot)
 	}
 	wg.Wait()
@@ -151,13 +151,13 @@ func invalidConfig(em *Emitter, kind Kind, detail string) string {
 // pool's own derived context (not the caller's ctx directly): cancelling it
 // is how the pool tells every slot to stop promptly, including one asleep
 // in clk.Sleep or blocked inside ResolveRevision.
-func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, p *pool) {
+func runSlot(ctx context.Context, slot int, cfg Config, em *Emitter, p *pool) {
 	for {
 		if stopOnCancel(ctx, p) {
 			return
 		}
 
-		revision, err := r.ResolveRevision(ctx)
+		revision, err := p.r.ResolveRevision(ctx)
 		if err != nil {
 			// A failed fetch is exactly the transient blip this slice's
 			// breaker exists for: back off and retry alone, unless enough
@@ -180,7 +180,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, p
 		em.Emit(Event{Event: "child_start", Kind: cfg.Kind, Revision: revision, Slot: intPtr(slot)})
 
 		p.occupy(slot)
-		result, err := r.RunChild(ctx, ChildRequest{Slot: slot, Kind: cfg.Kind, Revision: revision})
+		result, err := p.r.RunChild(ctx, ChildRequest{Slot: slot, Kind: cfg.Kind, Revision: revision})
 		p.unoccupy(slot)
 		if err != nil {
 			// The seam failed, not the child (e.g. it could not even be
@@ -230,7 +230,17 @@ func runSlot(ctx context.Context, slot int, cfg Config, r Runner, em *Emitter, p
 			} else {
 				em.Emit(Event{Event: "idle", Kind: cfg.Kind, Wait: wait.String(), Slot: intPtr(slot)})
 			}
-			p.clk.Sleep(ctx, wait)
+			// The short-circuit is keyed on the outcome, not on which event
+			// fired above: a none-dispatchable wait polls for a moved tip
+			// even when a sibling running makes it report "idle" rather than
+			// "jam". A queue-empty wait (exit 2) never polls — a merge
+			// cannot put new work in an empty queue, so noticing one mid-wait
+			// would only cost a query for nothing.
+			if outcome == "none-dispatchable" {
+				p.idleWait(ctx, slot, wait, revision)
+			} else {
+				p.clk.Sleep(ctx, wait)
+			}
 			continue
 		case Backoff:
 			if p.backoffOrHalt(ctx, slot, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit)) {

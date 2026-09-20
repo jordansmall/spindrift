@@ -604,3 +604,33 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 		t.Fatalf("jam events = %d, want exactly 1", jams)
 	}
 }
+
+// TestIdleWaitLastSliceClampsToRemaining pins the clamp at the tail of
+// idleWait's slicing loop: when IdleFloor does not evenly divide the
+// requested wait, the final slice must shrink to what's left rather than
+// overshoot it. That is a legal config — IdleCap need not be a multiple of
+// IdleFloor — but the shipped 5m/30m pair always divides evenly, so nothing
+// else in this package reaches the clamp.
+func TestIdleWaitLastSliceClampsToRemaining(t *testing.T) {
+	r := &fakeRunner{revisions: []string{"rev1"}}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.IdleFloor = 3 * time.Millisecond
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	p.idleWait(pctx, 0, 10*time.Millisecond, "rev1")
+
+	want := []time.Duration{3 * time.Millisecond, 3 * time.Millisecond, 3 * time.Millisecond, time.Millisecond}
+	if len(clk.waits) != len(want) {
+		t.Fatalf("waits = %v, want %v", clk.waits, want)
+	}
+	for i := range want {
+		if clk.waits[i] != want[i] {
+			t.Fatalf("waits = %v, want %v", clk.waits, want)
+		}
+	}
+}

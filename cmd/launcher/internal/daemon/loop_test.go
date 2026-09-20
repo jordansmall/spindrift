@@ -748,3 +748,209 @@ func TestLoopRejectsInvalidIdleConfig(t *testing.T) {
 		})
 	}
 }
+
+// TestLoopTipMovedShortCircuitsNoneDispatchableWait pins the asymmetric
+// short-circuit: a none-dispatchable wait is sliced into IdleFloor-sized
+// polls, and a tip that moves mid-wait ends the wait early, resets the
+// backoff, and the very next child runs at the new revision.
+func TestLoopTipMovedShortCircuitsNoneDispatchableWait(t *testing.T) {
+	r := &fakeRunner{
+		revisions: []string{"rev1", "rev1", "rev1", "rev1", "rev2"},
+		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
+	}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	// Three no-work checks grow the wait to floor, 2*floor, 4*floor; the
+	// third one's poll sees the moved tip after its first slice, so it
+	// contributes only one more floor-sized sleep instead of riding out
+	// the rest of its 4*floor wait.
+	want := []time.Duration{testIdleFloor, testIdleFloor, testIdleFloor, testIdleFloor}
+	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v (tip-moved cuts the third wait to a single floor slice)", clk.waits, want)
+	}
+
+	events := decodeEvents(t, &buf)
+	var tipMoved *Event
+	for i := range events {
+		if events[i].Event == "tip_moved" {
+			if tipMoved != nil {
+				t.Fatalf("events = %v, want exactly one tip_moved", eventNames(events))
+			}
+			tipMoved = &events[i]
+		}
+	}
+	if tipMoved == nil {
+		t.Fatalf("events = %v, want a tip_moved event", eventNames(events))
+	}
+	if tipMoved.Revision != "rev2" {
+		t.Errorf("tip_moved revision = %q, want %q", tipMoved.Revision, "rev2")
+	}
+	if tipMoved.Slot == nil || *tipMoved.Slot != 0 {
+		t.Errorf("tip_moved slot = %v, want 0", tipMoved.Slot)
+	}
+	if tipMoved.Reason == "" {
+		t.Errorf("tip_moved reason is empty, want it to say a merge can unblock a jammed queue")
+	}
+
+	if len(r.runCalls) != 4 {
+		t.Fatalf("run calls = %d, want 4", len(r.runCalls))
+	}
+	if r.runCalls[3].Revision != "rev2" {
+		t.Errorf("run calls[3].Revision = %q, want %q: the next child must run at the moved tip", r.runCalls[3].Revision, "rev2")
+	}
+}
+
+// TestLoopNoneDispatchableWaitSleepsFullWaitWhenTipNeverMoves pins the other
+// half of the short-circuit: with no tip movement, the grown wait is slept
+// out completely, in floor-sized slices, and no tip_moved event appears.
+func TestLoopNoneDispatchableWaitSleepsFullWaitWhenTipNeverMoves(t *testing.T) {
+	r := &fakeRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
+	}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	want := []time.Duration{
+		testIdleFloor,                // 1st check: wait = floor, one slice
+		testIdleFloor, testIdleFloor, // 2nd check: wait = 2*floor, two slices
+		testIdleFloor, testIdleFloor, testIdleFloor, testIdleFloor, // 3rd check: wait = 4*floor, four slices
+	}
+	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v (full grown wait slept in floor-sized slices)", clk.waits, want)
+	}
+
+	events := decodeEvents(t, &buf)
+	for _, ev := range events {
+		if ev.Event == "tip_moved" {
+			t.Fatalf("events = %v, want no tip_moved when the tip never moves", eventNames(events))
+		}
+	}
+}
+
+// TestLoopQueueEmptyWaitIgnoresTipMoved pins the asymmetric half of the
+// short-circuit that costs nothing: a queue-empty wait (exit 2) never
+// polls mid-wait, however far the backoff has grown, and ResolveRevision is
+// called no more than the once-per-iteration the loop already does.
+func TestLoopQueueEmptyWaitIgnoresTipMoved(t *testing.T) {
+	r := &fakeRunner{
+		revisions: []string{"rev1", "rev2", "rev3", "rev4"},
+		results:   []ChildResult{{Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 5}},
+	}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	want := []time.Duration{testIdleFloor, 2 * testIdleFloor, 4 * testIdleFloor}
+	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v: exactly one Sleep per wait, whole, never sliced", clk.waits, want)
+	}
+
+	if r.resolveCalls != 4 {
+		t.Errorf("resolveCalls = %d, want 4: exactly one ResolveRevision per iteration, no mid-wait poll", r.resolveCalls)
+	}
+
+	events := decodeEvents(t, &buf)
+	for _, ev := range events {
+		if ev.Event == "tip_moved" {
+			t.Fatalf("events = %v, want no tip_moved for a queue-empty wait", eventNames(events))
+		}
+	}
+}
+
+// TestLoopTipMovedResetsBackoffForNextWait pins that a tip-moved
+// short-circuit is treated the same as any other real-work observation: the
+// very next no-work wait starts back at the floor, not wherever the
+// short-circuited streak left off.
+func TestLoopTipMovedResetsBackoffForNextWait(t *testing.T) {
+	r := &fakeRunner{
+		revisions: []string{"rev1", "rev1", "rev1", "rev1", "rev2"},
+		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
+	}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	// Checks 1-3 grow floor -> 2*floor -> 4*floor, but the 3rd short-circuits
+	// after one slice on the moved tip. The 4th check, right after, must be
+	// back at a bare floor wait (one slice), not a continuation of the grown
+	// streak.
+	want := []time.Duration{testIdleFloor, testIdleFloor, testIdleFloor, testIdleFloor, testIdleFloor}
+	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v (backoff reset after the tip-moved short-circuit)", clk.waits, want)
+	}
+
+	events := decodeEvents(t, &buf)
+	tipMovedCount := 0
+	for _, ev := range events {
+		if ev.Event == "tip_moved" {
+			tipMovedCount++
+		}
+	}
+	if tipMovedCount != 1 {
+		t.Fatalf("tip_moved events = %d, want exactly 1", tipMovedCount)
+	}
+}
+
+// TestLoopIdleWaitSwallowsMidWaitPollFailure pins idleWait's mid-wait
+// poll-failure branch (cmd/launcher/internal/daemon/pool.go): a
+// ResolveRevision error during idleWait's mid-wait poll is
+// opportunistic, not the loop's own per-iteration fetch, so it must be
+// swallowed as "no change observed" rather than routed to backoffOrHalt
+// (which would trip the pool-wide breaker over a transient fetch blip).
+//
+// Iteration 1: ResolveRevision call #1 (top of loop) -> exit 3 -> wait =
+// floor; idleWait sleeps one slice and returns without polling (remaining
+// hits 0 exactly). Iteration 2: call #2 (top of loop) -> exit 3 -> wait =
+// 2*floor; idleWait sleeps slice 1, then polls -- that's call #3, the one
+// set to fail -- swallows it, and sleeps slice 2. Iteration 3: call #4
+// (top) -> exit 5 -> halt. FailureBackoff is set apart from the floor so a
+// stray failure-backoff sleep (a regression routing the poll failure to
+// backoffOrHalt) would be unmistakable in clk.waits.
+func TestLoopIdleWaitSwallowsMidWaitPollFailure(t *testing.T) {
+	r := &fakeRunner{
+		revisions:  []string{"rev1"},
+		resolveAt:  3,
+		resolveErr: errors.New("boom: transient fetch failure"),
+		results:    []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 5}},
+	}
+	clk := &fakeClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.FailureBackoff = 7 * time.Millisecond
+
+	reason := Loop(context.Background(), cfg, r, em, clk)
+
+	want := []time.Duration{testIdleFloor, testIdleFloor, testIdleFloor}
+	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v: the failed mid-wait poll must neither cut the wait short nor add a failure backoff", clk.waits, want)
+	}
+
+	events := decodeEvents(t, &buf)
+	for _, ev := range events {
+		if ev.Event == "backoff" || ev.Event == "breaker_trip" || ev.Event == "tip_moved" {
+			t.Fatalf("events = %v, want no backoff/breaker_trip/tip_moved event", eventNames(events))
+		}
+	}
+
+	if strings.Contains(reason, "breaker") {
+		t.Errorf("halt reason = %q, want it not to name the breaker (halts on exit 5, not a tripped breaker)", reason)
+	}
+
+	if len(r.runCalls) != 3 {
+		t.Fatalf("run calls = %d, want 3", len(r.runCalls))
+	}
+}
