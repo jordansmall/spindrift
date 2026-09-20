@@ -589,3 +589,26 @@ func TestReportResults_TierAndDegradedDriveRowPrefix(t *testing.T) {
 		})
 	}
 }
+
+// Blocking is the one place the "does this Required failure stop the run?"
+// rule lives, so cmd/launcher's config classification and this package's
+// fail-fast chains cannot drift apart (issue #3544).
+func TestBlocking(t *testing.T) {
+	tests := []struct {
+		name string
+		r    Result
+		want bool
+	}{
+		{name: "required failure", r: Result{Check: Check{Tier: Required}, Err: errors.New("boom")}, want: true},
+		{name: "required degraded", r: Result{Check: Check{Tier: Required}, Err: fmt.Errorf("probe: %w", ErrDegraded)}, want: false},
+		{name: "required pass", r: Result{Check: Check{Tier: Required}}, want: false},
+		{name: "advisory failure", r: Result{Check: Check{Tier: Advisory}, Err: errors.New("boom")}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Blocking(tc.r); got != tc.want {
+				t.Errorf("Blocking(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}

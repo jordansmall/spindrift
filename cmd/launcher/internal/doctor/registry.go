@@ -61,9 +61,13 @@ func runOne(c Check) Result {
 	return Result{Check: c, Output: output, Err: err}
 }
 
-// blocking reports whether r stops a fail-fast chain: a Required-tier Result
-// with a non-nil Err that does not wrap ErrDegraded.
-func blocking(r Result) bool {
+// Blocking reports whether r's failure stops the run. A Required-tier probe
+// that wrapped ErrDegraded could not determine its answer, which is not the
+// same as affirmatively detecting the condition it checks (issue #2962), so
+// it never blocks. Every caller asking "does this failure stop the run?" —
+// this package's fail-fast chains and cmd/launcher's configuration
+// classification alike — routes through here so the two cannot drift apart.
+func Blocking(r Result) bool {
 	return r.Check.Tier == Required && r.Err != nil && !errors.Is(r.Err, ErrDegraded)
 }
 
@@ -86,19 +90,19 @@ func RunChecksFailFast(checks []Check) []Result {
 	for _, c := range checks {
 		r := runOne(c)
 		results = append(results, r)
-		if blocking(r) {
+		if Blocking(r) {
 			break
 		}
 	}
 	return results
 }
 
-// firstBlockingResult returns the first Result for which blocking reports
+// firstBlockingResult returns the first Result for which Blocking reports
 // true, or nil. FirstRequiredError and RunRequiredFailFast share it so the two
 // cannot drift apart on what counts as blocking.
 func firstBlockingResult(results []Result) *Result {
 	for i := range results {
-		if blocking(results[i]) {
+		if Blocking(results[i]) {
 			return &results[i]
 		}
 	}
