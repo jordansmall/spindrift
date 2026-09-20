@@ -86,30 +86,47 @@ func loadInputDocument(path string) (*inputDocument, error) {
 	return &doc, nil
 }
 
-// resolveKnob resolves one schema knob: ambient env first, then the
+// lookupKnob resolves one schema knob: ambient env first, then the
 // document's settings (keyed by env var name — lib/mkHarness.nix's
-// documentSettings), then nothing. There is no hardcoded fallback: the
-// default lives in the schema and travels in the document, so a knob absent
-// from both is a configuration error, not a silent default. When the
-// document also carries a value and the ambient env wins anyway, it prints a
-// provenance warning to stderr (mirroring cmd/launcher/inputdoc.go's
+// documentSettings), then nothing (found=false). When the document also
+// carries a value and the ambient env wins anyway, it prints a provenance
+// warning to stderr (mirroring cmd/launcher/inputdoc.go's
 // warnAmbientKnobEnv) — otherwise nothing records which value actually drove
 // the run, and a stale exported override silently wins (ADR 0020).
-func resolveKnob(doc *inputDocument, envVar string, stderr io.Writer) (string, error) {
+func lookupKnob(doc *inputDocument, envVar string, stderr io.Writer) (string, bool) {
 	if v := os.Getenv(envVar); v != "" {
 		if doc != nil {
 			if docVal, ok := doc.Settings[envVar]; ok && docVal != "" {
 				fmt.Fprintf(stderr, "%s=%s set in environment — knob env overrides are deprecated; use the --input document's settings.%s\n", envVar, v, envVar)
 			}
 		}
-		return v, nil
+		return v, true
 	}
 	if doc != nil {
 		if v, ok := doc.Settings[envVar]; ok && v != "" {
-			return v, nil
+			return v, true
 		}
 	}
+	return "", false
+}
+
+// resolveKnob wraps lookupKnob for knobs that must have a value: the
+// default lives in the schema and travels in the document, so a knob absent
+// from both is a configuration error, not a silent default.
+func resolveKnob(doc *inputDocument, envVar string, stderr io.Writer) (string, error) {
+	if v, ok := lookupKnob(doc, envVar, stderr); ok {
+		return v, nil
+	}
 	return "", fmt.Errorf("daemon: no value for %s (not in environment or --input document settings)", envVar)
+}
+
+// resolveKnobOptional wraps lookupKnob for knobs whose schema default is
+// itself the empty string — absent-from-both is the normal case, not a
+// configuration error — while still keeping lookupKnob's ambient-env-wins
+// provenance warning.
+func resolveKnobOptional(doc *inputDocument, envVar string, stderr io.Writer) string {
+	v, _ := lookupKnob(doc, envVar, stderr)
+	return v
 }
 
 // parseSlots turns MAX_PARALLEL's resolved string value into the daemon's
@@ -168,8 +185,8 @@ func fail(stderr io.Writer, err error) int {
 // also means updating TestIdleBackoffCapsAtShippedDefaults
 // (cmd/launcher/internal/daemon/backoff_test.go), which spells this pair
 // out by hand since it can't import them from package main. Making either
-// configurable (Awake window, per-kind backoff) is a later ticket
-// (loop.go's Config doc).
+// configurable (per-kind backoff) is a later ticket (loop.go's Config
+// doc).
 const (
 	daemonIdleFloor = 5 * time.Minute
 	daemonIdleCap   = 30 * time.Minute
@@ -268,6 +285,15 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	// The schema validates DAEMON_AWAKE_WINDOW at Nix eval time, but an
+	// ambient env override (lookupKnob above) bypasses that entirely, so
+	// this runtime parse is the actual guarantee.
+	awakeRaw := resolveKnobOptional(doc, "DAEMON_AWAKE_WINDOW", stderr)
+	awake, err := daemon.ParseWindow(awakeRaw)
+	if err != nil {
+		return fail(stderr, err)
+	}
+
 	wd, err := os.Getwd()
 	if err != nil {
 		return fail(stderr, err)
@@ -296,6 +322,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		FailureBackoff:   daemonFailureBackoff,
 		BreakerThreshold: daemonBreakerThreshold,
 		BreakerWindow:    daemonBreakerWindow,
+		Awake:            awake,
 	}
 
 	reason := daemon.Loop(ctx, cfg, r, em, clk)
