@@ -5043,19 +5043,15 @@ uses (below): any child already running is waited out and still gets its
 `child_finish`, never killed — the halting slot simply starts no new
 child. **It never re-execs itself**: a freshly merged but broken daemon
 must not auto-load with nobody awake. The halt carries its own exit code
-(below) precisely so an operator who *does* want self-update can compose
-it with an ordinary service restart policy and get that behaviour by
-choice, not by default:
-
-```
-[Service]
-Restart=on-failure
-RestartForceExitStatus=10
-```
-
-— with the obvious caveat that under that policy the daemon started next
-is whatever just merged, so a broken merge restarts straight into the
-broken build, which is exactly why this is opt-in rather than the default.
+(below) precisely so an operator who *does* want self-update can compose it
+with an ordinary service restart policy and get that behaviour by choice,
+not by default: a restart policy that does not exempt exit 10, plus a step
+that advances the checkout before each start (see **Service unit** below
+for the full unit and the exit-code-to-policy mapping, and **Self-update by
+choice** below for why the second half is not optional) — with the
+obvious caveat that under that policy the daemon started next is whatever
+just merged, so a broken merge restarts straight into the broken build,
+which is exactly why this is opt-in rather than the default.
 
 An evaluation that *fails* — a broken flake, a network blip reaching `nix
 eval` — is not treated as a change: it is the same class of unclassified
@@ -5077,17 +5073,18 @@ the same log:
 | 11   | the startup preflight refused the start — a Required-tier `doctor` failure (missing triage labels, invalid config) or a seam failure resolving the tip/running doctor at all |
 | 1    | anything else: a startup failure (including a refused instance lock), or any other halt — the event stream carries the specific reason |
 
-10 and 11 both sit deliberately outside the 0–7 band the *child* launcher's
-exit codes occupy, so neither taxonomy can be confused with the other when
-both appear in one log (`exitSelfChanged`, `exitPreflightFailed`,
-`cmd/launcher/daemon/main.go`). The two read very differently to an
-operator composing a restart policy, though: 10 is the one code this
-daemon deliberately invites a supervisor to compose with
+10 and 11 both sit deliberately outside the 0–7 band the *child*
+launcher's exit codes occupy, so neither taxonomy can be confused with the
+other when both appear in one log (`exitSelfChanged`,
+`exitPreflightFailed`, `cmd/launcher/daemon/main.go`). The two read very
+differently to an operator composing a restart policy, though: 10 is the
+one code this daemon deliberately invites a supervisor to compose with
 `Restart=on-failure` (**Self-change halt** above), since restarting clears
-it by loading whatever just merged. 11 is not retryable that way — nothing
-a restart does fixes a missing label or an undersized podman machine, so a
-supervisor must treat 11 as a standing refusal to fix by hand, not a
-transient fault to bounce past.
+it by loading whatever just merged — for a unit that also advances the
+checkout before each start (**Self-update by choice** below). 11 is not
+retryable that way — nothing a restart does fixes a missing label or an
+undersized podman machine, so a supervisor must treat 11 as a standing
+refusal to fix by hand, not a transient fault to bounce past.
 
 **Halting.** A `SIGINT` or `SIGTERM` to the daemon is the first of two
 signals it consumes (`handleStopSignals`, `cmd/launcher/daemon/main.go`):
@@ -5163,13 +5160,8 @@ child counts two and aborts. Under the default `KillMode` a plain
 than a reliable path to either — unpredictable, which is its own reason to
 avoid it. Set `KillMode=mixed`, which sends the stop signal to the main
 process alone, leaving the forwarded drain request as the child's only
-signal:
-
-```
-[Service]
-KillMode=mixed
-TimeoutStopSec=infinity
-```
+signal, paired with `TimeoutStopSec=infinity` (see **Service unit**
+below for the full unit).
 
 The daemon always waits out a started child before exiting
 (`daemon.Loop`), so by the time systemd sees the main process go there is
@@ -5212,6 +5204,166 @@ whether that single `systemctl stop` already aborted the drain depends on
 whether the kernel folded those two `SIGTERM`s into one delivery or kept
 them distinct — the same reason `KillMode=mixed` is the recommended
 setting above.
+
+**Service unit.** The pieces above — the restart-policy composition in
+**Self-change halt**, `KillMode=mixed`, and `TimeoutStopSec` in
+**Halting** — are all one unit in practice. A complete, copyable shape,
+run as the operator's own user against their own checkout (the daemon
+fetches into and locks that checkout, so `WorkingDirectory` has to be
+it), as a systemd user unit so no `User=` line is needed (and no
+`Wants=`/`After=network-online.target` either: that target is a
+system-manager concept the user manager ships none of — a *system* unit
+would add it, a user unit has nothing to add it to):
+
+```
+[Unit]
+Description=spindrift daemon
+StartLimitIntervalSec=1h
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/spindrift-checkout
+EnvironmentFile=-/absolute/path/to/spindrift-secrets.env
+Environment=PATH=/absolute/path/to/nix-dir:/absolute/path/to/git-dir:/usr/bin:/bin
+ExecStart=/absolute/path/to/nix run .#daemon
+KillMode=mixed
+TimeoutStopSec=infinity
+Restart=on-failure
+RestartSec=30s
+RestartPreventExitStatus=10 11
+
+[Install]
+WantedBy=default.target
+```
+
+Substitute the checkout path, the directories holding the real `nix` and
+`git` (`command -v nix`, `command -v git` — the `nix` one feeds both
+`Environment=PATH=` and `ExecStart`), and a secrets file for the
+placeholders. `ExecStart` is argv, not a shell line, so it takes no shell
+quoting and no `&&`. `StartLimitIntervalSec`/`StartLimitBurst` are
+`[Unit]` directives, not `[Service]` ones, however much they read like
+part of the restart policy.
+
+`Environment=PATH=` matters even with an absolute `ExecStart`, and it is
+the line most easily dropped from a pasted unit. The daemon execs both
+`git` and `nix` by bare name — `git fetch`/`git rev-parse` at every
+iteration boundary (`ResolveRevision`, `cmd/launcher/daemon/runner.go`),
+and `nix run`/`nix eval` for every child it starts and every self-build
+evaluation (`cmd/launcher/internal/daemon/command.go`) — and sets no
+`cmd.Env`, so the unit's own `PATH` is the only place either can be
+found; the systemd user manager's default `PATH` carries neither on a
+NixOS host. Without this line the daemon does not limp along dispatching
+nothing — but the two binaries are reached for at different points in
+startup, so which one is missing decides both the exit code and how the
+unit behaves. A missing `git` fails before the preflight is ever reached:
+`repoRoot` shells out to `git rev-parse --show-toplevel` to find the
+checkout root, that exec fails, and the process exits 1 (`repoRoot`,
+`cmd/launcher/daemon/main.go`) — a code `Restart=on-failure` does bounce,
+so the unit restarts five times thirty seconds apart and then parks in
+`failed`. A missing `nix` gets further: resolving the tip is git's work
+and succeeds, `doctor` then cannot be run at all, the startup preflight
+refuses the start with a `doctor-seam-error` reason, and the process
+exits 11 (`startupPreflight`, same file) — before any slot, any claim,
+any Box. `RestartPreventExitStatus=11` above holds that one down, so it
+dies once at startup and stays dead. Either way nothing is ever
+dispatched, and neither exit code names the cause on its own: read the
+diagnostic off the unit's journal output, which names the seam that
+failed.
+
+`EnvironmentFile` is where forge credentials belong — a 0600 file
+readable only by the operator. The `-` prefix is deliberate: it makes a
+missing file the *daemon's* error rather than the service manager's, so
+the startup preflight runs and `doctor` names the missing credential in
+the journal, instead of systemd failing the unit before `ExecStart` with
+nothing but its own "failed to load environment files". Either way the
+unit does not come up; only one of the two says why. That refusal is an
+exit 11 too, and staying down is the expected shape of it, not a bug.
+
+stdout is the JSON-lines event stream (**Event stream** below); systemd
+captures it into the journal as-is, with no format of its own to
+configure.
+
+Run `loginctl enable-linger <user>` before installing this unit over
+SSH: without it the user manager — and this unit with it — is torn down
+at the last session's logout and never starts at boot, so an unattended
+overnight pool installed this way is silently gone by the next morning.
+
+Which exits mean stop and which mean restart, for the unit above — see
+the daemon *process*'s own exit-code table above for what each code
+means:
+
+| exit | policy |
+|------|--------|
+| 0    | stop — a clean stop is never worth restarting |
+| 10   | stop — self-update is opt-in, see below to turn it on |
+| 11   | stop — a refusal no restart can clear |
+| 1    | restart, rate-limited |
+
+`Restart=on-failure` restarts every non-zero exit; the two codes in
+`RestartPreventExitStatus=` carve 10 and 11 back out of it, which leaves
+exit 1 as the only code the unit actually bounces. Exit 1 covers both the
+transient (the pool-wide breaker tripping after an outage failed one
+iteration boundary's fetch after another) and the permanently
+unrecoverable (a refused checkout lock, an unparseable
+`DAEMON_AWAKE_WINDOW`, a `WorkingDirectory` that is not a git checkout, a
+`git` the unit's `PATH` does not reach),
+and nothing in the exit code tells those apart — which is what
+`RestartSec=` and the `StartLimit*` pair are for. Five restarts thirty
+seconds apart absorb a transient; a permanent one exhausts the burst and
+systemd parks the unit in `failed`, where `systemctl --user status` shows
+it, rather than looping unwatched until morning.
+
+Size `TimeoutStopSec` against the real drain bound, not the optimistic
+one: the in-flight Box's runtime *plus that Box's settle*, never the Box
+runtime alone. The sizing paragraph under **Halting** above works that
+ceiling out; the short form is that systemd's `TimeoutStopSec=90s`
+default sits far below even the floor of it, so a unit left at the
+default `SIGKILL`s mid-drain and strands exactly the work this design
+exists to protect. `TimeoutStopSec=infinity` above is the honest setting.
+An operator unwilling to wait the ceiling out escalates instead of
+shortening the timeout, by the `systemctl kill` route **Halting**
+describes.
+
+**Self-update by choice.** Two edits to the unit above, not one: drop
+`10` from `RestartPreventExitStatus=`, and add a line that advances the
+checkout before each start.
+
+```
+ExecStartPre=/absolute/path/to/git pull --ff-only origin main
+RestartPreventExitStatus=11
+```
+
+`RestartPreventExitStatus=11` above must *replace* the unit's existing
+`RestartPreventExitStatus=10 11` line, not sit alongside it: systemd merges
+repeated assignments of this directive rather than replacing them, so a
+pasted second line leaves `10` still exempted and self-update silently
+never happens (an empty `RestartPreventExitStatus=` assignment is what
+resets the list, for a unit that would rather reset than edit in place).
+`origin main` is the remote and the branch `BASE_BRANCH` names, and the
+checkout has to have that branch checked out — on any other branch the
+fast-forward refuses and the unit never starts.
+
+`ExecStartPre` is the half a hand-written unit is likeliest to be missing,
+and without it the composition does not self-update at all: the self-change
+halt compares the running daemon's own build against an evaluation at the
+*fetched* tip, while `ExecStart`'s `.#daemon` builds whatever the
+checkout's working tree holds — and the daemon fetches, never pulls. A
+restart on its own therefore rebuilds the identical store path, mismatches
+the fetched tip again, and exits 10 again having dispatched nothing: a
+restart loop, not an update. The `ExecStartPre` is what moves the tree, so
+the next start is the build that just merged.
+
+That composition stays opt-in for a second reason beyond the one
+**Self-change halt** gives: it needs a checkout the unit owns, and the two
+ways an operator's own checkout breaks it break it differently. Local
+commits make the fast-forward refuse outright, which fails `ExecStartPre`
+with git's own exit status — the daemon never starts, and no exit 10 is
+involved. A dirty tree the fast-forward does accept never matches an
+evaluation at a clean commit anyway, so a daemon started from one does
+reach its first iteration boundary and halts at 10 there, however the
+restart policy is written. Point the unit at its own checkout if the
+operator also wants one to edit in.
 
 **Awake window.** `DAEMON_AWAKE_WINDOW` (default empty, `lib/env-schema.nix`)
 names a daily local-time span the daemon may start a new Box in, as
@@ -5372,6 +5524,11 @@ autoload -Uz compinit && compinit
 ```
 
 ## Unattended runs
+
+For a standing pool that keeps working the queue unattended, the daemon is the
+recommended path — see [Daemon](#daemon), and **Service unit** there for the
+systemd unit, the restart policy, and how to size the stop timeout. The
+scheduled-invocation shapes below suit a bounded, one-shot wave instead.
 
 `spindrift dispatch` is just a command, so wrap it however you schedule things —
 `cron`, `launchd`, a systemd timer, or a CI job on a Linux runner (where the
