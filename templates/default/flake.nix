@@ -117,6 +117,8 @@
             #   daemonApp = ".#";
             #   # daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host
             #   daemonAwakeWindow = "";
+            #   # flake app attribute of the daemon itself, which the daemon evaluates at each fetched tip to notice its own build changed and halt -- distinct from DAEMON_APP, the child Dispatch app; a Consumer that re-exports the daemon under another attribute name (e.g. .#dogfood-bwrap-daemon) must set this to match; read by the daemon only, the launcher itself ignores it
+            #   daemonSelfApp = ".#daemon";
             #   # caps the wave size; 0 means uncapped
             #   maxJobs = 0;
             #   # maximum concurrent agent containers
