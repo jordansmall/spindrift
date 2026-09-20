@@ -159,10 +159,21 @@ func fail(stderr io.Writer, err error) int {
 	return 1
 }
 
-// daemonIdleInterval is how long the loop waits after an empty-queue or
-// none-dispatchable child before trying again. Making this configurable
-// (Awake window, per-kind backoff) is a later ticket (loop.go's Config doc).
-const daemonIdleInterval = 5 * time.Minute
+// daemonIdleFloor and daemonIdleCap are the shipped defaults for the
+// pool-wide idle backoff; the backoff's mechanics live in backoff.go and
+// the operator-facing writeup is in docs/reference.md's daemon exit-code
+// section. These values are a defensible first cut, not a tuned final
+// answer (final values were out of scope for the issue that added them);
+// expect to revisit them against a real unattended run — retuning them
+// also means updating TestIdleBackoffCapsAtShippedDefaults
+// (cmd/launcher/internal/daemon/backoff_test.go), which spells this pair
+// out by hand since it can't import them from package main. Making either
+// configurable (Awake window, per-kind backoff) is a later ticket
+// (loop.go's Config doc).
+const (
+	daemonIdleFloor = 5 * time.Minute
+	daemonIdleCap   = 30 * time.Minute
+)
 
 // daemonFailureBackoff, daemonBreakerThreshold and daemonBreakerWindow are
 // a defensible first cut, not a tuned final answer (final values are out
@@ -279,7 +290,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	em := daemon.NewEmitter(stdout, clk.Now)
 	cfg := daemon.Config{
 		Kind:             args.Kind,
-		IdleInterval:     daemonIdleInterval,
+		IdleFloor:        daemonIdleFloor,
+		IdleCap:          daemonIdleCap,
 		Slots:            slots,
 		FailureBackoff:   daemonFailureBackoff,
 		BreakerThreshold: daemonBreakerThreshold,

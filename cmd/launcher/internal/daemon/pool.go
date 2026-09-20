@@ -14,10 +14,11 @@ import (
 // idle wait or blocked in ResolveRevision stops promptly instead of riding
 // out the full interval or fetch.
 type pool struct {
-	cfg Config
-	em  *Emitter
-	clk Clock
-	b   *breaker
+	cfg  Config
+	em   *Emitter
+	clk  Clock
+	b    *breaker
+	idle *idleBackoff
 
 	cancel context.CancelFunc
 
@@ -32,9 +33,10 @@ type pool struct {
 // slot runs against the derived one, never the caller's directly, so
 // RunChild is already contractually drain-safe under a cancelled ctx (see
 // loop.go's own doc), and hostRunner.RunChild uses exec.Command rather than
-// CommandContext, so cancelling it can never kill a running child. clk and
-// the breaker are both breaker policy, not slot-tracking state, but they
-// live here so backoffOrHalt and runSlot stop threading them as parameters.
+// CommandContext, so cancelling it can never kill a running child. clk, the
+// breaker, and the idle backoff are all pool-wide policy, not slot-tracking
+// state, but they live here so backoffOrHalt and runSlot stop threading
+// them as parameters.
 func newPool(ctx context.Context, cfg Config, em *Emitter, clk Clock) (*pool, context.Context) {
 	pctx, cancel := context.WithCancel(ctx)
 	p := &pool{
@@ -42,6 +44,7 @@ func newPool(ctx context.Context, cfg Config, em *Emitter, clk Clock) (*pool, co
 		em:       em,
 		clk:      clk,
 		b:        newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
+		idle:     newIdleBackoff(cfg.IdleFloor, cfg.IdleCap),
 		cancel:   cancel,
 		occupied: make(map[int]struct{}),
 	}

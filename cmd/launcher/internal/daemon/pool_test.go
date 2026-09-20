@@ -131,7 +131,7 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 
 	done := make(chan string, 1)
 	go func() {
-		done <- Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: slots}, r, em, clk)
+		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
 
 	// Wait for all three slots to be in flight together before releasing
@@ -204,7 +204,7 @@ func TestPoolSlots1RunsOneChildAtATime(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: 1}, r, em, clk)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
 	if len(r.runCalls) != 2 {
 		t.Fatalf("run calls = %d, want 2", len(r.runCalls))
@@ -233,7 +233,10 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	cfg := Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: time.Millisecond, BreakerThreshold: threshold, BreakerWindow: time.Hour, Slots: slots}
+	cfg := testConfig(slots)
+	cfg.FailureBackoff = time.Millisecond
+	cfg.BreakerThreshold = threshold
+	cfg.BreakerWindow = time.Hour
 
 	done := make(chan string, 1)
 	go func() {
@@ -384,7 +387,10 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	cfg := Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: time.Millisecond, BreakerThreshold: threshold, BreakerWindow: time.Hour, Slots: slots}
+	cfg := testConfig(slots)
+	cfg.FailureBackoff = time.Millisecond
+	cfg.BreakerThreshold = threshold
+	cfg.BreakerWindow = time.Hour
 
 	done := make(chan string, 1)
 	go func() {
@@ -483,7 +489,7 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	clk := &fakeClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
-	cfg := Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: slots}
+	cfg := testConfig(slots)
 
 	done := make(chan string, 1)
 	go func() {
@@ -543,7 +549,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	clk := newGateClock()
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
-	cfg := Config{Kind: KindDispatch, IdleInterval: testIdleInterval, FailureBackoff: testFailureBackoff, BreakerThreshold: testBreakerThreshold, BreakerWindow: testBreakerWindow, Slots: slots}
+	cfg := testConfig(slots)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan string, 1)
