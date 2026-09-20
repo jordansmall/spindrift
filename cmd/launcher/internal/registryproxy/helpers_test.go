@@ -15,9 +15,11 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// newProxy assigns prefixes over routes, builds a handler with rows, and
-// fails the test on a construction error. It is the shared constructor
-// behind newWithEcosystemRows and newPlainProxy.
+// newProxy assigns prefixes over routes and builds a handler with rows. It
+// hands the assigned routes back because AssignPrefixes fills in each Prefix
+// and callers build their request paths out of it. It fails the test on a
+// construction error: only the tests that assert on New rejecting a route
+// care which error comes back, so only they call New directly.
 func newProxy(t *testing.T, rows []registryvocab.RewriteRow, routes []Route) (http.Handler, []Route) {
 	t.Helper()
 	assigned := AssignPrefixes(routes)
@@ -28,13 +30,9 @@ func newProxy(t *testing.T, rows []registryvocab.RewriteRow, routes []Route) (ht
 	return handler, assigned
 }
 
-// newWithEcosystemRows builds a handler over routes with every ecosystem's
-// real rewrite rows -- cargo's is the only one today -- so its callers
-// exercise the rows a production run uses. It returns the routes back
-// because AssignPrefixes mutates them in place -- callers need the assigned
-// Prefix to build request paths. It fails the test on a construction error:
-// only the tests that assert on New rejecting a route care which error
-// comes back, and they call New directly.
+// newWithEcosystemRows builds a handler with every ecosystem's real rewrite
+// rows -- cargo's is the only one today -- so its callers exercise the rows
+// a production run uses.
 func newWithEcosystemRows(t *testing.T, routes ...Route) (http.Handler, []Route) {
 	t.Helper()
 	return newProxy(t, ecosystem.ResponseRewriteRows(), routes)
@@ -42,7 +40,8 @@ func newWithEcosystemRows(t *testing.T, routes ...Route) (http.Handler, []Route)
 
 // newUpstream starts a test upstream and registers its Close on cleanup, so
 // callers that deliberately close it early (e.g. to force a dial failure)
-// don't need their own defer -- Close is idempotent.
+// don't need their own defer -- httptest.Server's Close is observed to be
+// idempotent (it guards on s.closed), not a documented contract.
 func newUpstream(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(h)
@@ -50,9 +49,8 @@ func newUpstream(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	return srv
 }
 
-// newPlainProxy assigns prefixes and builds a handler with no rewrite rows.
-// It returns the routes back because AssignPrefixes mutates them in place --
-// callers need the assigned Prefix to build request paths.
+// newPlainProxy builds a handler with no rewrite rows: the plain forwarding
+// path, which is what most tests are about.
 func newPlainProxy(t *testing.T, routes ...Route) (http.Handler, []Route) {
 	t.Helper()
 	return newProxy(t, nil, routes)

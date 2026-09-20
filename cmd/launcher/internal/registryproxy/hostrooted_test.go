@@ -32,10 +32,9 @@ func TestNew_HostRootedRejectsUpstreamWithPath(t *testing.T) {
 // at all (findResponseRewriteRow is where it does), so this pins only that New
 // accepts the field and still forwards normally.
 func TestNew_ThreadsEnforcedSubtreesWithoutError(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
 	p, _ := newWithEcosystemRows(t, Route{
 		Upstream: upstream.URL,
@@ -44,9 +43,8 @@ func TestNew_ThreadsEnforcedSubtreesWithoutError(t *testing.T) {
 		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 	})
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/index-a/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
@@ -58,27 +56,22 @@ func TestNew_ThreadsEnforcedSubtreesWithoutError(t *testing.T) {
 func TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree(t *testing.T) {
 	var gotPaths []string
 	var gotAuths []string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPaths = append(gotPaths, r.URL.Path)
 		gotAuths = append(gotAuths, r.Header.Get("Authorization"))
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{
+	p, _ := newPlainProxy(t, Route{
 		Upstream:   upstream.URL,
 		Credential: "s3kr1t",
 
 		EnforcedPaths: []string{"/index-a", "/index-b"},
-	}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	})
 
 	for _, path := range []string{"/r0/index-a/config.json", "/r0/index-b/xy/zz/foo"} {
-		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
-		p.ServeHTTP(rr, req)
+		rr := serve(p, req)
 		if rr.Code != http.StatusOK {
 			t.Errorf("%s: status = %d, want %d", path, rr.Code, http.StatusOK)
 		}
@@ -103,25 +96,20 @@ func TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree(t *testing.T
 // and lists the enforced paths.
 func TestHostRooted_RefusesPathOutsideEnforcedSet(t *testing.T) {
 	var upstreamRequests int
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		upstreamRequests++
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{
+	p, _ := newPlainProxy(t, Route{
 		Upstream:   upstream.URL,
 		Credential: "s3kr1t",
 
 		EnforcedPaths: []string{"/index-a", "/index-b"},
-	}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	})
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/some-other-path/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
@@ -158,19 +146,15 @@ func TestHostRooted_RefusalNeverDialsUpstream(t *testing.T) {
 	upstream.Start()
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{
+	p, _ := newPlainProxy(t, Route{
 		Upstream:   upstream.URL,
 		Credential: "s3kr1t",
 
 		EnforcedPaths: []string{"/index-a"},
-	}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	})
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/not-enforced/config.json", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
@@ -184,21 +168,16 @@ func TestHostRooted_RefusalNeverDialsUpstream(t *testing.T) {
 // closed rather than fall back to a permissive default. Emptiness never reads
 // as "no policy configured".
 func TestHostRooted_EmptyEnforcedPathsRefusesEverything(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{
+	p, _ := newPlainProxy(t, Route{
 		Upstream: upstream.URL,
-	}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	})
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/anything", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
@@ -209,23 +188,18 @@ func TestHostRooted_EmptyEnforcedPathsRefusesEverything(t *testing.T) {
 // sentinel, so it admits every path on a host-rooted route, mirroring
 // registryvocab.PathSet.Admits's own root-subtree rule.
 func TestHostRooted_RootSubtreeAdmitsWholeHost(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{
+	p, _ := newPlainProxy(t, Route{
 		Upstream: upstream.URL,
 
 		EnforcedPaths: []string{"/"},
-	}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	})
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/anything/at/all", nil)
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -238,7 +212,7 @@ func TestHostRooted_RootSubtreeAdmitsWholeHost(t *testing.T) {
 // matches per declared index base, not just the bare "/config.json" literal a
 // single-index route matches.
 func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/index-a/config.json":
@@ -249,8 +223,7 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
@@ -269,10 +242,9 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 		{"/" + prefix + "/index-b/config.json", `{"dl":"http://forwarder.example:9999/` + prefix + `/api/v1/crates-b"}`},
 	}
 	for _, tc := range tests {
-		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		req.Host = "forwarder.example:9999"
-		p.ServeHTTP(rr, req)
+		rr := serve(p, req)
 
 		if rr.Code != http.StatusOK {
 			t.Fatalf("%s: status = %d, want %d", tc.path, rr.Code, http.StatusOK)
@@ -289,7 +261,7 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 // rule is layout-agnostic; rewriteCargoDL's host check, not the row match,
 // decides whether a given dl is rewritable.
 func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path != "/index-a/config.json" {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
@@ -297,8 +269,7 @@ func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) 
 			return
 		}
 		_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/index-a/api/v1/crates"}`))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
@@ -309,10 +280,9 @@ func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) 
 	})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -329,7 +299,7 @@ func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) 
 func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
 	const wantBody = `{"dl":"https://crates.example.com/some/other/thing"}`
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/index-a/config-json-wannabe" {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -337,8 +307,7 @@ func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(wantBody))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
@@ -349,10 +318,9 @@ func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
 	})
 	prefix := routes[0].Prefix
 
-	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config-json-wannabe", nil)
 	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -394,22 +362,17 @@ func TestNew_StripsInboundAuthorization(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var got http.Header
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 				got = r.Header.Clone()
 				w.WriteHeader(http.StatusOK)
-			}))
-			defer upstream.Close()
+			})
 
 			tc.route.Upstream = upstream.URL
-			p, err := New(AssignPrefixes([]Route{tc.route}), nil)
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
+			p, _ := newPlainProxy(t, tc.route)
 
-			rr := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
 			req.Header.Set("Authorization", "Bearer inbound-client-token")
-			p.ServeHTTP(rr, req)
+			rr := serve(p, req)
 
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -433,7 +396,7 @@ func TestNew_StripsInboundAuthorization(t *testing.T) {
 func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 	var downloadRequests int
 	var downloadHeaders http.Header
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index-a/config.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -446,8 +409,7 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
@@ -461,16 +423,14 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 
 	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
 	configReq.Host = "forwarder.example:9999"
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, configReq)
+	rr := serve(p, configReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("config.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
 	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
 	downloadReq.Host = "forwarder.example:9999"
-	rr = httptest.NewRecorder()
-	p.ServeHTTP(rr, downloadReq)
+	rr = serve(p, downloadReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("download: status = %d, want %d", rr.Code, http.StatusOK)
 	}
@@ -488,7 +448,7 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 // layout-agnostic in the same way the rewrite itself is.
 func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 	var downloadRequests int
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index-a/config.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -500,8 +460,7 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
@@ -514,16 +473,14 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 
 	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
 	configReq.Host = "forwarder.example:9999"
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, configReq)
+	rr := serve(p, configReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("config.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
 	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/api/v1/crates/foo/1.0/download", nil)
 	downloadReq.Host = "forwarder.example:9999"
-	rr = httptest.NewRecorder()
-	p.ServeHTTP(rr, downloadReq)
+	rr = serve(p, downloadReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("download: status = %d, want %d", rr.Code, http.StatusOK)
 	}
@@ -537,11 +494,10 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 // records no request.
 func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
 	var upstreamRequests int
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		upstreamRequests++
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
@@ -554,8 +510,7 @@ func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
 	req.Host = "forwarder.example:9999"
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, req)
+	rr := serve(p, req)
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
@@ -570,7 +525,7 @@ func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
 // from it, so a later request to what would have been the dl's path is still
 // refused.
 func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/index-a/config.json" {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -578,8 +533,7 @@ func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"dl":"https://other.example.com/api/v1/crates"}`))
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
@@ -592,16 +546,14 @@ func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
 
 	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
 	configReq.Host = "forwarder.example:9999"
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, configReq)
+	rr := serve(p, configReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("config.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
 	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
 	downloadReq.Host = "forwarder.example:9999"
-	rr = httptest.NewRecorder()
-	p.ServeHTTP(rr, downloadReq)
+	rr = serve(p, downloadReq)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("download: status = %d, want %d (a cross-host dl must never be learned)", rr.Code, http.StatusForbidden)
 	}
@@ -611,7 +563,7 @@ func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
 // their own dl subtree independently, and a third path neither config.json
 // ever named is still refused.
 func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index-a/config.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -625,8 +577,7 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
-	defer upstream.Close()
+	})
 
 	p, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
@@ -640,8 +591,7 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	for _, indexPath := range []string{"/index-a/config.json", "/index-b/config.json"} {
 		req := httptest.NewRequest(http.MethodGet, "/"+prefix+indexPath, nil)
 		req.Host = "forwarder.example:9999"
-		rr := httptest.NewRecorder()
-		p.ServeHTTP(rr, req)
+		rr := serve(p, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("%s: status = %d, want %d", indexPath, rr.Code, http.StatusOK)
 		}
@@ -650,8 +600,7 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	for _, downloadPath := range []string{"/api/v1/crates-a/foo/1.0/download", "/api/v1/crates-b/bar/2.0/download"} {
 		req := httptest.NewRequest(http.MethodGet, "/"+prefix+downloadPath, nil)
 		req.Host = "forwarder.example:9999"
-		rr := httptest.NewRecorder()
-		p.ServeHTTP(rr, req)
+		rr := serve(p, req)
 		if rr.Code != http.StatusOK {
 			t.Errorf("%s: status = %d, want %d", downloadPath, rr.Code, http.StatusOK)
 		}
@@ -659,8 +608,7 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 
 	unrelatedReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/never-declared/baz/1.0/download", nil)
 	unrelatedReq.Host = "forwarder.example:9999"
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, unrelatedReq)
+	rr := serve(p, unrelatedReq)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("unrelated path: status = %d, want %d", rr.Code, http.StatusForbidden)
 	}
@@ -670,10 +618,9 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 // set past one entry, or repeat config.json fetches would leak memory over a
 // long-lived Forwarder process.
 func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
 	handler, routes := newWithEcosystemRows(t, Route{
 		Upstream: upstream.URL,
@@ -700,10 +647,9 @@ func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
 // branch instead of the "/" whole-host sentinel cargo's own rewriter
 // normalizes to.
 func TestRouteLogHandler_LearnEmptyPathNormalizesToRoot(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
 	handler, routes := newWithEcosystemRows(t, Route{
 		Upstream: upstream.URL,
@@ -737,7 +683,7 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 	const secret = "s3kr1t-e2e-secret"
 	const crateBody = "crate-bytes-for-foo"
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index-a/config.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -749,8 +695,7 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
-	defer upstream.Close()
+	})
 
 	handler, routes := newWithEcosystemRows(t, Route{
 		MatchHost: "crates.example.com",
@@ -825,22 +770,18 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 // attached.
 func TestHostRooted_BarePrefixForwardsRootToOrigin(t *testing.T) {
 	var gotPath, gotRequestURI, gotAuth string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotRequestURI = r.RequestURI
 		gotAuth = r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
+	})
 
-	p, err := New(AssignPrefixes([]Route{{
+	p, _ := newPlainProxy(t, Route{
 		Upstream:      upstream.URL,
 		Credential:    "s3kr1t",
 		EnforcedPaths: []string{"/"},
-	}}), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	})
 
 	srv := httptest.NewServer(p)
 	defer srv.Close()
