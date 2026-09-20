@@ -1318,6 +1318,7 @@ the authoritative list.
 | `MAX_JOBS`             | `0`     | `concurrency`      | caps the wave size (`0` = uncapped) |
 | `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the freshness probe before every launch; exits with a new documented code when the probe finds the loaded image or the loaded host launcher stale (see the [exit-code table](#dogfood-loop)) |
 | `DAEMON_APP`           | `.#`    | — (post-freeze; no legacy alias — set `dispatch.daemonApp`) | flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision — the Consumer's own CLI app, e.g. `.#` or `.#dogfood-bwrap`; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
+| `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host — see [Daemon](#daemon) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
 | `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap); also forwarded into the Box, where the orchestrator's own review loop applies the same threshold to its own fresh, Box-local sum (implement/fix/review passes plus dispatched workers in *this* Box only, not the host's cross-Box figure) to commit to a terminal land pass instead of a further BLOCK-triggered review round |
@@ -4802,6 +4803,56 @@ escalation above is aimed at the child rather than at the daemon:
 `SIGKILL` on the daemon leaves the child's isolated process group behind,
 orphaning it rather than killing it.
 
+**Awake window.** `DAEMON_AWAKE_WINDOW` (default empty, `lib/env-schema.nix`)
+names a daily local-time span the daemon may start a new Box in, as
+`HH:MM-HH:MM IANA-zone` — e.g. `22:00-06:00 Europe/London` starts Boxes
+only overnight London time. Empty (the default) means always awake: no
+window is configured, so nothing gates a start. An end before the start
+wraps past midnight — the window is one continuous span from start,
+through midnight, to end, never two separate spans — so "run while I
+sleep" is expressible in one clause.
+
+The window gates only *starting* a Box: `runSlot`
+(`cmd/launcher/internal/daemon/loop.go`) calls `pool.awaitWindow` once at
+the top of each iteration, before it even resolves a revision to run
+against, and checks it once more when that revision comes back — a fetch
+against a remote can outlast the decision that started it, and a slot
+that cleared the gate just before the close must not start a child on
+the far side of it. Once a child is running, the window closing never
+touches it — the child runs to completion, and so does its settle, so
+closing the window never throws away work already paid for in tokens and
+wall-clock.
+
+Outside the window, `awaitWindow` parks a slot in one `clk.Sleep` straight
+through to the next opening (`Window.Until`) rather than polling through
+it, so a shut window costs nothing beyond that single sleep. A
+none-dispatchable wait (exit 3) whose child finishes to find the window
+already shut skips its idle-backoff step and its mid-wait
+`ResolveRevision` polls entirely and parks instead — an operator reading
+the stream sees no `idle`/`jam` event for that iteration, only the
+`awake_close`/`awake_open` pair (below).
+
+The zone is explicit and never inherited: the literal zone `Local` is
+rejected by name, since silently falling back to the host's own zone is
+exactly the inheritance this knob exists to prevent.
+
+The window is validated in three places, each worth a different amount of
+trust. `lib/awake-window.nix` rejects a malformed value at Nix evaluation
+time, where the knob is declared — but an ambient `DAEMON_AWAKE_WINDOW`
+env var bypasses that check entirely, so the daemon's own startup
+`ParseWindow` (`cmd/launcher/internal/daemon/awake.go`) is the actual
+guarantee: it fails with a clear `daemon: DAEMON_AWAKE_WINDOW: ...`
+diagnostic rather than falling back to always-awake or any other default.
+And Nix cannot load the IANA zone database, so the Nix-level parse only
+checks the zone token's shape — only the runtime parse proves the
+configured zone actually resolves.
+
+Membership is wall-clock, so a DST transition inside the window changes
+its real elapsed length: an overnight `22:00-06:00 America/New_York`
+window spans a real 7 hours across the March spring-forward night (the
+clock skips an hour) and a real 9 hours across the November fall-back
+night (the clock repeats one), never the naive 8 either way.
+
 **Event stream.** The daemon writes one JSON object per line to stdout — a
 JSON-lines stream, so a service manager captures the run's history without
 the daemon owning a log format or a rotation policy. stdout is the machine
@@ -4814,11 +4865,17 @@ Every per-slot event — `child_start`, `box`, `child_finish`, `idle`, `jam`,
 event belongs to); `breaker_trip`'s `slot` is whichever slot's failure was
 the one that crossed `BreakerThreshold`, since the breaker itself counts
 across the whole pool but the crossing is always attributable to one
-slot's failure. `halt` is the one pool-level event and carries no `slot`,
-since it belongs to no one slot.
+slot's failure. `awake_close` and `awake_open` are pool-wide transitions,
+not per-slot events — however many slots park on one closing, the stream
+carries exactly one `awake_close`, and `awake_open` never appears without
+a preceding `awake_close` — but each still carries a `slot`: whichever
+slot happened to observe the transition. `halt` is the only event with no
+`slot` at all, since it belongs to no one slot.
 
 | event | fields | when |
 |-------|--------|------|
+| `awake_close` | `time`, `kind`, `slot`, `wait`, `reason` | the first slot parks on a shut Awake window — not the close instant itself, so a pool still busy at the close reports the transition, and computes `wait` (how long until the next opening), at that later parking |
+| `awake_open` | `time`, `kind`, `slot`, `reason` | the Awake window reopens after a prior `awake_close`; never emitted for a daemon that starts inside an already-open window |
 | `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched |
 | `box` | `time`, `kind`, `issue`, `revision`, `slot` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
 | `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
@@ -4829,9 +4886,9 @@ since it belongs to no one slot.
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the loop is about to return and the process is about to exit |
 
-**What this first cut doesn't do.** Per-kind backoff, the Awake window,
-and the instance lock are later tickets; the daemon does now own pool
-concurrency (`MAX_PARALLEL`, above) and does override the Consumer's own
+**What this first cut doesn't do.** Per-kind backoff and the instance
+lock are later tickets; the daemon does now own pool concurrency
+(`MAX_PARALLEL`, above) and does override the Consumer's own
 `dispatch.maxJobs`/`dispatch.maxParallel` for every child it starts — each
 child is pinned to exactly one Box (`--max-jobs 1 --max-parallel 1`, see
 **Pool** above) regardless of the Consumer's configured wave size, since
