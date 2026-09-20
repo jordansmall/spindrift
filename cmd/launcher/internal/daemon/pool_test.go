@@ -75,6 +75,15 @@ type blockingRunner struct {
 	mu       sync.Mutex
 	inFlight map[int]bool
 	peak     int
+	onIssue  map[int]func(string) // each slot's most recent RunChild call's OnIssue, for fireOnIssue
+
+	// announce, when true, makes RunChild call req.OnIssue for its slot
+	// immediately, before blocking on release — the same live signal a
+	// real claiming child sends (issue #3634's start gate) — so a test
+	// that wants every slot's first child running concurrently, as
+	// before the gate existed, can restore that with one flag rather than
+	// hand-firing fireOnIssue itself.
+	announce bool
 
 	started chan int
 	release map[int]chan ChildResult
@@ -109,7 +118,16 @@ func (r *blockingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildR
 	if n := len(r.inFlight); n > r.peak {
 		r.peak = n
 	}
+	if r.onIssue == nil {
+		r.onIssue = make(map[int]func(string))
+	}
+	r.onIssue[req.Slot] = req.OnIssue
+	announce := r.announce
 	r.mu.Unlock()
+
+	if announce && req.OnIssue != nil {
+		req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
+	}
 
 	r.started <- req.Slot
 	result := <-r.release[req.Slot]
@@ -127,6 +145,17 @@ func (r *blockingRunner) peakConcurrency() int {
 	return r.peak
 }
 
+// fireOnIssue calls slot's most recent RunChild call's OnIssue callback,
+// simulating a live Box announcement while that child is still blocked in
+// RunChild. Callers must wait for slot's value on started first, or there
+// is no callback captured yet to call.
+func (r *blockingRunner) fireOnIssue(slot int, issue string) {
+	r.mu.Lock()
+	fn := r.onIssue[slot]
+	r.mu.Unlock()
+	fn(issue)
+}
+
 // TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild pins the two
 // guarantees a pool of slots exists for: with Slots: N, N children really
 // do run at once (not N sequential calls that merely look concurrent from
@@ -136,6 +165,9 @@ func (r *blockingRunner) peakConcurrency() int {
 func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	const slots = 3
 	r := newBlockingRunner("rev1", slots)
+	// Restores this test's pre-gate concurrent first wave (issue #3634):
+	// without it, only the leader would start until it claims something.
+	r.announce = true
 	clk := &fakeClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -235,6 +267,8 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	const slots = 3
 	const threshold = 3
 	r := newBlockingRunner("rev1", slots)
+	// Restores this test's pre-gate concurrent first wave (issue #3634).
+	r.announce = true
 	clk := &fakeClock{}
 	// nw notifies on every event line as it is written, so the test can
 	// block until the pool's halt is actually recorded before releasing
@@ -379,6 +413,15 @@ func (r *barrierFailRunner) SelfPath(ctx context.Context, revision string) (stri
 }
 
 func (r *barrierFailRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	// Announce immediately, before ever joining the barrier below: the
+	// leader's slot must open the cold-start gate (issue #3634) the
+	// instant its own RunChild call begins, or the other slots would
+	// still be parked on the gate and could never join the barrier this
+	// test's whole premise depends on.
+	if req.OnIssue != nil {
+		req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
+	}
+
 	// Non-blocking, because the number of later calls is unbounded: a
 	// non-crossing slot races around through its backoff and back into
 	// RunChild as many times as the scheduler allows while the crossing
@@ -512,6 +555,8 @@ func (c *gateClock) Now() time.Time {
 func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	const slots = 2
 	r := newBlockingRunner("rev1", slots)
+	// Restores this test's pre-gate concurrent first wave (issue #3634).
+	r.announce = true
 	clk := &fakeClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
@@ -572,6 +617,8 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	const slots = 2
 	r := newBlockingRunner("rev1", slots)
+	// Restores this test's pre-gate concurrent first wave (issue #3634).
+	r.announce = true
 	clk := newGateClock()
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })

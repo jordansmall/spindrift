@@ -29,7 +29,64 @@ type pool struct {
 	reason    string
 	occupied  map[int]slotFlight
 	awakeShut bool // true once awake_close has fired, until the matching awake_open
+
+	// gate holds every slot but the leading one until that slot's first
+	// discovery round resolves (issue #3634): a cold pool that releases
+	// every slot at once lets two slots run discovery against the same
+	// tracker snapshot and both select the same issue, so the leader goes
+	// first and the rest park here until it either claims something (the
+	// race is over) or comes back with nothing (there is nothing left to
+	// race over). nil means there is no gate to wait on at all — a
+	// single-slot pool has no wave to stagger (see newPool). Non-nil but
+	// open (closed) is the steady-state case every later iteration takes:
+	// a closed channel always receives at once, so awaitStartGate costs
+	// one receive and nothing more once the wave has resolved.
+	gate     chan struct{}
+	gateOnce sync.Once
 }
+
+// leadSlot is the pool's designated cold-start leader (issue #3634): a
+// fixed slot number rather than whichever slot happens to reach the gate
+// first, so the wave's shape never depends on scheduler luck.
+const leadSlot = 0
+
+// Reasons stamped on gate_open — operator-facing prose in the same
+// documented-string convention as ShutdownDrain (events.go). Only the
+// first of these to actually fire reaches the stream: openStartGate is
+// idempotent, and these four release sites deliberately overlap so no
+// path out of the leader's first iteration can strand the rest of the
+// pool on a gate nothing else will ever open.
+const (
+	// gateOpenClaimed fires when the leader's child announces a Box while
+	// still running: the race the gate exists to prevent is already
+	// settled, so the rest of the pool starts its own discovery at once
+	// rather than waiting out the whole of the leader's Box run.
+	gateOpenClaimed = "the leading slot claimed an issue: releasing the rest of the pool to discover in parallel"
+	// gateOpenRoundResolved fires at the top of the leader's second
+	// iteration, catching every first-iteration exit with no release of
+	// its own above — including the Awake window shutting under the
+	// leader's own ResolveRevision fetch (issue #3634).
+	gateOpenRoundResolved = "the leading slot's first discovery round resolved without a claim: releasing the rest of the pool"
+	// gateOpenFailed fires on any unclassified failure that reaches
+	// backoffOrHalt during the leader's first round — a ResolveRevision
+	// error, a self-build evaluation failure, a RunChild seam error, or an
+	// unrecognised child exit code, whether or not a child ever ran: the
+	// leader is about to back off alone, and holding the rest of the pool
+	// through that backoff would stall every sibling's own cold start on
+	// a problem backoffOrHalt already handles per-slot.
+	gateOpenFailed = "the leading slot's first discovery round failed: releasing the rest of the pool rather than holding it through backoff"
+	// gateOpenStopped fires when the leader returns before any of the
+	// above resolved (a cancelled ctx, a halt, or a self-build mismatch):
+	// a leader that never gets to run discovery must still not strand
+	// every sibling parked on a gate nothing else will now ever open.
+	gateOpenStopped = "the leading slot stopped before its first discovery round resolved: releasing the rest of the pool"
+
+	// gateHoldReason is stamped on every gate_hold event, matching every
+	// other wait event in this stream (awake_close, backoff, idle's own
+	// wait): an operator reading a held start must see why without
+	// cross-referencing code.
+	gateHoldReason = "waiting for the leading slot's first discovery round to resolve"
+)
 
 // slotFlight is what one occupied slot currently has in flight.
 type slotFlight struct {
@@ -62,6 +119,11 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		kinds:    kinds,
 		cancel:   cancel,
 		occupied: make(map[int]slotFlight),
+	}
+	if cfg.Slots > 1 {
+		// A single slot has no sibling to race, so it must take no wait
+		// and the pool must emit no gate event at all (see gate's own doc).
+		p.gate = make(chan struct{})
 	}
 	return p, pctx
 }
@@ -232,6 +294,57 @@ func (p *pool) noteAwakeOpen(slot int) bool {
 	return was
 }
 
+// awaitStartGate holds slot until the pool's first discovery wave resolves
+// (issue #3634). Returns at once when there is no gate (a single-slot pool)
+// or when slot is the leader — the leader never waits on its own gate.
+//
+// The non-blocking select is deliberately tried first: this is called on
+// every iteration of every non-leader slot, and once the gate is open a
+// closed channel always receives immediately, so the steady-state path
+// (every iteration after the first wave resolves) costs one channel
+// receive and emits nothing. Only a non-leader slot that still finds the
+// gate shut emits gate_hold and actually blocks, on a select that also
+// watches ctx so a pool that is cancelled while a slot is held never
+// deadlocks it.
+func (p *pool) awaitStartGate(ctx context.Context, slot int) {
+	if p.gate == nil || slot == leadSlot {
+		return
+	}
+	select {
+	case <-p.gate:
+		return
+	default:
+	}
+	p.emit(Event{Event: "gate_hold", Slot: intPtr(slot), Reason: gateHoldReason})
+	select {
+	case <-ctx.Done():
+	case <-p.gate:
+	}
+}
+
+// openStartGate releases every slot parked in awaitStartGate. A no-op when
+// there is no gate, or when slot is not the leader: only the leader's own
+// round can end the wave, so every call site can call this unconditionally
+// without its own slot == leadSlot guard. Idempotent via gateOnce: several
+// release sites in runSlot legitimately race to call this for the same
+// leader (see the gateOpen* reasons' own doc), and only the first to
+// actually win the Once is the one whose reason reaches the stream.
+//
+// The gate_open emit happens before close(p.gate), not after: closing
+// first could let an awaitStartGate call already blocked on <-p.gate wake
+// and publish its own next event before gate_open itself reaches the
+// stream, which would make the durable record say a sibling acted before
+// the event that explains why it was allowed to.
+func (p *pool) openStartGate(slot int, reason string) {
+	if p.gate == nil || slot != leadSlot {
+		return
+	}
+	p.gateOnce.Do(func() {
+		p.emit(Event{Event: "gate_open", Slot: intPtr(slot), Reason: reason})
+		close(p.gate)
+	})
+}
+
 // stopped reports whether the pool has already recorded a halt reason —
 // deliberately not a raw ctx.Err() check; see stopOnCancel (loop.go) for why.
 func (p *pool) stopped() bool {
@@ -266,8 +379,22 @@ func (p *pool) halt(kind Kind, reason, revision string) {
 // look systemic — no per-slot retry clears that) or backs this one slot
 // off and lets it retry alone. Returns true if the pool halted (the caller
 // must stop), false if the caller should sleep out the backoff and
-// continue its own loop.
+// continue its own loop. When the caller is the leader and the start gate
+// is still shut, it also releases the gate before the backoff sleep below
+// (see gateOpenFailed) — a leader about to sleep alone through
+// FailureBackoff must not strand every sibling's cold start on that sleep.
 func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision, reason string) bool {
+	// Every path into backoffOrHalt during the leader's first round —
+	// pre-child (a ResolveRevision or self-build evaluation failure) or
+	// post-child (a RunChild seam error or an unrecognised exit code) —
+	// must release the gate before the backoff sleep below, or the whole
+	// pool waits out that backoff for nothing. openStartGate is
+	// idempotent: whichever of these reaches here first on the leader's
+	// first round is the one whose reason lands on the stream, and any
+	// later call (including a later iteration, or a sibling that never
+	// touches the gate at all) is a no-op.
+	p.openStartGate(slot, gateOpenFailed)
+
 	count, crossed := p.b.recordAndCheck(p.clk.Now())
 	if crossed {
 		haltReason := fmt.Sprintf("breaker: %d failures within %s reached threshold %d", count, p.cfg.BreakerWindow, p.cfg.BreakerThreshold)
