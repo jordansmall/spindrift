@@ -58,3 +58,98 @@ func TestIdleBackoffCapsAtShippedDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestKindBackoffFreshIsRunnable(t *testing.T) {
+	k := newKindBackoff(1, 8)
+	if !k.runnable(time.Now()) {
+		t.Fatalf("fresh kindBackoff: want runnable, got gated")
+	}
+	if until, gated := k.readyAt(); gated || !until.IsZero() {
+		t.Fatalf("fresh kindBackoff: readyAt() = (%v, %v), want (zero, false)", until, gated)
+	}
+	if k.jammedNow() {
+		t.Fatalf("fresh kindBackoff: want jammed=false")
+	}
+}
+
+func TestKindBackoffGatesUntilDeadline(t *testing.T) {
+	k := newKindBackoff(time.Second, 8*time.Second)
+	now := time.Now()
+
+	wait := k.markNoWork(now, false)
+	if wait != time.Second {
+		t.Fatalf("markNoWork() = %v, want %v", wait, time.Second)
+	}
+
+	if k.runnable(now) {
+		t.Fatalf("runnable(now) right after markNoWork: want gated")
+	}
+	if k.runnable(now.Add(wait - 1)) {
+		t.Fatalf("runnable(now+wait-1ns): want still gated")
+	}
+	// Landing exactly on the deadline must be runnable: a fake clock that
+	// sleeps exactly `wait` should not be gated an extra tick.
+	if !k.runnable(now.Add(wait)) {
+		t.Fatalf("runnable(now+wait): want runnable")
+	}
+
+	until, gated := k.readyAt()
+	if !gated || !until.Equal(now.Add(wait)) {
+		t.Fatalf("readyAt() = (%v, %v), want (%v, true)", until, gated, now.Add(wait))
+	}
+}
+
+func TestKindBackoffMarkNoWorkGrowsLikeIdleBackoff(t *testing.T) {
+	k := newKindBackoff(time.Second, 8*time.Second)
+	now := time.Now()
+
+	got := []time.Duration{}
+	for i := 0; i < 4; i++ {
+		got = append(got, k.markNoWork(now, false))
+	}
+
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("markNoWork() sequence = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestKindBackoffJammedFlag(t *testing.T) {
+	k := newKindBackoff(time.Second, 8*time.Second)
+	now := time.Now()
+
+	k.markNoWork(now, true)
+	if !k.jammedNow() {
+		t.Fatalf("jammedNow() after markNoWork(jammed=true): want true")
+	}
+
+	k.markNoWork(now, false)
+	if k.jammedNow() {
+		t.Fatalf("jammedNow() after markNoWork(jammed=false): want false")
+	}
+}
+
+func TestKindBackoffReset(t *testing.T) {
+	k := newKindBackoff(time.Second, 8*time.Second)
+	now := time.Now()
+
+	k.markNoWork(now, true)
+	k.markNoWork(now, true)
+
+	k.reset()
+
+	if !k.runnable(now) {
+		t.Fatalf("runnable(now) after reset: want runnable")
+	}
+	if k.jammedNow() {
+		t.Fatalf("jammedNow() after reset: want false")
+	}
+	if until, gated := k.readyAt(); gated || !until.IsZero() {
+		t.Fatalf("readyAt() after reset = (%v, %v), want (zero, false)", until, gated)
+	}
+	if got := k.markNoWork(now, false); got != time.Second {
+		t.Fatalf("markNoWork() after reset = %v, want floor (%v)", got, time.Second)
+	}
+}
