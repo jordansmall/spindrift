@@ -29,6 +29,13 @@ func TestRunChild_ExitCodeAndIssues(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", script)
 	}
 
+	// Every newHostRunner in this file passes env: os.Environ() — childEnv
+	// (command.go) always returns non-nil, so a nil cfg.env execs children
+	// with an EMPTY environment (no PATH), not "inherit the parent". Inert
+	// for this builtins-only child, but load-bearing for the tests whose
+	// children shell out: TestRunChild_OversizedLineDoesNotHang,
+	// TestRunChild_ChildInOwnProcessGroup, TestForwardStop_TwoCallsBeforeStartReplayBoth,
+	// TestRunDoctor_CancelledContextTearsDownChild.
 	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
