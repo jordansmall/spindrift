@@ -60,119 +60,26 @@ func (w *notifyWriter) waitForLine(t *testing.T, substr string) {
 	t.Fatalf("waitForLine: no line containing %q within %d lines", substr, 64)
 }
 
-// blockingRunner is the pool concurrency tests' Runner: RunChild for a
-// given slot blocks until the test sends that slot's result on its release
-// channel, so a test can hold several slots' children open at once and
-// observe how many are truly in flight together, then release them and
-// check every one that started also finished. It is keyed by req.Slot
-// (unlike loop_test.go's scriptedRunner, which scripts one shared call
-// sequence): several slots call RunChild concurrently here, so a shared
-// call-index counter would hand results to whichever slot happened to call
-// next rather than the slot the test meant.
-type blockingRunner struct {
-	revision string
-
-	mu       sync.Mutex
-	inFlight map[int]bool
-	peak     int
-	onIssue  map[int]func(string) // each slot's most recent RunChild call's OnIssue, for fireOnIssue
-
-	// announce, when true, makes RunChild call req.OnIssue for its slot
-	// immediately, before blocking on release — the same live signal a
-	// real claiming child sends (issue #3634's start gate) — so a test
-	// that wants every slot's first child running concurrently, as
-	// before the gate existed, can restore that with one flag rather than
-	// hand-firing fireOnIssue itself.
-	announce bool
-
-	started chan int
-	release map[int]chan ChildResult
-}
-
-func newBlockingRunner(revision string, slots int) *blockingRunner {
-	release := make(map[int]chan ChildResult, slots)
-	for s := 0; s < slots; s++ {
-		release[s] = make(chan ChildResult, 1)
-	}
-	return &blockingRunner{
-		revision: revision,
-		inFlight: make(map[int]bool),
-		started:  make(chan int, slots),
-		release:  release,
-	}
-}
-
-func (r *blockingRunner) ResolveRevision(ctx context.Context) (string, error) {
-	return r.revision, nil
-}
-
-// SelfPath is unused by every test using blockingRunner (Config.SelfProgram
-// stays empty), but must exist to satisfy Runner.
-func (r *blockingRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *blockingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	r.mu.Lock()
-	r.inFlight[req.Slot] = true
-	if n := len(r.inFlight); n > r.peak {
-		r.peak = n
-	}
-	if r.onIssue == nil {
-		r.onIssue = make(map[int]func(string))
-	}
-	r.onIssue[req.Slot] = req.OnIssue
-	announce := r.announce
-	r.mu.Unlock()
-
-	if announce && req.OnIssue != nil {
-		req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
-	}
-
-	r.started <- req.Slot
-	result := <-r.release[req.Slot]
-
-	r.mu.Lock()
-	delete(r.inFlight, req.Slot)
-	r.mu.Unlock()
-
-	return result, nil
-}
-
-func (r *blockingRunner) peakConcurrency() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.peak
-}
-
-// fireOnIssue calls slot's most recent RunChild call's OnIssue callback,
-// simulating a live Box announcement while that child is still blocked in
-// RunChild. Callers must wait for slot's value on started first, or there
-// is no callback captured yet to call.
-func (r *blockingRunner) fireOnIssue(t *testing.T, slot int, issue string) {
-	t.Helper()
-	r.mu.Lock()
-	fn := r.onIssue[slot]
-	r.mu.Unlock()
-	if fn == nil {
-		t.Fatalf("fireOnIssue: no OnIssue captured for slot %d (did the test wait on started first?)", slot)
-	}
-	fn(issue)
-}
-
 // TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild pins the two
 // guarantees a pool of slots exists for: with Slots: N and the cold-start
-// gate released (r.announce below), N children really do run at once (not
+// gate released (r.onStart below), N children really do run at once (not
 // N sequential calls that merely look concurrent from the outside), and
 // once every slot's child has started, halting one slot still lets every
 // sibling's already-started child return and emit its own child_finish
 // rather than being abandoned mid-run.
 func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	const slots = 3
-	r := newBlockingRunner("rev1", slots)
-	// Restores this test's pre-gate concurrent first wave (issue #3634):
-	// without it, only the leader would start until it claims something.
-	r.announce = true
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
+	// onStart restores this test's pre-gate concurrent first wave (issue
+	// #3634): without it, only the leader would start until it claims
+	// something.
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		if req.OnIssue != nil {
+			req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
+		}
+		return nil
+	}
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -187,7 +94,7 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	// rather than a lucky race.
 	seen := map[int]bool{}
 	for i := 0; i < slots; i++ {
-		seen[<-r.started] = true
+		seen[r.awaitStart(t)] = true
 	}
 	if len(seen) != slots {
 		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
@@ -200,7 +107,7 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	// slot's RunChild returns first wins the halt race; the others must
 	// still be allowed to finish rather than being cut off.
 	for s := 0; s < slots; s++ {
-		r.release[s] <- ChildResult{Exit: 7}
+		r.releaseSlot(s, ChildResult{Exit: 7})
 	}
 
 	reason := <-done
@@ -271,9 +178,16 @@ func TestPoolSlots1RunsOneChildAtATime(t *testing.T) {
 func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	const slots = 3
 	const threshold = 3
-	r := newBlockingRunner("rev1", slots)
-	// Restores this test's pre-gate concurrent first wave (issue #3634).
-	r.announce = true
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
+	// onStart restores this test's pre-gate concurrent first wave (issue
+	// #3634).
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		if req.OnIssue != nil {
+			req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
+		}
+		return nil
+	}
 	clk := &testClock{}
 	// nw notifies on every event line as it is written, so the test can
 	// block until the pool's halt is actually recorded before releasing
@@ -296,31 +210,31 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	// All three slots' first child in flight together.
 	seen := map[int]bool{}
 	for i := 0; i < slots; i++ {
-		seen[<-r.started] = true
+		seen[r.awaitStart(t)] = true
 	}
 	if len(seen) != slots {
 		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
 	}
 
 	// Slot 0 fails (1st pool-wide failure, below threshold): it backs off
-	// and restarts. Reading r.started again is only possible once that
+	// and restarts. Awaiting a start again is only possible once that
 	// restart's RunChild call is in flight, so it also proves the breaker
 	// recorded slot 0's failure before slot 1's is sent below.
-	r.release[0] <- ChildResult{Exit: 1}
-	if got := <-r.started; got != 0 {
+	r.releaseSlot(0, ChildResult{Exit: 1})
+	if got := r.awaitStart(t); got != 0 {
 		t.Fatalf("restart after backoff = slot %d, want slot 0", got)
 	}
 
 	// Slot 1 fails (2nd pool-wide failure, still below threshold): same
 	// backoff-and-restart.
-	r.release[1] <- ChildResult{Exit: 1}
-	if got := <-r.started; got != 1 {
+	r.releaseSlot(1, ChildResult{Exit: 1})
+	if got := r.awaitStart(t); got != 1 {
 		t.Fatalf("restart after backoff = slot %d, want slot 1", got)
 	}
 
 	// Slot 2 fails (3rd pool-wide failure, reaches threshold): the breaker
 	// trips instead of slot 2 backing off.
-	r.release[2] <- ChildResult{Exit: 1}
+	r.releaseSlot(2, ChildResult{Exit: 1})
 
 	// Wait for the pool's own halt event before releasing slot 0/1's
 	// still-in-flight children: the pool's mutex gives every later Lock
@@ -332,8 +246,8 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	// Slot 0 and 1's restarted children are still in flight (the pool's
 	// never-kill-a-started-child invariant), so they must be released for
 	// Loop to return at all.
-	r.release[0] <- ChildResult{Exit: 0}
-	r.release[1] <- ChildResult{Exit: 0}
+	r.releaseSlot(0, ChildResult{Exit: 0})
+	r.releaseSlot(1, ChildResult{Exit: 0})
 
 	reason := <-done
 	if !strings.Contains(reason, "breaker") {
@@ -383,70 +297,6 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	}
 }
 
-// barrierFailRunner is TestPoolBreakerTripsAtThresholdConcurrently's
-// Runner: the first `slots` RunChild calls all park on one channel and
-// return together the instant the last of them arrives, so every slot
-// hits backoffOrHalt at (as near as the scheduler allows) the same
-// instant — the genuinely concurrent crossing the serialized test above
-// cannot reach. Any later call (a non-crossing slot racing back around
-// before it notices the halt) finds the channel already closed and
-// returns immediately, so the test never needs to script a release for
-// it.
-type barrierFailRunner struct {
-	revision string
-	slots    int
-
-	started chan int
-
-	mu      sync.Mutex
-	arrived int
-	release chan struct{}
-}
-
-func newBarrierFailRunner(revision string, slots int) *barrierFailRunner {
-	return &barrierFailRunner{revision: revision, slots: slots, started: make(chan int, slots), release: make(chan struct{})}
-}
-
-func (r *barrierFailRunner) ResolveRevision(ctx context.Context) (string, error) {
-	return r.revision, nil
-}
-
-// SelfPath is unused by every test using barrierFailRunner (Config.SelfProgram
-// stays empty), but must exist to satisfy Runner.
-func (r *barrierFailRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *barrierFailRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	// Announce immediately, before ever joining the barrier below: the
-	// leader's slot must open the cold-start gate (issue #3634) the
-	// instant its own RunChild call begins, or the other slots would
-	// still be parked on the gate and could never join the barrier this
-	// test's whole premise depends on.
-	if req.OnIssue != nil {
-		req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
-	}
-
-	// Non-blocking, because the number of later calls is unbounded: a
-	// non-crossing slot races around through its backoff and back into
-	// RunChild as many times as the scheduler allows while the crossing
-	// slot sits between recordAndCheck and halt. Only the first `slots`
-	// sends are ever read, so a blocking send fills the buffer and parks
-	// a slot goroutine forever, and Loop never returns.
-	select {
-	case r.started <- req.Slot:
-	default:
-	}
-	r.mu.Lock()
-	r.arrived++
-	if r.arrived == r.slots {
-		close(r.release)
-	}
-	r.mu.Unlock()
-	<-r.release
-	return ChildResult{Exit: 1}, nil
-}
-
 // TestPoolBreakerTripsAtThresholdConcurrently pins the fix for the
 // non-atomic crossing: releasing every slot's failure at once (rather
 // than one at a time, like the serialized test above) used to let all of
@@ -456,7 +306,49 @@ func (r *barrierFailRunner) RunChild(ctx context.Context, req ChildRequest) (Chi
 func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 	const slots = 3
 	const threshold = 3
-	r := newBarrierFailRunner("rev1", slots)
+
+	// started/arrived/release: a test-local barrier releasing every
+	// slot's first RunChild call at once, so the concurrent crossing the
+	// serialized test above cannot reach really is concurrent.
+	started := make(chan int, slots)
+	var mu sync.Mutex
+	arrived := 0
+	release := make(chan struct{})
+
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 1}},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			// Announce immediately, before ever joining the barrier
+			// below: the leader's slot must open the cold-start gate
+			// (issue #3634) the instant its own RunChild call begins, or
+			// the other slots would still be parked on the gate and
+			// could never join the barrier this test's whole premise
+			// depends on.
+			if req.OnIssue != nil {
+				req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
+			}
+			// Non-blocking, because the number of later calls is
+			// unbounded: a non-crossing slot races around through its
+			// backoff and back into RunChild as many times as the
+			// scheduler allows while the crossing slot sits between
+			// recordAndCheck and halt. Only the first `slots` sends are
+			// ever read, so a blocking send fills the buffer and parks a
+			// slot goroutine forever, and Loop never returns.
+			select {
+			case started <- req.Slot:
+			default:
+			}
+			mu.Lock()
+			arrived++
+			if arrived == slots {
+				close(release)
+			}
+			mu.Unlock()
+			<-release
+			return nil
+		},
+	}
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -476,7 +368,7 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 	// before releasing any of them.
 	seen := map[int]bool{}
 	for i := 0; i < slots; i++ {
-		seen[<-r.started] = true
+		seen[<-started] = true
 	}
 	if len(seen) != slots {
 		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
@@ -518,40 +410,6 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 	}
 }
 
-// gateClock is the Clock for tests that need a slot to remain provably
-// parked in its idle wait, rather than testClock's instant advance racing
-// straight back into a second RunChild call. Sleep blocks on ctx.Done()
-// (recording the wait first, like testClock does) so "this slot is now
-// asleep" is a real synchronization point a test can wait on via
-// sleeping, and the only way any Sleep call ever returns is the pool
-// itself being cancelled — which is exactly how these tests end the test,
-// via the top-level ctx, so no slot ever loops back into a RunChild call
-// this test never scripts a release for.
-type gateClock struct {
-	mu       sync.Mutex
-	waits    []time.Duration
-	sleeping chan struct{}
-}
-
-func newGateClock() *gateClock {
-	return &gateClock{sleeping: make(chan struct{}, 8)}
-}
-
-func (c *gateClock) Sleep(ctx context.Context, d time.Duration) {
-	c.mu.Lock()
-	c.waits = append(c.waits, d)
-	c.mu.Unlock()
-	select {
-	case c.sleeping <- struct{}{}:
-	default:
-	}
-	<-ctx.Done()
-}
-
-func (c *gateClock) Now() time.Time {
-	return time.Unix(0, 0).UTC()
-}
-
 // TestPoolExit3WithSiblingRunningReportsIdleNotJam pins the routine half of
 // the occupancy axis: a slot's exit 3 while a sibling is genuinely still
 // running (blocked mid-RunChild, not merely between calls) must report
@@ -559,9 +417,16 @@ func (c *gateClock) Now() time.Time {
 // claimed or overlap-deferred against that very sibling.
 func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	const slots = 2
-	r := newBlockingRunner("rev1", slots)
-	// Restores this test's pre-gate concurrent first wave (issue #3634).
-	r.announce = true
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
+	// onStart restores this test's pre-gate concurrent first wave (issue
+	// #3634).
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		if req.OnIssue != nil {
+			req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
+		}
+		return nil
+	}
 	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
@@ -575,7 +440,7 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	// Both slots' first child in flight together.
 	seen := map[int]bool{}
 	for i := 0; i < slots; i++ {
-		seen[<-r.started] = true
+		seen[r.awaitStart(t)] = true
 	}
 	if len(seen) != slots {
 		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
@@ -584,23 +449,23 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	// Slot 1 exits none-dispatchable while slot 0 is still blocked mid-
 	// RunChild (genuinely occupied, not just between calls) — this must
 	// report idle.
-	r.release[1] <- ChildResult{Exit: 3}
+	r.releaseSlot(1, ChildResult{Exit: 3})
 	nw.waitForLine(t, "\"event\":\"idle\"")
 
 	// Slot 1 now loops back and restarts (still nothing wrong with the
 	// pool); wait for its restart so the later halt below has a real
 	// in-flight child to release rather than racing its own start.
-	if got := <-r.started; got != 1 {
+	if got := r.awaitStart(t); got != 1 {
 		t.Fatalf("restart after idle = slot %d, want slot 1", got)
 	}
 
 	// End the test: halt via slot 0's still-in-flight first child.
-	r.release[0] <- ChildResult{Exit: 7}
+	r.releaseSlot(0, ChildResult{Exit: 7})
 	nw.waitForLine(t, "\"event\":\"halt\"")
 
 	// Slot 1's restarted child is still in flight; release it so Loop can
 	// return.
-	r.release[1] <- ChildResult{Exit: 0}
+	r.releaseSlot(1, ChildResult{Exit: 0})
 
 	reason := <-done
 	if !strings.Contains(reason, "signalled-stop") {
@@ -621,10 +486,23 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 // number, and the daemon keeps going rather than halting on it.
 func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	const slots = 2
-	r := newBlockingRunner("rev1", slots)
-	// Restores this test's pre-gate concurrent first wave (issue #3634).
-	r.announce = true
-	clk := newGateClock()
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
+	// onStart restores this test's pre-gate concurrent first wave (issue
+	// #3634).
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		if req.OnIssue != nil {
+			req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
+		}
+		return nil
+	}
+	// clk: Sleep must remain provably parked rather than testClock's
+	// instant advance racing straight back into a second RunChild call,
+	// so "this slot is now asleep" is a real synchronization point this
+	// test can wait on via sleepSignal, and the only way any Sleep call
+	// ever returns is the pool itself being cancelled below.
+	clk := &testClock{sleepSignal: make(chan struct{}, slots)}
+	clk.park()
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 	cfg := testConfig(slots)
@@ -638,21 +516,21 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	// Both slots' first child in flight together.
 	seen := map[int]bool{}
 	for i := 0; i < slots; i++ {
-		seen[<-r.started] = true
+		seen[r.awaitStart(t)] = true
 	}
 	if len(seen) != slots {
 		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
 	}
 
-	// Slot 1 exits queue-empty and parks in its idle wait — gateClock's
-	// Sleep never returns on its own, so slot 1 is now genuinely,
+	// Slot 1 exits queue-empty and parks in its idle wait — the parked
+	// clock's Sleep never returns on its own, so slot 1 is now genuinely,
 	// provably not occupied and staying that way.
-	r.release[1] <- ChildResult{Exit: 2}
-	<-clk.sleeping
+	r.releaseSlot(1, ChildResult{Exit: 2})
+	<-clk.sleepSignal
 
 	// Slot 0 exits none-dispatchable with slot 1 parked and nothing else
 	// running: this must report jam, carrying slot 0.
-	r.release[0] <- ChildResult{Exit: 3}
+	r.releaseSlot(0, ChildResult{Exit: 3})
 	nw.waitForLine(t, "\"event\":\"jam\"")
 
 	// End the test: cancelling the top-level ctx reaches both slots
@@ -713,55 +591,6 @@ func TestIdleWaitLastSliceClampsToRemaining(t *testing.T) {
 	}
 }
 
-// stepClock is a Clock for testing concurrent parking: unlike testClock,
-// whose Sleep additively advances a virtual now (fine for one goroutine at
-// a time, but unsound once several Sleep calls race the same shared clock
-// -- their durations stack instead of overlapping), stepClock only changes
-// now when the test calls advance, which also releases every Sleep blocked
-// so far at once. That models "N slots are all asleep waiting for the same
-// instant" exactly, with no additive artifact.
-type stepClock struct {
-	mu       sync.Mutex
-	now      time.Time
-	waits    []time.Duration
-	barrier  chan struct{}
-	sleeping chan struct{}
-}
-
-func newStepClock(now time.Time, slots int) *stepClock {
-	return &stepClock{now: now, barrier: make(chan struct{}), sleeping: make(chan struct{}, slots)}
-}
-
-func (c *stepClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *stepClock) Sleep(ctx context.Context, d time.Duration) {
-	c.mu.Lock()
-	c.waits = append(c.waits, d)
-	barrier := c.barrier
-	c.mu.Unlock()
-
-	c.sleeping <- struct{}{}
-	select {
-	case <-barrier:
-	case <-ctx.Done():
-	}
-}
-
-// advance sets now and releases every Sleep call parked so far, as if all
-// of them woke at once.
-func (c *stepClock) advance(now time.Time) {
-	c.mu.Lock()
-	c.now = now
-	old := c.barrier
-	c.barrier = make(chan struct{})
-	c.mu.Unlock()
-	close(old)
-}
-
 // TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots pins the
 // edge-triggered contract: with several slots all parking on the same
 // closed window, the stream carries exactly one awake_close and one
@@ -773,7 +602,13 @@ func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing
 	}
 	const slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
-	clk := newStepClock(time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), slots)
+	// clk: testClock's step mode, unlike an additive advance (unsound once
+	// several Sleep calls race the same shared clock), only changes now on
+	// step and releases every Sleep blocked so far at once, modeling "all
+	// three slots are asleep waiting for the same instant" with no
+	// additive artifact.
+	clk := &testClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), sleepSignal: make(chan struct{}, slots)}
+	clk.park()
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -791,14 +626,8 @@ func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing
 		}(s)
 	}
 
-	for i := 0; i < slots; i++ {
-		select {
-		case <-clk.sleeping:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("timed out waiting for slot %d to park on the closed window", i)
-		}
-	}
-	clk.advance(time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)) // window opens, releases all three
+	clk.awaitSleep(t, slots)
+	clk.step(time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)) // window opens, releases all three
 	wg.Wait()
 
 	events := decodeEvents(t, &buf)
@@ -829,7 +658,10 @@ func TestAwaitWindowSkipsPublishOnNonTransitionIteration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
 	}
-	clk := newStepClock(time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), 1)
+	// clk: see TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots
+	// for why step mode, not an additive advance, is required here.
+	clk := &testClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), sleepSignal: make(chan struct{}, 1)}
+	clk.park()
 
 	// A counting now func: every StatusWriter.Publish call advances the
 	// stamped Time by one, whatever the sampled Status otherwise says, so
@@ -869,13 +701,13 @@ func TestAwaitWindowSkipsPublishOnNonTransitionIteration(t *testing.T) {
 		p.awaitWindow(pctx, 0)
 	}()
 
-	<-clk.sleeping // first iteration: noteAwakeClose observes the transition
+	clk.awaitSleep(t, 1) // first iteration: noteAwakeClose observes the transition
 	afterClose := readTime()
 
 	// Advance to a still-shut instant: a second iteration, still no
 	// transition (awakeShut was already true), must publish nothing new.
-	clk.advance(time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC))
-	<-clk.sleeping
+	clk.step(time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC))
+	clk.awaitSleep(t, 1)
 	afterSecondShutIteration := readTime()
 	if afterSecondShutIteration != afterClose {
 		t.Fatalf("status Time changed on a non-transition iteration: got %q, want unchanged %q", afterSecondShutIteration, afterClose)
@@ -883,7 +715,7 @@ func TestAwaitWindowSkipsPublishOnNonTransitionIteration(t *testing.T) {
 
 	// Advance past the reopening: the transition back to open must still
 	// publish.
-	clk.advance(time.Date(2026, 1, 1, 22, 0, 0, 0, time.UTC))
+	clk.step(time.Date(2026, 1, 1, 22, 0, 0, 0, time.UTC))
 	<-done
 	afterOpen := readTime()
 	if afterOpen == afterSecondShutIteration {
@@ -1258,8 +1090,12 @@ func TestPoolSnapshotElapsedGateReadsAsCheckingNotWaiting(t *testing.T) {
 // "every queue empty".
 func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing.T) {
 	const slots = 2
-	r := newBlockingRunner("rev1", slots)
-	clk := newGateClock()
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
+	// clk: Sleep must remain provably parked (see TestPoolExit3WithPoolIdleIsAJam)
+	// so slot 0 parking in its idle wait is a real synchronization point.
+	clk := &testClock{sleepSignal: make(chan struct{}, slots)}
+	clk.park()
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 	cfg := testConfig(slots)
@@ -1280,14 +1116,14 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 		runSlot(pctx, 0, cfg, p)
 	}()
 
-	if got := <-r.started; got != 0 {
+	if got := r.awaitStart(t); got != 0 {
 		t.Fatalf("started slot = %d, want 0", got)
 	}
-	r.release[0] <- ChildResult{Exit: 3}
+	r.releaseSlot(0, ChildResult{Exit: 3})
 	// Slot 0 parking in its idle wait is the synchronization point:
 	// markNoWork has run by then, so the flag read below is settled state
 	// rather than a sample taken mid-iteration.
-	<-clk.sleeping
+	<-clk.sleepSignal
 
 	if !p.kinds[KindDispatch].jammedNow() {
 		t.Fatalf("dispatch jammedNow = false with a sibling occupied, want true (exit 3 alone gates this)")

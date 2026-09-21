@@ -14,8 +14,7 @@ import (
 // scripting field below is written once, before Loop/the pool starts, and
 // never mutated again — mu does not guard them, only the call-recording
 // fields and the concurrent reads several slot goroutines make of them
-// once a multi-slot test is under way (mirroring fakeRunner's own
-// documented split).
+// once a multi-slot test is under way.
 type scriptedRunner struct {
 	// revisions/resolveAt/resolveErr: one revision per ResolveRevision
 	// call, last value repeating once exhausted; resolveAt is a 1-based
@@ -38,7 +37,7 @@ type scriptedRunner struct {
 	// a result to whichever slot happened to call next) beats byKind
 	// (keyed by the caller's own per-kind call index, for two
 	// independently-emptying dispatch/research queues) beats the single
-	// shared results sequence (today's fakeRunner behaviour). runErrAt
+	// shared results sequence in total call order. runErrAt
 	// is a 1-based *total* call index (across every slot and kind) that
 	// wins over all three when it matches.
 	bySlot       map[int][]ChildResult
@@ -328,12 +327,11 @@ func (r *scriptedRunner) RunChild(ctx context.Context, req ChildRequest) (ChildR
 
 // testClock is the package's one scriptable Clock double, covering every
 // sleep behaviour the 5 ad-hoc fake clocks it replaces needed: an instant
-// default advance (fakeClock), a parked mode that blocks until woken or
-// cancelled (gateClock, blockingMutableClock), a step mode that releases
-// every parked sleeper at once over a fresh barrier so N concurrent sleeps
-// never additively stack (stepClock), and a sleep-entry signal plus
-// onSleep hook for tests that need to know the instant a slot genuinely
-// idles (dualkind_test.go's cancelOnSleepClock).
+// default advance, a parked mode that blocks until woken or cancelled, a
+// step mode that releases every parked sleeper at once over a fresh
+// barrier so N concurrent sleeps never additively stack, and a
+// sleep-entry signal plus onSleep hook for tests that need to know the
+// instant a slot genuinely idles.
 type testClock struct {
 	mu       sync.Mutex
 	now      time.Time
@@ -370,7 +368,8 @@ func (c *testClock) park() {
 
 // wake releases every currently parked Sleep call without changing now and
 // without installing a fresh barrier — the one-shot "let everything through
-// from here on" gesture blockingMutableClock's release channel models.
+// from here on" gesture, for unparking every slot asleep in a shut window
+// without cancelling the pool.
 func (c *testClock) wake() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -384,9 +383,9 @@ func (c *testClock) wake() {
 }
 
 // step sets now and releases every Sleep call parked so far at once, then
-// installs a fresh barrier for the next round — stepClock's fix for
-// fakeClock's additive advance, which is unsound once several Sleep calls
-// race the same shared clock.
+// installs a fresh barrier for the next round. An additive advance is
+// sound for one sleeper at a time but not once several Sleep calls race
+// the same shared clock: their durations stack instead of overlapping.
 func (c *testClock) step(now time.Time) {
 	c.mu.Lock()
 	c.now = now

@@ -19,107 +19,6 @@ func dualKindConfig(slots, reservation int) Config {
 	return cfg
 }
 
-// fakeKindRunner is scriptedRunner's dual-kind sibling: scriptedRunner scripts one
-// shared RunChild sequence, which cannot model two independently-emptying
-// queues. resultsByKind gives each Kind its own sequence, consumed in call
-// order with the last value repeating once exhausted (scriptedRunner's own
-// exhaustion rule, per kind instead of pool-wide). Mutex-guarded: these
-// tests deliberately run several slots concurrently against one fake.
-type fakeKindRunner struct {
-	revision      string
-	resultsByKind map[Kind][]ChildResult
-
-	// limit, if non-zero, is a safety cap on the total RunChild count (every
-	// kind combined): far above whatever cancelWhen (or, absent that, limit
-	// itself) needs to reach its goal, so a genuine regression fails in
-	// bounded time as a clear "safety cap exhausted" fatal rather than
-	// hanging the test forever.
-	limit int
-	// cancelWhen, if set, is evaluated under the fake's own lock right after
-	// every call is recorded; the first time it returns true, RunChild fires
-	// cancelFn. This is deliberately the condition each test actually
-	// asserts on (e.g. "every slot has run"), not a call count: with several
-	// slot goroutines calling RunChild concurrently, a shared count races
-	// the Go scheduler (one fast slot can burn the whole budget before a
-	// sibling is ever scheduled), so the stop has to be the asserted state
-	// itself, which the loop is guaranteed to have reached by construction.
-	cancelWhen func(f *fakeKindRunner) bool
-	cancelFn   context.CancelFunc
-
-	mu           sync.Mutex
-	callsByKind  map[Kind]int
-	runCalls     []runCall
-	capExhausted bool // limit fired before cancelWhen's goal was ever met
-}
-
-func (f *fakeKindRunner) ResolveRevision(ctx context.Context) (string, error) {
-	return f.revision, nil
-}
-
-// SelfPath is never exercised here: these tests leave Config.SelfProgram
-// empty, so the self-build check short-circuits before reaching the seam.
-func (f *fakeKindRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (f *fakeKindRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	f.mu.Lock()
-	if f.callsByKind == nil {
-		f.callsByKind = make(map[Kind]int)
-	}
-	idx := f.callsByKind[req.Kind]
-	list := f.resultsByKind[req.Kind]
-	if idx >= len(list) {
-		idx = len(list) - 1
-	}
-	result := list[idx]
-	f.callsByKind[req.Kind]++
-	f.runCalls = append(f.runCalls, runCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot})
-	total := len(f.runCalls)
-
-	goalMet := f.cancelWhen != nil && f.cancelWhen(f)
-	shouldCancel := goalMet
-	if !goalMet && f.limit > 0 && total >= f.limit {
-		f.capExhausted = true
-		shouldCancel = true
-	}
-	f.mu.Unlock()
-
-	if shouldCancel && f.cancelFn != nil {
-		f.cancelFn()
-	}
-	return result, nil
-}
-
-// requireGoalMet fails the test if the safety cap fired before cancelWhen's
-// condition was ever satisfied. That distinguishes "the loop reached the
-// state the test wanted, and stopped there" from "a regression means it
-// never did, and only the cap kept the test from hanging" — without this, a
-// capped-out run can look identical to a successful one to whatever the test
-// asserts afterward.
-func (f *fakeKindRunner) requireGoalMet(t *testing.T) {
-	t.Helper()
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.capExhausted {
-		t.Fatalf("fakeKindRunner: safety cap (%d calls) fired before cancelWhen's goal was ever met — likely a regression, not scheduler flake", f.limit)
-	}
-}
-
-func (f *fakeKindRunner) callCount(kind Kind) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.callsByKind[kind]
-}
-
-func (f *fakeKindRunner) calls() []runCall {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]runCall, len(f.runCalls))
-	copy(out, f.runCalls)
-	return out
-}
-
 // slotsSeen returns the distinct slots among calls whose Kind is kind.
 func slotsSeen(calls []runCall, kind Kind) map[int]bool {
 	seen := map[int]bool{}
@@ -131,19 +30,79 @@ func slotsSeen(calls []runCall, kind Kind) map[int]bool {
 	return seen
 }
 
-// cancelOnSleepClock wraps testClock and fires cancelFn the first time
-// Sleep is called. A slot only ever calls Sleep from idleSleep once every
-// configured kind has backed off (pickKind found nothing runnable) — that
-// is exactly the "pool has genuinely idled" moment test 8 needs to stop on.
-type cancelOnSleepClock struct {
-	*testClock
-	cancelFn context.CancelFunc
-	once     sync.Once
+// kindGate stops a dual-kind Loop run through scriptedRunner's onStart
+// hook rather than being grown onto the seam double itself — this is
+// dualkind_test.go's own scheduling-stop concern, not
+// something every scriptedRunner user needs. limit is the total RunChild
+// count across every kind at which onStart fires cancelFn. With cancelWhen
+// set, limit is a safety cap set far above whatever the goal below needs,
+// so a genuine regression fails in bounded time as a clear "safety cap
+// exhausted" fatal rather than hanging the test forever, and
+// requireGoalMet is the check that the goal — not the cap — is what
+// actually stopped the run. With cancelWhen nil there is no goal to check:
+// limit IS the run's intended stop, and requireGoalMet is a no-op.
+// cancelWhen, when set, is evaluated right after every call is recorded
+// (via r's own calls()/kindCount() accessors, never r's internal lock); the
+// first time it returns true, onStart fires cancelFn. This is deliberately
+// the condition each test actually asserts on (e.g. "every slot has run"),
+// not a call count: with several slot goroutines calling RunChild
+// concurrently, a shared count races the Go scheduler (one fast slot can
+// burn the whole budget before a sibling is ever scheduled), so the stop
+// has to be the asserted state itself, which the loop is guaranteed to
+// have reached by construction.
+type kindGate struct {
+	r          *scriptedRunner
+	limit      int
+	cancelWhen func(r *scriptedRunner) bool
+	cancelFn   context.CancelFunc
+
+	mu           sync.Mutex
+	capExhausted bool // limit fired before cancelWhen's goal was ever met
 }
 
-func (c *cancelOnSleepClock) Sleep(ctx context.Context, d time.Duration) {
-	c.testClock.Sleep(ctx, d)
-	c.once.Do(c.cancelFn)
+func (g *kindGate) onStart(ctx context.Context, req ChildRequest) error {
+	goalMet := g.cancelWhen != nil && g.cancelWhen(g.r)
+	shouldCancel := goalMet
+	if !goalMet && g.limit > 0 && g.r.runCount() >= g.limit {
+		// capExhausted only means something when there was a goal to miss;
+		// with cancelWhen nil, limit is the intended stop, not a cap that
+		// fired early.
+		if g.cancelWhen != nil {
+			g.mu.Lock()
+			g.capExhausted = true
+			g.mu.Unlock()
+		}
+		shouldCancel = true
+	}
+	if shouldCancel && g.cancelFn != nil {
+		g.cancelFn()
+	}
+	return nil
+}
+
+// fataler is the sliver of *testing.T requireGoalMet needs — small enough
+// that a self-test can pass a recording double instead, to observe a
+// requireGoalMet failure without actually failing the suite.
+type fataler interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
+// requireGoalMet fails the test if the safety cap fired before cancelWhen's
+// condition was ever satisfied. That distinguishes "the loop reached the
+// state the test wanted, and stopped there" from "a regression means it
+// never did, and only the cap kept the test from hanging" — without this, a
+// capped-out run can look identical to a successful one to whatever the test
+// asserts afterward. With cancelWhen nil, capExhausted is never set (see
+// onStart), so this is a no-op: limit was the run's intended stop, not a
+// cap that fired early.
+func (g *kindGate) requireGoalMet(t fataler) {
+	t.Helper()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.capExhausted {
+		t.Fatalf("kindGate: safety cap (%d calls) fired before cancelWhen's goal was ever met — likely a regression, not scheduler flake", g.limit)
+	}
 }
 
 // TestPoolBothKindsShareOneSlotCapAcrossThePool pins issue #3541's central
@@ -152,9 +111,11 @@ func (c *cancelOnSleepClock) Sleep(ctx context.Context, d time.Duration) {
 // silently double an operator's MEMORY_LIMIT x MAX_PARALLEL sizing).
 func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 	const slots = 3
-	r := newBlockingRunner("rev1", slots)
-	// Restores this test's pre-gate concurrent first wave (issue #3634).
-	r.announce = true
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
+	// onStart restores this test's pre-gate concurrent first wave (issue
+	// #3634).
+	r.announceEachSlot()
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -168,7 +129,7 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 
 	seen := map[int]bool{}
 	for i := 0; i < slots; i++ {
-		seen[<-r.started] = true
+		seen[r.awaitStart(t)] = true
 	}
 	if len(seen) != slots {
 		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
@@ -178,7 +139,7 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 	}
 
 	for s := 0; s < slots; s++ {
-		r.release[s] <- ChildResult{Exit: 7}
+		r.releaseSlot(t, s, ChildResult{Exit: 7})
 	}
 	reason := <-done
 	if !strings.Contains(reason, "signalled-stop") {
@@ -193,25 +154,29 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 func TestPoolReservedSlotPrefersResearchWhileResearchHasWork(t *testing.T) {
 	const slots = 3
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &fakeKindRunner{
-		revision: "rev1",
-		resultsByKind: map[Kind][]ChildResult{
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
 			KindDispatch: {{Exit: 0}},
 			KindResearch: {{Exit: 0}},
 		},
-		limit: 5000, // safety cap: neither kind ever gates, so only the goal below stops the loop
 	}
-	r.cancelFn = cancel
-	// Goal: every slot has run at least once. A shared call-count budget
-	// would race the scheduler across the 3 slot goroutines; this instead
-	// stops exactly when the state under test has been reached.
-	r.cancelWhen = func(f *fakeKindRunner) bool {
-		seen := map[int]bool{}
-		for _, c := range f.runCalls {
-			seen[c.Slot] = true
-		}
-		return len(seen) >= slots
+	gate := &kindGate{
+		r:        r,
+		limit:    5000, // safety cap: neither kind ever gates, so only the goal below stops the loop
+		cancelFn: cancel,
+		// Goal: every slot has run at least once. A shared call-count budget
+		// would race the scheduler across the 3 slot goroutines; this instead
+		// stops exactly when the state under test has been reached.
+		cancelWhen: func(r *scriptedRunner) bool {
+			seen := map[int]bool{}
+			for _, c := range r.calls() {
+				seen[c.Slot] = true
+			}
+			return len(seen) >= slots
+		},
 	}
+	r.onStart = gate.onStart
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -220,7 +185,7 @@ func TestPoolReservedSlotPrefersResearchWhileResearchHasWork(t *testing.T) {
 	if !strings.Contains(reason, "context-cancelled") {
 		t.Fatalf("halt reason = %q, want context-cancelled (the test's own stop)", reason)
 	}
-	r.requireGoalMet(t)
+	gate.requireGoalMet(t)
 
 	calls := r.calls()
 	if len(calls) == 0 {
@@ -256,39 +221,43 @@ func TestPoolReservedSlotPrefersResearchWhileResearchHasWork(t *testing.T) {
 // into running work.
 func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &fakeKindRunner{
-		revision: "rev1",
-		resultsByKind: map[Kind][]ChildResult{
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
 			KindResearch: {{Exit: 2}},
 			KindDispatch: {{Exit: 0}},
 		},
-		limit: 3000, // safety cap: dispatch never gates, so only the goal below stops the loop
 	}
-	r.cancelFn = cancel
-	// Goal: dispatch has run in both slots (the burst this test pins).
-	// Research gates itself for good on its first call regardless of when
-	// this fires, so stopping here rather than on a shared call count still
-	// leaves the "research called exactly once" assertion below meaningful.
-	r.cancelWhen = func(f *fakeKindRunner) bool {
-		seen := map[int]bool{}
-		for _, c := range f.runCalls {
-			if c.Kind == KindDispatch {
-				seen[c.Slot] = true
+	gate := &kindGate{
+		r:        r,
+		limit:    3000, // safety cap: dispatch never gates, so only the goal below stops the loop
+		cancelFn: cancel,
+		// Goal: dispatch has run in both slots (the burst this test pins).
+		// Research gates itself for good on its first call regardless of when
+		// this fires, so stopping here rather than on a shared call count still
+		// leaves the "research called exactly once" assertion below meaningful.
+		cancelWhen: func(r *scriptedRunner) bool {
+			seen := map[int]bool{}
+			for _, c := range r.calls() {
+				if c.Kind == KindDispatch {
+					seen[c.Slot] = true
+				}
 			}
-		}
-		return seen[0] && seen[1]
+			return seen[0] && seen[1]
+		},
 	}
+	r.onStart = gate.onStart
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(ctx, dualKindConfig(2, 1), r, em, clk)
-	r.requireGoalMet(t)
+	gate.requireGoalMet(t)
 
 	// Only slot 0 (the reserved one) ever prefers research, and its single
 	// empty result gates it for good (the fake clock never advances here),
 	// so research must be tried exactly once.
-	if got := r.callCount(KindResearch); got != 1 {
+	if got := r.kindCount(KindResearch); got != 1 {
 		t.Fatalf("research calls = %d, want exactly 1: its first empty result should gate it for the rest of the run", got)
 	}
 	if seen := slotsSeen(r.calls(), KindDispatch); !seen[0] || !seen[1] {
@@ -301,33 +270,37 @@ func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 // first (and only) check, so research ends up running in every slot.
 func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &fakeKindRunner{
-		revision: "rev1",
-		resultsByKind: map[Kind][]ChildResult{
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
 			KindDispatch: {{Exit: 2}},
 			KindResearch: {{Exit: 0}},
 		},
-		limit: 3000, // safety cap: research never gates, so only the goal below stops the loop
 	}
-	r.cancelFn = cancel
-	// Goal: research has run in both slots (the mirrored burst this test pins).
-	r.cancelWhen = func(f *fakeKindRunner) bool {
-		seen := map[int]bool{}
-		for _, c := range f.runCalls {
-			if c.Kind == KindResearch {
-				seen[c.Slot] = true
+	gate := &kindGate{
+		r:        r,
+		limit:    3000, // safety cap: research never gates, so only the goal below stops the loop
+		cancelFn: cancel,
+		// Goal: research has run in both slots (the mirrored burst this test pins).
+		cancelWhen: func(r *scriptedRunner) bool {
+			seen := map[int]bool{}
+			for _, c := range r.calls() {
+				if c.Kind == KindResearch {
+					seen[c.Slot] = true
+				}
 			}
-		}
-		return seen[0] && seen[1]
+			return seen[0] && seen[1]
+		},
 	}
+	r.onStart = gate.onStart
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(ctx, dualKindConfig(2, 1), r, em, clk)
-	r.requireGoalMet(t)
+	gate.requireGoalMet(t)
 
-	if got := r.callCount(KindDispatch); got != 1 {
+	if got := r.kindCount(KindDispatch); got != 1 {
 		t.Fatalf("dispatch calls = %d, want exactly 1: its first empty result should gate it for the rest of the run", got)
 	}
 	if seen := slotsSeen(r.calls(), KindResearch); !seen[0] || !seen[1] {
@@ -341,26 +314,30 @@ func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 // research only once work has gated itself empty.
 func TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &fakeKindRunner{
-		revision: "rev1",
-		resultsByKind: map[Kind][]ChildResult{
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
 			KindDispatch: {{Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 2}},
 			KindResearch: {{Exit: 0}},
 		},
-		limit: 100, // safety cap: single slot makes this deterministic; a real regression would still hang without one
 	}
-	r.cancelFn = cancel
-	// Goal: research (which never gates) has run 5 times, i.e. exactly
-	// filling out the 10-call trace this test asserts on.
-	r.cancelWhen = func(f *fakeKindRunner) bool {
-		return f.callsByKind[KindResearch] >= 5
+	gate := &kindGate{
+		r:        r,
+		limit:    100, // safety cap: single slot makes this deterministic; a real regression would still hang without one
+		cancelFn: cancel,
+		// Goal: research (which never gates) has run 5 times, i.e. exactly
+		// filling out the 10-call trace this test asserts on.
+		cancelWhen: func(r *scriptedRunner) bool {
+			return r.kindCount(KindResearch) >= 5
+		},
 	}
+	r.onStart = gate.onStart
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(ctx, dualKindConfig(1, 0), r, em, clk)
-	r.requireGoalMet(t)
+	gate.requireGoalMet(t)
 
 	calls := r.calls()
 	if len(calls) != 10 {
@@ -386,35 +363,39 @@ func TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers(t *testing.T) {
 func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
 	const slots = 2
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &fakeKindRunner{
-		revision: "rev1",
-		resultsByKind: map[Kind][]ChildResult{
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
 			KindResearch: {{Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 2}},
 			KindDispatch: {{Exit: 0}},
 		},
-		limit: 3000, // safety cap: dispatch never gates, so only the goal below stops the loop
 	}
-	r.cancelFn = cancel
-	// Goal: dispatch has run in both slots — reachable only once research's
-	// queue has drained and gated the whole pool, so by construction research
-	// will already have run at least 3 times (its own queued results) by then.
-	r.cancelWhen = func(f *fakeKindRunner) bool {
-		seen := map[int]bool{}
-		for _, c := range f.runCalls {
-			if c.Kind == KindDispatch {
-				seen[c.Slot] = true
+	gate := &kindGate{
+		r:        r,
+		limit:    3000, // safety cap: dispatch never gates, so only the goal below stops the loop
+		cancelFn: cancel,
+		// Goal: dispatch has run in both slots — reachable only once research's
+		// queue has drained and gated the whole pool, so by construction research
+		// will already have run at least 3 times (its own queued results) by then.
+		cancelWhen: func(r *scriptedRunner) bool {
+			seen := map[int]bool{}
+			for _, c := range r.calls() {
+				if c.Kind == KindDispatch {
+					seen[c.Slot] = true
+				}
 			}
-		}
-		return seen[0] && seen[1]
+			return seen[0] && seen[1]
+		},
 	}
+	r.onStart = gate.onStart
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(ctx, dualKindConfig(slots, slots), r, em, clk)
-	r.requireGoalMet(t)
+	gate.requireGoalMet(t)
 
-	if got := r.callCount(KindResearch); got < 3 {
+	if got := r.kindCount(KindResearch); got < 3 {
 		t.Fatalf("research calls = %d, want at least 3: research's queued work must run before any burst to work", got)
 	}
 	if seen := slotsSeen(r.calls(), KindDispatch); !seen[0] || !seen[1] {
@@ -428,27 +409,31 @@ func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
 // dispatching. The slot must never fall back to sleeping out work's
 // backoff — clk.waits() must stay empty the whole run.
 func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
+	// gateLimit counts total calls across both kinds (see kindGate). Dispatch
+	// gates itself after exactly one call, leaving research the remaining
+	// gateLimit-1 calls before the shared cap cancels the run.
+	const gateLimit = 30
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &fakeKindRunner{
-		revision: "rev1",
-		resultsByKind: map[Kind][]ChildResult{
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
 			KindDispatch: {{Exit: 2}},
 			KindResearch: {{Exit: 0}},
 		},
-		limit: 30,
 	}
-	r.cancelFn = cancel
+	gate := &kindGate{r: r, limit: gateLimit, cancelFn: cancel}
+	r.onStart = gate.onStart
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(ctx, dualKindConfig(1, 0), r, em, clk)
 
-	if got := r.callCount(KindDispatch); got != 1 {
+	if got := r.kindCount(KindDispatch); got != 1 {
 		t.Fatalf("dispatch calls = %d, want exactly 1: it should gate itself once and never be retried against a clock that never advances", got)
 	}
-	if got := r.callCount(KindResearch); got != 29 {
-		t.Fatalf("research calls = %d, want 29: it must keep being dispatched every remaining iteration", got)
+	if got := r.kindCount(KindResearch); got != gateLimit-1 {
+		t.Fatalf("research calls = %d, want %d: it must keep being dispatched every remaining iteration", got, gateLimit-1)
 	}
 	if clk.waitCount() != 0 {
 		t.Fatalf("waits = %v, want none: an empty work queue must never make the slot sleep while research keeps dispatching", clk.waits())
@@ -461,11 +446,16 @@ func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
 // not idle on the first kind's empty result alone.
 func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	baseClk := &testClock{}
-	clk := &cancelOnSleepClock{testClock: baseClk, cancelFn: cancel}
-	r := &fakeKindRunner{
-		revision: "rev1",
-		resultsByKind: map[Kind][]ChildResult{
+	clk := &testClock{}
+	// onSleep fires cancelFn the first time Sleep is called. A slot only
+	// ever calls Sleep from idleSleep once every configured kind has backed
+	// off (pickKind found nothing runnable) — that is exactly the "pool has
+	// genuinely idled" moment this test needs to stop on.
+	var once sync.Once
+	clk.onSleep = func() { once.Do(cancel) }
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
 			KindDispatch: {{Exit: 2}},
 			KindResearch: {{Exit: 2}},
 		},
@@ -485,8 +475,8 @@ func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 	if calls[0].Kind != KindDispatch || calls[1].Kind != KindResearch {
 		t.Fatalf("run calls = %v, want [dispatch research] (work-first order at ResearchReservation 0)", calls)
 	}
-	if baseClk.waitCount() != 1 || baseClk.waits()[0] != testIdleFloor {
-		t.Fatalf("waits = %v, want exactly one wait of %v, taken only once both kinds had gated", baseClk.waits(), testIdleFloor)
+	if clk.waitCount() != 1 || clk.waits()[0] != testIdleFloor {
+		t.Fatalf("waits = %v, want exactly one wait of %v, taken only once both kinds had gated", clk.waits(), testIdleFloor)
 	}
 }
 
@@ -571,16 +561,17 @@ func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 // produced them, and the two kinds' events genuinely interleave in one
 // stream rather than one kind's events all preceding the other's.
 func TestLoopEventsCarryKindOnEveryTransition(t *testing.T) {
+	const gateLimit = 6 // safety cap; no assertion below derives a count from it
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &fakeKindRunner{
-		revision: "rev1",
-		resultsByKind: map[Kind][]ChildResult{
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
 			KindDispatch: {{Exit: 0}, {Exit: 2}},
 			KindResearch: {{Exit: 0}},
 		},
-		limit: 6,
 	}
-	r.cancelFn = cancel
+	gate := &kindGate{r: r, limit: gateLimit, cancelFn: cancel}
+	r.onStart = gate.onStart
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -632,4 +623,61 @@ func TestLoopEventsCarryKindOnEveryTransition(t *testing.T) {
 	if !interleaved {
 		t.Fatalf("kinds in order = %v, want the two kinds interleaved rather than one wholly preceding the other", kindsInOrder)
 	}
+}
+
+// fatalRecorder is a fataler double that records a Fatalf call instead of
+// aborting the goroutine, so TestKindGateRequireGoalMet can observe both of
+// requireGoalMet's outcomes without one of them actually failing the suite.
+type fatalRecorder struct {
+	called bool
+}
+
+func (f *fatalRecorder) Helper() {}
+
+func (f *fatalRecorder) Fatalf(format string, args ...any) {
+	f.called = true
+}
+
+// runNTimes drives r through n RunChild calls on slot 0, the gate's onStart
+// already installed as r.onStart.
+func runNTimes(t *testing.T, r *scriptedRunner, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := r.RunChild(context.Background(), ChildRequest{Kind: KindResearch, Slot: 0}); err != nil {
+			t.Fatalf("RunChild: %v", err)
+		}
+	}
+}
+
+// TestKindGateRequireGoalMet pins the two-mode contract the fix for issue
+// #3620 restores: with cancelWhen nil, limit is the run's own intended
+// stop, so running a gate to its limit must not read as a failed goal; with
+// cancelWhen set and never satisfied, hitting limit is exactly the
+// regression requireGoalMet exists to catch.
+func TestKindGateRequireGoalMet(t *testing.T) {
+	t.Run("cancelWhen nil: reaching limit is not a failure", func(t *testing.T) {
+		r := &scriptedRunner{byKind: map[Kind][]ChildResult{KindResearch: {{Exit: 0}}}}
+		gate := &kindGate{r: r, limit: 3}
+		r.onStart = gate.onStart
+		runNTimes(t, r, 3)
+
+		rec := &fatalRecorder{}
+		gate.requireGoalMet(rec)
+		if rec.called {
+			t.Fatalf("requireGoalMet fatal'd with cancelWhen nil and limit reached — limit was the run's own intended stop")
+		}
+	})
+
+	t.Run("cancelWhen set and never satisfied: requireGoalMet fails", func(t *testing.T) {
+		r := &scriptedRunner{byKind: map[Kind][]ChildResult{KindResearch: {{Exit: 0}}}}
+		gate := &kindGate{r: r, limit: 3, cancelWhen: func(r *scriptedRunner) bool { return false }}
+		r.onStart = gate.onStart
+		runNTimes(t, r, 3)
+
+		rec := &fatalRecorder{}
+		gate.requireGoalMet(rec)
+		if !rec.called {
+			t.Fatalf("requireGoalMet did not fatal with cancelWhen set and never satisfied — the cap fired before the goal, which is exactly the regression it must catch")
+		}
+	})
 }
