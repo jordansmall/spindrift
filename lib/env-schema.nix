@@ -648,6 +648,62 @@ in
     legacySettingsExempt = true;
     boxEnv = false;
   };
+  daemonIdleFloor = {
+    env = "DAEMON_IDLE_FLOOR";
+    group = "dispatch";
+    default = "5m";
+    doc = "wait before the daemon's first no-work check against a kind, and the poll slice size while riding out a jammed kind's backoff -- each further consecutive no-work check against that kind doubles the wait up to DAEMON_IDLE_CAP; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    flakeOption = true;
+    # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
+    # alias to preserve, so no lib/legacy-settings-section.nix row.
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
+  daemonIdleCap = {
+    env = "DAEMON_IDLE_CAP";
+    group = "dispatch";
+    default = "30m";
+    doc = "ceiling the daemon's per-kind idle backoff doubles up to, starting from DAEMON_IDLE_FLOOR; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    flakeOption = true;
+    # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
+    # alias to preserve, so no lib/legacy-settings-section.nix row.
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
+  daemonFailureBackoff = {
+    env = "DAEMON_FAILURE_BACKOFF";
+    group = "dispatch";
+    default = "1m";
+    doc = "wait a slot backs off for after an unclassified child failure before refilling itself; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    flakeOption = true;
+    # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
+    # alias to preserve, so no lib/legacy-settings-section.nix row.
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
+  daemonBreakerThreshold = {
+    env = "DAEMON_BREAKER_THRESHOLD";
+    group = "dispatch";
+    default = 5;
+    doc = "pool-wide unclassified failures within DAEMON_BREAKER_WINDOW that trip the circuit breaker and halt the whole daemon; a positive integer, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    flakeOption = true;
+    intKind = "positive";
+    # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
+    # alias to preserve, so no lib/legacy-settings-section.nix row.
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
+  daemonBreakerWindow = {
+    env = "DAEMON_BREAKER_WINDOW";
+    group = "dispatch";
+    default = "15m";
+    doc = "trailing window the circuit breaker counts DAEMON_BREAKER_THRESHOLD unclassified failures within; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    flakeOption = true;
+    # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
+    # alias to preserve, so no lib/legacy-settings-section.nix row.
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
   researchReservation = {
     env = "RESEARCH_RESERVATION";
     group = "dispatch";

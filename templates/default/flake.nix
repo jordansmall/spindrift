@@ -117,6 +117,16 @@
             #   daemonApp = ".#";
             #   # daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host
             #   daemonAwakeWindow = "";
+            #   # pool-wide unclassified failures within DAEMON_BREAKER_WINDOW that trip the circuit breaker and halt the whole daemon; a positive integer, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it
+            #   daemonBreakerThreshold = 5;
+            #   # trailing window the circuit breaker counts DAEMON_BREAKER_THRESHOLD unclassified failures within; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it
+            #   daemonBreakerWindow = "15m";
+            #   # wait a slot backs off for after an unclassified child failure before refilling itself; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it
+            #   daemonFailureBackoff = "1m";
+            #   # ceiling the daemon's per-kind idle backoff doubles up to, starting from DAEMON_IDLE_FLOOR; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it
+            #   daemonIdleCap = "30m";
+            #   # wait before the daemon's first no-work check against a kind, and the poll slice size while riding out a jammed kind's backoff -- each further consecutive no-work check against that kind doubles the wait up to DAEMON_IDLE_CAP; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it
+            #   daemonIdleFloor = "5m";
             #   # flake app attribute of the daemon itself, which the daemon evaluates at each fetched tip to notice its own build changed and halt -- distinct from DAEMON_APP, the child Dispatch app; a Consumer that re-exports the daemon under another attribute name (e.g. .#dogfood-bwrap-daemon) must set this to match; read by the daemon only, the launcher itself ignores it
             #   daemonSelfApp = ".#daemon";
             #   # caps the wave size; 0 means uncapped
