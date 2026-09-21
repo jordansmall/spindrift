@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# Skills discovery, prompt preference, and caveman-default narration (issues #118, #120, #487).
+# Skills discovery, prompt preference, caveman-default narration, and the
+# shared helper's skills-dir pin (issues #118, #120, #487, #3242).
 
 load helper
 
@@ -9,13 +10,14 @@ setup() {
   # where the repo tree isn't next to $BATS_TEST_DIRNAME. The fallback keeps a
   # bare `bats tests/` run working.
   skills_template_dir="${SKILLS_TEMPLATE_DIR:-$BATS_TEST_DIRNAME/../templates/default/skills}"
-  # _populate_driver_skills_dir copies HARNESS_SKILLS_DIR (/agent/skills) and
-  # OPERATOR_SKILLS_DIR into DRIVER_SKILLS_DIR before every SKILLS_FOUND scan,
-  # so on a Box that bakes its own skills the "not baked" assertions below
-  # would see skills no test staged (issue #2059). A test that wants a baked
-  # harness skill re-exports these itself.
-  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
-  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
+}
+
+# Regression test for issue #3242: every suite calling setup_entrypoint_env
+# inherits the skills-dir pin, so the Box's own baked skillset cannot reach a
+# fixture. A path under $BATS_TEST_TMPDIR is by construction neither default.
+@test "setup_entrypoint_env pins the skills dirs off their absolute defaults" {
+  [[ "$HARNESS_SKILLS_DIR" == "$BATS_TEST_TMPDIR"/* ]]
+  [[ "$OPERATOR_SKILLS_DIR" == "$BATS_TEST_TMPDIR"/* ]]
 }
 
 # Claude Code discovers skills from $HOME/.claude/skills/, and in the box HOME
@@ -37,9 +39,8 @@ SKILL
 
 # A bind mount onto DRIVER_SKILLS_DIR (how SPINDRIFT_SKILLS_DIR's runtime
 # override works) replaces its entire contents, and neither bwrap nor a plain
-# OCI volume mount offers a union mount. entrypoint.sh therefore copies both
-# HARNESS_SKILLS_DIR and OPERATOR_SKILLS_DIR into DRIVER_SKILLS_DIR before the
-# discovery scan: copying merges, mounting does not (issue #2489).
+# OCI volume mount offers a union mount. entrypoint.sh copies instead, so a
+# harness skill the operator did not override survives (issue #2489).
 @test "harness-owned skill survives an operator skills override (issue #2489)" {
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
   mkdir -p "$HARNESS_SKILLS_DIR/auto-format"
