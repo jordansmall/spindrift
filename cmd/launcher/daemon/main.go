@@ -16,22 +16,13 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/inputdoc"
 )
-
-// inputDocument mirrors the nix-rendered Launcher input document (ADR 0020).
-// cmd/launcher/inputdoc.go is the source of truth for the shape; it cannot be
-// imported here (a different package main), so this is a minimal local copy
-// of the two fields this binary reads.
-type inputDocument struct {
-	Settings  map[string]string `json:"settings"`
-	Artifacts map[string]string `json:"artifacts"`
-}
 
 // parsedArgs is the result of parsing argv: `--input <path>` plus an
 // optional positional kind-set selector (dispatch|research, default both —
@@ -81,93 +72,18 @@ func parseArgs(args []string) (parsedArgs, error) {
 	return parsedArgs{InputPath: inputPath, Kinds: kinds}, nil
 }
 
-// loadInputDocument reads and parses the Launcher input document at path.
-func loadInputDocument(path string) (*inputDocument, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read input document %s: %w", path, err)
-	}
-	var doc inputDocument
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("parse input document %s: %w", path, err)
-	}
-	return &doc, nil
-}
-
-// lookupKnob resolves one schema knob: ambient env first, then the
-// document's settings (keyed by env var name — lib/mkHarness.nix's
-// documentSettings), then nothing (found=false). When the document also
-// carries a value and the ambient env wins anyway, it prints a provenance
-// warning to stderr (mirroring cmd/launcher/inputdoc.go's
-// warnAmbientKnobEnv) — otherwise nothing records which value actually drove
-// the run, and a stale exported override silently wins (ADR 0020).
-func lookupKnob(doc *inputDocument, envVar string, stderr io.Writer) (string, bool) {
-	if v := os.Getenv(envVar); v != "" {
-		if doc != nil {
-			if docVal, ok := doc.Settings[envVar]; ok && docVal != "" {
-				fmt.Fprintf(stderr, "%s=%s set in environment — knob env overrides are deprecated; use the --input document's settings.%s\n", envVar, v, envVar)
-			}
-		}
-		return v, true
-	}
-	if doc != nil {
-		if v, ok := doc.Settings[envVar]; ok && v != "" {
-			return v, true
-		}
-	}
-	return "", false
-}
-
-// resolveKnob wraps lookupKnob for knobs that must have a value: the
-// default lives in the schema and travels in the document, so a knob absent
-// from both is a configuration error, not a silent default.
-func resolveKnob(doc *inputDocument, envVar string, stderr io.Writer) (string, error) {
-	if v, ok := lookupKnob(doc, envVar, stderr); ok {
-		return v, nil
-	}
-	return "", fmt.Errorf("daemon: no value for %s (not in environment or --input document settings)", envVar)
-}
-
-// resolveKnobOptional wraps lookupKnob for knobs whose schema default is
-// itself the empty string — absent-from-both is the normal case, not a
-// configuration error — while still keeping lookupKnob's ambient-env-wins
-// provenance warning.
-func resolveKnobOptional(doc *inputDocument, envVar string, stderr io.Writer) string {
-	v, _ := lookupKnob(doc, envVar, stderr)
-	return v
-}
-
-// parseIntKnob parses raw as a base-10 integer no smaller than min, both
-// callers' shared shape: resolveKnob can hand back an ambient env override
-// of anything, so a malformed or out-of-range knob must fail startup here
-// with a clear diagnostic rather than reaching daemon.Loop's own halt, which
-// is meant for a genuine programming error, not an operator's mistyped env
-// var. label names the constraint in the error text (e.g. "positive
-// integer"); it must read correctly next to both "got %q" (unparsable) and
-// "got %d" (out of range).
-func parseIntKnob(name, label, raw string, min int) (int, error) {
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("%s must be a %s, got %q", name, label, raw)
-	}
-	if n < min {
-		return 0, fmt.Errorf("%s must be a %s, got %d", name, label, n)
-	}
-	return n, nil
-}
-
 // parseSlots turns MAX_PARALLEL's resolved string value into the daemon's
 // pool size. lib/env-schema.nix declares it intKind = "positive".
 func parseSlots(raw string) (int, error) {
-	return parseIntKnob("MAX_PARALLEL", "positive integer", raw, 1)
+	return inputdoc.ParseInt("MAX_PARALLEL", "positive integer", raw, 1)
 }
 
 // parseResearchReservation turns RESEARCH_RESERVATION's resolved string
 // value into the daemon's research slot floor. lib/env-schema.nix declares
 // it intKind = "nonneg" and bounds it at MAX_PARALLEL; the upper bound is
-// this knob's own, since parseIntKnob only ever enforces a lower one.
+// this knob's own, since inputdoc.ParseInt only ever enforces a lower one.
 func parseResearchReservation(raw string, slots int) (int, error) {
-	n, err := parseIntKnob("RESEARCH_RESERVATION", "non-negative integer", raw, 0)
+	n, err := inputdoc.ParseInt("RESEARCH_RESERVATION", "non-negative integer", raw, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -175,6 +91,49 @@ func parseResearchReservation(raw string, slots int) (int, error) {
 		return 0, fmt.Errorf("RESEARCH_RESERVATION (%d) must not exceed MAX_PARALLEL (%d)", n, slots)
 	}
 	return n, nil
+}
+
+// parseIdleFloor turns DAEMON_IDLE_FLOOR's resolved string value into the
+// pool-wide idle backoff's starting wait (backoff.go).
+func parseIdleFloor(raw string) (time.Duration, error) {
+	return inputdoc.ParseDuration("DAEMON_IDLE_FLOOR", "positive duration", raw, time.Nanosecond)
+}
+
+// parseIdleCap turns DAEMON_IDLE_CAP's resolved string value into the idle
+// backoff's ceiling, and rejects a cap below floor: the backoff doubles up
+// from DAEMON_IDLE_FLOOR (backoff.go), so a cap under it would make the
+// wait shrink partway through a jammed kind's doubling instead of climbing.
+func parseIdleCap(raw string, floor time.Duration) (time.Duration, error) {
+	idleCap, err := inputdoc.ParseDuration("DAEMON_IDLE_CAP", "positive duration", raw, time.Nanosecond)
+	if err != nil {
+		return 0, err
+	}
+	if idleCap < floor {
+		return 0, fmt.Errorf("DAEMON_IDLE_CAP (%v) must not be less than DAEMON_IDLE_FLOOR (%v)", idleCap, floor)
+	}
+	return idleCap, nil
+}
+
+// parseFailureBackoff turns DAEMON_FAILURE_BACKOFF's resolved string value
+// into the per-slot wait after an unclassified child failure. Unlike the
+// idle and breaker knobs, zero is legal here (retry immediately), so this
+// passes inputdoc.ParseDuration a min of 0 rather than the one-nanosecond
+// min that rejects "0s" for the others.
+func parseFailureBackoff(raw string) (time.Duration, error) {
+	return inputdoc.ParseDuration("DAEMON_FAILURE_BACKOFF", "non-negative duration", raw, 0)
+}
+
+// parseBreakerThreshold turns DAEMON_BREAKER_THRESHOLD's resolved string
+// value into the circuit breaker's trip count. lib/env-schema.nix declares
+// it intKind = "positive".
+func parseBreakerThreshold(raw string) (int, error) {
+	return inputdoc.ParseInt("DAEMON_BREAKER_THRESHOLD", "positive integer", raw, 1)
+}
+
+// parseBreakerWindow turns DAEMON_BREAKER_WINDOW's resolved string value
+// into the circuit breaker's trailing window.
+func parseBreakerWindow(raw string) (time.Duration, error) {
+	return inputdoc.ParseDuration("DAEMON_BREAKER_WINDOW", "positive duration", raw, time.Nanosecond)
 }
 
 // nixSystemDouble maps Go's GOOS/GOARCH to the nix system double the self
@@ -330,42 +289,6 @@ func summarizeStatus(report daemon.StatusReport) string {
 		return "daemon: no daemon has run in this checkout"
 	}
 }
-
-// daemonIdleFloor and daemonIdleCap are the shipped defaults for the
-// pool-wide idle backoff; the backoff's mechanics live in backoff.go and
-// the operator-facing writeup is in docs/reference.md's daemon exit-code
-// section. These values are a defensible first cut, not a tuned final
-// answer (final values were out of scope for the issue that added them);
-// expect to revisit them against a real unattended run — retuning them
-// also means updating TestIdleBackoffCapsAtShippedDefaults
-// (cmd/launcher/internal/daemon/backoff_test.go), which spells this pair
-// out by hand since it can't import them from package main. Making either
-// configurable (per-kind backoff) is a later ticket (loop.go's Config
-// doc).
-const (
-	daemonIdleFloor = 5 * time.Minute
-	daemonIdleCap   = 30 * time.Minute
-)
-
-// daemonFailureBackoff, daemonBreakerThreshold and daemonBreakerWindow are
-// a defensible first cut, not a tuned final answer (final values are out
-// of scope for the issue that added them) — expect to revisit them against
-// a real unattended run. A systemic fault (an expired token, a forge
-// outage) fails every slot's child immediately, so the pool crosses
-// daemonBreakerThreshold within about one backoff at the default 3 slots,
-// and after (daemonBreakerThreshold-1) backoffs — about four minutes — at
-// MAX_PARALLEL=1, where the pool-wide count is one slot's own retries. A
-// lone slot reaching the threshold by itself is deliberate rather than a
-// gap: a failed child's issue has already left the ready queue (dispatch
-// claims it by label swap), so consecutive unclassified failures read as
-// systemic rather than as one bad issue retried, and a 1-slot pool has no
-// sibling still doing useful work for a spared breaker to protect (see
-// TestBreakerDefaults_TripReachableAtOneSlot).
-const (
-	daemonFailureBackoff   = 1 * time.Minute
-	daemonBreakerThreshold = 5
-	daemonBreakerWindow    = 15 * time.Minute
-)
 
 // hostClock is the production daemon.Clock: Now is time.Now, Sleep waits d
 // or returns early on ctx cancellation, so an operator stop during the idle
@@ -541,20 +464,20 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
-	doc, err := loadInputDocument(args.InputPath)
+	doc, err := inputdoc.Load(args.InputPath)
 	if err != nil {
 		return fail(stderr, err)
 	}
 
-	appAttr, err := resolveKnob(doc, "DAEMON_APP", stderr)
+	appAttr, err := doc.Resolve("DAEMON_APP", stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	baseBranch, err := resolveKnob(doc, "BASE_BRANCH", stderr)
+	baseBranch, err := doc.Resolve("BASE_BRANCH", stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	maxParallelRaw, err := resolveKnob(doc, "MAX_PARALLEL", stderr)
+	maxParallelRaw, err := doc.Resolve("MAX_PARALLEL", stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -563,10 +486,55 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	// The five backoff/breaker tuning knobs, resolved and validated here —
+	// before startupPreflight, before any slot fills, before any Box runs —
+	// so a bad value refuses the start cleanly rather than surfacing as a
+	// daemon.Loop halt mid-run.
+	idleFloorRaw, err := doc.Resolve("DAEMON_IDLE_FLOOR", stderr)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	idleFloor, err := parseIdleFloor(idleFloorRaw)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	idleCapRaw, err := doc.Resolve("DAEMON_IDLE_CAP", stderr)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	idleCap, err := parseIdleCap(idleCapRaw, idleFloor)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	failureBackoffRaw, err := doc.Resolve("DAEMON_FAILURE_BACKOFF", stderr)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	failureBackoff, err := parseFailureBackoff(failureBackoffRaw)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	breakerThresholdRaw, err := doc.Resolve("DAEMON_BREAKER_THRESHOLD", stderr)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	breakerThreshold, err := parseBreakerThreshold(breakerThresholdRaw)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	breakerWindowRaw, err := doc.Resolve("DAEMON_BREAKER_WINDOW", stderr)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	breakerWindow, err := parseBreakerWindow(breakerWindowRaw)
+	if err != nil {
+		return fail(stderr, err)
+	}
+
 	// The schema validates DAEMON_AWAKE_WINDOW at Nix eval time, but an
-	// ambient env override (lookupKnob above) bypasses that entirely, so
+	// ambient env override (Lookup above) bypasses that entirely, so
 	// this runtime parse is the actual guarantee.
-	awakeRaw := resolveKnobOptional(doc, "DAEMON_AWAKE_WINDOW", stderr)
+	awakeRaw := doc.ResolveOptional("DAEMON_AWAKE_WINDOW", stderr)
 	awake, err := daemon.ParseWindow(awakeRaw)
 	if err != nil {
 		return fail(stderr, err)
@@ -584,7 +552,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if selfProgram == "" {
 		fmt.Fprintln(stderr, "daemon: SPINDRIFT_DAEMON_PROGRAM is unset, so the self-change check is disabled (not started through the generated wrapper)")
 	} else {
-		selfAttr, err = resolveKnob(doc, "DAEMON_SELF_APP", stderr)
+		selfAttr, err = doc.Resolve("DAEMON_SELF_APP", stderr)
 		if err != nil {
 			return fail(stderr, err)
 		}
@@ -602,7 +570,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// MAX_PARALLEL — the knob simply does not apply to their run.
 	var reservation int
 	if len(args.Kinds) > 1 {
-		researchReservationRaw, err := resolveKnob(doc, "RESEARCH_RESERVATION", stderr)
+		researchReservationRaw, err := doc.Resolve("RESEARCH_RESERVATION", stderr)
 		if err != nil {
 			return fail(stderr, err)
 		}
@@ -688,13 +656,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	cfg := daemon.Config{
 		Kinds:               args.Kinds,
 		ResearchReservation: reservation,
-		IdleFloor:           daemonIdleFloor,
-		IdleCap:             daemonIdleCap,
+		IdleFloor:           idleFloor,
+		IdleCap:             idleCap,
 		Slots:               slots,
 		SelfProgram:         selfProgram,
-		FailureBackoff:      daemonFailureBackoff,
-		BreakerThreshold:    daemonBreakerThreshold,
-		BreakerWindow:       daemonBreakerWindow,
+		FailureBackoff:      failureBackoff,
+		BreakerThreshold:    breakerThreshold,
+		BreakerWindow:       breakerWindow,
 		Awake:               awake,
 		Status:              statusWriter,
 	}

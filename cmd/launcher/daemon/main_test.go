@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,163 +18,38 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
-func TestResolveKnob(t *testing.T) {
-	tests := []struct {
-		name       string
-		env        map[string]string
-		doc        *inputDocument
-		envVar     string
-		want       string
-		wantErr    bool
-		wantWarned bool
-	}{
-		{
-			name:   "document only",
-			doc:    &inputDocument{Settings: map[string]string{"DAEMON_APP": ".#dogfood"}},
-			envVar: "DAEMON_APP",
-			want:   ".#dogfood",
-		},
-		{
-			name:       "env overrides document, warns provenance",
-			env:        map[string]string{"DAEMON_APP": ".#from-env"},
-			doc:        &inputDocument{Settings: map[string]string{"DAEMON_APP": ".#from-doc"}},
-			envVar:     "DAEMON_APP",
-			want:       ".#from-env",
-			wantWarned: true,
-		},
-		{
-			// The document carries no value for this knob, so there is
-			// nothing ambiguous about the env value winning — no warning.
-			name:   "env only, no document value, no warning",
-			env:    map[string]string{"DAEMON_APP": ".#from-env"},
-			doc:    &inputDocument{Settings: map[string]string{}},
-			envVar: "DAEMON_APP",
-			want:   ".#from-env",
-		},
-		{
-			name:    "missing knob errors",
-			doc:     &inputDocument{Settings: map[string]string{}},
-			envVar:  "DAEMON_APP",
-			wantErr: true,
-		},
-		{
-			// BASE_BRANCH is a real knob the host environment may also carry
-			// (e.g. dogfood.sh's own BASE_BRANCH=main), so this clears it
-			// explicitly rather than relying on it being ambiently absent.
-			name:    "nil document, no env errors",
-			env:     map[string]string{"BASE_BRANCH": ""},
-			doc:     nil,
-			envVar:  "BASE_BRANCH",
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			for k, v := range tt.env {
-				t.Setenv(k, v)
-			}
-			var stderr bytes.Buffer
-			got, err := resolveKnob(tt.doc, tt.envVar, &stderr)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("resolveKnob() = %q, nil; want an error", got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("resolveKnob() unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("resolveKnob() = %q, want %q", got, tt.want)
-			}
-			warned := stderr.Len() > 0
-			if warned != tt.wantWarned {
-				t.Errorf("resolveKnob() stderr = %q, wantWarned %v", stderr.String(), tt.wantWarned)
-			}
-			if tt.wantWarned && !strings.Contains(stderr.String(), tt.envVar+"=") {
-				t.Errorf("resolveKnob() warning %q missing %s=", stderr.String(), tt.envVar)
-			}
-		})
-	}
-}
-
-// TestResolveKnobOptional pins the absent-is-normal shape DAEMON_AWAKE_WINDOW
-// needs: an absent knob resolves to "" without an error and without a
-// diagnostic, while the ambient-env-wins provenance warning (lookupKnob's
-// whole reason for existing) still fires when the document also carries a
-// value.
-func TestResolveKnobOptional(t *testing.T) {
-	tests := []struct {
-		name       string
-		env        map[string]string
-		doc        *inputDocument
-		envVar     string
-		want       string
-		wantWarned bool
-	}{
-		{
-			name:   "absent from both is not an error",
-			doc:    &inputDocument{Settings: map[string]string{}},
-			envVar: "DAEMON_AWAKE_WINDOW",
-			want:   "",
-		},
-		{
-			name:   "nil document, no env",
-			doc:    nil,
-			envVar: "DAEMON_AWAKE_WINDOW",
-			want:   "",
-		},
-		{
-			name:   "document only",
-			doc:    &inputDocument{Settings: map[string]string{"DAEMON_AWAKE_WINDOW": "22:00-06:00 Europe/London"}},
-			envVar: "DAEMON_AWAKE_WINDOW",
-			want:   "22:00-06:00 Europe/London",
-		},
-		{
-			name:       "env overrides document, warns provenance",
-			env:        map[string]string{"DAEMON_AWAKE_WINDOW": "20:00-05:00 UTC"},
-			doc:        &inputDocument{Settings: map[string]string{"DAEMON_AWAKE_WINDOW": "22:00-06:00 Europe/London"}},
-			envVar:     "DAEMON_AWAKE_WINDOW",
-			want:       "20:00-05:00 UTC",
-			wantWarned: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			for k, v := range tt.env {
-				t.Setenv(k, v)
-			}
-			var stderr bytes.Buffer
-			got := resolveKnobOptional(tt.doc, tt.envVar, &stderr)
-			if got != tt.want {
-				t.Errorf("resolveKnobOptional() = %q, want %q", got, tt.want)
-			}
-			warned := stderr.Len() > 0
-			if warned != tt.wantWarned {
-				t.Errorf("resolveKnobOptional() stderr = %q, wantWarned %v", stderr.String(), tt.wantWarned)
-			}
-		})
-	}
+// shippedKnobDefaults mirrors the five daemon tuning knobs' shipped
+// lib/env-schema.nix defaults, for tests to fill an input document with.
+var shippedKnobDefaults = map[string]string{
+	"DAEMON_IDLE_FLOOR":        "5m",
+	"DAEMON_IDLE_CAP":          "30m",
+	"DAEMON_FAILURE_BACKOFF":   "1m",
+	"DAEMON_BREAKER_THRESHOLD": "5",
+	"DAEMON_BREAKER_WINDOW":    "15m",
 }
 
 // validKnobDocument builds the minimal input document mainRun needs to get
-// past every required knob (DAEMON_APP, BASE_BRANCH, MAX_PARALLEL) and reach
-// the DAEMON_AWAKE_WINDOW parse step, so awake-window tests below fail (or
-// don't) for the reason they're actually testing rather than an earlier
-// missing-knob error.
-func validKnobDocument() *inputDocument {
-	return &inputDocument{Settings: map[string]string{
+// past every required knob (DAEMON_APP, BASE_BRANCH, MAX_PARALLEL, and the
+// five schema-defaulted backoff/breaker knobs, all set to their
+// lib/env-schema.nix defaults) and reach the DAEMON_AWAKE_WINDOW parse
+// step, so awake-window tests below fail (or don't) for the reason they're
+// actually testing rather than an earlier missing-knob error.
+func validKnobDocument() *inputdoc.Document {
+	settings := map[string]string{
 		"DAEMON_APP":   ".#dogfood",
 		"BASE_BRANCH":  "main",
 		"MAX_PARALLEL": "1",
-	}}
+	}
+	maps.Copy(settings, shippedKnobDefaults)
+	return &inputdoc.Document{Settings: settings}
 }
 
 // writeInputDocument writes doc as JSON to a temp file and returns its path,
 // the shape mainRun's --input flag expects.
-func writeInputDocument(t *testing.T, doc *inputDocument) string {
+func writeInputDocument(t *testing.T, doc *inputdoc.Document) string {
 	t.Helper()
 	data, err := json.Marshal(doc)
 	if err != nil {
@@ -417,6 +293,227 @@ func TestParseResearchReservation(t *testing.T) {
 				t.Errorf("parseResearchReservation(%q, %d) = %d, want %d", tt.raw, tt.slots, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestParseIdleFloor pins DAEMON_IDLE_FLOOR's parse step: a Go duration
+// string, rejected unless strictly positive.
+func TestParseIdleFloor(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "shipped default", raw: "5m", want: 5 * time.Minute},
+		{name: "malformed rejected", raw: "not-a-duration", wantErr: true},
+		{name: "zero rejected", raw: "0s", wantErr: true},
+		{name: "negative rejected", raw: "-1m", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseIdleFloor(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseIdleFloor(%q) = %v, nil; want an error", tt.raw, got)
+				}
+				if !strings.Contains(err.Error(), "DAEMON_IDLE_FLOOR") {
+					t.Errorf("parseIdleFloor(%q) error = %q, want it to name DAEMON_IDLE_FLOOR", tt.raw, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseIdleFloor(%q) unexpected error: %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Errorf("parseIdleFloor(%q) = %v, want %v", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseIdleCap pins DAEMON_IDLE_CAP's parse step: strictly positive,
+// and never below the floor it doubles up from — the cross-knob case names
+// both knobs and both values, the shape parseResearchReservation's own
+// cross-knob error already uses.
+func TestParseIdleCap(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		floor      time.Duration
+		want       time.Duration
+		wantErr    bool
+		wantErrHas []string
+	}{
+		{name: "shipped default", raw: "30m", floor: 5 * time.Minute, want: 30 * time.Minute},
+		{name: "equal to floor is valid", raw: "5m", floor: 5 * time.Minute, want: 5 * time.Minute},
+		{name: "malformed rejected", raw: "not-a-duration", floor: 5 * time.Minute, wantErr: true},
+		{name: "zero rejected", raw: "0s", floor: 5 * time.Minute, wantErr: true},
+		{
+			name:       "below floor rejected, names both knobs",
+			raw:        "1m",
+			floor:      5 * time.Minute,
+			wantErr:    true,
+			wantErrHas: []string{"DAEMON_IDLE_CAP", "DAEMON_IDLE_FLOOR", "1m0s", "5m0s"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseIdleCap(tt.raw, tt.floor)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseIdleCap(%q, %v) = %v, nil; want an error", tt.raw, tt.floor, got)
+				}
+				for _, want := range tt.wantErrHas {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("parseIdleCap(%q, %v) error = %q, want it to contain %q", tt.raw, tt.floor, err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseIdleCap(%q, %v) unexpected error: %v", tt.raw, tt.floor, err)
+			}
+			if got != tt.want {
+				t.Errorf("parseIdleCap(%q, %v) = %v, want %v", tt.raw, tt.floor, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseFailureBackoff pins DAEMON_FAILURE_BACKOFF's parse step: unlike
+// the idle and breaker knobs, zero is legal (retry immediately) — only a
+// malformed or negative value is rejected.
+func TestParseFailureBackoff(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "shipped default", raw: "1m", want: time.Minute},
+		{name: "zero is valid", raw: "0s", want: 0},
+		{name: "malformed rejected", raw: "not-a-duration", wantErr: true},
+		{name: "negative rejected", raw: "-1m", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseFailureBackoff(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseFailureBackoff(%q) = %v, nil; want an error", tt.raw, got)
+				}
+				if !strings.Contains(err.Error(), "DAEMON_FAILURE_BACKOFF") {
+					t.Errorf("parseFailureBackoff(%q) error = %q, want it to name DAEMON_FAILURE_BACKOFF", tt.raw, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseFailureBackoff(%q) unexpected error: %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Errorf("parseFailureBackoff(%q) = %v, want %v", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseBreakerThreshold pins DAEMON_BREAKER_THRESHOLD's parse step:
+// lib/env-schema.nix declares it intKind = "positive", so anything else —
+// unparsable, zero, or negative — is rejected.
+func TestParseBreakerThreshold(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    int
+		wantErr bool
+	}{
+		{name: "shipped default", raw: "5", want: 5},
+		{name: "one", raw: "1", want: 1},
+		{name: "zero rejected", raw: "0", wantErr: true},
+		{name: "negative rejected", raw: "-1", wantErr: true},
+		{name: "non-numeric rejected", raw: "many", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseBreakerThreshold(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseBreakerThreshold(%q) = %d, nil; want an error", tt.raw, got)
+				}
+				if !strings.Contains(err.Error(), "DAEMON_BREAKER_THRESHOLD") {
+					t.Errorf("parseBreakerThreshold(%q) error = %q, want it to name DAEMON_BREAKER_THRESHOLD", tt.raw, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseBreakerThreshold(%q) unexpected error: %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Errorf("parseBreakerThreshold(%q) = %d, want %d", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseBreakerWindow pins DAEMON_BREAKER_WINDOW's parse step: a Go
+// duration string, rejected unless strictly positive.
+func TestParseBreakerWindow(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "shipped default", raw: "15m", want: 15 * time.Minute},
+		{name: "malformed rejected", raw: "not-a-duration", wantErr: true},
+		{name: "zero rejected", raw: "0s", wantErr: true},
+		{name: "negative rejected", raw: "-1m", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseBreakerWindow(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseBreakerWindow(%q) = %v, nil; want an error", tt.raw, got)
+				}
+				if !strings.Contains(err.Error(), "DAEMON_BREAKER_WINDOW") {
+					t.Errorf("parseBreakerWindow(%q) error = %q, want it to name DAEMON_BREAKER_WINDOW", tt.raw, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseBreakerWindow(%q) unexpected error: %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Errorf("parseBreakerWindow(%q) = %v, want %v", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMainRun_BadDaemonIdleCapFailsStartup is the end-to-end case: an
+// --input document whose DAEMON_IDLE_CAP sits below DAEMON_IDLE_FLOOR must
+// refuse the start before any slot, any claim, any Box — exit 1, with
+// stderr naming both knobs, the same seam TestMainRun_BadAwakeWindow uses
+// for its own knob.
+func TestMainRun_BadDaemonIdleCapFailsStartup(t *testing.T) {
+	clearKnobEnvT(t)
+	docPath := writeInputDocT(t, map[string]string{
+		"DAEMON_APP":        ".#dogfood",
+		"BASE_BRANCH":       "main",
+		"MAX_PARALLEL":      "1",
+		"DAEMON_IDLE_FLOOR": "5m",
+		"DAEMON_IDLE_CAP":   "1m",
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", docPath, "dispatch"}, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("mainRun() = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), "DAEMON_IDLE_CAP") || !strings.Contains(stderr.String(), "DAEMON_IDLE_FLOOR") {
+		t.Errorf("stderr = %q, want it to name both DAEMON_IDLE_CAP and DAEMON_IDLE_FLOOR", stderr.String())
 	}
 }
 
@@ -739,11 +836,16 @@ func TestMainRun_MissingInputDocument(t *testing.T) {
 	}
 }
 
-// writeInputDocT writes an inputDocument with the given settings to a fresh
-// file in t.TempDir() and returns its path.
+// writeInputDocT writes an inputdoc.Document with the given settings to a
+// fresh file in t.TempDir() and returns its path. The five backoff/breaker
+// knobs are filled in at their lib/env-schema.nix defaults unless settings
+// already names one, so a caller testing something else (e.g. the
+// RESEARCH_RESERVATION checks below) doesn't also have to carry them.
 func writeInputDocT(t *testing.T, settings map[string]string) string {
 	t.Helper()
-	data, err := json.Marshal(inputDocument{Settings: settings})
+	merged := maps.Clone(shippedKnobDefaults)
+	maps.Copy(merged, settings)
+	data, err := json.Marshal(inputdoc.Document{Settings: merged})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -757,7 +859,11 @@ func writeInputDocT(t *testing.T, settings map[string]string) string {
 // input document values these tests set up.
 func clearKnobEnvT(t *testing.T) {
 	t.Helper()
-	for _, v := range []string{"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION"} {
+	for _, v := range []string{
+		"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION",
+		"DAEMON_IDLE_FLOOR", "DAEMON_IDLE_CAP", "DAEMON_FAILURE_BACKOFF",
+		"DAEMON_BREAKER_THRESHOLD", "DAEMON_BREAKER_WINDOW",
+	} {
 		t.Setenv(v, "")
 	}
 }
@@ -938,12 +1044,14 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 	// A bare invocation draws from both kinds, which makes
 	// RESEARCH_RESERVATION a required knob: without it startup fails there,
 	// short of the lock acquire this test exists to exercise.
-	doc := inputDocument{Settings: map[string]string{
+	settings := map[string]string{
 		"DAEMON_APP":           ".#dogfood",
 		"BASE_BRANCH":          "main",
 		"MAX_PARALLEL":         "1",
 		"RESEARCH_RESERVATION": "0",
-	}}
+	}
+	maps.Copy(settings, shippedKnobDefaults)
+	doc := inputdoc.Document{Settings: settings}
 	data, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatalf("marshal input document: %v", err)
@@ -996,15 +1104,29 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 // TestBreakerDefaults_TripReachableAtOneSlot pins the reachability the
 // breaker exists for at the smallest supported pool: at MAX_PARALLEL=1 a
 // systemic fault's failures are one slot's own retries, spaced
-// daemonFailureBackoff apart, so daemonBreakerThreshold of them must still
-// fit inside daemonBreakerWindow. Values that push that span past the
-// window leave a 1-slot daemon burning its only slot until morning with no
-// breaker_trip ever emitted.
+// DAEMON_FAILURE_BACKOFF apart, so DAEMON_BREAKER_THRESHOLD of them must
+// still fit inside DAEMON_BREAKER_WINDOW. Values that push that span past
+// the window leave a 1-slot daemon burning its only slot until morning with
+// no breaker_trip ever emitted. The shipped defaults (lib/env-schema.nix) no
+// longer live as constants in this package, so this parses them the same
+// way mainRun does, through the knobs' own parse helpers.
 func TestBreakerDefaults_TripReachableAtOneSlot(t *testing.T) {
-	span := time.Duration(daemonBreakerThreshold-1) * daemonFailureBackoff
-	if span >= daemonBreakerWindow {
+	threshold, err := parseBreakerThreshold("5")
+	if err != nil {
+		t.Fatalf("parseBreakerThreshold: %v", err)
+	}
+	backoff, err := parseFailureBackoff("1m")
+	if err != nil {
+		t.Fatalf("parseFailureBackoff: %v", err)
+	}
+	window, err := parseBreakerWindow("15m")
+	if err != nil {
+		t.Fatalf("parseBreakerWindow: %v", err)
+	}
+	span := time.Duration(threshold-1) * backoff
+	if span >= window {
 		t.Fatalf("a single slot can never trip the breaker: %d failures at %s apart span %s, outside the %s window",
-			daemonBreakerThreshold, daemonFailureBackoff, span, daemonBreakerWindow)
+			threshold, backoff, span, window)
 	}
 }
 
