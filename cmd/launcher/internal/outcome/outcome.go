@@ -610,7 +610,8 @@ func looksLikeSignalAttempt(line, token string) bool {
 // "<token> <nonce> <base64-payload>" control signal. line must carry
 // expectedNonce as the field structurally following the token, and the payload
 // after it is decoded with the strict standard decoder, rejecting any decode
-// error outright rather than stripping whitespace or decoding best-effort.
+// error outright rather than stripping whitespace or decoding best-effort. A
+// zero-length decoded payload is rejected too, not just a decode error.
 func parseSignalLine(line, token, expectedNonce string) (string, bool) {
 	idx := tokenIndex(line, token)
 	if idx < 0 {
@@ -626,6 +627,13 @@ func parseSignalLine(line, token, expectedNonce string) (string, bool) {
 	payload := base64AlphabetPrefix(fields[1])
 	decoded, err := base64.StdEncoding.Strict().DecodeString(payload)
 	if err != nil {
+		return "", false
+	}
+	// Issue #3668: the empty string decodes without error, so an echoed
+	// command line merely naming the token (a printf/grep diagnostic, say)
+	// would otherwise verify with a zero-length body and, under
+	// last-verifying-wins, mask a genuine payload.
+	if len(decoded) == 0 {
 		return "", false
 	}
 	return string(decoded), true
