@@ -6,6 +6,22 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
+// nonceHexWidth is newNonce's hex width. nix/checks/prompts.nix parses this
+// binding out of this file's source to derive the research-verdict payload
+// budget, so its name and single-space spelling are load-bearing there.
+const nonceHexWidth = 32
+
+// Pins newNonce's length (16 random bytes, hex-encoded). The research-verdict
+// fragments' payload budget (issue #3669) is BASH_MAX_OUTPUT_LENGTH minus the
+// whole marker prefix, i.e. minus (len("SPINDRIFT_COMMENT ") + len(nonce) + 1),
+// so a silent change to the nonce width would invalidate the budget text
+// baked into those fragments without this test catching it.
+func TestNewNonce_LengthIsNonceHexWidth(t *testing.T) {
+	if got := len(newNonce()); got != nonceHexWidth {
+		t.Fatalf("len(newNonce()) = %d, want %d", got, nonceHexWidth)
+	}
+}
+
 // A nil generation means "use the runner adapter's own startup-baked default",
 // matching runner.Box.ClosureGeneration's nil-means-default contract.
 func TestFactory_AgentGenerationNilBeforeSet(t *testing.T) {

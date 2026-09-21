@@ -39,6 +39,10 @@
 let
   # Single-sourced so a baked skill's name is never hand-typed here (#2532).
   bakedSkills = import ./baked-skills.nix;
+  # Single-sourced so Claude Code's baked output caps are never hand-typed
+  # here or in the research-verdict prompt budget that derives from them
+  # (issue #3669).
+  outputCaps = import ./output-caps.nix;
   # Bakes fj (forgejo-cli) into the image when ISSUE_TRACKER or CODE_FORGE
   # selects the forgejo backend (issue #1963). Defaults to false because a
   # caller may omit the knob.
@@ -428,10 +432,12 @@ let
         "PKG_CONFIG_PATH=/lib/pkgconfig"
         "PREFETCH=${knobs.prefetch}"
         "NIX_STORE_WRITABLE=${lib.boolToString knobs.nixStoreWritable}"
-        # Lower Claude Code's own output caps so its built-in file spillover
-        # engages early (issue #1987). See "Claude Code output caps" in
+        # Lower Claude Code's own output caps far below their stock defaults
+        # (issue #1987): on a dispatch run the cap is simply where a tool
+        # result is cut, so it bounds both transcript growth and a relayed
+        # marker line's payload. See "Claude Code output caps" in
         # docs/reference.md for the rationale.
-        "BASH_MAX_OUTPUT_LENGTH=8192"
+        "BASH_MAX_OUTPUT_LENGTH=${toString outputCaps.bashMaxOutputLength}"
         "MAX_MCP_OUTPUT_TOKENS=2000"
       ];
     };
