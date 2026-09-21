@@ -1152,20 +1152,39 @@ let
     meta.license = lib.licenses.mit;
   };
 
-  # daemon re-invokes launcherBin's own flake app for each child Dispatch
-  # (issue #3538), so it shares launcherSrc and launcherVendorHash with
-  # launcherBin verbatim -- same source tree, same vendor hash, the two
-  # cannot drift apart. Only `subPackages` differs, which per
-  # nix/quickstart.nix's comment does not change vendoring. No ldflags: the
-  # daemon bakes no version/revision of its own.
+  # daemonBin is one input to the wrapper whose own $0
+  # (SPINDRIFT_DAEMON_PROGRAM) is what checkSelfBuild compares at each
+  # iteration boundary (issue #3543); a mismatch halts a running daemon with
+  # exit 10. src is scoped with lib.fileset, not launcherSrc: launcherSrc
+  # copies ../docs alongside cmd/launcher for launcherBin's checkPhase
+  # (#611), and pulling docs in here would halt a running daemon on a
+  # docs-only commit (issue #3621).
+
+  # The fileset is the whole module, not a narrowed one like
+  # launcherCurrencyFileset below: the launcher's _test.go files pull
+  # test-only deps (github.com/charmbracelet/x/exp/golden, .../teatest) into
+  # go.sum, so trimming them out would vendor differently and force a second
+  # vendorHash. Only docs/ is excluded, so a test-only or sibling-package
+  # commit still moves the daemon's path.
+  daemonSrc = lib.fileset.toSource {
+    root = ../cmd/launcher;
+    fileset = ../cmd/launcher;
+  };
+
   daemonBin = hostPkgs.buildGoModule {
     pname = "spindrift-daemon";
     version = spindriftVersion;
-    src = launcherSrc;
-    modRoot = "cmd/launcher";
+    src = daemonSrc;
+    # No modRoot here (unlike launcherBin): the fileset's `root` is already
+    # ../cmd/launcher. Only subPackages differs from launcherBin, which per
+    # nix/quickstart.nix's comment does not change vendoring, so the
+    # whole-module fileset still vendors to launcherVendorHash rather than
+    # needing its own the way launcherCurrencyVendorHash does.
     vendorHash = buildConstants.launcherVendorHash;
     subPackages = [ "daemon" ];
     doCheck = false;
+    # No ldflags: the daemon bakes no version or revision of its own, so its
+    # path moves only when the code it is built from moves.
     meta.license = lib.licenses.mit;
   };
 
