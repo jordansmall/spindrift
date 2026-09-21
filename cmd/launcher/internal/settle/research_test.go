@@ -207,6 +207,78 @@ func TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked(t *testing.T) 
 	}
 }
 
+// Pins the existing "no verdict comment block" note (issue #3670): a
+// zero-value CommentRejected means the Box never emitted a comment line at
+// all, distinct from the malformed-payload case below.
+func TestResearchSettle_Local_MissingCommentBlock_NotePinned(t *testing.T) {
+	fc := newResearchFake("42")
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
+		CommentFound: false,
+	}
+
+	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	out := testutil.CaptureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "42", 0, result)
+	})
+
+	const want = "note=no verdict comment block"
+	if !strings.Contains(out, want) {
+		t.Errorf("stdout = %q, want substring %q", out, want)
+	}
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
+	}
+	call := fc.TransitionStateCalls[0]
+	if call.Num != "42" || call.From != forge.InProgress || call.To != forge.Failed {
+		t.Errorf("unexpected transition: %+v", call)
+	}
+}
+
+// A comment line that arrived but failed to decode — the Box's Bash output
+// cap truncating a base64 payload mid-stream — gets a failure note naming the
+// cause and payload length, not the generic "no verdict comment block" that
+// sends a human looking for a comment that was in fact sent (issue #3670).
+func TestResearchSettle_Local_MalformedCommentBlock_NoteNamesCause(t *testing.T) {
+	fc := newResearchFake("42")
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
+		CommentFound:    false,
+		CommentRejected: outcome.Rejections{Malformed: 1, LongestPayload: 8154},
+	}
+
+	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	out := testutil.CaptureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "42", 0, result)
+	})
+
+	const want = "note=verdict comment block found but unreadable: malformed payload, longest base64 run 8154 chars (a payload longer than the Box's Bash output cap arrives truncated)"
+	if !strings.Contains(out, want) {
+		t.Errorf("stdout = %q, want substring %q", out, want)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("want no comment posted, got %+v", fc.CommentCalls)
+	}
+	if len(fc.CompleteVerdictCalls) != 0 {
+		t.Errorf("want no verdict applied, got %+v", fc.CompleteVerdictCalls)
+	}
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
+	}
+	call := fc.TransitionStateCalls[0]
+	if call.Num != "42" || call.From != forge.InProgress || call.To != forge.Failed {
+		t.Errorf("unexpected transition: %+v", call)
+	}
+}
+
 // A complete but empty SPINDRIFT_COMMENT block counts as missing, so that
 // forge.Comment(num, "") never lands an empty comment on the issue.
 func TestResearchSettle_Local_EmptyCommentBlockTreatedAsBlocked(t *testing.T) {

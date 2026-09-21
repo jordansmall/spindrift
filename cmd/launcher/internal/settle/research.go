@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 // ResearchSettle is the research dispatch kind's one-shot settle adapter
@@ -90,7 +91,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 			return
 		}
 	} else if r.landing != nil || r.readOnly || r.filerEnabled {
-		r.fail(num, "no verdict comment block")
+		r.fail(num, commentFailureNote(result.CommentRejected))
 		return
 	}
 	if err := r.it.CompleteVerdict(num, verdict); err != nil {
@@ -139,6 +140,18 @@ func firstLine(s string) string {
 func escapeMarkdownLinkText(s string) string {
 	s = strings.ReplaceAll(s, "[", "\\[")
 	return strings.ReplaceAll(s, "]", "\\]")
+}
+
+// commentFailureNote distinguishes "the Box never emitted a comment line" from
+// "it emitted one the host could not decode" (issue #3670). Both used to read
+// "no verdict comment block", which sent a human triaging agent-research-failed
+// looking for a comment that had in fact been sent and cut at the Box's Bash
+// output cap (runs #3595, #3597).
+func commentFailureNote(rejected outcome.Rejections) string {
+	if rejected.Total() == 0 {
+		return "no verdict comment block"
+	}
+	return "verdict comment block found but unreadable: " + rejected.Detail()
 }
 
 // fail transitions num from InProgress to Failed (agent-research-failed).
