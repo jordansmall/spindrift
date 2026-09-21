@@ -1055,6 +1055,25 @@ category outcome's row occupies for its own, different mechanism), `carrier
 = "subagent-first-line"`.
 _Avoid_: verdict marker (too easily read as the Surface [[Verdict]]).
 
+**Signal carrier**:
+Which path a mid-run signal channel (`SPINDRIFT_COMMENT` /
+`SPINDRIFT_PR_INTENT` / `SPINDRIFT_ISSUE_INTENT`) takes across the Box seam,
+chosen per Dispatch by `BOX_SIGNAL_CARRIER`: `log`, the nonce-guarded marker
+line the Launcher scrapes from the driver log after Box exit, or `socket`,
+the [[Signal socket]]. One knob moves all three channels together; the
+[[Outcome line]] stays on the log either way (ADR 0052).
+_Avoid_: transport (the unix-versus-TCP layer beneath a carrier), mode.
+
+**Signal socket**:
+The Launcher-owned per-Box listener that carries the mid-run signal channels
+when the [[Signal carrier]] is `socket`: the Box posts a comment, PR intent
+or issue intent through the `driver-exec signal` verb and receives a
+synchronous accept or reject; the Launcher validates on receipt, buffers the
+accepted body in memory, and performs the write at settle. It carries the
+*content* of a write, never its destination, and shares the registry proxy's
+transport plumbing without sharing its listener (ADR 0052).
+_Avoid_: relay (the bundle act, see [[Mediation]]), control socket, RPC.
+
 **Resolved outcome**:
 The value `outcome.Resolve` (issue #2260) returns: the one seam that decides
 what a Dispatch's [[Outcome line]] evidence actually says, across every pass
