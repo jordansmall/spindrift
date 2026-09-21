@@ -677,6 +677,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		baseBranch: baseBranch,
 		selfAttr:   selfAttr,
 		nixSystem:  nixSystem,
+		// Snapshotted once here, not per-child: nothing between mainRun's
+		// entry and this line calls os.Setenv, so it's still a startup capture.
+		env:   os.Environ(),
+		knobs: strippedKeys,
 	})
 
 	// Buffered at 2, not 1, so a signal isn't dropped for want of room
