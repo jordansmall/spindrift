@@ -72,6 +72,10 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 	}
 	backlink := fmt.Sprintf("Filed from research on #%s", num)
 	filed := fileIssueIntentsDetailed(r.it, num, result, "agent-research-finding", backlink)
+	// Comment != "" is redundant now that parseSignalLine rejects a
+	// zero-length payload (issue #3668); kept because the failure it guards is
+	// user-visible -- an empty verdict comment on a human's tracker issue --
+	// and the else branch is the safer fallback if that invariant regresses.
 	if result.CommentFound && result.Comment != "" {
 		body := result.Comment
 		if section := buildFiledIssuesSection(filed); section != "" {
