@@ -432,9 +432,13 @@ Unlike `/check-hygiene`, `/auto-format`, `/auto-lint`, and `/code-comments`,
 image. It bakes only into spindrift's own dogfood image, via a repo-local
 row in `nix/dogfood-skills.nix` (the same list that pins the upstream
 `caveman`/`tdd`/`to-tickets`/`commit`/`code-review` skills). A Consumer's
-own image does not inherit it, so a Consumer prompt now renders no Nix
-guidance at all. If your target repo isn't a Nix flake, there is nothing to
-do here — the defaults just stopped handing you advice you couldn't use.
+own image does not inherit it, so a Consumer prompt's CHECK section now
+renders no Nix guidance. The harness-owned `auto-format`/`auto-lint`
+skills, baked into every image unconditionally, still carry their own
+ecosystem-agnostic Nix guardrails — that's deliberate, not a gap (issue
+#3268). If your target repo isn't a Nix flake, there is nothing to do
+here — the defaults just stopped handing you CHECK-section advice you
+couldn't use.
 
 If you were relying on the inline Nix advice — for example a Consumer
 targeting a Nix flake repo other than spindrift itself — get it back one of

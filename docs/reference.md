@@ -4685,6 +4685,19 @@ verbatim in the four prompts that need it, unconditionally.
 assembly, but it now gates no fragment row — only the skill invocation
 itself stays baked and available.
 
+Issue #3223's "no flake/devShell text" rule scopes to the bundled *issue*
+prompt's CHECK section only: `mkharness-prompt-check-no-nix-wording`
+(`nix/checks/prompts.nix`) enforces it over the CHECK-section slice awked out
+of `issue-prompt.md` alone — not the fix or research prompts' own CHECK
+sections, and never `templates/default/skills/*`. The harness-owned `auto-format` and
+`auto-lint` bodies keep their own Nix mentions on purpose — auto-format's
+never-`nix fmt` guardrail, auto-lint's flake/devShell checker row — because
+both are ecosystem-agnostic build-tooling advice: any target repo, Nix-primary
+or not, may have a `flake.nix`. Both mentions are pinned, by
+`auto-format-skill-baked-into-image` (`nix/checks/image.nix`) and
+`auto-lint-skill-keeps-nix-wording` (`nix/checks/prompts.nix`)
+respectively (issue #3268).
+
 ## Daemon
 
 `apps.daemon` is the unattended driving loop (issue #3538): generated per
