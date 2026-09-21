@@ -253,25 +253,14 @@ func invalidConfig(em *Emitter, cfg Config, detail string) string {
 // result and loops back around, and it is the next pickKind that decides
 // whether that means switching kinds or genuinely idling.
 func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
-	// Covers the one route the other release sites miss: the leader
-	// stopping (stopOnCancel or selfStop) before a second iteration ever
-	// starts to run the top-of-loop release below. openStartGate no-ops
-	// for a non-leader slot, so this defer needs no leader guard.
-	defer p.openStartGate(slot, gateOpenStopped)
+	// The catch-all for every return: whatever route a round ends by (a
+	// halt, a cancelled ctx, a self-build mismatch), the baton must not
+	// strand a sibling on a token this slot will now never pass any other
+	// way. passBaton no-ops unless slot actually holds the baton, so this
+	// defer needs no guard of its own.
+	defer p.passBaton(slot, batonPassStopped)
 	var lastRevision string // the revision this slot's last child ran at; the "tip moved" baseline
-	firstRound := true
 	for {
-		if !firstRound {
-			// Covers a first round that resolved with no claim while the
-			// window is still open, so awaitWindow below returns without
-			// parking. A leader that instead parks on a shut window holds
-			// the gate across the whole shut span (issue #3634): the
-			// siblings are parked on the window or on the gate either way,
-			// and this same release fires once the window reopens and the
-			// leader's first round actually resolves.
-			p.openStartGate(slot, gateOpenRoundResolved)
-		}
-		firstRound = false
 		if stopOnCancel(ctx, "", p) {
 			return
 		}
@@ -284,13 +273,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			return
 		}
 
-		// Gated after the Awake window, not before: a shut window already
-		// parks every slot, so a cold start inside a shut window costs no
-		// extra wait, and the gate only ever spans the leader's actual
-		// discovery once the window is open (issue #3634).
-		p.awaitStartGate(ctx, slot)
+		// Acquired after the Awake window, not before: apart from the
+		// pre-assigned initial holder's very first round, a slot never
+		// parks in awaitWindow holding the baton — acquisition happens
+		// here, after awaitWindow, and every path that loops back to the
+		// top passes the baton first (see the release sites below).
+		p.awaitBaton(ctx, slot)
 		if stopOnCancel(ctx, "", p) {
-			// awaitStartGate returns on ctx cancellation same as any other
+			// awaitBaton returns on ctx cancellation same as any other
 			// wait; nothing else re-checks before pickKind.
 			return
 		}
@@ -299,7 +289,9 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		if !ok {
 			// Every configured kind has backed off into an empty result:
 			// this is the daemon genuinely idling, not merely a kind this
-			// slot happens not to prefer right now.
+			// slot happens not to prefer right now. A slot must never sleep
+			// out an idle wait holding the baton.
+			p.passBaton(slot, batonPassIdle)
 			p.idleSleep(ctx, slot, lastRevision)
 			continue
 		}
@@ -351,7 +343,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// close; re-check here so that fetch never launches a child
 			// outside the window. No event here: awaitWindow's
 			// edge-triggered noteAwakeClose reports the transition when
-			// the slot parks on the next iteration.
+			// the slot parks on the next iteration. The holder is about to
+			// loop back into awaitWindow for the whole shut span, so the
+			// baton passes now rather than holding the pool through it.
+			p.passBaton(slot, batonPassWindowClosed)
 			continue
 		}
 
@@ -368,15 +363,19 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			OnIssue: func(issue string) {
 				p.noteIssue(slot, issue)
 				p.publish()
-				// A claim settles the race the gate exists to prevent
-				// (issue #3634) the moment it happens, live, rather than
-				// waiting for this child to exit.
-				p.openStartGate(slot, gateOpenClaimed)
+				// A claim settles discovery the moment it happens, live,
+				// rather than waiting for this child to exit.
+				p.passBaton(slot, batonPassClaimed)
 			},
 		}
 		result, err := p.r.RunChild(ctx, req)
 		p.unoccupy(slot)
 		p.publish()
+		// One site covers every post-child exit without a claim at once:
+		// queue empty, none dispatchable, an unrecognised exit, or a
+		// RunChild seam error. A no-op when OnIssue already passed the
+		// baton above.
+		p.passBaton(slot, batonPassChildEnded)
 		if err != nil {
 			// The seam failed, not the child (e.g. it could not even be
 			// started), so there is no exit code to report — but a

@@ -30,62 +30,75 @@ type pool struct {
 	occupied  map[int]slotFlight
 	awakeShut bool // true once awake_close has fired, until the matching awake_open
 
-	// gate holds every slot but the leading one until that slot's first
-	// discovery round resolves (issue #3634): a cold pool that releases
-	// every slot at once lets two slots run discovery against the same
-	// tracker snapshot and both select the same issue, so the leader goes
-	// first and the rest park here until it either claims something (the
-	// race is over) or comes back with nothing (there is nothing left to
-	// race over). nil means there is no gate to wait on at all — a
-	// single-slot pool has no wave to stagger (see newPool). Non-nil but
-	// open (closed) is the steady-state case every later iteration takes:
-	// a closed channel always receives at once, so awaitStartGate costs
-	// one receive and nothing more once the wave has resolved.
-	gate     chan struct{}
-	gateOnce sync.Once
+	// baton is the discovery token (issue #3684): at most one slot may be
+	// between "started" and "announced a Box" at any moment, on the first
+	// wave and on every refill alike — a pool that lets two slots run
+	// discovery against the same tracker snapshot at once risks both
+	// selecting the same issue. batonSlot (below, guarded by p.mu) is the
+	// current holder, or noBaton when the token is free; baton itself is
+	// the capacity-1 channel the holder sends into when it passes. nil
+	// means there is no baton to wait on at all — a single-slot pool has
+	// no sibling to stagger against (see newPool).
+	baton     chan struct{}
+	batonSlot int
 }
 
-// leadSlot is the pool's designated cold-start leader (issue #3634): a
-// fixed slot number rather than whichever slot happens to reach the gate
-// first, so the wave's shape never depends on scheduler luck.
+// leadSlot is the pool's designated initial baton holder: a fixed slot
+// number rather than whichever slot happens to reach awaitBaton first, so
+// a cold start's first discovering slot never depends on scheduler luck.
+// No longer a "leader" with any lasting powers — once its first round ends,
+// the baton is just a token that circulates to whichever slot is holding it.
 const leadSlot = 0
 
-// Reasons stamped on gate_open — operator-facing prose in the same
-// documented-string convention as ShutdownDrain (events.go). Only the
-// first of these to actually fire reaches the stream: openStartGate is
-// idempotent, and these four release sites deliberately overlap so no
-// path out of the leader's first iteration can strand the rest of the
-// pool on a gate nothing else will ever open.
-const (
-	// gateOpenClaimed fires when the leader's child announces a Box while
-	// still running: the race the gate exists to prevent is already
-	// settled, so the rest of the pool starts its own discovery at once
-	// rather than waiting out the whole of the leader's Box run.
-	gateOpenClaimed = "the leading slot claimed an issue: releasing the rest of the pool to discover in parallel"
-	// gateOpenRoundResolved fires at the top of the leader's second
-	// iteration, catching every first-iteration exit with no release of
-	// its own above — including the Awake window shutting under the
-	// leader's own ResolveRevision fetch (issue #3634).
-	gateOpenRoundResolved = "the leading slot's first discovery round resolved without a claim: releasing the rest of the pool"
-	// gateOpenFailed fires on any unclassified failure that reaches
-	// backoffOrHalt during the leader's first round — a ResolveRevision
-	// error, a self-build evaluation failure, a RunChild seam error, or an
-	// unrecognised child exit code, whether or not a child ever ran: the
-	// leader is about to back off alone, and holding the rest of the pool
-	// through that backoff would stall every sibling's own cold start on
-	// a problem backoffOrHalt already handles per-slot.
-	gateOpenFailed = "the leading slot's first discovery round failed: releasing the rest of the pool rather than holding it through backoff"
-	// gateOpenStopped fires when the leader returns before any of the
-	// above resolved (a cancelled ctx, a halt, or a self-build mismatch):
-	// a leader that never gets to run discovery must still not strand
-	// every sibling parked on a gate nothing else will now ever open.
-	gateOpenStopped = "the leading slot stopped before its first discovery round resolved: releasing the rest of the pool"
+// noBaton is batonSlot's value while the discovery baton is free — held by
+// no slot, in flight on p.baton's channel (or, before the pool's first
+// round, not yet claimed by anyone but the pre-assigned leadSlot).
+const noBaton = -1
 
-	// gateHoldReason is stamped on every gate_hold event, matching every
+// Reasons stamped on baton_hold/baton_pass — operator-facing prose in the
+// same documented-string convention as ShutdownDrain (events.go). Every
+// way a slot's discovery round can end without a claim has its own pass
+// reason below, so an operator reading the stream sees why the baton moved
+// without cross-referencing code.
+const (
+	// batonPassClaimed fires when the holder's child announces a Box while
+	// still running: discovery is over, so the next waiting slot starts at
+	// once rather than waiting out the whole of the holder's Box run.
+	batonPassClaimed = "the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"
+	// batonPassChildEnded fires when the holder's child returns without
+	// ever announcing a Box (queue empty, none dispatchable, an
+	// unrecognised exit, or a RunChild seam error): the holder's round is
+	// over either way, so the baton passes regardless of which of those it
+	// was.
+	batonPassChildEnded = "the holder's child ended without announcing a Box: passing the baton to the next waiting slot"
+	// batonPassFailed fires on an unclassified failure that reaches
+	// backoffOrHalt before the holder ever started a child — a
+	// ResolveRevision error or a self-build evaluation failure: the holder
+	// is about to back off alone, and holding the pool through that
+	// backoff would stall every sibling's own discovery on a problem
+	// backoffOrHalt already handles per-slot.
+	batonPassFailed = "the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"
+	// batonPassWindowClosed fires when the Awake window shuts between the
+	// holder's ResolveRevision fetch and starting its child: the holder is
+	// about to loop back around into awaitWindow, and holding the pool
+	// through that whole shut span would stall every sibling's own
+	// discovery for no reason.
+	batonPassWindowClosed = "the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"
+	// batonPassIdle fires when pickKind finds every configured kind backed
+	// off for the holder: the holder is about to idleSleep, and a slot
+	// must never sleep out an idle wait holding the baton.
+	batonPassIdle = "no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"
+	// batonPassStopped fires when the holder returns before any of the
+	// above resolved (a cancelled ctx, a halt, or a self-build mismatch):
+	// a holder that never gets to run discovery must still not strand the
+	// next waiting slot on a baton nothing else will now ever pass.
+	batonPassStopped = "the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"
+
+	// batonHoldReason is stamped on every baton_hold event, matching every
 	// other wait event in this stream (awake_close, backoff, idle's own
 	// wait): an operator reading a held start must see why without
 	// cross-referencing code.
-	gateHoldReason = "waiting for the leading slot's first discovery round to resolve"
+	batonHoldReason = "waiting for the discovery baton: another slot's child is still discovering"
 )
 
 // slotFlight is what one occupied slot currently has in flight.
@@ -111,19 +124,23 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		kinds[k] = newKindBackoff(cfg.IdleFloor, cfg.IdleCap)
 	}
 	p := &pool{
-		cfg:      cfg,
-		r:        r,
-		em:       em,
-		clk:      clk,
-		b:        newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
-		kinds:    kinds,
-		cancel:   cancel,
-		occupied: make(map[int]slotFlight),
+		cfg:       cfg,
+		r:         r,
+		em:        em,
+		clk:       clk,
+		b:         newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
+		kinds:     kinds,
+		cancel:    cancel,
+		occupied:  make(map[int]slotFlight),
+		batonSlot: leadSlot,
 	}
 	if cfg.Slots > 1 {
 		// A single slot has no sibling to race, so it must take no wait
-		// and the pool must emit no gate event at all (see gate's own doc).
-		p.gate = make(chan struct{})
+		// and the pool must emit no baton event at all (see baton's own
+		// doc). The token channel starts empty: batonSlot is
+		// pre-assigned to leadSlot above, so the first holder never
+		// receives from it, only ever sends when it passes.
+		p.baton = make(chan struct{}, 1)
 	}
 	return p, pctx
 }
@@ -294,55 +311,79 @@ func (p *pool) noteAwakeOpen(slot int) bool {
 	return was
 }
 
-// awaitStartGate holds slot until the pool's first discovery wave resolves
-// (issue #3634). Returns at once when there is no gate (a single-slot pool)
-// or when slot is the leader — the leader never waits on its own gate.
+// awaitBaton parks slot until it holds the discovery baton. Returns at once
+// when there is no baton (a single-slot pool) or when slot already holds
+// it — the pre-assigned initial holder's very first call, or any slot that
+// re-enters here while still holding from a prior pass (not possible today,
+// since every acquisition site is paired with a pass before the next
+// acquisition, but checked directly rather than assumed).
 //
-// The non-blocking select is deliberately tried first: this is called on
-// every iteration of every non-leader slot, and once the gate is open a
-// closed channel always receives immediately, so the steady-state path
-// (every iteration after the first wave resolves) costs one channel
-// receive and emits nothing. Only a non-leader slot that still finds the
-// gate shut emits gate_hold and actually blocks, on a select that also
-// watches ctx so a pool that is cancelled while a slot is held never
-// deadlocks it.
-func (p *pool) awaitStartGate(ctx context.Context, slot int) {
-	if p.gate == nil || slot == leadSlot {
+// The batonSlot check is tried first: this is called on every iteration of
+// every slot, and once a slot holds the baton a re-check costs one lock and
+// nothing more. Only a slot that does not hold it falls through to the
+// non-blocking receive (the token may already be waiting on the channel),
+// and only after that misses does it emit baton_hold and actually block, on
+// a select that also watches ctx so a pool that is cancelled while a slot
+// is held never deadlocks it.
+func (p *pool) awaitBaton(ctx context.Context, slot int) {
+	if p.baton == nil {
+		return
+	}
+	p.mu.Lock()
+	held := p.batonSlot == slot
+	p.mu.Unlock()
+	if held {
 		return
 	}
 	select {
-	case <-p.gate:
+	case <-p.baton:
+		p.takeBaton(slot)
 		return
 	default:
 	}
-	p.emit(Event{Event: "gate_hold", Slot: intPtr(slot), Reason: gateHoldReason})
+	p.emit(Event{Event: "baton_hold", Slot: intPtr(slot), Reason: batonHoldReason})
 	select {
 	case <-ctx.Done():
-	case <-p.gate:
+	case <-p.baton:
+		p.takeBaton(slot)
 	}
 }
 
-// openStartGate releases every slot parked in awaitStartGate. A no-op when
-// there is no gate, or when slot is not the leader: only the leader's own
-// round can end the wave, so every call site can call this unconditionally
-// without its own slot == leadSlot guard. Idempotent via gateOnce: several
-// release sites in runSlot legitimately race to call this for the same
-// leader (see the gateOpen* reasons' own doc), and only the first to
-// actually win the Once is the one whose reason reaches the stream.
+// takeBaton records slot as the current baton holder.
+func (p *pool) takeBaton(slot int) {
+	p.mu.Lock()
+	p.batonSlot = slot
+	p.mu.Unlock()
+}
+
+// passBaton hands the baton on. A no-op unless slot actually holds it,
+// which makes it idempotent per hold and safe to call unconditionally from
+// every site a round can end — several release sites in runSlot legitimately
+// overlap (see the batonPass* reasons' own doc), and only the first to
+// actually find itself the holder is the one whose reason reaches the
+// stream.
 //
-// The gate_open emit happens before close(p.gate), not after: closing
-// first could let an awaitStartGate call already blocked on <-p.gate wake
-// and publish its own next event before gate_open itself reaches the
-// stream, which would make the durable record say a sibling acted before
-// the event that explains why it was allowed to.
-func (p *pool) openStartGate(slot int, reason string) {
-	if p.gate == nil || slot != leadSlot {
+// The baton_pass emit happens before the send, not after: sending first
+// could let an awaitBaton call already blocked on <-p.baton wake and
+// publish its own next event before baton_pass itself reaches the stream,
+// which would make the durable record say a sibling acted before the event
+// that explains why it was allowed to. The send itself cannot block: the
+// holder is the only slot that ever sends, and the batonSlot flip above
+// guarantees it sends at most once per hold, so the capacity-1 channel is
+// always empty at this point.
+func (p *pool) passBaton(slot int, reason string) {
+	if p.baton == nil {
 		return
 	}
-	p.gateOnce.Do(func() {
-		p.emit(Event{Event: "gate_open", Slot: intPtr(slot), Reason: reason})
-		close(p.gate)
-	})
+	p.mu.Lock()
+	if p.batonSlot != slot {
+		p.mu.Unlock()
+		return
+	}
+	p.batonSlot = noBaton
+	p.mu.Unlock()
+	p.emit(Event{Event: "baton_pass", Slot: intPtr(slot), Reason: reason})
+	p.baton <- struct{}{}
 }
 
 // stopped reports whether the pool has already recorded a halt reason —
@@ -379,21 +420,20 @@ func (p *pool) halt(kind Kind, reason, revision string) {
 // look systemic — no per-slot retry clears that) or backs this one slot
 // off and lets it retry alone. Returns true if the pool halted (the caller
 // must stop), false if the caller should sleep out the backoff and
-// continue its own loop. When the caller is the leader and the start gate
-// is still shut, it also releases the gate before the backoff sleep below
-// (see gateOpenFailed) — a leader about to sleep alone through
-// FailureBackoff must not strand every sibling's cold start on that sleep.
+// continue its own loop. When the caller holds the discovery baton, it
+// also passes it before the backoff sleep below (see batonPassFailed) — a
+// holder about to sleep alone through FailureBackoff must not strand its
+// sibling's discovery on that sleep.
 func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision, reason string) bool {
-	// Every path into backoffOrHalt during the leader's first round —
-	// pre-child (a ResolveRevision or self-build evaluation failure) or
-	// post-child (a RunChild seam error or an unrecognised exit code) —
-	// must release the gate before the backoff sleep below, or the whole
-	// pool waits out that backoff for nothing. openStartGate is
-	// idempotent: whichever of these reaches here first on the leader's
-	// first round is the one whose reason lands on the stream, and any
-	// later call (including a later iteration, or a sibling that never
-	// touches the gate at all) is a no-op.
-	p.openStartGate(slot, gateOpenFailed)
+	// Only an unclassified pre-child failure (a ResolveRevision or
+	// self-build evaluation error) can still be holding the baton here:
+	// loop.go releases it unconditionally right after RunChild returns,
+	// before the exit is interpreted, so this call is already a no-op on
+	// every post-child failure path. passBaton is a no-op unless slot
+	// actually holds it, so it's safe to call unconditionally here too,
+	// rather than threading a "did I acquire it" flag through every
+	// caller.
+	p.passBaton(slot, batonPassFailed)
 
 	count, crossed := p.b.recordAndCheck(p.clk.Now())
 	if crossed {
