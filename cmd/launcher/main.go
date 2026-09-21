@@ -2084,7 +2084,7 @@ var verbHandlers = map[string]verbHandler{
 		lc, err := bootstrap(!parsed.noBuild, dispatchKindResearch, parsed.selfContained)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
-			return 1
+			return bootstrapExitCode(err)
 		}
 		if len(parsed.remaining) > 0 {
 			return cmdDispatchSelective(lc, parsed.remaining, parsed.yes)

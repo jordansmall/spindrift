@@ -80,8 +80,8 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 	for _, argv := range cases {
 		var stdout, stderr bytes.Buffer
 		code := mainRun(argv, &stdout, &stderr)
-		if code != 1 {
-			t.Errorf("mainRun(%v) code = %d, want 1", argv, code)
+		if code != exitConfigInvalid {
+			t.Errorf("mainRun(%v) code = %d, want %d", argv, code, exitConfigInvalid)
 		}
 		if !strings.Contains(stderr.String(), "REPO_SLUG") {
 			t.Errorf("mainRun(%v) stderr = %q, want a REPO_SLUG validation error", argv, stderr.String())
@@ -136,8 +136,8 @@ func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"research", "--continuous"}, &stdout, &stderr)
-	if code != 1 {
-		t.Errorf("mainRun(research --continuous) code = %d, want 1", code)
+	if code != exitConfigInvalid {
+		t.Errorf("mainRun(research --continuous) code = %d, want %d", code, exitConfigInvalid)
 	}
 	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
@@ -405,8 +405,8 @@ func TestMainRun_AmbientKnobEnv_WarnsAndStillHonored(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"research"}, &stdout, &stderr)
 
-	if code != 1 {
-		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	if code != exitConfigInvalid {
+		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
 	}
 	out := stderr.String()
 	if !strings.Contains(out, "MAX_JOBS=5 set in environment") {
@@ -537,8 +537,8 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"--input", docPath, "research"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	if code != exitConfigInvalid {
+		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
 	}
 	if strings.Contains(stderr.String(), "REPO_SLUG") {
 		t.Errorf("stderr = %q, want REPO_SLUG resolved from the document (no REPO_SLUG complaint)", stderr.String())
@@ -550,8 +550,8 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code = mainRun([]string{"--input", docPath, "--repo-slug", "flag-org/flag-repo", "research"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	if code != exitConfigInvalid {
+		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
 	}
 	if strings.Contains(stderr.String(), "REPO_SLUG") {
 		t.Errorf("stderr = %q, want REPO_SLUG resolved (flag overrides document)", stderr.String())
@@ -5955,6 +5955,29 @@ func TestBootstrapExitCode(t *testing.T) {
 				t.Errorf("bootstrapExitCode(%v) = %d, want %d", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+// research and dispatch must map the same bootstrap error to the same exit
+// code (issue #3617): a missing REPO_SLUG is config-invalid regardless of
+// which verb hits it first.
+func TestMainRun_ResearchDispatchParity_SameBootstrapErrorSameExitCode(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+
+	var dispatchOut, dispatchErr bytes.Buffer
+	dispatchCode := mainRun([]string{"dispatch"}, &dispatchOut, &dispatchErr)
+
+	var researchOut, researchErr bytes.Buffer
+	researchCode := mainRun([]string{"research"}, &researchOut, &researchErr)
+
+	if dispatchCode != exitConfigInvalid {
+		t.Fatalf("mainRun(dispatch) code = %d, want %d; stderr=%s", dispatchCode, exitConfigInvalid, dispatchErr.String())
+	}
+	if researchCode != dispatchCode {
+		t.Errorf("mainRun(research) code = %d, want the same as mainRun(dispatch) = %d; stderr=%s", researchCode, dispatchCode, researchErr.String())
+	}
+	if dispatchOut.String() != "" || researchOut.String() != "" {
+		t.Errorf("stdout = %q (dispatch), %q (research), want empty (bootstrap fails before any work runs)", dispatchOut.String(), researchOut.String())
 	}
 }
 
