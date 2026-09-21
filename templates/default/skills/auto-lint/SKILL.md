@@ -6,7 +6,8 @@ Before committing, lint the files you changed and resolve what you find:
 
 1. Detect the project's linter, in order of preference:
    - A `lint` target in the project's build config (`package.json` script,
-     `Makefile`, `justfile`), or a checker the flake/devShell exposes.
+     `Makefile`, `justfile`), or a checker the repo's own build tooling
+     exposes — including a Nix flake or devShell, when the repo has one.
    - The standard linter for the language (e.g. `eslint`, `ruff`/`flake8`,
      `golangci-lint`/`go vet`, `clippy`, `statix`).
 2. Run it only on the files you changed (from `git diff --name-only` vs the
