@@ -1,6 +1,8 @@
 package settle
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -10,6 +12,40 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/outcome"
 )
+
+// filedURLs returns filed's successful entries' URLs in payload order,
+// mirroring the URL-only shape the now-deleted fileIssueIntents wrapper used
+// to return, so tests written against that shape keep their assertions.
+func filedURLs(filed []filedIntent) []string {
+	var urls []string
+	for _, f := range filed {
+		if !f.Failed {
+			urls = append(urls, f.URL)
+		}
+	}
+	return urls
+}
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns
+// everything fn wrote, matching the capture idiom already used elsewhere in
+// this package (settle_entry_test.go).
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	fn()
+	w.Close()
+	os.Stdout = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stdout: %v", err)
+	}
+	return string(captured)
+}
 
 // Pins the 1-to-many host-mediated issue-filing relay (issue #2018): every
 // decoded SPINDRIFT_ISSUE_INTENT payload is filed through the tracker's
@@ -28,7 +64,7 @@ func TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels(t *testing.T) {
 		},
 	}
 
-	urls := fileIssueIntents(fc.AsIssueFiler(), "1", result, "agent-review-finding")
+	urls := filedURLs(fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", ""))
 
 	if len(fc.PostIssueCalls) != 2 {
 		t.Fatalf("PostIssueCalls = %+v, want 2", fc.PostIssueCalls)
@@ -73,7 +109,7 @@ func TestFileIssueIntents_MalformedPayloadSkipped(t *testing.T) {
 		},
 	}
 
-	urls := fileIssueIntents(fc.AsIssueFiler(), "1", result, "agent-review-finding")
+	urls := filedURLs(fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", ""))
 
 	if len(fc.PostIssueCalls) != 1 || fc.PostIssueCalls[0].Title != "good one" {
 		t.Fatalf("PostIssueCalls = %+v, want exactly the well-formed intent", fc.PostIssueCalls)
@@ -84,9 +120,9 @@ func TestFileIssueIntents_MalformedPayloadSkipped(t *testing.T) {
 }
 
 // A tracker that doesn't implement forge.HostPostedIssueFiler (every real
-// adapter today) leaves fileIssueIntents a no-op rather than panicking. The
-// relay is a best-effort side channel, not part of the run's own landing
-// decision.
+// adapter today) leaves fileIssueIntentsDetailed a no-op rather than
+// panicking. The relay is a best-effort side channel, not part of the run's
+// own landing decision.
 func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 
@@ -95,7 +131,7 @@ func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) 
 		IssueIntents:      []string{`{"title":"first","body":"body"}`},
 	}
 
-	urls := fileIssueIntents(fc, "1", result, "agent-review-finding")
+	urls := filedURLs(fileIssueIntentsDetailed(fc, "1", result, "agent-review-finding", ""))
 
 	if len(fc.PostIssueCalls) != 0 {
 		t.Errorf("PostIssueCalls = %+v, want none", fc.PostIssueCalls)
@@ -106,9 +142,9 @@ func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) 
 }
 
 // Exercises the relay (issue #2018) against a real *local.LocalTracker rather
-// than the fake: fileIssueIntents type-asserts its it parameter, and a real
-// adapter is the only way to prove that assertion reaches a tracker that
-// writes to disk.
+// than the fake: fileIssueIntentsDetailed type-asserts its it parameter, and
+// a real adapter is the only way to prove that assertion reaches a tracker
+// that writes to disk.
 func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	lt := local.NewLocalTracker(dir, testDispatchLabels)
@@ -121,7 +157,7 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 		},
 	}
 
-	urls := fileIssueIntents(lt, "1", result, "agent-review-finding")
+	urls := filedURLs(fileIssueIntentsDetailed(lt, "1", result, "agent-review-finding", ""))
 
 	if len(urls) != 2 {
 		t.Fatalf("urls = %v, want 2", urls)
@@ -172,7 +208,7 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 // routine. "some-other-caller-label" is a deliberate placeholder, not ADR
 // 0041's real "agent-research-finding" (which isn't registered in
 // lib/labels.nix). A research-settle caller (issue #2590) needs this seam:
-// fileIssueIntents is a package-level function, not a *Settle method.
+// fileIssueIntentsDetailed is a package-level function, not a *Settle method.
 func TestFileIssueIntents_ArbitraryProvenanceLabel(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/55"
@@ -184,7 +220,7 @@ func TestFileIssueIntents_ArbitraryProvenanceLabel(t *testing.T) {
 		},
 	}
 
-	urls := fileIssueIntents(fc.AsIssueFiler(), "1", result, "some-other-caller-label")
+	urls := filedURLs(fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "some-other-caller-label", ""))
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -778,5 +814,181 @@ func TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome(t *testing.T) {
 	}
 	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Body != d.UsageReportBody {
 		t.Errorf("a failed issue-intent file must not block the run's own ready/merge flow; CommentCalls = %+v", fc.CommentCalls)
+	}
+}
+
+// The work path (Settle.Settle via gate.go, not a direct
+// fileIssueIntentsDetailed call) prints the filed= tally line even when the
+// run carried no issue intents at all (issue #3608): "reached filing, filed
+// nothing" must still show up in the transcript.
+func TestSettle_ReportsFiledTally_NoIntents(t *testing.T) {
+	const issNum = "3608"
+	const prURL = "https://github.com/owner/repo/pull/3608"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc.AsIssueFiler(), fc)
+	stdout := captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), issNum, 0, result)
+	})
+
+	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:0\n") {
+		t.Errorf("stdout = %q, want it to contain the zero filed= tally", stdout)
+	}
+}
+
+// The work path's filed= tally line counts two successfully filed intents as
+// ok:2,failed:0 (issue #3608).
+func TestSettle_ReportsFiledTally_AllOK(t *testing.T) {
+	const issNum = "3608"
+	const prURL = "https://github.com/owner/repo/pull/3608"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/78"
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first bug","body":"first body"}`,
+			`{"title":"second bug","body":"second body"}`,
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc.AsIssueFiler(), fc)
+	stdout := captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), issNum, 0, result)
+	})
+
+	if !strings.Contains(stdout, "    #3608  filed=ok:2,failed:0\n") {
+		t.Errorf("stdout = %q, want it to contain the all-ok filed= tally", stdout)
+	}
+}
+
+// The work path's filed= tally line counts two failed PostIssue calls as
+// ok:0,failed:2 (issue #3608): a run that tried and failed to file must not
+// read as a quiet run.
+func TestSettle_ReportsFiledTally_AllFailed(t *testing.T) {
+	const issNum = "3608"
+	const prURL = "https://github.com/owner/repo/pull/3608"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.PostIssueErr = errFake
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first bug","body":"first body"}`,
+			`{"title":"second bug","body":"second body"}`,
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc.AsIssueFiler(), fc)
+	stdout := captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), issNum, 0, result)
+	})
+
+	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:2\n") {
+		t.Errorf("stdout = %q, want it to contain the all-failed filed= tally", stdout)
+	}
+}
+
+// A nil filed slice tallies to the zero value, not an error (issue #3608):
+// a run that never reached filing must tally the same as one that filed
+// zero intents.
+func TestTallyFiled_Zero(t *testing.T) {
+	got := tallyFiled(nil)
+	if got != (filedTally{}) {
+		t.Errorf("tallyFiled(nil) = %+v, want zero value", got)
+	}
+	if got.String() != "ok:0,failed:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:0")
+	}
+}
+
+// All-success filings tally entirely into ok (issue #3608).
+func TestTallyFiled_AllOK(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "a", URL: "https://example/1"},
+		{Title: "b", URL: "https://example/2"},
+	}
+	got := tallyFiled(filed)
+	if got.String() != "ok:2,failed:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:0")
+	}
+}
+
+// All-failed filings tally entirely into failed (issue #3608).
+func TestTallyFiled_AllFailed(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "a", Failed: true, Body: "body a"},
+		{Title: "b", Failed: true, Body: "body b"},
+	}
+	got := tallyFiled(filed)
+	if got.String() != "ok:0,failed:2" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:2")
+	}
+}
+
+// A mix of successes and failures splits across both counters (issue #3608).
+func TestTallyFiled_Mixed(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "a", URL: "https://example/1"},
+		{Title: "b", Failed: true, Body: "body b"},
+		{Title: "c", URL: "https://example/3"},
+	}
+	got := tallyFiled(filed)
+	if got.String() != "ok:2,failed:1" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:1")
+	}
+}
+
+// reportFiled prints even at the zero tally, on purpose (issue #3608): a run
+// that reached filing but filed nothing must read differently in the
+// transcript than a run that never reached filing at all (no line printed).
+func TestReportFiled_ZeroTallyStillPrints(t *testing.T) {
+	stdout := captureStdout(t, func() {
+		reportFiled("42", nil)
+	})
+	want := "    #42  filed=ok:0,failed:0\n"
+	if stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+// reportFiled's mixed-tally line matches the surrounding status-output
+// convention (four leading spaces, "#<num>", two spaces, then the field; see
+// research.go's landing/status/note line).
+func TestReportFiled_MixedTally(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "a", URL: "https://example/1"},
+		{Title: "b", Failed: true, Body: "body b"},
+	}
+	stdout := captureStdout(t, func() {
+		reportFiled("7", filed)
+	})
+	want := "    #7  filed=ok:1,failed:1\n"
+	if stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
 }

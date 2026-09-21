@@ -60,7 +60,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	// (issue #2019): a run's own findings are worth tracking whether it landed
 	// ready or blocked. Best-effort, so a filing failure never changes the
 	// switch's landing decision.
-	fileIssueIntents(s.it, num, result, "agent-review-finding")
+	reportFiled(num, fileIssueIntentsDetailed(s.it, num, result, "agent-review-finding", ""))
 	switch o.Status {
 	case outcome.StatusBlocked:
 		// A read-only run's status=blocked may be the ADR 0036 synthetic

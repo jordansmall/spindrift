@@ -171,15 +171,16 @@ let
       extract = src: extractResearchLabelNamesLiteral src ++ extractAmbiguousLabelNamesLiteral src;
     };
   };
-  # The literal is gate.go's fourth argument to fileIssueIntents (issue #2590).
-  # Anchored to the call itself rather than to its first three argument names,
-  # so renaming gate.go's local num/result variables cannot false-negative this
-  # extractor. splitString has no notion of lines, so the whole span between
-  # the marker and the next ")" is split on ",", inert to a gofmt reformat.
+  # The literal is gate.go's fourth argument to fileIssueIntentsDetailed
+  # (issues #2590, #3608). Anchored to the call itself rather than to its first
+  # three argument names, so renaming gate.go's local num/result variables
+  # cannot false-negative this extractor. splitString has no notion of lines,
+  # so the whole span between the marker and the next ")" is split on ",",
+  # inert to a gofmt reformat.
   extractFileIssueIntentsProvenanceLabel =
     src:
     let
-      marker = "fileIssueIntents(";
+      marker = "fileIssueIntentsDetailed(";
       labelFromCall =
         segment:
         let
@@ -497,14 +498,15 @@ in
       "label-registry-covers-harness-writes-json-spacing-regression: expected assertHarnessWritesInRegistry to reject a synthetic filer-label-direct-forgejo.md with a space after the \"name\" key's colon and the value renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-json-spacing-regression" { } "touch $out";
 
-  # Proves the emptyOffenders half fires when the anchored `fileIssueIntents(`
-  # marker breaks on a rename of the call (issue #2528): splitString never
-  # finds the old marker, the surface extracts [ ], and before emptyOffenders
-  # the check passed while the harness kept writing labels unobserved.
+  # Proves the emptyOffenders half fires when the anchored
+  # `fileIssueIntentsDetailed(` marker breaks on a rename of the call (issue
+  # #2528): splitString never finds the old marker, the surface extracts [ ],
+  # and before emptyOffenders the check passed while the harness kept writing
+  # labels unobserved.
   label-registry-covers-harness-writes-call-rename-regression =
     let
       doctoredGateSrc =
-        replaceStrings [ "fileIssueIntents(" ] [ "fileReviewFindingIntents(" ]
+        replaceStrings [ "fileIssueIntentsDetailed(" ] [ "fileReviewFindingIntents(" ]
           harnessSurfaces."cmd/launcher/internal/settle/gate.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
         "cmd/launcher/internal/settle/gate.go" = harnessSurfaces."cmd/launcher/internal/settle/gate.go" // {
@@ -517,7 +519,7 @@ in
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-call-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with fileIssueIntents renamed to fileReviewFindingIntents, but it evaluated successfully";
+      "label-registry-covers-harness-writes-call-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with fileIssueIntentsDetailed renamed to fileReviewFindingIntents, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-call-rename-regression" { } "touch $out";
 
   # Proves assertHarnessWritesInRegistry catches doctor.go's hand-written
@@ -598,7 +600,7 @@ in
     pkgs.runCommand "label-registry-covers-harness-writes-ambiguous-label-drift-regression" { } "touch $out";
 
   # Proves the span-scanned extraction survives a gofmt multi-line reformat of
-  # the fileIssueIntents(...) call arguments (issues #2528 AC1, #2590). A
+  # the fileIssueIntentsDetailed(...) call arguments (issues #2528 AC1, #2590). A
   # per-line scan would return [ ] the moment the literal lands on a different
   # line than the marker, the fails-open direction, so this asserts the
   # extractor finds the label, not merely that the assertion rejects it.
@@ -606,9 +608,9 @@ in
     let
       doctoredGateSrc =
         replaceStrings
-          [ ''fileIssueIntents(s.it, num, result, "agent-review-finding")'' ]
+          [ ''fileIssueIntentsDetailed(s.it, num, result, "agent-review-finding", "")'' ]
           [
-            "fileIssueIntents(\n\t\ts.it,\n\t\tnum,\n\t\tresult,\n\t\t\"agent-unregistered-label\",\n\t)"
+            "fileIssueIntentsDetailed(\n\t\ts.it,\n\t\tnum,\n\t\tresult,\n\t\t\"agent-unregistered-label\",\n\t\t\"\",\n\t)"
           ]
           harnessSurfaces."cmd/launcher/internal/settle/gate.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
@@ -628,6 +630,6 @@ in
     assert assertMsg (extractedLabels == [ "agent-unregistered-label" ])
       "label-registry-covers-harness-writes-fileissueintents-multiline-regression: expected extractFileIssueIntentsProvenanceLabel to find [ \"agent-unregistered-label\" ] on the multi-line-reformatted call (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-fileissueintents-multiline-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with the fileIssueIntents(...) call gofmt-reformatted across multiple lines and its label argument swapped to agent-unregistered-label, but it evaluated successfully";
+      "label-registry-covers-harness-writes-fileissueintents-multiline-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with the fileIssueIntentsDetailed(...) call gofmt-reformatted across multiple lines and its label argument swapped to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-fileissueintents-multiline-regression" { } "touch $out";
 }
