@@ -25,6 +25,8 @@ type hostRunner struct {
 	baseBranch string
 	selfAttr   string
 	nixSystem  string
+	env        []string // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
+	knobs      []string // keys of the Launcher input document's settings map, stripped from env before a child sees it
 
 	mu       sync.Mutex
 	children map[int]*os.Process // slot -> currently running child, for signal forwarding; empty when idle
@@ -56,6 +58,8 @@ type hostRunnerConfig struct {
 	baseBranch string
 	selfAttr   string
 	nixSystem  string
+	env        []string
+	knobs      []string
 }
 
 func newHostRunner(cfg hostRunnerConfig) *hostRunner {
@@ -65,6 +69,8 @@ func newHostRunner(cfg hostRunnerConfig) *hostRunner {
 		baseBranch: cfg.baseBranch,
 		selfAttr:   cfg.selfAttr,
 		nixSystem:  cfg.nixSystem,
+		env:        cfg.env,
+		knobs:      cfg.knobs,
 		children:   make(map[int]*os.Process),
 	}
 }
@@ -155,17 +161,21 @@ func (r *hostRunner) SelfPath(ctx context.Context, revision string) (string, err
 }
 
 func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
-	argv, err := daemon.ChildCommand(daemon.ChildSpec{
+	childCmd, err := daemon.ChildCommand(daemon.ChildSpec{
 		RepoPath: r.repoPath,
 		AppAttr:  r.appAttr,
 		Revision: req.Revision,
 		Kind:     req.Kind,
+		Env:      r.env,
+		Knobs:    r.knobs,
 	})
 	if err != nil {
 		return daemon.ChildResult{}, err
 	}
 
-	cmd := runnerExecCommand(argv[0], argv[1:]...)
+	cmd := runnerExecCommand(childCmd.Argv[0], childCmd.Argv[1:]...)
+	// Knob-stripped env, not the raw process environment — see childEnv.
+	cmd.Env = childCmd.Env
 	// A terminal Ctrl-C delivers SIGINT to the whole foreground process
 	// group (daemon, nix run, launcher); the daemon only treats SIGTERM as
 	// a drain request (see forwardStop below), so without this the group
@@ -275,12 +285,14 @@ var runnerDoctorCommand = exec.CommandContext
 // running) tears the child down instead of hanging until SIGKILL — same
 // reasoning as SelfPath/ResolveRevision above.
 func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error) {
-	argv, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision})
+	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs})
 	if err != nil {
 		return 0, err
 	}
 
-	cmd := runnerDoctorCommand(ctx, argv[0], argv[1:]...)
+	cmd := runnerDoctorCommand(ctx, doctorCmd.Argv[0], doctorCmd.Argv[1:]...)
+	// Same knob-stripped env as RunChild above (see its comment).
+	cmd.Env = doctorCmd.Env
 	// Both stdout and stderr go straight to the daemon's own stderr: the
 	// daemon's stdout is the JSON-lines event stream, so a doctor report
 	// written there would corrupt it, and the report itself is where the

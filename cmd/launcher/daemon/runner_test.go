@@ -29,7 +29,7 @@ func TestRunChild_ExitCodeAndIssues(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", script)
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
@@ -64,7 +64,7 @@ func TestRunChild_OnIssueFiresPerDistinctAnnounce(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", script)
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 
 	var mu sync.Mutex
 	var announced []string
@@ -91,6 +91,63 @@ func TestRunChild_OnIssueFiresPerDistinctAnnounce(t *testing.T) {
 	}
 }
 
+// envDumpScript has the child report the three variables below through
+// shell builtins alone, writing them to the file its %q names. These
+// tests hand the child a fixture PATH, so nothing external to the shell
+// — env(1) included — is reachable from inside it.
+const envDumpScript = `{ echo "MODEL=${MODEL-<unset>}"; echo "PATH=${PATH-<unset>}"; echo "GH_TOKEN=${GH_TOKEN-<unset>}"; } >%q; exit 0`
+
+// assertEnvStripsKnobsKeepsSecrets is the shared assertion for
+// TestRunChild_EnvStripsKnobsKeepsSecrets and
+// TestRunDoctor_EnvStripsKnobsKeepsSecrets below: the daemon-side knob
+// MODEL must never reach the child, while a non-knob (PATH) and a
+// secret-shaped var (GH_TOKEN) must pass through untouched.
+func assertEnvStripsKnobsKeepsSecrets(t *testing.T, dumped string) {
+	t.Helper()
+	got := strings.Split(strings.TrimRight(dumped, "\n"), "\n")
+	want := []string{"MODEL=<unset>", "PATH=/bin:/usr/bin", "GH_TOKEN=super-secret"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("child env = %v, want %v", got, want)
+	}
+}
+
+// TestRunChild_EnvStripsKnobsKeepsSecrets drives the exec seam with a
+// scripted child that dumps its own environment to a temp file (RunChild's
+// stdout is scanned for announce lines and re-emitted to os.Stderr, so a
+// temp file is the observable route here, same as RunDoctor's test below).
+func TestRunChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	dumpFile := filepath.Join(t.TempDir(), "env.out")
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", fmt.Sprintf(envDumpScript, dumpFile))
+	}
+
+	r := newHostRunner(hostRunnerConfig{
+		repoPath:   t.TempDir(),
+		appAttr:    ".#",
+		baseBranch: "main",
+		selfAttr:   ".#daemon",
+		nixSystem:  "x86_64-linux",
+		env:        []string{"MODEL=from-shell", "PATH=/bin:/usr/bin", "GH_TOKEN=super-secret"},
+		knobs:      []string{"MODEL"},
+	})
+	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+	if err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	if got.Exit != 0 {
+		t.Fatalf("Exit = %d, want 0", got.Exit)
+	}
+
+	dumped, err := os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("read dumped env: %v", err)
+	}
+	assertEnvStripsKnobsKeepsSecrets(t, string(dumped))
+}
+
 // TestRunChild_ZeroExitNoAnnounce pins the other end of the same seam: a
 // clean exit with no announce lines reports Exit 0 and a nil Issues slice.
 func TestRunChild_ZeroExitNoAnnounce(t *testing.T) {
@@ -101,7 +158,7 @@ func TestRunChild_ZeroExitNoAnnounce(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", `printf 'nothing to see\n'; exit 0`)
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindResearch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
@@ -128,7 +185,7 @@ func TestRunChild_OversizedLineDoesNotHang(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", "head -c 2000000 /dev/zero | tr '\\0' 'a'; exit 5")
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	resultCh, errCh := startChild(t, r)
 
 	select {
@@ -156,7 +213,7 @@ func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", "sleep 0.3")
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -267,7 +324,7 @@ func TestResolveRevision_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 	gitRunT(t, dirAdvancer, "push", "origin", "main")
 	wantTip := strings.TrimSpace(gitOutputT(t, dirAdvancer, "rev-parse", "HEAD"))
 
-	r := newHostRunner(hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	got, err := r.ResolveRevision(context.Background())
 	if err != nil {
 		t.Fatalf("ResolveRevision() error: %v", err)
@@ -330,7 +387,7 @@ func TestResolveRevision_ConcurrentCallsDoNotRace(t *testing.T) {
 	wantTip := strings.TrimSpace(gitOutputT(t, dirAdvancer, "rev-parse", "HEAD"))
 
 	const n = 5
-	r := newHostRunner(hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	var wg sync.WaitGroup
 	results := make([]string, n)
 	errs := make([]error, n)
@@ -383,7 +440,7 @@ func TestResolveRevision_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	r := newHostRunner(hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	done := make(chan error, 1)
 	go func() {
 		_, err := r.ResolveRevision(ctx)
@@ -491,7 +548,7 @@ func TestForwardStop_DeliversSIGTERMToChild(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", childExitOnFirstSignal, armed)
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	resultCh, errCh := startChild(t, r)
 
 	waitForArmed(t, r, 1, armed)
@@ -538,7 +595,7 @@ func TestForwardStop_DeliversSIGTERMToEveryChild(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", childExitOnFirstSignal, armed[n])
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	resultCh := make(chan daemon.ChildResult, nChildren)
 	errCh := make(chan error, nChildren)
 	for slot := 0; slot < nChildren; slot++ {
@@ -585,7 +642,7 @@ func TestForwardStop_RaceWindowChildStillSignalled(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", childExitOnFirstSignal, armed)
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 
 	// forwardStop lands before RunChild has even been called — the extreme
 	// end of the publish-after-Start race window.
@@ -631,7 +688,7 @@ func TestForwardStop_SecondCallDeliversTheEscalation(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", childExitOnSecondSignal, armed)
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	resultCh, errCh := startChild(t, r)
 
 	waitForArmed(t, r, 1, armed)
@@ -689,7 +746,7 @@ func TestForwardStop_TwoCallsBeforeStartReplayBoth(t *testing.T) {
 		return nil
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 
 	r.forwardStop()
 	r.forwardStop()
@@ -734,7 +791,7 @@ func TestForwardStop_ThirdCallForwardsNothing(t *testing.T) {
 		return nil
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	r.mu.Lock()
 	r.children[0] = &os.Process{}
 	r.mu.Unlock()
@@ -755,7 +812,7 @@ func TestForwardStop_ThirdCallForwardsNothing(t *testing.T) {
 // TestForwardStop_Noop asserts forwardStop is a no-op when no child is
 // running: it must not panic, and r.children must stay empty.
 func TestForwardStop_Noop(t *testing.T) {
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	r.forwardStop()
 	r.mu.Lock()
 	child := r.children[0]
@@ -774,7 +831,7 @@ func TestSelfPath_HappyPath(t *testing.T) {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf '/nix/store/abc-daemon\n'`)
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	got, err := r.SelfPath(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err != nil {
 		t.Fatalf("SelfPath() unexpected error: %v", err)
@@ -794,7 +851,7 @@ func TestSelfPath_EvalFailureCarriesStderr(t *testing.T) {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf 'error: attribute missing\n' >&2; exit 1`)
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	_, err := r.SelfPath(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err == nil {
 		t.Fatal("SelfPath() error = nil, want non-nil")
@@ -813,7 +870,7 @@ func TestRunDoctor_ZeroExit(t *testing.T) {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
@@ -821,6 +878,43 @@ func TestRunDoctor_ZeroExit(t *testing.T) {
 	if exit != 0 {
 		t.Errorf("exit = %d, want 0", exit)
 	}
+}
+
+// TestRunDoctor_EnvStripsKnobsKeepsSecrets is RunDoctor's half of
+// TestRunChild_EnvStripsKnobsKeepsSecrets above: same script-dumps-to-a-file
+// route, since RunDoctor sends both streams straight to os.Stderr with no
+// existing capture pattern in this file.
+func TestRunDoctor_EnvStripsKnobsKeepsSecrets(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+
+	dumpFile := filepath.Join(t.TempDir(), "env.out")
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", fmt.Sprintf(envDumpScript, dumpFile))
+	}
+
+	r := newHostRunner(hostRunnerConfig{
+		repoPath:   t.TempDir(),
+		appAttr:    ".#",
+		baseBranch: "main",
+		selfAttr:   ".#daemon",
+		nixSystem:  "x86_64-linux",
+		env:        []string{"MODEL=from-shell", "PATH=/bin:/usr/bin", "GH_TOKEN=super-secret"},
+		knobs:      []string{"MODEL"},
+	})
+	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err != nil {
+		t.Fatalf("RunDoctor() unexpected error: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+
+	dumped, err := os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("read dumped env: %v", err)
+	}
+	assertEnvStripsKnobsKeepsSecrets(t, string(dumped))
 }
 
 // TestRunDoctor_NonZeroExitIsNotAnError asserts doctor's required-labels-
@@ -833,7 +927,7 @@ func TestRunDoctor_NonZeroExitIsNotAnError(t *testing.T) {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 4")
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
@@ -853,7 +947,7 @@ func TestRunDoctor_SeamFailure(t *testing.T) {
 		return exec.CommandContext(ctx, "/no/such/executable-doctor-seam")
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	_, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err == nil {
 		t.Fatal("RunDoctor() error = nil, want non-nil")
@@ -878,19 +972,19 @@ func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
 	}
 
 	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-	r := newHostRunner(hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	if _, err := r.RunDoctor(context.Background(), revision); err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
 
-	want, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: "/repo", AppAttr: ".#", Revision: revision})
+	wantCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: "/repo", AppAttr: ".#", Revision: revision})
 	if err != nil {
 		t.Fatalf("daemon.DoctorCommand() unexpected error: %v", err)
 	}
 
 	got := append([]string{gotName}, gotArgs...)
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("argv = %v, want %v", got, want)
+	if !reflect.DeepEqual(got, wantCmd.Argv) {
+		t.Errorf("argv = %v, want %v", got, wantCmd.Argv)
 	}
 	joined := strings.Join(got, " ")
 	if !strings.Contains(joined, revision) {
@@ -917,7 +1011,7 @@ func TestRunDoctor_CancelledContextTearsDownChild(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	done := make(chan error, 1)
 	go func() {
 		_, err := r.RunDoctor(ctx, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
@@ -945,7 +1039,7 @@ func TestRunDoctor_UnparseableSpecSkipsSeam(t *testing.T) {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	_, err := r.RunDoctor(context.Background(), "")
 	if err == nil {
 		t.Fatal("RunDoctor(empty revision) error = nil, want non-nil")
@@ -966,7 +1060,7 @@ func TestRunDoctor_SignalKilledIsSeamFailure(t *testing.T) {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", "kill -TERM $$")
 	}
 
-	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux"})
+	r := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err == nil {
 		t.Fatalf("RunDoctor() = (%d, nil), want a non-nil error for a signal-killed child", exit)
