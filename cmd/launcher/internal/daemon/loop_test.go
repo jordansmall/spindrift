@@ -273,12 +273,7 @@ func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 		t.Fatalf("waits = %v, want exactly one wait of %v (FailureBackoff)", clk.waits(), testFailureBackoff)
 	}
 
-	events := decodeEvents(t, &buf)
-	names := eventNames(events)
-	wantNames := []string{"backoff", "child_start", "child_finish", "halt"}
-	if fmt.Sprint(names) != fmt.Sprint(wantNames) {
-		t.Fatalf("events = %v, want %v", names, wantNames)
-	}
+	events := wantEvents(t, &buf, []string{"backoff", "child_start", "child_finish", "halt"}, "")
 	if !strings.Contains(events[0].Reason, wantErr.Error()) {
 		t.Errorf("backoff event reason = %q, want it to name %v", events[0].Reason, wantErr)
 	}
@@ -302,17 +297,7 @@ func TestLoopRunChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 		t.Errorf("halt reason = %q, want the follow-up host-tainted halt, not the run-child failure itself", reason)
 	}
 
-	events := decodeEvents(t, &buf)
-	names := eventNames(events)
-	wantNames := []string{"child_start", "child_finish", "backoff", "child_start", "child_finish", "halt"}
-	if len(names) != len(wantNames) {
-		t.Fatalf("events = %v, want %v", names, wantNames)
-	}
-	for i, n := range wantNames {
-		if names[i] != n {
-			t.Errorf("events[%d] = %q, want %q", i, names[i], n)
-		}
-	}
+	wantEvents(t, &buf, []string{"child_start", "child_finish", "backoff", "child_start", "child_finish", "halt"}, "")
 }
 
 // TestLoopRunChildErrorStillEmitsAnnouncedBoxes covers the non-ExitError
@@ -329,12 +314,7 @@ func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
-	events := decodeEvents(t, &buf)
-	names := eventNames(events)
-	wantNames := []string{"child_start", "box", "child_finish", "backoff", "child_start", "child_finish", "halt"}
-	if fmt.Sprint(names) != fmt.Sprint(wantNames) {
-		t.Fatalf("events = %v, want %v", names, wantNames)
-	}
+	events := wantEvents(t, &buf, []string{"child_start", "box", "child_finish", "backoff", "child_start", "child_finish", "halt"}, "")
 	if events[1].Issue != "42" {
 		t.Errorf("box event Issue = %q, want %q", events[1].Issue, "42")
 	}
@@ -354,11 +334,7 @@ func TestLoopEventStreamSequenceAndFields(t *testing.T) {
 
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
-	events := decodeEvents(t, &buf)
-	wantNames := []string{"child_start", "box", "box", "child_finish", "child_start", "child_finish", "halt"}
-	if got := eventNames(events); fmt.Sprint(got) != fmt.Sprint(wantNames) {
-		t.Fatalf("event sequence = %v, want %v", got, wantNames)
-	}
+	events := wantEvents(t, &buf, []string{"child_start", "box", "box", "child_finish", "child_start", "child_finish", "halt"}, "")
 
 	box1, box2 := events[1], events[2]
 	if box1.Issue != "10" || box1.Revision != "rev1" {
@@ -470,12 +446,7 @@ func TestLoopCancelledDuringResolveRevisionHaltsBeforeStartingNewWork(t *testing
 	if r.runCount() != 0 {
 		t.Fatalf("run calls = %d, want 0: a ctx cancelled during resolve must halt before starting any child", r.runCount())
 	}
-	events := decodeEvents(t, &buf)
-	names := eventNames(events)
-	wantNames := []string{"halt"}
-	if fmt.Sprint(names) != fmt.Sprint(wantNames) {
-		t.Fatalf("events = %v, want %v: no child_start once ctx is cancelled mid-resolve", names, wantNames)
-	}
+	wantEvents(t, &buf, []string{"halt"}, "no child_start once ctx is cancelled mid-resolve")
 	if !strings.Contains(reason, "context") {
 		t.Errorf("halt reason = %q, want it to name the cancellation", reason)
 	}
@@ -506,12 +477,7 @@ func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
 	if r.runCount() != 1 {
 		t.Fatalf("run calls = %d, want 1", r.runCount())
 	}
-	events := decodeEvents(t, &buf)
-	names := eventNames(events)
-	wantNames := []string{"child_start", "child_finish", "halt"}
-	if fmt.Sprint(names) != fmt.Sprint(wantNames) {
-		t.Fatalf("events = %v, want %v: the started child's child_finish must still be emitted", names, wantNames)
-	}
+	wantEvents(t, &buf, []string{"child_start", "child_finish", "halt"}, "the started child's child_finish must still be emitted")
 	if !strings.Contains(reason, "context") {
 		t.Errorf("halt reason = %q, want it to name the cancellation", reason)
 	}
@@ -610,13 +576,8 @@ func TestLoopCtxCancelledIsNotABreakerFailure(t *testing.T) {
 
 			reason := Loop(ctx, testConfig(1), r, em, clk)
 
-			events := decodeEvents(t, &buf)
+			events := wantEvents(t, &buf, []string{"child_start", "child_finish", "halt"}, "the started child's child_finish must still be emitted")
 			assertCancelledStopNoBreaker(t, reason, events)
-			names := eventNames(events)
-			wantNames := []string{"child_start", "child_finish", "halt"}
-			if fmt.Sprint(names) != fmt.Sprint(wantNames) {
-				t.Fatalf("events = %v, want %v: the started child's child_finish must still be emitted", names, wantNames)
-			}
 		})
 	}
 }
@@ -674,10 +635,7 @@ func TestLoopRejectsNonPositiveSlots(t *testing.T) {
 			if !strings.Contains(reason, "config-invalid") {
 				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
 			}
-			events := decodeEvents(t, &buf)
-			if names := eventNames(events); len(names) != 1 || names[0] != "halt" {
-				t.Fatalf("events = %v, want exactly one halt event", names)
-			}
+			wantEvents(t, &buf, []string{"halt"}, "a config-invalid pool halts before any child runs, so the halt is the only event there is to emit")
 		})
 	}
 }
@@ -1076,11 +1034,8 @@ func TestLoopAwakeWindowClosedAtStartSleepsFullSpanThenStarts(t *testing.T) {
 		t.Fatalf("waits = %v, want the one wait = 1h, the whole remaining span to 09:00", clk.waits())
 	}
 
-	names := eventNames(decodeEvents(t, &buf))
-	wantPrefix := []string{"awake_close", "awake_open", "child_start"}
-	if len(names) < len(wantPrefix) || fmt.Sprint(names[:len(wantPrefix)]) != fmt.Sprint(wantPrefix) {
-		t.Fatalf("events = %v, want to start with %v", names, wantPrefix)
-	}
+	wantEventPrefix(t, &buf, []string{"awake_close", "awake_open", "child_start"},
+		"the daemon parks for the shut window, reopens, and only then starts its first child")
 }
 
 // TestLoopAwakeWindowWraparoundOpenStartsImmediately pins the wraparound
@@ -1149,11 +1104,7 @@ func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
 		t.Fatalf("run calls = %d, want 2: the in-flight child finishes, and a second starts once the window reopens", r.runCount())
 	}
 
-	names := eventNames(decodeEvents(t, &buf))
-	want := []string{"child_start", "child_finish", "awake_close", "awake_open", "child_start", "child_finish", "halt"}
-	if fmt.Sprint(names) != fmt.Sprint(want) {
-		t.Fatalf("events = %v, want %v: no idle/jam step consumed for the wait the closed window owns", names, want)
-	}
+	wantEvents(t, &buf, []string{"child_start", "child_finish", "awake_close", "awake_open", "child_start", "child_finish", "halt"}, "no idle/jam step consumed for the wait the closed window owns")
 }
 
 // TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting pins
@@ -1196,11 +1147,7 @@ func TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting(t *tes
 		t.Fatalf("run calls = %d, want 1: the closed-window fetch must not start a child, only the retry after the slot parks", r.runCount())
 	}
 
-	names := eventNames(decodeEvents(t, &buf))
-	want := []string{"awake_close", "awake_open", "child_start", "child_finish", "halt"}
-	if fmt.Sprint(names) != fmt.Sprint(want) {
-		t.Fatalf("events = %v, want %v: no child_start until the slot has parked and reopened", names, want)
-	}
+	wantEvents(t, &buf, []string{"awake_close", "awake_open", "child_start", "child_finish", "halt"}, "no child_start until the slot has parked and reopened")
 }
 
 // TestLoopSelfChangeHaltsAtIterationBoundary asserts the loop halts before
@@ -1224,11 +1171,7 @@ func TestLoopSelfChangeHaltsAtIterationBoundary(t *testing.T) {
 		t.Fatalf("run calls = %d, want 0: the halt must land before a child is launched", r.runCount())
 	}
 
-	events := decodeEvents(t, &buf)
-	names := eventNames(events)
-	if fmt.Sprint(names) != fmt.Sprint([]string{"halt"}) {
-		t.Fatalf("events = %v, want exactly one halt event", names)
-	}
+	events := wantEvents(t, &buf, []string{"halt"}, "exactly one halt event")
 	if events[0].Reason != reason {
 		t.Errorf("halt event reason = %q, want %q", events[0].Reason, reason)
 	}

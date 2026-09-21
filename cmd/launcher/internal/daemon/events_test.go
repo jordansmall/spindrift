@@ -140,6 +140,23 @@ func wantEvents(t *testing.T, buf *bytes.Buffer, want []string, msg string) []Ev
 	return events
 }
 
+// wantEventPrefix is wantEvents for a test that pins only how the stream
+// opens and leaves whatever follows it unconstrained. It renders a
+// mismatch through the same eventDiff, so a prefix assertion reads the
+// same as a whole-sequence one.
+func wantEventPrefix(t *testing.T, buf *bytes.Buffer, want []string, msg string) []Event {
+	t.Helper()
+	events := decodeEvents(t, buf)
+	names := eventNames(events)
+	if len(names) > len(want) {
+		names = names[:len(want)]
+	}
+	if diff := eventDiff(names, want, msg); diff != "" {
+		t.Fatalf("%s", diff)
+	}
+	return events
+}
+
 func TestWantEventsMatchingSequenceReturnsDecodedEvents(t *testing.T) {
 	var buf bytes.Buffer
 	e := NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
