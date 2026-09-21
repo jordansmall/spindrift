@@ -26,6 +26,10 @@ func newResearchFake(num string) *forge.Fake {
 // A verdict causes no other transition: ADR 0022's one-shot settle path parses
 // the outcome line, applies the label, and stops. The github-shaped tracker
 // (AsNoLandingRecorder) assumes the Box already posted the comment in-box.
+//
+// This is also the research path's no-intents filed= tally fixture (issue
+// #3608): a run that never filed anything still prints "filed=ok:0,failed:0",
+// so it reads as "reached filing" rather than leaving no trace at all.
 func TestResearchSettle_Recommend(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
@@ -37,7 +41,9 @@ func TestResearchSettle_Recommend(t *testing.T) {
 	}
 
 	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
-	s.Settle(dispatch.NewFake(), "42", 0, result)
+	stdout := captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "42", 0, result)
+	})
 
 	if len(fc.CompleteVerdictCalls) != 1 {
 		t.Fatalf("want 1 CompleteVerdict call, got %d", len(fc.CompleteVerdictCalls))
@@ -48,6 +54,9 @@ func TestResearchSettle_Recommend(t *testing.T) {
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("verdict path must not call TransitionState; got %+v", fc.TransitionStateCalls)
+	}
+	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:0\n") {
+		t.Errorf("stdout = %q, want it to contain the zero filed= tally", stdout)
 	}
 }
 
@@ -820,5 +829,68 @@ func TestBuildFiledIssuesSection_NonHTTPURLDegradesToPlainBullet(t *testing.T) {
 	}
 	if !strings.Contains(got, "local:some-slug") {
 		t.Errorf("section = %q, want the local identifier still surfaced", got)
+	}
+}
+
+// The research path's filed= tally line counts two successfully filed
+// intents as ok:2,failed:0 (issue #3608), same shape as the work path's
+// tally.
+func TestResearchSettle_ReportsFiledTally_TwoOK(t *testing.T) {
+	fc := newResearchFake("42")
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/501"
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:           "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound:      true,
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first bug","body":"first body"}`,
+			`{"title":"second bug","body":"second body"}`,
+		},
+	}
+
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
+	stdout := captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "42", 0, result)
+	})
+
+	if !strings.Contains(stdout, "    #42  filed=ok:2,failed:0\n") {
+		t.Errorf("stdout = %q, want it to contain the all-ok filed= tally", stdout)
+	}
+}
+
+// The research path's filed= tally line counts two failed PostIssue calls as
+// ok:0,failed:2 (issue #3608): the tally must print even though both
+// filings failed and the run still goes on to post the comment and apply
+// the verdict label.
+func TestResearchSettle_ReportsFiledTally_TwoFailed(t *testing.T) {
+	fc := newResearchFake("42")
+	fc.PostIssueErr = errFake
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:           "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound:      true,
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first bug","body":"first body"}`,
+			`{"title":"second bug","body":"second body"}`,
+		},
+	}
+
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
+	stdout := captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "42", 0, result)
+	})
+
+	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:2\n") {
+		t.Errorf("stdout = %q, want it to contain the all-failed filed= tally", stdout)
 	}
 }
