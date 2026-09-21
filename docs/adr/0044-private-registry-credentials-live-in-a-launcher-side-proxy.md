@@ -1065,10 +1065,12 @@ replace-with = "spindrift-registry-proxy-<prefix>"
 colliding.
 
 Two limits landed deliberately narrow rather than clever. First, the URL
-match is byte-for-byte string equality on the index, not a canonicalizing
-comparison — a differently-spelled but equivalent URL falls back to minting
-rather than the render guessing at equivalence. Second, a claiming name that
-collides with a name the home render already owns (`crates-io`,
+match was byte-for-byte string equality on the index, not a canonicalizing
+comparison — a differently-spelled but equivalent URL fell back to minting
+rather than the render guessing at equivalence. The issue #3251 amendment
+below narrows that first limit to the two axes cargo's own source matching
+already collapses, and keeps it for everything past them. Second, a claiming
+name that collides with a name the home render already owns (`crates-io`,
 `spindrift-registry-proxy`, a route's own
 `spindrift-registry-proxy-<prefix>`, or any `spindrift-upstream-<name>` the
 render itself might mint for a declared registry) is never reused; that
@@ -1097,6 +1099,127 @@ registry's URL still renders the pre-#3248 minted
 undeclared-but-host-matching, declared-but-unbound — is untouched. Nothing
 about what crosses the Box boundary changes; this amendment, like #3201
 before it, is still a Binding change, not a proxy-policy change.
+
+## Amendment (issue #3251): match the two URL axes cargo itself matches on
+
+The #3248 amendment above declined to canonicalize, and the reason was a good
+one: a render that guesses which two URLs "mean the same registry" eventually
+guesses wrong, and minting a fresh source name is the safe way to be wrong.
+That reasoning holds for URLs cargo treats as genuinely different. It does not
+hold for URLs cargo's *own* matching already collapses onto one source. There,
+minting a second name is not the safe fallback — it *is* the collision the
+amendment exists to prevent. A repo that writes
+
+```toml
+[registries.artifactory-remote]
+index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index"
+
+[source.artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+```
+
+— the same index, spelled with and without its trailing slash — missed the
+byte-for-byte match, got `[source.spindrift-upstream-artifactory-remote]`
+minted for it, and hit the identical "already defined" error quoted in the
+#3248 amendment above, gated on a spelling difference rather than on an absent
+claim.
+
+**The rule.** Cargo compares two source URLs through `SourceId`, which
+compares `CanonicalUrl`s rather than strings, and two of that type's
+normalizations are what this render now mirrors:
+
+- **One trailing slash on the path.** `CanonicalUrl` pops a trailing empty
+  path segment, so `…/index` and `…/index/` are one source. Exactly one
+  slash — not a greedy trim.
+- **Host case.** A URL's host is lowercased when it is parsed (WHATWG host
+  normalization, nothing cargo-specific), so `Example.test` and `example.test`
+  are one host and one source *to this key*. Go's `net/url` does not lowercase
+  it for us, so `cargoCanonicalSourceURLKey` does it explicitly.
+
+That function is where both live, and it is applied on both sides of the
+match: to each repo `[source.NAME].registry` value when the claiming map is
+built, and to each `[registries.NAME].index` value when it is looked up. It
+canonicalizes the map *key* only — the `registry = "…"` value the render
+emits is still the `[registries.NAME].index` spelling verbatim — not the
+`[source.NAME].registry` spelling the key matched it against. The two are one
+`SourceId` to cargo by construction, and the repo's own config outranks the
+rendered home config on a key both set, so the reused name merges onto the
+repo's stanza and the repo's spelling is the one that fixes the source's
+*identity*. Which URL cargo actually fetches is a separate question the
+stanza's `replace-with` answers: a replaced source is fetched from the local
+proxy source, never from either spelling of the upstream index. Parsing the
+URL at all folds the scheme's case as well (`HTTPS://` and `https://` key
+alike) — the same WHATWG-level normalization the host axis rides on, and one
+Go's `net/url` performs whether or not this key asks for it.
+
+Keeping the trailing-slash trim off the *escaped* path is what holds the
+percent-encoding promise below: trimming the decoded `Path` alone leaves
+`RawPath` stale, and `URL.String()` then re-escapes from the decoded path,
+decoding `%2F` into a structural `/` — two genuinely different `SourceId`s
+folded onto one key — and dropping the trim entirely for any index whose path
+carries percent-encoding.
+
+**What stays un-canonicalized, deliberately.** `sparse+` is significant rather
+than a spelling variant: `sparse+https://host/index` is a sparse-HTTP registry
+and `https://host/index` is a git registry index — two source kinds, two
+`SourceId`s. The prefix is therefore preserved in the key, and a pair
+differing only there still mints. Route binding is un-canonicalized too: the
+`[registries.NAME].index` host (`cargoIndexHost`) is compared byte-for-byte
+against the route's `UpstreamHost` where a route's registries are matched, so
+an uppercase-host *index* is dropped by that filter before this key ever sees
+it — as long as the manifest's own `match-host` is lowercase. Neither side
+lowercases the other, so a mixed-case `match-host` binds a mixed-case index
+and the key does then fold its host; either way the host-case axis earns its
+keep on a `[source.NAME].registry` spelling variant, not on a
+`[registries.NAME].index` one. Default ports (`:443`), percent-encoding,
+`.git` suffixes, and github.com's own path lowercasing are left alone too:
+cargo canonicalizes some of them, but the surface this render reads is a
+Target repo's `.cargo/config.toml` registry indexes, not git sources, and
+nothing observed there evidences a need — so the #3248 caution against
+guessing still governs everything past the two axes above. "Percent-encoding
+left alone" means no existing escape is decoded or re-cased; the
+`url.Parse`/`String()` round-trip does still escape a character the original
+spelling left bare, so `sparse+https://h/a b/` keys as
+`sparse+https://h/a%20b`. A value that does not parse as an http(s) URL with a
+host keys on itself verbatim, which leaves the old byte-for-byte behavior in
+place wherever canonicalization has nothing to say.
+
+**The dedupe moves with the key.** The per-route "one replacement per distinct
+upstream index URL" dedupe (issue #3256) canonicalizes on the same key, and has
+to: two `[registries.*]` decls spelling one index two ways now resolve to the
+same claiming source name, and emitting a `[source.<name>]` stanza for each
+would put a duplicate table in one file — a hard TOML error, strictly worse
+than the collision canonicalization removes. Collapsing them leaves one
+stanza, carrying the first decl's own spelling. A name collapsed that way
+still counts as bound, so the warning contract is unchanged — which also means
+the collapse leans entirely on the fold being right: if cargo did not in fact
+treat the pair as one source, the second registry would get no stanza, no
+`replace-with`, and no warning, and a network-less Box would see it attempt
+the upstream directly. That is the price of the two axes being read off
+cargo's own `CanonicalUrl`, narrow and cheap to re-verify, rather than guessed
+at. The collapse
+applies the same way when no `[source.*]` claims the URL at all: cargo maps
+one URL to one source name whether or not a repo stanza claims it, so two
+minted stanzas for one index would still be two names for one source.
+
+**Read off cargo's source, not a cargo binary.** No `cargo` is installed in
+the environments this change was written and checked in, so the two axes are
+taken from cargo's own `SourceId`/`CanonicalUrl` implementation rather than
+from a fresh repro against a real `cargo build`. They are narrow and cheap to
+re-verify if a Target repo ever contradicts them.
+
+**What is unchanged.** A repo whose two spellings already agree renders
+byte-for-byte as it did before. The second #3248 limit — a claiming name
+colliding with one the home render already owns is never reused — is
+untouched, and so is the warning contract for undeclared-but-host-matching
+and declared-but-unbound registries. Nothing about what crosses the Box
+boundary changes; like #3201 and #3248 before it, this is a Binding change,
+not a proxy-policy change. `TestCargoCanonicalSourceURLKey` pins the two axes
+and the `sparse+` exception directly;
+`TestCargoSourceReplacements_ReusesClaimingSourceName_AcrossSpellingVariants`,
+`TestCargoRepoAwareConfig_DedupeSameIndexURL_CanonicalizedRendersOneSourceTable`,
+and `TestCargoRepoAwareConfig_ReusesClaimingSourceName_TrailingSlashDiffers`
+in `cmd/launcher/internal/ecosystem/cargo_test.go` pin the rendered outcome.
 
 ## Amendment (issue #3467): the socket measurement was taken on an unshared path
 
