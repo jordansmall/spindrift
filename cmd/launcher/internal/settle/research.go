@@ -73,6 +73,10 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 	}
 	backlink := fmt.Sprintf("Filed from research on #%s", num)
 	filed := fileIssueIntentsDetailed(r.it, num, result, "agent-research-finding", backlink)
+	// Reported right after filing, not at the function's tail: the comment-post
+	// and verdict-apply branches below both return early, and filing has already
+	// happened by then, so the tally must still print (issue #3608).
+	reportFiled(num, filed)
 	// Comment != "" is redundant now that parseSignalLine rejects a
 	// zero-length payload (issue #3668); kept because the failure it guards is
 	// user-visible -- an empty verdict comment on a human's tracker issue --
