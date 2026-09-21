@@ -261,6 +261,23 @@ let
   # the baked BASH_MAX_OUTPUT_LENGTH rather than per check, so the fragment
   # check and the docs check below read the same arithmetic.
   outputCaps = import ../../lib/output-caps.nix;
+  # outcome_test.go's bakedCap restates outputCaps.bashMaxOutputLength by
+  # hand (Go can't read the Nix value); parse it out and throw if it's
+  # drifted, so the two checks below that quote the cap in fragments/docs
+  # force this and fail loudly instead of the Go test silently asserting
+  # against a stale number.
+  outcomeTestSrc = builtins.readFile ../../cmd/launcher/internal/outcome/outcome_test.go;
+  bakedCapMatch = builtins.match ".*bakedCap = ([0-9]+).*" outcomeTestSrc;
+  bakedCapInGoTest =
+    if bakedCapMatch == null then
+      throw "research-verdict budget check: no bakedCap const found in cmd/launcher/internal/outcome/outcome_test.go -- update the match in nix/checks/prompts.nix alongside the const"
+    else
+      builtins.fromJSON (builtins.elemAt bakedCapMatch 0);
+  pinnedBashMaxOutputLength =
+    if bakedCapInGoTest != outputCaps.bashMaxOutputLength then
+      throw "research-verdict budget check: outcome_test.go's bakedCap (${toString bakedCapInGoTest}) has drifted from lib/output-caps.nix's bashMaxOutputLength (${toString outputCaps.bashMaxOutputLength}) -- update outcome_test.go's bakedCap const to match"
+    else
+      outputCaps.bashMaxOutputLength;
   # newNonce's hex width, parsed out of the Go test that pins it
   # (TestNewNonce_LengthIsNonceHexWidth) rather than retyped here, the
   # same way tailBytes below is parsed out of the hook; the trailing + 1
@@ -273,7 +290,7 @@ let
     else
       builtins.fromJSON (builtins.elemAt nonceWidthMatch 0);
   markerPrefixLength = builtins.stringLength "SPINDRIFT_COMMENT " + nonceWidth + 1;
-  rawPayloadBudget = outputCaps.bashMaxOutputLength - markerPrefixLength;
+  rawPayloadBudget = pinnedBashMaxOutputLength - markerPrefixLength;
   # What makes the fragments' safety claim true isn't "the cut length is 1
   # mod 4" -- an accident of today's cap -- it's that outcome.go's
   # base64.StdEncoding.Strict() decoder accepts only multiple-of-4 lengths,
@@ -1457,8 +1474,8 @@ in
           echo "$f: missing the carrier phrase 'Bash tool result'" >&2
           exit 1
         }
-        normalized_grep "$p" 'caps a Bash result at ${toString outputCaps.bashMaxOutputLength} characters, cutting it there with no truncation' || {
-          echo "$f: missing the derived cap ${toString outputCaps.bashMaxOutputLength}" >&2
+        normalized_grep "$p" 'caps a Bash result at ${toString pinnedBashMaxOutputLength} characters, cutting it there with no truncation' || {
+          echo "$f: missing the derived cap ${toString pinnedBashMaxOutputLength}" >&2
           exit 1
         }
         normalized_grep "$p" 'take ${toString markerPrefixLength} of those, leaving ${toString payloadBudget} characters for the base64 payload' || {

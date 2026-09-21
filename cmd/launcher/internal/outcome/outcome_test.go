@@ -942,6 +942,98 @@ func TestLastCommentLineInLog_EmptyPayloadRejected(t *testing.T) {
 	}
 }
 
+const (
+	// lib/output-caps.nix's bashMaxOutputLength, which lib/image.nix bakes into
+	// the Box's config.Env as BASH_MAX_OUTPUT_LENGTH: the character count at
+	// which the Box hard-cuts a Bash tool result. Restated here because Go
+	// cannot read the Nix value; nix/checks/prompts.nix parses this const
+	// back out of this file and fails the build if it drifts from
+	// lib/output-caps.nix, so this is a pinned restatement, not an unchecked
+	// one.
+	bakedCap = 8192
+
+	// The real nonce width, pinned by dispatch.TestNewNonce_LengthIsNonceHexWidth.
+	realNonce   = "0123456789abcdef0123456789abcdef"
+	commentHead = "SPINDRIFT_COMMENT " + realNonce + " "
+)
+
+// cutCommentLine is what the Box's hard cut leaves of an over-budget
+// SPINDRIFT_COMMENT line when that line is the Bash call's sole output.
+func cutCommentLine(t *testing.T) string {
+	t.Helper()
+	encoded := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 20000)))
+	fullLine := commentHead + encoded
+	if len(fullLine) <= bakedCap {
+		t.Fatalf("fixture too small: full line is %d chars, want > %d", len(fullLine), bakedCap)
+	}
+	return fullLine[:bakedCap]
+}
+
+// Issue #3669: this is what the verdict fragments' sole-output precondition
+// ("Print nothing before the marker line") buys. With the marker line as the
+// whole Bash output, the cut always lands at the same payload length —
+// bakedCap minus the marker prefix. base64.StdEncoding.Strict() (the decoder
+// in outcome.go) rejects any string whose length is not a multiple of 4, so
+// asserting that property directly -- rather than a specific mod-4 residue
+// that happens to hold for today's bakedCap -- is what actually guarantees
+// the strict decoder rejects a cut payload instead of decoding half a
+// verdict into a posted comment. Anything printed first moves the cut to an
+// arbitrary offset, where a truncated payload can still decode.
+func TestLastCommentLineInLog_SoleOutputCutIsNeverDecodable(t *testing.T) {
+	cutLine := cutCommentLine(t)
+
+	payload := cutLine[len(commentHead):]
+	want := bakedCap - len(commentHead)
+	if len(payload) != want {
+		t.Fatalf("cut payload: got %d chars, want %d", len(payload), want)
+	}
+	if len(payload)%4 == 0 {
+		t.Fatalf("cut payload length %d is a multiple of 4, so base64.StdEncoding.Strict() would decode it", len(payload))
+	}
+
+	_, found, rejected, err := outcome.LastCommentLineInLog(writeLog(t, cutLine), realNonce)
+	if found {
+		t.Fatal("expected found=false for a cut sole-output line")
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error for a cut sole-output line")
+	}
+	if rejected.Malformed != 1 || rejected.Total() != 1 {
+		t.Errorf("rejections: got %+v, want exactly one Malformed", rejected)
+	}
+	// Issue #3670's length detail is what tells a human reading the warning
+	// that the line was cut at the cap rather than mangled some other way.
+	if rejected.LongestPayload != want {
+		t.Errorf("LongestPayload: got %d, want %d", rejected.LongestPayload, want)
+	}
+}
+
+// Issue #3669: ~30 of the 48 research runs on 2026-09-20 hit the Box's hard
+// output cut and emitted a truncated SPINDRIFT_COMMENT line first, followed by
+// a shorter, verifying re-emission. Last-*verifying*-wins (not last-line-wins)
+// is what makes that re-emission recoverable: the cut line must be counted as
+// a rejected signal attempt and skipped, not decoded into a truncated body.
+func TestLastCommentLineInLog_CutLineDoesNotWinOverShorterReemission(t *testing.T) {
+	cutLine := cutCommentLine(t)
+
+	final := "final verdict"
+	finalEncoded := base64.StdEncoding.EncodeToString([]byte(final))
+	path := writeLog(t, cutLine, commentHead+finalEncoded)
+	got, found, rejected, err := outcome.LastCommentLineInLog(path, realNonce)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true from the shorter re-emission")
+	}
+	if got != final {
+		t.Errorf("body: got %q, want %q", got, final)
+	}
+	if rejected.Total() != 1 {
+		t.Errorf("rejected: got %d, want 1", rejected.Total())
+	}
+}
+
 // Issue #2089: a line merely naming the token in prose, not leading with it, is
 // not a signal attempt at all, so it neither verifies nor warns.
 func TestLastCommentLineInLog_BareProseMentionDoesNotWarn(t *testing.T) {

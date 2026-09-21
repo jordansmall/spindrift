@@ -128,3 +128,30 @@ tool_input_json() {
   echo "$summary" | grep -q "line4"
   ! echo "$summary" | grep -q "line1"
 }
+
+# Issue #3669: this hook is why the research-verdict fragments make the Box
+# guard its SPINDRIFT_COMMENT line's size inside the command instead of reading
+# the echoed line back — the tail keeps the wrong end of the line.
+@test "the default tail drops a marker line's head while still reading as intact base64" {
+  unset BASH_OUTPUT_SUMMARY_TAIL_BYTES
+
+  log_file="$BATS_TEST_TMPDIR/marker.log"
+  nonce="0123456789abcdef0123456789abcdef"
+  # 5999 bytes -> 8000 base64 chars: past the 4096-byte tail the hook keeps,
+  # but still under the 8192-char Bash cut, so the head the tail hides belongs
+  # to a line the host would have accepted whole.
+  encoded="$(head -c 5999 /dev/zero | tr '\0' 'x' | base64 -w0)"
+  printf 'SPINDRIFT_COMMENT %s %s\n' "$nonce" "$encoded" >"$log_file"
+  printf '0' >"$log_file.exit"
+
+  payload="$(jq -n --argjson tool_input "$(tool_input_json "$log_file")" \
+    '{tool_name: "Bash", tool_input: $tool_input, tool_response: "ignored"}')"
+
+  run bash "$BASH_OUTPUT_SUMMARY_SCRIPT" <<<"$payload"
+  [ "$status" -eq 0 ]
+
+  summary="$(echo "$output" | jq -r '.hookSpecificOutput.updatedToolOutput')"
+  [ -n "$summary" ]
+  ! echo "$summary" | grep -q 'SPINDRIFT_COMMENT'
+  echo "$summary" | tail -n1 | grep -qE '^[A-Za-z0-9+/]+=$'
+}
