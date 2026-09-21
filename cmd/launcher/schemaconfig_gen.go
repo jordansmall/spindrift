@@ -23,6 +23,11 @@ type schemaConfig struct {
 	continuousDispatch           bool
 	daemonApp                    string
 	daemonAwakeWindow            string
+	daemonBreakerThreshold       int
+	daemonBreakerWindow          string
+	daemonFailureBackoff         string
+	daemonIdleCap                string
+	daemonIdleFloor              string
 	daemonSelfApp                string
 	failedLabel                  string
 	forgejoBaseURL               string
@@ -94,6 +99,11 @@ func loadSchemaConfig() schemaConfig {
 		continuousDispatch:      getenvSchema("CONTINUOUS_DISPATCH") != "",
 		daemonApp:               getenvSchema("DAEMON_APP"),
 		daemonAwakeWindow:       getenvSchema("DAEMON_AWAKE_WINDOW"),
+		daemonBreakerThreshold:  atoiSchema("DAEMON_BREAKER_THRESHOLD"),
+		daemonBreakerWindow:     getenvSchema("DAEMON_BREAKER_WINDOW"),
+		daemonFailureBackoff:    getenvSchema("DAEMON_FAILURE_BACKOFF"),
+		daemonIdleCap:           getenvSchema("DAEMON_IDLE_CAP"),
+		daemonIdleFloor:         getenvSchema("DAEMON_IDLE_FLOOR"),
 		daemonSelfApp:           getenvSchema("DAEMON_SELF_APP"),
 		failedLabel:             getenvSchema("FAILED_LABEL"),
 		forgejoBaseURL:          getenvSchema("FORGEJO_BASE_URL"),
