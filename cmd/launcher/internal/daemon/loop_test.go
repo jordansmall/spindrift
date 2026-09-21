@@ -15,121 +15,10 @@ import (
 	"time"
 )
 
-// fakeRunner scripts ResolveRevision/RunChild for the loop tests: no
-// subprocess, no container, no tracker. It records every call it was asked
-// for so a test can assert scheduling behaviour, not argv or how the fetch
-// was performed.
-type fakeRunner struct {
-	revisions  []string // one per ResolveRevision call; last value repeats once exhausted
-	resolveAt  int      // 1-based call index that returns resolveErr instead of a revision
-	resolveErr error
-
-	results  []ChildResult // one per RunChild call, consumed in order
-	runErrAt int           // 1-based call index that returns runErr instead of a result
-	runErr   error
-	// runErrIssues rides alongside runErr, as runner.go's non-ExitError wait
-	// failure does when it returns the issues already scanned before the
-	// seam itself failed.
-	runErrIssues []string
-
-	selfPaths []string // one per SelfPath call; last value repeats once exhausted
-	selfErrAt int      // 1-based call index that returns selfErr instead of a path
-	selfErr   error
-
-	// mu does not guard the scripting fields above (revisions, resolveAt,
-	// resolveErr, results, runErrAt, runErr, runErrIssues, selfPaths,
-	// selfErrAt, selfErr): every test writes those once, before Loop
-	// starts, and never mutates them again, so they are read-only for the
-	// life of the run. mu instead guards the call-recording fields below
-	// (and the concurrent reads of the scripting fields above): most
-	// tests drive fakeRunner from a single slot's goroutine and never
-	// contend on it, but the start-gate tests (startgate_test.go)
-	// deliberately run it under a multi-slot pool once the gate releases,
-	// and two slots' goroutines really do call these methods concurrently
-	// at that point.
-	mu sync.Mutex
-
-	resolveCalls int
-	runCalls     []runCall
-	selfCalls    int
-}
-
 type runCall struct {
 	Kind     Kind
 	Revision string
 	Slot     int
-}
-
-func (f *fakeRunner) ResolveRevision(ctx context.Context) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.resolveCalls++
-	if f.resolveAt != 0 && f.resolveCalls == f.resolveAt {
-		return "", f.resolveErr
-	}
-	idx := f.resolveCalls - 1
-	if idx >= len(f.revisions) {
-		idx = len(f.revisions) - 1
-	}
-	return f.revisions[idx], nil
-}
-
-// SelfPath scripts the same way ResolveRevision does: selfPaths consumed in
-// order (last value repeating once exhausted), selfErrAt/selfErr standing in
-// for a 1-based call index that fails instead.
-func (f *fakeRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.selfCalls++
-	if f.selfErrAt != 0 && f.selfCalls == f.selfErrAt {
-		return "", f.selfErr
-	}
-	if len(f.selfPaths) == 0 {
-		return "", nil
-	}
-	idx := f.selfCalls - 1
-	if idx >= len(f.selfPaths) {
-		idx = len(f.selfPaths) - 1
-	}
-	return f.selfPaths[idx], nil
-}
-
-func (f *fakeRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.runCalls = append(f.runCalls, runCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot})
-	call := len(f.runCalls)
-	if f.runErrAt != 0 && call == f.runErrAt {
-		return ChildResult{Issues: f.runErrIssues}, f.runErr
-	}
-	idx := call - 1
-	if idx >= len(f.results) {
-		idx = len(f.results) - 1
-	}
-	return f.results[idx], nil
-}
-
-// fakeClock is the test Clock: Sleep never actually sleeps, just records the
-// durations it was asked to wait so tests run instantly and can assert on
-// wait behaviour, and advances a virtual now by each one. Guarded by a
-// mutex: a later slice runs several slots concurrently against one clock.
-type fakeClock struct {
-	mu    sync.Mutex
-	now   time.Time
-	waits []time.Duration
-}
-
-func (c *fakeClock) Sleep(ctx context.Context, d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.waits = append(c.waits, d)
-	c.now = c.now.Add(d)
-}
-
-func (c *fakeClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
 }
 
 func newTestEmitter(buf *bytes.Buffer) *Emitter {
@@ -194,18 +83,18 @@ func testConfig(slots int) Config {
 }
 
 func TestLoopContinueThenHalt(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(r.runCalls) != 2 {
-		t.Fatalf("run calls = %d, want 2", len(r.runCalls))
+	if r.runCount() != 2 {
+		t.Fatalf("run calls = %d, want 2", r.runCount())
 	}
-	if len(clk.waits) != 0 {
-		t.Fatalf("waits = %v, want none (exit 0 continues at once)", clk.waits)
+	if clk.waitCount() != 0 {
+		t.Fatalf("waits = %v, want none (exit 0 continues at once)", clk.waits())
 	}
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want it to name host-tainted", reason)
@@ -213,18 +102,18 @@ func TestLoopContinueThenHalt(t *testing.T) {
 }
 
 func TestLoopWaitThenHalt(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 2}, {Exit: 0}, {Exit: 6}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 2}, {Exit: 0}, {Exit: 6}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(r.runCalls) != 3 {
-		t.Fatalf("run calls = %d, want 3", len(r.runCalls))
+	if r.runCount() != 3 {
+		t.Fatalf("run calls = %d, want 3", r.runCount())
 	}
-	if len(clk.waits) != 1 || clk.waits[0] != testIdleFloor {
-		t.Fatalf("waits = %v, want exactly one wait of %v", clk.waits, testIdleFloor)
+	if clk.waitCount() != 1 || clk.waits()[0] != testIdleFloor {
+		t.Fatalf("waits = %v, want exactly one wait of %v", clk.waits(), testIdleFloor)
 	}
 	if !strings.Contains(reason, "config-invalid") {
 		t.Errorf("halt reason = %q, want it to name config-invalid", reason)
@@ -237,15 +126,15 @@ func TestLoopWaitThenHalt(t *testing.T) {
 // idle — it still waits like exit 2 (below), it just no longer reports
 // like it.
 func TestLoopExit3SingleSlotIsAJam(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 3}, {Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 3}, {Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(clk.waits) != 1 || clk.waits[0] != testIdleFloor {
-		t.Fatalf("waits = %v, want exactly one wait of %v for exit 3", clk.waits, testIdleFloor)
+	if clk.waitCount() != 1 || clk.waits()[0] != testIdleFloor {
+		t.Fatalf("waits = %v, want exactly one wait of %v for exit 3", clk.waits(), testIdleFloor)
 	}
 
 	events := decodeEvents(t, &buf)
@@ -273,8 +162,8 @@ func TestLoopExit3SingleSlotIsAJam(t *testing.T) {
 // exit 3: an empty queue (exit 2) is empty whatever the siblings are
 // doing, so it always reports idle, never jam.
 func TestLoopExit2NeverEmitsJam(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 2}, {Exit: 2}, {Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 2}, {Exit: 2}, {Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -296,24 +185,24 @@ func TestLoopExit2NeverEmitsJam(t *testing.T) {
 }
 
 func TestLoopExit4ContinuesWithoutSleeping(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 4}, {Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 4}, {Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(clk.waits) != 0 {
-		t.Fatalf("waits = %v, want none for exit 4 (image-stale continues at once)", clk.waits)
+	if clk.waitCount() != 0 {
+		t.Fatalf("waits = %v, want none for exit 4 (image-stale continues at once)", clk.waits())
 	}
-	if len(r.runCalls) != 2 {
-		t.Fatalf("run calls = %d, want 2", len(r.runCalls))
+	if r.runCount() != 2 {
+		t.Fatalf("run calls = %d, want 2", r.runCount())
 	}
 }
 
 func TestLoopExit7Halts(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 7}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 7}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -330,8 +219,8 @@ func TestLoopExit7Halts(t *testing.T) {
 // so the test still terminates rather than looping forever on backoffs.
 func TestLoopUnknownExitBacksOffThenHalts(t *testing.T) {
 	for _, exit := range []int{1, 99} {
-		r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: exit}, {Exit: 5}}}
-		clk := &fakeClock{}
+		r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: exit}, {Exit: 5}}}
+		clk := &testClock{}
 		var buf bytes.Buffer
 		em := newTestEmitter(&buf)
 
@@ -340,8 +229,8 @@ func TestLoopUnknownExitBacksOffThenHalts(t *testing.T) {
 		if !strings.Contains(reason, "host-tainted") {
 			t.Errorf("exit %d: halt reason = %q, want the follow-up host-tainted halt, not the unclassified exit itself", exit, reason)
 		}
-		if len(clk.waits) != 1 || clk.waits[0] != testFailureBackoff {
-			t.Errorf("exit %d: waits = %v, want exactly one wait of %v (FailureBackoff)", exit, clk.waits, testFailureBackoff)
+		if clk.waitCount() != 1 || clk.waits()[0] != testFailureBackoff {
+			t.Errorf("exit %d: waits = %v, want exactly one wait of %v (FailureBackoff)", exit, clk.waits(), testFailureBackoff)
 		}
 
 		events := decodeEvents(t, &buf)
@@ -367,21 +256,21 @@ func TestLoopUnknownExitBacksOffThenHalts(t *testing.T) {
 // halt so the test still terminates.
 func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 	wantErr := errors.New("boom: no such revision")
-	r := &fakeRunner{revisions: []string{"rev1"}, resolveAt: 1, resolveErr: wantErr, results: []ChildResult{{Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, resolveAt: 1, resolveErr: wantErr, results: []ChildResult{{Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(r.runCalls) != 1 {
-		t.Fatalf("run calls = %d, want 1: the slot must retry after backing off from the resolve failure", len(r.runCalls))
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1: the slot must retry after backing off from the resolve failure", r.runCount())
 	}
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want the follow-up host-tainted halt, not the resolve failure itself", reason)
 	}
-	if len(clk.waits) != 1 || clk.waits[0] != testFailureBackoff {
-		t.Fatalf("waits = %v, want exactly one wait of %v (FailureBackoff)", clk.waits, testFailureBackoff)
+	if clk.waitCount() != 1 || clk.waits()[0] != testFailureBackoff {
+		t.Fatalf("waits = %v, want exactly one wait of %v (FailureBackoff)", clk.waits(), testFailureBackoff)
 	}
 
 	events := decodeEvents(t, &buf)
@@ -402,8 +291,8 @@ func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 // exit gives the fake a real halt so the test still terminates.
 func TestLoopRunChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 	wantErr := errors.New("exec: nix not found")
-	r := &fakeRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, results: []ChildResult{{Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, results: []ChildResult{{Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -433,8 +322,8 @@ func TestLoopRunChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 // child_finish even on the error path.
 func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 	wantErr := errors.New("wait: signal: killed")
-	r := &fakeRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, runErrIssues: []string{"42"}, results: []ChildResult{{Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, runErrIssues: []string{"42"}, results: []ChildResult{{Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -452,14 +341,14 @@ func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 }
 
 func TestLoopEventStreamSequenceAndFields(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results: []ChildResult{
 			{Exit: 0, Issues: []string{"10", "11"}},
 			{Exit: 5},
 		},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -495,21 +384,21 @@ func TestLoopEventStreamSequenceAndFields(t *testing.T) {
 }
 
 func TestLoopKeepsGoingAfterQueueDrainsThenPicksUpWork(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 2}, {Exit: 2}, {Exit: 0}, {Exit: 5}},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(r.runCalls) != 4 {
-		t.Fatalf("run calls = %d, want 4: the loop must keep going after the queue drains and pick work back up without a restart", len(r.runCalls))
+	if r.runCount() != 4 {
+		t.Fatalf("run calls = %d, want 4: the loop must keep going after the queue drains and pick work back up without a restart", r.runCount())
 	}
-	if len(clk.waits) != 2 {
-		t.Fatalf("waits = %v, want exactly two (one per empty-queue exit)", clk.waits)
+	if clk.waitCount() != 2 {
+		t.Fatalf("waits = %v, want exactly two (one per empty-queue exit)", clk.waits())
 	}
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want it to name host-tainted", reason)
@@ -517,11 +406,11 @@ func TestLoopKeepsGoingAfterQueueDrainsThenPicksUpWork(t *testing.T) {
 }
 
 func TestLoopPinsEachChildToTheResolvedRevisionEvenWhenItChanges(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1", "rev2", "rev3"},
 		results:   []ChildResult{{Exit: 0}, {Exit: 0}, {Exit: 5}},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -532,8 +421,8 @@ func TestLoopPinsEachChildToTheResolvedRevisionEvenWhenItChanges(t *testing.T) {
 		{Kind: KindDispatch, Revision: "rev2"},
 		{Kind: KindDispatch, Revision: "rev3"},
 	}
-	if fmt.Sprint(r.runCalls) != fmt.Sprint(want) {
-		t.Fatalf("run calls = %v, want %v: each child must be pinned to that iteration's resolved revision", r.runCalls, want)
+	if fmt.Sprint(r.calls()) != fmt.Sprint(want) {
+		t.Fatalf("run calls = %v, want %v: each child must be pinned to that iteration's resolved revision", r.calls(), want)
 	}
 }
 
@@ -541,15 +430,15 @@ func TestLoopCancelledContextHaltsBeforeStartingNewWork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	reason := Loop(ctx, testConfig(1), r, em, clk)
 
-	if len(r.runCalls) != 0 {
-		t.Fatalf("run calls = %d, want 0: an already-cancelled ctx must halt before starting any child", len(r.runCalls))
+	if r.runCount() != 0 {
+		t.Fatalf("run calls = %d, want 0: an already-cancelled ctx must halt before starting any child", r.runCount())
 	}
 	if !strings.Contains(reason, "context") {
 		t.Errorf("halt reason = %q, want it to name the cancellation", reason)
@@ -563,15 +452,23 @@ func TestLoopCancelledDuringResolveRevisionHaltsBeforeStartingNewWork(t *testing
 	// after ResolveRevision returns and halt instead of starting a child
 	// that nothing will ever signal.
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &cancellingResolveRunner{cancel: cancel, revision: "rev1", result: ChildResult{Exit: 0}}
-	clk := &fakeClock{}
+	// ResolveRevision cancelling ctx then returning the revision normally.
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 0}},
+		onResolve: func(ctx context.Context, call int) error {
+			cancel()
+			return nil
+		},
+	}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	reason := Loop(ctx, testConfig(1), r, em, clk)
 
-	if r.runCalls != 0 {
-		t.Fatalf("run calls = %d, want 0: a ctx cancelled during resolve must halt before starting any child", r.runCalls)
+	if r.runCount() != 0 {
+		t.Fatalf("run calls = %d, want 0: a ctx cancelled during resolve must halt before starting any child", r.runCount())
 	}
 	events := decodeEvents(t, &buf)
 	names := eventNames(events)
@@ -590,15 +487,24 @@ func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
 	// wait for the result and emit that child's child_finish before it
 	// re-checks ctx and halts, never killing the child itself.
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &cancellingRunner{cancel: cancel, revision: "rev1", result: ChildResult{Exit: 0}}
-	clk := &fakeClock{}
+	// RunChild cancelling ctx then returning result — the running child
+	// must still be waited on and its child_finish emitted, never abandoned.
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 0}},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			cancel()
+			return nil
+		},
+	}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	reason := Loop(ctx, testConfig(1), r, em, clk)
 
-	if r.runCalls != 1 {
-		t.Fatalf("run calls = %d, want 1", r.runCalls)
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1", r.runCount())
 	}
 	events := decodeEvents(t, &buf)
 	names := eventNames(events)
@@ -619,8 +525,8 @@ func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
 // stop's exit 0 into exit 1 (issue #3543).
 func TestLoopSelfPathCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &cancelErrRunner{cancel: cancel, cancelIn: seamSelfPath, revision: "rev1"}
-	clk := &fakeClock{}
+	r := newCancelErrRunner(cancel, seamSelfPath, "rev1")
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -638,8 +544,8 @@ func TestLoopSelfPathCtxCancelledIsNotABreakerFailure(t *testing.T) {
 // hazard since before this diff.
 func TestLoopResolveRevisionCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &cancelErrRunner{cancel: cancel, cancelIn: seamResolveRevision}
-	clk := &fakeClock{}
+	r := newCancelErrRunner(cancel, seamResolveRevision, "")
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -686,8 +592,19 @@ func TestLoopCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
-			r := &cancellingRunner{cancel: cancel, revision: "rev1", result: tt.result, err: tt.err}
-			clk := &fakeClock{}
+			r := &scriptedRunner{
+				revisions: []string{"rev1"},
+				results:   []ChildResult{tt.result},
+				onStart: func(ctx context.Context, req ChildRequest) error {
+					cancel()
+					return nil
+				},
+			}
+			if tt.err != nil {
+				r.runErrAt = 1
+				r.runErr = tt.err
+			}
+			clk := &testClock{}
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
@@ -711,83 +628,30 @@ const (
 	seamSelfPath        cancelSeam = "self-path"
 )
 
-// cancelErrRunner models an operator SIGTERM landing inside one seam: the
-// seam cancelIn names cancels the parent ctx and returns its ctx.Err(), and
-// every seam the loop must not reach afterwards errors loudly rather than
-// handing back a zero value the loop would read as a real answer.
-type cancelErrRunner struct {
-	cancel   context.CancelFunc
-	cancelIn cancelSeam
-	revision string
-}
-
-func (r *cancelErrRunner) ResolveRevision(ctx context.Context) (string, error) {
-	if r.cancelIn == seamResolveRevision {
-		r.cancel()
-		return "", ctx.Err()
+// newCancelErrRunner models an operator SIGTERM landing inside one seam:
+// the seam cancelIn names cancels the parent ctx and returns its ctx.Err(),
+// and every seam the loop must not reach afterwards errors loudly rather
+// than handing back a zero value the loop would read as a real answer.
+func newCancelErrRunner(cancel context.CancelFunc, cancelIn cancelSeam, revision string) *scriptedRunner {
+	r := &scriptedRunner{revisions: []string{revision}}
+	r.onResolve = func(ctx context.Context, call int) error {
+		if cancelIn == seamResolveRevision {
+			cancel()
+			return ctx.Err()
+		}
+		return nil
 	}
-	return r.revision, nil
-}
-
-func (r *cancelErrRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	if r.cancelIn == seamSelfPath {
-		r.cancel()
-		return "", ctx.Err()
+	r.onSelf = func(ctx context.Context, call int, revision string) error {
+		if cancelIn == seamSelfPath {
+			cancel()
+			return ctx.Err()
+		}
+		return fmt.Errorf("must not be called: the %s seam cancels before the self check runs", cancelIn)
 	}
-	return "", fmt.Errorf("must not be called: the %s seam cancels before the self check runs", r.cancelIn)
-}
-
-func (r *cancelErrRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	return ChildResult{}, fmt.Errorf("must not be called: a cancelled %s must halt before a child ever starts", r.cancelIn)
-}
-
-type cancellingRunner struct {
-	cancel   context.CancelFunc
-	revision string
-	result   ChildResult
-	// err, if set, is what RunChild returns instead of result after
-	// cancelling — scripting the seam-error variant of the same race (the
-	// child's own wait failing as an operator SIGTERM tears it down).
-	err      error
-	runCalls int
-}
-
-func (r *cancellingRunner) ResolveRevision(ctx context.Context) (string, error) {
-	return r.revision, nil
-}
-
-func (r *cancellingRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *cancellingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	r.runCalls++
-	r.cancel()
-	if r.err != nil {
-		return ChildResult{}, r.err
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		return fmt.Errorf("must not be called: a cancelled %s must halt before a child ever starts", cancelIn)
 	}
-	return r.result, nil
-}
-
-type cancellingResolveRunner struct {
-	cancel   context.CancelFunc
-	revision string
-	result   ChildResult
-	runCalls int
-}
-
-func (r *cancellingResolveRunner) ResolveRevision(ctx context.Context) (string, error) {
-	r.cancel()
-	return r.revision, nil
-}
-
-func (r *cancellingResolveRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *cancellingResolveRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	r.runCalls++
-	return r.result, nil
+	return r
 }
 
 // TestLoopRejectsNonPositiveSlots asserts Loop treats a zero or negative
@@ -797,15 +661,15 @@ func (r *cancellingResolveRunner) RunChild(ctx context.Context, req ChildRequest
 func TestLoopRejectsNonPositiveSlots(t *testing.T) {
 	for _, slots := range []int{0, -1} {
 		t.Run(fmt.Sprintf("slots=%d", slots), func(t *testing.T) {
-			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
-			clk := &fakeClock{}
+			r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
+			clk := &testClock{}
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
 			reason := Loop(context.Background(), testConfig(slots), r, em, clk)
 
-			if len(r.runCalls) != 0 {
-				t.Fatalf("run calls = %d, want 0: a non-positive slot count must halt before any child runs", len(r.runCalls))
+			if r.runCount() != 0 {
+				t.Fatalf("run calls = %d, want 0: a non-positive slot count must halt before any child runs", r.runCount())
 			}
 			if !strings.Contains(reason, "config-invalid") {
 				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
@@ -843,15 +707,15 @@ func TestLoopRejectsInvalidBreakerConfig(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
-			clk := &fakeClock{}
+			r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
+			clk := &testClock{}
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
 			reason := Loop(context.Background(), tc.cfg, r, em, clk)
 
-			if len(r.runCalls) != 0 {
-				t.Fatalf("run calls = %d, want 0: an invalid breaker config must halt before any child runs", len(r.runCalls))
+			if r.runCount() != 0 {
+				t.Fatalf("run calls = %d, want 0: an invalid breaker config must halt before any child runs", r.runCount())
 			}
 			if !strings.Contains(reason, "config-invalid") {
 				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
@@ -882,15 +746,15 @@ func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
-			clk := &fakeClock{}
+			r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
+			clk := &testClock{}
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
 			reason := Loop(context.Background(), tc.cfg, r, em, clk)
 
-			if len(r.runCalls) != 0 {
-				t.Fatalf("run calls = %d, want 0: an invalid kinds config must halt before any child runs", len(r.runCalls))
+			if r.runCount() != 0 {
+				t.Fatalf("run calls = %d, want 0: an invalid kinds config must halt before any child runs", r.runCount())
 			}
 			if !strings.Contains(reason, "config-invalid") {
 				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
@@ -904,10 +768,10 @@ func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
 // the wait from the last one, bounded by IdleCap, rather than repeating the
 // same fixed interval forever.
 func TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{
 		{Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 5},
 	}}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -918,8 +782,8 @@ func TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork(t *testing.T) {
 	Loop(context.Background(), cfg, r, em, clk)
 
 	want := []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond, 4 * time.Millisecond, 4 * time.Millisecond}
-	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
-		t.Fatalf("waits = %v, want %v", clk.waits, want)
+	if fmt.Sprint(clk.waits()) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v", clk.waits(), want)
 	}
 }
 
@@ -928,18 +792,18 @@ func TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork(t *testing.T) {
 // really idle, so the very next no-work check must wait the floor again,
 // not the grown value the streak was on before the dispatch.
 func TestLoopIdleBackoffResetsOnDispatch(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{
 		{Exit: 2}, {Exit: 2}, {Exit: 0}, {Exit: 2}, {Exit: 5},
 	}}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
 	want := []time.Duration{testIdleFloor, 2 * testIdleFloor, testIdleFloor}
-	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
-		t.Fatalf("waits = %v, want %v (dispatch between the two no-work streaks resets to the floor)", clk.waits, want)
+	if fmt.Sprint(clk.waits()) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v (dispatch between the two no-work streaks resets to the floor)", clk.waits(), want)
 	}
 }
 
@@ -962,15 +826,15 @@ func TestLoopRejectsInvalidIdleConfig(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
-			clk := &fakeClock{}
+			r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}}}
+			clk := &testClock{}
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
 			reason := Loop(context.Background(), tc.cfg, r, em, clk)
 
-			if len(r.runCalls) != 0 {
-				t.Fatalf("run calls = %d, want 0: an invalid idle config must halt before any child runs", len(r.runCalls))
+			if r.runCount() != 0 {
+				t.Fatalf("run calls = %d, want 0: an invalid idle config must halt before any child runs", r.runCount())
 			}
 			if !strings.Contains(reason, "config-invalid") {
 				t.Errorf("halt reason = %q, want it to name config-invalid", reason)
@@ -984,11 +848,11 @@ func TestLoopRejectsInvalidIdleConfig(t *testing.T) {
 // polls, and a tip that moves mid-wait ends the wait early, resets the
 // backoff, and the very next child runs at the new revision.
 func TestLoopTipMovedShortCircuitsNoneDispatchableWait(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1", "rev1", "rev1", "rev1", "rev2"},
 		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -999,8 +863,8 @@ func TestLoopTipMovedShortCircuitsNoneDispatchableWait(t *testing.T) {
 	// contributes only one more floor-sized sleep instead of riding out
 	// the rest of its 4*floor wait.
 	want := []time.Duration{testIdleFloor, testIdleFloor, testIdleFloor, testIdleFloor}
-	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
-		t.Fatalf("waits = %v, want %v (tip-moved cuts the third wait to a single floor slice)", clk.waits, want)
+	if fmt.Sprint(clk.waits()) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v (tip-moved cuts the third wait to a single floor slice)", clk.waits(), want)
 	}
 
 	events := decodeEvents(t, &buf)
@@ -1026,11 +890,11 @@ func TestLoopTipMovedShortCircuitsNoneDispatchableWait(t *testing.T) {
 		t.Errorf("tip_moved reason is empty, want it to say a merge can unblock a jammed queue")
 	}
 
-	if len(r.runCalls) != 4 {
-		t.Fatalf("run calls = %d, want 4", len(r.runCalls))
+	if r.runCount() != 4 {
+		t.Fatalf("run calls = %d, want 4", r.runCount())
 	}
-	if r.runCalls[3].Revision != "rev2" {
-		t.Errorf("run calls[3].Revision = %q, want %q: the next child must run at the moved tip", r.runCalls[3].Revision, "rev2")
+	if r.calls()[3].Revision != "rev2" {
+		t.Errorf("run calls[3].Revision = %q, want %q: the next child must run at the moved tip", r.calls()[3].Revision, "rev2")
 	}
 }
 
@@ -1038,11 +902,11 @@ func TestLoopTipMovedShortCircuitsNoneDispatchableWait(t *testing.T) {
 // half of the short-circuit: with no tip movement, the grown wait is slept
 // out completely, in floor-sized slices, and no tip_moved event appears.
 func TestLoopNoneDispatchableWaitSleepsFullWaitWhenTipNeverMoves(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1053,8 +917,8 @@ func TestLoopNoneDispatchableWaitSleepsFullWaitWhenTipNeverMoves(t *testing.T) {
 		testIdleFloor, testIdleFloor, // 2nd check: wait = 2*floor, two slices
 		testIdleFloor, testIdleFloor, testIdleFloor, testIdleFloor, // 3rd check: wait = 4*floor, four slices
 	}
-	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
-		t.Fatalf("waits = %v, want %v (full grown wait slept in floor-sized slices)", clk.waits, want)
+	if fmt.Sprint(clk.waits()) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v (full grown wait slept in floor-sized slices)", clk.waits(), want)
 	}
 
 	events := decodeEvents(t, &buf)
@@ -1070,23 +934,23 @@ func TestLoopNoneDispatchableWaitSleepsFullWaitWhenTipNeverMoves(t *testing.T) {
 // polls mid-wait, however far the backoff has grown, and ResolveRevision is
 // called no more than the once-per-iteration the loop already does.
 func TestLoopQueueEmptyWaitIgnoresTipMoved(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1", "rev2", "rev3", "rev4"},
 		results:   []ChildResult{{Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 5}},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
 	want := []time.Duration{testIdleFloor, 2 * testIdleFloor, 4 * testIdleFloor}
-	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
-		t.Fatalf("waits = %v, want %v: exactly one Sleep per wait, whole, never sliced", clk.waits, want)
+	if fmt.Sprint(clk.waits()) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v: exactly one Sleep per wait, whole, never sliced", clk.waits(), want)
 	}
 
-	if r.resolveCalls != 4 {
-		t.Errorf("resolveCalls = %d, want 4: exactly one ResolveRevision per iteration, no mid-wait poll", r.resolveCalls)
+	if r.resolveCount() != 4 {
+		t.Errorf("resolveCalls = %d, want 4: exactly one ResolveRevision per iteration, no mid-wait poll", r.resolveCount())
 	}
 
 	events := decodeEvents(t, &buf)
@@ -1102,11 +966,11 @@ func TestLoopQueueEmptyWaitIgnoresTipMoved(t *testing.T) {
 // very next no-work wait starts back at the floor, not wherever the
 // short-circuited streak left off.
 func TestLoopTipMovedResetsBackoffForNextWait(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1", "rev1", "rev1", "rev1", "rev2"},
 		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1117,8 +981,8 @@ func TestLoopTipMovedResetsBackoffForNextWait(t *testing.T) {
 	// back at a bare floor wait (one slice), not a continuation of the grown
 	// streak.
 	want := []time.Duration{testIdleFloor, testIdleFloor, testIdleFloor, testIdleFloor, testIdleFloor}
-	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
-		t.Fatalf("waits = %v, want %v (backoff reset after the tip-moved short-circuit)", clk.waits, want)
+	if fmt.Sprint(clk.waits()) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v (backoff reset after the tip-moved short-circuit)", clk.waits(), want)
 	}
 
 	events := decodeEvents(t, &buf)
@@ -1147,15 +1011,15 @@ func TestLoopTipMovedResetsBackoffForNextWait(t *testing.T) {
 // set to fail -- swallows it, and sleeps slice 2. Iteration 3: call #4
 // (top) -> exit 5 -> halt. FailureBackoff is set apart from the floor so a
 // stray failure-backoff sleep (a regression routing the poll failure to
-// backoffOrHalt) would be unmistakable in clk.waits.
+// backoffOrHalt) would be unmistakable in clk.waits().
 func TestLoopIdleWaitSwallowsMidWaitPollFailure(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions:  []string{"rev1"},
 		resolveAt:  3,
 		resolveErr: errors.New("boom: transient fetch failure"),
 		results:    []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 5}},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1165,8 +1029,8 @@ func TestLoopIdleWaitSwallowsMidWaitPollFailure(t *testing.T) {
 	reason := Loop(context.Background(), cfg, r, em, clk)
 
 	want := []time.Duration{testIdleFloor, testIdleFloor, testIdleFloor}
-	if fmt.Sprint(clk.waits) != fmt.Sprint(want) {
-		t.Fatalf("waits = %v, want %v: the failed mid-wait poll must neither cut the wait short nor add a failure backoff", clk.waits, want)
+	if fmt.Sprint(clk.waits()) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v: the failed mid-wait poll must neither cut the wait short nor add a failure backoff", clk.waits(), want)
 	}
 
 	events := decodeEvents(t, &buf)
@@ -1180,8 +1044,8 @@ func TestLoopIdleWaitSwallowsMidWaitPollFailure(t *testing.T) {
 		t.Errorf("halt reason = %q, want it not to name the breaker (halts on exit 5, not a tripped breaker)", reason)
 	}
 
-	if len(r.runCalls) != 3 {
-		t.Fatalf("run calls = %d, want 3", len(r.runCalls))
+	if r.runCount() != 3 {
+		t.Fatalf("run calls = %d, want 3", r.runCount())
 	}
 }
 
@@ -1195,8 +1059,8 @@ func TestLoopAwakeWindowClosedAtStartSleepsFullSpanThenStarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
 	}
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
-	clk := &fakeClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
+	clk := &testClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1205,11 +1069,11 @@ func TestLoopAwakeWindowClosedAtStartSleepsFullSpanThenStarts(t *testing.T) {
 
 	Loop(context.Background(), cfg, r, em, clk)
 
-	if len(clk.waits) != 1 {
-		t.Fatalf("waits = %v, want exactly one sleep to the next opening, not a poll loop", clk.waits)
+	if clk.waitCount() != 1 {
+		t.Fatalf("waits = %v, want exactly one sleep to the next opening, not a poll loop", clk.waits())
 	}
-	if clk.waits[0] != time.Hour {
-		t.Fatalf("waits = %v, want the one wait = 1h, the whole remaining span to 09:00", clk.waits)
+	if clk.waits()[0] != time.Hour {
+		t.Fatalf("waits = %v, want the one wait = 1h, the whole remaining span to 09:00", clk.waits())
 	}
 
 	names := eventNames(decodeEvents(t, &buf))
@@ -1228,8 +1092,8 @@ func TestLoopAwakeWindowWraparoundOpenStartsImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
 	}
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
-	clk := &fakeClock{now: time.Date(2026, 1, 1, 23, 0, 0, 0, time.UTC)}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
+	clk := &testClock{now: time.Date(2026, 1, 1, 23, 0, 0, 0, time.UTC)}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1238,50 +1102,17 @@ func TestLoopAwakeWindowWraparoundOpenStartsImmediately(t *testing.T) {
 
 	Loop(context.Background(), cfg, r, em, clk)
 
-	if len(clk.waits) != 0 {
-		t.Fatalf("waits = %v, want none: the window is already open at start", clk.waits)
+	if clk.waitCount() != 0 {
+		t.Fatalf("waits = %v, want none: the window is already open at start", clk.waits())
 	}
-	if len(r.runCalls) != 1 {
-		t.Fatalf("run calls = %d, want 1", len(r.runCalls))
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1", r.runCount())
 	}
 	for _, ev := range decodeEvents(t, &buf) {
 		if ev.Event == "awake_close" || ev.Event == "awake_open" {
 			t.Fatalf("events = %v, want no awake_close/awake_open when the window starts open", eventNames(decodeEvents(t, &buf)))
 		}
 	}
-}
-
-// windowAdvancingRunner is a single-slot Runner whose RunChild advances the
-// shared fakeClock by advance before returning, simulating a Box that
-// outlasts the Awake window: the window can close mid-run without anything
-// in the loop noticing until the child itself returns.
-type windowAdvancingRunner struct {
-	clk      *fakeClock
-	revision string
-	advance  time.Duration
-	results  []ChildResult
-	calls    int
-}
-
-func (r *windowAdvancingRunner) ResolveRevision(ctx context.Context) (string, error) {
-	return r.revision, nil
-}
-
-func (r *windowAdvancingRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *windowAdvancingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	r.clk.mu.Lock()
-	r.clk.now = r.clk.now.Add(r.advance)
-	r.clk.mu.Unlock()
-
-	r.calls++
-	idx := r.calls - 1
-	if idx >= len(r.results) {
-		idx = len(r.results) - 1
-	}
-	return r.results[idx], nil
 }
 
 // TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks pins the "a Box
@@ -1294,12 +1125,17 @@ func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
 	}
-	clk := &fakeClock{now: time.Date(2026, 1, 1, 16, 0, 0, 0, time.UTC)}
-	r := &windowAdvancingRunner{
-		clk:      clk,
-		revision: "rev1",
-		advance:  2 * time.Hour, // 16:00 -> 18:00, past the 17:00 close
-		results:  []ChildResult{{Exit: 3}, {Exit: 5}},
+	clk := &testClock{now: time.Date(2026, 1, 1, 16, 0, 0, 0, time.UTC)}
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 3}, {Exit: 5}},
+		// RunChild advances the shared clock, simulating a Box that
+		// outlasts the Awake window: the window can close mid-run without
+		// anything in the loop noticing until the child itself returns.
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			clk.advanceBy(2 * time.Hour) // 16:00 -> 18:00, past the 17:00 close
+			return nil
+		},
 	}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -1309,8 +1145,8 @@ func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
 
 	Loop(context.Background(), cfg, r, em, clk)
 
-	if r.calls != 2 {
-		t.Fatalf("run calls = %d, want 2: the in-flight child finishes, and a second starts once the window reopens", r.calls)
+	if r.runCount() != 2 {
+		t.Fatalf("run calls = %d, want 2: the in-flight child finishes, and a second starts once the window reopens", r.runCount())
 	}
 
 	names := eventNames(decodeEvents(t, &buf))
@@ -1318,39 +1154,6 @@ func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
 	if fmt.Sprint(names) != fmt.Sprint(want) {
 		t.Fatalf("events = %v, want %v: no idle/jam step consumed for the wait the closed window owns", names, want)
 	}
-}
-
-// resolveWindowAdvancingRunner is a single-slot Runner whose ResolveRevision
-// advances the shared fakeClock by advance before returning, simulating a
-// fetch that spans the window's close: the decision to run was made while
-// still open, but time has moved on by the time the revision comes back.
-// The advance only fires once, so a slot that parks and retries sees a
-// steady clock on its second pass.
-type resolveWindowAdvancingRunner struct {
-	clk      *fakeClock
-	revision string
-	advance  time.Duration
-	advanced bool
-	result   ChildResult
-	calls    int
-}
-
-func (r *resolveWindowAdvancingRunner) ResolveRevision(ctx context.Context) (string, error) {
-	if !r.advanced {
-		r.clk.mu.Lock()
-		r.clk.now = r.clk.now.Add(r.advance)
-		r.clk.mu.Unlock()
-		r.advanced = true
-	}
-	return r.revision, nil
-}
-func (r *resolveWindowAdvancingRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *resolveWindowAdvancingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	r.calls++
-	return r.result, nil
 }
 
 // TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting pins
@@ -1365,12 +1168,21 @@ func TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting(t *tes
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
 	}
-	clk := &fakeClock{now: time.Date(2026, 1, 1, 16, 58, 0, 0, time.UTC)}
-	r := &resolveWindowAdvancingRunner{
-		clk:      clk,
-		revision: "rev1",
-		advance:  4 * time.Minute, // 16:58 -> 17:02, past the 17:00 close
-		result:   ChildResult{Exit: 5},
+	clk := &testClock{now: time.Date(2026, 1, 1, 16, 58, 0, 0, time.UTC)}
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 5}},
+		// ResolveRevision advances the shared clock, simulating a fetch that
+		// spans the window's close: the decision to run was made while
+		// still open, but time has moved on by the time the revision comes
+		// back. Guarded to call 1 only, so a slot that parks and retries
+		// sees a steady clock on its second pass.
+		onResolve: func(ctx context.Context, call int) error {
+			if call == 1 {
+				clk.advanceBy(4 * time.Minute) // 16:58 -> 17:02, past the 17:00 close
+			}
+			return nil
+		},
 	}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -1380,8 +1192,8 @@ func TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting(t *tes
 
 	Loop(context.Background(), cfg, r, em, clk)
 
-	if r.calls != 1 {
-		t.Fatalf("run calls = %d, want 1: the closed-window fetch must not start a child, only the retry after the slot parks", r.calls)
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1: the closed-window fetch must not start a child, only the retry after the slot parks", r.runCount())
 	}
 
 	names := eventNames(decodeEvents(t, &buf))
@@ -1395,8 +1207,8 @@ func TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting(t *tes
 // starting a child when Runner.SelfPath reports the daemon's own build
 // changed at the fetched tip, and that the halt reason names it.
 func TestLoopSelfChangeHaltsAtIterationBoundary(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, selfPaths: []string{"/nix/store/new-path"}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, selfPaths: []string{"/nix/store/new-path"}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1408,8 +1220,8 @@ func TestLoopSelfChangeHaltsAtIterationBoundary(t *testing.T) {
 	if !strings.HasPrefix(reason, HaltSelfChanged) {
 		t.Fatalf("halt reason = %q, want prefix %q", reason, HaltSelfChanged)
 	}
-	if len(r.runCalls) != 0 {
-		t.Fatalf("run calls = %d, want 0: the halt must land before a child is launched", len(r.runCalls))
+	if r.runCount() != 0 {
+		t.Fatalf("run calls = %d, want 0: the halt must land before a child is launched", r.runCount())
 	}
 
 	events := decodeEvents(t, &buf)
@@ -1426,12 +1238,12 @@ func TestLoopSelfChangeHaltsAtIterationBoundary(t *testing.T) {
 // fired, Loop returns without ever calling RunChild again — no re-exec, no
 // further iteration, whatever ran before the halt is all that ever runs.
 func TestLoopSelfChangeNeverReExecs(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1", "rev2"},
 		results:   []ChildResult{{Exit: 0}},
 		selfPaths: []string{"/nix/store/old-path", "/nix/store/new-path"},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1443,8 +1255,8 @@ func TestLoopSelfChangeNeverReExecs(t *testing.T) {
 	if !strings.HasPrefix(reason, HaltSelfChanged) {
 		t.Fatalf("halt reason = %q, want prefix %q", reason, HaltSelfChanged)
 	}
-	if len(r.runCalls) != 1 {
-		t.Fatalf("run calls = %d, want 1: the first iteration's matching self-path should run its child, the second iteration's mismatch must halt before any further child", len(r.runCalls))
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1: the first iteration's matching self-path should run its child, the second iteration's mismatch must halt before any further child", r.runCount())
 	}
 }
 
@@ -1452,12 +1264,12 @@ func TestLoopSelfChangeNeverReExecs(t *testing.T) {
 // Config.SelfProgram is a no-op: the loop proceeds to run children as
 // normal.
 func TestLoopSelfPathMatchDoesNotHalt(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 0}, {Exit: 5}},
 		selfPaths: []string{"/nix/store/same-path"},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1469,8 +1281,8 @@ func TestLoopSelfPathMatchDoesNotHalt(t *testing.T) {
 	if strings.HasPrefix(reason, HaltSelfChanged) {
 		t.Fatalf("halt reason = %q, want no self-changed halt: the self path matched", reason)
 	}
-	if len(r.runCalls) != 2 {
-		t.Fatalf("run calls = %d, want 2: a matching self path must not stop children from running", len(r.runCalls))
+	if r.runCount() != 2 {
+		t.Fatalf("run calls = %d, want 2: a matching self path must not stop children from running", r.runCount())
 	}
 }
 
@@ -1478,15 +1290,15 @@ func TestLoopSelfPathMatchDoesNotHalt(t *testing.T) {
 // calls Runner.SelfPath at all — the check is fully disabled, not merely
 // non-halting.
 func TestLoopEmptySelfProgramSkipsCheck(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if r.selfCalls != 0 {
-		t.Fatalf("selfCalls = %d, want 0: an empty SelfProgram must never call SelfPath", r.selfCalls)
+	if r.selfCount() != 0 {
+		t.Fatalf("selfCalls = %d, want 0: an empty SelfProgram must never call SelfPath", r.selfCount())
 	}
 }
 
@@ -1494,14 +1306,14 @@ func TestLoopEmptySelfProgramSkipsCheck(t *testing.T) {
 // other unclassified iteration-boundary failure: this slot backs off
 // (reason prefixed self-build:) and retries, rather than halting the pool.
 func TestLoopSelfPathErrorBacksOff(t *testing.T) {
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 5}},
 		selfPaths: []string{"/nix/store/same-path"},
 		selfErrAt: 1,
 		selfErr:   errors.New("eval boom"),
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1514,11 +1326,11 @@ func TestLoopSelfPathErrorBacksOff(t *testing.T) {
 	if strings.HasPrefix(reason, HaltSelfChanged) {
 		t.Fatalf("halt reason = %q, want no self-changed halt: SelfPath only errored once, then matched", reason)
 	}
-	if r.selfCalls != 2 {
-		t.Fatalf("selfCalls = %d, want 2: the errored call plus the retry", r.selfCalls)
+	if r.selfCount() != 2 {
+		t.Fatalf("selfCalls = %d, want 2: the errored call plus the retry", r.selfCount())
 	}
-	if len(r.runCalls) != 1 {
-		t.Fatalf("run calls = %d, want 1: the slot must retry after backing off", len(r.runCalls))
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1: the slot must retry after backing off", r.runCount())
 	}
 
 	events := decodeEvents(t, &buf)
@@ -1536,87 +1348,66 @@ func TestLoopSelfPathErrorBacksOff(t *testing.T) {
 	}
 }
 
-// drainSelfRunner is a hand-rolled Runner for
-// TestLoopSelfChangeDrainsRunningChild: one slot's RunChild blocks on a
-// channel the test controls (a long-running child), while the other slot's
-// SelfPath call — deliberately made to wait until the child has actually
-// started — reports a changed build and halts the pool. Whichever slot's
-// SelfPath call lands first "wins" the matching path and goes on to run the
-// child; call order between the two goroutines is otherwise unconstrained,
-// so the test does not assume which slot number plays which role.
-type drainSelfRunner struct {
-	mu        sync.Mutex
-	selfCalls int
-	runCalls  int
-
-	started   chan struct{} // closed by RunChild the moment it starts
-	release   chan struct{} // closed by the test to let RunChild return
-	matchPath string
-	newPath   string
-}
-
-func (r *drainSelfRunner) ResolveRevision(ctx context.Context) (string, error) {
-	return "rev1", nil
-}
-
-func (r *drainSelfRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	r.mu.Lock()
-	r.selfCalls++
-	first := r.selfCalls == 1
-	r.mu.Unlock()
-	if first {
-		return r.matchPath, nil
-	}
-	// Not first: wait for the other slot's child to actually be running
-	// before reporting the mismatch, so the halt this triggers is
-	// guaranteed to race a genuinely in-flight child, not an imagined one.
-	<-r.started
-	return r.newPath, nil
-}
-
-func (r *drainSelfRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	r.mu.Lock()
-	r.runCalls++
-	r.mu.Unlock()
-	close(r.started)
-	<-r.release
-	return ChildResult{Exit: 0}, nil
-}
-
 // TestLoopSelfChangeDrainsRunningChild asserts the "drains running children
 // rather than killing them" criterion for the self-change halt specifically:
 // with one slot's child already running when a sibling slot's self-check
 // halts the pool, the running child's child_finish is still emitted and
 // Loop only returns once that child has actually returned.
+//
+// Whichever slot's SelfPath call lands first "wins" the matching path and
+// goes on to run the child; call order between the two goroutines is
+// otherwise unconstrained, so the test does not assume which slot number
+// plays which role.
 func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
-	r := &drainSelfRunner{
-		started:   make(chan struct{}),
-		release:   make(chan struct{}),
-		matchPath: "/nix/store/old-path",
-		newPath:   "/nix/store/new-path",
+	const matchPath = "/nix/store/old-path"
+	const newPath = "/nix/store/new-path"
+	started := make(chan struct{}) // closed by onStart the moment the child starts
+	release := make(chan struct{}) // closed by the test to let RunChild return
+	var startOnce sync.Once
+
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		selfPaths: []string{matchPath, newPath},
+		results:   []ChildResult{{Exit: 0}},
+		onSelf: func(ctx context.Context, call int, revision string) error {
+			if call == 1 {
+				return nil
+			}
+			// Not first: wait for the other slot's child to actually be
+			// running before reporting the mismatch, so the halt this
+			// triggers is guaranteed to race a genuinely in-flight child,
+			// not an imagined one.
+			<-started
+			return nil
+		},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			startOnce.Do(func() { close(started) })
+			<-release
+			return nil
+		},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	cfg := testConfig(2)
-	cfg.SelfProgram = "/nix/store/old-path"
+	cfg.SelfProgram = matchPath
 
 	done := make(chan string, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
 
-	<-r.started      // the long-running child is confirmed running
-	close(r.release) // let it finish now that it is known to have been running
+	<-started      // the long-running child is confirmed running
+	close(release) // let it finish now that it is known to have been running
 
 	reason := <-done
 
 	if !strings.HasPrefix(reason, HaltSelfChanged) {
 		t.Fatalf("halt reason = %q, want prefix %q", reason, HaltSelfChanged)
 	}
-	if r.runCalls != 1 {
-		t.Fatalf("run calls = %d, want 1: only the already-running child ever runs", r.runCalls)
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1: only the already-running child ever runs", r.runCount())
 	}
 
 	events := decodeEvents(t, &buf)
@@ -1639,43 +1430,30 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 	}
 }
 
-// statusProbeRunner is a single-purpose Runner for
-// TestLoopPublishesLiveStatus: its RunChild announces one issue through
-// req.OnIssue and, while still inside RunChild (the child is still
-// "running" from the pool's point of view), reads the status file straight
-// back so the assertion is genuinely about the in-flight file, not the one
-// left behind after the child returns.
-type statusProbeRunner struct {
-	revision string
-	dir      string
-
-	report StatusReport
-	err    error
-}
-
-func (r *statusProbeRunner) ResolveRevision(ctx context.Context) (string, error) {
-	return r.revision, nil
-}
-
-func (r *statusProbeRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *statusProbeRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	req.OnIssue("42")
-	r.report, r.err = ReadStatus(r.dir)
-	return ChildResult{Exit: 5}, nil // host-tainted: Loop halts promptly after this call
-}
-
 // TestLoopPublishesLiveStatus drives a Loop run with Config.Status pointed
 // at a temp dir and asserts the status file names the in-flight child's
 // kind/revision/issues while RunChild is still running, and that a valid
 // status file survives the run (issue #3545).
 func TestLoopPublishesLiveStatus(t *testing.T) {
 	dir := t.TempDir()
-	clk := &fakeClock{}
+	clk := &testClock{}
 	sw := NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
-	r := &statusProbeRunner{revision: "rev1", dir: dir}
+
+	// report/probeErr are read back from inside onStart, while the child is
+	// still "running" from the pool's point of view, so the assertion below
+	// is genuinely about the in-flight file, not the one left behind after
+	// the child returns.
+	var report StatusReport
+	var probeErr error
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 5}}, // host-tainted: Loop halts promptly after this call
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			req.OnIssue("42")
+			report, probeErr = ReadStatus(dir)
+			return nil
+		},
+	}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -1687,13 +1465,13 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 
-	if r.err != nil {
-		t.Fatalf("ReadStatus during RunChild: %v", r.err)
+	if probeErr != nil {
+		t.Fatalf("ReadStatus during RunChild: %v", probeErr)
 	}
-	if r.report.Status == nil {
+	if report.Status == nil {
 		t.Fatalf("status was nil while the child was still running")
 	}
-	st := r.report.Status
+	st := report.Status
 	if st.State != StateWorking {
 		t.Fatalf("in-flight state = %q, want %q", st.State, StateWorking)
 	}
@@ -1724,13 +1502,13 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 func TestLoopNilStatusPublishesNothing(t *testing.T) {
 	dir := t.TempDir()
 	statusPath := filepath.Join(dir, statusFileName)
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	cfg := testConfig(1)
 	// cfg.Status is left nil deliberately.
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
 	Loop(context.Background(), cfg, r, em, clk)
 
 	if _, err := os.Stat(statusPath); !os.IsNotExist(err) {
@@ -1738,7 +1516,7 @@ func TestLoopNilStatusPublishesNothing(t *testing.T) {
 	}
 
 	cfg.Status = NewStatusWriter(dir, clk.Now)
-	r2 := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
+	r2 := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}
 	Loop(context.Background(), cfg, r2, em, clk)
 
 	if _, err := os.Stat(statusPath); err != nil {
@@ -1754,13 +1532,13 @@ func TestLoopNilStatusPublishesNothing(t *testing.T) {
 // predecessor run last published, under a lock this run now holds.
 func TestLoopInvalidConfigPublishesHaltedStatus(t *testing.T) {
 	dir := t.TempDir()
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	cfg := testConfig(0) // Slots <= 0 is rejected before a pool is built
 	cfg.Status = NewStatusWriter(dir, clk.Now)
-	r := &fakeRunner{}
+	r := &scriptedRunner{}
 
 	reason := Loop(context.Background(), cfg, r, em, clk)
 	if !strings.Contains(reason, "config-invalid") {

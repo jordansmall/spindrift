@@ -8,7 +8,7 @@ import (
 )
 
 func TestBreakerUnderThresholdDoesNotTrip(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	b := newBreaker(3, time.Minute)
 
 	if _, crossed := b.recordAndCheck(clk.Now()); crossed {
@@ -24,7 +24,7 @@ func TestBreakerUnderThresholdDoesNotTrip(t *testing.T) {
 }
 
 func TestBreakerAtThresholdTrips(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	b := newBreaker(3, time.Minute)
 
 	b.recordAndCheck(clk.Now())
@@ -40,7 +40,7 @@ func TestBreakerAtThresholdTrips(t *testing.T) {
 }
 
 func TestBreakerCrossesExactlyOnce(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	b := newBreaker(3, time.Minute)
 
 	b.recordAndCheck(clk.Now())
@@ -57,7 +57,7 @@ func TestBreakerCrossesExactlyOnce(t *testing.T) {
 }
 
 func TestBreakerAgedOutFailuresDoNotCount(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	b := newBreaker(3, time.Minute)
 
 	b.recordAndCheck(clk.Now())

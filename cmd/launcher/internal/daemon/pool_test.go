@@ -65,7 +65,7 @@ func (w *notifyWriter) waitForLine(t *testing.T, substr string) {
 // channel, so a test can hold several slots' children open at once and
 // observe how many are truly in flight together, then release them and
 // check every one that started also finished. It is keyed by req.Slot
-// (unlike loop_test.go's fakeRunner, which scripts one shared call
+// (unlike loop_test.go's scriptedRunner, which scripts one shared call
 // sequence): several slots call RunChild concurrently here, so a shared
 // call-index counter would hand results to whichever slot happened to call
 // next rather than the slot the test meant.
@@ -173,7 +173,7 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	// Restores this test's pre-gate concurrent first wave (issue #3634):
 	// without it, only the leader would start until it claims something.
 	r.announce = true
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -247,15 +247,15 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 // this behaviour via Config{Slots: 1}, so this test just names the
 // invariant explicitly at the pool layer.
 func TestPoolSlots1RunsOneChildAtATime(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
 	reason := Loop(context.Background(), testConfig(1), r, em, clk)
 
-	if len(r.runCalls) != 2 {
-		t.Fatalf("run calls = %d, want 2", len(r.runCalls))
+	if r.runCount() != 2 {
+		t.Fatalf("run calls = %d, want 2", r.runCount())
 	}
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want it to name host-tainted", reason)
@@ -274,7 +274,7 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	r := newBlockingRunner("rev1", slots)
 	// Restores this test's pre-gate concurrent first wave (issue #3634).
 	r.announce = true
-	clk := &fakeClock{}
+	clk := &testClock{}
 	// nw notifies on every event line as it is written, so the test can
 	// block until the pool's halt is actually recorded before releasing
 	// slot 0/1's still-in-flight children — without it, those slots can
@@ -457,7 +457,7 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 	const slots = 3
 	const threshold = 3
 	r := newBarrierFailRunner("rev1", slots)
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -519,9 +519,9 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 }
 
 // gateClock is the Clock for tests that need a slot to remain provably
-// parked in its idle wait, rather than fakeClock's instant advance racing
+// parked in its idle wait, rather than testClock's instant advance racing
 // straight back into a second RunChild call. Sleep blocks on ctx.Done()
-// (recording the wait first, like fakeClock does) so "this slot is now
+// (recording the wait first, like testClock does) so "this slot is now
 // asleep" is a real synchronization point a test can wait on via
 // sleeping, and the only way any Sleep call ever returns is the pool
 // itself being cancelled — which is exactly how these tests end the test,
@@ -562,7 +562,7 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	r := newBlockingRunner("rev1", slots)
 	// Restores this test's pre-gate concurrent first wave (issue #3634).
 	r.announce = true
-	clk := &fakeClock{}
+	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 	cfg := testConfig(slots)
@@ -690,8 +690,8 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 // IdleFloor — but the shipped 5m/30m pair always divides evenly, so nothing
 // else in this package reaches the clamp.
 func TestIdleWaitLastSliceClampsToRemaining(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -703,17 +703,17 @@ func TestIdleWaitLastSliceClampsToRemaining(t *testing.T) {
 	p.pollSlices(pctx, 0, 10*time.Millisecond, "rev1")
 
 	want := []time.Duration{3 * time.Millisecond, 3 * time.Millisecond, 3 * time.Millisecond, time.Millisecond}
-	if len(clk.waits) != len(want) {
-		t.Fatalf("waits = %v, want %v", clk.waits, want)
+	if clk.waitCount() != len(want) {
+		t.Fatalf("waits = %v, want %v", clk.waits(), want)
 	}
 	for i := range want {
-		if clk.waits[i] != want[i] {
-			t.Fatalf("waits = %v, want %v", clk.waits, want)
+		if clk.waits()[i] != want[i] {
+			t.Fatalf("waits = %v, want %v", clk.waits(), want)
 		}
 	}
 }
 
-// stepClock is a Clock for testing concurrent parking: unlike fakeClock,
+// stepClock is a Clock for testing concurrent parking: unlike testClock,
 // whose Sleep additively advances a virtual now (fine for one goroutine at
 // a time, but unsound once several Sleep calls race the same shared clock
 // -- their durations stack instead of overlapping), stepClock only changes
@@ -772,7 +772,7 @@ func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing
 		t.Fatalf("ParseWindow: %v", err)
 	}
 	const slots = 3
-	r := &fakeRunner{revisions: []string{"rev1"}}
+	r := &scriptedRunner{revisions: []string{"rev1"}}
 	clk := newStepClock(time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), slots)
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -847,7 +847,7 @@ func TestAwaitWindowSkipsPublishOnNonTransitionIteration(t *testing.T) {
 	cfg.Status = sw
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
-	p, pctx := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+	p, pctx := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 	defer p.cancel()
 
 	readTime := func() string {
@@ -906,8 +906,8 @@ func TestPollSlicesTipMovedStampsJammedKinds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &fakeRunner{revisions: []string{"rev2"}}
-			clk := &fakeClock{}
+			r := &scriptedRunner{revisions: []string{"rev2"}}
+			clk := &testClock{}
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
@@ -1040,17 +1040,17 @@ func shutWindow(t *testing.T, now time.Time) *Window {
 func TestPoolSnapshotState(t *testing.T) {
 	tests := []struct {
 		name  string
-		setup func(p *pool, clk *fakeClock)
+		setup func(p *pool, clk *testClock)
 		want  State
 	}{
 		{
 			name:  "checking when nothing gated and nothing running",
-			setup: func(p *pool, clk *fakeClock) {},
+			setup: func(p *pool, clk *testClock) {},
 			want:  StateChecking,
 		},
 		{
 			name: "waiting when every kind gated queue-empty",
-			setup: func(p *pool, clk *fakeClock) {
+			setup: func(p *pool, clk *testClock) {
 				for _, k := range p.cfg.Kinds {
 					p.kinds[k].markNoWork(clk.Now(), false)
 				}
@@ -1059,7 +1059,7 @@ func TestPoolSnapshotState(t *testing.T) {
 		},
 		{
 			name: "jammed when every kind gated and one jammed",
-			setup: func(p *pool, clk *fakeClock) {
+			setup: func(p *pool, clk *testClock) {
 				p.kinds[KindDispatch].markNoWork(clk.Now(), true)
 				p.kinds[KindResearch].markNoWork(clk.Now(), false)
 			},
@@ -1072,14 +1072,14 @@ func TestPoolSnapshotState(t *testing.T) {
 			// edge-triggered flag, or it would disagree with nextCheck
 			// (already naming the reopening) and read checking instead.
 			name: "asleep from a shut window even before any slot parks",
-			setup: func(p *pool, clk *fakeClock) {
+			setup: func(p *pool, clk *testClock) {
 				p.cfg.Awake = shutWindow(t, clk.Now())
 			},
 			want: StateAsleep,
 		},
 		{
 			name: "working outranks asleep",
-			setup: func(p *pool, clk *fakeClock) {
+			setup: func(p *pool, clk *testClock) {
 				p.cfg.Awake = shutWindow(t, clk.Now())
 				p.occupy(0, KindDispatch, "rev1")
 			},
@@ -1087,7 +1087,7 @@ func TestPoolSnapshotState(t *testing.T) {
 		},
 		{
 			name: "halted outranks everything",
-			setup: func(p *pool, clk *fakeClock) {
+			setup: func(p *pool, clk *testClock) {
 				p.cfg.Awake = shutWindow(t, clk.Now())
 				p.occupy(0, KindDispatch, "rev1")
 				p.halted = true
@@ -1099,12 +1099,12 @@ func TestPoolSnapshotState(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			clk := &fakeClock{}
+			clk := &testClock{}
 			cfg := testConfig(2)
 			cfg.Kinds = []Kind{KindDispatch, KindResearch}
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
-			p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 			tc.setup(p, clk)
 
@@ -1122,11 +1122,11 @@ func TestPoolSnapshotState(t *testing.T) {
 // TestPoolSnapshotSlots pins that snapshot names each slot's kind, revision
 // and in-flight issues from occupancy, leaving an unoccupied slot bare.
 func TestPoolSnapshotSlots(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	cfg := testConfig(2)
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
-	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.occupy(0, KindDispatch, "rev1")
 	p.noteIssue(0, "7")
@@ -1150,11 +1150,11 @@ func TestPoolSnapshotSlots(t *testing.T) {
 // copy, not an alias onto the slot's live state: mutating the pool after
 // taking the snapshot must never change what was already handed out.
 func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	cfg := testConfig(1)
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
-	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.occupy(0, KindDispatch, "rev1")
 	p.noteIssue(0, "42")
@@ -1176,12 +1176,12 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 // never change what was already handed out (mirrors
 // TestPoolSnapshotCopiesIssuesSlice's contract for the Issues slice above).
 func TestPoolSnapshotCopiesKindsSlice(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	cfg := testConfig(1)
 	cfg.Kinds = []Kind{KindDispatch, KindResearch}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
-	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Kinds, []Kind{KindDispatch, KindResearch}) {
@@ -1199,12 +1199,12 @@ func TestPoolSnapshotCopiesKindsSlice(t *testing.T) {
 // cfg.Kinds order (not the p.kinds map's undefined order) and carries a
 // nextCheck only for a gated kind.
 func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	cfg := testConfig(1)
 	cfg.Kinds = []Kind{KindResearch, KindDispatch}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
-	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.kinds[KindResearch].markNoWork(clk.Now(), false)
 
@@ -1227,11 +1227,11 @@ func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
 // stale past NextCheck under StateWaiting — the seven-hours-stale
 // awake_open publish from the finding's own reproduction.
 func TestPoolSnapshotElapsedGateReadsAsCheckingNotWaiting(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	cfg := testConfig(1)
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
-	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	wait := p.kinds[KindDispatch].markNoWork(clk.Now(), false)
 	clk.now = clk.now.Add(wait + time.Millisecond) // past the deadline
@@ -1312,12 +1312,12 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 // KindCheck.Jammed: which kind is jammed must be recoverable from the
 // published Checks, not just the pool-level State.
 func TestPoolSnapshotChecksCarryPerKindJammed(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	cfg := testConfig(2)
 	cfg.Kinds = []Kind{KindDispatch, KindResearch}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
-	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.kinds[KindDispatch].markNoWork(clk.Now(), true)
 	p.kinds[KindResearch].markNoWork(clk.Now(), false)
@@ -1355,12 +1355,12 @@ func TestPoolPublishReportsWriteFailureDiagnostic(t *testing.T) {
 	emitErrW = &errBuf
 	t.Cleanup(func() { emitErrW = orig })
 
-	clk := &fakeClock{}
+	clk := &testClock{}
 	cfg := testConfig(1)
 	cfg.Status = NewStatusWriter(filepath.Join(t.TempDir(), "no-such-dir"), time.Now)
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
-	p, _ := newPool(context.Background(), cfg, &fakeRunner{}, em, clk)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.publish() // must not panic despite the write failure
 
@@ -1451,7 +1451,7 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseWindow(%q) err = %v, want nil", tc.window, err)
 			}
-			clk := &fakeClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)}
+			clk := &testClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)}
 			cfg := testConfig(1)
 			cfg.Kinds = []Kind{KindDispatch, KindResearch}
 			cfg.Awake = w
@@ -1460,7 +1460,7 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 				cfg.IdleCap = tc.floor
 			}
 			var buf bytes.Buffer
-			p, _ := newPool(context.Background(), cfg, &fakeRunner{}, newTestEmitter(&buf), clk)
+			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
 			p.awakeShut = tc.awakeShut
 			for _, k := range tc.gate {
 				p.kinds[k].markNoWork(clk.Now(), false)
