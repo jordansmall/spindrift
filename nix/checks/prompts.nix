@@ -364,6 +364,26 @@ let
       }
       touch $out
     '';
+
+  # A grep pin body asserting one awk section slice is defined exactly
+  # once in this file. The pattern arrives in two halves joined at eval
+  # time, so this file's own source text never carries the contiguous
+  # pattern the pin counts -- else the pin would count itself. Counts
+  # occurrences, not matching lines, since attribute definitions here run
+  # to 200+ columns and two copies could share one physical line.
+  sliceDefinedOncePin =
+    {
+      what,
+      half1,
+      half2,
+    }:
+    ''
+      count=$(grep -oF -- ${pkgs.lib.escapeShellArg (half1 + half2)} ${./prompts.nix} | wc -l || true)
+      [ "$count" -eq 1 ] || {
+        echo "expected the ${what} defined exactly once in prompts.nix, got $count" >&2
+        exit 1
+      }
+    '';
 in
 {
   # The configured `prompt` is rendered to a store-path directory and, by
@@ -1244,36 +1264,45 @@ in
       '';
 
   # Grep pin (issue #781): the CHECK-section awk slice must be defined once,
-  # not copy-pasted; a marker rename applied to one copy would leave the
-  # other checks silently reading stale content. Extended (issue #1154) to
-  # the fix-prompt half of the same pattern, which only
+  # not copy-pasted or dropped by a marker rename; either would leave a
+  # check silently reading stale content or nothing at all. Extended (issue
+  # #1154) to the fix-prompt half of the same pattern, which only
   # mkharness-prompt-fix-check-no-drift uses.
   prompts-nix-check-section-awk-defined-once =
     pkgs.runCommand "prompts-nix-check-section-awk-defined-once" { }
       ''
-        # Split so this line's own source text never contains the
-        # contiguous target pattern -- else this check would count itself.
-        # issue-prompt half is end-of-line-anchored only, not
-        # start-of-line (issue #3221): the raw, unrendered template it
-        # slices now has "# CHECK" trailing the IMPLEMENT phase's own
-        # variable run, not alone on its own line.
-        issue_half1='/# CHECK$/{f=1}'
-        issue_half2=' /# REVIEW$/{exit} f'
-        count=$(grep -cF "$issue_half1$issue_half2" ${./prompts.nix} || true)
-        [ "$count" -le 1 ] || {
-          echo "expected the CHECK-section awk slice defined at most once in prompts.nix, got $count" >&2
-          exit 1
-        }
-        # fix-prompt half slices the rendered fix-prompt.md, where the
-        # injected CHECK/COMMIT block still starts "# CHECK" on its own
-        # line, so it keeps the start-of-line anchor.
-        fix_half1='/^# CHECK$/{f=1}'
-        fix_half2=' /^# LAND THE CHANGE$/{exit} f'
-        fix_count=$(grep -cF "$fix_half1$fix_half2" ${./prompts.nix} || true)
-        [ "$fix_count" -le 1 ] || {
-          echo "expected the fix-prompt CHECK-section awk slice defined at most once in prompts.nix, got $fix_count" >&2
-          exit 1
-        }
+        ${sliceDefinedOncePin {
+          what = "CHECK-section awk slice";
+          # issue-prompt half is end-of-line-anchored only, not
+          # start-of-line (issue #3221): the raw, unrendered template it
+          # slices now has "# CHECK" trailing the IMPLEMENT phase's own
+          # variable run, not alone on its own line.
+          half1 = "/# CHECK$/{f=1}";
+          half2 = " /# REVIEW$/{exit} f";
+        }}
+        ${sliceDefinedOncePin {
+          what = "fix-prompt CHECK-section awk slice";
+          # fix-prompt half slices the rendered fix-prompt.md, where the
+          # injected CHECK/COMMIT block still starts "# CHECK" on its own
+          # line, so it keeps the start-of-line anchor.
+          half1 = "/^# CHECK$/{f=1}";
+          half2 = " /^# LAND THE CHANGE$/{exit} f";
+        }}
+        touch $out
+      '';
+
+  # Grep pin (issue #3270): the research prompts' TASK/CONTEXT awk slice
+  # must be defined once, not copy-pasted or dropped by a marker rename;
+  # either would leave a check silently reading stale content or nothing
+  # at all.
+  prompts-nix-research-task-slice-defined-once =
+    pkgs.runCommand "prompts-nix-research-task-slice-defined-once" { }
+      ''
+        ${sliceDefinedOncePin {
+          what = "research TASK/CONTEXT awk slice";
+          half1 = "/^# TASK$/{f=1}";
+          half2 = " /^# CONTEXT$/{exit} f";
+        }}
         touch $out
       '';
 
