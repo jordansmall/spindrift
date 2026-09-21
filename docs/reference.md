@@ -4945,6 +4945,35 @@ snapshot write that follows it (`snapshotStoreDB`, and only when a
 `nixConfigFileDrv` is configured), not the closure build. There is no
 image tag here for concurrent children to race over.
 
+**Child environment.** Every child the daemon starts — a dispatch child, a
+research child, and the doctor preflight below — execs with the daemon's own
+environment minus every key present in the `--input` document's `settings`
+(`childEnv`, `cmd/launcher/internal/daemon/command.go`, called from both
+`ChildCommand` and `DoctorCommand`; assigned to `cmd.Env` by `RunChild` and
+`RunDoctor` in `cmd/launcher/daemon/runner.go`). That strips exactly the
+non-secret knobs — a secret knob never enters the document at all — so a
+child's only knob source becomes its own input document plus the argv the
+daemon built for it. Everything else — secrets, `PATH`, `HOME`, `NIX_*`,
+`XDG_*`, and any variable the document does not name — passes through
+untouched, which is why the `EnvironmentFile` recipe under **Service unit**
+below still reaches a child's forge credentials unmolested. At startup,
+right after the input document loads, the daemon checks each stripped key
+against its own environment (`settingsKeys` and `warnStrippedChildEnv`,
+`cmd/launcher/daemon/main.go`) and, for every one actually set, prints one
+stderr line before the startup preflight runs:
+
+```
+MODEL=x set in environment — not forwarded to children; use the --input document's settings.MODEL
+```
+
+It never refuses to start over this. An exported `CONTINUOUS_DISPATCH=1` or
+`ISSUE_NUMBER` or `MODEL` now configures the daemon alone — its own knob
+resolution is unchanged, and an ambient value still wins there with its own,
+separate deprecation warning (`lookupKnob`, same file) — it simply never
+reaches a child. Anything a child's own wrapper re-sources from
+`harness.env` in its working directory is outside the daemon's control and
+stays so.
+
 **Startup preflight.** After the instance lock and the signal wiring, before
 any slot, claim, or Box, the daemon runs the pinned child's `doctor`
 subcommand exactly once (`startupPreflight`, `cmd/launcher/daemon/main.go`)
@@ -5449,22 +5478,26 @@ the line most easily dropped from a pasted unit. The daemon execs both
 `git` and `nix` by bare name — `git fetch`/`git rev-parse` at every
 iteration boundary (`ResolveRevision`, `cmd/launcher/daemon/runner.go`),
 and `nix run`/`nix eval` for every child it starts and every self-build
-evaluation (`cmd/launcher/internal/daemon/command.go`) — and sets no
-`cmd.Env`, so the unit's own `PATH` is the only place either can be
-found; the systemd user manager's default `PATH` carries neither on a
-NixOS host. Without this line the daemon does not limp along dispatching
-nothing — but the two binaries are reached for at different points in
-startup, so which one is missing decides both the exit code and how the
-unit behaves. A missing `git` fails before the preflight is ever reached:
-`repoRoot` shells out to `git rev-parse --show-toplevel` to find the
-checkout root, that exec fails, and the process exits 1 (`repoRoot`,
-`cmd/launcher/daemon/main.go`) — a code `Restart=on-failure` does bounce,
-so the unit restarts five times thirty seconds apart and then parks in
-`failed`. A missing `nix` gets further: resolving the tip is git's work
-and succeeds, `doctor` then cannot be run at all, the startup preflight
-refuses the start with a `doctor-seam-error` reason, and the process
-exits 11 (`startupPreflight`, same file) — before any slot, any claim,
-any Box. `RestartPreventExitStatus=11` above holds that one down, so it
+evaluation (`cmd/launcher/internal/daemon/command.go`). `git fetch`/`git
+rev-parse` and the self-build `nix eval` set no `cmd.Env` at all; the
+child-starting `nix run` sets a knob-stripped copy of the daemon's own
+environment (see **Child environment** above) that still carries `PATH`
+through unchanged. Either way the unit's own `PATH` is the only place
+either binary can be found; the systemd user manager's default `PATH`
+carries neither on a NixOS host. Without this line the daemon does not
+limp along dispatching nothing — but the two binaries are reached for
+at different points in startup, so which one is missing decides both the
+exit code and how the unit behaves. A missing `git` fails before the
+preflight is ever reached: `repoRoot` shells out to `git rev-parse
+--show-toplevel` to find the checkout root, that exec fails, and the
+process exits 1 (`repoRoot`, `cmd/launcher/daemon/main.go`) — a code
+`Restart=on-failure` does bounce, so the unit restarts five times
+thirty seconds apart and then parks in `failed`. A missing `nix` gets
+further: resolving the tip is git's work and succeeds, `doctor` then
+cannot be run at all, the startup preflight refuses the start
+with a `doctor-seam-error` reason, and the process exits 11
+(`startupPreflight`, same file) — before any slot, any claim, any
+Box. `RestartPreventExitStatus=11` above holds that one down, so it
 dies once at startup and stays dead. Either way nothing is ever
 dispatched, and neither exit code names the cause on its own: read the
 diagnostic off the unit's journal output, which names the seam that
