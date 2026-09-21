@@ -36,14 +36,20 @@ func TestIdleBackoffReset(t *testing.T) {
 }
 
 // TestIdleBackoffCapsAtShippedDefaults pins the clamp branch (b.cur =
-// b.cap) at the actual values the daemon ships: daemonIdleFloor (5m) and
-// daemonIdleCap (30m) from cmd/launcher/daemon/main.go. Those aren't a
+// b.cap) at the actual values the daemon ships: DAEMON_IDLE_FLOOR (5m) and
+// DAEMON_IDLE_CAP (30m) from lib/env-schema.nix. Those aren't a
 // power-of-two multiple of each other, so this is the only pair (among this
 // file's tests) where doubling overshoots the cap and the clamp itself
 // has to run: 20m doubles to 40m, which must clamp to 30m.
 func TestIdleBackoffCapsAtShippedDefaults(t *testing.T) {
-	floor := 5 * time.Minute
-	cap := 30 * time.Minute
+	floor, err := time.ParseDuration(shippedKnobDefaults["DAEMON_IDLE_FLOOR"])
+	if err != nil {
+		t.Fatalf("parse DAEMON_IDLE_FLOOR default: %v", err)
+	}
+	cap, err := time.ParseDuration(shippedKnobDefaults["DAEMON_IDLE_CAP"])
+	if err != nil {
+		t.Fatalf("parse DAEMON_IDLE_CAP default: %v", err)
+	}
 	b := newIdleBackoff(floor, cap)
 
 	got := []time.Duration{}
@@ -51,7 +57,9 @@ func TestIdleBackoffCapsAtShippedDefaults(t *testing.T) {
 		got = append(got, b.next())
 	}
 
-	want := []time.Duration{5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 30 * time.Minute, 30 * time.Minute}
+	// 4*floor (20m) is still under cap; doubling that (40m) is what
+	// overshoots and must clamp -- that's the branch this test exists to pin.
+	want := []time.Duration{floor, 2 * floor, 4 * floor, cap, cap}
 	for i, w := range want {
 		if got[i] != w {
 			t.Fatalf("next() sequence = %v, want %v", got, want)
