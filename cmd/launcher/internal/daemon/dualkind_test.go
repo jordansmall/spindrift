@@ -19,10 +19,10 @@ func dualKindConfig(slots, reservation int) Config {
 	return cfg
 }
 
-// fakeKindRunner is fakeRunner's dual-kind sibling: fakeRunner scripts one
+// fakeKindRunner is scriptedRunner's dual-kind sibling: scriptedRunner scripts one
 // shared RunChild sequence, which cannot model two independently-emptying
 // queues. resultsByKind gives each Kind its own sequence, consumed in call
-// order with the last value repeating once exhausted (fakeRunner's own
+// order with the last value repeating once exhausted (scriptedRunner's own
 // exhaustion rule, per kind instead of pool-wide). Mutex-guarded: these
 // tests deliberately run several slots concurrently against one fake.
 type fakeKindRunner struct {
@@ -131,18 +131,18 @@ func slotsSeen(calls []runCall, kind Kind) map[int]bool {
 	return seen
 }
 
-// cancelOnSleepClock wraps fakeClock and fires cancelFn the first time
+// cancelOnSleepClock wraps testClock and fires cancelFn the first time
 // Sleep is called. A slot only ever calls Sleep from idleSleep once every
 // configured kind has backed off (pickKind found nothing runnable) — that
 // is exactly the "pool has genuinely idled" moment test 8 needs to stop on.
 type cancelOnSleepClock struct {
-	*fakeClock
+	*testClock
 	cancelFn context.CancelFunc
 	once     sync.Once
 }
 
 func (c *cancelOnSleepClock) Sleep(ctx context.Context, d time.Duration) {
-	c.fakeClock.Sleep(ctx, d)
+	c.testClock.Sleep(ctx, d)
 	c.once.Do(c.cancelFn)
 }
 
@@ -155,7 +155,7 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 	r := newBlockingRunner("rev1", slots)
 	// Restores this test's pre-gate concurrent first wave (issue #3634).
 	r.announce = true
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -212,7 +212,7 @@ func TestPoolReservedSlotPrefersResearchWhileResearchHasWork(t *testing.T) {
 		}
 		return len(seen) >= slots
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -278,7 +278,7 @@ func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 		}
 		return seen[0] && seen[1]
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -320,7 +320,7 @@ func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 		}
 		return seen[0] && seen[1]
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -355,7 +355,7 @@ func TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers(t *testing.T) {
 	r.cancelWhen = func(f *fakeKindRunner) bool {
 		return f.callsByKind[KindResearch] >= 5
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -407,7 +407,7 @@ func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
 		}
 		return seen[0] && seen[1]
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -426,7 +426,7 @@ func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
 // the two kinds' gates: work is permanently empty (and, once gated, never
 // rechecked against a fake clock that never advances) while research keeps
 // dispatching. The slot must never fall back to sleeping out work's
-// backoff — clk.waits must stay empty the whole run.
+// backoff — clk.waits() must stay empty the whole run.
 func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &fakeKindRunner{
@@ -438,7 +438,7 @@ func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
 		limit: 30,
 	}
 	r.cancelFn = cancel
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -450,8 +450,8 @@ func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
 	if got := r.callCount(KindResearch); got != 29 {
 		t.Fatalf("research calls = %d, want 29: it must keep being dispatched every remaining iteration", got)
 	}
-	if len(clk.waits) != 0 {
-		t.Fatalf("waits = %v, want none: an empty work queue must never make the slot sleep while research keeps dispatching", clk.waits)
+	if clk.waitCount() != 0 {
+		t.Fatalf("waits = %v, want none: an empty work queue must never make the slot sleep while research keeps dispatching", clk.waits())
 	}
 }
 
@@ -461,8 +461,8 @@ func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
 // not idle on the first kind's empty result alone.
 func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	baseClk := &fakeClock{}
-	clk := &cancelOnSleepClock{fakeClock: baseClk, cancelFn: cancel}
+	baseClk := &testClock{}
+	clk := &cancelOnSleepClock{testClock: baseClk, cancelFn: cancel}
 	r := &fakeKindRunner{
 		revision: "rev1",
 		resultsByKind: map[Kind][]ChildResult{
@@ -485,8 +485,8 @@ func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 	if calls[0].Kind != KindDispatch || calls[1].Kind != KindResearch {
 		t.Fatalf("run calls = %v, want [dispatch research] (work-first order at ResearchReservation 0)", calls)
 	}
-	if len(baseClk.waits) != 1 || baseClk.waits[0] != testIdleFloor {
-		t.Fatalf("waits = %v, want exactly one wait of %v, taken only once both kinds had gated", baseClk.waits, testIdleFloor)
+	if baseClk.waitCount() != 1 || baseClk.waits()[0] != testIdleFloor {
+		t.Fatalf("waits = %v, want exactly one wait of %v, taken only once both kinds had gated", baseClk.waits(), testIdleFloor)
 	}
 }
 
@@ -499,7 +499,7 @@ func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 // runSlot stamps onto the idle event's Wait field — not on any private
 // idleBackoff field.
 func TestPoolPerKindBackoffGrowsIndependently(t *testing.T) {
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	cfg := dualKindConfig(1, 0)
@@ -533,16 +533,16 @@ func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 	t.Run("dispatch-only", func(t *testing.T) {
 		cfg := testConfig(1)
 		cfg.ResearchReservation = 1 // nonsensical if it mattered; must be inert with one kind
-		r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
-		clk := &fakeClock{}
+		r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
+		clk := &testClock{}
 		var buf bytes.Buffer
 		em := newTestEmitter(&buf)
 
 		Loop(context.Background(), cfg, r, em, clk)
 
-		for _, c := range r.runCalls {
+		for _, c := range r.calls() {
 			if c.Kind != KindDispatch {
-				t.Fatalf("run calls = %v, want every call to be dispatch", r.runCalls)
+				t.Fatalf("run calls = %v, want every call to be dispatch", r.calls())
 			}
 		}
 	})
@@ -551,16 +551,16 @@ func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 		cfg := testConfig(1)
 		cfg.Kinds = []Kind{KindResearch}
 		cfg.ResearchReservation = 0
-		r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
-		clk := &fakeClock{}
+		r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
+		clk := &testClock{}
 		var buf bytes.Buffer
 		em := newTestEmitter(&buf)
 
 		Loop(context.Background(), cfg, r, em, clk)
 
-		for _, c := range r.runCalls {
+		for _, c := range r.calls() {
 			if c.Kind != KindResearch {
-				t.Fatalf("run calls = %v, want every call to be research", r.runCalls)
+				t.Fatalf("run calls = %v, want every call to be research", r.calls())
 			}
 		}
 	})
@@ -581,7 +581,7 @@ func TestLoopEventsCarryKindOnEveryTransition(t *testing.T) {
 		limit: 6,
 	}
 	r.cancelFn = cancel
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 

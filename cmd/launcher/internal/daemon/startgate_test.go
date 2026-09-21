@@ -22,7 +22,7 @@ import (
 func TestPoolColdStartGatesDiscoveryToTheLeadingSlot(t *testing.T) {
 	const slots = 3
 	r := newBlockingRunner("rev1", slots)
-	clk := &fakeClock{}
+	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
@@ -108,7 +108,7 @@ func TestPoolColdStartGateStaysReleasedAcrossLaterIterations(t *testing.T) {
 	const slots = 3
 	const passes = 3 // the gated first pass, plus two ungated ones
 	r := newBlockingRunner("rev1", slots)
-	clk := &fakeClock{}
+	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
@@ -286,8 +286,8 @@ func TestPoolColdStartWithNoClaimReleasesAfterFinishReports(t *testing.T) {
 // at all (see newPool): the sole slot is both leader and everyone, so
 // there is no wave to stagger and the stream must carry no gate event.
 func TestPoolSingleSlotNeverGates(t *testing.T) {
-	r := &fakeRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
-	clk := &fakeClock{}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -311,13 +311,13 @@ func TestPoolSingleSlotNeverGates(t *testing.T) {
 func TestPoolLeaderFailureBeforeChildStillReleasesTheGate(t *testing.T) {
 	const slots = 2
 	wantErr := errors.New("boom")
-	r := &fakeRunner{
+	r := &scriptedRunner{
 		revisions:  []string{"rev1"},
 		resolveAt:  1,
 		resolveErr: wantErr,
 		results:    []ChildResult{{Exit: 7}},
 	}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
@@ -380,18 +380,18 @@ func TestPoolLeaderFailureBeforeChildStillReleasesTheGate(t *testing.T) {
 func TestPoolLeaderPostChildFailureReleasesTheGateWithHonestReason(t *testing.T) {
 	tests := []struct {
 		name string
-		r    *fakeRunner
+		r    *scriptedRunner
 	}{
 		{
 			name: "unrecognised exit code",
-			r: &fakeRunner{
+			r: &scriptedRunner{
 				revisions: []string{"rev1"},
 				results:   []ChildResult{{Exit: 99}, {Exit: 7}},
 			},
 		},
 		{
 			name: "RunChild seam error",
-			r: &fakeRunner{
+			r: &scriptedRunner{
 				revisions: []string{"rev1"},
 				runErrAt:  1,
 				runErr:    errors.New("boom"),
@@ -403,7 +403,7 @@ func TestPoolLeaderPostChildFailureReleasesTheGateWithHonestReason(t *testing.T)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			const slots = 2
-			clk := &fakeClock{}
+			clk := &testClock{}
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
@@ -492,7 +492,7 @@ func TestPoolLeaderStopBeforeResolvingReleasesTheGate(t *testing.T) {
 	const slots = 3
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &stoppingRunner{cancel: cancel, proceed: make(chan struct{})}
-	clk := &fakeClock{}
+	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
@@ -550,7 +550,7 @@ func TestPoolLeaderStopBeforeResolvingReleasesTheGate(t *testing.T) {
 func TestPoolColdStartEventStreamOrderingAndReasons(t *testing.T) {
 	const slots = 3
 	r := newBlockingRunner("rev1", slots)
-	clk := &fakeClock{}
+	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
