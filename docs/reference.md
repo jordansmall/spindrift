@@ -547,33 +547,39 @@ message (the coordinator owns COMMIT, issue #3419), and the worker role is
 structurally forbidden from ever emitting the marker grammar (issue
 #2059/#2491 quarantine), so naming those markers in its own rendered prompt
 would trip that contract.
-The review prompt carries the full marker-grammar paragraph plus one
-addition of its own (`fragments/caveman-default-review.md`): the `VERDICT:`
-line and every `## Blocking`/`## Non-blocking` finding stay full prose too,
-since the orchestrator hands finding text to a Filer subagent that turns it
-into a GitHub issue body verbatim. The research prompts carry their own
-variant too (`fragments/caveman-default-research.md`, issue #2708), for the
-opposite reason from the worker prompt: research's posted verdict comment is
-the entire human-facing product of the run — a human reads it to decide
-whether to promote the issue or close it, and a later worker picks up the
-context-for-a-worker section cold — so the exemption both widens and
+The review prompt carries the marker-grammar paragraph minus
+`SPINDRIFT_ISSUE_INTENT`, which the reviewer agent itself never emits (issue
+#2707) — only the Filer subagent it spawns does — plus two additions of its
+own (`fragments/caveman-default-review.md`). First, every
+`## Blocking`/`## Non-blocking` finding stays full prose, since the
+orchestrator hands finding text to a Filer subagent that turns it into a
+GitHub issue body verbatim. Second, the `## Probed (APPROVE only)` lines
+stay full prose too (issue #3265), on the same tier for the adjacent reason:
+no Filer relays those, so the tier is text a human reads cold rather than
+text the Filer forwards, and a compressed receipt stops being evidence that
+the approving pass ran the hunt it names. The research prompts carry their
+own variant too (`fragments/caveman-default-research.md`, issue #2708), for
+the opposite reason from the worker prompt: research's posted verdict
+comment is the entire human-facing product of the run — a human reads it to
+decide whether to promote the issue or close it, and a later worker picks up
+the context-for-a-worker section cold — so the exemption both widens and
 narrows relative to `fragments/caveman-default.md`: it widens from just the
 marker-grammar lines to the whole posted comment (the verdict line and its
 rationale, the context-for-a-worker section, the open-questions section, and
-the `<!-- spindrift-research -->` machine marker), on top of the still-exempt
-`SPINDRIFT_OUTCOME` line and its required shape, but it narrows too — it
-never names the `VERDICT:`/`SPINDRIFT_PR_INTENT` lines, since research never
-emits either, and it drops the base fragment's commit-message exemption
-(`fragments/caveman-default.md` exempts commit messages, always full
-human-quality prose — irrelevant here since a research dispatch never
+the `<!-- spindrift-research -->` machine marker), on top of the
+still-exempt `SPINDRIFT_OUTCOME` line and its required shape, but it narrows
+too — it never names the `VERDICT:`/`SPINDRIFT_PR_INTENT` lines, since
+research never emits either, and it drops the base fragment's commit-message
+exemption (`fragments/caveman-default.md` exempts commit messages, always
+full human-quality prose — irrelevant here since a research dispatch never
 commits). It does name `SPINDRIFT_COMMENT` explicitly, where the base
 fragment only reaches it generically, as one instance of "any host-relay
 signal line such as `SPINDRIFT_PR_INTENT`": on a read-only dispatch
 (`BoxWriteEnabled=false`) the box can't post the verdict comment directly,
-and independently, whenever the issue tracker is a local tracker there is
-no tracker client to post through at all — either way it relays that
-comment through a single `SPINDRIFT_COMMENT` host-relay stdout line
-instead, making it the sole carrier of the verdict on that path
+and independently, whenever the issue tracker is a local tracker there is no
+tracker client to post through at all — either way it relays that comment
+through a single `SPINDRIFT_COMMENT` host-relay stdout line instead, making
+it the sole carrier of the verdict on that path
 (`fragments/research-verdict-local.md`). A Consumer that never bakes the
 skill gets a prompt with zero mention of it.
 
