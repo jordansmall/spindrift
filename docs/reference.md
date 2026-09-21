@@ -3089,6 +3089,26 @@ is itself non-fatal, the same best-effort guarantee as the rest of this
 channel. Extending the enum is a host-side-only change; the Box can never
 smuggle an arbitrary label through this field.
 
+##### Filing volume on the status output
+
+Every settle that reaches the filing step prints one tally line on the run's
+own status output, work path and research path alike:
+
+```
+    #1234  filed=ok:2,failed:1
+```
+
+`ok` counts the issues actually filed; `failed` counts the filing attempts
+that errored, so a run that tried and failed does not read as a quiet run.
+The line prints even when nothing was filed (`filed=ok:0,failed:0`), which is
+what makes "reached filing, filed nothing" distinguishable from a run that
+never got that far and prints no tally line at all. That makes the
+findings-per-run rate readable straight off a dogfood log or a dispatch
+summary, without querying the tracker (issue #3608). The value is a
+comma-joined set of `name:count` pairs, so a later count — skipped-as-duplicate,
+say — is one more pair rather than a format change: parse it by name, never by
+position.
+
 ##### Research filing
 
 The Filer also backs the research Dispatch kind (see [Research
