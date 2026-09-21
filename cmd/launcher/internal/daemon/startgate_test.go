@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -21,7 +20,8 @@ import (
 // gate opens and the rest of the pool starts its own first wave at once.
 func TestPoolColdStartGatesDiscoveryToTheLeadingSlot(t *testing.T) {
 	const slots = 3
-	r := newBlockingRunner("rev1", slots)
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
 	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
@@ -32,7 +32,7 @@ func TestPoolColdStartGatesDiscoveryToTheLeadingSlot(t *testing.T) {
 	}()
 
 	// Only the leader (slot 0) starts discovery at first.
-	if got := <-r.started; got != 0 {
+	if got := r.awaitStart(t); got != 0 {
 		t.Fatalf("first slot to start = %d, want 0 (the leader)", got)
 	}
 
@@ -57,7 +57,7 @@ func TestPoolColdStartGatesDiscoveryToTheLeadingSlot(t *testing.T) {
 
 	seen := map[int]bool{0: true}
 	for i := 0; i < slots-1; i++ {
-		seen[<-r.started] = true
+		seen[r.awaitStart(t)] = true
 	}
 	if len(seen) != slots {
 		t.Fatalf("distinct slots started after the claim = %v, want all %d", seen, slots)
@@ -87,7 +87,7 @@ func TestPoolColdStartGatesDiscoveryToTheLeadingSlot(t *testing.T) {
 
 	// End the test: release every slot's in-flight child.
 	for s := 0; s < slots; s++ {
-		r.release[s] <- ChildResult{Exit: 7}
+		r.releaseSlot(t, s, ChildResult{Exit: 7})
 	}
 	reason := <-done
 	if !strings.Contains(reason, "signalled-stop") {
@@ -107,7 +107,8 @@ func TestPoolColdStartGatesDiscoveryToTheLeadingSlot(t *testing.T) {
 func TestPoolColdStartGateStaysReleasedAcrossLaterIterations(t *testing.T) {
 	const slots = 3
 	const passes = 3 // the gated first pass, plus two ungated ones
-	r := newBlockingRunner("rev1", slots)
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
 	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
@@ -118,7 +119,7 @@ func TestPoolColdStartGateStaysReleasedAcrossLaterIterations(t *testing.T) {
 	}()
 
 	// First pass: leader alone, siblings gated, exactly as the test above.
-	if got := <-r.started; got != 0 {
+	if got := r.awaitStart(t); got != 0 {
 		t.Fatalf("first slot to start = %d, want 0 (the leader)", got)
 	}
 	for i := 0; i < slots-1; i++ {
@@ -128,7 +129,7 @@ func TestPoolColdStartGateStaysReleasedAcrossLaterIterations(t *testing.T) {
 
 	seen := map[int]bool{0: true}
 	for i := 0; i < slots-1; i++ {
-		seen[<-r.started] = true
+		seen[r.awaitStart(t)] = true
 	}
 	if len(seen) != slots {
 		t.Fatalf("distinct slots started after the claim = %v, want all %d", seen, slots)
@@ -139,11 +140,11 @@ func TestPoolColdStartGateStaysReleasedAcrossLaterIterations(t *testing.T) {
 	// and no gate in the way.
 	for pass := 1; pass < passes; pass++ {
 		for s := 0; s < slots; s++ {
-			r.release[s] <- ChildResult{Exit: 0}
+			r.releaseSlot(t, s, ChildResult{Exit: 0})
 		}
 		seen = map[int]bool{}
 		for i := 0; i < slots; i++ {
-			seen[<-r.started] = true
+			seen[r.awaitStart(t)] = true
 		}
 		if len(seen) != slots {
 			t.Fatalf("pass %d: distinct slots started = %v, want all %d", pass, seen, slots)
@@ -152,7 +153,7 @@ func TestPoolColdStartGateStaysReleasedAcrossLaterIterations(t *testing.T) {
 
 	// End the test: release every slot's final in-flight child.
 	for s := 0; s < slots; s++ {
-		r.release[s] <- ChildResult{Exit: 7}
+		r.releaseSlot(t, s, ChildResult{Exit: 7})
 	}
 	reason := <-done
 	if !strings.Contains(reason, "signalled-stop") {
@@ -186,14 +187,18 @@ func TestPoolColdStartGateStaysReleasedAcrossLaterIterations(t *testing.T) {
 // racing ahead of the events its reason names.
 func TestPoolColdStartWithNoClaimReleasesAfterFinishReports(t *testing.T) {
 	const slots = 2
-	r := newBlockingRunner("rev1", slots)
-	// gateClock: once the leader's exit-2 backs the pool's one configured
-	// kind off, every slot that reaches pickKind finds it gated and parks
-	// in its own idle wait — gateClock's Sleep never returns on its own,
-	// so that park is this test's synchronization point for "the sibling
-	// ran its own discovery cycle", not just "the sibling started a
-	// child" (which single-kind exhaustion makes nothing left to start).
-	clk := newGateClock()
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
+	// clk: once the leader's exit-2 backs the pool's one configured kind
+	// off, every slot that reaches pickKind finds it gated and parks in
+	// its own idle wait — a parked testClock's Sleep never returns on its
+	// own, so that park is this test's synchronization point for "the
+	// sibling ran its own discovery cycle", not just "the sibling started
+	// a child" (which single-kind exhaustion makes nothing left to
+	// start). Never calling wake(): the only way any Sleep call ever
+	// returns here is the top-level ctx being cancelled below.
+	clk := &testClock{now: time.Unix(0, 0).UTC(), sleepSignal: make(chan struct{}, 8)}
+	clk.park()
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
@@ -203,7 +208,7 @@ func TestPoolColdStartWithNoClaimReleasesAfterFinishReports(t *testing.T) {
 		done <- Loop(ctx, testConfig(slots), r, em, clk)
 	}()
 
-	if got := <-r.started; got != 0 {
+	if got := r.awaitStart(t); got != 0 {
 		t.Fatalf("first slot to start = %d, want 0 (the leader)", got)
 	}
 	nw.waitForLine(t, "\"event\":\"gate_hold\"")
@@ -219,12 +224,12 @@ func TestPoolColdStartWithNoClaimReleasesAfterFinishReports(t *testing.T) {
 	// sibling — previously blocked in awaitStartGate — run its own
 	// pickKind instead of staying parked on a gate that is now the only
 	// thing standing between it and ever running.
-	r.release[0] <- ChildResult{Exit: 2}
+	r.releaseSlot(t, 0, ChildResult{Exit: 2})
 
 	// The leader's own next pickKind call observes the dispatch backoff it
 	// just set synchronously, in the same goroutine, so it always idles.
 	select {
-	case <-clk.sleeping:
+	case <-clk.sleepSignal:
 	case <-time.After(5 * time.Second):
 		t.Fatalf("the leader never reached its own idle wait after releasing the gate")
 	}
@@ -240,8 +245,8 @@ func TestPoolColdStartWithNoClaimReleasesAfterFinishReports(t *testing.T) {
 		if s != 1 {
 			t.Fatalf("unexpected slot %d started a child", s)
 		}
-		r.release[1] <- ChildResult{Exit: 2}
-	case <-clk.sleeping:
+		r.releaseSlot(t, 1, ChildResult{Exit: 2})
+	case <-clk.sleepSignal:
 	case <-time.After(5 * time.Second):
 		t.Fatalf("the sibling never unblocked from the gate")
 	}
@@ -458,31 +463,6 @@ func TestPoolLeaderPostChildFailureReleasesTheGateWithHonestReason(t *testing.T)
 	}
 }
 
-// stoppingRunner is TestPoolLeaderStopBeforeResolvingReleasesTheGate's
-// Runner: ResolveRevision blocks on proceed (so the test can first confirm
-// every sibling is genuinely parked on the gate) and then cancels the pool
-// itself, modelling an operator SIGTERM landing before the leader's first
-// discovery round ever resolves. RunChild must never be reached down this
-// path — a cancelled pool halts before starting any child.
-type stoppingRunner struct {
-	cancel  context.CancelFunc
-	proceed chan struct{}
-}
-
-func (r *stoppingRunner) ResolveRevision(ctx context.Context) (string, error) {
-	<-r.proceed
-	r.cancel()
-	return "", ctx.Err()
-}
-
-func (r *stoppingRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *stoppingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	return ChildResult{}, fmt.Errorf("must not be called: a cancelled pool must halt before any child starts")
-}
-
 // TestPoolLeaderStopBeforeResolvingReleasesTheGate pins the deferred
 // release in runSlot (gateOpenStopped): a leader that stops — here, an
 // operator cancellation landing inside its very first ResolveRevision,
@@ -491,7 +471,22 @@ func (r *stoppingRunner) RunChild(ctx context.Context, req ChildRequest) (ChildR
 func TestPoolLeaderStopBeforeResolvingReleasesTheGate(t *testing.T) {
 	const slots = 3
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &stoppingRunner{cancel: cancel, proceed: make(chan struct{})}
+	// onResolve blocks on proceed (so the test can first confirm every
+	// sibling is genuinely parked on the gate) and then cancels the pool
+	// itself, modelling an operator SIGTERM landing before the leader's
+	// first discovery round ever resolves. onStart must never be reached
+	// down this path — a cancelled pool halts before starting any child.
+	proceed := make(chan struct{})
+	r := &scriptedRunner{
+		onResolve: func(ctx context.Context, call int) error {
+			<-proceed
+			cancel()
+			return ctx.Err()
+		},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			return fmt.Errorf("must not be called: a cancelled pool must halt before any child starts")
+		},
+	}
 	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
@@ -507,7 +502,7 @@ func TestPoolLeaderStopBeforeResolvingReleasesTheGate(t *testing.T) {
 	for i := 0; i < slots-1; i++ {
 		nw.waitForLine(t, "\"event\":\"gate_hold\"")
 	}
-	close(r.proceed)
+	close(proceed)
 
 	var reason string
 	select {
@@ -549,7 +544,8 @@ func TestPoolLeaderStopBeforeResolvingReleasesTheGate(t *testing.T) {
 // after gate_open, and both event kinds carry a non-empty reason.
 func TestPoolColdStartEventStreamOrderingAndReasons(t *testing.T) {
 	const slots = 3
-	r := newBlockingRunner("rev1", slots)
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
 	clk := &testClock{}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
@@ -559,7 +555,7 @@ func TestPoolColdStartEventStreamOrderingAndReasons(t *testing.T) {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
 
-	if got := <-r.started; got != 0 {
+	if got := r.awaitStart(t); got != 0 {
 		t.Fatalf("first slot to start = %d, want 0 (the leader)", got)
 	}
 	nw.waitForLine(t, "\"event\":\"gate_hold\"")
@@ -569,7 +565,7 @@ func TestPoolColdStartEventStreamOrderingAndReasons(t *testing.T) {
 
 	seen := map[int]bool{0: true}
 	for i := 0; i < slots-1; i++ {
-		seen[<-r.started] = true
+		seen[r.awaitStart(t)] = true
 	}
 	if len(seen) != slots {
 		t.Fatalf("distinct slots started after the claim = %v, want all %d", seen, slots)
@@ -621,95 +617,9 @@ func TestPoolColdStartEventStreamOrderingAndReasons(t *testing.T) {
 	}
 
 	for s := 0; s < slots; s++ {
-		r.release[s] <- ChildResult{Exit: 7}
+		r.releaseSlot(t, s, ChildResult{Exit: 7})
 	}
 	<-done
-}
-
-// blockingMutableClock is windowClosingLeaderRunner's Clock: like
-// pool_test.go's gateClock, Sleep blocks on ctx.Done() rather than
-// advancing, so a slot parked in awaitWindow stays parked for the shut
-// window's whole span, exactly as a real clock would — but unlike
-// gateClock's fixed Now, this one reads a mutable now that the runner
-// advances past the window's close once its own fetch returns.
-type blockingMutableClock struct {
-	mu  sync.Mutex
-	now time.Time
-
-	// release, when non-nil, is a second way out of Sleep besides
-	// ctx.Done(): closing it lets a test unpark every slot blocked in a
-	// shut-window sleep without cancelling the pool itself. A nil release
-	// leaves that select case blocking forever, so Sleep only ever
-	// returns via ctx.Done().
-	release chan struct{}
-
-	// entered, when non-nil, gets a best-effort, non-blocking send on each
-	// Sleep call, before it blocks: with several slots racing to their
-	// first Awake.Until check via Loop (no per-slot identity to stage them
-	// by hand), a test sized to the slot count drains this exactly N times
-	// to know every slot has already made that check — and any call a
-	// slot makes before its own Sleep, buggy or not, has already run —
-	// before mutating now out from under a slot that has not reached
-	// Sleep yet. Non-blocking, not a guaranteed per-call delivery: once
-	// the test has drained its N, later Sleep calls (idleSleep, backoff)
-	// must never deadlock a slot that finds the buffer already full.
-	entered chan struct{}
-}
-
-func (c *blockingMutableClock) Sleep(ctx context.Context, d time.Duration) {
-	if c.entered != nil {
-		select {
-		case c.entered <- struct{}{}:
-		default:
-		}
-	}
-	select {
-	case <-ctx.Done():
-	case <-c.release:
-	}
-}
-
-func (c *blockingMutableClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-// windowClosingLeaderRunner models the reviewer's blocking finding on issue
-// #3634: a daemon started with the Awake window still open, whose leader's
-// own ResolveRevision fetch (a git fetch) outlasts the window's close by
-// the time it returns. proceed lets the test hold the leader there until
-// every sibling is confirmed parked on the gate; returning advances the
-// clock past the window's close, so runSlot's post-fetch Awake check takes
-// the bare continue without ever starting a child. Every call after that
-// first one — the leader's own retries and any sibling's, once the gate
-// opens — blocks on ctx.Done() instead of resolving, so the pool goes
-// quiescent rather than spinning once the test is ready to assert.
-type windowClosingLeaderRunner struct {
-	clk      *blockingMutableClock
-	proceed  chan struct{}
-	revision string
-	calls    int32
-}
-
-func (r *windowClosingLeaderRunner) ResolveRevision(ctx context.Context) (string, error) {
-	if atomic.AddInt32(&r.calls, 1) == 1 {
-		<-r.proceed
-		r.clk.mu.Lock()
-		r.clk.now = r.clk.now.Add(2 * time.Minute)
-		r.clk.mu.Unlock()
-		return r.revision, nil
-	}
-	<-ctx.Done()
-	return "", ctx.Err()
-}
-
-func (r *windowClosingLeaderRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *windowClosingLeaderRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	return ChildResult{}, fmt.Errorf("must not be called: the window shut before the leader's fetch returned")
 }
 
 // TestPoolLeaderWindowClosesDuringResolveReleasesTheGate pins the
@@ -731,8 +641,37 @@ func TestPoolLeaderWindowClosesDuringResolveReleasesTheGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
 	}
-	clk := &blockingMutableClock{now: time.Date(2026, 1, 1, 16, 59, 50, 0, time.UTC)}
-	r := &windowClosingLeaderRunner{clk: clk, proceed: make(chan struct{}), revision: "rev1"}
+	// clk: like pool_test.go's parked testClock, Sleep blocks on
+	// ctx.Done() rather than advancing, so a slot parked in awaitWindow
+	// stays parked for the shut window's whole span, exactly as a real
+	// clock would — but unlike a fixed-Now gate clock, this one reads a
+	// mutable now that the leader's onResolve hook advances past the
+	// window's close once its own fetch returns.
+	clk := &testClock{now: time.Date(2026, 1, 1, 16, 59, 50, 0, time.UTC)}
+	clk.park()
+	// proceed lets the test hold the leader there until every sibling is
+	// confirmed parked on the gate; returning advances the clock past the
+	// window's close, so runSlot's post-fetch Awake check takes the bare
+	// continue without ever starting a child. Every call after that first
+	// one — the leader's own retries and any sibling's, once the gate
+	// opens — blocks on ctx.Done() instead of resolving, so the pool goes
+	// quiescent rather than spinning once the test is ready to assert.
+	proceed := make(chan struct{})
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		onResolve: func(ctx context.Context, call int) error {
+			if call == 1 {
+				<-proceed
+				clk.advanceBy(2 * time.Minute)
+				return nil
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			return fmt.Errorf("must not be called: the window shut before the leader's fetch returned")
+		},
+	}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
@@ -750,7 +689,7 @@ func TestPoolLeaderWindowClosesDuringResolveReleasesTheGate(t *testing.T) {
 	for i := 0; i < slots-1; i++ {
 		nw.waitForLine(t, "\"event\":\"gate_hold\"")
 	}
-	close(r.proceed)
+	close(proceed)
 
 	// The leader's fetch returns past the window's close (16:59:50 ->
 	// 17:01:50): the gate must still open, on the leader's next iteration,
@@ -795,34 +734,6 @@ func TestPoolLeaderWindowClosesDuringResolveReleasesTheGate(t *testing.T) {
 	}
 }
 
-// shutWindowReopenRunner is the leader's Runner once its own window read
-// lands after the siblings' (see the test below): ResolveRevision's first
-// call fails outright, the simplest way to reach a release
-// (backoffOrHalt), so RunChild is never called at all. Every later call —
-// this slot's own retries, or a sibling's once the gate opens — blocks on
-// ctx.Done() instead, so the stream goes quiescent while the test asserts.
-type shutWindowReopenRunner struct {
-	calls      int32
-	childCalls int32
-}
-
-func (r *shutWindowReopenRunner) ResolveRevision(ctx context.Context) (string, error) {
-	if atomic.AddInt32(&r.calls, 1) == 1 {
-		return "", errors.New("boom")
-	}
-	<-ctx.Done()
-	return "", ctx.Err()
-}
-
-func (r *shutWindowReopenRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *shutWindowReopenRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	atomic.AddInt32(&r.childCalls, 1)
-	return ChildResult{}, fmt.Errorf("must not be called: the leader releases via a resolve failure before RunChild")
-}
-
 // TestPoolLeaderParkedOnShutWindowHoldsTheGateUntilItReopens pins the
 // invariant a shut-window park must NOT release the gate (issue #3634): a
 // shut window parks every slot, so releasing the leader into it would only
@@ -845,8 +756,26 @@ func TestPoolLeaderParkedOnShutWindowHoldsTheGateUntilItReopens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
 	}
-	clk := &blockingMutableClock{now: time.Date(2026, 1, 1, 16, 59, 50, 0, time.UTC), release: make(chan struct{})}
-	r := &shutWindowReopenRunner{}
+	clk := &testClock{now: time.Date(2026, 1, 1, 16, 59, 50, 0, time.UTC)}
+	clk.park()
+	// r is the leader's Runner once its own window read lands after the
+	// siblings' (see below): ResolveRevision's first call fails outright,
+	// the simplest way to reach a release (backoffOrHalt), so RunChild is
+	// never called at all. Every later call — this slot's own retries, or
+	// a sibling's once the gate opens — blocks on ctx.Done() instead, so
+	// the stream goes quiescent while the test asserts.
+	r := &scriptedRunner{
+		onResolve: func(ctx context.Context, call int) error {
+			if call == 1 {
+				return errors.New("boom")
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			return fmt.Errorf("must not be called: the leader releases via a resolve failure before RunChild")
+		},
+	}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
@@ -870,9 +799,7 @@ func TestPoolLeaderParkedOnShutWindowHoldsTheGateUntilItReopens(t *testing.T) {
 
 	// Only now does the window shut, so the leader's very first window read
 	// — and no sibling's — finds it already closed.
-	clk.mu.Lock()
-	clk.now = time.Date(2026, 1, 1, 17, 0, 5, 0, time.UTC)
-	clk.mu.Unlock()
+	clk.setNow(time.Date(2026, 1, 1, 17, 0, 5, 0, time.UTC))
 
 	wg.Add(1)
 	go func() {
@@ -901,16 +828,14 @@ func TestPoolLeaderParkedOnShutWindowHoldsTheGateUntilItReopens(t *testing.T) {
 	// Now reopen the window: the leader's blocked Sleep returns, its first
 	// window read finds it open, and its first discovery round runs (and
 	// fails, releasing the gate).
-	clk.mu.Lock()
-	clk.now = time.Date(2026, 1, 2, 9, 0, 5, 0, time.UTC)
-	clk.mu.Unlock()
-	close(clk.release)
+	clk.setNow(time.Date(2026, 1, 2, 9, 0, 5, 0, time.UTC))
+	clk.wake()
 
 	nw.waitForLine(t, "\"event\":\"gate_open\"")
 	p.cancel()
 	wg.Wait()
 
-	if got := atomic.LoadInt32(&r.childCalls); got != 0 {
+	if got := r.runCount(); got != 0 {
 		t.Errorf("RunChild calls = %d, want 0 (the leader releases via a resolve failure)", got)
 	}
 
@@ -944,52 +869,6 @@ func TestPoolLeaderParkedOnShutWindowHoldsTheGateUntilItReopens(t *testing.T) {
 	}
 }
 
-// coldStartInsideWindowRunner counts ResolveRevision calls and blocks the
-// very first on proceed — the leader's own discovery — so the test can
-// assert exactly one ran before releasing it. Every later call (a
-// sibling's, once the gate opens, or the leader's own next iteration)
-// blocks on ctx.Done() instead, so the stream goes quiescent while the
-// test asserts.
-type coldStartInsideWindowRunner struct {
-	proceed  chan struct{}
-	revision string
-	calls    int32
-
-	// started closes the instant the first call's atomic increment lands,
-	// before it blocks on proceed: the leader and the siblings run on
-	// independent goroutines with no ordering guarantee between "the
-	// leader entered ResolveRevision" and "a sibling reached gate_hold",
-	// so the test drains this rather than assuming the former already
-	// happened once it observes the latter.
-	started chan struct{}
-}
-
-func (r *coldStartInsideWindowRunner) ResolveRevision(ctx context.Context) (string, error) {
-	if atomic.AddInt32(&r.calls, 1) == 1 {
-		close(r.started)
-		select {
-		case <-r.proceed:
-			return r.revision, nil
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
-	}
-	<-ctx.Done()
-	return "", ctx.Err()
-}
-
-func (r *coldStartInsideWindowRunner) SelfPath(ctx context.Context, revision string) (string, error) {
-	return "", nil
-}
-
-func (r *coldStartInsideWindowRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
-	return ChildResult{Exit: 2}, nil
-}
-
-func (r *coldStartInsideWindowRunner) resolveCalls() int32 {
-	return atomic.LoadInt32(&r.calls)
-}
-
 // TestPoolColdStartInsideShutWindowGatesTheWaveAtOpen pins the reviewer's
 // blocking finding: an ordinary cold start wholly inside a shut Awake
 // window, the leader included, must not let every slot wake into discovery
@@ -1004,12 +883,41 @@ func TestPoolColdStartInsideShutWindowGatesTheWaveAtOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
 	}
-	clk := &blockingMutableClock{
-		now:     time.Date(2026, 1, 1, 3, 0, 0, 0, time.UTC),
-		release: make(chan struct{}),
-		entered: make(chan struct{}, slots),
+	clk := &testClock{
+		now:         time.Date(2026, 1, 1, 3, 0, 0, 0, time.UTC),
+		sleepSignal: make(chan struct{}, slots),
 	}
-	r := &coldStartInsideWindowRunner{proceed: make(chan struct{}), revision: "rev1", started: make(chan struct{})}
+	clk.park()
+	// proceed lets the test hold the leader's first ResolveRevision there
+	// so it can assert exactly one call ran before releasing it. Every
+	// later call (a sibling's, once the gate opens, or the leader's own
+	// next iteration) blocks on ctx.Done() instead, so the stream goes
+	// quiescent while the test asserts.
+	proceed := make(chan struct{})
+	// resolveStarted closes the instant the first call lands, before it
+	// blocks on proceed: the leader and the siblings run on independent
+	// goroutines with no ordering guarantee between "the leader entered
+	// ResolveRevision" and "a sibling reached gate_hold", so the test
+	// drains this rather than assuming the former already happened once
+	// it observes the latter.
+	resolveStarted := make(chan struct{})
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 2}},
+		onResolve: func(ctx context.Context, call int) error {
+			if call == 1 {
+				close(resolveStarted)
+				select {
+				case <-proceed:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
@@ -1029,26 +937,24 @@ func TestPoolColdStartInsideShutWindowGatesTheWaveAtOpen(t *testing.T) {
 	// so without this, mutating now below can race ahead of the leader's
 	// own first check.
 	for i := 0; i < slots; i++ {
-		<-clk.entered
+		<-clk.sleepSignal
 	}
 	nw.waitForLine(t, "\"event\":\"awake_close\"")
 
-	clk.mu.Lock()
-	clk.now = time.Date(2026, 1, 1, 9, 0, 1, 0, time.UTC)
-	clk.mu.Unlock()
-	close(clk.release)
+	clk.setNow(time.Date(2026, 1, 1, 9, 0, 1, 0, time.UTC))
+	clk.wake()
 
 	// The window opens for every slot at once; the siblings clear it and
 	// park on the gate.
 	for i := 0; i < slots-1; i++ {
 		nw.waitForLine(t, "\"event\":\"gate_hold\"")
 	}
-	<-r.started
-	if got := r.resolveCalls(); got != 1 {
+	<-resolveStarted
+	if got := r.resolveCount(); got != 1 {
 		t.Fatalf("ResolveRevision calls = %d, want exactly 1 (the leader only) before the gate opens", got)
 	}
 
-	close(r.proceed)
+	close(proceed)
 	nw.waitForLine(t, "\"event\":\"gate_open\"")
 	cancel()
 	<-done
