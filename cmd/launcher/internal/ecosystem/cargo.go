@@ -367,7 +367,10 @@ func cargoIndexHost(index string) (string, bool) {
 // for a host-rooted route's per-registry local URL (issue #3256): a registry
 // served at its own real path must resolve through that path locally, or the
 // Forwarder's per-registry subtree never admits the requests cargo sends. The
-// result is always "" or a leading-"/", no-trailing-"/" path.
+// result is always "" or a leading-"/", no-trailing-"/" path. It trims the
+// decoded u.Path, not the escaped path cargoCanonicalSourceURLKey trims, so
+// "%2F" and "/" collapse onto one local URL here while the canonical key
+// keys them apart -- pre-existing #3256 behaviour, unchanged by #3251.
 func cargoIndexPath(index string) string {
 	raw := strings.TrimPrefix(index, "sparse+")
 	u, err := url.Parse(raw)
@@ -397,6 +400,48 @@ func cargoLocalIndexURLWithPath(port int, prefix, indexPath string) string {
 // name, the one stanza CargoSourceReplacements must reuse rather than collide
 // with under cargo's 1:1 URL to source-name rule.
 const registryProxySourceName = "spindrift-registry-proxy"
+
+// cargoCanonicalSourceURLKey returns value (a [source.NAME].registry or
+// [registries.NAME].index string) as a canonical claimingSourceNameByURL map
+// key on cargo's own two CanonicalUrl/SourceId matching axes -- one trailing
+// slash trimmed from the path, and the host lowercased -- plus the scheme
+// case-folding url.Parse/String do for free; the default port cargo also
+// folds is deliberately left unfolded. A leading "sparse+" is deliberately
+// left as-is -- cargo treats "sparse+https://..." (sparse HTTP registry) and
+// "https://..." (git registry index) as different source kinds, a genuinely
+// different SourceId, not a spelling variant of the same one (issue #3251).
+// A value that fails to parse as an http(s) URL with a host falls back to
+// itself verbatim, so today's byte-for-byte behavior holds for anything this
+// axis pair can't canonicalize.
+func cargoCanonicalSourceURLKey(value string) string {
+	sparse := strings.HasPrefix(value, "sparse+")
+	raw := strings.TrimPrefix(value, "sparse+")
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return value
+	}
+	u.Host = strings.ToLower(u.Host)
+	// Trim the trailing slash on the escaped path, then re-derive Path from
+	// it, so RawPath and Path stay consistent -- trimming only u.Path leaves
+	// u.RawPath stale, and u.String() then re-escapes from the decoded Path,
+	// silently decoding %2F into a structural "/" and dropping the
+	// trailing-slash trim whenever the path holds percent-encoding.
+	escaped := strings.TrimSuffix(u.EscapedPath(), "/")
+	decoded, err := url.PathUnescape(escaped)
+	if err != nil {
+		// Belt and braces: EscapedPath() is a valid encoding by construction
+		// and trimming a structural trailing "/" cannot invalidate it, so
+		// this branch is unreachable today.
+		return value
+	}
+	u.Path = decoded
+	u.RawPath = escaped
+	key := u.String()
+	if sparse {
+		key = "sparse+" + key
+	}
+	return key
+}
 
 // CargoSourceReplacements plans cargo source replacements (issue #3201, ADR
 // 0044) from routes and the repo's un-rewritten .cargo/config.toml, and warns
@@ -453,10 +498,11 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 		if homeOwnedSourceNames[sd.Name] {
 			continue
 		}
-		if _, claimed := claimingSourceNameByURL[sd.Registry]; claimed {
+		key := cargoCanonicalSourceURLKey(sd.Registry)
+		if _, claimed := claimingSourceNameByURL[key]; claimed {
 			continue
 		}
-		claimingSourceNameByURL[sd.Registry] = sd.Name
+		claimingSourceNameByURL[key] = sd.Name
 	}
 
 	cratesIOLocalURL := cargoLocalIndexURL(port, prefix)
@@ -503,15 +549,20 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			// Marked before the dedupe check on purpose: a name collapsed
 			// into an earlier name's stanza still binds through it.
 			bound[d.name] = true
-			if seenIndexURL[d.index] {
+			// Canonicalized on the same axes as claimingSourceNameByURL
+			// above (issue #3251), so two decls cargo treats as one
+			// SourceId dedupe to one [source.<name>] stanza.
+			canonicalIndexURL := cargoCanonicalSourceURLKey(d.index)
+			if seenIndexURL[canonicalIndexURL] {
 				continue
 			}
-			seenIndexURL[d.index] = true
-			// Reuse the repo's own claiming source name (issue #3248) when one
-			// exists for this exact index URL, byte-for-byte; cargo would
-			// otherwise reject the merged config as a duplicate source.
+			seenIndexURL[canonicalIndexURL] = true
+			// Reuse the repo's own claiming source name (issue #3248) when
+			// one exists for this canonical index URL, so a repo spelling
+			// that differs only on the axes above still reuses instead of
+			// minting a second stanza (issue #3251).
 			sourceName := "spindrift-upstream-" + d.name
-			if claimed, ok := claimingSourceNameByURL[d.index]; ok {
+			if claimed, ok := claimingSourceNameByURL[canonicalIndexURL]; ok {
 				sourceName = claimed
 			}
 			matched = append(matched, matchedDecl{name: d.name, index: d.index, sourceName: sourceName})
