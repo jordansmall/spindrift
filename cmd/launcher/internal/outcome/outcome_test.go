@@ -2,8 +2,10 @@ package outcome_test
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/outcome"
@@ -889,8 +891,8 @@ func TestLastCommentLineInLog_NonceMismatchCountsRejectedLines(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a non-nil error to warn on a nonce mismatch")
 	}
-	if rejected != 2 {
-		t.Errorf("rejected: got %d, want 2", rejected)
+	if rejected.Total() != 2 {
+		t.Errorf("rejected: got %d, want 2", rejected.Total())
 	}
 }
 
@@ -1084,8 +1086,8 @@ func TestAllIssueIntentLinesInLog_NotFound(t *testing.T) {
 	if len(got) != 0 {
 		t.Errorf("got %v, want empty", got)
 	}
-	if rejected != 0 {
-		t.Errorf("rejected: got %d, want 0", rejected)
+	if rejected.Total() != 0 {
+		t.Errorf("rejected: got %d, want 0", rejected.Total())
 	}
 }
 
@@ -1109,8 +1111,8 @@ func TestAllIssueIntentLinesInLog_NonceMismatchCountedAsRejected(t *testing.T) {
 	if len(got) != 1 || got[0] != want[0] {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if rejected != 1 {
-		t.Errorf("rejected: got %d, want 1", rejected)
+	if rejected.Total() != 1 {
+		t.Errorf("rejected: got %d, want 1", rejected.Total())
 	}
 }
 
@@ -1133,8 +1135,8 @@ func TestAllIssueIntentLinesInLog_DedupsSubagentEcho(t *testing.T) {
 	if len(got) != 1 || got[0] != want[0] {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if rejected != 0 {
-		t.Errorf("rejected: got %d, want 0 (both lines verify; dedup is not rejection)", rejected)
+	if rejected.Total() != 0 {
+		t.Errorf("rejected: got %d, want 0 (both lines verify; dedup is not rejection)", rejected.Total())
 	}
 }
 
@@ -1155,8 +1157,8 @@ func TestAllIssueIntentLinesInLog_MalformedBase64CountedAsRejected(t *testing.T)
 	if len(got) != 1 || got[0] != want[0] {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if rejected != 1 {
-		t.Errorf("rejected: got %d, want 1", rejected)
+	if rejected.Total() != 1 {
+		t.Errorf("rejected: got %d, want 1", rejected.Total())
 	}
 }
 
@@ -1174,8 +1176,8 @@ func TestAllIssueIntentLinesInLog_EmptyPayloadRejected(t *testing.T) {
 	if len(got) != 0 {
 		t.Errorf("got %v, want no collected intents", got)
 	}
-	if rejected != 1 {
-		t.Errorf("rejected: got %d, want 1", rejected)
+	if rejected.Total() != 1 {
+		t.Errorf("rejected: got %d, want 1", rejected.Total())
 	}
 }
 
@@ -1604,5 +1606,116 @@ func TestResolve_MultiLogSelfReportErrorDoesNotAbortWalk(t *testing.T) {
 	}
 	if got.SelfReportError == nil {
 		t.Fatal("SelfReportError: got nil, want the bad middle log's I/O error to still surface")
+	}
+}
+
+// Issue #3670's acceptance criterion 1 (#3597's shape): a stream-json
+// tool_result line truncated mid-payload by the Box's Bash output cap. The
+// token sits mid-line (after `"content":"`), never leading, and the base64
+// run's length is not a multiple of four, so the strict decoder rejects it.
+// Before #3670 a non-leading token that failed to verify was silently
+// dropped as a bare mention; now a non-empty malformed run counts wherever
+// the token sits (that is the whole point of the slice).
+func TestLastCommentLineInLog_StreamJSONTruncatedPayloadCountsAsMalformed(t *testing.T) {
+	full := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("verdict body text ", 200)))
+	truncated := full[:len(full)-2] // cut mid-quantum: length not a multiple of four
+	jsonl := `{"type":"user","message":{"content":[{"type":"tool_result","content":"SPINDRIFT_COMMENT the-nonce ` +
+		truncated + `"}]}}`
+	path := writeLog(t, jsonl)
+	_, found, rejected, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false — no line in this log genuinely verifies")
+	}
+	if rejected.Total() != 1 {
+		t.Errorf("rejected.Total(): got %d, want 1", rejected.Total())
+	}
+	if rejected.Malformed != 1 {
+		t.Errorf("rejected.Malformed: got %d, want 1", rejected.Malformed)
+	}
+	if rejected.LongestPayload != len(truncated) {
+		t.Errorf("rejected.LongestPayload: got %d, want %d", rejected.LongestPayload, len(truncated))
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error")
+	}
+	if !strings.HasPrefix(err.Error(), "comment line found but did not verify") {
+		t.Errorf("error must keep the standard prefix, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "malformed payload") {
+		t.Errorf("error must name the cause, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d", len(truncated))) {
+		t.Errorf("error must name the payload length, got: %v", err)
+	}
+}
+
+// The prompt fragment itself carries a placeholder shaped like the grammar
+// ("SPINDRIFT_PR_INTENT <nonce> <base64-encoded title, a blank line, then
+// body>"). Echoed by the Box mid-line inside stream-json (e.g. quoting its
+// own instructions back), it must not be counted: the placeholder text is not
+// base64-alphabet, so its base64 run is empty, and an empty run off a
+// non-leading token stays silent (the same trap TestLastCommentLineInLog_
+// EchoedMarkerDoesNotMaskVerdict pins for SPINDRIFT_COMMENT).
+func TestLastPRIntentInLog_PromptPlaceholderEmbeddedMidLineNotRejected(t *testing.T) {
+	jsonl := `{"type":"assistant","message":{"content":[{"type":"text","text":"Remember: SPINDRIFT_PR_INTENT the-nonce ` +
+		`<base64-encoded title, a blank line, then body>\n"}]}}`
+	path := writeLog(t, jsonl)
+	_, found, rejected, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false — the placeholder never verifies")
+	}
+	if rejected.Total() != 0 {
+		t.Errorf("rejected.Total(): got %d, want 0 — a mid-line placeholder must not warn", rejected.Total())
+	}
+	if err != nil {
+		t.Errorf("unexpected error for a mid-line prompt placeholder: %v", err)
+	}
+}
+
+func TestRejections_Cause(t *testing.T) {
+	cases := []struct {
+		name string
+		r    outcome.Rejections
+		want string
+	}{
+		{"zero value", outcome.Rejections{}, "nonce-mismatched"},
+		{"nonce mismatch only", outcome.Rejections{NonceMismatch: 3}, "nonce-mismatched"},
+		{"malformed only", outcome.Rejections{Malformed: 2}, "malformed"},
+		{"both", outcome.Rejections{NonceMismatch: 1, Malformed: 1}, "nonce-mismatched or malformed"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.r.Cause(); got != c.want {
+				t.Errorf("Cause(): got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestRejections_Detail(t *testing.T) {
+	cases := []struct {
+		name string
+		r    outcome.Rejections
+		want string
+	}{
+		{"zero value", outcome.Rejections{}, "nonce mismatch or malformed payload"},
+		{"nonce mismatch only", outcome.Rejections{NonceMismatch: 2}, "nonce mismatch"},
+		{
+			"malformed only",
+			outcome.Rejections{Malformed: 1, LongestPayload: 42},
+			"malformed payload, longest base64 run 42 chars (a payload longer than the Box's Bash output cap arrives truncated)",
+		},
+		{
+			"both",
+			outcome.Rejections{NonceMismatch: 1, Malformed: 1, LongestPayload: 7},
+			"nonce mismatch or malformed payload, longest base64 run 7 chars (a payload longer than the Box's Bash output cap arrives truncated)",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.r.Detail(); got != c.want {
+				t.Errorf("Detail(): got %q, want %q", got, c.want)
+			}
+		})
 	}
 }

@@ -33,11 +33,11 @@ type Result struct {
 	// present. A mismatched nonce or an undecodable payload is ignored.
 	CommentFound bool
 
-	// CommentRejected counts SPINDRIFT_COMMENT lines that attempted the signal
-	// grammar but failed nonce verification; a prose mention of the token or a
-	// one-field doc example does not count (issue #2089). Callers settle-log a
-	// warning from it (issue #2976).
-	CommentRejected int
+	// CommentRejected splits, by cause, the SPINDRIFT_COMMENT lines that
+	// attempted the signal grammar but failed to verify; a prose mention of
+	// the token or a one-field doc example does not count (issue #2089).
+	// Callers settle-log a warning from it (issue #2976, split #3670).
+	CommentRejected outcome.Rejections
 
 	// PRIntent is the decoded "title\n\nbody" payload of the box log's last
 	// nonce-verified SPINDRIFT_PR_INTENT line (issue #1919, single-line
@@ -49,10 +49,10 @@ type Result struct {
 	// was present. A mismatched nonce or an undecodable payload is ignored.
 	PRIntentFound bool
 
-	// PRIntentRejected counts SPINDRIFT_PR_INTENT lines that attempted the
-	// signal grammar but failed nonce verification, on CommentRejected's terms
-	// (issues #2089 and #2976).
-	PRIntentRejected int
+	// PRIntentRejected splits, by cause, the SPINDRIFT_PR_INTENT lines that
+	// attempted the signal grammar but failed to verify, on CommentRejected's
+	// terms (issues #2089, #2976, split #3670).
+	PRIntentRejected outcome.Rejections
 
 	// Resolved is dispatch's single outcome.Resolve-seam result for this
 	// Result (issue #2268 slice 2).
@@ -69,10 +69,10 @@ type Result struct {
 	// undecodable payload is dropped.
 	IssueIntentsFound bool
 
-	// IssueIntentsRejected counts SPINDRIFT_ISSUE_INTENT lines that attempted
-	// the signal grammar but failed nonce verification, on CommentRejected's
-	// terms (issues #2089 and #2976).
-	IssueIntentsRejected int
+	// IssueIntentsRejected splits, by cause, the SPINDRIFT_ISSUE_INTENT lines
+	// that attempted the signal grammar but failed to verify, on
+	// CommentRejected's terms (issues #2089, #2976, split #3670).
+	IssueIntentsRejected outcome.Rejections
 
 	// ParseErr is non-nil when the box's log held an unparseable
 	// SPINDRIFT_OUTCOME line, as opposed to no line at all. Classification is

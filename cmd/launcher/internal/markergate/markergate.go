@@ -131,7 +131,7 @@ func ShouldNudgePRIntent(cfg NudgeConfig) (bool, error) {
 func prIntentPresent(path, nonce string) (bool, error) {
 	_, found, rejected, err := outcome.LastPRIntentInLog(path, nonce)
 	if err != nil {
-		return found, fmt.Errorf("scan %s for a verified %s line (%d rejected): %w", path, outcome.PRIntentToken, rejected, err)
+		return found, fmt.Errorf("scan %s for a verified %s line (%d rejected): %w", path, outcome.PRIntentToken, rejected.Total(), err)
 	}
 	return found, nil
 }

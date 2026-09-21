@@ -832,7 +832,7 @@ func TestSettle_NonceRejectedIssueIntent_LogsWarning(t *testing.T) {
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
 		},
-		IssueIntentsRejected: 1,
+		IssueIntentsRejected: outcome.Rejections{NonceMismatch: 1},
 	}
 
 	s := newTestSettle(baseConfig(), fc, fc)
@@ -863,7 +863,7 @@ func TestSettle_NonceRejectedComment_FoundSuppressesDuplicate(t *testing.T) {
 				Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
 			},
 			CommentFound:    commentFound,
-			CommentRejected: 1,
+			CommentRejected: outcome.Rejections{NonceMismatch: 1},
 		}
 	}
 
