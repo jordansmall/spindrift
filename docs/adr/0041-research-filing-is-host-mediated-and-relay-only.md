@@ -1,5 +1,11 @@
 # Research filing is host-mediated: the Filer relays, the launcher writes
 
+> **Extended by [ADR 0052](0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md).**
+> Relay-only filing and the file → comment → label settle order stand
+> unchanged. The intents' carrier gains a socket alternative behind
+> `BOX_SIGNAL_CARRIER`: the Launcher validates each intent on receipt and
+> answers the Filer synchronously, but still performs every write at settle.
+
 A research Dispatch (ADR 0022) is advise-only — its prompt says "Comments
 only," no filing step exists in any research prompt, and even an off-script
 attempt dead-ends: under a read-only Box the `gh` shim blocks direct
