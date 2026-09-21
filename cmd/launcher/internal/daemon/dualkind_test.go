@@ -123,7 +123,7 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 
 	cfg := dualKindConfig(slots, 1)
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
@@ -142,7 +142,7 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 	for s := 0; s < slots; s++ {
 		r.releaseSlot(t, s, ChildResult{Exit: 7})
 	}
-	reason := <-done
+	reason := (<-done).String()
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
 	}
@@ -182,7 +182,7 @@ func TestPoolReservedSlotPrefersResearchWhileResearchHasWork(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, dualKindConfig(slots, 1), r, em, clk)
+	reason := Loop(ctx, dualKindConfig(slots, 1), r, em, clk).String()
 	if !strings.Contains(reason, "context-cancelled") {
 		t.Fatalf("halt reason = %q, want context-cancelled (the test's own stop)", reason)
 	}
@@ -464,7 +464,7 @@ func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, dualKindConfig(1, 0), r, em, clk)
+	reason := Loop(ctx, dualKindConfig(1, 0), r, em, clk).String()
 	if !strings.Contains(reason, "context-cancelled") {
 		t.Fatalf("halt reason = %q, want context-cancelled (the test's own stop, fired by the first Sleep)", reason)
 	}

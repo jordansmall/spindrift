@@ -19,13 +19,13 @@ import (
 // before a halt actually lands (runSlot never kills a child it has
 // started), so the slot that takes the baton back can legitimately start
 // one more round in the gap — a bare <-done would hang on it forever.
-func awaitHalt(t *testing.T, r *scriptedRunner, done <-chan string) string {
+func awaitHalt(t *testing.T, r *scriptedRunner, done <-chan Halt) string {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
 		select {
-		case reason := <-done:
-			return reason
+		case h := <-done:
+			return h.String()
 		case slot := <-r.started:
 			r.releaseSlot(t, slot, ChildResult{Exit: 7})
 		case <-deadline:
@@ -164,7 +164,7 @@ func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
@@ -243,7 +243,7 @@ func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 	for s := 0; s < slots; s++ {
 		r.releaseSlot(t, s, ChildResult{Exit: 7})
 	}
-	reason := <-done
+	reason := (<-done).String()
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
 	}
@@ -295,7 +295,7 @@ func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(ctx, testConfig(slots), r, em, clk)
 	}()
@@ -305,9 +305,9 @@ func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 	cancel()
 
 	select {
-	case reason := <-done:
-		if !strings.Contains(reason, "context-cancelled") {
-			t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
+	case h := <-done:
+		if !strings.Contains(h.String(), "context-cancelled") {
+			t.Fatalf("halt reason = %q, want it to name context-cancelled", h.String())
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Loop never returned: a slot parked in awaitBaton deadlocked on cancellation")
@@ -347,7 +347,7 @@ func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
@@ -392,7 +392,7 @@ func TestPoolBatonPassesOnNoneDispatchableChildEnd(t *testing.T) {
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
@@ -435,7 +435,7 @@ func TestPoolBatonPassesOnUnrecognisedExit(t *testing.T) {
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
@@ -484,17 +484,18 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 	clk := &testClock{}
 	pinTheFailingHolder(clk)
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
 
-	var reason string
+	var h Halt
 	select {
-	case reason = <-done:
+	case h = <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Loop never returned: a RunChild seam error left the pool deadlocked")
 	}
+	reason := h.String()
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
 	}
@@ -552,7 +553,7 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 	cfg.Awake = win
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(ctx, cfg, r, em, clk)
 	}()
@@ -572,12 +573,13 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 	nw.waitForLine(t, "\"event\":\"baton_pass\"")
 	cancel()
 
-	var reason string
+	var h Halt
 	select {
-	case reason = <-done:
+	case h = <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Loop never returned: a window close mid-resolve left the pool deadlocked")
 	}
+	reason := h.String()
 	if !strings.Contains(reason, "context-cancelled") {
 		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
 	}
@@ -621,7 +623,7 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 	cfg := testConfig(slots)
 	cfg.Awake = win
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
@@ -700,17 +702,18 @@ func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 	clk := &testClock{}
 	pinTheFailingHolder(clk)
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
 
-	var reason string
+	var h Halt
 	select {
-	case reason = <-done:
+	case h = <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Loop never returned: a holder that failed before starting a child left the pool deadlocked")
 	}
+	reason := h.String()
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
 	}
@@ -815,7 +818,7 @@ func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(ctx, testConfig(slots), r, em, clk)
 	}()
@@ -823,12 +826,13 @@ func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 	close(proceed)
 
-	var reason string
+	var h Halt
 	select {
-	case reason = <-done:
+	case h = <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Loop never returned: a holder that stopped before resolving anything left the sibling parked")
 	}
+	reason := h.String()
 	if !strings.Contains(reason, "context-cancelled") {
 		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
 	}
@@ -854,7 +858,7 @@ func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
@@ -960,7 +964,7 @@ func TestPoolOneKindPoolBehavesAsBefore(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
@@ -1006,7 +1010,7 @@ func TestPoolBatonEventStreamOrderingAndReasons(t *testing.T) {
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()

@@ -47,8 +47,7 @@ type Event struct {
 // ShutdownDrain is the reason on the shutdown event the daemon emits for the
 // first stop signal: docs/reference.md documents this exact string as
 // operator-facing grammar, so changing it is a documented-behaviour change,
-// not a rename (see HaltSelfBuildPrefix in outcome.go for the same
-// convention).
+// not a rename (see Halt.String() in halt.go for the same convention).
 const ShutdownDrain = "signalled stop: forwarding a drain request to every running child"
 
 // ShutdownEscalate is the reason on the shutdown event the daemon emits for

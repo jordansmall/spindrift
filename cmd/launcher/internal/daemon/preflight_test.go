@@ -33,8 +33,11 @@ func TestClassifyPreflight(t *testing.T) {
 				t.Errorf("ClassifyPreflight(%d).Exit = %d, want %d", tc.exit, v.Exit, tc.exit)
 			}
 			if tc.wantHealthy {
-				if v.HaltReason() != "" {
-					t.Errorf("ClassifyPreflight(%d).HaltReason() = %q, want empty for a healthy verdict", tc.exit, v.HaltReason())
+				if got := v.Halt().String(); got != "" {
+					t.Errorf("ClassifyPreflight(%d).Halt().String() = %q, want empty for a healthy verdict", tc.exit, got)
+				}
+				if got := v.Halt().Class; got != HaltNone {
+					t.Errorf("ClassifyPreflight(%d).Halt().Class = %v, want %v for a healthy verdict", tc.exit, got, HaltNone)
 				}
 				return
 			}
@@ -44,12 +47,15 @@ func TestClassifyPreflight(t *testing.T) {
 			if v.Remedy == "" {
 				t.Errorf("ClassifyPreflight(%d).Remedy is empty, want non-empty", tc.exit)
 			}
-			reason := v.HaltReason()
-			if !strings.HasPrefix(reason, HaltPreflightPrefix) {
-				t.Errorf("ClassifyPreflight(%d).HaltReason() = %q, want prefix %q", tc.exit, reason, HaltPreflightPrefix)
+			if got := v.Halt().Class; got != HaltPreflight {
+				t.Errorf("ClassifyPreflight(%d).Halt().Class = %v, want %v", tc.exit, got, HaltPreflight)
+			}
+			reason := v.Halt().String()
+			if !strings.HasPrefix(reason, "preflight: ") {
+				t.Errorf("ClassifyPreflight(%d).Halt().String() = %q, want prefix %q", tc.exit, reason, "preflight: ")
 			}
 			if !strings.Contains(reason, strconv.Itoa(tc.exit)) {
-				t.Errorf("ClassifyPreflight(%d).HaltReason() = %q, want it to mention the exit code", tc.exit, reason)
+				t.Errorf("ClassifyPreflight(%d).Halt().String() = %q, want it to mention the exit code", tc.exit, reason)
 			}
 		})
 	}
@@ -62,7 +68,7 @@ func TestClassifyPreflight(t *testing.T) {
 func TestClassifyPreflightNeverConflatesWithInterpret(t *testing.T) {
 	for exit := 0; exit <= 7; exit++ {
 		preflightOutcome := ClassifyPreflight(exit).Outcome
-		childOutcome, _ := Interpret(exit)
+		childOutcome, _, _ := Interpret(exit)
 		if preflightOutcome == childOutcome {
 			t.Errorf("exit %d: ClassifyPreflight outcome %q collides with Interpret outcome %q", exit, preflightOutcome, childOutcome)
 		}

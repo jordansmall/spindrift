@@ -88,7 +88,7 @@ func TestLoopContinueThenHalt(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), testConfig(1), r, em, clk)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 2 {
 		t.Fatalf("run calls = %d, want 2", r.runCount())
@@ -107,7 +107,7 @@ func TestLoopWaitThenHalt(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), testConfig(1), r, em, clk)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 3 {
 		t.Fatalf("run calls = %d, want 3", r.runCount())
@@ -206,7 +206,7 @@ func TestLoopExit7Halts(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), testConfig(1), r, em, clk)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
 
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Errorf("halt reason = %q, want it to name signalled-stop", reason)
@@ -224,7 +224,7 @@ func TestLoopUnknownExitBacksOffThenHalts(t *testing.T) {
 		var buf bytes.Buffer
 		em := newTestEmitter(&buf)
 
-		reason := Loop(context.Background(), testConfig(1), r, em, clk)
+		reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
 
 		if !strings.Contains(reason, "host-tainted") {
 			t.Errorf("exit %d: halt reason = %q, want the follow-up host-tainted halt, not the unclassified exit itself", exit, reason)
@@ -261,7 +261,7 @@ func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), testConfig(1), r, em, clk)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 1 {
 		t.Fatalf("run calls = %d, want 1: the slot must retry after backing off from the resolve failure", r.runCount())
@@ -291,7 +291,7 @@ func TestLoopRunChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), testConfig(1), r, em, clk)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
 
 	if !strings.Contains(reason, "host-tainted") {
 		t.Errorf("halt reason = %q, want the follow-up host-tainted halt, not the run-child failure itself", reason)
@@ -368,7 +368,7 @@ func TestLoopKeepsGoingAfterQueueDrainsThenPicksUpWork(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), testConfig(1), r, em, clk)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 4 {
 		t.Fatalf("run calls = %d, want 4: the loop must keep going after the queue drains and pick work back up without a restart", r.runCount())
@@ -411,7 +411,7 @@ func TestLoopCancelledContextHaltsBeforeStartingNewWork(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, testConfig(1), r, em, clk)
+	reason := Loop(ctx, testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 0 {
 		t.Fatalf("run calls = %d, want 0: an already-cancelled ctx must halt before starting any child", r.runCount())
@@ -441,7 +441,7 @@ func TestLoopCancelledDuringResolveRevisionHaltsBeforeStartingNewWork(t *testing
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, testConfig(1), r, em, clk)
+	reason := Loop(ctx, testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 0 {
 		t.Fatalf("run calls = %d, want 0: a ctx cancelled during resolve must halt before starting any child", r.runCount())
@@ -472,7 +472,7 @@ func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, testConfig(1), r, em, clk)
+	reason := Loop(ctx, testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 1 {
 		t.Fatalf("run calls = %d, want 1", r.runCount())
@@ -499,7 +499,7 @@ func TestLoopSelfPathCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	cfg := testConfig(1)
 	cfg.SelfProgram = "/nix/store/old-path"
 
-	reason := Loop(ctx, cfg, r, em, clk)
+	reason := Loop(ctx, cfg, r, em, clk).String()
 
 	assertCancelledStopNoBreaker(t, reason, decodeEvents(t, &buf))
 }
@@ -515,7 +515,7 @@ func TestLoopResolveRevisionCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, testConfig(1), r, em, clk)
+	reason := Loop(ctx, testConfig(1), r, em, clk).String()
 
 	assertCancelledStopNoBreaker(t, reason, decodeEvents(t, &buf))
 }
@@ -574,7 +574,7 @@ func TestLoopCtxCancelledIsNotABreakerFailure(t *testing.T) {
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
-			reason := Loop(ctx, testConfig(1), r, em, clk)
+			reason := Loop(ctx, testConfig(1), r, em, clk).String()
 
 			events := wantEvents(t, &buf, []string{"child_start", "child_finish", "halt"}, "the started child's child_finish must still be emitted")
 			assertCancelledStopNoBreaker(t, reason, events)
@@ -627,7 +627,7 @@ func TestLoopRejectsNonPositiveSlots(t *testing.T) {
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
-			reason := Loop(context.Background(), testConfig(slots), r, em, clk)
+			reason := Loop(context.Background(), testConfig(slots), r, em, clk).String()
 
 			if r.runCount() != 0 {
 				t.Fatalf("run calls = %d, want 0: a non-positive slot count must halt before any child runs", r.runCount())
@@ -670,7 +670,7 @@ func TestLoopRejectsInvalidBreakerConfig(t *testing.T) {
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
-			reason := Loop(context.Background(), tc.cfg, r, em, clk)
+			reason := Loop(context.Background(), tc.cfg, r, em, clk).String()
 
 			if r.runCount() != 0 {
 				t.Fatalf("run calls = %d, want 0: an invalid breaker config must halt before any child runs", r.runCount())
@@ -709,7 +709,7 @@ func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
-			reason := Loop(context.Background(), tc.cfg, r, em, clk)
+			reason := Loop(context.Background(), tc.cfg, r, em, clk).String()
 
 			if r.runCount() != 0 {
 				t.Fatalf("run calls = %d, want 0: an invalid kinds config must halt before any child runs", r.runCount())
@@ -789,7 +789,7 @@ func TestLoopRejectsInvalidIdleConfig(t *testing.T) {
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
-			reason := Loop(context.Background(), tc.cfg, r, em, clk)
+			reason := Loop(context.Background(), tc.cfg, r, em, clk).String()
 
 			if r.runCount() != 0 {
 				t.Fatalf("run calls = %d, want 0: an invalid idle config must halt before any child runs", r.runCount())
@@ -984,7 +984,7 @@ func TestLoopIdleWaitSwallowsMidWaitPollFailure(t *testing.T) {
 	cfg := testConfig(1)
 	cfg.FailureBackoff = 7 * time.Millisecond
 
-	reason := Loop(context.Background(), cfg, r, em, clk)
+	reason := Loop(context.Background(), cfg, r, em, clk).String()
 
 	want := []time.Duration{testIdleFloor, testIdleFloor, testIdleFloor}
 	if fmt.Sprint(clk.waits()) != fmt.Sprint(want) {
@@ -1162,18 +1162,18 @@ func TestLoopSelfChangeHaltsAtIterationBoundary(t *testing.T) {
 	cfg := testConfig(1)
 	cfg.SelfProgram = "/nix/store/old-path"
 
-	reason := Loop(context.Background(), cfg, r, em, clk)
+	h := Loop(context.Background(), cfg, r, em, clk)
 
-	if !strings.HasPrefix(reason, HaltSelfChanged) {
-		t.Fatalf("halt reason = %q, want prefix %q", reason, HaltSelfChanged)
+	if h.Class != HaltSelfChanged {
+		t.Fatalf("halt class = %v, want %v", h.Class, HaltSelfChanged)
 	}
 	if r.runCount() != 0 {
 		t.Fatalf("run calls = %d, want 0: the halt must land before a child is launched", r.runCount())
 	}
 
 	events := wantEvents(t, &buf, []string{"halt"}, "exactly one halt event")
-	if events[0].Reason != reason {
-		t.Errorf("halt event reason = %q, want %q", events[0].Reason, reason)
+	if events[0].Reason != h.String() {
+		t.Errorf("halt event reason = %q, want %q", events[0].Reason, h.String())
 	}
 }
 
@@ -1193,10 +1193,10 @@ func TestLoopSelfChangeNeverReExecs(t *testing.T) {
 	cfg := testConfig(1)
 	cfg.SelfProgram = "/nix/store/old-path"
 
-	reason := Loop(context.Background(), cfg, r, em, clk)
+	h := Loop(context.Background(), cfg, r, em, clk)
 
-	if !strings.HasPrefix(reason, HaltSelfChanged) {
-		t.Fatalf("halt reason = %q, want prefix %q", reason, HaltSelfChanged)
+	if h.Class != HaltSelfChanged {
+		t.Fatalf("halt class = %v, want %v", h.Class, HaltSelfChanged)
 	}
 	if r.runCount() != 1 {
 		t.Fatalf("run calls = %d, want 1: the first iteration's matching self-path should run its child, the second iteration's mismatch must halt before any further child", r.runCount())
@@ -1219,10 +1219,10 @@ func TestLoopSelfPathMatchDoesNotHalt(t *testing.T) {
 	cfg := testConfig(1)
 	cfg.SelfProgram = "/nix/store/same-path"
 
-	reason := Loop(context.Background(), cfg, r, em, clk)
+	h := Loop(context.Background(), cfg, r, em, clk)
 
-	if strings.HasPrefix(reason, HaltSelfChanged) {
-		t.Fatalf("halt reason = %q, want no self-changed halt: the self path matched", reason)
+	if h.Class == HaltSelfChanged {
+		t.Fatalf("halt class = %v, want no self-changed halt: the self path matched", h.Class)
 	}
 	if r.runCount() != 2 {
 		t.Fatalf("run calls = %d, want 2: a matching self path must not stop children from running", r.runCount())
@@ -1264,10 +1264,10 @@ func TestLoopSelfPathErrorBacksOff(t *testing.T) {
 	cfg.SelfProgram = "/nix/store/same-path"
 	cfg.FailureBackoff = 5 * time.Millisecond
 
-	reason := Loop(context.Background(), cfg, r, em, clk)
+	h := Loop(context.Background(), cfg, r, em, clk)
 
-	if strings.HasPrefix(reason, HaltSelfChanged) {
-		t.Fatalf("halt reason = %q, want no self-changed halt: SelfPath only errored once, then matched", reason)
+	if h.Class == HaltSelfChanged {
+		t.Fatalf("halt class = %v, want no self-changed halt: SelfPath only errored once, then matched", h.Class)
 	}
 	if r.selfCount() != 2 {
 		t.Fatalf("selfCalls = %d, want 2: the errored call plus the retry", r.selfCount())
@@ -1336,7 +1336,7 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 	cfg := testConfig(2)
 	cfg.SelfProgram = matchPath
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
@@ -1344,10 +1344,10 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 	<-started      // the long-running child is confirmed running
 	close(release) // let it finish now that it is known to have been running
 
-	reason := <-done
+	h := <-done
 
-	if !strings.HasPrefix(reason, HaltSelfChanged) {
-		t.Fatalf("halt reason = %q, want prefix %q", reason, HaltSelfChanged)
+	if h.Class != HaltSelfChanged {
+		t.Fatalf("halt class = %v, want %v", h.Class, HaltSelfChanged)
 	}
 	if r.runCount() != 1 {
 		t.Fatalf("run calls = %d, want 1: only the already-running child ever runs", r.runCount())
@@ -1403,7 +1403,7 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 	cfg := testConfig(1)
 	cfg.Status = sw
 
-	reason := Loop(context.Background(), cfg, r, em, clk)
+	reason := Loop(context.Background(), cfg, r, em, clk).String()
 	if !strings.Contains(reason, "host-tainted") {
 		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
@@ -1483,7 +1483,7 @@ func TestLoopInvalidConfigPublishesHaltedStatus(t *testing.T) {
 	cfg.Status = NewStatusWriter(dir, clk.Now)
 	r := &scriptedRunner{}
 
-	reason := Loop(context.Background(), cfg, r, em, clk)
+	reason := Loop(context.Background(), cfg, r, em, clk).String()
 	if !strings.Contains(reason, "config-invalid") {
 		t.Fatalf("halt reason = %q, want it to name config-invalid", reason)
 	}

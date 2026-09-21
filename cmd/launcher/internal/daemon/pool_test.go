@@ -79,7 +79,7 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
 	}()
@@ -105,7 +105,7 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 		r.releaseSlot(t, s, ChildResult{Exit: 7})
 	}
 
-	reason := <-done
+	reason := (<-done).String()
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
 	}
@@ -154,7 +154,7 @@ func TestPoolSlots1RunsOneChildAtATime(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(context.Background(), testConfig(1), r, em, clk)
+	reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 2 {
 		t.Fatalf("run calls = %d, want 2", r.runCount())
@@ -193,7 +193,7 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	cfg.BreakerThreshold = threshold
 	cfg.BreakerWindow = time.Hour
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
@@ -240,7 +240,7 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	r.releaseSlot(t, 0, ChildResult{Exit: 0})
 	r.releaseSlot(t, 1, ChildResult{Exit: 0})
 
-	reason := <-done
+	reason := (<-done).String()
 	if !strings.Contains(reason, "breaker") {
 		t.Errorf("halt reason = %q, want it to name the breaker trip", reason)
 	}
@@ -349,7 +349,7 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 	cfg.BreakerThreshold = threshold
 	cfg.BreakerWindow = time.Hour
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
@@ -365,12 +365,13 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
 	}
 
-	var reason string
+	var h Halt
 	select {
-	case reason = <-done:
+	case h = <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatalf("Loop did not return within 10s of the concurrent release")
 	}
+	reason := h.String()
 	if !strings.Contains(reason, "breaker") {
 		t.Errorf("halt reason = %q, want it to name the breaker trip", reason)
 	}
@@ -419,7 +420,7 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 	cfg := testConfig(slots)
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()
@@ -454,7 +455,7 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	// return.
 	r.releaseSlot(t, 1, ChildResult{Exit: 0})
 
-	reason := <-done
+	reason := (<-done).String()
 	if !strings.Contains(reason, "signalled-stop") {
 		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
 	}
@@ -491,7 +492,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	cfg := testConfig(slots)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(ctx, cfg, r, em, clk)
 	}()
@@ -521,7 +522,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	// return via stopOnCancel without ever starting a third RunChild call
 	// this test never scripts a release for.
 	cancel()
-	reason := <-done
+	reason := (<-done).String()
 	if !strings.Contains(reason, "context-cancelled") {
 		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
 	}
@@ -1174,7 +1175,7 @@ func TestPoolSnapshotSlots(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	done := make(chan string, 1)
+	done := make(chan Halt, 1)
 	go func() {
 		done <- Loop(context.Background(), cfg, r, em, clk)
 	}()

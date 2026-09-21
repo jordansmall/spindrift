@@ -348,17 +348,6 @@ func (hostClock) Sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-// isOperatorStop reports whether reason (daemon.Loop's return value) reflects
-// an operator-requested stop rather than a real failure: either the loop's
-// own ctx was cancelled (a signal arrived between iterations, no child
-// running) or the running child drained and reported exit 7 / "signalled-stop"
-// (a forwarded SIGTERM reached it mid-run — see runner.go's forwardStop).
-// Anything else — a resolve/run-child error or a Halt-mapped exit like
-// host-tainted or config-invalid — is a real failure.
-func isOperatorStop(reason string) bool {
-	return strings.HasPrefix(reason, "context-cancelled") || reason == "outcome: signalled-stop"
-}
-
 // handleStopSignals waits for the first two signals on sig and forwards
 // each: the first stops the daemon from filling any more slots (cancel) and
 // forwards a SIGTERM so anything already running starts draining right away
@@ -410,23 +399,22 @@ type preflightRunner interface {
 }
 
 // startupPreflight runs `doctor` exactly once, before the pool exists, and
-// reports why the daemon must not start — "" means it may. It always emits
-// one "preflight" event on every path — pass, refusal, seam failure, or an
-// operator's Ctrl-C — so a reader of the event stream can tell "ran and was
-// healthy" apart from "never ran"; every path but a pass also emits a
-// "halt" event carrying the same operator-facing reason returned here.
-func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter) string {
+// reports whether the daemon may start: the zero Halt (class HaltNone)
+// means it may. It always emits one "preflight" event on every path —
+// pass, refusal, seam failure, or an operator's Ctrl-C — so a reader of
+// the event stream can tell "ran and was healthy" apart from "never ran".
+// It does not itself emit the "halt" event a refusal implies — mainRun's
+// finish helper does, after routing the returned Halt through ExitCode.
+func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter) daemon.Halt {
 	// Resolve at the same freshly fetched tip the first child will run at,
 	// so the preflight validates the build about to actually run rather
 	// than the operator's possibly-stale working tree.
 	revision, err := r.ResolveRevision(ctx)
-	// refuseCancelled reports an operator's Ctrl-C during the preflight. Its
-	// reason deliberately carries no HaltPreflightPrefix: mainRun's
-	// isOperatorStop tells a stop (exit 0) from a refusal (exit 11) by
-	// matching "context-cancelled" as a *prefix*, so putting anything in
-	// front of it would displace that match and turn a Ctrl-C into a refusal.
-	refuseCancelled := func() string {
-		return preflightRefusal(em, revision, "doctor-cancelled", "context-cancelled: "+ctx.Err().Error())
+	// refuseCancelled reports an operator's Ctrl-C during the preflight: a
+	// clean stop, not a refusal — HaltOperatorStop's ExitCode is 0 by
+	// class, so there is nothing left to distinguish by string layout.
+	refuseCancelled := func() daemon.Halt {
+		return preflightRefusal(em, revision, "doctor-cancelled", daemon.Halt{Class: daemon.HaltOperatorStop, Detail: ctx.Err().Error()})
 	}
 	// Cancellation is checked against ctx rather than against err: a seam
 	// whose child was signal-killed can return any shape at all (including
@@ -436,7 +424,7 @@ func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter
 		return refuseCancelled()
 	}
 	if err != nil {
-		return preflightRefusal(em, revision, "doctor-seam-error", daemon.HaltPreflightPrefix+"resolve-revision: "+err.Error())
+		return preflightRefusal(em, revision, "doctor-seam-error", daemon.Halt{Class: daemon.HaltPreflight, Detail: "resolve-revision: " + err.Error()})
 	}
 
 	exit, err := r.RunDoctor(ctx, revision)
@@ -444,29 +432,23 @@ func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter
 		return refuseCancelled()
 	}
 	if err != nil {
-		return preflightRefusal(em, revision, "doctor-seam-error", daemon.HaltPreflightPrefix+"run-doctor: "+err.Error())
+		return preflightRefusal(em, revision, "doctor-seam-error", daemon.Halt{Class: daemon.HaltPreflight, Detail: "run-doctor: " + err.Error()})
 	}
 
 	v := daemon.ClassifyPreflight(exit)
 	em.Emit(daemon.Event{Event: "preflight", Revision: revision, Exit: &exit, Outcome: v.Outcome})
-	if v.Healthy {
-		return ""
-	}
-	reason := v.HaltReason()
-	em.Emit(daemon.Event{Event: "halt", Reason: reason})
-	return reason
+	return v.Halt()
 }
 
-// preflightRefusal emits the event pair every startupPreflight path that
-// never got a doctor verdict emits — the "preflight" event proving doctor
-// was attempted, then the "halt" event — and returns reason for mainRun.
-// Neither carries an `exit` field, there being no exit code to report, and
+// preflightRefusal emits the "preflight" event proving doctor was
+// attempted (the "halt" event that used to follow it here now comes from
+// mainRun's finish helper instead) and returns h for startupPreflight.
+// It never carries an `exit` field, there being no exit code to report, and
 // outcome stays "doctor-"-prefixed like ClassifyPreflight's own labels so a
 // preflight outcome can never be read as a child_finish one.
-func preflightRefusal(em *daemon.Emitter, revision, outcome, reason string) string {
-	em.Emit(daemon.Event{Event: "preflight", Revision: revision, Outcome: outcome, Reason: reason})
-	em.Emit(daemon.Event{Event: "halt", Reason: reason})
-	return reason
+func preflightRefusal(em *daemon.Emitter, revision, outcome string, h daemon.Halt) daemon.Halt {
+	em.Emit(daemon.Event{Event: "preflight", Revision: revision, Outcome: outcome, Reason: h.String()})
+	return h
 }
 
 // publishHaltedStatus writes a StateHalted status naming reason directly to
@@ -478,6 +460,27 @@ func publishHaltedStatus(stderr io.Writer, sw *daemon.StatusWriter, kinds []daem
 	if err := sw.Write(daemon.Status{Kinds: kinds, State: daemon.StateHalted, Reason: reason}); err != nil {
 		fmt.Fprintf(stderr, "daemon: status file write failed: %v\n", err)
 	}
+}
+
+// finish is mainRun's one path from a pre-loop Halt to a return value: emit
+// the halt event, publish the halted status, and derive the exit code, all
+// from h alone. sw == nil is deliberate, not a missing argument: it is the
+// instance-lock refusal, where the status file belongs to the daemon that
+// actually holds the checkout, and a refused second instance must never
+// stomp the live holder's file (daemon.NewStatusWriter is not even
+// constructed until after the lock acquire below succeeds).
+//
+// An in-loop halt never comes through here for the emit/publish half:
+// pool.halt (and invalidConfig) have already emitted the halt event and
+// published the status by the time Loop returns its Halt, so mainRun ends
+// on h.ExitCode() alone for that path — that asymmetry is intentional, not
+// a gap to "fix" by double-emitting.
+func finish(stderr io.Writer, em *daemon.Emitter, sw *daemon.StatusWriter, kinds []daemon.Kind, h daemon.Halt) int {
+	em.Emit(h.Event())
+	if sw != nil {
+		publishHaltedStatus(stderr, sw, kinds, h.String())
+	}
+	return h.ExitCode()
 }
 
 // mainRun holds everything main() does: argv parse, input document load,
@@ -646,10 +649,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	lock, err := daemon.AcquireCheckoutLock(gitDirPath, args.Kinds)
 	if err != nil {
-		// Report both to the operator (stderr, via fail below) and to the
-		// durable event stream, so a reader of either sees the same halt.
-		em.Emit(daemon.Event{Event: "halt", Reason: daemon.HaltInstanceLockPrefix + err.Error()})
-		return fail(stderr, err)
+		// finish first, and sw nil: it only emits here (no status file
+		// exists yet), and emitting before the stderr line keeps a merged
+		// stdout+stderr stream byte-identical to the pre-refactor order.
+		code := finish(stderr, em, nil, args.Kinds, daemon.Halt{Class: daemon.HaltInstanceLock, Detail: err.Error()})
+		fmt.Fprintf(stderr, "daemon: %s\n", err)
+		return code
 	}
 	// No cleanup on the crash path: the kernel drops the flock when the
 	// holder dies (including SIGKILL), so a deferred Release here only
@@ -696,13 +701,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// claim, any Box. After AcquireCheckoutLock above, so a second daemon
 	// against the same checkout is still refused by the lock's own cheaper
 	// path rather than after a full doctor run.
-	if reason := startupPreflight(ctx, r, em); reason != "" {
-		fmt.Fprintf(stderr, "daemon: %s\n", reason)
-		publishHaltedStatus(stderr, statusWriter, args.Kinds, reason)
-		if isOperatorStop(reason) {
-			return 0
-		}
-		return exitPreflightFailed
+	if h := startupPreflight(ctx, r, em); h.Class != daemon.HaltNone {
+		fmt.Fprintf(stderr, "daemon: %s\n", h)
+		return finish(stderr, em, statusWriter, args.Kinds, h)
 	}
 
 	cfg := daemon.Config{
@@ -719,47 +720,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		Status:              statusWriter,
 	}
 
-	reason := daemon.Loop(ctx, cfg, r, em, clk)
-
-	return exitCodeFor(reason)
-}
-
-// exitSelfChanged is the daemon's own exit code for the one halt an
-// operator may want to act on automatically: its build changed at the
-// fetched tip. It is deliberately distinct from every other code this
-// binary returns (0 clean stop, 1 anything else) so a service unit can
-// restart on it alone — the daemon never re-execs itself, so composing
-// this exit with a restart policy is how an operator opts into
-// self-update, by choice rather than by default. It sits outside the
-// 0-7 band the *child* launcher's exit codes occupy (Interpret,
-// cmd/launcher/internal/daemon/outcome.go) so the two taxonomies cannot
-// be confused when both appear in one log.
-const exitSelfChanged = 10
-
-// exitPreflightFailed is the daemon's own exit code for a refused start: the
-// startup doctor preflight found a Required-tier failure (missing triage
-// labels, an invalid config) or could not run at all. It is 11, not a
-// pass-through of doctor's own 1/2/3/4 (a different table where the same
-// integers mean something else) nor of the *child* launcher's 0-7 band
-// (Interpret) — sharing either would let a reader misattribute this halt to
-// the wrong process's contract. Unlike exitSelfChanged (10), which an
-// operator deliberately composes with a restart policy, a restart cannot
-// clear this one: nothing the daemon does fixes a missing label or an
-// undersized VM, so a supervisor must not treat this code as retryable.
-const exitPreflightFailed = 11
-
-// exitCodeFor maps daemon.Loop's halt reason to this process's exit code.
-func exitCodeFor(reason string) int {
-	if isOperatorStop(reason) {
-		return 0
-	}
-	if strings.HasPrefix(reason, daemon.HaltSelfChanged+":") {
-		return exitSelfChanged
-	}
-	// A plain non-zero exit: the event stream already carries the specific
-	// halt reason as structured JSON, so stderr/exit code need only say
-	// "this was not a clean stop" for a process supervisor to act on.
-	return 1
+	return daemon.Loop(ctx, cfg, r, em, clk).ExitCode()
 }
 
 func main() {
