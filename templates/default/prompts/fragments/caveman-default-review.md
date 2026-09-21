@@ -25,3 +25,10 @@ issue body verbatim, so it reaches a human cold, the same reason a commit
 message and the SPINDRIFT_OUTCOME note= field stay exempt. Write every
 finding line, Blocking or Non-blocking, in full human-quality prose; never
 route it through `/caveman` or otherwise compress it.
+
+The `## Probed (APPROVE only)` lines are exempt on the same tier, for the
+adjacent reason. No Filer relays them, so the tier is not "text the Filer
+forwards" but text a human reads cold. A reader weighing an APPROVE needs
+each hunt dimension and trace obligation named exactly as it ran;
+compressed, the Probed section stops being evidence. Write those lines in
+full human-quality prose too.
