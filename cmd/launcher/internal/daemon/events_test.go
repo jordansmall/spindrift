@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -93,6 +94,91 @@ func TestEmitterEncodeFailureReportsDiagnosticAndDoesNotPanic(t *testing.T) {
 
 	if got := errBuf.String(); !strings.Contains(got, "daemon: event stream write failed") {
 		t.Fatalf("emitErrW = %q, want it to contain %q", got, "daemon: event stream write failed")
+	}
+}
+
+// eventDiff renders wantEvents' mismatch report and is exported (in test
+// scope) as its own function so a self-test can inspect the rendering
+// without going through a testing.T that would fail the suite on mismatch.
+// It reports the first index where got and want diverge — "<missing>" for
+// an index past got's end (want expected more events than arrived),
+// "<none>" for an index past want's end (got carries more events than want
+// asked for, so want has nothing at this index) — then both full
+// sequences, then msg as the caller's "why this is the right sequence"
+// context. Returns "" when the sequences match exactly.
+func eventDiff(got, want []string, msg string) string {
+	longest := len(got)
+	if len(want) > longest {
+		longest = len(want)
+	}
+	for i := 0; i < longest; i++ {
+		g := "<missing>"
+		if i < len(got) {
+			g = got[i]
+		}
+		w := "<none>"
+		if i < len(want) {
+			w = want[i]
+		}
+		if g != w {
+			return fmt.Sprintf("event sequence mismatch at index %d: got %q, want %q\n got:  %v\n want: %v\n%s",
+				i, g, w, got, want, msg)
+		}
+	}
+	return ""
+}
+
+// wantEvents decodes buf's JSON-lines event stream and asserts its event
+// names are exactly want, in order. It returns the decoded events so a
+// caller can go on to assert on their fields.
+func wantEvents(t *testing.T, buf *bytes.Buffer, want []string, msg string) []Event {
+	t.Helper()
+	events := decodeEvents(t, buf)
+	if diff := eventDiff(eventNames(events), want, msg); diff != "" {
+		t.Fatalf("%s", diff)
+	}
+	return events
+}
+
+func TestWantEventsMatchingSequenceReturnsDecodedEvents(t *testing.T) {
+	var buf bytes.Buffer
+	e := NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	e.Emit(Event{Event: "child_start"})
+	e.Emit(Event{Event: "child_finish"})
+
+	events := wantEvents(t, &buf, []string{"child_start", "child_finish"}, "both events must appear in emission order")
+	if len(events) != 2 {
+		t.Fatalf("wantEvents returned %d events, want 2", len(events))
+	}
+}
+
+func TestEventDiffNameMismatchReportsFirstDivergingIndex(t *testing.T) {
+	diff := eventDiff([]string{"a", "b", "c"}, []string{"a", "x", "c"}, "why clause")
+	if diff == "" {
+		t.Fatalf("eventDiff = \"\", want a non-empty mismatch report")
+	}
+	if !strings.Contains(diff, "index 1") || !strings.Contains(diff, `"b"`) || !strings.Contains(diff, `"x"`) {
+		t.Fatalf("eventDiff = %q, want it to name index 1, got \"b\", want \"x\"", diff)
+	}
+	if !strings.Contains(diff, "why clause") {
+		t.Fatalf("eventDiff = %q, want it to include the msg", diff)
+	}
+}
+
+func TestEventDiffLengthMismatchReportsMissingOrNone(t *testing.T) {
+	shortGot := eventDiff([]string{"a"}, []string{"a", "b"}, "")
+	if !strings.Contains(shortGot, "<missing>") {
+		t.Fatalf("eventDiff (got shorter) = %q, want it to mark the missing tail with <missing>", shortGot)
+	}
+	longGot := eventDiff([]string{"a", "b"}, []string{"a"}, "")
+	if !strings.Contains(longGot, "<none>") {
+		t.Fatalf("eventDiff (got longer) = %q, want it to mark want's exhausted tail with <none>", longGot)
+	}
+}
+
+func TestEventDiffMatchReturnsEmpty(t *testing.T) {
+	if diff := eventDiff([]string{"a", "b"}, []string{"a", "b"}, "msg"); diff != "" {
+		t.Fatalf("eventDiff on matching sequences = %q, want \"\"", diff)
 	}
 }
 
