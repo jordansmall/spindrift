@@ -4685,12 +4685,15 @@ verbatim in the four prompts that need it, unconditionally.
 assembly, but it now gates no fragment row — only the skill invocation
 itself stays baked and available.
 
-Issue #3223's "no flake/devShell text" rule scopes to the bundled *issue*
-prompt's CHECK section only: `mkharness-prompt-check-no-nix-wording`
-(`nix/checks/prompts.nix`) enforces it over the CHECK-section slice awked out
-of `issue-prompt.md` alone — not the fix or research prompts' own CHECK
-sections, and never `templates/default/skills/*`. The harness-owned `auto-format` and
-`auto-lint` bodies keep their own Nix mentions on purpose — auto-format's
+Issue #3223's "no flake/devShell text" rule scopes to one CHECK section:
+`mkharness-prompt-check-no-nix-wording` (`nix/checks/prompts.nix`) enforces it
+over the slice awked out of `issue-prompt.md` alone. The rendered fix prompt
+inherits that slice byte for byte (`lib/prompt-contract.nix`'s `check` row,
+injected by `injectFixSharedBlocks`), so it is covered transitively, and the
+research prompts have no CHECK section to cover. What the rule leaves
+unchecked is Nix wording anywhere else — the rest of `fix-prompt.md`, and
+`templates/default/skills/*`. The harness-owned `auto-format` and `auto-lint`
+bodies keep their own Nix mentions on purpose — auto-format's
 never-`nix fmt` guardrail, auto-lint's flake/devShell checker row — because
 both are ecosystem-agnostic build-tooling advice: any target repo, Nix-primary
 or not, may have a `flake.nix`. Both mentions are pinned, by
