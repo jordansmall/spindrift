@@ -9,6 +9,86 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.19.0 — 2026-09-20
+
+Unattended operation stops being a shell script you write and becomes a program
+spindrift ships. The daemon drives the loop, runs work and research side by
+side, and stops cleanly when you ask it to.
+
+**⚠ Breaking changes** this release: `spindrift doctor` now fails the run on a
+podman machine too small for the concurrency you configured.
+
+- **The daemon is the driving loop now (beta).** `mkHarness` generates
+  `apps.daemon` for every Consumer, beside `apps.default`, so running spindrift
+  unattended is something you run rather than something you write. It fetches
+  your base branch, pins each child to an exact revision so an evaluation can
+  never straddle a commit that landed mid-build, holds `MAX_PARALLEL` slots
+  with one Box per child, and keeps going through a bad child instead of ending
+  the night. This is the loop spindrift now builds itself with, and it is not a
+  spindrift-only script: every Consumer gets the same daemon out of the same
+  `mkHarness`. `CONTINUOUS_DISPATCH` (and `--continuous-dispatch`, and
+  `dispatch.continuous.enable`) is deprecated in favor of it. Nothing is
+  removed and nothing breaks today; see `MIGRATING.md`. Treat the daemon as
+  **beta**: the shape is settled and it is under real use here, but it is new,
+  so watch your first few nights with it.
+- **Work and research run at the same time, out of one pool.** The daemon
+  spawns children of either dispatch kind from the same `MAX_PARALLEL` slots,
+  so you stop choosing between advancing the queue and enriching the backlog.
+  `RESEARCH_RESERVATION` (default 1) is how many slots prefer research; it is a
+  floor, not a ceiling, so either kind bursts into the whole pool once the other
+  has nothing queued. Each kind keeps its own idle timer, so an empty work queue
+  doesn't stall research. Discovery skips an issue the other family already has
+  in flight, so a researcher and a worker never land on the same ticket. On the
+  research side, applying `agent-research-reject` now closes the issue as not
+  planned by itself, which also stops a rejected finding from being refiled.
+- **An awake window, and a backoff that tells empty from jammed.**
+  `DAEMON_AWAKE_WINDOW` ("22:00-06:00 America/New_York", wrapping past midnight)
+  gates starting a Box, never stopping one: a Box running when the window closes
+  finishes, settle and all. With nothing to do, the idle wait grows instead of
+  polling your tracker every five minutes forever. A queue that is full but
+  blocked gets treated differently: that wait is sliced, and the daemon
+  rechecks the tip between slices, so a blocker merging gets picked up within
+  one slice instead of riding out the rest of a long backoff.
+- **One signal drains, two reap, on every launcher path.** A first SIGTERM or
+  SIGINT stops claiming new issues and lets the Boxes in flight finish; a second
+  reaps them and releases their issues back to dispatchable. Either way the
+  launcher exits 7, and that now covers plain `dispatch`, `dispatch <issue>`,
+  `research`, and the `recover` gate, not just continuous mode. The daemon
+  forwards both stages to its children, so one `systemctl stop` drains the whole
+  pool. A settle in flight when the signal lands now stops instead of driving an
+  already-released issue to complete or failed, and an abort landing just as a
+  merge finishes no longer undoes it.
+- **It refuses to start into a host that can't run it.** The daemon runs
+  `doctor` once at startup, pinned to the same revision its first child will run
+  at, and refuses to start on a failure rather than running all night and
+  claiming nothing. A per-checkout lock means a second daemon on the same
+  checkout says "already running" instead of quietly doubling your concurrency.
+  And when a newer daemon merges, the running one halts at a slot boundary
+  rather than orchestrating Boxes under code nobody loaded. **⚠ Breaking:**
+  `spindrift doctor` used to print a MISSING line and exit 0 when the podman
+  machine had less RAM than `MEMORY_LIMIT` x `MAX_PARALLEL` needs. It exits 2
+  now. If you drive doctor from CI or a wrapper script, that host will start
+  failing until you resize the machine or lower the limits; the remedy line
+  names the exact `--memory` figure.
+- **You can see what it is doing.** The daemon writes a JSON-lines event stream
+  to stdout, so journald and `jq` do the work instead of the daemon owning a log
+  format, and it keeps a status file beside the checkout lock with live pool
+  state: which slot holds what kind, at which revision, on which issues.
+  `daemon status` prints that without starting anything. The reference docs now
+  carry a copyable systemd user unit, which of the daemon's exit codes mean stop
+  and which mean restart, and a `TimeoutStopSec` you can actually size against a
+  real drain.
+- **Fixes for several Boxes sharing one host.** Concurrent children realizing
+  the same agent image now serialize behind a per-image lock instead of
+  duplicating the work and contending on the runtime's store. A cold start
+  releases one slot first and holds the rest until it claims, so a pool coming
+  up doesn't race itself onto the same issue. A launcher that finds a container
+  a sibling created but hasn't started yet leaves the issue dispatchable instead
+  of marking it failed, and continuous refill skips an in-flight issue rather
+  than failing it. Separately, delta review of the land pass now fires on the
+  lines a reviewer actually read rather than the files it happened to name, so
+  prose added late in a run stops slipping through unreviewed.
+
 ## 0.18.1 — 2026-09-19
 
 The Box stops fetching its own issue. The host reads the body, the comments,
