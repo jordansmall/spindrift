@@ -4,10 +4,7 @@ import "fmt"
 
 // Kind is the Dispatch kind the daemon drives: work dispatch or advise-only
 // research. Both are driven through the same exit-code interpretation (ADR
-// 0022), which is why one loop drives either — but the contract is not
-// identical: research's bootstrap failures surface as a bare 1 (main.go's
-// "research" handler), not exitConfigInvalid, which the loop treats as a
-// generic failure.
+// 0022), which is why one loop drives either.
 type Kind string
 
 const (
