@@ -26,7 +26,7 @@ type pool struct {
 
 	mu        sync.Mutex
 	halted    bool
-	reason    string
+	reason    Halt
 	occupied  map[int]slotFlight
 	awakeShut bool // true once awake_close has fired, until the matching awake_open
 
@@ -394,22 +394,22 @@ func (p *pool) stopped() bool {
 	return p.halted
 }
 
-// halt records reason as the pool's halt reason if none is recorded yet,
-// emits the single pool-level halt event, and cancels the derived context.
+// halt records h as the pool's halt reason if none is recorded yet, emits
+// the single pool-level halt event, and cancels the derived context.
 // Idempotent: once the pool has halted, later calls (racing siblings, or a
 // slot that merely rediscovers the same cancellation) are no-ops — the
-// first reason wins and no second halt event is ever emitted.
-func (p *pool) halt(kind Kind, reason, revision string) {
+// first h wins and no second halt event is ever emitted.
+func (p *pool) halt(h Halt) {
 	p.mu.Lock()
 	if p.halted {
 		p.mu.Unlock()
 		return
 	}
 	p.halted = true
-	p.reason = reason
+	p.reason = h
 	p.mu.Unlock()
 
-	p.emit(Event{Event: "halt", Kind: kind, Revision: revision, Reason: reason})
+	p.emit(h.Event())
 	p.cancel()
 }
 
@@ -437,9 +437,9 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 
 	count, crossed := p.b.recordAndCheck(p.clk.Now())
 	if crossed {
-		haltReason := fmt.Sprintf("breaker: %d failures within %s reached threshold %d", count, p.cfg.BreakerWindow, p.cfg.BreakerThreshold)
+		detail := fmt.Sprintf("%d failures within %s reached threshold %d", count, p.cfg.BreakerWindow, p.cfg.BreakerThreshold)
 		p.emit(Event{Event: "breaker_trip", Kind: kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()})
-		p.halt(kind, haltReason, revision)
+		p.halt(Halt{Class: HaltBreaker, Detail: detail, Kind: kind, Revision: revision})
 		return true
 	}
 
@@ -500,7 +500,13 @@ func (p *pool) checkSelfBuild(ctx context.Context, slot int, kind Kind, revision
 		if stopOnCancel(ctx, kind, p) {
 			return selfStop
 		}
-		if p.backoffOrHalt(ctx, slot, kind, revision, HaltSelfBuildPrefix+err.Error()) {
+		// Rendered through Halt rather than a raw "self-build: " literal so
+		// the documented self-build grammar has exactly one renderer
+		// (Halt.String()) even though this reason only ever reaches a halt
+		// indirectly, via the breaker — backoffOrHalt's own reason param
+		// stays a plain string because its other two callers pass
+		// non-halt-grammar strings.
+		if p.backoffOrHalt(ctx, slot, kind, revision, Halt{Class: HaltSelfBuild, Detail: err.Error()}.String()) {
 			return selfStop
 		}
 		return selfRetry
@@ -508,8 +514,8 @@ func (p *pool) checkSelfBuild(ctx context.Context, slot int, kind Kind, revision
 	if path == p.cfg.SelfProgram {
 		return selfOK
 	}
-	reason := fmt.Sprintf("%s: daemon build at %s is %s, running %s", HaltSelfChanged, revision, path, p.cfg.SelfProgram)
-	p.halt(kind, reason, revision)
+	detail := fmt.Sprintf("daemon build at %s is %s, running %s", revision, path, p.cfg.SelfProgram)
+	p.halt(Halt{Class: HaltSelfChanged, Detail: detail, Kind: kind, Revision: revision})
 	return selfStop
 }
 
@@ -716,7 +722,7 @@ func (p *pool) snapshot() Status {
 	switch {
 	case p.halted:
 		state = StateHalted
-		reason = p.reason
+		reason = p.reason.String()
 	case len(p.occupied) > 0:
 		state = StateWorking
 	case !windowOpensAt.IsZero():
@@ -774,12 +780,12 @@ func (p *pool) publish() {
 // (loop.go).
 func (p *pool) emit(ev Event) { p.em.Emit(ev); p.publish() }
 
-// haltReason returns the pool's recorded halt reason. Only meaningful after
+// haltReason returns the pool's recorded Halt. Only meaningful after
 // every slot goroutine has returned (Loop calls it after its WaitGroup
 // drains), so no lock is strictly required at that point, but the pool's
 // own mutex is reused anyway rather than trusting a second, easy-to-miss
 // synchronisation argument.
-func (p *pool) haltReason() string {
+func (p *pool) haltReason() Halt {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.reason

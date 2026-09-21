@@ -517,25 +517,6 @@ func TestMainRun_BadDaemonIdleCapFailsStartup(t *testing.T) {
 	}
 }
 
-func TestIsOperatorStop(t *testing.T) {
-	tests := []struct {
-		reason string
-		want   bool
-	}{
-		{"context-cancelled: context canceled", true},
-		{"outcome: signalled-stop", true},
-		{"outcome: host-tainted", false},
-		{"outcome: config-invalid", false},
-		{"resolve-revision: boom", false},
-		{"run-child: boom", false},
-	}
-	for _, tt := range tests {
-		if got := isOperatorStop(tt.reason); got != tt.want {
-			t.Errorf("isOperatorStop(%q) = %v, want %v", tt.reason, got, tt.want)
-		}
-	}
-}
-
 func TestNixSystemDouble(t *testing.T) {
 	tests := []struct {
 		goos    string
@@ -563,29 +544,6 @@ func TestNixSystemDouble(t *testing.T) {
 		}
 		if got != tt.want {
 			t.Errorf("nixSystemDouble(%q, %q) = %q, want %q", tt.goos, tt.goarch, got, tt.want)
-		}
-	}
-}
-
-// TestExitCodeFor pins the daemon process's exit-code contract: 0 for an
-// operator stop, exitSelfChanged (10) for — and only for — a self-changed
-// halt, 1 for everything else (issue #3543).
-func TestExitCodeFor(t *testing.T) {
-	tests := []struct {
-		reason string
-		want   int
-	}{
-		{"context-cancelled: context canceled", 0},
-		{"outcome: signalled-stop", 0},
-		{"self-changed: /nix/store/old-daemon != /nix/store/new-daemon", exitSelfChanged},
-		{"outcome: host-tainted", 1},
-		{"outcome: config-invalid", 1},
-		{"resolve-revision: boom", 1},
-		{"run-child: boom", 1},
-	}
-	for _, tt := range tests {
-		if got := exitCodeFor(tt.reason); got != tt.want {
-			t.Errorf("exitCodeFor(%q) = %d, want %d", tt.reason, got, tt.want)
 		}
 	}
 }
@@ -1338,15 +1296,15 @@ func TestMainRun_StatusOutsideGitCheckout(t *testing.T) {
 	}
 }
 
-// TestExitSelfChanged_OutsideChildExitBand pins the invariant exitSelfChanged's
+// TestExitSelfChanged_OutsideChildExitBand pins the invariant daemon.ExitSelfChanged's
 // own doc comment claims but nothing enforces: it must fall outside the 0-7
 // band a *child* launcher's exit codes occupy (daemon.Interpret), so an
-// operator restarting a service unit on exitSelfChanged alone can never be
-// triggered by a child's exit leaking through. Fails if exitSelfChanged is
+// operator restarting a service unit on daemon.ExitSelfChanged alone can never be
+// triggered by a child's exit leaking through. Fails if daemon.ExitSelfChanged is
 // ever lowered into that band.
 func TestExitSelfChanged_OutsideChildExitBand(t *testing.T) {
 	for exit := 0; exit < 256; exit++ {
-		outcome, action := daemon.Interpret(exit)
+		outcome, action, _ := daemon.Interpret(exit)
 		// The band is two things, and neither alone is all of it: the 0-7 span
 		// the doc names (exit 1 is a child's generic failure, which Interpret
 		// leaves unclassified), plus every code Interpret *does* classify, so a
@@ -1354,9 +1312,9 @@ func TestExitSelfChanged_OutsideChildExitBand(t *testing.T) {
 		if exit > 7 && action == daemon.Backoff {
 			continue
 		}
-		if exitSelfChanged == exit {
-			t.Fatalf("exitSelfChanged (%d) collides with child exit code %d, which daemon.Interpret classifies as %q",
-				exitSelfChanged, exit, outcome)
+		if daemon.ExitSelfChanged == exit {
+			t.Fatalf("daemon.ExitSelfChanged (%d) collides with child exit code %d, which daemon.Interpret classifies as %q",
+				daemon.ExitSelfChanged, exit, outcome)
 		}
 	}
 }
@@ -1453,9 +1411,9 @@ func TestStartupPreflight_Healthy(t *testing.T) {
 	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 0}
 
-	reason := startupPreflight(context.Background(), r, em)
-	if reason != "" {
-		t.Fatalf("startupPreflight() = %q, want \"\"", reason)
+	h := startupPreflight(context.Background(), r, em)
+	if h.Class != daemon.HaltNone {
+		t.Fatalf("startupPreflight() = %+v, want the zero Halt", h)
 	}
 	if r.calls() != 1 {
 		t.Fatalf("RunDoctor called %d times, want 1", r.calls())
@@ -1488,10 +1446,11 @@ func TestStartupPreflight_RequiredLabelsMissing(t *testing.T) {
 	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 4}
 
-	reason := startupPreflight(context.Background(), r, em)
-	if !strings.HasPrefix(reason, daemon.HaltPreflightPrefix) {
-		t.Fatalf("reason = %q, want prefix %q", reason, daemon.HaltPreflightPrefix)
+	h := startupPreflight(context.Background(), r, em)
+	if h.Class != daemon.HaltPreflight {
+		t.Fatalf("startupPreflight().Class = %v, want %v", h.Class, daemon.HaltPreflight)
 	}
+	reason := h.String()
 	if !strings.Contains(reason, "required triage labels are missing") {
 		t.Errorf("reason = %q, want it to name what failed", reason)
 	}
@@ -1499,15 +1458,15 @@ func TestStartupPreflight_RequiredLabelsMissing(t *testing.T) {
 		t.Errorf("reason = %q, want it to carry the remedy", reason)
 	}
 
+	// startupPreflight itself emits only the "preflight" event now; the
+	// matching "halt" event is mainRun's finish helper's job, not
+	// exercised by this direct call.
 	events := decodePreflightEvents(t, &buf)
-	if len(events) != 2 {
-		t.Fatalf("events = %+v, want a preflight event and a halt event", events)
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want exactly one preflight event", events)
 	}
 	if events[0].Event != "preflight" || events[0].Outcome != "doctor-required-labels-missing" {
 		t.Errorf("events[0] = %+v, want preflight/doctor-required-labels-missing", events[0])
-	}
-	if events[1].Event != "halt" || events[1].Reason != reason {
-		t.Errorf("events[1] = %+v, want halt with reason %q", events[1], reason)
 	}
 }
 
@@ -1518,9 +1477,9 @@ func TestStartupPreflight_ConfigInvalid(t *testing.T) {
 	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 2}
 
-	reason := startupPreflight(context.Background(), r, em)
-	if reason == "" {
-		t.Fatal("startupPreflight() = \"\", want a refusal for doctor exit 2")
+	h := startupPreflight(context.Background(), r, em)
+	if h.Class != daemon.HaltPreflight {
+		t.Fatalf("startupPreflight().Class = %v, want %v (a refusal for doctor exit 2)", h.Class, daemon.HaltPreflight)
 	}
 }
 
@@ -1530,9 +1489,9 @@ func TestStartupPreflight_Connectivity(t *testing.T) {
 	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 3}
 
-	reason := startupPreflight(context.Background(), r, em)
-	if reason == "" {
-		t.Fatal("startupPreflight() = \"\", want a refusal for doctor exit 3")
+	h := startupPreflight(context.Background(), r, em)
+	if h.Class != daemon.HaltPreflight {
+		t.Fatalf("startupPreflight().Class = %v, want %v (a refusal for doctor exit 3)", h.Class, daemon.HaltPreflight)
 	}
 }
 
@@ -1559,17 +1518,19 @@ func TestStartupPreflight_ResolveRevisionFailure(t *testing.T) {
 	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
 	r := &fakePreflightRunner{resolveErr: errors.New("git fetch boom")}
 
-	reason := startupPreflight(context.Background(), r, em)
-	if reason == "" {
-		t.Fatal("startupPreflight() = \"\", want a refusal on a resolve failure")
+	h := startupPreflight(context.Background(), r, em)
+	if h.Class != daemon.HaltPreflight {
+		t.Fatalf("startupPreflight().Class = %v, want %v (a refusal on a resolve failure)", h.Class, daemon.HaltPreflight)
 	}
 	if r.calls() != 0 {
 		t.Errorf("RunDoctor called %d times, want 0 (never reached)", r.calls())
 	}
 
+	// The matching "halt" event is mainRun's finish helper's job now, not
+	// exercised by this direct call — see TestStartupPreflight_RequiredLabelsMissing.
 	events := decodePreflightEvents(t, &buf)
-	if len(events) != 2 {
-		t.Fatalf("events = %+v, want a preflight error event and a halt event", events)
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want exactly one preflight error event", events)
 	}
 	if events[0].Event != "preflight" || events[0].Outcome != "doctor-seam-error" {
 		t.Errorf("events[0] = %+v, want preflight/doctor-seam-error", events[0])
@@ -1583,15 +1544,15 @@ func TestStartupPreflight_RunDoctorSeamFailure(t *testing.T) {
 	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
 	r := &fakePreflightRunner{revision: "deadbeef", doctorErr: errors.New("exec boom")}
 
-	reason := startupPreflight(context.Background(), r, em)
-	if reason == "" {
-		t.Fatal("startupPreflight() = \"\", want a refusal on a RunDoctor seam failure")
+	h := startupPreflight(context.Background(), r, em)
+	if h.Class != daemon.HaltPreflight {
+		t.Fatalf("startupPreflight().Class = %v, want %v (a refusal on a RunDoctor seam failure)", h.Class, daemon.HaltPreflight)
 	}
 }
 
 // TestStartupPreflight_ContextCancelled covers both seams returning
-// ctx.Err(): the resulting reason must be one isOperatorStop accepts, so a
-// Ctrl-C during the preflight exits 0 rather than exitPreflightFailed.
+// ctx.Err(): the result must classify as daemon.HaltOperatorStop, so a
+// Ctrl-C during the preflight exits 0 rather than daemon.ExitPreflightFailed.
 func TestStartupPreflight_ContextCancelled(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1612,37 +1573,34 @@ func TestStartupPreflight_ContextCancelled(t *testing.T) {
 
 			var buf bytes.Buffer
 			em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
-			reason := startupPreflight(ctx, tt.r, em)
-			if !isOperatorStop(reason) {
-				t.Fatalf("isOperatorStop(%q) = false, want true", reason)
+			h := startupPreflight(ctx, tt.r, em)
+			if h.Class != daemon.HaltOperatorStop {
+				t.Fatalf("startupPreflight().Class = %v, want %v", h.Class, daemon.HaltOperatorStop)
 			}
 
 			// A cancelled preflight must still reach the durable event
-			// stream (every other halt in this daemon does) — otherwise a
-			// Ctrl-C here leaves the stream showing nothing at all between
-			// process start and process exit.
+			// stream (every other halt in this daemon does) via its
+			// "preflight" event — the matching "halt" event is mainRun's
+			// finish helper's job now, not exercised by this direct call.
 			events := decodePreflightEvents(t, &buf)
-			if len(events) != 2 {
-				t.Fatalf("events = %+v, want a preflight event and a halt event", events)
+			if len(events) != 1 {
+				t.Fatalf("events = %+v, want exactly one preflight event", events)
 			}
 			if events[0].Event != "preflight" || events[0].Outcome != "doctor-cancelled" {
 				t.Errorf("events[0] = %+v, want preflight/doctor-cancelled", events[0])
-			}
-			if events[1].Event != "halt" || events[1].Reason != reason {
-				t.Errorf("events[1] = %+v, want halt with reason %q", events[1], reason)
 			}
 		})
 	}
 }
 
-// TestExitPreflightFailed_DistinctFromOtherExitCodes guards exitPreflightFailed
+// TestExitPreflightFailed_DistinctFromOtherExitCodes guards daemon.ExitPreflightFailed
 // against ever colliding with one of this binary's other exit codes, so a
 // later edit cannot make an operator-stop or a self-changed halt
 // indistinguishable from a refused start.
 func TestExitPreflightFailed_DistinctFromOtherExitCodes(t *testing.T) {
-	for _, other := range []int{0, 1, exitSelfChanged} {
-		if exitPreflightFailed == other {
-			t.Fatalf("exitPreflightFailed (%d) collides with exit code %d", exitPreflightFailed, other)
+	for _, other := range []int{0, 1, daemon.ExitSelfChanged} {
+		if daemon.ExitPreflightFailed == other {
+			t.Fatalf("daemon.ExitPreflightFailed (%d) collides with exit code %d", daemon.ExitPreflightFailed, other)
 		}
 	}
 }
@@ -1660,15 +1618,9 @@ func TestStartupPreflight_SignalKilledDoctorOnCancelledContext(t *testing.T) {
 	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: -1}
 
-	reason := startupPreflight(ctx, r, em)
-	if !isOperatorStop(reason) {
-		t.Fatalf("startupPreflight() = %q, want an operator-stop reason", reason)
-	}
-	if got := exitCodeFor(reason); got != 0 {
-		t.Errorf("exitCodeFor(%q) = %d, want 0", reason, got)
-	}
-	if strings.Contains(reason, daemon.HaltPreflightPrefix) {
-		t.Errorf("startupPreflight() = %q, want no %q refusal", reason, daemon.HaltPreflightPrefix)
+	h := startupPreflight(ctx, r, em)
+	if h.Class != daemon.HaltOperatorStop {
+		t.Fatalf("startupPreflight().Class = %v, want %v (an operator stop)", h.Class, daemon.HaltOperatorStop)
 	}
 
 	events := decodePreflightEvents(t, &buf)
@@ -1687,6 +1639,93 @@ func TestStartupPreflight_SignalKilledDoctorOnCancelledContext(t *testing.T) {
 	if !sawPreflight {
 		t.Errorf("events = %+v, want a preflight event among them", events)
 	}
+}
+
+// TestFinish_OnePathForEveryPreLoopHalt pins mainRun's single finish path
+// (issue #3622 slice 3): a preflight refusal, an operator Ctrl-C during the
+// preflight, and an instance-lock refusal each emit exactly one "halt"
+// event carrying h.String()'s documented reason and return the exit code
+// their HaltClass derives — 11, 0, and 1 respectively — and only the first
+// two (sw != nil) publish a halted status file; the instance-lock refusal
+// (sw == nil, per finish's doc) leaves no status file behind.
+func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
+	countHalts := func(t *testing.T, buf *bytes.Buffer, h daemon.Halt) int {
+		t.Helper()
+		var halts int
+		for _, ev := range decodePreflightEvents(t, buf) {
+			if ev.Event != "halt" {
+				continue
+			}
+			halts++
+			if ev.Reason != h.String() {
+				t.Errorf("halt reason = %q, want %q", ev.Reason, h.String())
+			}
+		}
+		return halts
+	}
+
+	t.Run("preflight refusal", func(t *testing.T) {
+		var buf, stderr bytes.Buffer
+		em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+		r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 4}
+		h := startupPreflight(context.Background(), r, em)
+
+		dir := t.TempDir()
+		sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
+		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindDispatch}, h); got != daemon.ExitPreflightFailed {
+			t.Errorf("finish() = %d, want %d", got, daemon.ExitPreflightFailed)
+		}
+		if got := countHalts(t, &buf, h); got != 1 {
+			t.Errorf("halt events = %d, want exactly 1", got)
+		}
+
+		report, err := daemon.ReadStatus(dir)
+		if err != nil {
+			t.Fatalf("ReadStatus: %v", err)
+		}
+		if report.Status == nil || report.Status.Reason != h.String() {
+			t.Errorf("status = %+v, want a halted status naming %q", report.Status, h.String())
+		}
+	})
+
+	t.Run("operator cancel during preflight", func(t *testing.T) {
+		var buf, stderr bytes.Buffer
+		em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		h := startupPreflight(ctx, &fakePreflightRunner{}, em)
+
+		dir := t.TempDir()
+		sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
+		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindDispatch}, h); got != 0 {
+			t.Errorf("finish() = %d, want 0", got)
+		}
+		if got := countHalts(t, &buf, h); got != 1 {
+			t.Errorf("halt events = %d, want exactly 1", got)
+		}
+	})
+
+	t.Run("instance lock refusal", func(t *testing.T) {
+		var buf, stderr bytes.Buffer
+		em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+		h := daemon.Halt{Class: daemon.HaltInstanceLock, Detail: "held by pid 123"}
+
+		dir := t.TempDir()
+		if got := finish(&stderr, em, nil, []daemon.Kind{daemon.KindDispatch}, h); got != 1 {
+			t.Errorf("finish() = %d, want 1", got)
+		}
+		if got := countHalts(t, &buf, h); got != 1 {
+			t.Errorf("halt events = %d, want exactly 1", got)
+		}
+
+		report, err := daemon.ReadStatus(dir)
+		if err != nil {
+			t.Fatalf("ReadStatus: %v", err)
+		}
+		if report.Status != nil {
+			t.Errorf("status = %+v, want no status file written (sw == nil)", report.Status)
+		}
+	})
 }
 
 // TestSettingsKeys pins settingsKeys' sorted-order contract and its nil
@@ -1948,8 +1987,8 @@ func TestMainRun_DoctorChildGetsCapturedEnv(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	got := mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
-	if got != exitPreflightFailed {
-		t.Fatalf("mainRun() = %d, want %d (exitPreflightFailed); stderr = %q", got, exitPreflightFailed, stderr.String())
+	if got != daemon.ExitPreflightFailed {
+		t.Fatalf("mainRun() = %d, want %d (daemon.ExitPreflightFailed); stderr = %q", got, daemon.ExitPreflightFailed, stderr.String())
 	}
 	if captured == nil {
 		t.Fatal("runnerDoctorCommand was never called")

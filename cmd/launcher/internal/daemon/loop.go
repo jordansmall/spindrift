@@ -167,7 +167,7 @@ type Config struct {
 // cfg.Slots must be positive: a zero or negative pool size would silently
 // run no children while looking like a healthy daemon, so Loop rejects it
 // as a halt-shaped config error instead.
-func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) string {
+func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Halt {
 	if cfg.Slots <= 0 {
 		return invalidConfig(em, cfg, fmt.Sprintf("slots must be a positive integer, got %d", cfg.Slots))
 	}
@@ -222,22 +222,23 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) str
 	return p.haltReason()
 }
 
-// invalidConfig emits and returns a "config-invalid: " + detail halt reason,
-// the shape shared by every cfg field Loop rejects before starting a pool.
+// invalidConfig emits and returns a Halt of class HaltInvalidConfig carrying
+// detail, the shape shared by every cfg field Loop rejects before starting a
+// pool.
 // No Kind is stamped on the halt event: this rejection happens before any
 // pool exists to have picked one. It also publishes a StateHalted status
 // directly, bypassing pool.snapshot (there is no pool yet to snapshot): cfg
 // is otherwise unvalidated at this point, so cfg.Kinds is copied over as
 // given rather than assumed well-formed.
-func invalidConfig(em *Emitter, cfg Config, detail string) string {
-	reason := "config-invalid: " + detail
-	em.Emit(Event{Event: "halt", Reason: reason})
+func invalidConfig(em *Emitter, cfg Config, detail string) Halt {
+	h := Halt{Class: HaltInvalidConfig, Detail: detail}
+	em.Emit(h.Event())
 	if cfg.Status != nil {
-		if err := cfg.Status.Write(Status{Kinds: cfg.Kinds, State: StateHalted, Reason: reason}); err != nil {
+		if err := cfg.Status.Write(Status{Kinds: cfg.Kinds, State: StateHalted, Reason: h.String()}); err != nil {
 			fmt.Fprintf(emitErrW, "daemon: status file write failed: %v\n", err)
 		}
 	}
-	return reason
+	return h
 }
 
 // runSlot drives one pool slot's children until the pool halts, either
@@ -407,7 +408,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		}
 
 		exit := result.Exit
-		outcome, action := Interpret(exit)
+		outcome, action, haltClass := Interpret(exit)
 		p.emit(Event{Event: "child_finish", Kind: kind, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
 
 		switch action {
@@ -462,8 +463,11 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 				return
 			}
 			continue
-		default: // Halt
-			p.halt(kind, "outcome: "+outcome, revision)
+		default: // HaltPool
+			// haltClass is never HaltNone here: Interpret's one table ties
+			// action == HaltPool to a real class, pinned by
+			// TestInterpret_HaltPoolIffHaltClassSet.
+			p.halt(Halt{Class: haltClass, Kind: kind, Revision: revision})
 			return
 		}
 	}
@@ -488,7 +492,7 @@ func stopOnCancel(ctx context.Context, kind Kind, p *pool) bool {
 		return true
 	}
 	if err := ctx.Err(); err != nil {
-		p.halt(kind, "context-cancelled: "+err.Error(), "")
+		p.halt(Halt{Class: HaltOperatorStop, Detail: err.Error(), Kind: kind})
 		return true
 	}
 	return false

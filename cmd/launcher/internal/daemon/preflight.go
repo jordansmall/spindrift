@@ -2,12 +2,6 @@ package daemon
 
 import "fmt"
 
-// HaltPreflightPrefix is the sibling of HaltInstanceLockPrefix and
-// HaltSelfBuildPrefix for the startup doctor preflight's halt reason (issue
-// #3544): docs/reference.md documents this exact string as operator-facing
-// grammar, so changing it is a documented-behaviour change, not a rename.
-const HaltPreflightPrefix = "preflight: "
-
 // PreflightVerdict is ClassifyPreflight's result: whether the host may run
 // at all, and — when it may not — what an operator needs to know and do
 // about it.
@@ -74,12 +68,13 @@ func ClassifyPreflight(exit int) PreflightVerdict {
 	}
 }
 
-// HaltReason formats v's halt reason for the daemon's stderr and event
-// stream, prefixed HaltPreflightPrefix. It must never be called on a
-// healthy verdict (there is nothing to halt for); doing so returns "".
-func (v PreflightVerdict) HaltReason() string {
+// Halt renders v as a typed Halt. The zero Halt (class HaltNone, which
+// String() renders "") on a healthy verdict keeps the same "never call this
+// on a healthy verdict" contract the string-returning version carried,
+// without a second special case.
+func (v PreflightVerdict) Halt() Halt {
 	if v.Healthy {
-		return ""
+		return Halt{}
 	}
-	return fmt.Sprintf("%sdoctor exit %d: %s — remedy: %s", HaltPreflightPrefix, v.Exit, v.Detail, v.Remedy)
+	return Halt{Class: HaltPreflight, Detail: fmt.Sprintf("doctor exit %d: %s — remedy: %s", v.Exit, v.Detail, v.Remedy)}
 }
