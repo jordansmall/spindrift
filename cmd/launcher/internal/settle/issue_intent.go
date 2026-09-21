@@ -72,22 +72,6 @@ type filedIntent struct {
 	Body   string
 }
 
-// fileIssueIntents files every payload in result.IssueIntents through the
-// host-mediated relay (issue #2018, ADR 0034), using the Launcher's
-// write-credentialed tracker rather than the read-only Box's, and returns the
-// successes' URLs in payload order. It wraps fileIssueIntentsDetailed (issue
-// #2592); only the tests consume this shape.
-func fileIssueIntents(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string) []string {
-	detailed := fileIssueIntentsDetailed(it, num, result, provenanceLabel, "")
-	var urls []string
-	for _, d := range detailed {
-		if !d.Failed {
-			urls = append(urls, d.URL)
-		}
-	}
-	return urls
-}
-
 // fileIssueIntentsDetailed returns one filedIntent per well-formed payload in
 // payload order, success or failure, and appends a non-empty bodyBacklink to
 // each body before filing. Labels are host-derived, the provenanceLabel plus
@@ -134,4 +118,41 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 		out = append(out, filedIntent{Title: in.Title, URL: url})
 	}
 	return out
+}
+
+// filedTally is one run's issue-filing volume. A failed filing is counted
+// apart from a successful one so a run that tried and failed does not read as
+// a quiet run (issue #3608).
+type filedTally struct {
+	ok     int
+	failed int
+}
+
+// tallyFiled counts filed by filedIntent.Failed. A nil/empty slice yields the
+// zero tally, not an error.
+func tallyFiled(filed []filedIntent) filedTally {
+	var t filedTally
+	for _, f := range filed {
+		if f.Failed {
+			t.failed++
+		} else {
+			t.ok++
+		}
+	}
+	return t
+}
+
+// String renders as comma-joined name:count pairs (issue #3608) rather than
+// a fixed "ok/failed" shape, so a later skipped:<N> count slots in as one
+// more pair instead of a breaking format change.
+func (t filedTally) String() string {
+	return fmt.Sprintf("ok:%d,failed:%d", t.ok, t.failed)
+}
+
+// reportFiled prints the filing tally for issue num, always — even a zero
+// tally (filed=ok:0,failed:0) — so "reached filing and filed nothing" reads
+// differently in the transcript than "never reached filing" (no line at
+// all).
+func reportFiled(num string, filed []filedIntent) {
+	fmt.Printf("    #%s  filed=%s\n", num, tallyFiled(filed))
 }
