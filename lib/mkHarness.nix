@@ -1588,6 +1588,11 @@ else
       orchestratorBin = imageDriver.orchestratorBin;
       driverEntry = imageDriver.driverEntry;
 
+      # daemonBin is otherwise reachable only as apps.daemon.program, a
+      # string -- exposed here so nix/checks/equivalence.nix's store-path
+      # checks can compare and override it directly (issue #3621).
+      inherit daemonBin;
+
       # The fully resolved roster, after dropOptedOut and the reviewEffort
       # step (issue #2512). Exposed for nix/checks/equivalence.nix's
       # eval-level introspection, not as part of the settings or CLI.
