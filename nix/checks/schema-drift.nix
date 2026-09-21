@@ -1753,6 +1753,28 @@ checkedMerge {
         touch $out
       '';
 
+  # Regenerate with `nix run .#regen` when lib/env-schema.nix's daemon tuning
+  # knob defaults change; gofmt-normalized the same way regen normalizes it
+  # (issue #3619).
+  daemon-knob-defaults-gen-go =
+    let
+      raw = pkgs.writeText "shippeddefaults_gen_test.go.raw" (
+        renderers.renderDaemonKnobDefaultsGo schema
+      );
+    in
+    pkgs.runCommand "daemon-knob-defaults-gen-go"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/daemon/shippeddefaults_gen_test.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/daemon/shippeddefaults_gen_test.go is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # Proves assertMarkedBlockOk rejects a drifted block rather than passing
   # vacuously (issue #2948). Every row is exercised, not just the first, by
   # appending a content-agnostic sentinel to its own docSrc. `postSplice ==

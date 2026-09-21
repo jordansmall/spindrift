@@ -1101,35 +1101,6 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 	}
 }
 
-// TestBreakerDefaults_TripReachableAtOneSlot pins the reachability the
-// breaker exists for at the smallest supported pool: at MAX_PARALLEL=1 a
-// systemic fault's failures are one slot's own retries, spaced
-// DAEMON_FAILURE_BACKOFF apart, so DAEMON_BREAKER_THRESHOLD of them must
-// still fit inside DAEMON_BREAKER_WINDOW. Values that push that span past
-// the window leave a 1-slot daemon burning its only slot until morning with
-// no breaker_trip ever emitted. The shipped defaults (lib/env-schema.nix) no
-// longer live as constants in this package, so this parses them the same
-// way mainRun does, through the knobs' own parse helpers.
-func TestBreakerDefaults_TripReachableAtOneSlot(t *testing.T) {
-	threshold, err := parseBreakerThreshold("5")
-	if err != nil {
-		t.Fatalf("parseBreakerThreshold: %v", err)
-	}
-	backoff, err := parseFailureBackoff("1m")
-	if err != nil {
-		t.Fatalf("parseFailureBackoff: %v", err)
-	}
-	window, err := parseBreakerWindow("15m")
-	if err != nil {
-		t.Fatalf("parseBreakerWindow: %v", err)
-	}
-	span := time.Duration(threshold-1) * backoff
-	if span >= window {
-		t.Fatalf("a single slot can never trip the breaker: %d failures at %s apart span %s, outside the %s window",
-			threshold, backoff, span, window)
-	}
-}
-
 // TestMainRun_StatusDoesNotRequireInput is the regression the pre-parseArgs
 // dispatch in mainRun exists to prevent: `daemon status` with no --input
 // must never hit parseArgs's "flag --input is required" error, since
