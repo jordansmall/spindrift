@@ -1834,3 +1834,176 @@ func TestMainRun_NoKnobsSetNoWarning(t *testing.T) {
 		t.Errorf("stderr = %q, want no stripped-env warning", stderr.String())
 	}
 }
+
+// bareOriginConsumerT sets up a bare origin repo plus a clone with one
+// commit pushed to main, and returns the clone's path. Both
+// TestMainRun_*ChildGetsCapturedEnv tests need a real git remote so
+// ResolveRevision's `git fetch` succeeds during mainRun's preflight.
+func bareOriginConsumerT(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	bare := filepath.Join(root, "origin.git")
+	dirConsumer := filepath.Join(root, "consumer")
+	gitRunT(t, "", "init", "--bare", bare)
+	gitRunT(t, "", "clone", bare, dirConsumer)
+	gitRunT(t, dirConsumer, "checkout", "-B", "main")
+	gitRunT(t, dirConsumer, "config", "user.email", "consumer@example.com")
+	gitRunT(t, dirConsumer, "config", "user.name", "Consumer")
+	writeFileT(t, filepath.Join(dirConsumer, "a.txt"), "a\n")
+	gitRunT(t, dirConsumer, "add", "a.txt")
+	gitRunT(t, dirConsumer, "commit", "-m", "base")
+	gitRunT(t, dirConsumer, "push", "-u", "origin", "main")
+	return dirConsumer
+}
+
+// assertCapturedEnvT checks env for a PATH and HOME entry (proving the
+// child inherited the parent's environment, not an empty one) and asserts
+// MODEL was stripped (it names a settings key, not a passthrough var).
+// label distinguishes the doctor and dispatch child in failure output.
+//
+// Failure output names keys only, never env itself: env is the live
+// os.Environ()-derived child environment, so a %v of it would put real
+// credentials into the test log and any transcript that captures it.
+func assertCapturedEnvT(t *testing.T, label string, env []string) {
+	t.Helper()
+	var hasPath, hasHome, hasModel bool
+	for _, kv := range env {
+		switch {
+		case strings.HasPrefix(kv, "PATH="):
+			hasPath = true
+		case strings.HasPrefix(kv, "HOME="):
+			hasHome = true
+		case strings.HasPrefix(kv, "MODEL="):
+			hasModel = true
+		}
+	}
+	// Only built on a failing assertion, and keeping a no-"=" entry (as
+	// itself) rather than dropping it: env is the live, credential-bearing
+	// child environment, so this stays off the hot path and never hides a key.
+	envKeysT := func() []string {
+		keys := make([]string, 0, len(env))
+		for _, kv := range env {
+			k, _, _ := strings.Cut(kv, "=")
+			keys = append(keys, k)
+		}
+		return keys
+	}
+	if !hasPath {
+		t.Errorf("%s Env keys = %v, want a PATH entry", label, envKeysT())
+	}
+	if !hasHome {
+		t.Errorf("%s Env keys = %v, want a HOME entry", label, envKeysT())
+	}
+	if hasModel {
+		t.Errorf("%s Env keys = %v, want MODEL stripped (it names a settings key)", label, envKeysT())
+	}
+}
+
+// capturedEnvFixtureT is the shared setup for TestMainRun_*ChildGetsCapturedEnv:
+// skip without git, a synthetic HOME (so the fixture never depends on the
+// ambient test environment), a cleared+MODEL-set knob env, a bare-origin
+// consumer repo, and an input document carrying MODEL plus extra, chdir'd
+// into the consumer. Returns the input document path; each caller keeps its
+// own doctor/exec stubs and assertions, which diverge between the tests.
+func capturedEnvFixtureT(t *testing.T, extra map[string]string) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	t.Setenv("HOME", t.TempDir())
+
+	clearKnobEnvT(t)
+	t.Setenv("MODEL", "opus")
+
+	dirConsumer := bareOriginConsumerT(t)
+
+	doc := validKnobDocument()
+	doc.Settings["MODEL"] = "opus"
+	for k, v := range extra {
+		doc.Settings[k] = v
+	}
+	path := writeInputDocument(t, doc)
+
+	t.Chdir(dirConsumer)
+	return path
+}
+
+// TestMainRun_DoctorChildGetsCapturedEnv is the regression test for the bug
+// where newHostRunner's call site never set env/knobs, so RunDoctor exec'd
+// children with an EMPTY environment (no PATH, no HOME) — dogfood's doctor
+// preflight couldn't even locate `sh`. The stubbed doctor exits non-zero,
+// halting mainRun at startupPreflight before daemon.Loop starts, which
+// keeps the test bounded to the doctor seam.
+func TestMainRun_DoctorChildGetsCapturedEnv(t *testing.T) {
+	path := capturedEnvFixtureT(t, nil)
+
+	origDoctor := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+	var captured *exec.Cmd
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+		captured = cmd
+		return cmd
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
+	if got != exitPreflightFailed {
+		t.Fatalf("mainRun() = %d, want %d (exitPreflightFailed); stderr = %q", got, exitPreflightFailed, stderr.String())
+	}
+	if captured == nil {
+		t.Fatal("runnerDoctorCommand was never called")
+	}
+
+	assertCapturedEnvT(t, "doctor child", captured.Env)
+}
+
+// TestMainRun_DispatchChildGetsCapturedEnv is the dispatch-child sibling of
+// TestMainRun_DoctorChildGetsCapturedEnv above: it stubs the doctor preflight
+// to pass, so daemon.Loop actually starts a slot and runs a child through
+// runnerExecCommand (runner.go's RunChild seam), and asserts that child gets
+// the same captured, knob-stripped environment. Bounding: the stubbed child
+// exits 1, an unclassified outcome (Interpret's default case), and
+// DAEMON_BREAKER_THRESHOLD is set to 1 (the parser's own minimum) so the
+// pool-wide breaker trips on that first failure and Loop halts at once,
+// rather than backing the slot off forever.
+func TestMainRun_DispatchChildGetsCapturedEnv(t *testing.T) {
+	path := capturedEnvFixtureT(t, map[string]string{"DAEMON_BREAKER_THRESHOLD": "1"})
+
+	origDoctor := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	origExec := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = origExec })
+	// No mutex needed: mainRun calls daemon.Loop synchronously, and Loop
+	// joins every slot goroutine at wg.Wait() before returning, so this
+	// write happens-before the read below. A mutex here would anyway never
+	// have covered cmd.Env, which runner.go sets after this stub returns.
+	var captured *exec.Cmd
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		cmd := exec.Command("/bin/sh", "-c", "exit 1")
+		captured = cmd
+		return cmd
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("mainRun() = %d, want 1 (breaker halt); stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "breaker_trip") {
+		// threshold 1 also trips on a pre-child failure (ResolveRevision,
+		// self-build), so this alone doesn't prove a child dispatched — the
+		// captured == nil check below carries that claim.
+		t.Errorf("stdout = %q, want a breaker_trip event", stdout.String())
+	}
+
+	if captured == nil {
+		t.Fatal("runnerExecCommand was never called")
+	}
+
+	assertCapturedEnvT(t, "dispatch child", captured.Env)
+}
