@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
@@ -365,7 +366,7 @@ func TestRetiredRegistryProxyKnobsFromEnv_EachEnvVarFillsItsOwnField(t *testing.
 
 // withLoadedDoc points the package-level loadedDoc at doc for the calling test
 // only, so no test's document setting leaks into the next.
-func withLoadedDoc(t *testing.T, doc *inputDocument) {
+func withLoadedDoc(t *testing.T, doc *inputdoc.Document) {
 	t.Helper()
 	prev := loadedDoc
 	loadedDoc = doc
@@ -377,7 +378,7 @@ func withLoadedDoc(t *testing.T, doc *inputDocument) {
 // gate. That mirrors the document fallback getenvSchema gives every other
 // schema knob, so the retired-knob gate is not a silent exception to it.
 func TestRetiredRegistryProxyKnobsFromEnv_ReadsInputDocumentSettings(t *testing.T) {
-	withLoadedDoc(t, &inputDocument{Settings: map[string]string{
+	withLoadedDoc(t, &inputdoc.Document{Settings: map[string]string{
 		"REGISTRY_PROXY_CREDENTIAL_ENV": "SOME_ENV_VAR",
 	}})
 
@@ -397,7 +398,7 @@ func TestRetiredRegistryProxyKnobsFromEnv_ReadsInputDocumentSettings(t *testing.
 // settings value for the same knob. That is the same env-over-document
 // precedence getenvSchema applies to every other knob.
 func TestRetiredRegistryProxyKnobsFromEnv_AmbientEnvWinsOverInputDocument(t *testing.T) {
-	withLoadedDoc(t, &inputDocument{Settings: map[string]string{
+	withLoadedDoc(t, &inputdoc.Document{Settings: map[string]string{
 		"REGISTRY_PROXY_CREDENTIAL_ENV": "FROM_DOCUMENT",
 	}})
 	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "FROM_AMBIENT_ENV")

@@ -396,7 +396,7 @@ var globalSecretCmdTemplate string
 
 // applySecretCmdFallback resolves globalSecretCmdTemplate, substituting
 // {name} with the kebab-case env name, for every secret knob this run needs
-// that still has no value. main() must call it after loadInputDocument, not
+// that still has no value. main() must call it after inputdoc.Load, not
 // from parseFlags: secretRequiredThisRun reads loadedDoc through
 // getenvSchema, and loadedDoc is still nil while parseFlags runs (ADR 0020).
 func applySecretCmdFallback() error {

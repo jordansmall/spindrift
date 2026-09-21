@@ -27,6 +27,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/registryproxy"
@@ -2152,7 +2153,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if inputPath != "" {
-		doc, err := loadInputDocument(inputPath)
+		doc, err := inputdoc.Load(inputPath)
 		if err != nil {
 			stderr.Write(ambientWarnings.Bytes())
 			fmt.Fprintf(stderr, "%s\n", err)

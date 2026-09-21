@@ -1,41 +1,19 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
-// inputDocument mirrors the nix-rendered Launcher input document (ADR 0020):
-// Settings holds resolved knob values keyed by env var name, Artifacts the
-// nix-computed plumbing (image refs, agent files, driver name). It is
-// hand-written, not nix-generated (issue #813), and the mkharness-defaults
-// drift gate in nix/checks/equivalence.nix greps hand-picked keys only.
-type inputDocument struct {
-	Settings  map[string]string `json:"settings"`
-	Artifacts map[string]string `json:"artifacts"`
-}
-
-// loadedDoc is populated once by loadInputDocument, before loadConfig runs. It
+// loadedDoc is populated once by inputdoc.Load, before loadConfig runs. It
 // stays nil when the binary runs without --input (tests, manual debugging), and
 // every lookup then falls through to os.Getenv or schemaFlags.
-var loadedDoc *inputDocument
-
-// loadInputDocument reads and parses the Launcher input document at path.
-func loadInputDocument(path string) (*inputDocument, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read input document %s: %w", path, err)
-	}
-	var doc inputDocument
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("parse input document %s: %w", path, err)
-	}
-	return &doc, nil
-}
+var loadedDoc *inputdoc.Document
 
 // getenvArtifact reads key from the environment, then the loaded document's
 // artifacts section, then def. Artifacts are nix-computed plumbing, never
