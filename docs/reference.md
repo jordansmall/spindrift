@@ -5331,8 +5331,10 @@ the same log:
 
 10 and 11 both sit deliberately outside the 0–7 band the *child*
 launcher's exit codes occupy, so neither taxonomy can be confused with the
-other when both appear in one log (`exitSelfChanged`,
-`exitPreflightFailed`, `cmd/launcher/daemon/main.go`). The two read very
+other when both appear in one log (`ExitSelfChanged`,
+`ExitPreflightFailed`, `cmd/launcher/internal/daemon/halt.go`, where
+`Halt.ExitCode` derives every code in the table above from the halting
+class alone — nothing re-reads the reason string). The two read very
 differently to an operator composing a restart policy, though: 10 is the
 one code this daemon deliberately invites a supervisor to compose with
 `Restart=on-failure` (**Self-change halt** above), since restarting clears
