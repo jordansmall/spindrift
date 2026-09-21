@@ -113,8 +113,9 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 	const slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
-	// onStart restores this test's pre-gate concurrent first wave (issue
-	// #3634).
+	// onStart restores this test's concurrent first wave: every slot
+	// announces at once, so none ever parks waiting for the discovery
+	// baton.
 	r.announceEachSlot()
 	clk := &testClock{}
 	var buf bytes.Buffer

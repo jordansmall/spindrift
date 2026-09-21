@@ -59,9 +59,11 @@ func (w *notifyWriter) waitForLine(t *testing.T, substr string) {
 }
 
 // TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild pins the two
-// guarantees a pool of slots exists for: with Slots: N and the cold-start
-// gate released (r.onStart below), N children really do run at once (not
-// N sequential calls that merely look concurrent from the outside), and
+// guarantees a pool of slots exists for: with Slots: N and every slot's
+// discovery released at once (r.onStart below announces each slot
+// immediately, so none ever parks on the baton), N children really do run
+// at once (not N sequential calls that merely look concurrent from the
+// outside), and
 // once every slot's child has started, halting one slot still lets every
 // sibling's already-started child return and emit its own child_finish
 // rather than being abandoned mid-run.
@@ -69,8 +71,8 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	const slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
-	// onStart restores this test's pre-gate concurrent first wave (issue
-	// #3634): without it, only the leader would start until it claims
+	// onStart restores this test's concurrent first wave: without it, only
+	// the pre-assigned initial baton holder would start until it claims
 	// something.
 	r.announceEachSlot()
 	clk := &testClock{}
@@ -173,8 +175,9 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	const threshold = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
-	// onStart restores this test's pre-gate concurrent first wave (issue
-	// #3634).
+	// onStart restores this test's concurrent first wave: every slot
+	// announces at once, so none ever parks waiting for the discovery
+	// baton.
 	r.announceEachSlot()
 	clk := &testClock{}
 	// nw notifies on every event line as it is written, so the test can
@@ -308,9 +311,9 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 		results:   []ChildResult{{Exit: 1}},
 		onStart: func(ctx context.Context, req ChildRequest) error {
 			// Announce immediately, before ever joining the barrier
-			// below: the leader's slot must open the cold-start gate
-			// (issue #3634) the instant its own RunChild call begins, or
-			// the other slots would still be parked on the gate and
+			// below: whichever slot currently holds the discovery baton
+			// must pass it the instant its own RunChild call begins, or
+			// the other slots would still be parked waiting for it and
 			// could never join the barrier this test's whole premise
 			// depends on.
 			if req.OnIssue != nil {
@@ -407,8 +410,9 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	const slots = 2
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
-	// onStart restores this test's pre-gate concurrent first wave (issue
-	// #3634).
+	// onStart restores this test's concurrent first wave: every slot
+	// announces at once, so none ever parks waiting for the discovery
+	// baton.
 	r.announceEachSlot()
 	clk := &testClock{}
 	nw := newNotifyWriter()
@@ -471,8 +475,9 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	const slots = 2
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
-	// onStart restores this test's pre-gate concurrent first wave (issue
-	// #3634).
+	// onStart restores this test's concurrent first wave: every slot
+	// announces at once, so none ever parks waiting for the discovery
+	// baton.
 	r.announceEachSlot()
 	// clk: Sleep must remain provably parked rather than testClock's
 	// instant advance racing straight back into a second RunChild call,
@@ -1135,13 +1140,14 @@ func TestPoolSnapshotState(t *testing.T) {
 
 // TestPoolSnapshotSlots pins that snapshot names each slot's kind, revision
 // and in-flight issues from occupancy, leaving an unoccupied slot bare.
-// Driven through Loop with a 2-slot pool: slot 0 is the cold-start leader
-// (pool.go's leadSlot), so it alone resolves and occupies on the first
-// round while slot 1 parks in awaitStartGate. Announcing slot 0's issue via
-// req.OnIssue opens the gate, so slot 1's own ResolveRevision call (call
-// index 2 — onResolve is keyed by call, not slot, since ResolveRevision
-// carries no slot) is parked forever on ctx.Done(), which keeps slot 1 from
-// ever reaching occupy regardless of scheduling.
+// Driven through Loop with a 2-slot pool: slot 0 is the pre-assigned
+// initial baton holder (pool.go's leadSlot), so it alone resolves and
+// occupies on the first round while slot 1 parks in awaitBaton. Announcing
+// slot 0's issue via req.OnIssue passes the baton, so slot 1's own
+// ResolveRevision call (call index 2 — onResolve is keyed by call, not
+// slot, since ResolveRevision carries no slot) is parked forever on
+// ctx.Done(), which keeps slot 1 from ever reaching occupy regardless of
+// scheduling.
 func TestPoolSnapshotSlots(t *testing.T) {
 	dir, sw := statusDir(t)
 	clk := &testClock{}
@@ -1174,7 +1180,7 @@ func TestPoolSnapshotSlots(t *testing.T) {
 	}()
 
 	if got := r.awaitStart(t); got != 0 {
-		t.Fatalf("started slot = %d, want 0 (the leader)", got)
+		t.Fatalf("started slot = %d, want 0 (the initial baton holder)", got)
 	}
 	r.releaseSlot(t, 0, ChildResult{Exit: 5}) // host-tainted: halts the pool, which cancels the ctx onResolve is parked on
 	<-done
