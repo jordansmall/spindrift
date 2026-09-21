@@ -12,37 +12,89 @@ type ChildSpec struct {
 	AppAttr  string // DAEMON_APP, e.g. ".#" or ".#dogfood-bwrap"
 	Revision string // full git rev the child is pinned to
 	Kind     Kind
+	Env      []string // the daemon's own environment, os.Environ() "KEY=VALUE" shape
+	Knobs    []string // keys of the Launcher input document's settings map
 }
 
-// ChildCommand builds the argv for one pinned child launcher invocation. It
-// is pure: no filesystem or process access, so the loop slice's seam is
-// tested by feeding it a ChildSpec and asserting on the returned argv.
+// Command is the argv and environment for one pinned invocation, returned
+// together so a caller cannot silently transpose two same-typed []string
+// results (both are built by ChildCommand/DoctorCommand; see their docs).
+// Whenever one of those builders returns a nil error, Env is non-nil; the
+// zero Command it returns alongside an error is not meant to be used at
+// all. See childEnv for why non-nil matters once this reaches exec.Cmd.Env.
+type Command struct {
+	Argv []string
+	Env  []string
+}
+
+// ChildCommand builds the Command for one pinned child launcher invocation.
+// It is pure: no filesystem or process access, so the loop slice's seam is
+// tested by feeding it a ChildSpec and asserting on the returned Command.
+// The caller supplies both the environment to filter and the knob keys to
+// strip; ChildCommand never reads os.Environ itself.
+//
+// The child's environment is the daemon's own environment minus every key
+// present in Knobs: those keys are the Launcher input document's settings,
+// which is itself the child's own knob source, so stripping them here keeps
+// the daemon's resolved knobs from leaking into (and shadowing) the child's
+// independent resolution of the same names.
 //
 // The flakeref is built before the kind is parsed, so a spec that is wrong in
 // both ways reports the flakeref error: the pin is what keeps the daemon off a
 // moving working tree, so it is the half worth naming first. TestChildCommand
 // pins that order.
-func ChildCommand(s ChildSpec) ([]string, error) {
+func ChildCommand(s ChildSpec) (Command, error) {
 	flakeref, err := appFlakeref(s.RepoPath, s.AppAttr, s.Revision, "a child must always be pinned")
 	if err != nil {
-		return nil, err
+		return Command{}, err
 	}
 	kind, err := ParseKind(string(s.Kind))
 	if err != nil {
-		return nil, err
+		return Command{}, err
 	}
 
-	return []string{
-		"nix", "run", flakeref, "--",
-		string(kind),
-		// The pool cap now lives in the daemon (one slot, one child), so
-		// each child must itself be exactly one Box: --max-jobs 1 caps the
-		// wave to a single issue and --max-parallel 1 caps concurrency
-		// within it. Pinning both means the guarantee does not depend on
-		// which of the two knobs a given dispatch path happens to honour.
-		"--max-jobs", "1",
-		"--max-parallel", "1",
+	return Command{
+		Argv: []string{
+			"nix", "run", flakeref, "--",
+			string(kind),
+			// The pool cap now lives in the daemon (one slot, one child), so
+			// each child must itself be exactly one Box: --max-jobs 1 caps the
+			// wave to a single issue and --max-parallel 1 caps concurrency
+			// within it. Pinning both means the guarantee does not depend on
+			// which of the two knobs a given dispatch path happens to honour.
+			"--max-jobs", "1",
+			"--max-parallel", "1",
+		},
+		Env: childEnv(s.Env, s.Knobs),
 	}, nil
+}
+
+// childEnv filters env down to the entries whose key (the text before the
+// first '=') is not in knobs, preserving env's order. It always returns a
+// non-nil slice, even when the result is empty: this becomes Command.Env,
+// which callers assign straight to exec.Cmd.Env, where nil means "inherit
+// the parent's environment" — exactly the ambient-knob leak this change
+// closes, so an empty-but-non-nil slice must stay empty rather than falling
+// back to inheritance. An entry with no '=' has no key to match and always
+// passes through. knobs is small (one schema's worth of keys), so a map
+// built per call is fine.
+func childEnv(env, knobs []string) []string {
+	strip := make(map[string]struct{}, len(knobs))
+	for _, k := range knobs {
+		strip[k] = struct{}{}
+	}
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		key := e
+		if i := strings.IndexByte(e, '='); i >= 0 {
+			key = e[:i]
+		}
+		if _, stripped := strip[key]; stripped {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // appFlakeref validates repoPath/revision and pins attr's frag into a git
@@ -151,20 +203,25 @@ func SelfCommand(s SelfSpec) ([]string, error) {
 
 // DoctorSpec is everything one pinned startup-preflight invocation needs.
 type DoctorSpec struct {
-	RepoPath string // absolute path to the operator's checkout
-	AppAttr  string // DAEMON_APP, e.g. ".#" or ".#dogfood-bwrap"
-	Revision string // full git rev the preflight is pinned to
+	RepoPath string   // absolute path to the operator's checkout
+	AppAttr  string   // DAEMON_APP, e.g. ".#" or ".#dogfood-bwrap"
+	Revision string   // full git rev the preflight is pinned to
+	Env      []string // the daemon's own environment, os.Environ() "KEY=VALUE" shape
+	Knobs    []string // keys of the Launcher input document's settings map
 }
 
-// DoctorCommand builds the argv for the daemon's own startup preflight: the
-// same pinned flakeref ChildCommand resolves (same repo/attr/revision, same
-// validation), but invoking "doctor" instead of a dispatch kind, and with
+// DoctorCommand builds the Command for the daemon's own startup preflight:
+// the same pinned flakeref ChildCommand resolves (same repo/attr/revision,
+// same validation) and the same env-minus-Knobs stripping (see ChildCommand
+// and childEnv), but invoking "doctor" instead of a dispatch kind, and with
 // neither --max-jobs nor --max-parallel appended — those cap a child's wave
-// of dispatched work, and doctor dispatches nothing to cap.
-func DoctorCommand(s DoctorSpec) ([]string, error) {
+// of dispatched work, and doctor dispatches nothing to cap. Pure like
+// ChildCommand: the caller supplies Env, DoctorCommand never reads
+// os.Environ itself.
+func DoctorCommand(s DoctorSpec) (Command, error) {
 	flakeref, err := appFlakeref(s.RepoPath, s.AppAttr, s.Revision, "a preflight must always be pinned")
 	if err != nil {
-		return nil, err
+		return Command{}, err
 	}
-	return []string{"nix", "run", flakeref, "--", "doctor"}, nil
+	return Command{Argv: []string{"nix", "run", flakeref, "--", "doctor"}, Env: childEnv(s.Env, s.Knobs)}, nil
 }

@@ -112,8 +112,8 @@ func TestChildCommand(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ChildCommand(%+v): unexpected error: %v", tc.spec, err)
 			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("ChildCommand(%+v) = %v, want %v", tc.spec, got, tc.want)
+			if !reflect.DeepEqual(got.Argv, tc.want) {
+				t.Fatalf("ChildCommand(%+v) = %v, want %v", tc.spec, got.Argv, tc.want)
 			}
 		})
 	}
@@ -286,14 +286,107 @@ func TestDoctorCommand(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DoctorCommand(%+v): unexpected error: %v", tc.spec, err)
 			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("DoctorCommand(%+v) = %v, want %v", tc.spec, got, tc.want)
+			if !reflect.DeepEqual(got.Argv, tc.want) {
+				t.Fatalf("DoctorCommand(%+v) = %v, want %v", tc.spec, got.Argv, tc.want)
 			}
-			for _, arg := range got {
+			for _, arg := range got.Argv {
 				if arg == "--max-jobs" || arg == "--max-parallel" {
-					t.Fatalf("DoctorCommand(%+v) = %v: must not cap a wave doctor never dispatches", tc.spec, got)
+					t.Fatalf("DoctorCommand(%+v) = %v: must not cap a wave doctor never dispatches", tc.spec, got.Argv)
 				}
 			}
 		})
+	}
+}
+
+func TestChildEnv(t *testing.T) {
+	cases := []struct {
+		name  string
+		env   []string
+		knobs []string
+		want  []string
+	}{
+		{
+			name:  "knob key present in env and knobs is stripped",
+			env:   []string{"PATH=/bin", "MODEL=opus", "HOME=/home/op"},
+			knobs: []string{"MODEL"},
+			want:  []string{"PATH=/bin", "HOME=/home/op"},
+		},
+		{
+			name:  "non-knob and secret-shaped var survive",
+			env:   []string{"PATH=/bin", "GH_TOKEN=secret"},
+			knobs: []string{"MODEL"},
+			want:  []string{"PATH=/bin", "GH_TOKEN=secret"},
+		},
+		{
+			name:  "order is preserved relative to input env",
+			env:   []string{"Z=1", "MODEL=opus", "A=2", "MAX_JOBS=1"},
+			knobs: []string{"MODEL", "MAX_JOBS"},
+			want:  []string{"Z=1", "A=2"},
+		},
+		{
+			name:  "empty knobs returns every entry",
+			env:   []string{"PATH=/bin", "MODEL=opus"},
+			knobs: nil,
+			want:  []string{"PATH=/bin", "MODEL=opus"},
+		},
+		{
+			name:  "exact-key match: MODEL_EXTRA survives, MODEL is stripped",
+			env:   []string{"MODEL_EXTRA=x", "MODEL="},
+			knobs: []string{"MODEL"},
+			want:  []string{"MODEL_EXTRA=x"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := childEnv(tc.env, tc.knobs)
+			if got == nil {
+				t.Fatalf("childEnv(%v, %v) = nil, want non-nil", tc.env, tc.knobs)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("childEnv(%v, %v) = %v, want %v", tc.env, tc.knobs, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestChildEnvEmptyEnvReturnsNonNil(t *testing.T) {
+	got := childEnv(nil, []string{"MODEL"})
+	if got == nil {
+		t.Fatalf("childEnv(nil, ...) = nil, want non-nil empty slice")
+	}
+	if len(got) != 0 {
+		t.Fatalf("childEnv(nil, ...) = %v, want empty", got)
+	}
+}
+
+func TestChildCommandReturnsChildEnv(t *testing.T) {
+	spec := ChildSpec{
+		RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch,
+		Env:   []string{"PATH=/bin", "MODEL=opus"},
+		Knobs: []string{"MODEL"},
+	}
+	got, err := ChildCommand(spec)
+	if err != nil {
+		t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
+	}
+	want := []string{"PATH=/bin"}
+	if !reflect.DeepEqual(got.Env, want) {
+		t.Fatalf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, want)
+	}
+}
+
+func TestDoctorCommandReturnsChildEnv(t *testing.T) {
+	spec := DoctorSpec{
+		RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123",
+		Env:   []string{"PATH=/bin", "MODEL=opus"},
+		Knobs: []string{"MODEL"},
+	}
+	got, err := DoctorCommand(spec)
+	if err != nil {
+		t.Fatalf("DoctorCommand(%+v): unexpected error: %v", spec, err)
+	}
+	want := []string{"PATH=/bin"}
+	if !reflect.DeepEqual(got.Env, want) {
+		t.Fatalf("DoctorCommand(%+v) env = %v, want %v", spec, got.Env, want)
 	}
 }
