@@ -89,8 +89,7 @@ let
   codeCommentsSkillSource = ../../templates/default/skills/code-comments/SKILL.md;
 
   # Issue #3268: the harness-owned auto-lint skill, so
-  # auto-lint-skill-keeps-nix-wording can pin its deliberate Nix mention
-  # (see that check for why this is a *keep*, not a rerun of #3223's ban).
+  # auto-lint-skill-keeps-nix-wording can pin its deliberate Nix mention.
   # The source SKILL.md, since lib/image.nix bakes this same file verbatim.
   autoLintSkill = ../../templates/default/skills/auto-lint/SKILL.md;
 
