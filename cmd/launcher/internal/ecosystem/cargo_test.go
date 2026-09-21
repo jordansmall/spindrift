@@ -2,6 +2,8 @@ package ecosystem
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -229,6 +231,128 @@ registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote
 	}
 	if up.IndexURL != "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/" {
 		t.Errorf("IndexURL = %q, want the registries decl's index", up.IndexURL)
+	}
+}
+
+// Spelling variants of the same SourceId (issue #3251): a [registries.*].index
+// and the [source.*].registry that claims it can differ by trailing slash,
+// host case, or both, and cargo still treats them as one SourceId -- the
+// claiming name must be reused, not re-minted. "sparse+" is the one prefix
+// that must NOT be normalized away: cargo treats a sparse HTTP registry and a
+// git registry index at the same URL as different SourceIds, so a stanza
+// differing only in that prefix must keep the freshly minted name instead of
+// reusing the other stanza's.
+func TestCargoSourceReplacements_ReusesClaimingSourceName_AcrossSpellingVariants(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
+	}
+
+	cases := []struct {
+		name            string
+		registriesIndex string
+		sourceRegistry  string
+		wantSourceName  string
+		wantIndexURL    string
+	}{
+		{
+			name:            "trailing slash differs",
+			registriesIndex: "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index",
+			sourceRegistry:  "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/",
+			wantSourceName:  "artifactory-remote",
+			wantIndexURL:    "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index",
+		},
+		{
+			name:            "host case differs",
+			registriesIndex: "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/",
+			sourceRegistry:  "sparse+https://ARTIFACTORY.example.test/artifactory/api/cargo/remote/index/",
+			wantSourceName:  "artifactory-remote",
+			wantIndexURL:    "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/",
+		},
+		{
+			name:            "trailing slash and host case both differ",
+			registriesIndex: "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index",
+			sourceRegistry:  "sparse+https://ARTIFACTORY.example.test/artifactory/api/cargo/remote/index/",
+			wantSourceName:  "artifactory-remote",
+			wantIndexURL:    "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index",
+		},
+		{
+			// "sparse+" is a different source kind to cargo, not a spelling
+			// variant, so this row must mint rather than reuse.
+			name:            "sparse+ differs keeps minted name",
+			registriesIndex: "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/",
+			sourceRegistry:  "https://artifactory.example.test/artifactory/api/cargo/remote/index/",
+			wantSourceName:  "spindrift-upstream-artifactory-remote",
+			wantIndexURL:    "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repoConfig := `[registries.artifactory-remote]
+index = "` + tc.registriesIndex + `"
+
+[source.crates-io]
+replace-with = "artifactory-remote"
+
+[source.artifactory-remote]
+registry = "` + tc.sourceRegistry + `"
+`
+
+			got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+			if len(warnings) != 0 {
+				t.Errorf("warnings = %v, want none", warnings)
+			}
+			if len(got) != 1 || len(got[0].Upstreams) != 1 {
+				t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+			}
+			up := got[0].Upstreams[0]
+			if up.SourceName != tc.wantSourceName {
+				t.Errorf("SourceName = %q, want %q", up.SourceName, tc.wantSourceName)
+			}
+			if up.IndexURL != tc.wantIndexURL {
+				t.Errorf("IndexURL = %q, want %q", up.IndexURL, tc.wantIndexURL)
+			}
+		})
+	}
+}
+
+// cargoCanonicalSourceURLKey's own axes, table-tested directly.
+func TestCargoCanonicalSourceURLKey(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"trailing slash absent", "sparse+https://cargo.example.test/index", "sparse+https://cargo.example.test/index"},
+		{"trailing slash present", "sparse+https://cargo.example.test/index/", "sparse+https://cargo.example.test/index"},
+		{"host case", "sparse+https://CARGO.example.test/index", "sparse+https://cargo.example.test/index"},
+		{"both axes", "sparse+https://CARGO.example.test/index/", "sparse+https://cargo.example.test/index"},
+		{"no sparse+ prefix keys without one", "https://cargo.example.test/index/", "https://cargo.example.test/index"},
+		{"percent-encoded path, no trailing slash", "sparse+https://cargo.example.test/a%7Eb", "sparse+https://cargo.example.test/a%7Eb"},
+		{"percent-encoded path, trailing slash", "sparse+https://cargo.example.test/a%7Eb/", "sparse+https://cargo.example.test/a%7Eb"},
+		// These two must key apart: folding them onto one key would let one
+		// decl's replacement steal the other's claiming source name.
+		{"percent-encoded slash preserved", "sparse+https://cargo.example.test/a%2Fb/", "sparse+https://cargo.example.test/a%2Fb"},
+		{"structural slash, not the same as percent-encoded", "sparse+https://cargo.example.test/a/b", "sparse+https://cargo.example.test/a/b"},
+		{"bare space in path is escaped, not left alone", "sparse+https://cargo.example.test/a b/", "sparse+https://cargo.example.test/a%20b"},
+		{"double trailing slash trims exactly one", "sparse+https://cargo.example.test/index//", "sparse+https://cargo.example.test/index/"},
+		{"default port not folded", "sparse+https://cargo.example.test:443/index/", "sparse+https://cargo.example.test:443/index"},
+		{"parse error falls back verbatim", "sparse+https://cargo.example.test/%zz", "sparse+https://cargo.example.test/%zz"},
+		{"empty host (no scheme) falls back verbatim", "not a url", "not a url"},
+		{"empty host (scheme with no host) falls back verbatim", "file:///x/", "file:///x/"},
+		{"non-http(s) scheme (ftp) falls back verbatim", "ftp://h/index/", "ftp://h/index/"},
+		{"non-http(s) scheme (git+https) falls back verbatim", "git+https://h/index/", "git+https://h/index/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cargoCanonicalSourceURLKey(tc.value)
+			if got != tc.want {
+				t.Errorf("cargoCanonicalSourceURLKey(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -622,6 +746,109 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
+// Two [registries.*] decls on the same host spell the same index two ways --
+// a trailing slash differs -- so cargo sees one SourceId. The dedupe must
+// canonicalize too (issue #3251), not just the claiming-name lookup: both
+// declared names are explicitly listed on the route's cargo block, and both
+// must count as bound (no "declared-but-unbound" warning) even though only
+// one matchedDecl survives.
+func TestCargoSourceReplacements_DedupeSameIndexURL_CanonicalizedAcrossTrailingSlash(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("first-name", "second-name")},
+	}
+	repoConfig := `[registries.first-name]
+index = "sparse+https://cargo.example.test/index/"
+
+[registries.second-name]
+index = "sparse+https://cargo.example.test/index"
+
+[source.claimed-name]
+registry = "sparse+https://cargo.example.test/index/"
+`
+
+	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none (both declared names count as bound)", warnings)
+	}
+	if len(got) != 1 || len(got[0].Upstreams) != 1 {
+		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+	}
+	if got[0].Upstreams[0].SourceName != "claimed-name" {
+		t.Errorf("SourceName = %q, want the reused claiming name %q", got[0].Upstreams[0].SourceName, "claimed-name")
+	}
+}
+
+// The same collapse (issue #3251), but with no [source.*] claiming the index
+// at all: cargo still maps one canonical URL to one source name whether or
+// not a repo stanza claims it, so the dedupe applies either way. The
+// surviving matchedDecl keeps the first decl's own index spelling and mints
+// spindrift-upstream-<first-name> off the first decl's own name; the second
+// declared name still counts as bound, since it collapsed into the
+// survivor's stanza rather than falling through unbound.
+func TestCargoSourceReplacements_DedupeSameIndexURL_CanonicalizedAcrossTrailingSlash_NoClaim(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("first-name", "second-name")},
+	}
+	repoConfig := `[registries.first-name]
+index = "sparse+https://cargo.example.test/index/"
+
+[registries.second-name]
+index = "sparse+https://cargo.example.test/index"
+`
+
+	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none (both declared names count as bound)", warnings)
+	}
+	if len(got) != 1 || len(got[0].Upstreams) != 1 {
+		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+	}
+	up := got[0].Upstreams[0]
+	if up.SourceName != "spindrift-upstream-first-name" {
+		t.Errorf("SourceName = %q, want the minted name off the first decl %q", up.SourceName, "spindrift-upstream-first-name")
+	}
+	if up.IndexURL != "sparse+https://cargo.example.test/index/" {
+		t.Errorf("IndexURL = %q, want the first decl's own index spelling %q", up.IndexURL, "sparse+https://cargo.example.test/index/")
+	}
+}
+
+// The regression this issue closes: with the canonical dedupe in place, the
+// two spellings collapse onto one matched decl and therefore one
+// [source.claimed-name] stanza, not two -- a duplicate TOML table would be a
+// hard cargo error.
+func TestCargoRepoAwareConfig_DedupeSameIndexURL_CanonicalizedRendersOneSourceTable(t *testing.T) {
+	repoConfig := `[registries.first-name]
+index = "sparse+https://cargo.example.test/index/"
+
+[registries.second-name]
+index = "sparse+https://cargo.example.test/index"
+
+[source.claimed-name]
+registry = "sparse+https://cargo.example.test/index/"
+`
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("first-name", "second-name")},
+	}
+
+	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	assertNoDuplicateCargoSourceTables(t, repoConfig, got)
+
+	if n := strings.Count(got, "[source.claimed-name]"); n != 1 {
+		t.Errorf("CargoRepoAwareConfig() content declares [source.claimed-name] %d times, want exactly 1: %q", n, got)
+	}
+}
+
 // A registry name that fails cargoBareKeyPattern must never produce an
 // Upstream, since it would otherwise flow into a rendered TOML table name or
 // a shell-sourced env var name.
@@ -930,10 +1157,54 @@ func TestCargoReplacementPlaceholders_DedupesReusedProxySource(t *testing.T) {
 	}
 }
 
+// cargoSourceIDCollisionKey is assertNoDuplicateCargoSourceTables's own
+// oracle for "same SourceId to cargo", deliberately independent of (and wider
+// than) cargoCanonicalSourceURLKey: keying the guard on the production
+// function itself would only ever catch collisions that function already
+// recognizes, so a real cargo collision the production key deliberately
+// leaves unfolded -- e.g. a default port spelled explicitly on one side --
+// would pass the guard silently instead of failing it. This folds one
+// trailing slash off the path, the host lowercased, and the default port
+// (:443 on https, :80 on http), in addition to the two axes production
+// folds, so the guard fails whenever a render emits two [source.…] names for
+// a pair cargo itself would call one source, even on an axis production
+// deliberately does not canonicalize. "sparse+" stays significant here too:
+// it is a different source kind to cargo, not a spelling variant.
+func cargoSourceIDCollisionKey(value string) string {
+	sparse := strings.HasPrefix(value, "sparse+")
+	raw := strings.TrimPrefix(value, "sparse+")
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return value
+	}
+	host := strings.ToLower(u.Host)
+	if hostname, port, splitErr := net.SplitHostPort(host); splitErr == nil {
+		if (u.Scheme == "https" && port == "443") || (u.Scheme == "http" && port == "80") {
+			host = hostname
+		}
+	}
+	u.Host = host
+	escaped := strings.TrimSuffix(u.EscapedPath(), "/")
+	decoded, err := url.PathUnescape(escaped)
+	if err != nil {
+		return value
+	}
+	u.Path, u.RawPath = decoded, escaped
+	key := u.String()
+	if sparse {
+		key = "sparse+" + key
+	}
+	return key
+}
+
 // assertNoDuplicateCargoSourceTables pins AC 1 (issue #3248): homeConfig alone
 // must never declare the same [source.…] table name twice (a same-file
 // duplicate table is a TOML error, not a merge question), and once merged with
-// repoConfig no two table names may claim the same registry URL (gotcha 1). A
+// repoConfig no two table names may claim registry URLs cargo itself treats as
+// the same SourceId -- keyed by cargoSourceIDCollisionKey, not
+// cargoCanonicalSourceURLKey or byte equality (issue #3251), since a spelling
+// difference on any axis cargo folds is still one cargo error waiting to
+// happen, whether or not the production render's own key folds that axis. A
 // stanza with no registry key claims no URL and is exempt from that second check.
 func assertNoDuplicateCargoSourceTables(t *testing.T, repoConfig, homeConfig string) {
 	t.Helper()
@@ -949,17 +1220,22 @@ func assertNoDuplicateCargoSourceTables(t *testing.T, repoConfig, homeConfig str
 		}
 	}
 
-	nameByURL := make(map[string]string)
+	type urlClaim struct {
+		name  string
+		value string
+	}
+	nameByURL := make(map[string]urlClaim)
 	merged := append(scanCargoNamedTableOccurrences(repoConfig, "source.", "registry"), homeOccurrences...)
 	for _, occ := range merged {
 		if occ.value == "" {
 			continue
 		}
-		if existing, ok := nameByURL[occ.value]; ok && existing != occ.name {
-			t.Errorf("registry URL %q is claimed by both [source.%s] and [source.%s]", occ.value, existing, occ.name)
+		key := cargoSourceIDCollisionKey(occ.value)
+		if existing, ok := nameByURL[key]; ok && existing.name != occ.name {
+			t.Errorf("[source.%s] (registry = %q) and [source.%s] (registry = %q) claim one cargo source (canonical key %q), want at most one claimant per source", existing.name, existing.value, occ.name, occ.value, key)
 			continue
 		}
-		nameByURL[occ.value] = occ.name
+		nameByURL[key] = urlClaim{name: occ.name, value: occ.value}
 	}
 }
 
@@ -1087,6 +1363,44 @@ index = "sparse+https://cargo.example.test/index/"
 		got, _, _ := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
 		assertNoDuplicateCargoSourceTables(t, repoConfig, got)
 	})
+}
+
+// The repo's own [source.artifactory-remote] claims a URL that spells the
+// [registries.artifactory-remote] index differently -- one trailing slash --
+// but the two are one SourceId to cargo (issue #3251). If the claiming-name
+// lookup ever regressed to byte-for-byte matching, the render would mint a
+// second stanza, [source.spindrift-upstream-artifactory-remote], claiming
+// the same canonical URL under a different name -- exactly what the
+// strengthened assertNoDuplicateCargoSourceTables (canonical URL keying, not
+// byte equality) exists to catch.
+func TestCargoRepoAwareConfig_ReusesClaimingSourceName_TrailingSlashDiffers(t *testing.T) {
+	repoConfig := `[registries.artifactory-remote]
+index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index"
+
+[source.crates-io]
+replace-with = "artifactory-remote"
+
+[source.artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+`
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
+	}
+
+	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	assertNoDuplicateCargoSourceTables(t, repoConfig, got)
+
+	if n := strings.Count(got, "[source.artifactory-remote]"); n != 1 {
+		t.Errorf("CargoRepoAwareConfig() content declares [source.artifactory-remote] %d times, want exactly 1: %q", n, got)
+	}
+	if strings.Contains(got, "spindrift-upstream-artifactory-remote") {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want no minted spindrift-upstream-artifactory-remote table (the reused name should win)", got)
+	}
 }
 
 // Pins the emergent crates-io chain (issue #3248, gotcha 7) as an intended
