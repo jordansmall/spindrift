@@ -1330,6 +1330,11 @@ the authoritative list.
 | `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host — see [Daemon](#daemon) |
 | `DAEMON_SELF_APP`      | `.#daemon` | — (post-freeze; no legacy alias — set `dispatch.daemonSelfApp`) | flake app attribute of the daemon itself, evaluated at each fetched tip to notice its own build changed and halt — distinct from `DAEMON_APP`, the child Dispatch app; a Consumer that re-exports the daemon under another top-level attribute (e.g. spindrift's own `.#dogfood-bwrap-daemon`) must set this to match, or the check would evaluate a different harness's daemon and report a permanent, spurious change; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
 | `RESEARCH_RESERVATION` | `1`     | — (post-freeze; no legacy alias — set `dispatch.researchReservation`) | how many of `MAX_PARALLEL`'s pool slots prefer research Dispatches over work — a floor, not a ceiling; read by the daemon only — see [Daemon](#daemon) |
+| `DAEMON_IDLE_FLOOR`    | `5m`    | — (post-freeze; no legacy alias — set `dispatch.daemonIdleFloor`) | wait before the daemon's first no-work check against a kind, and the poll slice size while riding out a jammed kind's backoff; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only — see [Daemon](#daemon) |
+| `DAEMON_IDLE_CAP`      | `30m`   | — (post-freeze; no legacy alias — set `dispatch.daemonIdleCap`) | ceiling the daemon's per-kind idle backoff doubles up to, starting from `DAEMON_IDLE_FLOOR`; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start if the cap is below the floor; read by the daemon only — see [Daemon](#daemon) |
+| `DAEMON_FAILURE_BACKOFF` | `1m`  | — (post-freeze; no legacy alias — set `dispatch.daemonFailureBackoff`) | wait a slot backs off for after an unclassified child failure before refilling itself; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only — see [Daemon](#daemon) |
+| `DAEMON_BREAKER_THRESHOLD` | `5` | — (post-freeze; no legacy alias — set `dispatch.daemonBreakerThreshold`) | pool-wide unclassified failures within `DAEMON_BREAKER_WINDOW` that trip the circuit breaker and halt the whole daemon; validated by the daemon at startup, which refuses to start on a non-positive value; read by the daemon only — see [Daemon](#daemon) |
+| `DAEMON_BREAKER_WINDOW` | `15m`  | — (post-freeze; no legacy alias — set `dispatch.daemonBreakerWindow`) | trailing window the circuit breaker counts `DAEMON_BREAKER_THRESHOLD` unclassified failures within; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only — see [Daemon](#daemon) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
 | `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap); also forwarded into the Box, where the orchestrator's own review loop applies the same threshold to its own fresh, Box-local sum (implement/fix/review passes plus dispatched workers in *this* Box only, not the host's cross-Box figure) to commit to a terminal land pass instead of a further BLOCK-triggered review round |
@@ -5137,18 +5142,19 @@ it earns — lives and resets independently of the other's). Within a kind
 the streak is still pool-wide, not per slot: any slot's no-work result
 against a kind counts against that kind's one timer, the same shape as the
 breaker below. The first no-work check against a kind waits `IdleFloor`
-(`daemonIdleFloor`, default 5 minutes, `cmd/launcher/daemon/main.go`); each
-further *consecutive* no-work check against that same kind doubles the
-wait, capped at `IdleCap` (`daemonIdleCap`, default 30 minutes) — 5m → 10m
-→ 20m → 30m, which takes a drought from 12 checks an hour down to 2, at the
-price of waiting out at most that half hour before the next check notices
-work that arrived just after a capped wait began. The quantity each kind's
-backoff bounds is that kind's own rate-limit spend against the forge, since
-an idle check still costs a fetch, an evaluation, a bootstrap and a
-discovery query to learn "nothing to do" again. A check that answers
-something else — exit 0 or exit 4, below — resets that kind's wait back to
-`IdleFloor`, on the theory that a check finding real work is evidence that
-kind's drought is over; the other kind's own timer, if any, is untouched.
+(`DAEMON_IDLE_FLOOR`, default 5 minutes, see
+[Advanced tuning](#advanced-tuning)); each further *consecutive* no-work
+check against that same kind doubles the wait, capped at `IdleCap`
+(`DAEMON_IDLE_CAP`, default 30 minutes) — 5m → 10m → 20m → 30m, which takes
+a drought from 12 checks an hour down to 2, at the price of waiting out at
+most that half hour before the next check notices work that arrived just
+after a capped wait began. The quantity each kind's backoff bounds is that
+kind's own rate-limit spend against the forge, since an idle check still
+costs a fetch, an evaluation, a bootstrap and a discovery query to learn
+"nothing to do" again. A check that answers something else — exit 0 or
+exit 4, below — resets that kind's wait back to `IdleFloor`, on the theory
+that a check finding real work is evidence that kind's drought is over; the
+other kind's own timer, if any, is untouched.
 
 Because the backoff is now per kind, a `Wait` outcome (exit 2 or 3) no
 longer sleeps the slot in place: the slot records the no-work result
@@ -5180,30 +5186,30 @@ in-place wait.
 (`cmd/launcher/internal/daemon/outcome.go`) doesn't recognise, a `RunChild`
 seam error, a `ResolveRevision` fetch error, or a `SelfPath` self-build
 evaluation error (see **Self-change halt** below) — no longer halts the pool
-by itself: the failing slot backs off for `daemonFailureBackoff` (default 1
-minute, `cmd/launcher/daemon/main.go`) and refills itself, and the sibling
-slots never notice. A `RunChild` seam error or an unrecognised exit code
-that lands once a stop has already been requested — a child killed on
+by itself: the failing slot backs off for `DAEMON_FAILURE_BACKOFF` (default 1
+minute, see [Advanced tuning](#advanced-tuning)) and refills itself, and the
+sibling slots never notice. A `RunChild` seam error or an unrecognised exit
+code that lands once a stop has already been requested — a child killed on
 SIGTERM's default disposition before it installed its own handler, or one
 that raced the seam's own teardown — is carved out first and never counted
 at all: it is an ordinary shutdown, not evidence of a systemic fault, so it
-can no longer trip the breaker and turn a clean operator stop into a
-non-zero exit. That alone would burn every slot on a fault no retry
-clears, so these failures are also counted pool-wide by a circuit breaker
-(`cmd/launcher/internal/daemon/breaker.go`): `daemonBreakerThreshold`
-(default 5) of them within a trailing `daemonBreakerWindow` (default 15
-minutes) halts the whole daemon and emits a `breaker_trip` event, on the
-theory that a systemic fault (an expired token, a forge outage) fails every
-slot's child immediately. At the default 3 slots that crosses the threshold
-within about one backoff; at `MAX_PARALLEL=1` the count is one slot's own
-retries, so it crosses after four backoffs instead — slower, but still well
-inside the window, because a lone slot that keeps failing has no sibling
-doing useful work for a spared breaker to protect. All three defaults are a
-defensible first cut, not a tuned answer — they want a real unattended run
-to argue with them. The halt-mapped exits (5/6/7) are untouched by the
-breaker: a tainted host, an invalid config, and a signalled stop still halt
-the pool at once, since no retry clears the first two and the third is the
-operator's own request.
+can no longer trip the breaker and turn a clean operator stop into a non-zero
+exit. That alone would burn every slot on a fault no retry clears, so these
+failures are also counted pool-wide by a circuit breaker
+(`cmd/launcher/internal/daemon/breaker.go`): `DAEMON_BREAKER_THRESHOLD`
+(default 5) of them within a trailing `DAEMON_BREAKER_WINDOW` (default 15
+minutes, see [Advanced tuning](#advanced-tuning)) halts the whole daemon and
+emits a `breaker_trip` event, on the theory that a systemic fault (an expired
+token, a forge outage) fails every slot's child immediately. At the default 3
+slots that crosses the threshold within about one backoff; at
+`MAX_PARALLEL=1` the count is one slot's own retries, so it crosses after
+four backoffs instead — slower, but still well inside the window, because a
+lone slot that keeps failing has no sibling doing useful work for a spared
+breaker to protect. All three defaults are a defensible first cut, not a
+tuned answer — revisiting them is now a settings change, not a code change.
+The halt-mapped exits (5/6/7) are untouched by the breaker: a tainted host,
+an invalid config, and a signalled stop still halt the pool at once, since no
+retry clears the first two and the third is the operator's own request.
 
 **Self-change halt.** At each slot's iteration boundary — after that
 iteration's own fetch resolves the tip, before any child is launched — the
