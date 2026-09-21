@@ -169,20 +169,22 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	}
 }
 
-// logRejectedSignals warns about nonce-mismatched lines a result channel
-// dropped (issue #2976). An issue-intent rejection leaves no other trace, so it
-// always warns. retry.go's own scan already warns when every comment or
-// pr-intent line was rejected, so for those two this covers only the silent
-// case: a verifying match alongside one or more rejections.
+// logRejectedSignals warns about rejected lines a result channel dropped
+// (issue #2976), naming the actual cause — nonce-mismatched, malformed, or
+// both (issue #3670) — rather than always saying nonce-mismatched. An
+// issue-intent rejection leaves no other trace, so it always warns. retry.go's
+// own scan already warns when every comment or pr-intent line was rejected, so
+// for those two this covers only the silent case: a verifying match alongside
+// one or more rejections.
 func logRejectedSignals(num string, result dispatch.Result) {
 	if result.CommentFound && result.CommentRejected.Total() > 0 {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched comment line(s) rejected\n", num, result.CommentRejected.Total())
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %d %s comment line(s) rejected\n", num, result.CommentRejected.Total(), result.CommentRejected.Cause())
 	}
 	if result.PRIntentFound && result.PRIntentRejected.Total() > 0 {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched pr-intent line(s) rejected\n", num, result.PRIntentRejected.Total())
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %d %s pr-intent line(s) rejected\n", num, result.PRIntentRejected.Total(), result.PRIntentRejected.Cause())
 	}
 	if result.IssueIntentsRejected.Total() > 0 {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched issue-intent line(s) rejected\n", num, result.IssueIntentsRejected.Total())
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %d %s issue-intent line(s) rejected\n", num, result.IssueIntentsRejected.Total(), result.IssueIntentsRejected.Cause())
 	}
 }
 

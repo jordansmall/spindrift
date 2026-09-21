@@ -897,6 +897,52 @@ func TestSettle_NonceRejectedComment_FoundSuppressesDuplicate(t *testing.T) {
 	})
 }
 
+// logRejectedSignals must report the actual rejection cause — nonce mismatch,
+// malformed payload, or both — rather than always saying nonce-mismatched
+// (issue #3670). Table-driven so each cause's exact wording, sourced from
+// outcome.Rejections.Cause(), stays pinned.
+func TestSettle_LogRejectedSignals_CausePinned(t *testing.T) {
+	const issNum = "3670"
+	const prURL = "https://github.com/owner/repo/pull/3670"
+
+	tests := []struct {
+		name      string
+		rejected  outcome.Rejections
+		wantCause string
+	}{
+		{"nonce mismatch only", outcome.Rejections{NonceMismatch: 1}, "nonce-mismatched"},
+		{"malformed only", outcome.Rejections{Malformed: 1, LongestPayload: 8154}, "malformed"},
+		{"both causes", outcome.Rejections{NonceMismatch: 1, Malformed: 1, LongestPayload: 8154}, "nonce-mismatched or malformed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := forge.NewFake(testDispatchLabels)
+			fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+			result := dispatch.Result{
+				Success: true,
+				Resolved: outcome.Resolved{
+					Found:   true,
+					Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+				},
+				CommentFound:    true,
+				CommentRejected: tt.rejected,
+			}
+
+			s := newTestSettle(baseConfig(), fc, fc)
+			stderr := testutil.CaptureStderr(t, func() {
+				s.Settle(dispatch.NewFake(), issNum, 0, result)
+			})
+
+			want := fmt.Sprintf("#%s: %d %s comment line(s) rejected", issNum, tt.rejected.Total(), tt.wantCause)
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr must warn with the exact cause wording; want substring %q, got: %q", want, stderr)
+			}
+		})
+	}
+}
+
 var errFake = fakeErr("fake error")
 
 type fakeErr string
