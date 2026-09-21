@@ -1530,6 +1530,32 @@ in
       touch $out
     '';
 
+  # Issue #3669 review finding: docs/reference.md's "Claude Code output caps"
+  # section hand-typed these same numbers as prose while asserting in the
+  # same breath that they cannot drift. Pinning the prose here is what makes
+  # that claim true -- same derived values as the fragment check above, one
+  # let block, so a cap change fails both or neither. normalized_grep because
+  # the prose wraps wherever the paragraph happens to fill.
+  research-verdict-budget-numbers-in-reference-docs-match-the-baked-cap =
+    pkgs.runCommand "research-verdict-budget-numbers-in-reference-docs-match-the-baked-cap" { }
+      ''
+        ${normalizedGrep}
+        p=${../../docs/reference.md}
+        normalized_grep "$p" 'BASH_MAX_OUTPUT_LENGTH=${toString pinnedBashMaxOutputLength}' || {
+          echo "docs/reference.md: no bullet stating the derived cap BASH_MAX_OUTPUT_LENGTH=${toString pinnedBashMaxOutputLength}" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'is exactly ${toString pinnedBashMaxOutputLength} characters long' || {
+          echo "docs/reference.md: the observed hard-cut length no longer states the derived cap ${toString pinnedBashMaxOutputLength}" >&2
+          exit 1
+        }
+        normalized_grep "$p" '${toString pinnedBashMaxOutputLength} characters less the ${toString markerPrefixLength} the marker and nonce take, leaving ${toString payloadBudget} characters of base64 and ${toString bodyBudget} bytes of Markdown before encoding' || {
+          echo "docs/reference.md: the research-verdict budget prose no longer states the derived numbers (cap ${toString pinnedBashMaxOutputLength}, marker prefix ${toString markerPrefixLength}, payload ${toString payloadBudget}, body ${toString bodyBudget})" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The filer write-mechanism split (issue #2019): the direct-mode fragments
   # must keep `gh label create`/`gh issue create` byte-for-byte, the same
   # in-box writes filer-prompt.md's steps rendered before this split existed.

@@ -1523,46 +1523,84 @@ mechanism.
 ### Claude Code output caps
 
 Unlike every knob above, `BASH_MAX_OUTPUT_LENGTH` and `MAX_MCP_OUTPUT_TOKENS`
-are fixed constants baked straight into the image's `config.Env`
-(`lib/image.nix`) — Claude Code's own output-cap knobs, not a spindrift
-`settings.*` surface: there is no spindrift `--flag` for either, only the
-container runtime's own `-e`/`--env` override of a baked `config.Env` entry,
-same as any other OCI image env var (issue #1987).
+are fixed constants baked straight into the image's `config.Env` by
+`lib/image.nix`, from the `lib/output-caps.nix` attrset — Claude Code's own
+output-cap knobs, not a spindrift `settings.*` surface: there is no
+spindrift `--flag` for either, only the container runtime's own `-e`/`--env`
+override of a baked `config.Env` entry, same as any other OCI image env var
+(issue #1987).
 
 Cost of a dispatch run is ~99% cache-read, and cache-read scales with
 context size times turn count: every token in the conversation is re-read on
 every later turn. The bulk of that context is verbose tool output (`nix
 build`, `nix flake check`, `go test`, `git log`) accumulating inline. Claude
-Code already has a built-in fix for this — past `BASH_MAX_OUTPUT_LENGTH`
-chars, a Bash command's full output is written to a file in the session
-directory and the model gets back only a path plus a short preview, with
-nothing lost on disk — but the stock default (30,000 chars / 25,000 tokens)
-is high enough that it rarely engages. The Box lowers both knobs so the
-file-spillover behavior kicks in early instead:
+Code's documented behavior past `BASH_MAX_OUTPUT_LENGTH` chars is to write a
+Bash command's full output to a file in the session directory and hand the
+model back only a path plus a short preview, with nothing lost on disk — but
+the stock default (30,000 chars / 25,000 tokens) is high enough that it
+rarely engages. The Box lowers both knobs so that early truncation kicks in
+at all:
 
-- `BASH_MAX_OUTPUT_LENGTH=8192` — bash tool output past ~8 KB spills to a
-  file. High enough that a short `git log`/`git status` still returns
-  inline, low enough to catch the `nix build`/`go test` firehoses this
-  ticket's cost data (see #1987) flags as the dominant cache-read cost.
-- `MAX_MCP_OUTPUT_TOKENS=2000` — the same file-plus-preview spillover for MCP
-  tool output, not an error, once a result exceeds the threshold (a
-  server-declared `anthropic/maxResultSizeChars` tool still overrides this
-  per-tool). Spindrift has no MCP server configured today, so there's no
-  live traffic to size this against; picked deliberately far below the
-  25,000-token default since a future MCP addition should default to
-  file-based inspection for a large result rather than growing the
-  transcript, with headroom to raise it per-server via the annotation above
-  if a legitimate large-result tool shows up.
+- `BASH_MAX_OUTPUT_LENGTH=8192` — bash tool output past 8 KB stops reaching
+  the model whole: the documented spillover above if the client behaves as
+  documented, a hard cut on a dispatch run (see below). High enough that a
+  short `git log`/`git status` still returns inline, low enough to catch the
+  `nix build`/`go test` firehoses this ticket's cost data (see #1987) flags
+  as the dominant cache-read cost.
+- `MAX_MCP_OUTPUT_TOKENS=2000` — the documented file-plus-preview spillover
+  described above, applied to MCP tool output rather than bash, not an error,
+  once a result exceeds the threshold (a server-declared
+  `anthropic/maxResultSizeChars` tool still overrides this per-tool). Spindrift
+  has no MCP server configured today, so there's no live traffic to size this
+  against; picked deliberately far below the 25,000-token default since a
+  future MCP addition should default to file-based inspection for a large
+  result rather than growing the transcript, with headroom to raise it
+  per-server via the annotation above if a legitimate large-result tool shows
+  up.
+
+**What a `--output-format stream-json` run actually records is a hard cut,
+not a spillover.** On a Box log — verified on issue #3605's — the
+`tool_use_result.stdout` of an overflowing Bash call is exactly 8192
+characters long and ends mid-token, with no spill-file path and no
+truncation notice of any kind. Whether the interactive client behaves as
+documented above is untested here; what a dispatch run gets is the cut.
+That matters beyond cost, because some Bash results are load-bearing rather
+than merely informative: every host-relay control signal —
+`SPINDRIFT_PR_INTENT`, `SPINDRIFT_ISSUE_INTENT`, `SPINDRIFT_COMMENT` — rides
+back to the launcher as a base64 line the host parses out of the echoed
+output, so the cap is each one's size limit too. The intent lines stay well
+under it in practice; the research verdict is the one that does not, since a
+read-only research Box hands a whole comment body back on a single
+`SPINDRIFT_COMMENT` line, so it is the case this budget text is written for
+— 8192 characters less the 51 the marker and nonce take, leaving 8141
+characters of base64 and 6105 bytes of Markdown before encoding (issue
+#3669). Every verdict fragment that carries a `SPINDRIFT_COMMENT` line states
+that budget, and two checks in `nix/checks/prompts.nix` derive the numbers —
+the fragments' via
+`research-verdict-comment-line-fragments-state-carrier-and-payload-budget`
+and this paragraph's via
+`research-verdict-budget-numbers-in-reference-docs-match-the-baked-cap` —
+from `lib/output-caps.nix`, so neither can drift from the baked cap.
 
 Both are asserted directly on the built image's `config.Env` by
 `nix/checks/image.nix`'s `output-cap-env-marker` check, the same
 way `nix-store-writable-env-marker` verifies `NIX_STORE_WRITABLE` above.
 
+The `-e` override above is a runtime knob only: it changes what the Box's
+Bash tool cuts, not what the fragments say, so overriding
+`BASH_MAX_OUTPUT_LENGTH` leaves them quoting the build's numbers. A lowered
+cap can also move the cut onto a payload length that *is* a multiple of
+four, where a truncated payload decodes cleanly and half a verdict posts as
+though it were whole. Changing the cap therefore means editing
+`lib/output-caps.nix` and rebuilding, which re-derives the numbers above and
+re-asserts that invariant in `nix/checks/prompts.nix`.
+
 ### Bash command-output interceptor
 
-The output caps above are a start-only preview that only engages once a
-command's output crosses the threshold. Issue #1988 adds a uniform,
-error-oriented interceptor on top: a PreToolUse/PostToolUse hook pair, baked
+The output caps above only engage once a command's output crosses the
+threshold, and what they leave is the start of the output — the wrong end
+for a build error. Issue #1988 adds a uniform, error-oriented interceptor
+on top: a PreToolUse/PostToolUse hook pair, baked
 into the image alongside `reject-background-bash.sh` and the other hooks
 described in [Self-inflicted secret reads are structurally
 blocked](#self-inflicted-secret-reads-are-structurally-blocked), that applies
