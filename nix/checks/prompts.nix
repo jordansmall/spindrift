@@ -88,6 +88,12 @@ let
   # of silently drifting from it.
   codeCommentsSkillSource = ../../templates/default/skills/code-comments/SKILL.md;
 
+  # Issue #3268: the harness-owned auto-lint skill, so
+  # auto-lint-skill-keeps-nix-wording can pin its deliberate Nix mention
+  # (see that check for why this is a *keep*, not a rerun of #3223's ban).
+  # The source SKILL.md, since lib/image.nix bakes this same file verbatim.
+  autoLintSkill = ../../templates/default/skills/auto-lint/SKILL.md;
+
   # Broken fixture shared by both build-time-reject-research-verdict-comment-
   # relay-* checks below (issue #2250, parent #2244): the whole fragments
   # directory copied from the real templates tree, so every other fragment is
@@ -816,6 +822,19 @@ in
         fi
         touch $out
       '';
+
+  # Issue #3268: the CHECK-section ban above (#3223) is scoped to
+  # issue-check.txt only -- it never touched skills/*. The harness-owned
+  # auto-lint skill bakes into every image unconditionally (not gated by a
+  # Consumer's skills list) and its flake/devShell mention is a deliberate,
+  # ecosystem-agnostic guardrail, not #3223 residue. Pin that it stays.
+  auto-lint-skill-keeps-nix-wording = pkgs.runCommand "auto-lint-skill-keeps-nix-wording" { } ''
+    grep -qi 'nix flake or devshell' ${autoLintSkill} || {
+      echo "auto-lint skill missing its deliberate, ecosystem-agnostic Nix flake/devShell mention (issue #3268)" >&2
+      exit 1
+    }
+    touch $out
+  '';
 
   mkharness-prompt-fix-outcome-no-drift =
     pkgs.runCommand "mkharness-prompt-fix-outcome-no-drift" { }
