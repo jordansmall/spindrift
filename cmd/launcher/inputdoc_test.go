@@ -3,51 +3,11 @@ package main
 import (
 	"bytes"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/inputdoc"
 )
-
-// loadInputDocument reads the two top-level sections of the nix-rendered
-// document (ADR 0020).
-func TestLoadInputDocument_ParsesSettingsAndArtifacts(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "input.json")
-	body := `{"settings":{"BASE_BRANCH":"develop"},"artifacts":{"IMAGE_TAG":"spindrift:abc"}}`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	doc, err := loadInputDocument(path)
-	if err != nil {
-		t.Fatalf("loadInputDocument: %v", err)
-	}
-	if doc.Settings["BASE_BRANCH"] != "develop" {
-		t.Errorf("Settings[BASE_BRANCH] = %q, want develop", doc.Settings["BASE_BRANCH"])
-	}
-	if doc.Artifacts["IMAGE_TAG"] != "spindrift:abc" {
-		t.Errorf("Artifacts[IMAGE_TAG] = %q, want spindrift:abc", doc.Artifacts["IMAGE_TAG"])
-	}
-}
-
-func TestLoadInputDocument_MissingFile(t *testing.T) {
-	_, err := loadInputDocument(filepath.Join(t.TempDir(), "nope.json"))
-	if err == nil {
-		t.Fatal("want error for missing input document, got nil")
-	}
-}
-
-func TestLoadInputDocument_InvalidJSON(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "input.json")
-	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err := loadInputDocument(path)
-	if err == nil {
-		t.Fatal("want error for invalid JSON, got nil")
-	}
-}
 
 // ADR 0020 requires the warning to say where the knob belongs, so for a
 // flakeOption-backed knob it names the variable, its flag, and its domain-tree
@@ -120,7 +80,7 @@ func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 	os.Unsetenv("MODEL")
 	os.Unsetenv("DRIVER")
 
-	loadedDoc = &inputDocument{
+	loadedDoc = &inputdoc.Document{
 		Settings:  map[string]string{"MODEL": "from-settings"},
 		Artifacts: map[string]string{"DRIVER": "from-artifacts"},
 	}
@@ -146,7 +106,7 @@ func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 func TestGetenvArtifact_PrecedenceEnvThenDocThenDefault(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 
-	loadedDoc = &inputDocument{Artifacts: map[string]string{"IMAGE_TAG": "from-doc"}}
+	loadedDoc = &inputdoc.Document{Artifacts: map[string]string{"IMAGE_TAG": "from-doc"}}
 	if got := getenvArtifact("IMAGE_TAG", "from-default"); got != "from-doc" {
 		t.Errorf("getenvArtifact = %q, want from-doc (doc beats default)", got)
 	}

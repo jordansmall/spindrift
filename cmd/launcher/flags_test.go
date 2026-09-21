@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // MODEL must stay sonnet-5 and not regress to opus-4-8 or an older release
@@ -1328,7 +1329,7 @@ func TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar(t *testing.T)
 // run needs, JIRA_TOKEN here.
 func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputDocument{Settings: map[string]string{"ISSUE_TRACKER": "jira"}}
+	loadedDoc = &inputdoc.Document{Settings: map[string]string{"ISSUE_TRACKER": "jira"}}
 
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
@@ -1357,7 +1358,7 @@ func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
 // still matches the resolved pairing (ADR 0020; issue #2527 review).
 func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputDocument{
+	loadedDoc = &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
 		Artifacts: map[string]string{"FULLY_LOCAL": "true"},
 	}
