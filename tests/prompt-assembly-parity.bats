@@ -9,14 +9,6 @@ load helper
 setup() {
   setup_entrypoint_env
 
-  # phase_prompt_assembly copies HARNESS_SKILLS_DIR and OPERATOR_SKILLS_DIR into
-  # DRIVER_SKILLS_DIR before the SKILLS_FOUND scan, and both default to real host
-  # paths outside this test's sandbox. A Box with its own skills baked there
-  # widens every cell's roster, so the goldens then only match that one machine
-  # (issue #2059). Point both at guaranteed-empty directories.
-  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
-  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
-
   # The covered cell requires every per-skill gate on and a non-empty
   # SKILLS_FOUND (assemble.go's checkCoveredCell), so bake all six.
   mkdir -p "$HOME/.claude/skills/caveman"

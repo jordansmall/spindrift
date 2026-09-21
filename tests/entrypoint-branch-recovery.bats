@@ -233,7 +233,6 @@ SKILL
 
 @test "pre-work rebase conflict: unresolvable conflict prompt has no caveman directive or literal tokens by default" {
   setup_rebase_conflict
-  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
   # No FAKE_DRIVER_RESOLVE_CONFLICT, so the stub leaves the rebase unfinished.
 
   run bash "$ENTRYPOINT"

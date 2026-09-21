@@ -15,14 +15,6 @@ setup() {
   # the computation here for the Go side's EnvFromEnviron().
   export BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 
-  # Point the skills dirs at empty paths before the SKILLS_FOUND scan (issue
-  # #2059). Left unset they default to /agent/skills and /operator-skills, and
-  # a Box with its own baked skills widens the bash side's roster past the four
-  # baked below, so the byte-parity tests diff a fixed --skills-found against a
-  # bash side that discovered extra skills.
-  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
-  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
-
   # The covered cell requires every per-skill gate on and a non-empty
   # SKILLS_FOUND (assemble.go's checkCoveredCell), so bake all four.
   mkdir -p "$HOME/.claude/skills/caveman"

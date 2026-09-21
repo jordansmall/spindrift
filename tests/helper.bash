@@ -168,6 +168,17 @@ setup_entrypoint_env() {
   # (issue #2045) key off it: unset, every read-only+github+status=ready
   # fixture here would look like a #2036 repro and eat a resume pass.
   export RUN_NONCE="test-run-nonce-0001"
+  # _populate_driver_skills_dir copies HARNESS_SKILLS_DIR and
+  # OPERATOR_SKILLS_DIR into DRIVER_SKILLS_DIR before every SKILLS_FOUND scan,
+  # so a Box that bakes its own skills at those vars' absolute defaults would
+  # leak into every fixture here: widening "not baked" assertions, mismatching
+  # golden diffs, and skewing byte-parity comparisons against a fixed
+  # --skills-found (issue #2059). Own both paths and create them empty, so the
+  # fixtures stay skill-free however entrypoint reads them; a test that wants a
+  # baked skill re-exports one itself.
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
+  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR" "$OPERATOR_SKILLS_DIR"
 }
 
 # Stands in for `launcher build`'s VACUUMed host nix store DB snapshot
