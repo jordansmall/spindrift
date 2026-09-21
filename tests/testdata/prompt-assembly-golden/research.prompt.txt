@@ -9,7 +9,10 @@ the open-questions section, together with the machine marker
 `<!-- spindrift-research -->` carried in the comment body. Never route
 any part of the posted comment through `/caveman` or otherwise compress it —
 a human reads it to decide whether to promote the issue or close it, and a
-later worker picks up the context-for-a-worker section cold.
+later worker picks up the context-for-a-worker section cold. Fitting that
+comment inside the byte budget the verdict instructions give you means
+writing less — fewer points, tighter scope — never compressing the prose:
+whatever you do post stays full human-quality prose.
 
 The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`
 line and its `note=` field, and any host-relay signal line such as

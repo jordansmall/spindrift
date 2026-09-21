@@ -257,6 +257,60 @@ let
     "## Probed (APPROVE only)"
     "this is the receipt that turns APPROVE into work done, not an assertion taken on faith"
   ];
+  # Issue #3669: the research-verdict payload budget, derived once here from
+  # the baked BASH_MAX_OUTPUT_LENGTH rather than per check, so the fragment
+  # check and the docs check below read the same arithmetic.
+  outputCaps = import ../../lib/output-caps.nix;
+  # newNonce's hex width, parsed out of the Go test that pins it
+  # (TestNewNonce_LengthIsNonceHexWidth) rather than retyped here, the
+  # same way tailBytes below is parsed out of the hook; the trailing + 1
+  # is the space between the nonce and the payload.
+  goTestSrc = builtins.readFile ../../cmd/launcher/internal/dispatch/factory_test.go;
+  nonceWidthMatch = builtins.match ".*nonceHexWidth = ([0-9]+).*" goTestSrc;
+  nonceWidth =
+    if nonceWidthMatch == null then
+      throw "research-verdict budget check: no nonceHexWidth const found in cmd/launcher/internal/dispatch/factory_test.go -- update the match in nix/checks/prompts.nix alongside the const"
+    else
+      builtins.fromJSON (builtins.elemAt nonceWidthMatch 0);
+  markerPrefixLength = builtins.stringLength "SPINDRIFT_COMMENT " + nonceWidth + 1;
+  rawPayloadBudget = outputCaps.bashMaxOutputLength - markerPrefixLength;
+  # What makes the fragments' safety claim true isn't "the cut length is 1
+  # mod 4" -- an accident of today's cap -- it's that outcome.go's
+  # base64.StdEncoding.Strict() decoder accepts only multiple-of-4 lengths,
+  # so a cut landing anywhere else can never decode. Assert that against the
+  # actual cap, so a cap change that lands the cut on a multiple of 4 fails
+  # the build instead of silently letting a truncated verdict post as a
+  # whole one.
+  payloadBudget =
+    if pkgs.lib.mod rawPayloadBudget 4 == 0 then
+      throw "research-verdict budget check: payloadBudget (${toString rawPayloadBudget}) is a multiple of 4 -- base64.StdEncoding.Strict() decodes exactly those lengths, so a cap whose cut payload lands 0 mod 4 would let a truncated verdict decode and post as a whole one. Pick a different lib/output-caps.nix bashMaxOutputLength."
+    else
+      rawPayloadBudget;
+  # base64 spends 4 characters per 3 bytes; the largest whole 3-byte
+  # group that still encodes within payloadBudget. Nix `/` on integers
+  # truncates, and needs spaces around it or it parses as a path.
+  bodyBudget = payloadBudget / 4 * 3;
+  # What bodyBudget encodes back to, so the fragment's two numbers stay
+  # each other's cross-check: a round trip that no longer closes means
+  # the prose quotes an encoded size the arithmetic does not support.
+  encodedBudget = bodyBudget / 3 * 4;
+  # A soft target for the fragments to name, so the agent has an actionable
+  # size below the hard ceiling rather than only the ceiling itself, which
+  # fits by zero margin. Four fifths of the body budget, derived so it moves
+  # with the cap.
+  targetBudget = bodyBudget * 4 / 5;
+  # A Bash result longer than this comes back to the Box as its last
+  # tailBytes bytes, so a marker line emitted before a long command's
+  # output is unreadable to the Box that emitted it. Parsed out of the
+  # hook rather than retyped; Nix's regex is POSIX extended, where `.`
+  # spans newlines, so the anchored `.*` wrappers reach into the file.
+  hookSrc = builtins.readFile ../../agent/bash-output-summary.sh;
+  tailBytesMatch = builtins.match ".*BASH_OUTPUT_SUMMARY_TAIL_BYTES:-([0-9]+).*" hookSrc;
+  tailBytes =
+    if tailBytesMatch == null then
+      throw "research-verdict budget check: no BASH_OUTPUT_SUMMARY_TAIL_BYTES default found in agent/bash-output-summary.sh -- update the match in nix/checks/prompts.nix alongside the hook"
+    else
+      builtins.elemAt tailBytesMatch 0;
 in
 {
   # The configured `prompt` is rendered to a store-path directory and, by
@@ -1358,6 +1412,106 @@ in
         ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments/research-verdict-forgejo-readonly.md}
         touch $out
       '';
+
+  # Issue #3669: the verdict rides back to the host as the echoed Bash tool
+  # result, and the Box hard-cuts that at the baked BASH_MAX_OUTPUT_LENGTH
+  # with no truncation notice -- so an over-budget base64 payload arrives
+  # undecodable (~30 of 48 research runs hit this on 2026-09-20). Every
+  # verdict fragment that carries a SPINDRIFT_COMMENT line must state the
+  # carrier, the payload budget, the summary-hook read-back hazard, and the
+  # re-emit rule, and the numbers they state must come from the derived
+  # bindings above -- from the same lib/output-caps.nix value lib/image.nix bakes into
+  # BASH_MAX_OUTPUT_LENGTH, and from agent/bash-output-summary.sh's own tail
+  # default -- so a cap change fails this check instead of leaving the
+  # fragments lying about the size.
+  research-verdict-comment-line-fragments-state-carrier-and-payload-budget =
+    let
+      inherit (pkgs.lib)
+        concatMapStringsSep
+        filter
+        hasInfix
+        hasPrefix
+        ;
+      fragmentsDir = ../../templates/default/prompts/fragments;
+      # The fragments the Box posts itself, derived from the registry rather
+      # than retyped: a verdict fragment relaying through a SPINDRIFT_COMMENT
+      # line is one subject to the cap. The write-token variants
+      # (research-verdict-github.md, -forgejo.md) comment via the tracker CLI
+      # and carry no such line, so they drop out here by construction.
+      commentLineRows = filter (
+        r:
+        hasPrefix "RESEARCH_VERDICT_" r.var
+        && hasInfix "SPINDRIFT_COMMENT" (builtins.readFile (fragmentsDir + "/${r.fragment}"))
+      ) fragmentsRegistry;
+      checkedFragments =
+        if commentLineRows == [ ] then
+          throw "research-verdict budget check: no lib/fragments.nix row matched RESEARCH_VERDICT_* with a SPINDRIFT_COMMENT line -- the predicate has gone stale and would vacuously pass"
+        else
+          commentLineRows;
+    in
+    pkgs.runCommand "research-verdict-comment-line-fragments-state-carrier-and-payload-budget" { } ''
+      ${normalizedGrep}
+      for f in ${concatMapStringsSep " " (r: r.fragment) checkedFragments}; do
+        p=${fragmentsDir}/"$f"
+        normalized_grep "$p" 'Bash tool result' || {
+          echo "$f: missing the carrier phrase 'Bash tool result'" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'caps a Bash result at ${toString outputCaps.bashMaxOutputLength} characters, cutting it there with no truncation' || {
+          echo "$f: missing the derived cap ${toString outputCaps.bashMaxOutputLength}" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'take ${toString markerPrefixLength} of those, leaving ${toString payloadBudget} characters for the base64 payload' || {
+          echo "$f: missing the derived marker-prefix length ${toString markerPrefixLength} or payload budget ${toString payloadBudget}" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'at most ${toString bodyBudget} bytes of Markdown' || {
+          echo "$f: missing the derived body budget ${toString bodyBudget}" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'Aim for ${toString targetBudget} bytes' || {
+          echo "$f: missing the derived soft target ${toString targetBudget} bytes" >&2
+          exit 1
+        }
+        normalized_grep "$p" '${toString bodyBudget} bytes encode to exactly ${toString encodedBudget} characters' || {
+          echo "$f: missing the derived encoded size (${toString bodyBudget} bytes to ${toString encodedBudget} characters)" >&2
+          exit 1
+        }
+        normalized_grep "$p" '"''${#payload}" -gt ${toString payloadBudget}' || {
+          echo "$f: missing the derived guard threshold ${toString payloadBudget} in the emission snippet" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'A Bash result over ${tailBytes} bytes reaches you as its *last* ${tailBytes} bytes' || {
+          echo "$f: missing the derived summary-hook read-back hazard (tail of ${tailBytes} bytes, from agent/bash-output-summary.sh)" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'Emit at most one valid such line' || {
+          echo "$f: missing the 'Emit at most one valid such line' rule" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'Print nothing before the marker line' || {
+          echo "$f: missing the sole-output precondition 'Print nothing before the marker line'" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'cut at payload character ${toString payloadBudget}, which is not a multiple of four' || {
+          echo "$f: missing the reason the cut is always safe -- payload character ${toString payloadBudget} is not a multiple of four, so base64 cannot decode a truncated payload there" >&2
+          exit 1
+        }
+        normalized_grep "$p" 'shorten the verdict body and emit it again' || {
+          echo "$f: missing the re-emit rule" >&2
+          exit 1
+        }
+        ! normalized_grep "$p" 'exactly ONE such line' || {
+          echo "$f: still carries the old 'exactly ONE such line' wording" >&2
+          exit 1
+        }
+        ! normalized_grep "$p" 'if the line came back cut' || {
+          echo "$f: still tells the Box to detect a cut marker line by reading it back, which the ${tailBytes}-byte tail makes impossible" >&2
+          exit 1
+        }
+      done
+      touch $out
+    '';
 
   # The filer write-mechanism split (issue #2019): the direct-mode fragments
   # must keep `gh label create`/`gh issue create` byte-for-byte, the same

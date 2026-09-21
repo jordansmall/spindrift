@@ -9,7 +9,10 @@ the open-questions section, together with the machine marker
 `<!-- spindrift-research -->` carried in the comment body. Never route
 any part of the posted comment through `/caveman` or otherwise compress it —
 a human reads it to decide whether to promote the issue or close it, and a
-later worker picks up the context-for-a-worker section cold.
+later worker picks up the context-for-a-worker section cold. Fitting that
+comment inside the byte budget the verdict instructions give you means
+writing less — fewer points, tighter scope — never compressing the prose:
+whatever you do post stays full human-quality prose.
 
 The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`
 line and its `note=` field, and any host-relay signal line such as
@@ -65,8 +68,45 @@ SPINDRIFT_COMMENT test-run-nonce-0001 <base64-encoded verdict comment body,
 structured per below>
 
 Base64-encode the entire verdict body (e.g. `base64 -w0`) into one unbroken
-token with no embedded newlines or spaces. Print exactly ONE such line,
-before the SPINDRIFT_OUTCOME line below.
+token with no embedded newlines or spaces. Emit at most one valid such
+line, before the SPINDRIFT_OUTCOME line below.
+
+The launcher reads that line back out of the Bash tool result, so what
+reaches the host is the echoed output of the command you run — and the Box
+caps a Bash result at 8192 characters, cutting it there with no truncation
+notice. The `SPINDRIFT_COMMENT ` token, the nonce, and the space after it
+take 51 of those, leaving 8141 characters for the base64 payload: at most
+6105 bytes of Markdown before encoding. Aim for 4884 bytes and treat 6105
+as a ceiling, not a target — 6105 bytes encode to exactly 8140 characters,
+and the marker prefix and trailing newline take the rest of the cap, so
+the ceiling has no headroom at all.
+
+Check the size in the command itself; you cannot check it by reading the
+echoed line back. A Bash result over 4096 bytes reaches you as its *last*
+4096 bytes, so the head of the line — the part the host parses — is never
+in what you see, and a tail ending in valid base64 padding looks intact
+whether or not the head survived. A marker line that is absent from what
+you read back is therefore the expected, healthy case, not a lost line.
+Write the verdict body to `verdict.md` and guard the emission on its
+encoded size:
+
+    payload="$(base64 -w0 <verdict.md)"
+    if [ "${#payload}" -gt 8141 ]; then
+      printf 'over budget: %s > 8141\n' "${#payload}"
+    else
+      printf 'SPINDRIFT_COMMENT %s %s\n' "test-run-nonce-0001" "$payload"
+    fi
+
+Print nothing before the marker line in that Bash call. Alone, an
+over-budget line is always cut at payload character 8141, which is not a
+multiple of four — a length no base64 encoding has — so the host rejects
+it; anything printed first moves the cut to an arbitrary offset, where a
+truncated payload can still decode and half a verdict posts silently as
+the whole one.
+
+The host takes the last *valid* line, so a rejected one costs a retry, not
+the run: when the guard reports over budget, shorten the verdict body and
+emit it again.
 
 
 Structure the verdict in this order:
