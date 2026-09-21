@@ -1688,3 +1688,149 @@ func TestStartupPreflight_SignalKilledDoctorOnCancelledContext(t *testing.T) {
 		t.Errorf("events = %+v, want a preflight event among them", events)
 	}
 }
+
+// TestSettingsKeys pins settingsKeys' sorted-order contract and its nil
+// handling: a nil doc and a doc with a nil Settings map must both come back
+// as an empty slice rather than panicking (JSON with no "settings" key
+// unmarshals to a nil map, not an empty one).
+func TestSettingsKeys(t *testing.T) {
+	if got := settingsKeys(nil); len(got) != 0 {
+		t.Errorf("settingsKeys(nil) = %v, want empty", got)
+	}
+	if got := settingsKeys(&inputdoc.Document{}); len(got) != 0 {
+		t.Errorf("settingsKeys(&inputdoc.Document{}) = %v, want empty", got)
+	}
+	doc := &inputdoc.Document{Settings: map[string]string{
+		"MODEL":        "opus",
+		"BASE_BRANCH":  "main",
+		"MAX_PARALLEL": "1",
+	}}
+	got := settingsKeys(doc)
+	want := []string{"BASE_BRANCH", "MAX_PARALLEL", "MODEL"}
+	if !slices.Equal(got, want) {
+		t.Errorf("settingsKeys(doc) = %v, want %v (sorted)", got, want)
+	}
+}
+
+// TestWarnStrippedChildEnv_SetKnobWarnsExactlyOnce asserts an exported knob
+// present in keys produces exactly one "not forwarded to children" line
+// naming it — not zero, not a duplicate.
+func TestWarnStrippedChildEnv_SetKnobWarnsExactlyOnce(t *testing.T) {
+	t.Setenv("MODEL", "opus")
+	var stderr bytes.Buffer
+	warnStrippedChildEnv([]string{"MODEL"}, &stderr)
+	got := strings.Count(stderr.String(), "not forwarded to children")
+	if got != 1 {
+		t.Errorf("warning count = %d, want 1; stderr=%q", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "MODEL=opus") {
+		t.Errorf("stderr = %q, want it to name MODEL=opus", stderr.String())
+	}
+}
+
+// TestWarnStrippedChildEnv_UnsetKnobWarnsNever asserts a key genuinely
+// absent from the environment (not exported at all) produces no line at
+// all. t.Setenv registers the restore cleanup; the immediate os.Unsetenv
+// then makes the key actually absent for the test body, since t.Setenv
+// itself only ever exports (see EmptyExportWarnsNever below for the
+// exported-but-empty case).
+func TestWarnStrippedChildEnv_UnsetKnobWarnsNever(t *testing.T) {
+	t.Setenv("MODEL", "x")
+	os.Unsetenv("MODEL")
+	var stderr bytes.Buffer
+	warnStrippedChildEnv([]string{"MODEL"}, &stderr)
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty (MODEL not set)", stderr.String())
+	}
+}
+
+// TestWarnStrippedChildEnv_EmptyExportWarnsNever mirrors the "set" test
+// lookupKnob itself applies (its `os.Getenv(envVar) != ""` guard in
+// main.go): an exported-but-empty knob (present in the environment with
+// value "") is not "set" there, so it must not be "set" here either.
+func TestWarnStrippedChildEnv_EmptyExportWarnsNever(t *testing.T) {
+	t.Setenv("ISSUE_NUMBER", "")
+	var stderr bytes.Buffer
+	warnStrippedChildEnv([]string{"ISSUE_NUMBER"}, &stderr)
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty (ISSUE_NUMBER exported empty)", stderr.String())
+	}
+}
+
+// TestWarnStrippedChildEnv_MultipleKeysSortedOrder asserts multiple set
+// knobs are warned about in the order keys arrives in (settingsKeys already
+// sorts, so this pins that warnStrippedChildEnv does not itself reorder).
+func TestWarnStrippedChildEnv_MultipleKeysSortedOrder(t *testing.T) {
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MODEL", "opus")
+	var stderr bytes.Buffer
+	warnStrippedChildEnv([]string{"BASE_BRANCH", "MODEL"}, &stderr)
+	out := stderr.String()
+	iBase := strings.Index(out, "BASE_BRANCH=")
+	iModel := strings.Index(out, "MODEL=")
+	if iBase == -1 || iModel == -1 {
+		t.Fatalf("stderr = %q, want both BASE_BRANCH and MODEL warnings", out)
+	}
+	if iBase >= iModel {
+		t.Errorf("stderr = %q, want BASE_BRANCH warning before MODEL warning", out)
+	}
+}
+
+// TestMainRun_StrippedEnvWarningPrecedesPreflight asserts the startup
+// warning for a stripped knob appears in stderr before mainRun reaches any
+// later startup diagnostic. There is no seam onto the real preflight here
+// (it needs a real nix/doctor run), so this uses repoRoot's own fast-failing
+// "not a git checkout" as the ordering anchor — the same proxy
+// TestMainRun_ValidAwakeWindowReachesRepoRoot uses — which is itself well
+// before the startupPreflight call in mainRun.
+func TestMainRun_StrippedEnvWarningPrecedesPreflight(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	clearKnobEnvT(t)
+	t.Setenv("MODEL", "opus")
+	doc := validKnobDocument()
+	doc.Settings["MODEL"] = "opus"
+	path := writeInputDocument(t, doc)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
+	if got != 1 {
+		t.Errorf("mainRun() = %d, want 1", got)
+	}
+	out := stderr.String()
+	iWarn := strings.Index(out, "MODEL=opus set in environment — not forwarded to children")
+	iGit := strings.Index(out, "not a git checkout")
+	if iWarn == -1 {
+		t.Fatalf("stderr = %q, want the stripped-env warning", out)
+	}
+	if iGit == -1 {
+		t.Fatalf("stderr = %q, want the repoRoot failure (ordering anchor)", out)
+	}
+	if iWarn >= iGit {
+		t.Errorf("stderr = %q, want the warning before the repoRoot failure", out)
+	}
+}
+
+// TestMainRun_NoKnobsSetNoWarning asserts a document with no matching
+// ambient env produces none of the stripped-env warning lines.
+func TestMainRun_NoKnobsSetNoWarning(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	clearKnobEnvT(t)
+	doc := validKnobDocument()
+	path := writeInputDocument(t, doc)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	var stdout, stderr bytes.Buffer
+	mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
+	if strings.Contains(stderr.String(), "not forwarded to children") {
+		t.Errorf("stderr = %q, want no stripped-env warning", stderr.String())
+	}
+}

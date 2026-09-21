@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -70,6 +71,47 @@ func parseArgs(args []string) (parsedArgs, error) {
 		return parsedArgs{}, err
 	}
 	return parsedArgs{InputPath: inputPath, Kinds: kinds}, nil
+}
+
+// settingsKeys returns doc's settings keys, sorted, so the warning loop and
+// the runner's stripped-key list both read from one source and come out in
+// a fixed order for an operator — a Go map's own iteration order is random,
+// which would otherwise reshuffle the warnings between runs. A nil doc or a
+// nil Settings map (the JSON shape when the document carries no "settings"
+// key at all) yields an empty slice rather than panicking.
+func settingsKeys(doc *inputdoc.Document) []string {
+	if doc == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(doc.Settings))
+	for k := range doc.Settings {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// warnStrippedChildEnv prints one stderr line per key in keys that is
+// actually set in the daemon's own environment (matching
+// inputdoc.Document.Lookup's own "set" test: non-empty os.Getenv, so an
+// exported-but-empty knob is not "set" here either). This is distinct from
+// Lookup's deprecation warning: that one flags the daemon itself still
+// honouring an ambient override; this one flags a key that a child will
+// never see at all, because childEnv strips it before exec.
+func warnStrippedChildEnv(keys []string, stderr io.Writer) {
+	for _, key := range keys {
+		if v := os.Getenv(key); v != "" {
+			// Printing v mirrors inputdoc.Document.Lookup, which prints a
+			// value too. These keys are whatever the --input document's
+			// settings carry — inputdoc.Load validates none of them against
+			// the schema — but that document is an operator-supplied trusted
+			// input written by lib/mkHarness.nix's documentSettings, which
+			// draws only on flakeOption schema entries, and
+			// lib/env-schema.nix marks no entry both flakeOption and
+			// secret. So no credential reaches this line.
+			fmt.Fprintf(stderr, "%s=%s set in environment — not forwarded to children; use the --input document's settings.%s\n", key, v, key)
+		}
+	}
 }
 
 // parseSlots turns MAX_PARALLEL's resolved string value into the daemon's
@@ -468,6 +510,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
+
+	// Computed once here, right after the document loads (the earliest
+	// point the key set is known) and reused below for the runner config,
+	// so the warning and the actual strip act on the same list.
+	strippedKeys := settingsKeys(doc)
+	warnStrippedChildEnv(strippedKeys, stderr)
 
 	appAttr, err := doc.Resolve("DAEMON_APP", stderr)
 	if err != nil {
