@@ -176,8 +176,8 @@ func TestDispatchWithRetry_CommentLineWithWrongNoncePopulatesRejectedCount(t *te
 	if !result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if result.CommentRejected != 1 {
-		t.Errorf("CommentRejected: got %d, want 1", result.CommentRejected)
+	if result.CommentRejected.Total() != 1 {
+		t.Errorf("CommentRejected: got %d, want 1", result.CommentRejected.Total())
 	}
 }
 
@@ -375,8 +375,8 @@ func TestDispatchWithRetry_IssueIntentLineWithWrongNoncePopulatesRejectedCount(t
 	if result.IssueIntentsFound {
 		t.Fatal("want IssueIntentsFound=false for a nonce mismatch")
 	}
-	if result.IssueIntentsRejected != 1 {
-		t.Errorf("IssueIntentsRejected: got %d, want 1", result.IssueIntentsRejected)
+	if result.IssueIntentsRejected.Total() != 1 {
+		t.Errorf("IssueIntentsRejected: got %d, want 1", result.IssueIntentsRejected.Total())
 	}
 }
 
@@ -423,8 +423,8 @@ func TestDispatchWithRetry_PRIntentLineWithWrongNoncePopulatesRejectedCount(t *t
 	if !result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if result.PRIntentRejected != 1 {
-		t.Errorf("PRIntentRejected: got %d, want 1", result.PRIntentRejected)
+	if result.PRIntentRejected.Total() != 1 {
+		t.Errorf("PRIntentRejected: got %d, want 1", result.PRIntentRejected.Total())
 	}
 }
 

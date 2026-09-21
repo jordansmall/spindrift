@@ -486,14 +486,63 @@ func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool, error) {
 	return winner, found, lastErr
 }
 
+// Rejections summarises the token-bearing lines a signal scan refused, split
+// by cause so a caller can say what was actually wrong instead of reporting
+// every rejection as a nonce mismatch (issue #3670).
+type Rejections struct {
+	NonceMismatch int
+	Malformed     int
+	// LongestPayload is the longest base64-alphabet run seen on a Malformed
+	// line, the length a human needs to recognise a payload the Box's Bash
+	// output cap cut mid-stream.
+	LongestPayload int
+}
+
+// Total is the count of rejected lines across both causes.
+func (r Rejections) Total() int { return r.NonceMismatch + r.Malformed }
+
+// Cause names the adjective for a warning that reports how many lines were
+// rejected, without the length detail Detail carries. The zero-value answer
+// matches the pre-#3670 wording, so a caller that never saw a Malformed line
+// reads unchanged.
+func (r Rejections) Cause() string {
+	switch {
+	case r.NonceMismatch > 0 && r.Malformed > 0:
+		return "nonce-mismatched or malformed"
+	case r.Malformed > 0:
+		return "malformed"
+	default:
+		return "nonce-mismatched"
+	}
+}
+
+// Detail is the sentence a scanner error / failure note reports: which
+// cause(s) were seen and, when any line was Malformed, the longest base64 run
+// length it carried — not the Box's Bash output cap itself (that number
+// belongs to the Box, not this repo), but the size a human needs to recognise
+// a payload the cap cut mid-stream.
+func (r Rejections) Detail() string {
+	const truncationNote = "longest base64 run %d chars (a payload longer than the Box's Bash output cap arrives truncated)"
+	switch {
+	case r.NonceMismatch > 0 && r.Malformed > 0:
+		return fmt.Sprintf("nonce mismatch or malformed payload, "+truncationNote, r.LongestPayload)
+	case r.Malformed > 0:
+		return fmt.Sprintf("malformed payload, "+truncationNote, r.LongestPayload)
+	case r.NonceMismatch > 0:
+		return "nonce mismatch"
+	default:
+		return "nonce mismatch or malformed payload"
+	}
+}
+
 // LastCommentLineInLog decodes the last verifying line in the file at path
 // carrying the grammar SPINDRIFT_COMMENT <nonce> <base64-body> (issue #1940).
 // See lastVerifiedSignalInLog for the verify-then-prefer selection, which
 // differs from lastInLog's take-the-last-line behaviour. err is set only when
 // every token-bearing line fails to verify, never when there was no comment.
-func LastCommentLineInLog(path, expectedNonce string) (string, bool, int, error) {
+func LastCommentLineInLog(path, expectedNonce string) (string, bool, Rejections, error) {
 	return lastVerifiedSignalInLog(path, CommentToken, expectedNonce,
-		"comment line found but did not verify: nonce mismatch or malformed payload")
+		"comment line found but did not verify")
 }
 
 // base64AlphabetPrefix returns the longest prefix of s made only of
@@ -517,45 +566,49 @@ func isBase64Char(b byte) bool {
 // "title\n\nbody" a read-only Box hands the launcher in place of its own
 // `gh pr create` (issue #1919). The grammar is single-line because stream-json
 // collapses a multi-line block onto one line, hiding it (issue #1921).
-func LastPRIntentInLog(path, expectedNonce string) (string, bool, int, error) {
+func LastPRIntentInLog(path, expectedNonce string) (string, bool, Rejections, error) {
 	return lastVerifiedSignalInLog(path, PRIntentToken, expectedNonce,
-		"PR-intent line found but did not verify: nonce mismatch or malformed payload")
+		"PR-intent line found but did not verify")
 }
 
 // AllIssueIntentLinesInLog decodes every verifying line in the file at path
 // carrying SPINDRIFT_ISSUE_INTENT <nonce> <base64-payload> (issue #2018), in
 // encounter order, deduped by decoded bytes because a Filer subagent echoes its
 // one intent line twice (issue #2068). A non-verifying line is dropped, so an
-// untrusted author's echo is never filed, but counted in rejectedCount (#2976).
-func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, int, error) {
+// untrusted author's echo is never filed, but counted in the returned
+// Rejections (#2976, #3670).
+func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, Rejections, error) {
 	return scanSignalLines(path, IssueIntentToken, expectedNonce, true)
 }
 
 // lastVerifiedSignalInLog is the shared "last verifying signal wins" scanner
 // behind LastCommentLineInLog and LastPRIntentInLog: the last verifying line
 // wins over a later line that merely carries the token, because an untrusted
-// author wrote their echo before this run's nonce was minted. The int counts
-// non-verifying lines; notVerifiedErr is the "found but none verified" text.
-func lastVerifiedSignalInLog(path, token, expectedNonce, notVerifiedErr string) (string, bool, int, error) {
-	matches, rejectedCount, err := scanSignalLines(path, token, expectedNonce, false)
+// author wrote their echo before this run's nonce was minted. notVerifiedPrefix
+// is combined with Rejections.Detail() to build the "found but none verified"
+// error text (issue #3670): callers must keep this prefix stable, since
+// acceptance criteria elsewhere pin the leading words verbatim.
+func lastVerifiedSignalInLog(path, token, expectedNonce, notVerifiedPrefix string) (string, bool, Rejections, error) {
+	matches, rejected, err := scanSignalLines(path, token, expectedNonce, false)
 	if err != nil {
-		return "", false, 0, err
+		return "", false, Rejections{}, err
 	}
 	if len(matches) > 0 {
-		return matches[len(matches)-1], true, rejectedCount, nil
+		return matches[len(matches)-1], true, rejected, nil
 	}
-	if rejectedCount > 0 {
-		return "", false, rejectedCount, errors.New(notVerifiedErr)
+	if rejected.Total() > 0 {
+		return "", false, rejected, errors.New(notVerifiedPrefix + ": " + rejected.Detail())
 	}
-	return "", false, 0, nil
+	return "", false, Rejections{}, nil
 }
 
 // scanSignalLines is the one scanning skeleton behind all three public signal
 // scanners (issue #2976). collectAll false is "last verifying line wins"; true
 // collects every verifying line, deduped by decoded payload identity, in
 // encounter order (issue #2018/#2068). A non-verifying line is never an error
-// here: last-wins and collect-all callers weigh rejectedCount differently.
-func scanSignalLines(path, token, expectedNonce string, collectAll bool) (matches []string, rejectedCount int, err error) {
+// here: last-wins and collect-all callers weigh the returned Rejections
+// differently.
+func scanSignalLines(path, token, expectedNonce string, collectAll bool) (matches []string, rejected Rejections, err error) {
 	// seen dedups collectAll's payloads by decoded byte identity (issue #2068,
 	// see AllIssueIntentLinesInLog). Left nil in last-wins mode.
 	var seen map[string]bool
@@ -563,80 +616,112 @@ func scanSignalLines(path, token, expectedNonce string, collectAll bool) (matche
 		seen = make(map[string]bool)
 	}
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		if !containsToken(line, token) {
+		body, cause, payloadLen := classifySignalLine(line, token, expectedNonce)
+		switch cause {
+		case causeNonceMismatch:
+			rejected.NonceMismatch++
 			return
-		}
-		if body, ok := parseSignalLine(line, token, expectedNonce); ok {
-			if collectAll {
-				if seen[body] {
-					return
-				}
-				seen[body] = true
+		case causeMalformed:
+			rejected.Malformed++
+			if payloadLen > rejected.LongestPayload {
+				rejected.LongestPayload = payloadLen
 			}
-			matches = append(matches, body)
 			return
 		}
-		if looksLikeSignalAttempt(line, token) {
-			rejectedCount++
+		if body == "" {
+			// Not a signal attempt at all: no token, a one-field doc example,
+			// or a non-leading mention that fails a leading-only reject rule.
+			return
 		}
+		if collectAll {
+			if seen[body] {
+				return
+			}
+			seen[body] = true
+		}
+		matches = append(matches, body)
 	})
 	if scanErr != nil {
 		if errors.Is(scanErr, os.ErrNotExist) {
-			return nil, 0, nil
+			return nil, Rejections{}, nil
 		}
-		return nil, 0, scanErr
+		return nil, Rejections{}, scanErr
 	}
-	return matches, rejectedCount, nil
+	return matches, rejected, nil
 }
 
-// looksLikeSignalAttempt reports whether line is a real attempt at the
-// "<token> <nonce> <base64-payload>" grammar rather than prose naming the
-// token or a one-field doc example: the token must lead the line (only
-// whitespace or a stream-json-escaped newline before it) and carry at least
-// two fields. Only such a line, when it fails to verify, is worth a warning (#2089).
-func looksLikeSignalAttempt(line, token string) bool {
-	idx := tokenIndex(line, token)
-	if idx < 0 {
-		return false
-	}
+// rejectCause classifies a token-bearing line that did not verify.
+type rejectCause int
+
+const (
+	causeNone          rejectCause = iota // verified, or not an attempt at the grammar at all
+	causeNonceMismatch                    // token leads, but the nonce field doesn't match
+	causeMalformed                        // nonce matches, but the base64 payload didn't decode
+)
+
+// tokenLeads reports whether the token occurrence at idx (as found by
+// tokenIndex) leads line: only whitespace, or a stream-json-escaped `\n`
+// (backslash then 'n'), sits before it. Preserved verbatim from the
+// pre-#3670 looksLikeSignalAttempt prefix rule.
+func tokenLeads(line string, idx int) bool {
 	prefix := strings.TrimSpace(line[:idx])
-	if prefix != "" && !strings.HasSuffix(prefix, "\\n") {
-		return false
-	}
-	return len(strings.Fields(line[idx+len(token):])) >= 2
+	return prefix == "" || strings.HasSuffix(prefix, "\\n")
 }
 
-// parseSignalLine extracts and strictly decodes the payload of a single-line
-// "<token> <nonce> <base64-payload>" control signal. line must carry
-// expectedNonce as the field structurally following the token, and the payload
-// after it is decoded with the strict standard decoder, rejecting any decode
-// error outright rather than stripping whitespace or decoding best-effort. A
-// zero-length decoded payload is rejected too, not just a decode error.
-func parseSignalLine(line, token, expectedNonce string) (string, bool) {
+// classifySignalLine decides whether line verifies the single-line
+// "<token> <nonce> <base64-payload>" control-signal grammar against
+// expectedNonce and, when it does not, why (issue #3670 collapses the old
+// looksLikeSignalAttempt/parseSignalLine split into one decision so the cause
+// is derived once). The strict standard decoder rejects any decode error
+// outright rather than stripping whitespace or decoding best-effort; a
+// verified body is never the empty string (issue #3668).
+func classifySignalLine(line, token, expectedNonce string) (body string, cause rejectCause, payloadLen int) {
 	idx := tokenIndex(line, token)
 	if idx < 0 {
-		return "", false
+		return "", causeNone, 0
 	}
 	// strings.Fields is already word-bounded and never yields an empty token,
 	// so an empty expectedNonce can never match: no separate LineHasNonce gate
 	// is needed here.
 	fields := strings.Fields(line[idx+len(token):])
-	if len(fields) < 2 || fields[0] != expectedNonce {
-		return "", false
+	if len(fields) < 2 {
+		// A one-field doc example (issue #2089): not a signal attempt at all.
+		return "", causeNone, 0
+	}
+	leads := tokenLeads(line, idx)
+	if fields[0] != expectedNonce {
+		// Without this run's nonce there is no freshness proof, so prose
+		// merely naming the token — wherever it sits — must keep not warning
+		// (issue #2089). Only a leading-token line, the Box's own output
+		// shape, is worth warning about.
+		if leads {
+			return "", causeNonceMismatch, 0
+		}
+		return "", causeNone, 0
 	}
 	payload := base64AlphabetPrefix(fields[1])
+	if payload == "" {
+		// An echoed `printf 'SPINDRIFT_COMMENT <nonce> %s\n' ...` command, a
+		// `grep -o "..."` diagnostic, and the prompt's own
+		// "SPINDRIFT_PR_INTENT <nonce> <base64-encoded title...>" placeholder
+		// all sit mid-line inside stream-json and all yield an empty base64
+		// run; counting those would warn on every run. A leading-token line is
+		// the Box's own output and stays warn-worthy (issue #3668's
+		// TestLastCommentLineInLog_EmptyPayloadRejected).
+		if leads {
+			return "", causeMalformed, 0
+		}
+		return "", causeNone, 0
+	}
 	decoded, err := base64.StdEncoding.Strict().DecodeString(payload)
 	if err != nil {
-		return "", false
+		// Unlike the empty-run case above, a non-empty run that fails to
+		// decode is the new shape issue #3670 is about — a stream-json
+		// tool_result truncated mid-payload by the Box's Bash output cap —
+		// and it counts wherever the token sits in the line.
+		return "", causeMalformed, len(payload)
 	}
-	// Issue #3668: the empty string decodes without error, so an echoed
-	// command line merely naming the token (a printf/grep diagnostic, say)
-	// would otherwise verify with a zero-length body and, under
-	// last-verifying-wins, mask a genuine payload.
-	if len(decoded) == 0 {
-		return "", false
-	}
-	return string(decoded), true
+	return string(decoded), causeNone, 0
 }
 
 // LineHasNonce reports whether line carries expected as a standalone token

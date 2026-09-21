@@ -175,14 +175,14 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 // pr-intent line was rejected, so for those two this covers only the silent
 // case: a verifying match alongside one or more rejections.
 func logRejectedSignals(num string, result dispatch.Result) {
-	if result.CommentFound && result.CommentRejected > 0 {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched comment line(s) rejected\n", num, result.CommentRejected)
+	if result.CommentFound && result.CommentRejected.Total() > 0 {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched comment line(s) rejected\n", num, result.CommentRejected.Total())
 	}
-	if result.PRIntentFound && result.PRIntentRejected > 0 {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched pr-intent line(s) rejected\n", num, result.PRIntentRejected)
+	if result.PRIntentFound && result.PRIntentRejected.Total() > 0 {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched pr-intent line(s) rejected\n", num, result.PRIntentRejected.Total())
 	}
-	if result.IssueIntentsRejected > 0 {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched issue-intent line(s) rejected\n", num, result.IssueIntentsRejected)
+	if result.IssueIntentsRejected.Total() > 0 {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched issue-intent line(s) rejected\n", num, result.IssueIntentsRejected.Total())
 	}
 }
 
