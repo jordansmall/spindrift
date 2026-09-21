@@ -1,24 +1,13 @@
 package main
 
-import (
-	"path/filepath"
-	"strings"
-	"testing"
-)
+import "testing"
 
 // TestCavemanDefaultFragmentContract pins the prose of
 // fragments/caveman-default.md (issue #2710): why each marker is exempt and the
 // shape it must keep. The parity guard in markers_test.go's
-// TestPromptMarkersMatchScanner covers only the bare marker literals. Each case
-// checks one clause on its own, so rewording one clause fails only that case.
+// TestPromptMarkersMatchScanner covers only the bare marker literals.
 func TestCavemanDefaultFragmentContract(t *testing.T) {
-	repoRoot := filepath.Join("..", "..", "..")
-	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/caveman-default.md"))
-
-	cases := []struct {
-		name   string
-		clause string
-	}{
+	cases := []promptClause{
 		{
 			name:   "regression guard: code, commands, error messages, and commit messages stay exempt",
 			clause: "Code, commands, error messages, and commit messages are exempt and stay verbatim",
@@ -57,11 +46,37 @@ func TestCavemanDefaultFragmentContract(t *testing.T) {
 		},
 	}
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if !strings.Contains(normalized, normalizeWhitespace(c.clause)) {
-				t.Errorf("fragments/caveman-default.md no longer states %q", c.clause)
-			}
-		})
+	assertPromptClauses(t, "fragments/caveman-default.md", cases)
+}
+
+// TestCavemanDefaultReviewFragmentContract pins the prose of
+// fragments/caveman-default-review.md (issue #3265): the review-only
+// exemption tier for Blocking/Non-blocking findings and Probed lines. The
+// directive case is what a reviewer agent must actually act on — without it
+// the rationale clauses alone survive a paragraph that inverts the order.
+func TestCavemanDefaultReviewFragmentContract(t *testing.T) {
+	cases := []promptClause{
+		{
+			name:   "Blocking/Non-blocking findings stay exempt",
+			clause: "every finding written under `## Blocking` or `## Non-blocking`",
+		},
+		{
+			name:   "Probed lines are exempt on the same tier",
+			clause: "The `## Probed (APPROVE only)` lines are exempt on the same tier",
+		},
+		{
+			name:   "Probed section rationale: text a human reads cold",
+			clause: "but text a human reads cold",
+		},
+		{
+			name:   "Probed section rationale: compressed section stops being evidence",
+			clause: "compressed, the Probed section stops being evidence",
+		},
+		{
+			name:   "Probed lines carry the full-prose directive, not just its rationale",
+			clause: "Write those lines in full human-quality prose too",
+		},
 	}
+
+	assertPromptClauses(t, "fragments/caveman-default-review.md", cases)
 }
