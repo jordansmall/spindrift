@@ -1,5 +1,11 @@
 # `github` joins the host-mediated write model, behind an opt-in switch
 
+> **Superseded in part by [ADR 0052](0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md).**
+> The `SPINDRIFT_PR_INTENT` stdout line (the #1938 amendment below) gains a
+> socket carrier with explicit `title` and `body` fields, selected by
+> `BOX_SIGNAL_CARRIER`; the host-mediated write model itself and
+> `BOX_FORGE_AND_ISSUE_ACCESS` stand unchanged.
+
 ## Context
 
 ADR 0032 and ADR 0033 host-mediated `local`'s two planes — issue content and

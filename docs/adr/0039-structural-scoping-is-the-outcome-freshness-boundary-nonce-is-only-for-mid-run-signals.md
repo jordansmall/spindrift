@@ -1,5 +1,12 @@
 # Structural scoping is `SPINDRIFT_OUTCOME`'s freshness boundary; the nonce is retained only for the mid-run signal channels
 
+> **Narrowed by [ADR 0052](0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md).**
+> "The nonce is the sole replay defense for the mid-run signal channels"
+> holds only on the `log` carrier. On the `socket` carrier those channels are
+> defended by the Launcher-owned listener and its own secret — echoed text
+> cannot reach a socket by accident — and the nonce retires for them. The
+> outcome line's structural scoping stands exactly as written.
+
 ## Context
 
 > **Note (issue #2973):** `outcome.LastInLog` below is now the unexported

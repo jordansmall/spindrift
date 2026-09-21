@@ -1,5 +1,14 @@
 # Local issues are the one host-mediated tracker: read-only mount in, launcher-posted comments out
 
+> **Superseded in part by [ADR 0052](0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md).**
+> The stdout `SPINDRIFT_COMMENT` block below was chosen because under bwrap
+> "the only way to get bytes out … is a writable host bind, a larger breach";
+> that premise expired once the seam bundle made the outbox a writable bind
+> everywhere. The comment is one of the three mid-run signal channels ADR 0052
+> moves onto a Launcher-owned socket behind `BOX_SIGNAL_CARRIER`; the log
+> carrier stays the default until the flip that ADR records. The read-only
+> mount and the launcher-posted comment model stand.
+
 > **Superseded in part by [ADR 0050](0050-local-issue-reads-cross-the-seam-as-host-injected-text.md).**
 > The read half below — a read-only `/issues` mount the agent reads and
 > walks itself — is retired: local issue content now crosses the seam as

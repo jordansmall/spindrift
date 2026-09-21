@@ -1,5 +1,12 @@
 # Private-registry credentials live in a launcher-side proxy, never in the Box
 
+> **Extended by [ADR 0052](0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md).**
+> The signal socket is a second Launcher-owned listener on this ADR's
+> transport plumbing — probe, socket directory, secret recipe, TCP fallback —
+> without sharing the proxy's listener or its GET/HEAD contract. "Opens no
+> host TCP port" already ceased to hold with the #3111 fallback below; the
+> signal socket accepts the same fallback under the same secret discipline.
+
 > **Superseded by [ADR 0045](0045-registry-routes-declared-table-protocol-aware-mirror.md).**
 > The containment model this ADR established — credential in the launcher,
 > unauthenticated channel authenticated on the Box's behalf, read-only
