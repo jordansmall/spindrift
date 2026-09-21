@@ -570,6 +570,22 @@ func TestLastPRIntentInLog_StrictDecodeRejectsMalformedPayload(t *testing.T) {
 	}
 }
 
+// Issue #3668: mirrors TestLastCommentLineInLog_EmptyPayloadRejected for the
+// PR-intent grammar.
+func TestLastPRIntentInLog_EmptyPayloadRejected(t *testing.T) {
+	// Shape of a `grep -o "SPINDRIFT_PR_INTENT <nonce> [A-Za-z0-9+/=]*"`
+	// diagnostic whose pattern text leaks through verbatim instead of a
+	// real payload.
+	path := writeLog(t, `SPINDRIFT_PR_INTENT the-nonce [A-Za-z0-9+/=]*`)
+	_, found, _, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for an empty payload")
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error for an empty payload")
+	}
+}
+
 // Issue #2089: a line merely naming the token in prose, not leading with it, is
 // not a signal attempt at all, so it neither verifies nor warns.
 func TestLastPRIntentInLog_BareProseMentionDoesNotWarn(t *testing.T) {
@@ -908,6 +924,22 @@ func TestLastCommentLineInLog_MalformedBase64Rejected(t *testing.T) {
 	}
 }
 
+// Issue #3668: an empty payload decodes without error under the strict
+// standard decoder, so a printf/grep diagnostic that echoes the token and
+// nonce but stops before any base64 character (e.g. `printf 'SPINDRIFT_COMMENT
+// <nonce> %s\n' ...`) would otherwise verify with a zero-length body and,
+// under last-verifying-wins, mask a genuine payload.
+func TestLastCommentLineInLog_EmptyPayloadRejected(t *testing.T) {
+	path := writeLog(t, `SPINDRIFT_COMMENT the-nonce %s\n`)
+	_, found, _, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for an empty payload")
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error for an empty payload")
+	}
+}
+
 // Issue #2089: a line merely naming the token in prose, not leading with it, is
 // not a signal attempt at all, so it neither verifies nor warns.
 func TestLastCommentLineInLog_BareProseMentionDoesNotWarn(t *testing.T) {
@@ -955,6 +987,54 @@ func TestLastCommentLineInLog_SurvivesJSONLShapedLog(t *testing.T) {
 	}
 	if got != body {
 		t.Errorf("body: got %q, want %q", got, body)
+	}
+}
+
+// Issue #3605, issue #3668's motivating shape: the Box emitted a genuine
+// verdict, then echoed the marker twice while checking its own work — a
+// `printf 'SPINDRIFT_COMMENT <nonce> %s\n' ...` tool_use command and a
+// `grep -o "SPINDRIFT_COMMENT <nonce> [A-Za-z0-9+/=]*"` diagnostic. Both
+// carry the real token and nonce but no base64 after them, so before the
+// zero-length reject they verified empty and, being later, won.
+func TestLastCommentLineInLog_EchoedMarkerDoesNotMaskVerdict(t *testing.T) {
+	body := "**Verdict** — recommend, real 7628-char-class payload"
+	encoded := base64.StdEncoding.EncodeToString([]byte(body))
+	genuine := `{"type":"assistant","message":{"content":[{"type":"text","text":"SPINDRIFT_COMMENT the-nonce ` +
+		encoded + `\n"}]}}`
+	printfEcho := `{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"command":` +
+		`"printf 'SPINDRIFT_COMMENT the-nonce %s\n' \"$body\""}}]}}`
+	grepDiagnostic := `{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"command":` +
+		`"grep -o \"SPINDRIFT_COMMENT the-nonce [A-Za-z0-9+/=]*\" run.log"}}]}}`
+	path := writeLog(t, genuine, printfEcho, grepDiagnostic)
+	got, found, _, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true — the genuine verdict must not be masked by the echoes")
+	}
+	if got != body {
+		t.Errorf("body: got %q, want %q", got, body)
+	}
+}
+
+// Issue #3597, issue #3668's second motivating shape: the log carries a
+// printf-echoed marker (verifies to an empty payload, now rejected) followed
+// only by a truncated, undecodable payload — no genuine verifying line at
+// all. The caller must see found=false and an empty body, i.e. reach
+// settle's "no comment" branch for the right reason, rather than found=true
+// with an empty verified comment.
+func TestLastCommentLineInLog_TruncatedPayloadAfterEchoReportsNoComment(t *testing.T) {
+	printfEcho := `{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"command":` +
+		`"printf 'SPINDRIFT_COMMENT the-nonce %s\n' \"$body\""}}]}}`
+	truncated := "SPINDRIFT_COMMENT the-nonce YWJjZ"
+	path := writeLog(t, printfEcho, truncated)
+	got, found, _, _ := outcome.LastCommentLineInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false — no line in this log genuinely verifies")
+	}
+	if got != "" {
+		t.Errorf("body: got %q, want empty", got)
 	}
 }
 
@@ -1074,6 +1154,25 @@ func TestAllIssueIntentLinesInLog_MalformedBase64CountedAsRejected(t *testing.T)
 	want := []string{`{"title":"genuine"}`}
 	if len(got) != 1 || got[0] != want[0] {
 		t.Errorf("got %v, want %v", got, want)
+	}
+	if rejected != 1 {
+		t.Errorf("rejected: got %d, want 1", rejected)
+	}
+}
+
+// Issue #3668: mirrors TestLastCommentLineInLog_EmptyPayloadRejected for the
+// issue-intent grammar; an empty payload is dropped and counted as rejected,
+// exactly as a malformed one is (issue #2976).
+func TestAllIssueIntentLinesInLog_EmptyPayloadRejected(t *testing.T) {
+	// Shape of a `printf 'SPINDRIFT_ISSUE_INTENT <nonce> %s\n' ...` format
+	// string leaking through verbatim instead of a real payload.
+	path := writeLog(t, `SPINDRIFT_ISSUE_INTENT the-nonce %s\n`)
+	got, rejected, err := outcome.AllIssueIntentLinesInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want no collected intents", got)
 	}
 	if rejected != 1 {
 		t.Errorf("rejected: got %d, want 1", rejected)
