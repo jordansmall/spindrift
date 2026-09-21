@@ -5292,6 +5292,23 @@ obvious caveat that under that policy the daemon started next is whatever
 just merged, so a broken merge restarts straight into the broken build,
 which is exactly why this is opt-in rather than the default.
 
+What moves the daemon's build: any change under `cmd/launcher`'s Go
+module (`daemonBin`, `lib/mkHarness.nix`). Its source is the whole module
+tree, so a test file or one of the sibling `driver-exec`, `orchestrator`
+and `quickstart` packages moves it just as `cmd/launcher/daemon` and
+`cmd/launcher/internal/daemon` do. So does a
+change to any setting the wrapper bakes in — the run-input document,
+prompts/skills, or the agent image/closure the Consumer's settings
+resolve to. What does not: a commit touching only `docs/`. `daemonBin`
+builds from a file-set source (`daemonSrc`) rooted at `../cmd/launcher`
+itself, so `docs/` sits outside it and it still shares
+`launcherVendorHash` — unlike `launcherBin`, whose own `src`
+(`launcherSrc`) copies `../docs` alongside for its own checkPhase
+(#611). So `daemonBin`'s store path, and with it
+`SPINDRIFT_DAEMON_PROGRAM`, no longer moves on a documentation-only
+merge, which used to halt a daemon running under the restart-on-exit-10
+policy above for nothing (issue #3621).
+
 An evaluation that *fails* — a broken flake, a network blip reaching `nix
 eval` — is not treated as a change: it is the same class of unclassified
 iteration-boundary failure as a fetch error (see **Failures** above), so
