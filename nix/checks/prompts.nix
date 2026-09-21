@@ -328,6 +328,42 @@ let
       throw "research-verdict budget check: no BASH_OUTPUT_SUMMARY_TAIL_BYTES default found in agent/bash-output-summary.sh -- update the match in nix/checks/prompts.nix alongside the hook"
     else
       builtins.elemAt tailBytesMatch 0;
+
+  # Shared by the two research-prompt advise-only enumeration dedup checks
+  # below (issue #3227, #3270): research-prompt.md and its self-contained
+  # sub-mode sibling carry the identical trailer/TASK contract, so one
+  # parameterized derivation covers both prompt files. The advise-only
+  # prohibition enumeration once appeared twice in research-prompt.md,
+  # loosely reworded in TASK and in full in the byte-shared POST THE
+  # VERDICT trailer. Pins each phrase to exactly one occurrence, the
+  # trailer's, which a Consumer with no section of its own still
+  # receives; TASK keeps only the posture.
+  mkAdviseOnlyEnumerationDedupCheck =
+    name: file:
+    pkgs.runCommand name { } ''
+      p=${batsHarness.internals.promptDir}/${file}
+      # Join hard-wrapped lines before counting: the trailer prose wraps
+      # at the terminal width, so "never close the issue" can straddle a
+      # line break in the source file even though it reads as one phrase.
+      flat=$(tr '\n' ' ' < "$p")
+      for phrase in 'never edit the issue body' 'never close the issue' 'never promote it to dispatchable'; do
+        count=$(grep -io -- "$phrase" <<<"$flat" | wc -l)
+        [ "$count" -eq 1 ] || {
+          echo "expected \"$phrase\" exactly once (trailer copy only) in $p, got $count" >&2
+          exit 1
+        }
+      done
+      task=$(awk '/^# TASK$/{f=1} /^# CONTEXT$/{exit} f' "$p" | tr '\n' ' ')
+      echo "$task" | grep -qi -- 'advise-only' || {
+        echo "expected the TASK section of $p to still state the advise-only posture" >&2
+        exit 1
+      }
+      echo "$task" | grep -qF -- 'launcher owns every lifecycle transition' || {
+        echo "expected the TASK section of $p to keep the launcher-owns-every-lifecycle-transition clause" >&2
+        exit 1
+      }
+      touch $out
+    '';
 in
 {
   # The configured `prompt` is rendered to a store-path directory and, by
@@ -2147,66 +2183,13 @@ in
       { }
       "touch $out";
 
-  # Grep pin (issue #3227): the research prompts' advise-only prohibition
-  # enumeration once appeared twice in research-prompt.md, loosely reworded
-  # in TASK and in full in the byte-shared POST THE VERDICT trailer. Pins
-  # each phrase to exactly one occurrence, the trailer's, which a Consumer
-  # with no section of its own still receives; TASK keeps only the posture.
-  mkharness-prompt-research-advise-only-enumeration-dedup =
-    pkgs.runCommand "mkharness-prompt-research-advise-only-enumeration-dedup" { }
-      ''
-        p=${batsHarness.internals.promptDir}/research-prompt.md
-        # Join hard-wrapped lines before counting: the trailer prose wraps
-        # at the terminal width, so "never close the issue" can straddle a
-        # line break in the source file even though it reads as one phrase.
-        flat=$(tr '\n' ' ' < "$p")
-        for phrase in 'never edit the issue body' 'never close the issue' 'never promote it to dispatchable'; do
-          count=$(grep -io -- "$phrase" <<<"$flat" | wc -l)
-          [ "$count" -eq 1 ] || {
-            echo "expected \"$phrase\" exactly once (trailer copy only) in $p, got $count" >&2
-            exit 1
-          }
-        done
-        task=$(awk '/^# TASK$/{f=1} /^# CONTEXT$/{exit} f' "$p" | tr '\n' ' ')
-        echo "$task" | grep -qi -- 'advise-only' || {
-          echo "expected the TASK section of $p to still state the advise-only posture" >&2
-          exit 1
-        }
-        echo "$task" | grep -qF -- 'launcher owns every lifecycle transition' || {
-          echo "expected the TASK section of $p to keep the launcher-owns-every-lifecycle-transition clause" >&2
-          exit 1
-        }
-        touch $out
-      '';
+  # Grep pin (issue #3227): covers research-prompt.md. See
+  # mkAdviseOnlyEnumerationDedupCheck above for the contract this pins.
+  mkharness-prompt-research-advise-only-enumeration-dedup = mkAdviseOnlyEnumerationDedupCheck "mkharness-prompt-research-advise-only-enumeration-dedup" "research-prompt.md";
 
   # Companion to mkharness-prompt-research-advise-only-enumeration-dedup
   # above, for the self-contained sub-mode prompt (issue #3227).
-  mkharness-prompt-research-self-contained-advise-only-enumeration-dedup =
-    pkgs.runCommand "mkharness-prompt-research-self-contained-advise-only-enumeration-dedup" { }
-      ''
-        p=${batsHarness.internals.promptDir}/research-self-contained-prompt.md
-        # Join hard-wrapped lines before counting: the trailer prose wraps
-        # at the terminal width, so "never close the issue" can straddle a
-        # line break in the source file even though it reads as one phrase.
-        flat=$(tr '\n' ' ' < "$p")
-        for phrase in 'never edit the issue body' 'never close the issue' 'never promote it to dispatchable'; do
-          count=$(grep -io -- "$phrase" <<<"$flat" | wc -l)
-          [ "$count" -eq 1 ] || {
-            echo "expected \"$phrase\" exactly once (trailer copy only) in $p, got $count" >&2
-            exit 1
-          }
-        done
-        task=$(awk '/^# TASK$/{f=1} /^# CONTEXT$/{exit} f' "$p" | tr '\n' ' ')
-        echo "$task" | grep -qi -- 'advise-only' || {
-          echo "expected the TASK section of $p to still state the advise-only posture" >&2
-          exit 1
-        }
-        echo "$task" | grep -qF -- 'launcher owns every lifecycle transition' || {
-          echo "expected the TASK section of $p to keep the launcher-owns-every-lifecycle-transition clause" >&2
-          exit 1
-        }
-        touch $out
-      '';
+  mkharness-prompt-research-self-contained-advise-only-enumeration-dedup = mkAdviseOnlyEnumerationDedupCheck "mkharness-prompt-research-self-contained-advise-only-enumeration-dedup" "research-self-contained-prompt.md";
 
   # Anti-drift check for lib/mkHarness.nix's researchPromptContentByName
   # (issue #2595 review finding B): it hand-keys exactly the research prompt
