@@ -280,10 +280,12 @@ func TestPoolSingleSlotNeverHoldsABaton(t *testing.T) {
 // forever.
 func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 	const slots = 2
+	entered := make(chan struct{})
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		onResolve: func(ctx context.Context, call int) error {
 			if call == 1 {
+				close(entered)
 				<-ctx.Done()
 				return ctx.Err()
 			}
@@ -295,19 +297,44 @@ func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan Halt, 1)
+	cfg := testConfig(slots)
+	p, pctx := newPool(ctx, cfg, r, em, clk)
+	defer p.cancel()
+
+	// leadSlot is launched alone first, and only released to siblingSlot
+	// once it is confirmed genuinely blocked inside its own (call 1)
+	// resolve: the baton no longer gates ResolveTip (issue #3625's
+	// structural fix), so both slots would otherwise race for call 1, and
+	// whichever slot loses that race would find the baton already free and
+	// never park on it at all.
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		done <- Loop(ctx, testConfig(slots), r, em, clk)
+		defer wg.Done()
+		runSlot(pctx, leadSlot, cfg, p)
+	}()
+	<-entered
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, siblingSlot, cfg, p)
 	}()
 
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 
 	cancel()
 
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
 	select {
-	case h := <-done:
-		if !strings.Contains(h.String(), "context-cancelled") {
-			t.Fatalf("halt reason = %q, want it to name context-cancelled", h.String())
+	case <-done:
+		if reason := p.haltReason().String(); !strings.Contains(reason, "context-cancelled") {
+			t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Loop never returned: a slot parked in awaitBaton deadlocked on cancellation")
@@ -532,14 +559,13 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 	}
 	clk := &testClock{now: time.Date(2026, 1, 1, 16, 59, 50, 0, time.UTC)}
 	clk.park()
+	entered := make(chan struct{})
 	proceed := make(chan struct{})
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		onResolve: func(ctx context.Context, call int) error {
 			if call == 1 {
-				// call 1 is guaranteed the holder's own: the sibling is
-				// still parked on the baton and has not reached
-				// ResolveTip yet.
+				close(entered)
 				<-proceed
 				clk.setNow(clk.Now().Add(2 * time.Minute))
 			}
@@ -553,14 +579,30 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 	cfg.Awake = win
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan Halt, 1)
+	p, pctx := newPool(ctx, cfg, r, em, clk)
+	defer p.cancel()
+
+	// leadSlot is launched alone first, and siblingSlot only once leadSlot
+	// is confirmed genuinely blocked inside its own (call 1) resolve: the
+	// baton no longer gates ResolveTip (issue #3625's structural fix), so
+	// a bare call-index script would otherwise race both slots for call 1.
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		done <- Loop(ctx, cfg, r, em, clk)
+		defer wg.Done()
+		runSlot(pctx, leadSlot, cfg, p)
+	}()
+	<-entered
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, siblingSlot, cfg, p)
 	}()
 
 	// The sibling clears awaitWindow (the window is still open at
-	// 16:59:50) and parks on the baton before the holder's fetch is
-	// allowed to return.
+	// 16:59:50), resolves its own tip, and parks on the baton before the
+	// holder's own fetch is allowed to return.
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 	close(proceed)
 
@@ -573,13 +615,18 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 	nw.waitForLine(t, "\"event\":\"baton_pass\"")
 	cancel()
 
-	var h Halt
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
 	select {
-	case h = <-done:
+	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Loop never returned: a window close mid-resolve left the pool deadlocked")
 	}
-	reason := h.String()
+	reason := p.haltReason().String()
 	if !strings.Contains(reason, "context-cancelled") {
 		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
 	}
@@ -686,25 +733,64 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 // holder's very first ResolveTip): the holder is about to back off
 // alone, and holding the pool through that backoff would stall the
 // sibling's own discovery on a problem backoffOrHalt already handles
-// per-slot. Call 1 is guaranteed the holder's own: the sibling is still
-// parked on the baton and has not reached ResolveTip yet.
+// per-slot.
+//
+// The baton no longer gates ResolveTip (issue #3625's structural fix moved
+// acquisition to after the resolve), so both slots can now reach
+// resolveTipOnce concurrently and a bare resolveAt=1 script would race
+// both slots for call index 1. Launching leadSlot's goroutine alone first,
+// and holding it inside its own onResolve until the test has observed it
+// get there, pins call 1 to leadSlot deterministically without relying on
+// scheduler timing — siblingSlot is only launched, and only then reaches
+// resolveTipOnce for call 2, once that is confirmed.
 func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 	const slots = 2
 	wantErr := errors.New("boom")
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	holderEntered := make(chan struct{})
+	proceed := make(chan struct{})
 	r := &scriptedRunner{
 		revisions:  []string{"rev1"},
 		resolveAt:  1,
 		resolveErr: wantErr,
 		results:    []ChildResult{{Exit: 5}},
+		onResolve: func(ctx context.Context, call int) error {
+			if call == 1 {
+				close(holderEntered)
+				<-proceed
+			}
+			return nil
+		},
 	}
 	clk := &testClock{}
 	pinTheFailingHolder(clk)
 
+	cfg := testConfig(slots)
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, leadSlot, cfg, p)
+	}()
+
+	<-holderEntered
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, siblingSlot, cfg, p)
+	}()
+
+	close(proceed)
+
 	done := make(chan Halt, 1)
 	go func() {
-		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
+		wg.Wait()
+		done <- p.haltReason()
 	}()
 
 	var h Halt
@@ -791,24 +877,27 @@ func TestPoolBatonPassesWhenNoKindIsRunnable(t *testing.T) {
 // deferred passBaton (batonPassStopped): a holder that stops before any of
 // the other release sites ever resolves — here, an operator cancellation
 // landing inside its very first ResolveTip — must still release the
-// baton on its way out, or the sibling parked in awaitBaton would hang
-// forever on a token nothing else will ever pass. Complements, and does
-// not duplicate,
-// TestPoolBatonCancellationNeverDeadlocksAWaitingSlot: that test asserts
-// the waiting sibling unblocks; this one asserts the holder's own exit
-// stamps its own reason.
+// baton on its way out, or a sibling parked in awaitBaton would hang
+// forever on a token nothing else will ever pass.
+//
+// Only leadSlot's own goroutine runs: the property this pins is the
+// holder's own stamped reason on exit, not a sibling's unblocking (that is
+// TestPoolBatonCancellationNeverDeadlocksAWaitingSlot's own claim, and — now
+// that the baton is acquired after the resolve rather than before (issue
+// #3625's structural fix) — a sibling no longer parks on the baton ahead of
+// the holder's first resolve anyway, so there is nothing left here for a
+// second slot to pin). cfg still configures two slots so newPool allocates
+// a baton at all (Slots > 1, pool.go) — a single-slot pool has none to
+// stamp.
 func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 	const slots = 2
 	ctx, cancel := context.WithCancel(context.Background())
-	proceed := make(chan struct{})
+	entered := make(chan struct{})
 	r := &scriptedRunner{
 		onResolve: func(rctx context.Context, call int) error {
 			if call == 1 {
-				// call 1 is guaranteed the holder's own: the sibling is
-				// still parked on the baton and has not reached
-				// ResolveTip yet.
-				<-proceed
-				cancel()
+				close(entered)
+				<-rctx.Done()
 				return rctx.Err()
 			}
 			return nil
@@ -818,21 +907,26 @@ func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
-	done := make(chan Halt, 1)
+	cfg := testConfig(slots)
+	p, pctx := newPool(ctx, cfg, r, em, clk)
+	defer p.cancel()
+
+	done := make(chan struct{})
 	go func() {
-		done <- Loop(ctx, testConfig(slots), r, em, clk)
+		defer close(done)
+		runSlot(pctx, leadSlot, cfg, p)
 	}()
 
-	nw.waitForLine(t, "\"event\":\"baton_hold\"")
-	close(proceed)
+	<-entered
+	cancel()
 
-	var h Halt
 	select {
-	case h = <-done:
+	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Loop never returned: a holder that stopped before resolving anything left the sibling parked")
+		t.Fatal("runSlot never returned: a holder that stopped before resolving anything left its own baton unpassed")
 	}
-	reason := h.String()
+
+	reason := p.haltReason().String()
 	if !strings.Contains(reason, "context-cancelled") {
 		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
 	}

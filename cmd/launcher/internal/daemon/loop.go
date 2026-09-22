@@ -267,7 +267,7 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	}
 	// Watches cfg.Stop for the rest of the pool's life, so a later close
 	// halts promptly whether or not any slot is between iterations to
-	// notice it itself (a slot deep in clk.Sleep or ResolveRevision only
+	// notice it itself (a slot deep in clk.Sleep or ResolveTip only
 	// unblocks once p.halt cancels pctx). Also selects on pctx.Done so this
 	// goroutine never outlives one Loop call — tests drive Loop repeatedly,
 	// and a leaked watcher from a previous call must not fire on a later
@@ -341,14 +341,15 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	// the baton is freed, so the sibling that hand-off wakes never reads this
 	// slot as still resolving.
 	defer p.setPhase(slot, PhaseIdle)
-	// resolveTip carries idleSleep's return across the loop: set when a
+	// wantResolve carries idleSleep's return across the loop: set when a
 	// jammed kind's wait outlived its first IdleFloor slice (idleSleep,
 	// pool.go), it asks the next round to make one opportunistic resolution
 	// before pickKind, rather than idleSleep polling internally — the
 	// restart in between passes through awaitWindow and awaitBaton, either
-	// of which can block for hours, so nothing is carried across that span
-	// but the flag itself (design decision 4, issue #3625).
-	var resolveTip bool
+	// of which can block for hours, so a Tip resolved before that wait
+	// could be stale by the time it reopens; only the request to
+	// re-resolve survives, not the resolution itself.
+	var wantResolve bool
 	for {
 		// The pool's one admission check (issue #3626): with cfg.Stop
 		// riding every ChildRequest, a child started after Stop closes is
@@ -360,23 +361,16 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 
 		p.awaitWindow(ctx, slot)
 
-		// Acquired after the Awake window, not before: apart from the
-		// pre-assigned initial holder's very first round, a slot never
-		// parks in awaitWindow holding the baton — acquisition happens
-		// here, after awaitWindow, and every path that loops back to the
-		// top passes the baton first (see the release sites below).
-		p.awaitBaton(ctx, slot)
-
 		// The opportunistic resolution idleSleep's return asked for, made
 		// before pickKind so a newly unblocked kind (noteTipMoved resets its
 		// backoff) is visible to pickKind in this same round. A failure
-		// here is swallowed inside resolveOpportunistic itself (design
-		// decision 6): haveTip stays false and the ordinary post-pickKind
-		// resolve below is left to report a genuinely broken fetch.
+		// here is swallowed inside resolveOpportunistic itself: haveTip
+		// stays false and the ordinary post-pickKind resolve below is left
+		// to report a genuinely broken fetch.
 		var tip Tip
 		var haveTip bool
-		if resolveTip {
-			resolveTip = false
+		if wantResolve {
+			wantResolve = false
 			if t, ok := p.resolveOpportunistic(ctx, slot); ok {
 				tip, haveTip = t, true
 			}
@@ -389,18 +383,18 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// slot happens not to prefer right now. A slot must never sleep
 			// out an idle wait holding the baton.
 			//
-			// The explicit setPhase matters here (issue #3625 review
-			// finding waiting to happen): a resolveOpportunistic call just
-			// above can have left this slot PhaseResolving on success, and
-			// siblingsEngaged (pool.go) counts that phase as engaged — a
-			// slot that fell into idleSleep still reporting PhaseResolving
-			// would suppress a sibling's real jam. The window is open by
+			// The explicit setPhase matters here: a resolveOpportunistic
+			// call just above can have left this slot PhaseResolving on
+			// success, and siblingsEngaged (pool.go) counts that phase
+			// as engaged — a slot that fell into idleSleep still
+			// reporting PhaseResolving would suppress a sibling's real
+			// jam. The window is open by
 			// the time pickKind runs, so idle is the right phase to park
 			// in, the same one runSlot's own deferred setPhase resets to on
 			// every other exit.
 			p.setPhase(slot, PhaseIdle)
 			p.passBaton(slot, batonPassIdle)
-			resolveTip = p.idleSleep(ctx, slot)
+			wantResolve = p.idleSleep(ctx, slot)
 			continue
 		}
 
@@ -410,15 +404,15 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// slot inside either is no more idle than one inside a fetch —
 			// nothing between here and startChild (or a failure exit)
 			// changes phase again, so one setPhase covers the whole span.
-			p.setPhase(slot, PhaseResolving)
-			t, err := p.r.ResolveTip(ctx)
+			// resolveTip (pool.go, see its own doc) is the one pool seam
+			// both this call and the opportunistic one above go through.
+			t, err := p.resolveTip(ctx, slot)
 			if err != nil {
 				// A failed fetch and a failed self-eval are both the
-				// transient blip this slice's breaker exists for, but they
-				// keep the halt classes today's two separate seams gave
-				// them (resolveFailure); backoffOrHalt's own
-				// breaker-vs-retry logic doesn't care which.
-				revision, reason := p.resolveFailure(t, err)
+				// transient blip the breaker exists for, but resolveFailure
+				// keeps them under separate halt classes; backoffOrHalt's
+				// own breaker-vs-retry logic doesn't care which.
+				revision, reason := resolveFailure(t, err)
 				if p.backoffOrHalt(ctx, slot, kind, revision, reason) {
 					return
 				}
@@ -444,6 +438,23 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			})
 			return
 		}
+
+		// Acquired here, not before the resolve: the baton is a discovery
+		// token, and neither pickKind nor ResolveTip discovers anything —
+		// they just pick a kind and learn the tip. Acquiring it earlier
+		// would serialize the tip resolutions the single-flight in
+		// ResolveTip exists to coalesce (issue #3625). Apart from the
+		// pre-assigned initial holder's very first round, a slot never
+		// holds the baton across a resolve; every path that loops back to
+		// the top passes it first (see the release sites below). Nothing
+		// re-checks ctx once awaitBaton returns, cancelled or not (issue
+		// #3626's one admission check): a ctx cancelled mid-wait here is
+		// caught by the *other* slot's own path instead — the holder that
+		// was actually in flight when cancellation landed reports it
+		// through backoffOrHalt's haltIfStopping, and this slot's own
+		// stray child, if it starts one, is harmless and cleaned up the
+		// same as any other child once the pool halts.
+		p.awaitBaton(ctx, slot)
 
 		if !cfg.Awake.Open(p.clk.Now()) {
 			// ResolveTip (a git fetch) can outlast the window's own
