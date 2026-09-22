@@ -13,6 +13,13 @@
 # `inverseOf` (issue #3219) declares this row's gate the boolean inverse of
 # the named on-gate; fragment-pairs.nix's `validate` asserts those pairs at
 # the end of this file, before an image can bake from a malformed one.
+
+# `signalChannel` (issue #3726) names which of lib/prompt-contract.nix's
+# markerChannels ("comment" | "pr-intent" | "issue-intent") a _LOG/_SOCKET
+# fragment pair's row belongs to, so buildTimeSignalFragmentViolations can
+# derive the required marker/verb from that registry instead of a
+# hand-listed per-file table. Only the eight _LOG/_SOCKET-paired rows carry
+# it; every other row is silently skipped by that check.
 let
   rows = [
     {
@@ -238,10 +245,23 @@ let
       fragment = "file-issues-direct.md";
       var = "FILE_ISSUES_DIRECT_STEP";
     }
+    # The carrier (issue #3726) forks the issue-filing relay the same way as
+    # the comment/pr-intent channels above: a read-only Filer emits either a
+    # SPINDRIFT_ISSUE_INTENT stdout log line or a `driver-exec signal
+    # issue-intent` socket call, so this row and its socket sibling fork on
+    # BOX_SIGNAL_CARRIER via the FILER_FILE_RELAY_LOG/_SOCKET gate pair
+    # gates.go computes.
     {
-      gate = "FILER_FILE_RELAY";
+      gate = "FILER_FILE_RELAY_LOG";
       fragment = "file-issues-relay.md";
       var = "FILE_ISSUES_RELAY_STEP";
+      signalChannel = "issue-intent";
+    }
+    {
+      gate = "FILER_FILE_RELAY_SOCKET";
+      fragment = "file-issues-relay-socket.md";
+      var = "FILE_ISSUES_RELAY_SOCKET_STEP";
+      signalChannel = "issue-intent";
     }
     {
       gate = "FILER_FILE_DIRECT_GH";
@@ -279,9 +299,16 @@ let
       var = "FILER_FILE_DIRECT_FORGEJO_STEP";
     }
     {
-      gate = "FILER_FILE_RELAY";
+      gate = "FILER_FILE_RELAY_LOG";
       fragment = "filer-file-relay.md";
       var = "FILER_FILE_RELAY_STEP";
+      signalChannel = "issue-intent";
+    }
+    {
+      gate = "FILER_FILE_RELAY_SOCKET";
+      fragment = "filer-file-relay-socket.md";
+      var = "FILER_FILE_RELAY_SOCKET_STEP";
+      signalChannel = "issue-intent";
     }
     # The research-only filing step (issue #2593, ADR 0041): reuses the
     # FILER_FILE_RELAY gate, which gates_tracker.go makes unconditionally true
@@ -289,9 +316,16 @@ let
     # research prompt must never render a direct-file fragment in any mode;
     # `researchDirectFileCheckOk` (issue #2595) backstops that at build time.
     {
-      gate = "FILER_FILE_RELAY";
+      gate = "FILER_FILE_RELAY_LOG";
       fragment = "research-file-issues-relay.md";
       var = "RESEARCH_FILE_ISSUES_RELAY_STEP";
+      signalChannel = "issue-intent";
+    }
+    {
+      gate = "FILER_FILE_RELAY_SOCKET";
+      fragment = "research-file-issues-relay-socket.md";
+      var = "RESEARCH_FILE_ISSUES_RELAY_SOCKET_STEP";
+      signalChannel = "issue-intent";
     }
     {
       gate = "AUTO_FORMAT";
@@ -403,15 +437,38 @@ let
       fragment = "research-verdict-github.md";
       var = "RESEARCH_VERDICT_GITHUB_STEP";
     }
+    # The carrier (issue #3726) is orthogonal to the tracker backend: a
+    # read-only/local research Box relays its verdict either as a stdout
+    # SPINDRIFT_COMMENT log line or over the Signal socket, so each of the
+    # three rows below forks in two on BOX_SIGNAL_CARRIER via the
+    # _LOG/_SOCKET gate pair gates.go computes. The registry only allows
+    # one gate per row, so the conjunction itself lives in gates.go, not
+    # here. The read-write rows above/below are untouched: a write-capable
+    # Box posts the comment with its own tracker client and never uses
+    # either carrier.
     {
-      gate = "ISSUE_TRACKER_GITHUB_READONLY";
+      gate = "ISSUE_TRACKER_GITHUB_READONLY_LOG";
       fragment = "research-verdict-github-readonly.md";
       var = "RESEARCH_VERDICT_GITHUB_READONLY_STEP";
+      signalChannel = "comment";
     }
     {
-      gate = "ISSUE_TRACKER_LOCAL";
+      gate = "ISSUE_TRACKER_GITHUB_READONLY_SOCKET";
+      fragment = "research-verdict-github-readonly-socket.md";
+      var = "RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP";
+      signalChannel = "comment";
+    }
+    {
+      gate = "ISSUE_TRACKER_LOCAL_LOG";
       fragment = "research-verdict-local.md";
       var = "RESEARCH_VERDICT_LOCAL_STEP";
+      signalChannel = "comment";
+    }
+    {
+      gate = "ISSUE_TRACKER_LOCAL_SOCKET";
+      fragment = "research-verdict-local-socket.md";
+      var = "RESEARCH_VERDICT_LOCAL_SOCKET_STEP";
+      signalChannel = "comment";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
@@ -419,9 +476,16 @@ let
       var = "RESEARCH_VERDICT_FORGEJO_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_FORGEJO_READONLY";
+      gate = "ISSUE_TRACKER_FORGEJO_READONLY_LOG";
       fragment = "research-verdict-forgejo-readonly.md";
       var = "RESEARCH_VERDICT_FORGEJO_READONLY_STEP";
+      signalChannel = "comment";
+    }
+    {
+      gate = "ISSUE_TRACKER_FORGEJO_READONLY_SOCKET";
+      fragment = "research-verdict-forgejo-readonly-socket.md";
+      var = "RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP";
+      signalChannel = "comment";
     }
     {
       gate = "ISSUE_TRACKER_GITHUB_READWRITE";
@@ -504,10 +568,21 @@ let
       fragment = "open-pr-create-forgejo.md";
       var = "OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP";
     }
+    # The carrier (issue #3726) forks the PR-intent send itself: a read-only
+    # Box emits the nonce-guarded SPINDRIFT_PR_INTENT stdout line above, or
+    # sends the same intent over the Signal socket via `driver-exec signal
+    # pr-intent`, per BOX_SIGNAL_CARRIER's _LOG/_SOCKET gate pair.
     {
-      gate = "BOX_ACCESS_READ_ONLY";
+      gate = "BOX_ACCESS_READ_ONLY_LOG";
       fragment = "open-pr-create-outbox.md";
       var = "OPEN_PR_CREATE_READ_ONLY_STEP";
+      signalChannel = "pr-intent";
+    }
+    {
+      gate = "BOX_ACCESS_READ_ONLY_SOCKET";
+      fragment = "open-pr-create-outbox-socket.md";
+      var = "OPEN_PR_CREATE_READ_ONLY_SOCKET_STEP";
+      signalChannel = "pr-intent";
     }
     # The OUTCOME section's landing= value and status=ready close
     # (issue #1919): a read-only Box never opens the PR, so it never learns a
@@ -583,10 +658,18 @@ let
       fragment = "if-blocked-pr-git.md";
       var = "IF_BLOCKED_PR_READ_WRITE_STEP";
     }
+    # Same carrier fork (issue #3726) on the IF BLOCKED path's PR-intent send.
     {
-      gate = "BOX_ACCESS_READ_ONLY";
+      gate = "BOX_ACCESS_READ_ONLY_LOG";
       fragment = "if-blocked-pr-outbox.md";
       var = "IF_BLOCKED_PR_READ_ONLY_STEP";
+      signalChannel = "pr-intent";
+    }
+    {
+      gate = "BOX_ACCESS_READ_ONLY_SOCKET";
+      fragment = "if-blocked-pr-outbox-socket.md";
+      var = "IF_BLOCKED_PR_READ_ONLY_SOCKET_STEP";
+      signalChannel = "pr-intent";
     }
     # The IF BLOCKED section's closing SPINDRIFT_OUTCOME line (issue #1933): a
     # read-only Box never opens a PR on the blocked path either, so it never

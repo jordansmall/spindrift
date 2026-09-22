@@ -31,7 +31,7 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_
    Skip any finding that matches an existing issue in any search by
    subject.
 
-${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}4. Each filed issue:
+${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}${FILER_FILE_RELAY_SOCKET_STEP}4. Each filed issue:
    - Title: a conventional-commit-style title scoped to the fix itself (e.g.
      `fix(auth): validate token expiry before use`) — never a meta-title like
      "review finding".
@@ -61,9 +61,11 @@ SKIPPED (duplicate of <url>) — <title>
 FAILED — <title>: <reason>
 ```
 
-`FILED <url>` is for a direct issue-creation call; `QUEUED` is for a
-`SPINDRIFT_ISSUE_INTENT` line, whose issue isn't filed until the launcher
-relays it after this run exits, so no URL is known yet.
+`FILED <url>` is for a direct issue-creation call; `QUEUED` is for an
+intent you handed to the launcher's relay — a `SPINDRIFT_ISSUE_INTENT`
+line under the `log` carrier, or a `driver-exec signal issue-intent` call
+the socket accepted — whose issue isn't filed until the launcher relays
+it, so no URL is known yet.
 
 If you were given no findings, or every finding was skipped, output exactly:
 

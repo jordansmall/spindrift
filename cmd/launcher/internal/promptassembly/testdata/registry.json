@@ -136,9 +136,16 @@
     "var": "FILE_ISSUES_DIRECT_STEP"
   },
   {
-    "gate": "FILER_FILE_RELAY",
+    "gate": "FILER_FILE_RELAY_LOG",
     "fragment": "file-issues-relay.md",
-    "var": "FILE_ISSUES_RELAY_STEP"
+    "var": "FILE_ISSUES_RELAY_STEP",
+    "signalChannel": "issue-intent"
+  },
+  {
+    "gate": "FILER_FILE_RELAY_SOCKET",
+    "fragment": "file-issues-relay-socket.md",
+    "var": "FILE_ISSUES_RELAY_SOCKET_STEP",
+    "signalChannel": "issue-intent"
   },
   {
     "gate": "FILER_FILE_DIRECT_GH",
@@ -171,14 +178,28 @@
     "var": "FILER_FILE_DIRECT_FORGEJO_STEP"
   },
   {
-    "gate": "FILER_FILE_RELAY",
+    "gate": "FILER_FILE_RELAY_LOG",
     "fragment": "filer-file-relay.md",
-    "var": "FILER_FILE_RELAY_STEP"
+    "var": "FILER_FILE_RELAY_STEP",
+    "signalChannel": "issue-intent"
   },
   {
-    "gate": "FILER_FILE_RELAY",
+    "gate": "FILER_FILE_RELAY_SOCKET",
+    "fragment": "filer-file-relay-socket.md",
+    "var": "FILER_FILE_RELAY_SOCKET_STEP",
+    "signalChannel": "issue-intent"
+  },
+  {
+    "gate": "FILER_FILE_RELAY_LOG",
     "fragment": "research-file-issues-relay.md",
-    "var": "RESEARCH_FILE_ISSUES_RELAY_STEP"
+    "var": "RESEARCH_FILE_ISSUES_RELAY_STEP",
+    "signalChannel": "issue-intent"
+  },
+  {
+    "gate": "FILER_FILE_RELAY_SOCKET",
+    "fragment": "research-file-issues-relay-socket.md",
+    "var": "RESEARCH_FILE_ISSUES_RELAY_SOCKET_STEP",
+    "signalChannel": "issue-intent"
   },
   {
     "gate": "AUTO_FORMAT",
@@ -267,14 +288,28 @@
     "var": "RESEARCH_VERDICT_GITHUB_STEP"
   },
   {
-    "gate": "ISSUE_TRACKER_GITHUB_READONLY",
+    "gate": "ISSUE_TRACKER_GITHUB_READONLY_LOG",
     "fragment": "research-verdict-github-readonly.md",
-    "var": "RESEARCH_VERDICT_GITHUB_READONLY_STEP"
+    "var": "RESEARCH_VERDICT_GITHUB_READONLY_STEP",
+    "signalChannel": "comment"
   },
   {
-    "gate": "ISSUE_TRACKER_LOCAL",
+    "gate": "ISSUE_TRACKER_GITHUB_READONLY_SOCKET",
+    "fragment": "research-verdict-github-readonly-socket.md",
+    "var": "RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP",
+    "signalChannel": "comment"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL_LOG",
     "fragment": "research-verdict-local.md",
-    "var": "RESEARCH_VERDICT_LOCAL_STEP"
+    "var": "RESEARCH_VERDICT_LOCAL_STEP",
+    "signalChannel": "comment"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL_SOCKET",
+    "fragment": "research-verdict-local-socket.md",
+    "var": "RESEARCH_VERDICT_LOCAL_SOCKET_STEP",
+    "signalChannel": "comment"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO_READWRITE",
@@ -282,9 +317,16 @@
     "var": "RESEARCH_VERDICT_FORGEJO_STEP"
   },
   {
-    "gate": "ISSUE_TRACKER_FORGEJO_READONLY",
+    "gate": "ISSUE_TRACKER_FORGEJO_READONLY_LOG",
     "fragment": "research-verdict-forgejo-readonly.md",
-    "var": "RESEARCH_VERDICT_FORGEJO_READONLY_STEP"
+    "var": "RESEARCH_VERDICT_FORGEJO_READONLY_STEP",
+    "signalChannel": "comment"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO_READONLY_SOCKET",
+    "fragment": "research-verdict-forgejo-readonly-socket.md",
+    "var": "RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP",
+    "signalChannel": "comment"
   },
   {
     "gate": "ISSUE_TRACKER_GITHUB_READWRITE",
@@ -347,9 +389,16 @@
     "var": "OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP"
   },
   {
-    "gate": "BOX_ACCESS_READ_ONLY",
+    "gate": "BOX_ACCESS_READ_ONLY_LOG",
     "fragment": "open-pr-create-outbox.md",
-    "var": "OPEN_PR_CREATE_READ_ONLY_STEP"
+    "var": "OPEN_PR_CREATE_READ_ONLY_STEP",
+    "signalChannel": "pr-intent"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY_SOCKET",
+    "fragment": "open-pr-create-outbox-socket.md",
+    "var": "OPEN_PR_CREATE_READ_ONLY_SOCKET_STEP",
+    "signalChannel": "pr-intent"
   },
   {
     "gate": "BOX_ACCESS_READ_WRITE",
@@ -407,9 +456,16 @@
     "var": "IF_BLOCKED_PR_READ_WRITE_STEP"
   },
   {
-    "gate": "BOX_ACCESS_READ_ONLY",
+    "gate": "BOX_ACCESS_READ_ONLY_LOG",
     "fragment": "if-blocked-pr-outbox.md",
-    "var": "IF_BLOCKED_PR_READ_ONLY_STEP"
+    "var": "IF_BLOCKED_PR_READ_ONLY_STEP",
+    "signalChannel": "pr-intent"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY_SOCKET",
+    "fragment": "if-blocked-pr-outbox-socket.md",
+    "var": "IF_BLOCKED_PR_READ_ONLY_SOCKET_STEP",
+    "signalChannel": "pr-intent"
   },
   {
     "gate": "BOX_ACCESS_READ_WRITE",

@@ -24,6 +24,12 @@ type FragmentRow struct {
 	// references beyond Var itself. Empty for all but skill-preamble.md and
 	// ci-failure.md as of issue #2462.
 	ExtraSubstVars []string `json:"extraSubstVars,omitempty"`
+	// SignalChannel names the markerChannels id ("comment", "pr-intent",
+	// "issue-intent") the fragment instructs, set only on the paired
+	// _LOG/_SOCKET rows (issue #3726). Unread by Go: mirrored so the drift
+	// check keeps comparing whole rows, and consumed by
+	// lib/prompt-contract.nix's buildTimeSignalFragmentViolations.
+	SignalChannel string `json:"signalChannel,omitempty"`
 	// InverseOf names the gate this row's Gate is the exact complement of;
 	// lib/fragment-pairs.nix validates the pair's shape at eval time. The pair
 	// holds only if Gates computes the two as complements, so Go carries the
