@@ -41,6 +41,7 @@ set_box_env() {
   export REVIEW_EFFORT=""
   export REVIEW_MODEL="claude-opus-5"
   export SCOUT_MODEL="claude-haiku-4-5-20251001"
+  export BOX_SIGNAL_CARRIER="log"
   export TRANSIENT_BACKOFF_SECS=30
   export WORKER_MODEL="claude-sonnet-5"
 }

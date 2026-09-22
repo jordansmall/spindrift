@@ -542,7 +542,10 @@ in
       "log"
       "socket"
     ];
-    boxEnv = false;
+    # In-box prompt assembly (cmd/launcher/internal/promptassembly) reads this
+    # knob to select the log- or socket-variant of each signal fragment, so it
+    # must reach the Box environment too (issue #3726).
+    boxEnv = true;
   };
   maxRebaseAttempts = {
     env = "MAX_REBASE_ATTEMPTS";

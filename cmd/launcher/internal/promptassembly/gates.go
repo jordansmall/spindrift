@@ -78,6 +78,29 @@ func Gates(e Env) map[string]bool {
 		g[k] = v
 	}
 
+	// SignalCarrier arrives empty on an older host launcher that forwards
+	// nothing for this knob, and empty means the schema default "log" (issue
+	// #3726), so only the exact string "socket" moves the carrier: any other
+	// value, including empty and unknown, falls to the log arm.
+	socket := e.SignalCarrier == "socket"
+	g["SIGNAL_CARRIER_SOCKET"] = socket
+
+	// These gates carry a signal fragment (comment/PR-intent/issue-intent),
+	// each split into a log/socket pair so the fragment registry's one row
+	// per rendered fragment can pick the carrier variant. Both members are
+	// false whenever the base gate is off, so this is a plain conjunction
+	// rather than the exactly-one-on inverseOf mechanic (lib/fragment-pairs.nix).
+	for _, base := range []string{
+		"ISSUE_TRACKER_GITHUB_READONLY",
+		"ISSUE_TRACKER_LOCAL",
+		"ISSUE_TRACKER_FORGEJO_READONLY",
+		"BOX_ACCESS_READ_ONLY",
+		"FILER_FILE_RELAY",
+	} {
+		g[base+"_LOG"] = g[base] && !socket
+		g[base+"_SOCKET"] = g[base] && socket
+	}
+
 	g["AUTO_FORMAT"] = e.AutoFormat
 	g["AUTO_LINT"] = e.AutoLint
 
