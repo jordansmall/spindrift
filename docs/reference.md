@@ -1571,18 +1571,21 @@ characters long and ends mid-token, with no spill-file path and no
 truncation notice of any kind. Whether the interactive client behaves as
 documented above is untested here; what a dispatch run gets is the cut.
 That matters beyond cost, because some Bash results are load-bearing rather
-than merely informative: every host-relay control signal —
-`SPINDRIFT_PR_INTENT`, `SPINDRIFT_ISSUE_INTENT`, `SPINDRIFT_COMMENT` — rides
-back to the launcher as a base64 line the host parses out of the echoed
-output, so the cap is each one's size limit too. The intent lines stay well
-under it in practice; the research verdict is the one that does not, since a
-read-only research Box hands a whole comment body back on a single
-`SPINDRIFT_COMMENT` line, so it is the case this budget text is written for
-— 8192 characters less the 51 the marker and nonce take, leaving 8141
-characters of base64 and 6105 bytes of Markdown before encoding (issue
-#3669). Every verdict fragment that carries a `SPINDRIFT_COMMENT` line states
-that budget, and two checks in `nix/checks/prompts.nix` derive the numbers —
-the fragments' via
+than merely informative: under the `log` Signal carrier, every host-relay
+control signal — `SPINDRIFT_PR_INTENT`, `SPINDRIFT_ISSUE_INTENT`,
+`SPINDRIFT_COMMENT` — rides back to the launcher as a base64 line the host
+parses out of the echoed output, so the cap is each one's size limit too.
+`BOX_SIGNAL_CARRIER=socket` moves all three channels off the log entirely
+(see [Signal socket](#signal-socket-box_signal_carriersocket) below), so
+the cap is not their size limit there at all. On the `log` carrier, the
+intent lines stay well under it in practice; the research verdict is the
+one that does not, since a read-only research Box hands a whole comment
+body back on a single `SPINDRIFT_COMMENT` line, so it is the case this
+budget text is written for — 8192 characters less the 51 the marker and
+nonce take, leaving 8141 characters of base64 and 6105 bytes of Markdown
+before encoding (issue #3669). Every `log`-carrier verdict fragment that
+carries a `SPINDRIFT_COMMENT` line states that budget, and two checks in
+`nix/checks/prompts.nix` derive the numbers — the fragments' via
 `research-verdict-comment-line-fragments-state-carrier-and-payload-budget`
 and this paragraph's via
 `research-verdict-budget-numbers-in-reference-docs-match-the-baked-cap` —
@@ -1592,14 +1595,15 @@ Both are asserted directly on the built image's `config.Env` by
 `nix/checks/image.nix`'s `output-cap-env-marker` check, the same
 way `nix-store-writable-env-marker` verifies `NIX_STORE_WRITABLE` above.
 
-The `-e` override above is a runtime knob only: it changes what the Box's
-Bash tool cuts, not what the fragments say, so overriding
-`BASH_MAX_OUTPUT_LENGTH` leaves them quoting the build's numbers. A lowered
-cap can also move the cut onto a payload length that *is* a multiple of
-four, where a truncated payload decodes cleanly and half a verdict posts as
-though it were whole. Changing the cap therefore means editing
-`lib/output-caps.nix` and rebuilding, which re-derives the numbers above and
-re-asserts that invariant in `nix/checks/prompts.nix`.
+Under the `log` Signal carrier, the `-e` override above is a runtime knob
+only: it changes what the Box's Bash tool cuts, not what the fragments
+say, so overriding `BASH_MAX_OUTPUT_LENGTH` leaves them quoting the
+build's numbers. A lowered cap can also move the cut onto a payload
+length that *is* a multiple of four, where a truncated payload decodes
+cleanly and half a verdict posts as though it were whole. Changing
+the cap therefore means editing `lib/output-caps.nix` and rebuilding,
+which re-derives the numbers above and re-asserts that invariant in
+`nix/checks/prompts.nix`.
 
 ### Bash command-output interceptor
 
