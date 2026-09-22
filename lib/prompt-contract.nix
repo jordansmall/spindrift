@@ -104,6 +104,8 @@ rec {
       severity = "reject";
       when = "readOnlyResearch";
       message = "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required 'SPINDRIFT_COMMENT' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.";
+      socketMarker = "driver-exec signal comment";
+      socketMessage = "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required 'driver-exec signal comment' call -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.";
     }
     {
       id = "reviewer-verdict";
@@ -120,6 +122,8 @@ rec {
       severity = "warn";
       when = "boxAccessReadOnly";
       message = "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the 'SPINDRIFT_PR_INTENT' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.";
+      socketMarker = "driver-exec signal pr-intent";
+      socketMessage = "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the 'driver-exec signal pr-intent' call (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.";
     }
     {
       id = "issue-intent";
@@ -128,6 +132,8 @@ rec {
       severity = "warn";
       when = "filerFileRelay";
       message = "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.";
+      socketMarker = "driver-exec signal issue-intent";
+      socketMessage = "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'driver-exec signal issue-intent' call (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.";
     }
     {
       id = "research-issue-intent";
@@ -136,6 +142,8 @@ rec {
       severity = "warn";
       when = "researchFileRelay";
       message = "_validate_prompt_contract: warning -- research dispatch's rendered prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker under an active Filer-relay gate (belongs in research-prompt.md's, or research-self-contained-prompt.md's, POST THE VERDICT section, research-file-issues-relay.md-substituted). Proceeding: any finding the filer can't relay still surfaces inline via its own best-effort fallback (describe it directly in the verdict body), and the researcher's posted verdict comment is unaffected either way.";
+      socketMarker = "driver-exec signal issue-intent";
+      socketMessage = "_validate_prompt_contract: warning -- research dispatch's rendered prompt is missing the 'driver-exec signal issue-intent' call under an active Filer-relay gate (belongs in research-prompt.md's, or research-self-contained-prompt.md's, POST THE VERDICT section, research-file-issues-relay.md-substituted). Proceeding: any finding the filer can't relay still surfaces inline via its own best-effort fallback (describe it directly in the verdict body), and the researcher's posted verdict comment is unaffected either way.";
     }
   ];
 
@@ -177,7 +185,7 @@ rec {
       kind = "substring";
       enforce = "command-shim";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT), so a Box must never run 'gh pr create' itself. Refusing to invoke the Driver.";
-      runtimeMessage = "read-only Box: PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT); do not run `gh pr create` -- this call has been blocked locally.";
+      runtimeMessage = "read-only Box: PRs are opened via the PR-intent relay -- `driver-exec signal pr-intent` under BOX_SIGNAL_CARRIER=socket, a SPINDRIFT_PR_INTENT line otherwise; do not run `gh pr create` -- this call has been blocked locally.";
     }
     {
       id = "forbidden-gh-pr-ready";
@@ -210,7 +218,7 @@ rec {
       kind = "substring";
       enforce = "command-shim";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue comment' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issue comments are relayed via the outcome contract's `note=` field, so a Box must never run 'gh issue comment' itself. Refusing to invoke the Driver.";
-      runtimeMessage = "read-only Box: issue comments are relayed via the outcome note= field; do not run `gh issue comment` -- this call has been blocked locally.";
+      runtimeMessage = "read-only Box: a WORK Box relays comments via the outcome note= field; a RESEARCH Box relays its verdict via `driver-exec signal comment` under BOX_SIGNAL_CARRIER=socket, a SPINDRIFT_COMMENT line otherwise; do not run `gh issue comment` -- this call has been blocked locally.";
     }
     {
       id = "forbidden-gh-issue-create";
@@ -221,7 +229,7 @@ rec {
       kind = "substring";
       enforce = "command-shim";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT), so a Box must never run 'gh issue create' itself. Refusing to invoke the Driver.";
-      runtimeMessage = "read-only Box: issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT); do not run `gh issue create` -- this call has been blocked locally.";
+      runtimeMessage = "read-only Box: issues are filed via the issue-intent relay -- `driver-exec signal issue-intent` under BOX_SIGNAL_CARRIER=socket, a SPINDRIFT_ISSUE_INTENT line otherwise; do not run `gh issue create` -- this call has been blocked locally.";
     }
     {
       id = "forbidden-git-bundle-create";
@@ -457,6 +465,57 @@ rec {
       ) directFileFragmentRows
     ) (builtins.attrNames researchPromptContentByName);
 
+  # Asserts every _LOG/_SOCKET fragment pair fork (issue #3726) actually
+  # instructs the verb its carrier requires: a _SOCKET-gated fragment must
+  # contain "driver-exec signal <channel>", and a _LOG-gated fragment must
+  # contain its channel's markerChannels token. Which channel a row belongs
+  # to comes from the row's own `signalChannel` field (lib/fragments.nix),
+  # never a hand-listed filename table, so a new paired fragment only needs
+  # that one field to be covered here. Rows with no `signalChannel` (every
+  # non-signal fragment) are silently skipped. Takes the fragment rows and a
+  # content map as arguments, like buildTimeResearchDirectFileViolations
+  # above, so a check can hand it synthetic content and prove it really fails.
+  buildTimeSignalFragmentViolations =
+    { fragmentRows, fragmentContentByFile }:
+    let
+      channelToken = id: (builtins.head (builtins.filter (c: c.id == id) markerChannels)).token;
+      requiredFor =
+        row:
+        if !(row ? signalChannel) then
+          null
+        else if builtinsCompat.hasSuffix "_SOCKET" row.gate then
+          {
+            kind = "verb";
+            needle = "driver-exec signal " + row.signalChannel;
+          }
+        else if builtinsCompat.hasSuffix "_LOG" row.gate then
+          {
+            kind = "marker";
+            needle = channelToken row.signalChannel;
+          }
+        else
+          null;
+    in
+    builtins.concatMap (
+      row:
+      let
+        required = requiredFor row;
+        content = fragmentContentByFile.${row.fragment} or "";
+      in
+      if required == null || hasInfix required.needle content then
+        [ ]
+      else
+        [
+          {
+            inherit (row) fragment gate;
+            inherit (row) signalChannel;
+            kind = required.kind;
+            missing = required.needle;
+            message = "prompt-contract: fragment '${row.fragment}' (gate '${row.gate}', signal channel '${row.signalChannel}') is missing the required ${required.kind} '${required.needle}' -- the Signal socket carrier fork (issue #3726) must instruct the same verb in both carrier modes.";
+          }
+        ]
+    ) fragmentRows;
+
   # Folds a buildTimeRejectVerdicts verdict to "must the runtime validator NOT
   # block" (issue #2320, parent #2244). The runtime validator sees a resolved
   # gate and has no "advise" state, so only "reject" folds to "must block".
@@ -550,6 +609,14 @@ rec {
   # `defense` is what stops a corpus echoing a token back: a structurally
   # scoped extractor (ADR 0039, issue #2980) or RUN_NONCE. `fieldShape` reads
   # as prose, but markergate.substituteFieldShape parses its key=value layout.
+  # `carrier`/`defense` describe the `log` Signal carrier (a marker line in
+  # the mid-run log or final message); the three signal rows (comment,
+  # pr-intent, issue-intent) additionally carry `socketCarrier`/
+  # `socketDefense`, describing the `socket` Signal carrier
+  # (BOX_SIGNAL_CARRIER, ADR 0052, issue #3726). The socket's defense is the
+  # launcher-owned listener rather than RUN_NONCE: the Box reaches a socket
+  # only the launcher opened, so no token in the corpus can be echoed into a
+  # signal.
   markerChannels = [
     {
       id = "outcome";
@@ -564,6 +631,8 @@ rec {
       fieldShape = "<nonce> <base64-payload>";
       defense = "nonce";
       carrier = "mid-run-log";
+      socketCarrier = "signal-socket";
+      socketDefense = "launcher-owned-listener";
     }
     {
       id = "pr-intent";
@@ -571,6 +640,8 @@ rec {
       fieldShape = "<nonce> <base64-payload>";
       defense = "nonce";
       carrier = "mid-run-log";
+      socketCarrier = "signal-socket";
+      socketDefense = "launcher-owned-listener";
     }
     {
       id = "issue-intent";
@@ -578,6 +649,8 @@ rec {
       fieldShape = "<nonce> <base64-payload>";
       defense = "nonce";
       carrier = "mid-run-log";
+      socketCarrier = "signal-socket";
+      socketDefense = "launcher-owned-listener";
     }
     {
       id = "review-verdict";

@@ -43,6 +43,14 @@ type ValidateMarkerRow struct {
 	// Message is the row's diagnostic prose, marker already interpolated by
 	// the nix registry.
 	Message string `json:"message"`
+	// SocketMarker is the verb substring (e.g. "driver-exec signal comment")
+	// this row scans for instead of Marker when BOX_SIGNAL_CARRIER=socket.
+	// Empty for a row that never crosses the Signal socket (reviewer-verdict),
+	// which stays Marker-only in both carrier modes.
+	SocketMarker string `json:"socketMarker,omitempty"`
+	// SocketMessage is SocketMarker's diagnostic prose, the socket-mode
+	// counterpart to Message. Empty exactly when SocketMarker is.
+	SocketMessage string `json:"socketMessage,omitempty"`
 }
 
 // LoadValidateMarkers decodes a validateMarkers registry from r: a bare JSON
@@ -73,6 +81,11 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string, err error) {
 	gates := Gates(e)
 	kind := e.kind()
+	// SIGNAL_CARRIER_SOCKET picks the verb (SocketMarker) over the marker for
+	// any row that has one; a row with no SocketMarker (reviewer-verdict,
+	// which never crosses the Signal socket) is carrier-blind and always
+	// scans for Marker (issue #3726).
+	socketCarrier := gates["SIGNAL_CARRIER_SOCKET"]
 
 	for _, row := range rows {
 		var gateActive bool
@@ -100,11 +113,14 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 			return warnings, fmt.Errorf("promptassembly: validate: no known gate for when %q (row %q)", row.When, row.ID)
 		}
 
-		if !gateActive || strings.Contains(haystack, row.Marker) {
-			continue
+		marker, message := row.Marker, row.Message
+		if socketCarrier && row.SocketMarker != "" {
+			marker, message = row.SocketMarker, row.SocketMessage
 		}
 
-		message := row.Message
+		if !gateActive || strings.Contains(haystack, marker) {
+			continue
+		}
 
 		switch row.Severity {
 		case severityReject:

@@ -375,18 +375,266 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 	})
 }
 
+// Issue #3726: under BOX_SIGNAL_CARRIER=socket, verdict-comment-relay scans
+// for the verb (driver-exec signal comment) instead of the SPINDRIFT_COMMENT
+// marker, and log mode (the default, empty SignalCarrier) is unaffected.
+func TestValidateVerdictCommentRelaySignalCarrier(t *testing.T) {
+	rows := testValidateMarkerRows()
+	baseEnv := Env{DispatchKind: "research", BoxWriteEnabled: false}
+
+	t.Run("socket mode rejects on the marker alone", func(t *testing.T) {
+		e := baseEnv
+		e.SignalCarrier = "socket"
+		result := Result{Prompt: "research stub, SPINDRIFT_COMMENT present but no verb"}
+
+		_, err := Validate(e, result, rows)
+		if err == nil {
+			t.Fatal("Validate() error = nil, want non-nil")
+		}
+		mustContain(t, err.Error(), "driver-exec signal comment")
+	})
+
+	t.Run("socket mode passes on the verb", func(t *testing.T) {
+		e := baseEnv
+		e.SignalCarrier = "socket"
+		result := Result{Prompt: "research stub, driver-exec signal comment -body-file verdict.md"}
+
+		_, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("log mode rejects on the verb alone", func(t *testing.T) {
+		e := baseEnv
+		result := Result{Prompt: "research stub, driver-exec signal comment -body-file verdict.md"}
+
+		_, err := Validate(e, result, rows)
+		if err == nil {
+			t.Fatal("Validate() error = nil, want non-nil")
+		}
+		mustContain(t, err.Error(), "SPINDRIFT_COMMENT")
+	})
+}
+
+// Issue #3726: pr-intent's socket/log split, the warn-severity counterpart of
+// TestValidateVerdictCommentRelaySignalCarrier.
+func TestValidatePrIntentSignalCarrier(t *testing.T) {
+	rows := testValidateMarkerRows()
+	baseEnv := Env{DispatchKind: "work", BoxWriteEnabled: false}
+
+	t.Run("socket mode warns on the marker alone", func(t *testing.T) {
+		e := baseEnv
+		e.SignalCarrier = "socket"
+		result := Result{Prompt: "issue stub, SPINDRIFT_PR_INTENT present but no verb"}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("Validate() warnings = %v, want exactly one entry", warnings)
+		}
+		mustContain(t, warnings[0], "driver-exec signal pr-intent")
+	})
+
+	t.Run("socket mode passes on the verb", func(t *testing.T) {
+		e := baseEnv
+		e.SignalCarrier = "socket"
+		result := Result{Prompt: `issue stub, driver-exec signal pr-intent -title "x"`}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if warnings != nil {
+			t.Fatalf("Validate() warnings = %v, want nil", warnings)
+		}
+	})
+
+	t.Run("log mode warns on the verb alone", func(t *testing.T) {
+		e := baseEnv
+		result := Result{Prompt: `issue stub, driver-exec signal pr-intent -title "x"`}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("Validate() warnings = %v, want exactly one entry", warnings)
+		}
+		mustContain(t, warnings[0], "SPINDRIFT_PR_INTENT")
+	})
+}
+
+// Issue #3726: issue-intent's socket/log split. Its haystack is the filer
+// prompt extracted from AgentsJSON, not result.Prompt, so Prompt here always
+// carries both forms of the sibling pr-intent row's requirement (boxAccessReadOnly
+// is active too under this Env) to keep that row quiet and isolate the
+// assertion to issue-intent's own warning.
+func TestValidateIssueIntentSignalCarrier(t *testing.T) {
+	rows := testValidateMarkerRows()
+	const promptKeepsPrIntentQuiet = "issue stub already ran driver-exec signal pr-intent and logged SPINDRIFT_PR_INTENT"
+	baseEnv := Env{
+		DispatchKind:        "work",
+		BoxWriteEnabled:     false,
+		OrchestratorEnabled: true,
+		AgentsJSONTemplate:  `{"filer":{"model":"m"}}`,
+		FilerEnabled:        true,
+	}
+
+	t.Run("socket mode warns on the marker alone", func(t *testing.T) {
+		e := baseEnv
+		e.SignalCarrier = "socket"
+		result := Result{
+			Prompt:     promptKeepsPrIntentQuiet,
+			AgentsJSON: `{"filer":{"prompt":"SPINDRIFT_ISSUE_INTENT marker, no verb"}}`,
+		}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("Validate() warnings = %v, want exactly one entry", warnings)
+		}
+		mustContain(t, warnings[0], "driver-exec signal issue-intent")
+	})
+
+	t.Run("socket mode passes on the verb", func(t *testing.T) {
+		e := baseEnv
+		e.SignalCarrier = "socket"
+		result := Result{
+			Prompt:     promptKeepsPrIntentQuiet,
+			AgentsJSON: `{"filer":{"prompt":"driver-exec signal issue-intent -title \"x\" -type bug"}}`,
+		}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if warnings != nil {
+			t.Fatalf("Validate() warnings = %v, want nil", warnings)
+		}
+	})
+
+	t.Run("log mode warns on the verb alone", func(t *testing.T) {
+		e := baseEnv
+		result := Result{
+			Prompt:     promptKeepsPrIntentQuiet,
+			AgentsJSON: `{"filer":{"prompt":"driver-exec signal issue-intent -title \"x\" -type bug"}}`,
+		}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("Validate() warnings = %v, want exactly one entry", warnings)
+		}
+		mustContain(t, warnings[0], "SPINDRIFT_ISSUE_INTENT")
+	})
+}
+
+// Issue #3726: research-issue-intent's socket/log split. Its gate
+// (researchFileRelay) forces two sibling rows active too --
+// verdict-comment-relay (readOnlyResearch) and issue-intent (filerFileRelay)
+// -- so every fixture keeps both quiet in both carrier modes by carrying both
+// their marker and their verb.
+func TestValidateResearchIssueIntentSignalCarrier(t *testing.T) {
+	rows := testValidateMarkerRows()
+	const (
+		commentQuiet     = "already ran driver-exec signal comment and logged SPINDRIFT_COMMENT"
+		filerPromptQuiet = `{"filer":{"prompt":"already ran driver-exec signal issue-intent and logged SPINDRIFT_ISSUE_INTENT"}}`
+	)
+	baseEnv := Env{DispatchKind: "research", FilerEnabled: true, BoxWriteEnabled: true}
+
+	t.Run("socket mode warns on the marker alone", func(t *testing.T) {
+		e := baseEnv
+		e.SignalCarrier = "socket"
+		result := Result{
+			Prompt:     "research stub, " + commentQuiet + ", SPINDRIFT_ISSUE_INTENT present but no verb",
+			AgentsJSON: filerPromptQuiet,
+		}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("Validate() warnings = %v, want exactly one entry", warnings)
+		}
+		mustContain(t, warnings[0], "driver-exec signal issue-intent")
+	})
+
+	t.Run("socket mode passes on the verb", func(t *testing.T) {
+		e := baseEnv
+		e.SignalCarrier = "socket"
+		result := Result{
+			Prompt:     "research stub, " + commentQuiet + `, driver-exec signal issue-intent -title "x" -type bug`,
+			AgentsJSON: filerPromptQuiet,
+		}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if warnings != nil {
+			t.Fatalf("Validate() warnings = %v, want nil", warnings)
+		}
+	})
+
+	t.Run("log mode warns on the verb alone", func(t *testing.T) {
+		e := baseEnv
+		result := Result{
+			Prompt:     "research stub, " + commentQuiet + `, driver-exec signal issue-intent -title "x" -type bug`,
+			AgentsJSON: filerPromptQuiet,
+		}
+
+		warnings, err := Validate(e, result, rows)
+		if err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("Validate() warnings = %v, want exactly one entry", warnings)
+		}
+		mustContain(t, warnings[0], "SPINDRIFT_ISSUE_INTENT")
+	})
+}
+
+// Issue #3726: reviewer-verdict carries no SocketMarker -- VERDICT: is not a
+// signal channel and never crosses the Signal socket -- so
+// SIGNAL_CARRIER_SOCKET must never change its gate: it scans for VERDICT: in
+// both carrier modes.
+func TestValidateReviewerVerdictCarrierBlind(t *testing.T) {
+	rows := testValidateMarkerRows()
+
+	for _, carrier := range []string{"", "socket"} {
+		e := Env{OrchestratorEnabled: true, SignalCarrier: carrier}
+		result := Result{ReviewPromptText: "reviewer stub, no verdict line here"}
+
+		_, err := Validate(e, result, rows)
+		if err == nil {
+			t.Fatalf("carrier=%q: Validate() error = nil, want non-nil", carrier)
+		}
+		mustContain(t, err.Error(), "VERDICT:")
+	}
+}
+
 // The rows stay in lib/prompt-contract.nix's own order, because
 // TestLoadValidateMarkersParsesAllRows compares them against the testdata file
 // index by index.
 func testValidateMarkerRows() []ValidateMarkerRow {
 	return []ValidateMarkerRow{
 		{
-			ID:       "verdict-comment-relay",
-			Marker:   "SPINDRIFT_COMMENT",
-			Carrier:  "fragment-body",
-			Severity: "reject",
-			When:     "readOnlyResearch",
-			Message:  "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required 'SPINDRIFT_COMMENT' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.",
+			ID:            "verdict-comment-relay",
+			Marker:        "SPINDRIFT_COMMENT",
+			Carrier:       "fragment-body",
+			Severity:      "reject",
+			When:          "readOnlyResearch",
+			Message:       "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required 'SPINDRIFT_COMMENT' marker -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.",
+			SocketMarker:  "driver-exec signal comment",
+			SocketMessage: "_validate_prompt_contract: read-only research dispatch's rendered prompt is missing the required 'driver-exec signal comment' call -- this belongs in research-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) POST THE VERDICT section; without it a read-only Box has no way to hand its verdict to the launcher. Refusing to invoke the Driver.",
 		},
 		{
 			ID:       "reviewer-verdict",
@@ -397,28 +645,34 @@ func testValidateMarkerRows() []ValidateMarkerRow {
 			Message:  "_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required 'VERDICT:' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver.",
 		},
 		{
-			ID:       "pr-intent",
-			Marker:   "SPINDRIFT_PR_INTENT",
-			Carrier:  "fragment-body",
-			Severity: "warn",
-			When:     "boxAccessReadOnly",
-			Message:  "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the 'SPINDRIFT_PR_INTENT' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.",
+			ID:            "pr-intent",
+			Marker:        "SPINDRIFT_PR_INTENT",
+			Carrier:       "fragment-body",
+			Severity:      "warn",
+			When:          "boxAccessReadOnly",
+			Message:       "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the 'SPINDRIFT_PR_INTENT' marker (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.",
+			SocketMarker:  "driver-exec signal pr-intent",
+			SocketMessage: "_validate_prompt_contract: warning -- read-only dispatch's rendered prompt is missing the 'driver-exec signal pr-intent' call (belongs in issue-prompt.md's, or fix-prompt.md's injected, OPEN A PULL REQUEST section). Proceeding: a status=ready run with no PR-intent line still gets one resume-nudge attempt post-driver, and a genuinely exhausted attempt falls back to the merge-blocked report rather than losing the branch.",
 		},
 		{
-			ID:       "issue-intent",
-			Marker:   "SPINDRIFT_ISSUE_INTENT",
-			Carrier:  "fragment-body",
-			Severity: "warn",
-			When:     "filerFileRelay",
-			Message:  "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.",
+			ID:            "issue-intent",
+			Marker:        "SPINDRIFT_ISSUE_INTENT",
+			Carrier:       "fragment-body",
+			Severity:      "warn",
+			When:          "filerFileRelay",
+			Message:       "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.",
+			SocketMarker:  "driver-exec signal issue-intent",
+			SocketMessage: "_validate_prompt_contract: warning -- filer-relay dispatch's rendered filer prompt is missing the 'driver-exec signal issue-intent' call (belongs in filer-prompt.md's, or a SPINDRIFT_PROMPT_DIR override's, filer-file-relay-injected section). Proceeding: the filer's own best-effort PR-body fallback still records the issue reference even without the relay.",
 		},
 		{
-			ID:       "research-issue-intent",
-			Marker:   "SPINDRIFT_ISSUE_INTENT",
-			Carrier:  "fragment-body",
-			Severity: "warn",
-			When:     "researchFileRelay",
-			Message:  "_validate_prompt_contract: warning -- research dispatch's rendered prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker under an active Filer-relay gate (belongs in research-prompt.md's, or research-self-contained-prompt.md's, POST THE VERDICT section, research-file-issues-relay.md-substituted). Proceeding: any finding the filer can't relay still surfaces inline via its own best-effort fallback (describe it directly in the verdict body), and the researcher's posted verdict comment is unaffected either way.",
+			ID:            "research-issue-intent",
+			Marker:        "SPINDRIFT_ISSUE_INTENT",
+			Carrier:       "fragment-body",
+			Severity:      "warn",
+			When:          "researchFileRelay",
+			Message:       "_validate_prompt_contract: warning -- research dispatch's rendered prompt is missing the 'SPINDRIFT_ISSUE_INTENT' marker under an active Filer-relay gate (belongs in research-prompt.md's, or research-self-contained-prompt.md's, POST THE VERDICT section, research-file-issues-relay.md-substituted). Proceeding: any finding the filer can't relay still surfaces inline via its own best-effort fallback (describe it directly in the verdict body), and the researcher's posted verdict comment is unaffected either way.",
+			SocketMarker:  "driver-exec signal issue-intent",
+			SocketMessage: "_validate_prompt_contract: warning -- research dispatch's rendered prompt is missing the 'driver-exec signal issue-intent' call under an active Filer-relay gate (belongs in research-prompt.md's, or research-self-contained-prompt.md's, POST THE VERDICT section, research-file-issues-relay.md-substituted). Proceeding: any finding the filer can't relay still surfaces inline via its own best-effort fallback (describe it directly in the verdict body), and the researcher's posted verdict comment is unaffected either way.",
 		},
 	}
 }

@@ -96,7 +96,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			Kind:           "substring",
 			Enforce:        "command-shim",
 			Message:        "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh pr create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT), so a Box must never run 'gh pr create' itself. Refusing to invoke the Driver.",
-			RuntimeMessage: "read-only Box: PRs are opened via the PR-intent relay (SPINDRIFT_PR_INTENT); do not run `gh pr create` -- this call has been blocked locally.",
+			RuntimeMessage: "read-only Box: PRs are opened via the PR-intent relay -- `driver-exec signal pr-intent` under BOX_SIGNAL_CARRIER=socket, a SPINDRIFT_PR_INTENT line otherwise; do not run `gh pr create` -- this call has been blocked locally.",
 		},
 		{
 			ID:             "forbidden-gh-pr-ready",
@@ -129,7 +129,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			Kind:           "substring",
 			Enforce:        "command-shim",
 			Message:        "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue comment' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issue comments are relayed via the outcome contract's `note=` field, so a Box must never run 'gh issue comment' itself. Refusing to invoke the Driver.",
-			RuntimeMessage: "read-only Box: issue comments are relayed via the outcome note= field; do not run `gh issue comment` -- this call has been blocked locally.",
+			RuntimeMessage: "read-only Box: a WORK Box relays comments via the outcome note= field; a RESEARCH Box relays its verdict via `driver-exec signal comment` under BOX_SIGNAL_CARRIER=socket, a SPINDRIFT_COMMENT line otherwise; do not run `gh issue comment` -- this call has been blocked locally.",
 		},
 		{
 			ID:             "forbidden-gh-issue-create",
@@ -140,7 +140,7 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			Kind:           "substring",
 			Enforce:        "command-shim",
 			Message:        "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh issue create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT), so a Box must never run 'gh issue create' itself. Refusing to invoke the Driver.",
-			RuntimeMessage: "read-only Box: issues are filed via the issue-intent relay (SPINDRIFT_ISSUE_INTENT); do not run `gh issue create` -- this call has been blocked locally.",
+			RuntimeMessage: "read-only Box: issues are filed via the issue-intent relay -- `driver-exec signal issue-intent` under BOX_SIGNAL_CARRIER=socket, a SPINDRIFT_ISSUE_INTENT line otherwise; do not run `gh issue create` -- this call has been blocked locally.",
 		},
 		{
 			ID:       "forbidden-git-bundle-create",
