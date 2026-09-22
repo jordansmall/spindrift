@@ -4802,20 +4802,30 @@ that invokes `nix` at runtime: it cannot exec the launcher store path it was
 built against, since that path is precisely the stale one a rebuild exists
 to replace, so each child Dispatch runs through `nix run` instead.
 
-Each slot's own iteration fetches — never pulls — and resolves the tip of
-`BASE_BRANCH` from `FETCH_HEAD`, then pins its next child Dispatch to that
-revision via a `git+file://...?rev=...` flakeref. The operator's working
-tree is never mutated, so they can keep editing while the daemon runs. The
-pin also means a checkout landing mid-evaluation can't produce a build of a
+Each slot's own iteration resolves the tip of `BASE_BRANCH`, then pins its
+next child Dispatch to that revision via a `git+file://...?rev=...`
+flakeref. The resolution itself fetches — never pulls — and never mutates
+the operator's working tree, so they can keep editing while the daemon
+runs. A caller that arrives while a resolution is already in flight waits
+on that one and takes its result, so concurrent resolutions cost one forge
+request however many callers share them; within a single pool that sharing
+is latent rather than routine, since the discovery baton (below) lets one
+slot at a time through the span a resolution happens in and sibling slots
+therefore resolve one after another. There is no time-to-live on the
+sharing either way: a caller arriving after a resolution has already
+finished fetches again rather than reusing a stale one, which is what
+keeps the pin below exact. The pin
+also means a checkout landing mid-evaluation can't produce a build of a
 tree that never existed as a commit, and a child started an hour into the
 night is still pinned to the tip as it was when that slot came free, not
 the tip at daemon startup.
 
 **Pool.** `MAX_PARALLEL` is the daemon's own pool size (`Config.Slots`,
 `cmd/launcher/internal/daemon/loop.go`): `Loop` runs that many slot
-goroutines, each independently fetching, resolving, and driving its own
-children, rather than one loop iterating a single child. When both kinds
-are in play, they draw from that same single pool rather than one pool
+goroutines, each independently resolving and driving its own children
+(concurrent resolutions share one fetch, as above), rather than one loop
+iterating a single child. When both kinds are in play, they draw from that
+same single pool rather than one pool
 apiece (`Config.Kinds`, issue #3541): research runs through the full Box
 and costs exactly what work costs, so a second, research-only pool would
 quietly invalidate the operator's `MEMORY_LIMIT` × `MAX_PARALLEL` sizing by
@@ -5264,17 +5274,19 @@ in-place wait.
 |------|---------|----------------|
 | 0    | dispatched work | go again at once; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
 | 2    | queue empty | record it against this kind's own backoff (emit `idle`), then loop back around: switch to the other configured kind at once if it is still runnable, or sleep — via the shared `idleSleep` — only if every kind is now gated. A queue-empty gate is never itself polled mid-wait: a merge cannot create work in an empty queue, so polling for one would only spend a query for nothing |
-| 3    | none dispatchable | with any sibling slot `resolving`, `running` or `backing_off` — doing anything at all but waiting for its own turn — routine: record it against this kind's backoff (emit `idle`) the same as exit 2. Only once every sibling is `idle` or `awaiting_window` is it recorded as a jam instead (emit `jam`), same routing (a single-slot daemon has no siblings at all and so reports every exit 3 as a jam). Either way the slot switches to the other configured kind at once if that kind is still runnable; only once every kind is gated, *and* at least one of them is jammed, does the shared `idleSleep` poll `ResolveRevision` between `IdleFloor`-sized sleep slices, since a merge here *can* unblock the jam — the first no-work wait for a kind is exactly one `IdleFloor` slice and so polls nothing, with mid-wait polling starting only once that kind's backoff has grown past the floor; if the tip has moved, the slot emits `tip_moved` once and resets *every currently-jammed kind's* backoff to `IdleFloor` (the observed change is evidence for all of them, not just the kind this slot was running), and goes again at once instead of riding out the rest of the wait. A poll that errors is treated as no change observed — it never feeds the breaker, since the next iteration's own top-of-loop fetch is what reports a broken fetch |
+| 3    | none dispatchable | with any sibling slot `resolving`, `running` or `backing_off` — doing anything at all but waiting for its own turn — routine: record it against this kind's backoff (emit `idle`) the same as exit 2. Only once every sibling is `idle` or `awaiting_window` is it recorded as a jam instead (emit `jam`), same routing (a single-slot daemon has no siblings at all and so reports every exit 3 as a jam). Either way the slot switches to the other configured kind at once if that kind is still runnable; only once every kind is gated, *and* at least one of them is jammed, does the shared `idleSleep` sleep in `IdleFloor`-sized slices, since a merge here *can* unblock the jam — there is no separate poll: the slot sleeps one slice, and the next round's own resolution, made before it picks a kind, is what finds out, so a jammed wait costs one fetch per slice, not one for a poll and another for the round it unblocks. The first no-work wait for a kind is exactly one `IdleFloor` slice and so still resolves nothing extra, with the next round's own resolution asked for only once that kind's backoff has grown past the floor; if that resolution reports the tip moved (`Tip.Moved`), the slot emits `tip_moved` once and resets *every currently-jammed kind's* backoff to `IdleFloor` (the observed change is evidence for all of them, not just the kind this slot was running), and goes again at once instead of riding out the rest of the wait. A mid-wait resolution that fails is treated as no change observed — it never feeds the breaker, since the iteration's own post-`pickKind` resolution is what reports a broken fetch |
 | 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
 | 5    | host-tainted | halt the pool |
 | 6    | config-invalid | halt the pool |
 | 7    | signalled stop | halt the pool once the operator's Stop latch is already closed; while Stop is still open, an unrecognised operator-external signal instead backs this slot off (see **Failures** below) |
-| anything else | unrecognised (an unclassified exit code, a `RunChild` seam error, or a `ResolveRevision`/fetch error all land here) | back this slot off alone for `FailureBackoff` and refill it — see **Failures** below |
+| anything else | unrecognised (an unclassified exit code, a `RunChild` seam error, or a `ResolveTip` error — a fetch failure or a self-build evaluation failure, carrying different reasons — all land here) | back this slot off alone for `FailureBackoff` and refill it — see **Failures** below |
 
 **Failures.** An unclassified failure — an exit code `Interpret`
 (`cmd/launcher/internal/daemon/outcome.go`) doesn't recognise, a `RunChild`
-seam error, a `ResolveRevision` fetch error, or a `SelfPath` self-build
-evaluation error (see **Self-change halt** below) — no longer halts the pool
+seam error, or a `ResolveTip` error (a fetch failure, or a self-build
+evaluation failure — see **Self-change halt** below; the two carry
+different reasons, and it's the self-build one's halt class that decides
+the exit code if the breaker trips on it) — no longer halts the pool
 by itself: the failing slot backs off for `DAEMON_FAILURE_BACKOFF` (default 1
 minute, see [Advanced tuning](#advanced-tuning)) and refills itself, and the
 sibling slots never notice. A `RunChild` seam error, an unrecognised exit
@@ -5305,17 +5317,20 @@ the unclassified failure above instead, and backs its own slot off rather
 than halting anything.
 
 **Self-change halt.** At each slot's iteration boundary — after that
-iteration's own fetch resolves the tip, before any child is launched — the
-daemon evaluates its own app attribute at the fetched revision and compares
-the resulting program store path against its own (`checkSelfBuild`,
-`cmd/launcher/internal/daemon/pool.go`). The attribute is `DAEMON_SELF_APP`
-(default `.#daemon`), the daemon's own app, distinct from `DAEMON_APP`, the
-child Dispatch app the slot is about to launch — see the `DAEMON_APP` note
-above. A Consumer that re-exports the daemon under a different top-level
-name must set it to match; spindrift's own bwrap harness does exactly that
-(`.#dogfood-bwrap-daemon`, `nix/fixtures.nix`), and without it the check
-would evaluate a different harness's daemon entirely and report a
-permanent, spurious change on every iteration.
+iteration's own resolution finds the tip, before any child is launched —
+the daemon evaluates its own app attribute at that revision and compares
+the resulting program store path against its own, a field comparison in
+`runSlot` (`cmd/launcher/internal/daemon/loop.go`) against the self-path
+`ResolveTip` already returned. The evaluation is memoised by revision, so
+one `nix eval` covers a given tip however many slots ask about it, and a
+new tip is what triggers a fresh evaluation. The attribute is
+`DAEMON_SELF_APP` (default `.#daemon`), the daemon's own app, distinct from
+`DAEMON_APP`, the child Dispatch app the slot is about to launch — see the
+`DAEMON_APP` note above. A Consumer that re-exports the daemon under a
+different top-level name must set it to match; spindrift's own bwrap
+harness does exactly that (`.#dogfood-bwrap-daemon`, `nix/fixtures.nix`),
+and without it the check would evaluate a different harness's daemon
+entirely and report a permanent, spurious change on every iteration.
 
 The evaluation is `nix eval --raw
 git+file://<checkout>?rev=<tip>&allRefs=1#apps.<system>.<attr>.program`
@@ -5577,9 +5592,10 @@ part of the restart policy.
 `Environment=PATH=` matters even with an absolute `ExecStart`, and it is
 the line most easily dropped from a pasted unit. The daemon execs both
 `git` and `nix` by bare name — `git fetch`/`git rev-parse` at every
-iteration boundary (`ResolveRevision`, `cmd/launcher/daemon/runner.go`),
-and `nix run`/`nix eval` for every child it starts and every self-build
-evaluation (`cmd/launcher/internal/daemon/command.go`). `git fetch`/`git
+iteration boundary (`ResolveTip`, `cmd/launcher/daemon/runner.go`), and
+`nix run`/`nix eval` for every child it starts and every distinct tip's
+self-build evaluation, memoised so a tip several slots ask about is only
+evaluated once (`cmd/launcher/internal/daemon/command.go`). `git fetch`/`git
 rev-parse` and the self-build `nix eval` set no `cmd.Env` at all; the
 child-starting `nix run` sets a knob-stripped copy of the daemon's own
 environment (see **Child environment** above) that still carries `PATH`
@@ -5722,9 +5738,9 @@ Outside the window, `awaitWindow` parks a slot in one `clk.Sleep` straight
 through to the next opening (`Window.Until`) rather than polling through
 it, so a shut window costs nothing beyond that single sleep. A
 none-dispatchable wait (exit 3) whose child finishes to find the window
-already shut skips its idle-backoff step and its mid-wait
-`ResolveRevision` polls entirely and parks instead — an operator reading
-the stream sees no `idle`/`jam` event for that iteration, only the
+already shut skips both its idle-backoff step and the mid-wait resolution
+`idleSleep` would otherwise ask for, and parks instead — an operator
+reading the stream sees no `idle`/`jam` event for that iteration, only the
 `awake_close`/`awake_open` pair (below).
 
 The zone is explicit and never inherited: the literal zone `Local` is
