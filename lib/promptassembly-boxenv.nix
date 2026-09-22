@@ -95,6 +95,11 @@
     kind = "string";
   }
   {
+    field = "SignalCarrier";
+    env = "BOX_SIGNAL_CARRIER";
+    kind = "string";
+  }
+  {
     field = "SelfContained";
     env = "SELF_CONTAINED";
     kind = "equals1";

@@ -100,6 +100,11 @@ type Env struct {
 	FixPass         int    // entrypoint.sh: $FIX_PASS (fix-pass number; >0 selects fix-prompt.md)
 	ResumeAfterHold bool   // entrypoint.sh: $RESUME_AFTER_HOLD presence
 
+	// SignalCarrier is the BOX_SIGNAL_CARRIER knob (ADR 0052, issue #3725) as the
+	// Box sees it: "log" (or empty, the schema default) or "socket". It selects
+	// which variant of each signal fragment renders (issue #3726).
+	SignalCarrier string // entrypoint.sh: $BOX_SIGNAL_CARRIER
+
 	// PromptsDir, AgentsPromptFiles, and DriverAgentFilesDir locate the
 	// fragment/prompt files and the per-Driver agent-file rewrite target.
 	PromptsDir          string // entrypoint.sh: $PROMPTS_DIR (default "/agent/prompts"; SPINDRIFT_PROMPT_DIR override resolved before this phase)

@@ -31,6 +31,7 @@ var boxEnvRows = []boxEnvRow{
 	{"CodeForge", "CODE_FORGE", "string"},
 	{"ForgeBackend", "BOX_FORGE_BACKEND", "string"},
 	{"DispatchKind", "DISPATCH_KIND", "string"},
+	{"SignalCarrier", "BOX_SIGNAL_CARRIER", "string"},
 	{"SelfContained", "SELF_CONTAINED", "equals1"},
 	{"FixPass", "FIX_PASS", "int"},
 	{"ResumeAfterHold", "RESUME_AFTER_HOLD", "presence"},
