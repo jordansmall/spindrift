@@ -3770,8 +3770,20 @@ knob; changing it takes a daemon restart. The in-Box front for `socket` mode
 is the `driver-exec signal comment|pr-intent|issue-intent|status` verb (issue
 #3724), which reads `SIGNAL_SOCKET_ENDPOINT` and errors when it is unset — so
 it serves the socket carrier only; under `log` the front stays what it has
-always been, a nonce-guarded marker line the Box prints. The prompts don't
-yet instruct agents to use the verb — that's a later ticket.
+always been, a nonce-guarded marker line the Box prints.
+
+The prompts instruct the verb under `socket` (issue #3726): prompt assembly
+picks each of the three signal fragments — the research verdict comment, the
+PR intent, and the Filer's issue intent — from the carrier at run time, so a
+socket-mode agent is told to run `driver-exec signal <kind>` with explicit
+fields and to read the command's exit code as the acceptance, with no nonce,
+no base64 and no "print exactly one line" wording anywhere in its prompt.
+Both variants of every fragment bake into the image, so flipping the knob
+takes no rebuild. The read-only `gh` shim's refusal messages for `gh pr
+create`, `gh issue comment` and `gh issue create` name both routes, and the
+in-Box marker gate — the post-driver resume nudge for a `ready` outcome with
+no PR intent — asks the socket's status route under `socket` instead of
+re-scanning the Box log.
 
 ---
 
