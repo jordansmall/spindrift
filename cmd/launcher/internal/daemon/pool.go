@@ -520,11 +520,68 @@ func (p *pool) passBaton(slot int, reason string) {
 }
 
 // stopped reports whether the pool has already recorded a halt reason —
-// deliberately not a raw ctx.Err() check; see stopOnCancel (loop.go) for why.
+// deliberately not a raw ctx.Err() check; see haltIfStopping for why.
 func (p *pool) stopped() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.st.halted
+}
+
+// stopClosed reports whether cfg.Stop has been closed, without blocking. A
+// nil Stop (a Config that sets no latch, e.g. an embedder that hard-cancels
+// ctx instead) always reads open: a nil channel never receives in a select,
+// so this reads the same as "not closed" rather than blocking.
+func (p *pool) stopClosed() bool {
+	select {
+	case <-p.cfg.Stop:
+		return true
+	default:
+		return false
+	}
+}
+
+// haltStopRequested records the operator-stop halt a closed cfg.Stop
+// demands, from one construction site: Loop's own Stop watcher and
+// haltIfStopping below both reach it, so neither the class nor the detail
+// can drift between them. "context-cancelled" is docs/reference.md's
+// documented halt grammar for this class (halt.go's haltRenderings), not a
+// name this slice may change — an operator stop and a caller ctx
+// cancellation render identically on purpose.
+//
+// kind is the halt event's Kind if the caller has one, "" for Loop's own
+// watcher, which runs no kind of its own.
+func (p *pool) haltStopRequested(kind Kind) {
+	p.halt(Halt{Class: HaltOperatorStop, Detail: "stop requested", Kind: kind})
+}
+
+// haltIfStopping reports whether the slot should stop starting new work,
+// checking three things in order: whether a sibling already recorded a halt
+// reason (return quietly — nothing new to emit); whether cfg.Stop has
+// closed (an operator stop this call is the first to notice); and whether
+// ctx itself is freshly cancelled (the caller's own hard cancel — tests and
+// any embedder that skips cfg.Stop and cancels ctx directly instead).
+// Checking p.stopped() first is what makes the ctx branch meaningful: p.halt's
+// own cancel() also cancels ctx, so a raw ctx.Err() check alone cannot tell
+// "I am first to notice real cancellation" from "a sibling already halted
+// for some other reason and cancelled me as a side effect".
+//
+// kind is the halt event's Kind, if the caller has picked one yet: the
+// top-of-loop call races cancellation against pickKind itself and so has
+// none to give (pass ""), while backoffOrHalt already knows which kind this
+// iteration is running.
+func (p *pool) haltIfStopping(ctx context.Context, kind Kind) bool {
+	if p.stopped() {
+		return true
+	}
+	if p.stopClosed() {
+		p.haltStopRequested(kind)
+		return true
+	}
+	if err := ctx.Err(); err != nil {
+		p.halt(Halt{Class: HaltOperatorStop, Detail: err.Error(), Kind: kind})
+		return true
+	}
+	return false
 }
 
 // halt records h as the pool's halt reason if none is recorded yet, emits
@@ -550,17 +607,43 @@ func (p *pool) halt(h Halt) {
 }
 
 // backoffOrHalt is what a slot calls on an unclassified failure (a
-// ResolveRevision error, a RunChild seam error, or an unrecognised exit
-// code): it records the failure in the pool-wide breaker and either trips
-// the pool (enough failures landed across the pool within the window to
-// look systemic — no per-slot retry clears that) or backs this one slot
-// off and lets it retry alone. Returns true if the pool halted (the caller
-// must stop), false if the caller should sleep out the backoff and
-// continue its own loop. When the caller holds the discovery baton, it
-// also passes it before the backoff sleep below (see batonPassFailed) — a
-// holder about to sleep alone through FailureBackoff must not strand its
-// sibling's discovery on that sleep.
+// ResolveRevision error, a RunChild seam error, an unrecognised exit code,
+// or exit 7 while Stop is open — someone else signalled that child): it
+// records the failure in the pool-wide breaker and either trips the pool
+// (enough failures landed across the pool within the window to look
+// systemic — no per-slot retry clears that) or backs this one slot off and
+// lets it retry alone. Returns true if the pool halted (the caller must
+// stop), false if the caller should sleep out the backoff and continue its
+// own loop. When the caller holds the discovery baton and this call is
+// about to back off rather than halt, it also passes the baton before the
+// backoff sleep below (see batonPassFailed) — a holder about to sleep
+// alone through FailureBackoff must not strand its sibling's discovery on
+// that sleep.
+//
+// This is also the breaker's one carve-out (issue #3595, by construction):
+// a failure that lands while Stop has already closed — or while the pool
+// has already halted, or the caller's ctx is cancelled — is never counted,
+// because it is an ordinary shutdown (an operator SIGTERM racing the
+// child/fetch/evaluation) rather than evidence of a systemic fault. The
+// check belongs here, once, rather than at every call site: the carve-out
+// is about the breaker, and backoffOrHalt is the breaker's one gate. It
+// therefore reads the latch after the child exited rather than at the
+// moment it exited, the way exit 7 does (loop.go reads it once, at
+// Interpret, so a later close cannot race that answer): a close landing in
+// that window carves out an unrecognised exit that itself landed while Stop
+// was still open. The pool halts as an operator stop under either reading,
+// so the wider window changes no operator-visible outcome — only which exit
+// the breaker declines to count on the way down.
 func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision, reason string) bool {
+	// Check stopping before touching the baton: a stop closing here means
+	// runSlot's own deferred passBaton(slot, batonPassStopped) (loop.go) is
+	// the pass that should be observed, not a batonPassFailed pass from
+	// this call — an operator stop racing an in-flight fetch must still
+	// read as a stop in the baton_pass event stream.
+	if p.haltIfStopping(ctx, kind) {
+		return true
+	}
+
 	// Only an unclassified pre-child failure (a ResolveRevision or
 	// self-build evaluation error) can still be holding the baton here:
 	// loop.go releases it unconditionally right after RunChild returns,
@@ -658,13 +741,6 @@ func (p *pool) checkSelfBuild(ctx context.Context, slot int, kind Kind, revision
 	}
 	path, err := p.r.SelfPath(ctx, revision)
 	if err != nil {
-		// A ctx cancelled out from under an in-flight SelfPath (an operator
-		// SIGTERM racing this evaluation) is an ordinary stop, not evidence
-		// of a broken evaluation — recording it as a breaker failure could
-		// trip the breaker on a clean shutdown and turn a 0 exit into a 1.
-		if stopOnCancel(ctx, kind, p) {
-			return selfStop
-		}
 		// Rendered through Halt rather than a raw "self-build: " literal so
 		// the documented self-build grammar has exactly one renderer
 		// (Halt.String()) even though this reason only ever reaches a halt
@@ -773,7 +849,7 @@ func (p *pool) pollSlices(ctx context.Context, slot int, wait time.Duration, rev
 		if p.stopped() || ctx.Err() != nil {
 			// A sibling halted the pool, or the caller's ctx was cancelled,
 			// while this slot slept. Stop polling and return: the slot's own
-			// top-of-loop stopOnCancel does the halt bookkeeping next.
+			// top-of-loop haltIfStopping does the halt bookkeeping next.
 			return
 		}
 		if remaining <= 0 {

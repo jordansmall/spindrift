@@ -30,13 +30,22 @@ type Runner interface {
 }
 
 // ChildRequest is one child invocation's parameters. Slot is the daemon
-// pool slot the child occupies (0-based): it is how the production Runner
-// tracks several concurrent children for signal forwarding, and how the
-// event stream says which slot a child filled.
+// pool slot the child occupies (0-based): it is how the event stream says
+// which slot a child filled.
+//
+// Stop and Abort are the operator-stop/hard-abort latch, carried here as
+// data rather than left for the Runner to hold per-child state of its own:
+// the pool is what knows which config it was given, and re-handing the same
+// two channels on every request (this slot's whole lifetime, not just its
+// first child) means a Runner needs no bookkeeping to answer "has the
+// operator asked me to stop" — it only ever selects on what this request
+// carries.
 type ChildRequest struct {
 	Slot     int
 	Kind     Kind
 	Revision string
+	Stop     <-chan struct{}
+	Abort    <-chan struct{}
 
 	// OnIssue, when non-nil, is called with each issue the child announces a
 	// Box for, as the announce line is read rather than after the child
@@ -82,6 +91,20 @@ type Config struct {
 	ResearchReservation int
 
 	Slots int
+
+	// Stop and Abort are the operator-stop/hard-abort latch (issue #3626):
+	// the same two-channel shape the Launcher's own shutdown gate and
+	// signal relay already use. A closed Stop halts the pool with
+	// HaltOperatorStop and cancels its own derived context, ending an
+	// in-progress sleep or fetch promptly. Abort has no pool-level watcher
+	// — escalation is the child's business — but is re-exposed on every
+	// ChildRequest alongside Stop so a Runner can react to both without
+	// tracking per-child state of its own. Nil is the deliberate opt-out
+	// for either: a nil channel never fires in a select, so a caller that
+	// sets neither — a test, or an embedder that hard-cancels ctx instead —
+	// halts only through ctx, exactly as the pre-#3626 host binary did.
+	Stop  <-chan struct{}
+	Abort <-chan struct{}
 
 	// Awake gates when a slot may start a new child: nil means no window
 	// is configured, so the daemon is always awake. When set, it only
@@ -150,19 +173,24 @@ type Config struct {
 // into a process exit code.
 //
 // An unclassified failure is not one of those: a resolve failure, a
-// RunChild error or an unrecognised exit code backs its own slot off and
+// RunChild error, an unrecognised exit code, or exit 7 while Stop is still
+// open (someone else signalled that child) backs its own slot off and
 // refills it, leaving the siblings working, and only reaches a halt by
-// tripping the breaker — unless ctx is already cancelled (an operator
-// SIGTERM forwarded to a child that had not yet installed its own handler,
-// or that raced the seam's own teardown), in which case it is an ordinary
-// stop and never reaches the breaker at all.
+// tripping the breaker — unless cfg.Stop has already closed or ctx is
+// already cancelled (an operator SIGTERM forwarded to a child that had not
+// yet installed its own handler, or that raced the seam's own teardown), in
+// which case it is an ordinary stop and never reaches the breaker at all
+// (issue #3595, by construction — see backoffOrHalt, pool.go).
 //
 // It never kills a child it has started: once a slot calls RunChild, it
 // always waits for it to return and always emits that child's child_finish
 // before halting, even if ctx was cancelled mid-run or a sibling slot
-// halted the pool in the meantime. "Stop starting new work" is enforced
-// only between iterations and before RunChild: at the top of a slot's loop,
-// after ResolveRevision returns, and after Interpret decides to Wait.
+// halted the pool in the meantime. "Stop starting new work" is enforced by
+// one admission check, at the top of a slot's loop, before it starts a new
+// iteration: cfg.Stop and Abort ride every ChildRequest (see ChildRequest's
+// own doc), so a child started after Stop closes is signalled by the Runner
+// at once, and nothing between the top of the loop and RunChild needs to
+// re-assert the same fact.
 //
 // cfg.Slots must be positive: a zero or negative pool size would silently
 // run no children while looking like a healthy daemon, so Loop rejects it
@@ -206,6 +234,34 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	p, pctx := newPool(ctx, cfg, r, em, clk)
 	defer p.cancel()
 	p.publishInitial()
+
+	// A Stop already closed before Loop was even called must halt before
+	// any slot starts, not merely once the background watcher below happens
+	// to get scheduled: a bare `go` statement makes no ordering promise
+	// against the slot goroutines started just after it. This non-blocking
+	// check runs synchronously, in Loop's own goroutine, before any slot
+	// exists to race it.
+	select {
+	case <-cfg.Stop:
+		p.haltStopRequested("")
+	default:
+	}
+	// Watches cfg.Stop for the rest of the pool's life, so a later close
+	// halts promptly whether or not any slot is between iterations to
+	// notice it itself (a slot deep in clk.Sleep or ResolveRevision only
+	// unblocks once p.halt cancels pctx). Also selects on pctx.Done so this
+	// goroutine never outlives one Loop call — tests drive Loop repeatedly,
+	// and a leaked watcher from a previous call must not fire on a later
+	// call's cfg.Stop. cfg.Stop is nil-safe: a nil channel never receives,
+	// so an unset Stop makes this select equivalent to just waiting on
+	// pctx.Done.
+	go func() {
+		select {
+		case <-cfg.Stop:
+			p.haltStopRequested("")
+		case <-pctx.Done():
+		}
+	}()
 
 	var wg sync.WaitGroup
 	wg.Add(cfg.Slots)
@@ -268,17 +324,15 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	defer p.setPhase(slot, PhaseIdle)
 	var lastRevision string // the revision this slot's last child ran at; the "tip moved" baseline
 	for {
-		if stopOnCancel(ctx, "", p) {
+		// The pool's one admission check (issue #3626): with cfg.Stop
+		// riding every ChildRequest, a child started after Stop closes is
+		// signalled by the Runner at once, so nothing between here and
+		// RunChild needs to re-assert "stop starting new work".
+		if p.haltIfStopping(ctx, "") {
 			return
 		}
 
 		p.awaitWindow(ctx, slot)
-		if stopOnCancel(ctx, "", p) {
-			// A signal can arrive while the slot was parked in
-			// awaitWindow; nothing else re-checks ctx between there and
-			// ResolveRevision, so this is that check.
-			return
-		}
 
 		// Acquired after the Awake window, not before: apart from the
 		// pre-assigned initial holder's very first round, a slot never
@@ -286,11 +340,6 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		// here, after awaitWindow, and every path that loops back to the
 		// top passes the baton first (see the release sites below).
 		p.awaitBaton(ctx, slot)
-		if stopOnCancel(ctx, "", p) {
-			// awaitBaton returns on ctx cancellation same as any other
-			// wait; nothing else re-checks before pickKind.
-			return
-		}
 
 		kind, ok := p.pickKind(slot)
 		if !ok {
@@ -311,14 +360,6 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		p.setPhase(slot, PhaseResolving)
 		revision, err := p.r.ResolveRevision(ctx)
 		if err != nil {
-			// A ctx cancelled out from under an in-flight fetch (an operator
-			// SIGTERM) is an ordinary stop, not the transient blip the
-			// breaker below exists for — recording it as a breaker failure
-			// could trip the breaker on a clean shutdown and turn a 0 exit
-			// into a 1.
-			if stopOnCancel(ctx, kind, p) {
-				return
-			}
 			// A failed fetch is exactly the transient blip this slice's
 			// breaker exists for: back off and retry alone, unless enough
 			// failures have piled up pool-wide to say this is systemic
@@ -343,14 +384,6 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			continue
 		}
 
-		if stopOnCancel(ctx, kind, p) {
-			// ResolveRevision (a git fetch) can outlast a SIGTERM sent
-			// while it was in flight; re-check here so that fetch never
-			// launches a child that forwardStop never gets a chance to
-			// signal.
-			return
-		}
-
 		if !cfg.Awake.Open(p.clk.Now()) {
 			// ResolveRevision (a git fetch) can outlast the window's own
 			// close; re-check here so that fetch never launches a child
@@ -368,6 +401,8 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			Slot:     slot,
 			Kind:     kind,
 			Revision: revision,
+			Stop:     cfg.Stop,
+			Abort:    cfg.Abort,
 			OnIssue: func(issue string) {
 				p.noteIssue(slot, issue)
 				// A claim settles discovery the moment it happens, live,
@@ -395,13 +430,6 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 				p.emit(Event{Event: "box", Kind: kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
 			}
 			p.emit(Event{Event: "child_finish", Kind: kind, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
-			// This seam error can be the child's own wait failing as an
-			// operator SIGTERM tears it down mid-run, same as the
-			// ResolveRevision guard above — check before spending a breaker
-			// failure on it.
-			if stopOnCancel(ctx, kind, p) {
-				return
-			}
 			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err)) {
 				return
 			}
@@ -413,7 +441,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		}
 
 		exit := result.Exit
-		outcome, action, haltClass := Interpret(exit)
+		// Exit 7 means "the operator stopped this child" only while Stop
+		// was already closed when the child exited; read the latch once,
+		// here, rather than let a later close race Interpret's answer.
+		outcome, action, haltClass := Interpret(exit, p.stopClosed())
 		p.emit(Event{Event: "child_finish", Kind: kind, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
 
 		switch action {
@@ -446,12 +477,6 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// genuinely idling.
 			continue
 		case Backoff:
-			// An unrecognised exit can be a child dying on the default
-			// SIGTERM disposition before it installed its own handler —
-			// same operator-stop guard as above, not a breaker failure.
-			if stopOnCancel(ctx, kind, p) {
-				return
-			}
 			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit)) {
 				return
 			}
@@ -464,31 +489,6 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			return
 		}
 	}
-}
-
-// stopOnCancel reports whether the slot should stop starting new work: true
-// if the pool has already halted (a sibling got there first — this slot
-// returns quietly, nothing more to emit) or if ctx is freshly cancelled (the
-// caller's own ctx, e.g. an operator signal — this slot is the one that
-// discovers it, so it records the reason via p.halt). Checking p.stopped()
-// first is what makes the distinction possible: p.halt's own cancel() also
-// cancels ctx, so a raw ctx.Err() check alone cannot tell "I am first to
-// notice real cancellation" from "a sibling already halted for some other
-// reason and cancelled me as a side effect".
-//
-// kind is the halt event's Kind, if the caller has picked one yet: the
-// top-of-loop call races cancellation against pickKind itself and so has
-// none to give (pass ""), while the post-ResolveRevision call already knows
-// which kind this iteration is running.
-func stopOnCancel(ctx context.Context, kind Kind, p *pool) bool {
-	if p.stopped() {
-		return true
-	}
-	if err := ctx.Err(); err != nil {
-		p.halt(Halt{Class: HaltOperatorStop, Detail: err.Error(), Kind: kind})
-		return true
-	}
-	return false
 }
 
 // intPtr returns a pointer to v. Event.Slot (like Event.Exit) is a pointer

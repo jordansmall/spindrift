@@ -27,7 +27,7 @@ func awaitHalt(t *testing.T, r *scriptedRunner, done <-chan Halt) string {
 		case h := <-done:
 			return h.String()
 		case slot := <-r.started:
-			r.releaseSlot(t, slot, ChildResult{Exit: 7})
+			r.releaseSlot(t, slot, ChildResult{Exit: 5})
 		case <-deadline:
 			t.Fatalf("awaitHalt: Loop did not return within 5s")
 			return ""
@@ -52,7 +52,7 @@ func awaitWG(t *testing.T, r *scriptedRunner, wg *sync.WaitGroup) {
 		case <-finished:
 			return
 		case slot := <-r.started:
-			r.releaseSlot(t, slot, ChildResult{Exit: 7})
+			r.releaseSlot(t, slot, ChildResult{Exit: 5})
 		case <-deadline:
 			t.Fatalf("awaitWG: goroutines did not finish within 5s")
 			return
@@ -113,7 +113,7 @@ const siblingSlot = 1
 // every failure path here reaches backoffOrHalt, which passes the baton
 // and *then* sleeps out FailureBackoff. Parked, that sleep blocks until Loop's halt
 // cancels ctx, so the failing holder is still sitting in it while the
-// sibling runs — and once it does wake, its next stopOnCancel returns it
+// sibling runs — and once it does wake, its next haltIfStopping returns it
 // rather than letting it start anything.
 func pinTheFailingHolder(clk *testClock) {
 	clk.park()
@@ -241,11 +241,11 @@ func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 
 	// End the test: release every slot's in-flight child.
 	for s := 0; s < slots; s++ {
-		r.releaseSlot(t, s, ChildResult{Exit: 7})
+		r.releaseSlot(t, s, ChildResult{Exit: 5})
 	}
 	reason := (<-done).String()
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 }
 
@@ -361,10 +361,10 @@ func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 
 	awaitSiblingStart(t, r, ChildResult{Exit: 2})
 
-	r.releaseSlot(t, siblingSlot, ChildResult{Exit: 7})
+	r.releaseSlot(t, siblingSlot, ChildResult{Exit: 5})
 	reason := awaitHalt(t, r, done)
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
@@ -406,10 +406,10 @@ func TestPoolBatonPassesOnNoneDispatchableChildEnd(t *testing.T) {
 
 	awaitSiblingStart(t, r, ChildResult{Exit: 3})
 
-	r.releaseSlot(t, siblingSlot, ChildResult{Exit: 7})
+	r.releaseSlot(t, siblingSlot, ChildResult{Exit: 5})
 	reason := awaitHalt(t, r, done)
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
@@ -454,10 +454,10 @@ func TestPoolBatonPassesOnUnrecognisedExit(t *testing.T) {
 		t.Fatalf("next slot to start = %d, want %d: the sibling parked on the baton, not the holder re-acquiring", next, siblingSlot)
 	}
 
-	r.releaseSlot(t, next, ChildResult{Exit: 7})
+	r.releaseSlot(t, next, ChildResult{Exit: 5})
 	reason := awaitHalt(t, r, done)
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
@@ -479,7 +479,7 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 		revisions: []string{"rev1"},
 		runErrAt:  1,
 		runErr:    wantErr,
-		results:   []ChildResult{{Exit: 7}},
+		results:   []ChildResult{{Exit: 5}},
 	}
 	clk := &testClock{}
 	pinTheFailingHolder(clk)
@@ -496,8 +496,8 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 		t.Fatal("Loop never returned: a RunChild seam error left the pool deadlocked")
 	}
 	reason := h.String()
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
@@ -512,7 +512,7 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 	// that follows is siblingSlot's — the only other configured slot
 	// (slots==2) — and with the clock parked exactly two children start,
 	// in exactly that order: leadSlot's seam-failed one, then the
-	// sibling's, whose exit 7 halts the pool.
+	// sibling's, whose exit 5 halts the pool.
 	startSlots := childStartSlots(t, events)
 	if len(startSlots) != 2 || startSlots[0] != leadSlot || startSlots[1] != siblingSlot {
 		t.Fatalf("child_start slots = %v, want exactly [%d %d]: the sibling parked on the baton must start next, not the failing holder re-acquiring", startSlots, leadSlot, siblingSlot)
@@ -673,11 +673,11 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 
 	// End the test: release every slot's in-flight child (the third never
 	// got released above, so it is still parked on baton_hold).
-	r.releaseSlot(t, leadSlot, ChildResult{Exit: 7})
-	r.releaseSlot(t, winner, ChildResult{Exit: 7})
+	r.releaseSlot(t, leadSlot, ChildResult{Exit: 5})
+	r.releaseSlot(t, winner, ChildResult{Exit: 5})
 	reason := awaitHalt(t, r, done)
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 }
 
@@ -697,7 +697,7 @@ func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 		revisions:  []string{"rev1"},
 		resolveAt:  1,
 		resolveErr: wantErr,
-		results:    []ChildResult{{Exit: 7}},
+		results:    []ChildResult{{Exit: 5}},
 	}
 	clk := &testClock{}
 	pinTheFailingHolder(clk)
@@ -714,8 +714,8 @@ func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 		t.Fatal("Loop never returned: a holder that failed before starting a child left the pool deadlocked")
 	}
 	reason := h.String()
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
@@ -837,6 +837,13 @@ func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
 	}
 
+	// backoffOrHalt checks haltIfStopping before it ever touches the baton
+	// (issue #3626), and this ctx cancellation is exactly what that check
+	// catches — so backoffOrHalt returns without passing the baton itself,
+	// and it is runSlot's own deferred passBaton that fires as the holder
+	// unwinds. The reason is batonPassStopped, not batonPassFailed: the
+	// holder returned before its discovery round resolved, so the pass
+	// this test observes is runSlot's, not backoffOrHalt's.
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 	assertBatonPassReason(t, events, batonPassStopped)
 }
@@ -941,12 +948,12 @@ func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 		t.Errorf("baton_hold events = %d, want %d (%d from the first wave's siblings, one more from the refill)", holds, slots, slots-1)
 	}
 
-	r.releaseSlot(t, third, ChildResult{Exit: 7})
-	r.releaseSlot(t, winner, ChildResult{Exit: 7})
-	r.releaseSlot(t, loser, ChildResult{Exit: 7})
+	r.releaseSlot(t, third, ChildResult{Exit: 5})
+	r.releaseSlot(t, winner, ChildResult{Exit: 5})
+	r.releaseSlot(t, loser, ChildResult{Exit: 5})
 	reason := awaitHalt(t, r, done)
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 }
 
@@ -984,11 +991,11 @@ func TestPoolOneKindPoolBehavesAsBefore(t *testing.T) {
 	}
 
 	for s := 0; s < slots; s++ {
-		r.releaseSlot(t, s, ChildResult{Exit: 7})
+		r.releaseSlot(t, s, ChildResult{Exit: 5})
 	}
 	reason := awaitHalt(t, r, done)
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 }
 
@@ -1033,11 +1040,11 @@ func TestPoolBatonEventStreamOrderingAndReasons(t *testing.T) {
 	}
 
 	for s := 0; s < slots; s++ {
-		r.releaseSlot(t, s, ChildResult{Exit: 7})
+		r.releaseSlot(t, s, ChildResult{Exit: 5})
 	}
 	reason := awaitHalt(t, r, done)
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))

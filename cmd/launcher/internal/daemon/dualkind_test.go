@@ -140,11 +140,11 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 	}
 
 	for s := 0; s < slots; s++ {
-		r.releaseSlot(t, s, ChildResult{Exit: 7})
+		r.releaseSlot(t, s, ChildResult{Exit: 5})
 	}
 	reason := (<-done).String()
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 }
 
