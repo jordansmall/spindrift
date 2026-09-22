@@ -2,10 +2,10 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/doctor"
 )
 
 // launchGate is one entry in the ordered gate registry (issue #2942).
@@ -99,10 +99,10 @@ func splitGateRegistryByNetwork(registry []launchGate) (nonNetwork, network []la
 
 // walkGateRegistry runs registry's gates against c in order. checkW goes to
 // each gate's own Check, so a gate's operator-facing output still reaches the
-// caller's real writer even when reportW is discarded for the generic ok and
-// MISSING lines (issue #2942 AC5). collectAll lets doctor enumerate every
-// broken non-network gate instead of stopping at the first.
-func walkGateRegistry(registry []launchGate, c config, checkW, reportW io.Writer, collectAll bool) error {
+// caller's real writer even when rep is discarding the generic ok and MISSING
+// lines (issue #2942 AC5). collectAll lets doctor enumerate every broken
+// non-network gate instead of stopping at the first.
+func walkGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *doctor.Reporter, collectAll bool) error {
 	var errs []error
 	for _, g := range registry {
 		if g.Applicable != nil && !g.Applicable(c) {
@@ -110,13 +110,13 @@ func walkGateRegistry(registry []launchGate, c config, checkW, reportW io.Writer
 		}
 		if err := g.Check(c, checkW); err != nil {
 			errs = append(errs, err)
-			fmt.Fprintf(reportW, "MISSING: %s: %s\n", g.Name, err)
+			rep.Finding(doctor.Required, "%s: %s", g.Name, err)
 			if !collectAll || g.Network {
 				return errors.Join(errs...)
 			}
 			continue
 		}
-		fmt.Fprintf(reportW, "ok: %s\n", g.Name)
+		rep.Success("%s", g.Name)
 	}
 	return errors.Join(errs...)
 }
@@ -126,9 +126,9 @@ func walkGateRegistry(registry []launchGate, c config, checkW, reportW io.Writer
 // newGatedContext uses to interleave the bwrap gates (gatedcontext.go), so
 // doctor's report order cannot diverge from enforcement's after a later edit
 // to registry.
-func walkSplitGateRegistry(registry []launchGate, c config, checkW, reportW io.Writer, collectAll bool) error {
+func walkSplitGateRegistry(registry []launchGate, c config, checkW io.Writer, rep *doctor.Reporter, collectAll bool) error {
 	nonNetwork, network := splitGateRegistryByNetwork(registry)
-	errNonNetwork := walkGateRegistry(nonNetwork, c, checkW, reportW, collectAll)
-	errNetwork := walkGateRegistry(network, c, checkW, reportW, collectAll)
+	errNonNetwork := walkGateRegistry(nonNetwork, c, checkW, rep, collectAll)
+	errNetwork := walkGateRegistry(network, c, checkW, rep, collectAll)
 	return errors.Join(errNonNetwork, errNetwork)
 }

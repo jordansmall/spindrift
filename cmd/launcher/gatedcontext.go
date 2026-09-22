@@ -1,6 +1,10 @@
 package main
 
-import "io"
+import (
+	"io"
+
+	"spindrift.dev/launcher/internal/doctor"
+)
 
 // gatedContext is a readContext whose construction already ran validate() and
 // every gate in gateRegistry (issues #2941, #2942). preview() and bootstrap()
@@ -19,8 +23,11 @@ func newGatedContext(w io.Writer, kind string, selfContained bool) (gatedContext
 	if err := validate(rc.config); err != nil {
 		return gatedContext{}, err
 	}
+	// Enforcement has no report stream, so both halves discard it here;
+	// hoisted into one instance rather than one io.Discard Reporter per call.
+	discardRep := doctor.NewReporter(io.Discard)
 	nonNetwork, network := splitGateRegistryByNetwork(gateRegistry)
-	if err := walkGateRegistry(nonNetwork, rc.config, w, io.Discard, false); err != nil {
+	if err := walkGateRegistry(nonNetwork, rc.config, w, discardRep, false); err != nil {
 		return gatedContext{}, err
 	}
 	if err := checkBwrapPastaGate(rc.config); err != nil {
@@ -29,7 +36,7 @@ func newGatedContext(w io.Writer, kind string, selfContained bool) (gatedContext
 	if err := checkBwrapOverlayGate(rc.config); err != nil {
 		return gatedContext{}, err
 	}
-	if err := walkGateRegistry(network, rc.config, w, io.Discard, false); err != nil {
+	if err := walkGateRegistry(network, rc.config, w, discardRep, false); err != nil {
 		return gatedContext{}, err
 	}
 	return gatedContext{readContext: rc}, nil

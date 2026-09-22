@@ -58,7 +58,7 @@ func TestRunDoctor_HealthyReport_Golden(t *testing.T) {
 	f.Labels = append(f.Labels, doctor.AmbiguousLabelNames()...)
 
 	var buf bytes.Buffer
-	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false, nil); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, nil); err != nil {
 		t.Fatalf("runDoctor() unexpected error: %v", err)
 	}
 
