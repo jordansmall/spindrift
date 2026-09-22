@@ -13,10 +13,8 @@
   # launcher-currency's fileset excludes driver-exec, orchestrator, quickstart
   # and daemon (each an independent `package main` the launcher never
   # imports), internal/daemon (no non-test package outside daemon imports
-  # it, issue #3538), and all _test.go files -- which is what keeps the
-  # internal/daemon exclusion true, since internal/dispatch's own
-  # announce_test.go imports it -- so it vendors differently even off
-  # identical go.mod/go.sum (#784, issue #2677).
+  # it, issue #3538), and all _test.go files -- so it vendors differently
+  # even off identical go.mod/go.sum (#784, issue #2677).
   launcherCurrencyVendorHash = "sha256-q5jyNelr05+EY930FEOGo19uK5Z2UY+eYl8RebSgVG4=";
   nixBuilderImage = "docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8";
 }

@@ -86,6 +86,7 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // SettleAdopted's job, so sit.OpenPRFound returns false. Local push-only has
 // no PR to open (ADR 0039, #2254), where a bundle alone is evidence (#2378).
 func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) bool {
+	defer s.flushSettled(num)
 	if sit.OpenPRFound {
 		return false
 	}
@@ -156,7 +157,7 @@ func (s *Settle) tryMarkRecoverable(num string, result dispatch.Result) bool {
 		reason = "killed by signal"
 	}
 	fmt.Printf("    #%s  status=recoverable  note=%s; bundle present in outbox; run `spindrift recover %s` to land it\n", num, reason, num)
-	s.transitionState(num, forge.InProgress, forge.Recoverable)
+	s.transitionState(num, forge.InProgress, forge.Recoverable, reason)
 	return true
 }
 

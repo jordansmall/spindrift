@@ -114,6 +114,16 @@ func (r Result) ReportFailureReason(num string) {
 	}
 }
 
+// FailureNote returns r.Err's text, or "" when unset, the same condition
+// ReportFailureReason gates on. Sharing that one source (issue #3627 review
+// finding) keeps the stderr line and the settled record's note from drifting.
+func (r Result) FailureNote() string {
+	if r.Err == nil {
+		return ""
+	}
+	return r.Err.Error()
+}
+
 // Dispatcher is the seam callers depend on so tests can inject a Fake instead
 // of a real Dispatch.
 type Dispatcher interface {

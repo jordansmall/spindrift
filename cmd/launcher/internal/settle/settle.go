@@ -4,6 +4,8 @@
 package settle
 
 import (
+	"sync"
+
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
@@ -120,8 +122,8 @@ type WorkSettler interface {
 
 // Settle is the prod adapter, constructed once per top-level dispatch entry
 // point and reused across every issue in that invocation. Safe for concurrent
-// use by dispatchWave goroutines: it holds no mutable state beyond the
-// concurrency-safe it/cf.
+// use by dispatchWave goroutines: the only mutable state beyond the
+// concurrency-safe it/cf is settledLatch, and that is mutex-guarded.
 type Settle struct {
 	cfg Config
 	it  forge.IssueTracker
@@ -146,6 +148,20 @@ type Settle struct {
 	cfForNum func(num string) forge.CodeForge
 	// clock defaults to dispatch.RealClock() when Config.Clock is unset.
 	clock dispatch.Clock
+	// settledMu guards settledLatch (issue #3627): dispatchWave goroutines
+	// settle different issues on the same *Settle concurrently, so the map
+	// itself needs a lock even though each issue's own read-modify-write
+	// (transitionState latching, then flushSettled popping) happens
+	// sequentially on one goroutine.
+	settledMu sync.Mutex
+	// settledLatch holds each in-flight issue's most recent terminal
+	// transition, last write wins. One issue's own settle path can reach
+	// transitionState twice for two different terminal states — e.g. a green
+	// completeLanding (Complete) that verifyMerged then demotes to Failed
+	// after a merge re-check (adopt.go) — and only the tracker's final
+	// decision should ever reach the daemon as a settled record, once
+	// (issue #3627).
+	settledLatch map[string]settledLatch
 }
 
 // Registrar is the "settler that owns a termination registry" seam: a caller

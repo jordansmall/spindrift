@@ -88,7 +88,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				if errors.Is(err, errLandingNeverGreen) {
 					fmt.Printf("    #%s  landing=%s  status=landing-failed  !! %v\n", num, pr, err)
 					s.it.Comment(num, fmt.Sprintf("landing failed: %v — no green PR exists at the current head", err))
-					s.transitionState(num, forge.InProgress, forge.Failed)
+					s.transitionState(num, forge.InProgress, forge.Failed, err.Error())
 					return landingFailed, err.Error()
 				}
 				fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, pr, err)
@@ -107,7 +107,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			}
 			fmt.Printf("    #%s  landing=%s  status=gate-terminal  !! %s\n", num, pr, gateReason)
 			s.it.Comment(num, fmt.Sprintf("landing failed: %s", gateReason))
-			s.transitionState(num, forge.InProgress, forge.Failed)
+			s.transitionState(num, forge.InProgress, forge.Failed, gateReason)
 			return landingFailed, gateReason
 		case gateRedRetry:
 			// Catches a mark landing mid-poll, before the fix-exhausted and
@@ -120,8 +120,9 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 					fmt.Printf("    #%s  landing=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
 						num, pr, s.cfg.MaxFixAttempts)
 				}
-				s.transitionState(num, forge.InProgress, forge.Failed)
-				return landingFailed, fmt.Sprintf("ci-red: still red after exhausting %d fix pass(es)", s.cfg.MaxFixAttempts)
+				reason := fmt.Sprintf("ci-red: still red after exhausting %d fix pass(es)", s.cfg.MaxFixAttempts)
+				s.transitionState(num, forge.InProgress, forge.Failed, reason)
+				return landingFailed, reason
 			}
 			// The budget caps (issue #2001) stop a runaway token or cost run
 			// even while MaxFixAttempts would still allow more passes. Both
@@ -131,8 +132,9 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				if exceeded, reason := budgetExceeded(s.cfg, d.CumulativeUsage()); exceeded {
 					fmt.Printf("    #%s  landing=%s  status=budget-exhausted  !! %s\n", num, pr, reason)
 					s.it.Comment(num, fmt.Sprintf("budget exhausted (%s) — stopping self-heal before another fix pass", reason))
-					s.transitionState(num, forge.InProgress, forge.Failed)
-					return landingFailed, fmt.Sprintf("budget-exhausted: %s", reason)
+					note := fmt.Sprintf("budget-exhausted: %s", reason)
+					s.transitionState(num, forge.InProgress, forge.Failed, note)
+					return landingFailed, note
 				}
 			}
 			fmt.Printf("    #%s  landing=%s  fix-pass=%d/%d\n", num, pr, attempt+1, s.cfg.MaxFixAttempts)
@@ -159,8 +161,9 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				fmt.Printf("    #%s  landing=%s  status=fix-failed  !! fix pass %d exited non-zero — aborting self-heal\n", num, pr, attempt+1)
 				result.ReportFailureReason(num)
 				s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
-				s.transitionState(num, forge.InProgress, forge.Failed)
-				return landingFailed, fmt.Sprintf("fix-failed: fix pass %d exited non-zero", attempt+1)
+				note := fmt.Sprintf("fix-failed: fix pass %d exited non-zero", attempt+1)
+				s.transitionState(num, forge.InProgress, forge.Failed, note)
+				return landingFailed, note
 			}
 			// A read-only Box holds no push-capable token (issue #1979): its fix
 			// agent bundled its work to the outbox, so HeadCommitSHA reflects no
@@ -187,8 +190,9 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 						}
 						fmt.Printf("    #%s  landing=%s  status=fix-no-op  !! fix pass %d produced no new commit — aborting self-heal\n", num, pr, attempt+1)
 						s.it.Comment(num, fmt.Sprintf("fix pass %d produced no new commit — aborting self-heal", attempt+1))
-						s.transitionState(num, forge.InProgress, forge.Failed)
-						return landingFailed, fmt.Sprintf("fix-no-op: fix pass %d produced no new commit", attempt+1)
+						note := fmt.Sprintf("fix-no-op: fix pass %d produced no new commit", attempt+1)
+						s.transitionState(num, forge.InProgress, forge.Failed, note)
+						return landingFailed, note
 					}
 				}
 			}
@@ -207,7 +211,7 @@ func (s *Settle) completeLanding(num string, gen uint64, landed landingResult) l
 	if s.terminated(num, gen) {
 		return landingAbandoned
 	}
-	s.transitionState(num, forge.InProgress, forge.Complete)
+	s.transitionState(num, forge.InProgress, forge.Complete, "")
 	return landed
 }
 
@@ -221,7 +225,7 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 	if s.terminated(num, gen) {
 		return landingAbandoned
 	}
-	s.transitionState(num, forge.InProgress, forge.Complete)
+	s.transitionState(num, forge.InProgress, forge.Complete, "")
 	if err := s.applyMergeMode(num, gen, branch, nil); err != nil {
 		fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 		s.it.Comment(num, fmt.Sprintf("landing blocked: %v", err))

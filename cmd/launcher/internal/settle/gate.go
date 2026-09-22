@@ -9,12 +9,14 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
+	"spindrift.dev/launcher/internal/report"
 )
 
 // Settle interprets result and drives num to its terminal label, routing a
 // parsed "ready" outcome to the self-heal merge gate. Called immediately after
 // a Box exits so each issue settles independently of its wave siblings.
 func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
+	defer s.flushSettled(num)
 	logRejectedSignals(num, result)
 	if result.ParseErr != nil {
 		// A malformed outcome line gets the same PR-adoption safety net as no
@@ -80,7 +82,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			return
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
-		s.transitionState(num, forge.InProgress, forge.Failed)
+		s.transitionState(num, forge.InProgress, forge.Failed, o.Note)
 		// A read-only Box never pushes or opens a PR in-box (issue #1933), so a
 		// bundle it wrote to the outbox and a PR-intent line it printed would
 		// be stranded once the container exits. Applies to PR-shaped and
@@ -137,8 +139,9 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		if s.pr != nil {
 			pr, ok, err := s.pr.PRForBranch(branch)
 			if err != nil || !ok {
-				fmt.Printf("    #%s  landing=%s  status=failed  !! no PR found on branch to verify merge\n", num, branch)
-				s.transitionState(num, forge.InProgress, forge.Failed)
+				const reason = "no PR found on branch to verify merge"
+				fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, branch, reason)
+				s.transitionState(num, forge.InProgress, forge.Failed, reason)
 			} else {
 				s.verifyMerged(num, pr)
 			}
@@ -161,7 +164,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			}
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
-		s.transitionState(num, forge.InProgress, forge.Ambiguous)
+		s.transitionState(num, forge.InProgress, forge.Ambiguous, o.Note)
 		s.postUsageComment(num, d)
 	default:
 		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
@@ -201,7 +204,11 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 	}
 	if !res.Found {
 		fmt.Printf("    #%s  status=missing%s  note=%s\n", num, clsNote, missingNote)
-		s.transitionState(num, forge.InProgress, forge.Failed)
+		// Same detail the log line above prints, folded into one note (issue
+		// #3627) so a settled record is diagnosable on disk without the
+		// daemon's terminal.
+		note := missingNote + clsNote
+		s.transitionState(num, forge.InProgress, forge.Failed, note)
 		return
 	}
 	// No transitionState here, on purpose, regardless of draft-ness (issue
@@ -212,11 +219,53 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 	fmt.Printf("    #%s  landing=%s  status=blocked  note=no outcome line; PR on %s left for manual adopt\n", num, res.URL, branch)
 }
 
-// transitionState is a best-effort dispatch-state transition that logs but does
-// not propagate errors.
-func (s *Settle) transitionState(num string, from, to forge.DispatchState) {
+// settledLatch is one issue's most recently latched terminal decision,
+// awaiting flushSettled (issue #3627).
+type settledLatch struct {
+	state string
+	note  string
+}
+
+// transitionState is a best-effort dispatch-state transition that logs but
+// does not propagate errors. note is the most specific reason live at the
+// call site, "" where none exists — see flushSettled for why this only
+// latches rather than emits.
+func (s *Settle) transitionState(num string, from, to forge.DispatchState, note string) {
 	if err := s.it.TransitionState(num, from, to); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s\n", num, to)
+	}
+	if !to.Terminal() {
+		return
+	}
+	// Latched, not emitted, here (issue #3627): one issue's settle path can
+	// reach a second, contradicting terminal transition on the same run — a
+	// green completeLanding (Complete) that verifyMerged then demotes to
+	// Failed after re-checking PR state (adopt.go) — so emitting per call
+	// would let a stale Complete race a real Failed to the daemon. Last write
+	// wins: it is always the tracker's own final decision, checked in
+	// call order. The mutex exists because dispatchWave goroutines settle
+	// different issues on the same *Settle concurrently.
+	s.settledMu.Lock()
+	if s.settledLatch == nil {
+		s.settledLatch = make(map[string]settledLatch)
+	}
+	s.settledLatch[num] = settledLatch{state: to.String(), note: note}
+	s.settledMu.Unlock()
+}
+
+// flushSettled emits num's latched terminal decision, if any, exactly once
+// (issue #3627). Call it via defer at every entry point that can drive one
+// issue to a terminal transitionState call, so an issue that never reaches a
+// terminal state still produces no record, as before this latch existed.
+func (s *Settle) flushSettled(num string) {
+	s.settledMu.Lock()
+	rec, ok := s.settledLatch[num]
+	if ok {
+		delete(s.settledLatch, num)
+	}
+	s.settledMu.Unlock()
+	if ok {
+		report.Settled(num, rec.state, rec.note)
 	}
 }
 

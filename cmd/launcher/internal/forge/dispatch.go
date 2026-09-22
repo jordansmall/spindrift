@@ -1,5 +1,7 @@
 package forge
 
+import "fmt"
+
 // DispatchState is the canonical state of an issue in the dispatch lifecycle.
 type DispatchState int
 
@@ -16,6 +18,47 @@ const (
 	// adapter's remove-label step is a no-op (#646).
 	Untriaged
 )
+
+// String returns a stable, lower-case-kebab name for s, used by the report
+// package (issue #3627) so a "settled" record's state field is stable
+// machine-readable text rather than the underlying int, which would shift if
+// the const block above ever reordered.
+func (s DispatchState) String() string {
+	switch s {
+	case Dispatchable:
+		return "dispatchable"
+	case InProgress:
+		return "in-progress"
+	case Complete:
+		return "complete"
+	case Failed:
+		return "failed"
+	case Recoverable:
+		return "recoverable"
+	case Ambiguous:
+		return "ambiguous"
+	case Untriaged:
+		return "untriaged"
+	default:
+		// Unreachable today -- every Terminal() state is named above -- but an
+		// identifying fallback keeps a "state" field on the wire and a
+		// non-blank diagnostic if that ever stops holding.
+		return fmt.Sprintf("DispatchState(%d)", int(s))
+	}
+}
+
+// Terminal reports whether s is one of the four states that end an issue's
+// dispatch lifecycle: Complete, Failed, Recoverable, Ambiguous. Dispatchable,
+// InProgress, and Untriaged are all mid-lifecycle, so a transition landing on
+// any of those three is not settle's outcome to report.
+func (s DispatchState) Terminal() bool {
+	switch s {
+	case Complete, Failed, Recoverable, Ambiguous:
+		return true
+	default:
+		return false
+	}
+}
 
 // DispatchLabels maps DispatchState values to issue-tracker labels. Only the
 // GitHub adapter reads them; Jira and local use their own native markers.

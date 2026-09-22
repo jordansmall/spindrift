@@ -2,11 +2,16 @@
 package testutil
 
 import (
+	"bufio"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/report"
 )
 
 // SameHash and DiffHash are 32-char store-hash-shaped fixtures for tests that
@@ -47,6 +52,51 @@ func NewCloneWithOrigin(t *testing.T, baseBranch string) string {
 	GitRun(t, clone, "push", "-u", "origin", baseBranch)
 
 	return clone
+}
+
+// InstallPipeReporter installs a report.Reporter over a fresh os.Pipe as the
+// process-wide default, the same way FromEnv builds one in production (a real
+// pipe fd number handed through getenv), and returns a function that reads
+// back every report.Record written so far. Restores the previous default via
+// t.Cleanup. Both pipe ends get their own t.Cleanup close, independent of
+// whether the returned reader ever runs: a test that installs the reporter
+// and never reads back would otherwise leak the write end.
+func InstallPipeReporter(t *testing.T) func() []report.Record {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	t.Cleanup(func() { r.Close() })
+	t.Cleanup(func() { w.Close() })
+
+	fd := int(w.Fd())
+	getenv := func(k string) string {
+		if k == "SPINDRIFT_REPORT_FD" {
+			return fmt.Sprint(fd)
+		}
+		return ""
+	}
+	rep := report.FromEnv(getenv, os.Stderr)
+	if rep == nil {
+		t.Fatalf("report.FromEnv returned nil")
+	}
+	restore := report.Install(rep)
+	t.Cleanup(restore)
+
+	scanner := bufio.NewScanner(r)
+	return func() []report.Record {
+		w.Close() // unblock the reader's EOF once the writer is done
+		var out []report.Record
+		for scanner.Scan() {
+			var rec report.Record
+			if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+				t.Fatalf("unmarshal record %q: %v", scanner.Text(), err)
+			}
+			out = append(out, rec)
+		}
+		return out
+	}
 }
 
 // CaptureStderr returns everything fn writes to os.Stderr.

@@ -11,16 +11,25 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
 	"spindrift.dev/launcher/internal/terminate"
 )
 
 // transitionState logs a failed dispatch-state transition rather than
-// propagating the error.
-func transitionState(it forge.IssueTracker, num string, from, to forge.DispatchState) {
+// propagating the error. note carries the most specific reason live at the
+// call site, "" where none exists -- mirrors settle.Settle's own
+// transitionState(num, from, to, note) shape so both spellings agree.
+func transitionState(it forge.IssueTracker, num string, from, to forge.DispatchState, note string) {
 	if err := it.TransitionState(num, from, to); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s\n", num, to)
+	}
+	// Same failed-write-still-reports rule as settle.Settle.transitionState
+	// (issue #3627): the record is what the host decided, not whether the
+	// tracker write landed.
+	if to.Terminal() {
+		report.Settled(num, to.String(), note)
 	}
 }
 
@@ -128,7 +137,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 			case !result.Success:
 				fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 				result.ReportFailureReason(iss.Number)
-				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
+				transitionState(it, iss.Number, forge.InProgress, forge.Failed, result.FailureNote())
 			default:
 				fmt.Printf("    <- #%s done  (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 				s.Settle(d, iss.Number, iss.Generation, result)
