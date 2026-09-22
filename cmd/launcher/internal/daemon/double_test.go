@@ -42,6 +42,27 @@ type scriptedRunner struct {
 	// is driven by the flag alone, never a revision-string diff.
 	moved []bool
 
+	// coalesceResolve, when set, makes ResolveTip coalesce concurrent
+	// callers into one flight the way hostRunner.ResolveTip does
+	// (cmd/launcher/daemon/runner.go, issue #3625): a caller that arrives
+	// while a resolution is in flight waits on it and returns its exact
+	// Tip/error, without bumping resolveCalls, so resolveCount() counts
+	// resolutions, not callers. Off by default: every existing test scripts
+	// revisions/moved/selfPaths/resolveAt by call index, and turning
+	// coalescing on would silently change which call index a given caller
+	// lands on — never flip it on for an existing test.
+	coalesceResolve bool
+
+	resolveFlightMu sync.Mutex
+	resolveFlight   *scriptedResolveFlight
+
+	// resolveHold/resolveJoins: installed by holdResolve for a test that
+	// needs to pin a coalesced flight's leader in place while it counts
+	// joiners, the resolve-side counterpart of holdSlots/started above. Both
+	// nil (no hold at all) unless holdResolve was called.
+	resolveHold  chan struct{}
+	resolveJoins chan struct{}
+
 	// Result scripting, most specific winning: bySlot (keyed by the
 	// caller's own per-slot call index — needed wherever several slots
 	// call RunChild concurrently, since a shared call counter would hand
@@ -98,6 +119,54 @@ func (r *scriptedRunner) holdSlots(n int) {
 	}
 	r.release = release
 	r.started = make(chan int, n)
+}
+
+// scriptedResolveFlight is one in-flight (or just-finished, until its
+// leader clears r.resolveFlight) coalesced ResolveTip resolution, the
+// double's mirror of hostRunner's tipFlight.
+type scriptedResolveFlight struct {
+	done chan struct{}
+	tip  Tip
+	err  error
+}
+
+// holdResolve switches a coalesced flight's leader (coalesceResolve must
+// also be set) into blocking mode: after registering its flight, it parks
+// on resolveHold until releaseResolve, giving joiners a real window to
+// arrive rather than a race a sleep would only paper over. n sizes the
+// joins channel awaitResolveJoins drains, the same "size the channel to
+// the wait" gesture holdSlots(n) makes for started.
+func (r *scriptedRunner) holdResolve(n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.resolveHold = make(chan struct{})
+	r.resolveJoins = make(chan struct{}, n)
+}
+
+// awaitResolveJoins blocks until n callers have joined the held leader's
+// flight, failing the test with a clear message rather than hanging if
+// fewer than n arrive within five seconds — same bound as awaitStart.
+func (r *scriptedRunner) awaitResolveJoins(t *testing.T, n int) {
+	t.Helper()
+	r.mu.Lock()
+	joins := r.resolveJoins
+	r.mu.Unlock()
+	for i := 0; i < n; i++ {
+		select {
+		case <-joins:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("scriptedRunner: awaitResolveJoins timed out waiting for join %d/%d", i+1, n)
+		}
+	}
+}
+
+// releaseResolve lets a leader parked by holdResolve proceed with its
+// resolution.
+func (r *scriptedRunner) releaseResolve() {
+	r.mu.Lock()
+	hold := r.resolveHold
+	r.mu.Unlock()
+	close(hold)
 }
 
 // releaseSlot hands slot's blocked RunChild call its result. It fails the
@@ -201,16 +270,69 @@ func (r *scriptedRunner) calls() []runCall {
 	return out
 }
 
-// ResolveTip serves the resolve half first: resolveAt short-circuits with
-// resolveErr before the self half is ever reached, so selfCalls is not
-// incremented on that path — the same ordering the pool had when the two
-// were separate methods. The self half then only runs (and counts in
+// ResolveTip dispatches straight to resolveTipOnce unless coalesceResolve
+// is set, in which case it wraps that call in a single-flight the same
+// shape as hostRunner.ResolveTip (cmd/launcher/daemon/runner.go): the first
+// caller becomes the leader and registers the flight, then (if holdResolve
+// installed a hold) parks until released; every caller that arrives while
+// the flight is registered joins it instead — signalling resolveJoins,
+// then waiting on flight.done — without ever calling resolveTipOnce
+// itself, so resolveCalls only ever counts leaders. No TTL: once a flight's
+// done channel is closed and r.resolveFlight cleared, the next caller
+// starts a fresh one, same as production.
+func (r *scriptedRunner) ResolveTip(ctx context.Context) (Tip, error) {
+	if !r.coalesceResolve {
+		return r.resolveTipOnce(ctx)
+	}
+
+	r.resolveFlightMu.Lock()
+	if flight := r.resolveFlight; flight != nil {
+		r.resolveFlightMu.Unlock()
+		r.mu.Lock()
+		joins := r.resolveJoins
+		r.mu.Unlock()
+		if joins != nil {
+			joins <- struct{}{}
+		}
+		select {
+		case <-flight.done:
+			return flight.tip, flight.err
+		case <-ctx.Done():
+			return Tip{}, ctx.Err()
+		}
+	}
+	flight := &scriptedResolveFlight{done: make(chan struct{})}
+	r.resolveFlight = flight
+	r.resolveFlightMu.Unlock()
+
+	r.mu.Lock()
+	hold := r.resolveHold
+	r.mu.Unlock()
+	if hold != nil {
+		<-hold
+	}
+
+	tip, err := r.resolveTipOnce(ctx)
+	flight.tip, flight.err = tip, err
+
+	r.resolveFlightMu.Lock()
+	r.resolveFlight = nil
+	r.resolveFlightMu.Unlock()
+	close(flight.done)
+
+	return tip, err
+}
+
+// resolveTipOnce serves the resolve half first: resolveAt short-circuits
+// with resolveErr before the self half is ever reached, so selfCalls is
+// not incremented on that path — the same ordering the pool had when the
+// two were separate methods. The self half then only runs (and counts in
 // selfCalls) when a test actually scripted it; otherwise the returned
 // Tip.SelfPath is left empty, same as Config.SelfProgram == "" skipping the
 // check outright. A scripted self failure still carries the resolved
 // revision on the returned Tip, wrapped as *SelfEvalError, so the pool's
 // backoff event has a revision to report.
-func (r *scriptedRunner) ResolveTip(ctx context.Context) (Tip, error) {
+func (r *scriptedRunner) resolveTipOnce(ctx context.Context) (Tip, error) {
 	r.mu.Lock()
 	r.resolveCalls++
 	call := r.resolveCalls

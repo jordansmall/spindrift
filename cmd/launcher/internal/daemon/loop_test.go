@@ -1698,3 +1698,60 @@ func TestLoopInvalidConfigPublishesHaltedStatus(t *testing.T) {
 		t.Errorf("status reason = %q, want %q", report.Status.Reason, reason)
 	}
 }
+
+// TestLoopCoalescesConcurrentResolvesAcrossSlots is the Loop-seam
+// acceptance test for issue #3625's coalescing criterion: three slots
+// whose rounds arrive at ResolveTip together must cost the shared Runner
+// one resolve, not three.
+//
+// A single multi-slot pool cannot itself produce that overlap: its own
+// discovery baton (pool.go's awaitBaton) holds one slot at a time between
+// acquiring it and passing it on, and ResolveTip only ever runs inside
+// that span (loop.go's runSlot) — so cross-slot resolves are already
+// strictly serialized by the baton, one caller finishing before the next
+// is ever let in. What a shared Runner actually needs to survive is
+// concurrent callers, however many pools or slots end up driving it
+// concurrently — the same property a production hostRunner instance
+// handed to more than one caller relies on. Three single-slot loops (no
+// baton at all — awaitBaton no-ops when a pool has only one slot) sharing
+// one scriptedRunner reproduce exactly that: "three slots released
+// together" as three independent rounds hitting the same Runner at once,
+// without fighting a serialization mechanism that exists for a different
+// reason.
+//
+// coalesceResolve+holdResolve pins the leader in place until the other two
+// have genuinely joined its flight (not merely started their own — a sleep
+// here would make the test flaky by construction), then releases it: one
+// resolve should answer all three. resolveCount() == 1 is the tripwire —
+// three independently resolving slots would have left it at 3.
+func TestLoopCoalescesConcurrentResolvesAcrossSlots(t *testing.T) {
+	const n = 3
+	r := &scriptedRunner{
+		revisions:       []string{"rev1"},
+		results:         []ChildResult{{Exit: 7}}, // signalled-stop: each loop halts right after its one round
+		coalesceResolve: true,
+	}
+	r.holdResolve(n - 1) // the leader itself never joins its own flight
+
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	done := make(chan Halt, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			done <- Loop(context.Background(), testConfig(1), r, em, clk)
+		}()
+	}
+
+	r.awaitResolveJoins(t, n-1)
+	r.releaseResolve()
+
+	for i := 0; i < n; i++ {
+		<-done
+	}
+
+	if got := r.resolveCount(); got != 1 {
+		t.Fatalf("resolveCalls = %d, want 1: three slots resolving independently would have made 3", got)
+	}
+}
