@@ -198,9 +198,10 @@ func TestRunSignal_BodyFile(t *testing.T) {
 	})
 }
 
-// An over-limit body must error before the socket ever sees it -- on both
-// sources, not just stdin -- rather than either silently truncating (a
-// body-file read) or reporting a size the agent never sent.
+// A body past the verb's own limit must error client-side -- on both sources,
+// not just stdin -- rather than either silently truncating (a body-file read)
+// or reporting a size the agent never sent. Bodies under it still reach the
+// socket, which enforces the smaller per-field MaxBodyBytes itself.
 func TestRunSignal_BodyOverLimit(t *testing.T) {
 	t.Setenv("SIGNAL_SOCKET_ENDPOINT", "unix://"+filepath.Join(t.TempDir(), "unused.sock"))
 	t.Setenv("SIGNAL_SOCKET_SECRET", "")
@@ -388,13 +389,9 @@ func TestRunSignal_TCPSecret(t *testing.T) {
 // newNonce is unexported, so the nonce is asserted here as the Box receives
 // it -- through RUN_NONCE.
 //
-// This issue does not wire the socket into a Dispatch, so there is no
-// production mint site yet to pin against RUN_NONCE. What this test can
-// assert: two independent signalsocket.NewSecret() mints differ from each
-// other and from whatever RUN_NONCE holds, so a constant or a
-// nonce-derived implementation fails. What stays unpinned until the
-// Dispatch wiring lands: whether the real mint site actually reads
-// RUN_NONCE at all.
+// With no production mint site until the Dispatch wiring lands, this pins
+// NewSecret alone: two mints differ from each other and from RUN_NONCE, so a
+// constant or nonce-derived implementation fails.
 func TestRunSignal_SecretIsNotTheRunNonce(t *testing.T) {
 	t.Setenv("RUN_NONCE", "0123456789abcdef0123456789abcdef")
 	srv := startSignalServer(t, "tcp", signalsocket.Config{Consumes: allKinds()})

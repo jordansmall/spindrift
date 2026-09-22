@@ -204,10 +204,9 @@ func signalClient(endpoint string) (*http.Client, string, error) {
 }
 
 // readSignalBody reads the body from bodyFile, or from stdin when it is empty
-// or "-". Both sources are bounded the same way (readLimitedBody), so an
-// over-limit body-file behaves like over-limit stdin: an error naming the
-// source, not a read of the whole file into Box memory before the socket
-// gets a chance to refuse it.
+// or "-". Both sources are bounded the same way (readLimitedBody), so a
+// 1 GiB body-file errors exactly like over-limit stdin instead of landing in
+// Box memory.
 func readSignalBody(bodyFile string, stdin io.Reader) (string, error) {
 	if bodyFile == "" || bodyFile == "-" {
 		return readLimitedBody(stdin, "stdin")
