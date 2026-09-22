@@ -68,7 +68,7 @@ func TestClassifyPreflight(t *testing.T) {
 func TestClassifyPreflightNeverConflatesWithInterpret(t *testing.T) {
 	for exit := 0; exit <= 7; exit++ {
 		preflightOutcome := ClassifyPreflight(exit).Outcome
-		childOutcome, _, _ := Interpret(exit)
+		childOutcome, _, _ := Interpret(exit, false)
 		if preflightOutcome == childOutcome {
 			t.Errorf("exit %d: ClassifyPreflight outcome %q collides with Interpret outcome %q", exit, preflightOutcome, childOutcome)
 		}

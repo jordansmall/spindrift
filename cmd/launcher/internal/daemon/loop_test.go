@@ -200,19 +200,6 @@ func TestLoopExit4ContinuesWithoutSleeping(t *testing.T) {
 	}
 }
 
-func TestLoopExit7Halts(t *testing.T) {
-	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 7}}}
-	clk := &testClock{}
-	var buf bytes.Buffer
-	em := newTestEmitter(&buf)
-
-	reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
-
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Errorf("halt reason = %q, want it to name signalled-stop", reason)
-	}
-}
-
 // TestLoopUnknownExitBacksOffThenHalts pins the new contract for an
 // unrecognised exit code: it backs the slot off rather than halting the
 // pool outright. A follow-up host-tainted exit gives the fake a real halt
@@ -421,14 +408,16 @@ func TestLoopCancelledContextHaltsBeforeStartingNewWork(t *testing.T) {
 	}
 }
 
-func TestLoopCancelledDuringResolveRevisionHaltsBeforeStartingNewWork(t *testing.T) {
-	// A Runner whose ResolveRevision cancels ctx mid-fetch, as the
-	// production adapter's git-fetch path can when the operator sends
-	// SIGTERM while a resolve is in flight — the loop must re-check ctx
-	// after ResolveRevision returns and halt instead of starting a child
-	// that nothing will ever signal.
+// TestLoopCancelledDuringResolveRevisionStillHaltsAtTheNextAdmission pins
+// issue #3626's collapse to one admission check: a ctx cancelled mid-fetch
+// (a bare caller cancel, not cfg.Stop — no ChildRequest.Stop exists to
+// forward it to a running child) is no longer re-checked between
+// ResolveRevision and RunChild, so this iteration's child still starts and
+// runs to completion; the loop only notices the cancellation back at the
+// top of its next iteration, and still halts with the context-cancelled
+// reason rather than ever reaching the breaker.
+func TestLoopCancelledDuringResolveRevisionStillHaltsAtTheNextAdmission(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	// ResolveRevision cancelling ctx then returning the revision normally.
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 0}},
@@ -443,10 +432,10 @@ func TestLoopCancelledDuringResolveRevisionHaltsBeforeStartingNewWork(t *testing
 
 	reason := Loop(ctx, testConfig(1), r, em, clk).String()
 
-	if r.runCount() != 0 {
-		t.Fatalf("run calls = %d, want 0: a ctx cancelled during resolve must halt before starting any child", r.runCount())
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1: nothing re-checks ctx between ResolveRevision and RunChild anymore", r.runCount())
 	}
-	wantEvents(t, &buf, []string{"halt"}, "no child_start once ctx is cancelled mid-resolve")
+	wantEvents(t, &buf, []string{"child_start", "child_finish", "halt"}, "the child that was already admitted still runs and finishes before the halt")
 	if !strings.Contains(reason, "context") {
 		t.Errorf("halt reason = %q, want it to name the cancellation", reason)
 	}

@@ -25,16 +25,22 @@ const (
 const outcomeNoneDispatchable = "none-dispatchable"
 
 // Interpret maps a child's exit code to a stable outcome label for the event
-// stream, the loop's next action, and — for the three exits that halt the
-// pool — the HaltClass that outcome renders as. All three ride the same
-// table so the class can never drift from the outcome label it names: a
-// second table would risk, say, exit 6 changing its outcome string here
-// without its HaltClass following along. Every other exit returns HaltNone:
+// stream, the loop's next action, and — for the exits that halt the pool —
+// the HaltClass that outcome renders as. All three ride the same table so
+// the class can never drift from the outcome label it names: a second table
+// would risk, say, exit 6 changing its outcome string here without its
+// HaltClass following along. Every other exit returns HaltNone:
 // Continue/Wait/Backoff never halt, so there is nothing to classify.
 // It mirrors cmd/launcher/main.go's exitCodeFor taxonomy (main.go:1774-1798,
 // exitConfigInvalid/exitSignalledStop at main.go:1183-1192) — the exit codes
 // are that loop's contract, not this package's to redefine.
-func Interpret(exit int) (outcome string, action Action, halt HaltClass) {
+//
+// stopClosed is whether cfg.Stop was already closed when the child exited:
+// it only changes exit 7's answer (every other exit ignores it), because
+// exit 7 itself is ambiguous — it means "the operator stopped this child"
+// only while Stop is closed; while Stop is open, it means someone else
+// signalled that child, an unclassified failure like any other (#3626).
+func Interpret(exit int, stopClosed bool) (outcome string, action Action, halt HaltClass) {
 	switch exit {
 	case 0:
 		return "dispatched", Continue, HaltNone
@@ -53,7 +59,10 @@ func Interpret(exit int) (outcome string, action Action, halt HaltClass) {
 	case 6:
 		return "config-invalid", HaltPool, HaltChildConfigInvalid
 	case 7:
-		return "signalled-stop", HaltPool, HaltChildSignalled
+		if stopClosed {
+			return "signalled-stop", HaltPool, HaltChildSignalled
+		}
+		return "signalled-stop", Backoff, HaltNone
 	default:
 		return "error", Backoff, HaltNone
 	}

@@ -99,16 +99,16 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 		t.Fatalf("peak concurrency = %d, want %d: slots did not overlap", peak, slots)
 	}
 
-	// Every slot halts on release (exit 7 == signalled-stop). Whichever
+	// Every slot halts on release (exit 5 == host-tainted). Whichever
 	// slot's RunChild returns first wins the halt race; the others must
 	// still be allowed to finish rather than being cut off.
 	for s := 0; s < slots; s++ {
-		r.releaseSlot(t, s, ChildResult{Exit: 7})
+		r.releaseSlot(t, s, ChildResult{Exit: 5})
 	}
 
 	reason := (<-done).String()
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 
 	events := decodeEvents(t, &buf)
@@ -230,7 +230,7 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 
 	// Wait for the pool's own halt event before releasing slot 0/1's
 	// still-in-flight children: the pool's mutex gives every later Lock
-	// (including slot 0/1's own stopOnCancel check) a happens-after view
+	// (including slot 0/1's own haltIfStopping check) a happens-after view
 	// of the halt, so once this line is observed they are guaranteed to
 	// notice the halt and return rather than starting a fourth call.
 	nw.waitForLine(t, "\"event\":\"halt\"")
@@ -449,7 +449,7 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	}
 
 	// End the test: halt via slot 0's still-in-flight first child.
-	r.releaseSlot(t, 0, ChildResult{Exit: 7})
+	r.releaseSlot(t, 0, ChildResult{Exit: 5})
 	nw.waitForLine(t, "\"event\":\"halt\"")
 
 	// Slot 1's restarted child is still in flight; release it so Loop can
@@ -457,8 +457,8 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	r.releaseSlot(t, 1, ChildResult{Exit: 0})
 
 	reason := (<-done).String()
-	if !strings.Contains(reason, "signalled-stop") {
-		t.Fatalf("halt reason = %q, want it to name signalled-stop", reason)
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
 	}
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
@@ -520,7 +520,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 
 	// End the test: cancelling the top-level ctx reaches both slots
 	// through their gated Sleep call (blocked on ctx.Done()), so both
-	// return via stopOnCancel without ever starting a third RunChild call
+	// return via haltIfStopping without ever starting a third RunChild call
 	// this test never scripts a release for.
 	cancel()
 	reason := (<-done).String()
@@ -607,7 +607,7 @@ func TestPoolExit3WithSiblingResolvingReportsIdleNotJam(t *testing.T) {
 
 	// End the test: cancelling ctx releases slot 0's blocked fetch (the
 	// hook itself selects on ctx.Done()) and any wait slot 1 has since
-	// parked in, so both slots return via stopOnCancel without either one
+	// parked in, so both slots return via haltIfStopping without either one
 	// ever needing a scripted result this test does not provide.
 	cancel()
 	reason := (<-done).String()
