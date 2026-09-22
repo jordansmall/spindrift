@@ -233,7 +233,12 @@ labels (fatal if missing) plus eleven advisory labels (the seven
 `agent-ambiguous-spec`). Run interactively, it offers to create missing
 labels; in CI it exits non-zero when a triage label is missing or the
 configuration is invalid — see [exit codes](docs/reference.md#spindrift-doctor-exit-codes-issue-2569)
-for the full vocabulary.
+for the full vocabulary. The report is quiet by default: a healthy run prints
+nothing and exits 0, and without the flag only `MISSING:` rows and their
+`remedy:` lines, the interactive create-label prompt, and its
+`created:`/still-missing lines reach stdout. Pass `--verbose`/`-v` for the full
+report, including the read-only token gates' own `WARNING:` lines for an
+uninspectable Box token.
 
 ## Basic flow
 
