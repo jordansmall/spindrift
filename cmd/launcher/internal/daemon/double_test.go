@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/report"
 )
 
 // scriptedRunner is the package's one scriptable Runner double, replacing
@@ -74,11 +76,10 @@ type scriptedRunner struct {
 	// results sequence in total call order. A test wanting per-slot
 	// results pins the call order instead — holdSlots/releaseSlot, or
 	// a hook that serialises the slots — never a slot-keyed tier here.
-	byKind       map[Kind][]ChildResult
-	results      []ChildResult
-	runErrAt     int
-	runErr       error
-	runErrIssues []string
+	byKind   map[Kind][]ChildResult
+	results  []ChildResult
+	runErrAt int
+	runErr   error
 
 	// Hooks fire before the scripted answer is computed, at each seam
 	// crossing, so a test can cancel a context or read a clock at exactly
@@ -95,7 +96,7 @@ type scriptedRunner struct {
 	kindCalls    map[Kind]int
 	inFlight     int
 	peak         int
-	onIssue      map[int]func(string)
+	onRecord     map[int]func(Record)
 
 	// release/started: installed by holdSlots for tests that need to hold
 	// several children open at once and release them one at a time. A nil
@@ -223,12 +224,12 @@ func (r *scriptedRunner) releaseSlot(t *testing.T, slot int, res ChildResult) {
 }
 
 // announceEachSlot installs an onStart that announces "issue-<slot>" through
-// req.OnIssue, the one shape every RunChild call site that wants a per-slot
+// req.OnRecord, the one shape every RunChild call site that wants a per-slot
 // issue announcement needs.
 func (r *scriptedRunner) announceEachSlot() {
 	r.onStart = func(ctx context.Context, req ChildRequest) error {
-		if req.OnIssue != nil {
-			req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
+		if req.OnRecord != nil {
+			req.OnRecord(Record{Event: report.EventBox, Issue: fmt.Sprintf("issue-%d", req.Slot)})
 		}
 		return nil
 	}
@@ -250,19 +251,28 @@ func (r *scriptedRunner) awaitStart(t *testing.T) int {
 	}
 }
 
-// fireOnIssue calls slot's most recently captured RunChild call's
-// OnIssue, simulating a live Box announcement while that child is still in
-// flight. Failing rather than silently no-op-ing on a nil hook catches a
+// fireOnRecord calls slot's most recently captured RunChild call's
+// OnRecord, simulating a live report-pipe record while that child is still
+// in flight. Failing rather than silently no-op-ing on a nil hook catches a
 // test that fires before the slot's RunChild call has actually happened.
-func (r *scriptedRunner) fireOnIssue(t *testing.T, slot int, issue string) {
+func (r *scriptedRunner) fireOnRecord(t *testing.T, slot int, rec Record) {
 	t.Helper()
 	r.mu.Lock()
-	fn := r.onIssue[slot]
+	fn := r.onRecord[slot]
 	r.mu.Unlock()
 	if fn == nil {
-		t.Fatalf("scriptedRunner: fireOnIssue: no OnIssue captured for slot %d", slot)
+		t.Fatalf("scriptedRunner: fireOnRecord: no OnRecord captured for slot %d", slot)
 	}
-	fn(issue)
+	fn(rec)
+}
+
+// fireOnIssue is fireOnRecord's convenience wrapper for the many existing
+// call sites that only ever simulate a "box" record for a bare issue
+// number — keeping them from having to spell out Record{Event: "box", ...}
+// at every call.
+func (r *scriptedRunner) fireOnIssue(t *testing.T, slot int, issue string) {
+	t.Helper()
+	r.fireOnRecord(t, slot, Record{Event: report.EventBox, Issue: issue})
 }
 
 func (r *scriptedRunner) resolveCount() int {
@@ -450,10 +460,10 @@ func (r *scriptedRunner) RunChild(ctx context.Context, req ChildRequest) (ChildR
 	}
 	kindIdx := r.kindCalls[req.Kind]
 	r.kindCalls[req.Kind]++
-	if r.onIssue == nil {
-		r.onIssue = make(map[int]func(string))
+	if r.onRecord == nil {
+		r.onRecord = make(map[int]func(Record))
 	}
-	r.onIssue[req.Slot] = req.OnIssue
+	r.onRecord[req.Slot] = req.OnRecord
 	r.inFlight++
 	if r.inFlight > r.peak {
 		r.peak = r.inFlight
@@ -493,7 +503,7 @@ func (r *scriptedRunner) RunChild(ctx context.Context, req ChildRequest) (ChildR
 	}
 
 	if r.runErrAt != 0 && total == r.runErrAt {
-		return ChildResult{Issues: r.runErrIssues}, r.runErr
+		return ChildResult{}, r.runErr
 	}
 	if list, ok := r.byKind[req.Kind]; ok {
 		return pickScripted(list, kindIdx), nil
@@ -739,7 +749,7 @@ func TestScriptedRunnerSelfPathUnscriptedNeverServed(t *testing.T) {
 func TestScriptedRunnerAllUnsetYieldsZeroValuesNotPanic(t *testing.T) {
 	r := &scriptedRunner{}
 	res, err := r.RunChild(context.Background(), ChildRequest{Slot: 0})
-	if err != nil || res.Exit != 0 || res.Issues != nil {
+	if err != nil || res.Exit != 0 {
 		t.Fatalf("RunChild with nothing scripted = (%+v, %v), want (zero ChildResult, nil)", res, err)
 	}
 	tip, err := r.ResolveTip(context.Background())
@@ -776,21 +786,16 @@ func TestScriptedRunnerResultsSharedSequence(t *testing.T) {
 
 func TestScriptedRunnerRunErrAt(t *testing.T) {
 	r := &scriptedRunner{
-		results:      []ChildResult{{Exit: 0}},
-		runErrAt:     2,
-		runErr:       errors.New("runboom"),
-		runErrIssues: []string{"issue-9"},
+		results:  []ChildResult{{Exit: 0}},
+		runErrAt: 2,
+		runErr:   errors.New("runboom"),
 	}
 	ctx := context.Background()
 	if _, err := r.RunChild(ctx, ChildRequest{Slot: 0}); err != nil {
 		t.Fatalf("call 1 err = %v, want nil", err)
 	}
-	res, err := r.RunChild(ctx, ChildRequest{Slot: 0})
-	if err == nil {
+	if _, err := r.RunChild(ctx, ChildRequest{Slot: 0}); err == nil {
 		t.Fatalf("call 2 err = nil, want runErr")
-	}
-	if len(res.Issues) != 1 || res.Issues[0] != "issue-9" {
-		t.Fatalf("call 2 issues = %v, want [issue-9]", res.Issues)
 	}
 }
 
@@ -846,7 +851,7 @@ func TestScriptedRunnerRunErrAtWinsOverByKind(t *testing.T) {
 		runErr:   errors.New("runboom"),
 	}
 	res, err := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindDispatch})
-	if err == nil || res.Exit != 0 || res.Issues != nil {
+	if err == nil || res.Exit != 0 {
 		t.Fatalf("= (%+v, %v), want (zero ChildResult, runErr) (runErrAt wins over byKind)", res, err)
 	}
 }
@@ -902,12 +907,12 @@ func TestScriptedRunnerFireOnIssueCallsCapturedHook(t *testing.T) {
 	var got string
 	r.holdSlots(1)
 	go func() {
-		_, _ = r.RunChild(context.Background(), ChildRequest{Slot: 0, OnIssue: func(issue string) { got = issue }})
+		_, _ = r.RunChild(context.Background(), ChildRequest{Slot: 0, OnRecord: func(rec Record) { got = rec.Issue }})
 	}()
 	r.awaitStart(t)
 	r.fireOnIssue(t, 0, "issue-42")
 	if got != "issue-42" {
-		t.Fatalf("OnIssue fired with %q, want issue-42", got)
+		t.Fatalf("OnRecord fired with %q, want issue-42", got)
 	}
 	r.releaseSlot(t, 0, ChildResult{})
 }

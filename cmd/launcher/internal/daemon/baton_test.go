@@ -153,9 +153,10 @@ func awaitSiblingStart(t *testing.T, r *scriptedRunner, again ChildResult) {
 // pre-assigned initial holder (slot 0) starts discovery; every other slot
 // parks on baton_hold rather than running its own discovery against the
 // same tracker snapshot. Once the holder announces a claim (live, via
-// OnIssue, not after its child exits), the baton passes to exactly one
-// waiting slot — never both at once, which is the whole point of a token
-// versus the old one-shot gate that released every sibling together.
+// OnRecord's box record, not after its child exits), the baton passes to
+// exactly one waiting slot — never both at once, which is the whole point
+// of a token versus the old one-shot gate that released every sibling
+// together.
 func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 	const slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}

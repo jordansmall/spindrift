@@ -30,14 +30,23 @@ type Event struct {
 	// reset actually ended (see pool.go's noteTipMoved) — plural because a
 	// moved tip is evidence for every jammed kind at once, not just
 	// whichever kind Kind would have named.
-	Kinds    []Kind `json:"kinds,omitempty"`
-	Issue    string `json:"issue,omitempty"`
+	Kinds []Kind `json:"kinds,omitempty"`
+	Issue string `json:"issue,omitempty"`
+	// Phase is the box event's own field — "initial", "fix-pass-N" or
+	// "conflict-resolve" — carried straight from the child's report.Record
+	// (issue #3627); no other event sets it.
+	Phase    string `json:"phase,omitempty"`
 	Revision string `json:"revision,omitempty"`
 	Slot     *int   `json:"slot,omitempty"`
 	Exit     *int   `json:"exit,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Wait     string `json:"wait,omitempty"`
+	// State and Note are the settled event's own fields, carried straight
+	// from the child's report.Record — issue's terminal outcome
+	// (complete/failed/recoverable/ambiguous) and any free-text detail.
+	State string `json:"state,omitempty"`
+	Note  string `json:"note,omitempty"`
 	// Failures is the breaker's failure count, stamped on breaker_trip so
 	// the event names the transition without cross-referencing an earlier
 	// backoff event.

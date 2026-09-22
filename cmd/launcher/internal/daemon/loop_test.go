@@ -13,6 +13,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	// aliased: two tests below declare a local "report" (a StatusReport)
+	// that would otherwise shadow the package name for the rest of their
+	// function body.
+	reportpkg "spindrift.dev/launcher/internal/report"
 )
 
 type runCall struct {
@@ -288,13 +293,26 @@ func TestLoopRunChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 }
 
 // TestLoopRunChildErrorStillEmitsAnnouncedBoxes covers the non-ExitError
-// wait-failure path (runner.go): RunChild can return Issues alongside an
-// error when the child announced Boxes before the seam itself failed. Those
-// Boxes must still reach the durable stream, so a box event lands before
-// child_finish even on the error path.
+// wait-failure path (runner.go): a child can report a box record over its
+// pipe and only then have the seam itself fail (a wait failure that is no
+// ExitError). That box must still reach the durable stream, so a box event
+// lands before child_finish even on the error path — reported live via
+// OnRecord, from onStart, since a seam-failed call never reaches a
+// scripted ChildResult at all.
 func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 	wantErr := errors.New("wait: signal: killed")
-	r := &scriptedRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, runErrIssues: []string{"42"}, results: []ChildResult{{Exit: 5}}}
+	var calls int
+	r := &scriptedRunner{
+		revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr,
+		results: []ChildResult{{Exit: 5}},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			calls++
+			if calls == 1 && req.OnRecord != nil {
+				req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "42"})
+			}
+			return nil
+		},
+	}
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -308,11 +326,17 @@ func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 }
 
 func TestLoopEventStreamSequenceAndFields(t *testing.T) {
+	var calls int
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
-		results: []ChildResult{
-			{Exit: 0, Issues: []string{"10", "11"}},
-			{Exit: 5},
+		results:   []ChildResult{{Exit: 0}, {Exit: 5}},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			calls++
+			if calls == 1 && req.OnRecord != nil {
+				req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "10"})
+				req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "11"})
+			}
+			return nil
 		},
 	}
 	clk := &testClock{}
@@ -1692,7 +1716,7 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 5}}, // host-tainted: Loop halts promptly after this call
 		onStart: func(ctx context.Context, req ChildRequest) error {
-			req.OnIssue("42")
+			req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "42"})
 			report, probeErr = ReadStatus(dir)
 			return nil
 		},
@@ -1731,6 +1755,73 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 	}
 	if report.Status == nil {
 		t.Fatalf("status file missing after Loop finished")
+	}
+}
+
+// TestLoopBoxSettledAndUnknownRecords drives one child through a box
+// record (with phase), an unknown record, and a settled record over
+// OnRecord (issue #3627), and pins: the box event carries phase and lands
+// the issue in the live status file's slot while the child is still
+// running; the unknown record produces neither an event nor an error; the
+// settled event carries issue/state/note; and child_finish carries the
+// issue the child claimed.
+func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
+	dir := t.TempDir()
+	clk := &testClock{}
+	sw := NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
+
+	var report StatusReport
+	var probeErr error
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 5}}, // host-tainted: Loop halts promptly after this call
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "42", Phase: "initial"})
+			// A live status read here is genuinely about the in-flight
+			// file, not the one left behind after the child returns.
+			report, probeErr = ReadStatus(dir)
+			// An event this daemon build doesn't recognise must produce
+			// neither an event nor an error — never crash the slot
+			// goroutine mid-run.
+			req.OnRecord(Record{Event: "heartbeat", Issue: "99"})
+			req.OnRecord(Record{Event: reportpkg.EventSettled, Issue: "42", State: "complete", Note: "merged clean"})
+			return nil
+		},
+	}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Status = sw
+
+	reason := Loop(context.Background(), cfg, r, em, clk).String()
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
+	}
+
+	if probeErr != nil {
+		t.Fatalf("ReadStatus during RunChild: %v", probeErr)
+	}
+	if report.Status == nil {
+		t.Fatalf("status was nil while the child was still running")
+	}
+	if !reflect.DeepEqual(report.Status.Slots[0].Issues, []string{"42"}) {
+		t.Fatalf("in-flight issues = %v, want [42] (the heartbeat record must not appear)", report.Status.Slots[0].Issues)
+	}
+
+	events := wantEvents(t, &buf, []string{"child_start", "box", "settled", "child_finish", "halt"}, "")
+
+	box := events[1]
+	if box.Issue != "42" || box.Phase != "initial" {
+		t.Errorf("box event = %+v, want issue 42 phase initial", box)
+	}
+	settled := events[2]
+	if settled.Issue != "42" || settled.State != "complete" || settled.Note != "merged clean" {
+		t.Errorf("settled event = %+v, want issue 42 state complete note %q", settled, "merged clean")
+	}
+	finish := events[3]
+	if finish.Issue != "42" {
+		t.Errorf("child_finish event Issue = %q, want %q", finish.Issue, "42")
 	}
 }
 

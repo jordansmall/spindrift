@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"spindrift.dev/launcher/internal/report"
 )
 
 // Tip is one resolution of the base branch's tip: the revision to pin the
@@ -34,10 +36,12 @@ func (e *SelfEvalError) Unwrap() error { return e.Err }
 // daemon's own build would be at that revision) and run a child of a given
 // Dispatch kind at a resolved revision.
 //
-// RunChild may return a ChildResult carrying Issues alongside a non-nil
-// error: a child can announce Boxes and only then fail the seam itself (a
-// wait failure that is no ExitError), and those Boxes are real work already
-// in flight, so Loop emits them before it halts.
+// A child's box/settled records reach the caller live, through
+// ChildRequest.OnRecord, as they arrive — not bundled onto ChildResult —
+// so there is nothing left for RunChild's return value to carry once the
+// seam itself fails partway through a run: whatever records a child
+// reported before a wait failure already reached the stream through
+// OnRecord, and ChildResult only ever needed to report the exit.
 type Runner interface {
 	// ResolveTip fetches the base branch's current tip. An error that
 	// unwraps to *SelfEvalError means the fetch itself succeeded (the
@@ -66,13 +70,13 @@ type ChildRequest struct {
 	Stop     <-chan struct{}
 	Abort    <-chan struct{}
 
-	// OnIssue, when non-nil, is called with each issue the child announces a
-	// Box for, as the announce line is read rather than after the child
-	// exits. ChildResult.Issues remains the authoritative, ordered record for
-	// the event stream; this is the live channel the status file needs to name
-	// the issue a slot has in flight while the child is still running (issue
-	// #3545) — after-the-fact Issues can only ever say what a slot *had*.
-	OnIssue func(issue string)
+	// OnRecord, when non-nil, is called with each Record the child reports
+	// over its private pipe (internal/report), live as each line arrives
+	// rather than after the child exits — the channel the status file needs
+	// to name the issue a slot has in flight while the child is still
+	// running (issue #3545), and the only channel a "settled" record ever
+	// reaches at all.
+	OnRecord func(rec Record)
 }
 
 // Clock is the loop's time seam: Now for the breaker's window, Sleep for
@@ -83,12 +87,12 @@ type Clock interface {
 	Sleep(ctx context.Context, d time.Duration)
 }
 
-// ChildResult is what one child invocation reports back. Issues holds the
-// issue numbers the child announced Boxes for, in announce order, so the
-// loop can emit one "box" event per announced issue.
+// ChildResult is what one child invocation reports back: only the exit
+// code. Every box/settled record the child reported already reached the
+// stream live through ChildRequest.OnRecord as it arrived, so there is
+// nothing left for the post-exit result to carry.
 type ChildResult struct {
-	Exit   int
-	Issues []string
+	Exit int
 }
 
 // Config is the loop's tuning: which Dispatch kinds to draw from, how many
@@ -475,18 +479,32 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			Revision: revision,
 			Stop:     cfg.Stop,
 			Abort:    cfg.Abort,
-			OnIssue: func(issue string) {
-				p.noteIssue(slot, issue)
-				// A claim settles discovery the moment it happens, live,
-				// rather than waiting for this child to exit.
-				p.passBaton(slot, batonPassClaimed)
+			OnRecord: func(rec Record) {
+				switch rec.Event {
+				case report.EventBox:
+					p.noteBox(slot, kind, revision, rec.Issue, rec.Phase)
+					// A claim settles discovery the moment it happens, live,
+					// rather than waiting for this child to exit.
+					p.passBaton(slot, batonPassClaimed)
+				case report.EventSettled:
+					p.noteSettled(slot, kind, revision, rec.Issue, rec.State, rec.Note)
+				}
+				// No default clause: an event this switch hasn't been
+				// taught yet is silently ignored. ParseRecord already
+				// dropped a genuinely unknown event upstream (record.go),
+				// so only a known-but-unhandled Event value can reach
+				// this switch and fall through unmatched.
 			},
 		}
 		result, err := p.r.RunChild(ctx, req)
+		// Read under the pool lock, and before finishChild zeroes the
+		// slot's flight: this is the only place the issue the child
+		// claimed is still available at all.
+		issue := p.flightIssue(slot)
 		p.finishChild(slot)
 		// One site covers every post-child exit without a claim at once:
 		// queue empty, none dispatchable, an unrecognised exit, or a
-		// RunChild seam error. A no-op when OnIssue already passed the
+		// RunChild seam error. A no-op when a box record already passed the
 		// baton above.
 		p.passBaton(slot, batonPassChildEnded)
 		if err != nil {
@@ -494,22 +512,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// started), so there is no exit code to report — but a
 			// child_start was already emitted, and every started child
 			// gets a matching child_finish so the stream never shows one
-			// without the other. RunChild can still return Issues alongside
-			// the error (e.g. a non-ExitError wait failure after the child
-			// announced boxes), so emit those first: an announced Box must
-			// reach the durable stream even when the seam itself failed.
-			for _, issue := range result.Issues {
-				p.emit(Event{Event: "box", Kind: kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
-			}
-			p.emit(Event{Event: "child_finish", Kind: kind, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
+			// without the other. Every box/settled record the child
+			// reported before this failure already reached the stream live
+			// through OnRecord, so there is nothing left to replay here.
+			p.emit(Event{Event: "child_finish", Kind: kind, Issue: issue, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
 			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err)) {
 				return
 			}
 			continue
-		}
-
-		for _, issue := range result.Issues {
-			p.emit(Event{Event: "box", Kind: kind, Issue: issue, Revision: revision, Slot: intPtr(slot)})
 		}
 
 		exit := result.Exit
@@ -517,7 +527,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		// was already closed when the child exited; read the latch once,
 		// here, rather than let a later close race Interpret's answer.
 		outcome, action, haltClass := Interpret(exit, p.stopClosed())
-		p.emit(Event{Event: "child_finish", Kind: kind, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
+		p.emit(Event{Event: "child_finish", Kind: kind, Issue: issue, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
 
 		switch action {
 		case Continue:

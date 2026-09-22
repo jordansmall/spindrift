@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"spindrift.dev/launcher/internal/report"
 )
 
 // pool is the shared state behind Loop's slot goroutines. It owns the one
@@ -161,11 +163,17 @@ const (
 	batonHoldReason = "waiting for the discovery baton: another slot's child is still discovering"
 )
 
-// slotFlight is what one occupied slot currently has in flight.
+// slotFlight is what one occupied slot currently has in flight. issues is
+// the deduped set behind SlotStatus.Issues (origin/main's "seen" semantics,
+// issue #3627's review finding) in first-seen order; last is tracked
+// separately since a repeat-issue box (e.g. a fix-pass after the initial
+// box) must still move flightIssue's answer even though it adds nothing to
+// issues.
 type slotFlight struct {
 	kind     Kind
 	revision string
 	issues   []string
+	last     string
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -317,7 +325,12 @@ func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatch
 // child_start event, together in one mutate: the phase flip is therefore
 // always visible to any snapshot that publishes alongside this event, which
 // a hand-placed write after a separately-emitted child_start could not
-// otherwise guarantee.
+// otherwise guarantee. child_start carries no issue: the daemon cannot know
+// which issue a freshly started child will work until it reports a "box"
+// record, and waiting to emit child_start until then would either hide a
+// started child from the stream for its whole queue scan, or emit nothing
+// at all for a child that never claims — the "box" event is where the
+// slot↔issue binding first appears (see noteBox).
 func (p *pool) startChild(slot int, kind Kind, revision string) {
 	p.mutate(func(s *state) []Event {
 		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision}}
@@ -337,19 +350,65 @@ func (p *pool) finishChild(slot int) {
 	})
 }
 
-// noteIssue appends issue to slot's in-flight issue list, for a snapshot to
-// report while the child is still running. A no-op if slot is not currently
-// running: the child announced after the slot cleared, which can only be a
-// race (RunChild already returned), not a state worth publishing. Dedupe is
-// already done by the runner, so this never re-dedupes.
-func (p *pool) noteIssue(slot int, issue string) {
+// noteBox records issue as slot's most recently boxed issue and, the first
+// time this child run boxes it, appends it to slot's in-flight issue list
+// for a snapshot to report while the child is still running — deduped, to
+// match origin/main's "seen" semantics, since a fix-pass box for an issue
+// already open in this slot is the same claim continuing, not a second one
+// (issue #3627's review finding). It emits the box event unconditionally,
+// dedup or not: a fix-pass box is a real thing that happened, and only the
+// status-file issue list collapses repeats, not the event stream. Both in
+// one mutate so the event and the status snapshot it rides alongside always
+// agree. A no-op — no state change, no event — if slot is not currently
+// running: the child reported after the slot cleared, which can only be a
+// race (RunChild already returned), not a state worth publishing.
+func (p *pool) noteBox(slot int, kind Kind, revision, issue, phase string) {
 	p.mutate(func(s *state) []Event {
 		if s.slots[slot].phase != PhaseRunning {
 			return nil
 		}
-		s.slots[slot].flight.issues = append(s.slots[slot].flight.issues, issue)
-		return nil
+		flight := &s.slots[slot].flight
+		flight.last = issue
+		seen := false
+		for _, existing := range flight.issues {
+			if existing == issue {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			flight.issues = append(flight.issues, issue)
+		}
+		return []Event{{Event: report.EventBox, Kind: kind, Revision: revision, Issue: issue, Phase: phase, Slot: intPtr(slot)}}
 	})
+}
+
+// noteSettled emits the settled event through the same mutate-ordered path
+// as noteBox, so a settled record is never reordered against the status
+// snapshot or another pool event. Unlike noteBox it touches no state: a
+// settled record names a terminal outcome, not a fact the in-flight
+// SlotStatus.Issues list needs to grow by.
+// It carries no `phase != PhaseRunning` guard either, though noteBox's race
+// applies here too: a settled record names the issue's terminal outcome,
+// true whether or not the slot still runs, and dropping it would lose the
+// one event that answers "what happened to #123".
+func (p *pool) noteSettled(slot int, kind Kind, revision, issue, settledState, note string) {
+	p.mutate(func(*state) []Event {
+		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Issue: issue, State: settledState, Note: note, Slot: intPtr(slot)}}
+	})
+}
+
+// flightIssue returns the issue slot's child most recently boxed (the last
+// value noteBox recorded, regardless of whether that box was a repeat and
+// so never grew the deduped issues list), or "" if it boxed none. Read
+// directly under p.mu rather than through mutate, since it changes
+// nothing; callers that need it for a child_finish event must call it
+// before finishChild zeroes the slot's flight — this is the only place
+// that issue is still available at all.
+func (p *pool) flightIssue(slot int) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.st.slots[slot].flight.last
 }
 
 // working reports whether any slot's phase is running — snapshotLocked's
