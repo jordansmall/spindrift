@@ -19,6 +19,16 @@ const operatorSkillsDir = "/operator-skills"
 // name this in-box path in REGISTRY_PROXY_MANIFEST, not the host-side source.
 const RegistryProxySocketTarget = "/registry-proxy.sock"
 
+// SocketMount names one launcher-owned unix socket buildMountSpecs mounts
+// into a Box (issue #3723): Source is the launcher-side host path, Target the
+// fixed in-Box path it always lands at. No ReadOnly or Message field: every
+// socket mount goes through candidateSocketMount, which always returns a
+// writable, silent spec.
+type SocketMount struct {
+	Source string
+	Target string
+}
+
 // MountSpec describes one host-to-box mount. Whether a mount applies is
 // decided once by buildMountSpecs, independent of runtime backend; each
 // adapter only renders a MountSpec into its own flag syntax.
@@ -109,8 +119,10 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 		}
 	}
 
-	if spec, ok := candidateSocketMount(box.RegistryProxy.Endpoint.SocketPath(), RegistryProxySocketTarget); ok {
-		specs = append(specs, spec)
+	for _, s := range box.Sockets {
+		if spec, ok := candidateSocketMount(s.Source, s.Target); ok {
+			specs = append(specs, spec)
+		}
 	}
 
 	return specs

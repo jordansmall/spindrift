@@ -536,7 +536,7 @@ const registryProbeEntrypoint = "driver-exec"
 // --rm is added because a probe must leave no stopped container behind, unlike
 // a real Box, which the caller reaps explicitly.
 func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName string) []string {
-	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(hostSocketPath)}}
+	box := Box{Name: containerName, Sockets: []SocketMount{{Source: hostSocketPath, Target: RegistryProxySocketTarget}}}
 	full := a.buildRunArgs(box)
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
 	return append(args, a.image, "probe-registry-socket", "-path", RegistryProxySocketTarget)

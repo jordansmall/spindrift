@@ -52,6 +52,13 @@ type Box struct {
 	// RegistryProxy locates the launcher-side registry-credential proxy.
 	RegistryProxy RegistryProxyLocation
 
+	// Sockets lists launcher-owned unix sockets mounted read-write at fixed
+	// in-Box paths (issue #3723); empty mounts nothing. The caller takes the
+	// transport verdict once per Dispatch, so an entry exists only when that
+	// verdict was unix — dispatch lists the minted host socket path here,
+	// which is what the mount layer reads.
+	Sockets []SocketMount
+
 	// ClosureGeneration optionally names the agent-closure generation this
 	// launch binds (issue #2681); nil binds the adapter's own default.
 	ClosureGeneration *AgentGeneration
@@ -64,8 +71,9 @@ type Box struct {
 // means the feature is off for this Box.
 type RegistryProxyLocation struct {
 	// Endpoint is the unix-socket or TCP host the proxy is reachable at (ADR
-	// 0045); exactly one of IsUnix()/IsTCP() holds once the feature is on. A
-	// unix Endpoint is mounted read-write at RegistryProxySocketTarget.
+	// 0045); exactly one of IsUnix()/IsTCP() holds once the feature is on. It
+	// is not the mount source: dispatch lists the minted host socket path in
+	// Box.Sockets, which is what the mount layer reads.
 	Endpoint registrymanifest.Endpoint
 
 	// TCPSecret is the per-run secret (registrymanifest.TCPSecretHeader) every

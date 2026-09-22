@@ -1,10 +1,9 @@
 package runner
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
-
-	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // Values of offArgvKeys must stay off bwrap's argv, where ps and /proc would
@@ -119,8 +118,8 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
-// A Box-derived RegistryProxy endpoint's unix path becomes a --bind onto the
-// fixed /registry-proxy.sock (ADR 0044, issue #2849).
+// A Box.Sockets entry's unix path becomes a --bind onto its fixed target
+// (ADR 0044, issue #2849; issue #3723).
 func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
 	a := &bwrapAdapter{
@@ -128,12 +127,45 @@ func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}})
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, Sockets: []SocketMount{{Source: sock, Target: RegistryProxySocketTarget}}})
 
 	argStr := strings.Join(args, " ")
 	want := "--bind " + sock + " /registry-proxy.sock"
 	if !strings.Contains(argStr, want) {
 		t.Errorf("registry-proxy socket bind %q not found in args: %v", want, args)
+	}
+}
+
+// issue #3723: two Box.Sockets entries each render their own --dir parent +
+// --bind pair, none as --ro-bind.
+func TestBwrapArgs_MultipleSockets_TwoBindPairs(t *testing.T) {
+	sockA := newTestSocket(t, "registry-proxy.sock")
+	sockB := newTestSocket(t, "signal.sock")
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	box := Box{Env: map[string]string{}, Sockets: []SocketMount{
+		{Source: sockA, Target: RegistryProxySocketTarget},
+		{Source: sockB, Target: "/signal.sock"},
+	}}
+	args := a.buildArgs("/tmp/fake-etc", box)
+	argStr := strings.Join(args, " ")
+
+	for _, m := range []struct{ source, target string }{
+		{sockA, RegistryProxySocketTarget},
+		{sockB, "/signal.sock"},
+	} {
+		if !strings.Contains(argStr, "--dir "+filepath.Dir(m.target)) {
+			t.Errorf("missing --dir for parent of %q in args: %v", m.target, args)
+		}
+		if !strings.Contains(argStr, "--bind "+m.source+" "+m.target) {
+			t.Errorf("missing --bind %s %s in args: %v", m.source, m.target, args)
+		}
+		if strings.Contains(argStr, "--ro-bind "+m.source+" "+m.target) {
+			t.Errorf("socket mount %s -> %s must not be --ro-bind; args: %v", m.source, m.target, args)
+		}
 	}
 }
 

@@ -578,21 +578,43 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	}
 }
 
-// TestBuildRunArgs_RegistryProxySocketMounted: a Box-derived
-// RegistryProxy.Endpoint's unix path produces a -v <source>:/registry-proxy.sock
-// entry (ADR 0044, issue #2849).
+// TestBuildRunArgs_RegistryProxySocketMounted: a Box.Sockets entry's unix
+// path produces a -v <source>:/registry-proxy.sock entry (ADR 0044, issue
+// #2849; issue #3723).
 func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
 	a := &ociAdapter{
 		cli:   "podman",
 		image: "spindrift:test",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, Sockets: []SocketMount{{Source: sock, Target: RegistryProxySocketTarget}}}
 	args := a.buildRunArgs(box)
 
 	want := sock + ":/registry-proxy.sock"
 	if !containsArg(args, want) {
 		t.Errorf("registry-proxy socket mount %q not found in args: %v", want, args)
+	}
+}
+
+// issue #3723: two Box.Sockets entries each render their own -v flag, in
+// order, none read-only.
+func TestBuildRunArgs_MultipleSockets_TwoMountFlags(t *testing.T) {
+	sockA := newTestSocket(t, "registry-proxy.sock")
+	sockB := newTestSocket(t, "signal.sock")
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, Sockets: []SocketMount{
+		{Source: sockA, Target: RegistryProxySocketTarget},
+		{Source: sockB, Target: "/signal.sock"},
+	}}
+	args := a.buildRunArgs(box)
+
+	for _, want := range []string{sockA + ":" + RegistryProxySocketTarget, sockB + ":/signal.sock"} {
+		if !containsArg(args, want) {
+			t.Errorf("missing socket mount %q in args: %v", want, args)
+		}
+		if containsArg(args, want+":ro") {
+			t.Errorf("socket mount %q must be writable, not :ro; args: %v", want, args)
+		}
 	}
 }
 
