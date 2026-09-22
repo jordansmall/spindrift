@@ -171,9 +171,11 @@ func (d *Dispatch) successResult(logPath string) Result {
 }
 
 // outcomeResult builds the fully populated Result for a parsed outcome,
-// gathering the comment, PR-intent and issue-intent signals from logPath.
-// Shared by the zero-exit and non-zero-exit settled paths (issue #2075) so both
-// report identical signals.
+// gathering the comment, PR-intent and issue-intent signals from whichever
+// carrier this Dispatch's BOX_SIGNAL_CARRIER selects (issue #3725): the
+// log carrier's marker-line scanners in "log" mode, or d.signalBuffer in
+// "socket" mode. Shared by the zero-exit and non-zero-exit settled paths
+// (issue #2075) so both report identical signals.
 func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Result {
 	comment, commentFound, commentRejected, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
 	if commentErr != nil {
@@ -186,6 +188,28 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 	issueIntents, issueIntentsRejected, issueIntentsErr := outcome.AllIssueIntentLinesInLog(logPath, d.nonce)
 	if issueIntentsErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
+	}
+	// Under the socket carrier the log scan above still runs, but only to
+	// warn: a marker line surviving in the log means a Box or an untrusted
+	// echo wrote one anyway, which under this carrier is stale and must
+	// contribute no data -- neither the payload nor the *Rejected counts,
+	// which describe log-carrier lines only. d.signalBuffer, not the log
+	// scan, is the sole source of truth for all three fields here.
+	if d.cfg.signalCarrierSocket() {
+		// A line that attempted the grammar and failed to verify is still a
+		// marker line on the log carrier, so it warns alongside a verifying
+		// one: under this carrier both are equally stale.
+		warnStaleMarker := func(channel string, found bool, rejected outcome.Rejections) {
+			if !found && rejected.Total() == 0 {
+				return
+			}
+			fmt.Fprintf(os.Stderr, "    ?? #%s: %s marker line found in log under BOX_SIGNAL_CARRIER=socket; ignored\n", d.number, channel)
+		}
+		warnStaleMarker("comment", commentFound, commentRejected)
+		warnStaleMarker("pr-intent", prIntentFound, prIntentRejected)
+		warnStaleMarker("issue-intent", len(issueIntents) > 0, issueIntentsRejected)
+		comment, commentFound, prIntent, prIntentFound, issueIntents = signalResultFromBuffer(d.signalBuffer)
+		commentRejected, prIntentRejected, issueIntentsRejected = outcome.Rejections{}, outcome.Rejections{}, outcome.Rejections{}
 	}
 	if resolved.SelfReportError != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", d.number, resolved.SelfReportError)
