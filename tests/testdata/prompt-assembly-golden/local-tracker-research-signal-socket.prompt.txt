@@ -1,0 +1,128 @@
+# TASK
+
+Default to the `/caveman` skill for all narration and prose output this run.
+Code, commands, and error messages are exempt and stay verbatim.
+
+The posted verdict comment is exempt in full and stays human-quality prose:
+the verdict line and its rationale, the context-for-a-worker section, and
+the open-questions section, together with the machine marker
+`<!-- spindrift-research -->` carried in the comment body. Never route
+any part of the posted comment through `/caveman` or otherwise compress it —
+a human reads it to decide whether to promote the issue or close it, and a
+later worker picks up the context-for-a-worker section cold. Fitting that
+comment inside the byte budget the verdict instructions give you means
+writing less — fewer points, tighter scope — never compressing the prose:
+whatever you do post stays full human-quality prose.
+
+The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`
+line and its `note=` field, and any host-relay signal line such as
+`SPINDRIFT_COMMENT` — under the log carrier, on a read-only dispatch or
+when the issue tracker is a local tracker, `SPINDRIFT_COMMENT` is the sole
+carrier of the posted verdict comment above. Under the socket carrier the
+comment instead goes through the signal relay, not a marker line, but the
+text you hand it is that same posted verdict comment, already exempt in
+full under the paragraph above. Never route these through `/caveman`.
+
+Where a marker line is the carrier, it must keep its required shape exactly
+intact — never reworded, reflowed, or line-wrapped: the leading token,
+the outcome line's key=value pairs, and the SPINDRIFT_COMMENT line's
+nonce and base64 payload as one unbroken token.
+
+Research GitHub issue #7: Do the thing
+
+Fresh clone of the Target repo, no branch cut, no commits. This is a research
+dispatch (ADR 0022): explore the repo, judge the issue's relevance, and post
+one verdict comment. Advise-only — the full list of what you must never do
+is below, under POST THE VERDICT. A human acts on your verdict; the
+launcher owns every lifecycle transition.
+
+# CONTEXT
+
+The issue's body and its last-10-comment snapshot are already in the
+# ISSUE TEXT section after the template body — read there, do not fetch
+it from the tracker. What follows here you still run yourself:
+
+- Any prior research comment (look for the `<!-- spindrift-research -->`
+  marker used below) inside the # ISSUE TEXT section below — read it before
+  researching again so a re-run doesn't repeat prior findings.
+
+
+# EXPLORE
+
+Explore the actual repo — grep, read the relevant files, check existing
+tests — before rendering a verdict; the issue text alone is not enough.
+
+Before running the first gate, invoke the `/check-hygiene` skill.
+
+When the issue claims a bug and the repo's own tests make it cheap, attempt a
+repro (run the existing suite, or write and run a throwaway repro script).
+Skip the repro when it would be expensive to set up — encouraged, not
+mandated.
+
+# VERDICT
+
+Render exactly one of these verdicts:
+
+<!-- RESEARCH_VERDICT_BULLETS -->
+
+# POST THE VERDICT
+
+This is a local issue: you have no tracker client to post a comment with.
+Send the verdict over the Signal socket instead, so the launcher writes it
+to the issue file host-side once you exit:
+
+    driver-exec signal comment -body-file verdict.md
+
+(or pipe the body on stdin: `driver-exec signal comment` with no
+`-body-file`). The body is the verdict comment, structured per the
+sections below. It goes over the socket whole — no marker line, no base64,
+and none of the log carrier's 8 KB result cap to budget against — up to a
+hard ceiling of 65536 bytes per field. A body over that ceiling is refused
+outright, never truncated, so a verdict that overruns it costs a retry
+rather than posting half.
+
+The command's exit code is the acceptance: a zero exit prints `signal
+comment accepted: <n> bytes, <hash>, sequence <n>`, and the comment is
+taken. A non-zero exit prints `signal comment rejected (<status>):
+<reason>` — the signal was NOT taken, so read the reason, fix it, and send
+the command again.
+
+Sending the command again replaces the earlier body rather than racing it,
+so correcting a verdict costs one more call, never the run.
+
+
+Structure the verdict in this order:
+
+1. **Verdict** — `<RESEARCH_VERDICT_ENUM>`, plus a one-line rationale.
+2. **Context for a worker** — code pointers (file:line), related issues/PRs,
+   repro notes, sharpened acceptance criteria.
+3. **Open questions** — mandatory when the verdict is `unclear`: the concrete
+   questions only a human can answer. Omit this section for
+   `recommend`/`reject`.
+
+Carry the machine marker `<!-- spindrift-research -->` in the comment body so
+a later research pass or tooling can find it. Always post a NEW comment —
+never edit a predecessor research comment, even on a re-run.
+
+Never edit the issue body, never add or remove a label, never close the
+issue, never promote it to dispatchable, and never file an issue yourself.
+Comments only.
+
+# OUTCOME
+
+Once the comment is posted, print exactly one line as your final output —
+raw plain text, not wrapped in backticks, a code fence, or any other
+markdown formatting:
+
+SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>
+
+This must be the literal final message — nothing after it, no prose summary.
+For github, `landing` is the URL of the comment you just posted
+(`gh issue comment` prints it). For local, nothing was posted from in-box —
+use `landing=none`. `status` carries the verdict, not a work-style
+ready/blocked.
+
+If you cannot reach a verdict, or the comment cannot be posted, use `blocked`
+as the escape hatch instead — same raw plain text requirement:
+
+SPINDRIFT_OUTCOME issue=7 landing=none status=blocked note=<short reason>

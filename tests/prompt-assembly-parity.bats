@@ -577,3 +577,106 @@ SKILL
 
   assert_cell_golden "nix-checks-skill-baked" initial
 }
+
+# issue #3726 slice 8: socket-carrier siblings of the log-mode cells above,
+# one per fragment pair the carrier fork added. Each cell is named after its
+# nearest log-mode sibling with a "-signal-socket" suffix and differs from it
+# by exactly BOX_SIGNAL_CARRIER=socket plus whatever gate the target fragment
+# pair needs that the sibling didn't already set.
+
+@test "production path matches the golden fixture for the github read-only research cell, socket carrier" {
+  # Nearest sibling: "research", plus unset BOX_WRITE_ENABLED (as
+  # "github-read-only" does) so ISSUE_TRACKER_GITHUB_READONLY fires, gating
+  # research-verdict-github-readonly-socket.md.
+  export DISPATCH_KIND="research"
+  unset BOX_WRITE_ENABLED
+  # The bash-side PR-intent nudge gate (agent/entrypoint.sh, carrier-aware
+  # since issue #3726) fires for ANY read-only Box with status=ready and
+  # queries the real Signal socket, which this harness never starts; skip it
+  # by making the Box outbox-relay-incapable, which this cell's target
+  # fragment (a research verdict, not PR-intent) never reads.
+  unset BOX_OUTBOX_RELAY_CAPABLE
+  export BOX_SIGNAL_CARRIER="socket"
+
+  assert_cell_golden "github-read-only-research-signal-socket" initial
+}
+
+@test "production path matches the golden fixture for the local tracker research cell, socket carrier" {
+  # Nearest sibling: "local-tracker-no-issue-ref" crossed with DISPATCH_KIND
+  # research, gating research-verdict-local-socket.md (ISSUE_TRACKER_LOCAL
+  # ignores BOX_WRITE_ENABLED, so no read-only override is needed here).
+  export DISPATCH_KIND="research"
+  export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
+  export BOX_SIGNAL_CARRIER="socket"
+
+  assert_cell_golden "local-tracker-research-signal-socket" initial
+}
+
+@test "production path matches the golden fixture for the forgejo tracker read-only research cell, socket carrier" {
+  # Nearest sibling: "forgejo-tracker" (tracker axis, not CODE_FORGE), plus
+  # unset BOX_WRITE_ENABLED so ISSUE_TRACKER_FORGEJO_READONLY fires, gating
+  # research-verdict-forgejo-readonly-socket.md.
+  export DISPATCH_KIND="research"
+  export ISSUE_TRACKER="forgejo"
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  unset BOX_WRITE_ENABLED
+  unset BOX_OUTBOX_RELAY_CAPABLE
+  export BOX_SIGNAL_CARRIER="socket"
+
+  assert_cell_golden "forgejo-tracker-readonly-research-signal-socket" initial
+}
+
+@test "production path matches the golden fixture for the github read-only cell, socket carrier" {
+  # Nearest sibling: "github-read-only". BOX_ACCESS_READ_ONLY covers both
+  # open-pr-create-outbox-socket.md and if-blocked-pr-outbox-socket.md, which
+  # render in the same prompt.
+  unset BOX_WRITE_ENABLED
+  # Unlike the research verdict cells above, this cell's whole point IS the
+  # PR-intent fragment, but the fake driver (tests/fakes/claude) still never
+  # sends a real Signal-socket pr-intent, so the bash-side nudge gate above
+  # would otherwise overwrite $DRIVER_PROMPT_FILE with its own nudge text
+  # instead of the first-pass prompt this golden pins.
+  unset BOX_OUTBOX_RELAY_CAPABLE
+  export BOX_SIGNAL_CARRIER="socket"
+
+  assert_cell_golden "github-read-only-signal-socket" initial
+}
+
+@test "production path matches the golden fixture for the orchestrator-on filer-on read-only cell, socket carrier" {
+  # Nearest sibling: "orchestrator-filer-on", plus unset BOX_WRITE_ENABLED:
+  # FILER_FILE_RELAY on a work dispatch needs filer + orchestrator +
+  # read-only together, gating file-issues-relay-socket.md and, through the
+  # filer's own prompt in .agents.json, filer-file-relay-socket.md.
+  export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+  export BOX_FILER_ENABLED=1
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+  unset BOX_WRITE_ENABLED
+  # Same nudge-gate dodge as the github-read-only-signal-socket cell above.
+  unset BOX_OUTBOX_RELAY_CAPABLE
+  export BOX_SIGNAL_CARRIER="socket"
+
+  assert_cell_golden "orchestrator-filer-on-signal-socket" initial
+
+  assert_review_handoff_golden "orchestrator-filer-on-signal-socket"
+}
+
+@test "production path matches the golden fixture for the research filer-on cell, socket carrier" {
+  # Nearest sibling: "research-filer-on". A research dispatch with a filer
+  # forces FILER_FILE_RELAY unconditionally (researchForceRelay), gating
+  # research-file-issues-relay-socket.md.
+  export DISPATCH_KIND="research"
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+  export BOX_FILER_ENABLED=1
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+  export BOX_SIGNAL_CARRIER="socket"
+
+  assert_cell_golden "research-filer-on-signal-socket" initial
+}

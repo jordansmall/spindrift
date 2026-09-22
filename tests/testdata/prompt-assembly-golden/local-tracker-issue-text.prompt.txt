@@ -53,6 +53,15 @@ tier as a commit message — on a blocked or ambiguous stop it is posted
 verbatim as a comment on the tracker issue, so caveman-compressing it
 ships caveman prose straight to a human reader.
 
+The payload those signals carry is exempt on that same tier, whichever
+carrier takes it: the draft PR's title and body, and a filed issue's title
+and body, stay full human-quality prose — as the base64 payload of a
+marker line under the `log` carrier, and as the text you hand
+`driver-exec signal pr-intent` or `driver-exec signal issue-intent` under
+the `socket` carrier, where no marker line renders at all. A human reads
+the PR and the filed issue cold, the same reason the `note=` field above
+is exempt.
+
 Where a marker line is the carrier, it must keep its required shape exactly
 intact — never reworded, reflowed, or line-wrapped: the leading token,
 the outcome line's key=value pairs, and the PR-intent line's nonce and
