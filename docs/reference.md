@@ -1199,6 +1199,7 @@ exceptions.
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` all satisfy the check today; a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
+| `BOX_SIGNAL_CARRIER`     | `log` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `log` (unchanged — nonce-guarded marker lines in the Box log) or `socket` (routed over a launcher-owned Signal socket instead, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), `jira`, or `forgejo` (see [Issue Tracker backends](#issue-tracker-backends)) |
@@ -3729,6 +3730,48 @@ separation when the Box still needs to author the PR/comment content itself
 at the cost of the Launcher doing more host-side work per issue. The two are
 not mutually exclusive but are also not additive: `read-only` alone already
 removes the capability two-actor separation was closing off with a ruleset.
+
+### Signal socket (`BOX_SIGNAL_CARRIER=socket`)
+
+The default `log` carrier sends the three mid-run signal channels
+(`SPINDRIFT_COMMENT`, `SPINDRIFT_PR_INTENT`, `SPINDRIFT_ISSUE_INTENT`) as
+nonce-guarded marker lines in the Box's stdout log — unchanged for every
+existing Consumer. `BOX_SIGNAL_CARRIER=socket` moves those same three
+channels off the log and onto a per-Dispatch Signal socket instead ([ADR
+0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md)),
+closing the defect the log carrier can't: the Bash output cap truncates a
+large payload before the marker line ever reaches the log, silently losing
+the signal.
+
+The Launcher starts the listener before the container comes up and mounts
+it read-write at the in-Box path `/signal-socket.sock`, beside the registry
+proxy's own socket. It hands the Box `SIGNAL_SOCKET_ENDPOINT`
+(`unix:///signal-socket.sock`, or `http://host:port` on the TCP fallback)
+and, on the TCP fallback only, `SIGNAL_SOCKET_SECRET` — a secret minted
+independently of `RUN_NONCE` and kept off argv. The listener closes at Box
+exit; its accepted buffer stays readable after that, until settle has
+consumed it.
+
+Requesting `socket` where the transport can't work is a startup error,
+never a silent fallback to `log`: `NETWORK_MODE=none` fails at launcher
+startup (the socket transport needs the loopback this mode tears down), and
+`NETWORK_MODE=no-host-loopback` fails when the Dispatch starts — before any
+container — once the per-Dispatch transport probe returns the TCP verdict.
+Both errors name the knob and the mode.
+
+The three log scanners still run under `socket` mode, but only to warn if a
+marker line is still present in the log; such a line contributes no data —
+no fallback, no double delivery.
+
+Nothing changes for an existing Consumer: the default stays `log`. This is
+a runtime-only knob — no `spindrift.*` setting and no flake option — so the
+daemon passes it through its child environment like any other env-only
+knob; changing it takes a daemon restart. The in-Box front for `socket` mode
+is the `driver-exec signal comment|pr-intent|issue-intent|status` verb (issue
+#3724), which reads `SIGNAL_SOCKET_ENDPOINT` and errors when it is unset — so
+it serves the socket carrier only; under `log` the front stays what it has
+always been, a nonce-guarded marker line the Box prints. The prompts don't
+yet instruct agents to use the verb — that's a later ticket.
 
 ---
 
