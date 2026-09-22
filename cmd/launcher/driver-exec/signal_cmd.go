@@ -294,22 +294,61 @@ func postSignal(stdout io.Writer, client *http.Client, base, secret, kind string
 	return 0
 }
 
-func getSignalStatus(stdout io.Writer, client *http.Client, base, secret string) int {
+// fetchSignalStatus is the transport shared by the "status" verb below and by
+// markergate's socket-carrier PR-intent presence check (issue #3726,
+// markergate_cmd.go's signalStatusFunc): GET base+"/status" against an
+// already-resolved client/secret and decode the reply. A non-2xx reply comes
+// back as a non-nil *signalwire.Reject rather than an error, so a caller that
+// wants CLI-style "rejected (status): reason" text (getSignalStatus) and one
+// that wants a plain error (markergate's closure) each render it their own
+// way from the same parsed value.
+func fetchSignalStatus(client *http.Client, base, secret string) (signalwire.Status, *signalwire.Reject, error) {
 	req, err := http.NewRequest(http.MethodGet, base+"/status", nil)
 	if err != nil {
-		return signalFail(stdout, err)
+		return signalwire.Status{}, nil, err
 	}
 	code, reply, err := doSignal(client, req, secret)
 	if err != nil {
-		return signalFail(stdout, err)
+		return signalwire.Status{}, nil, err
 	}
 	if code < 200 || code > 299 {
-		return printReject(stdout, "status", decodeReject(code, reply))
+		rej := decodeReject(code, reply)
+		return signalwire.Status{}, &rej, nil
 	}
-
 	var st signalwire.Status
 	if err := json.Unmarshal(reply, &st); err != nil {
-		return signalFail(stdout, fmt.Errorf("decode status: %w", err))
+		return signalwire.Status{}, nil, fmt.Errorf("decode status: %w", err)
+	}
+	return st, nil, nil
+}
+
+// signalStatusFunc is markergate_cmd.go's markergate.NudgeConfig.SignalStatus
+// / ResolveConfig.SignalStatus closure (issue #3726): it resolves the socket
+// target itself, so markergate's caller supplies nothing but this function,
+// never a client or secret. ADR 0007 / issue #2511 keeps the decision in
+// markergate and the transport here.
+func signalStatusFunc() (signalwire.Status, error) {
+	client, base, secret, err := signalTarget()
+	if err != nil {
+		return signalwire.Status{}, err
+	}
+	st, rej, err := fetchSignalStatus(client, base, secret)
+	if err != nil {
+		return signalwire.Status{}, err
+	}
+	if rej != nil {
+		return signalwire.Status{}, fmt.Errorf("signal status rejected (%s): %s", rej.Status, rej.Reason)
+	}
+	return st, nil
+}
+
+func getSignalStatus(stdout io.Writer, client *http.Client, base, secret string) int {
+	st, rej, err := fetchSignalStatus(client, base, secret)
+	if err != nil {
+		return signalFail(stdout, err)
+	}
+	if rej != nil {
+		return printReject(stdout, "status", *rej)
 	}
 	// Declaration order, not accept order: a stable listing lets an agent
 	// diff two status calls.

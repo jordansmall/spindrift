@@ -30,6 +30,9 @@ type markerGateFlags struct {
 	// nudge phase (both markers) / resolve phase, marker=pr-intent
 	logPath *string
 
+	// nudge phase, marker=pr-intent; also reused by resolve phase
+	signalCarrier *string
+
 	// resolve phase, marker=pr-intent
 	attempts                 *int
 	resumedOutcomeLine       *string
@@ -54,6 +57,8 @@ func newMarkerGateFlagSet() (*flag.FlagSet, *markerGateFlags) {
 		originalOutcomeLine: fs.String("original-outcome-line", "", "the exact status=ready SPINDRIFT_OUTCOME line (nudge phase, marker=pr-intent; also resolve phase)"),
 
 		logPath: fs.String("log-path", "", "path to scan for the required marker (nudge phase, both markers; also resolve phase, marker=pr-intent) -- see markergate.NudgeConfig.LogPath for the marker-specific meaning: the Driver's unwrapped final-message text for marker=outcome, the raw Driver stream_log for marker=pr-intent"),
+
+		signalCarrier: fs.String("signal-carrier", "log", `the BOX_SIGNAL_CARRIER knob value: "log" (default) scans --log-path for the PR-intent marker; "socket" queries the Signal socket's status route instead and ignores --log-path (nudge phase and resolve phase, marker=pr-intent)`),
 
 		attempts:                 fs.Int("attempts", 1, "number of nudge attempts exhausted (resolve phase)"),
 		resumedOutcomeLine:       fs.String("resumed-outcome-line", "", "the resumed pass's own freshly-scanned SPINDRIFT_OUTCOME line, empty if absent (resolve phase)"),
@@ -102,6 +107,8 @@ func runMarkerGate(args []string, stdout io.Writer) int {
 			Nonce:               *flags.nonce,
 			OriginalOutcomeLine: *flags.originalOutcomeLine,
 			LogPath:             *flags.logPath,
+			SignalCarrier:       *flags.signalCarrier,
+			SignalStatus:        signalStatusFunc,
 		}
 		prompt, promptErr := markergate.RenderNudgePrompt(cfg)
 		printScanErr(fs, promptErr)
@@ -129,6 +136,8 @@ func runMarkerGate(args []string, stdout io.Writer) int {
 		OriginalOutcomeLine:      *flags.originalOutcomeLine,
 		OutcomeViaBackstop:       *flags.outcomeViaBackstop,
 		ResumeExitCode:           *flags.resumeExitCode,
+		SignalCarrier:            *flags.signalCarrier,
+		SignalStatus:             signalStatusFunc,
 	})
 	printScanErr(fs, resolveErr)
 	return emitJSON(fs, stdout, resolution)

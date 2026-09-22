@@ -1144,7 +1144,7 @@ main() {
     local _pr_intent_gate_json
     _pr_intent_gate_json="$(driver-exec marker-gate --phase nudge --marker pr-intent \
       --nonce "${RUN_NONCE:-}" --original-outcome-line "$_last_outcome_line" \
-      --log-path "$_last_stream_log")"
+      --log-path "$_last_stream_log" --signal-carrier "${BOX_SIGNAL_CARRIER:-log}")"
     if [ "$(printf '%s' "$_pr_intent_gate_json" | jq -r '.should_nudge // false')" = "true" ]; then
       local _original_ready_outcome_line="$_last_outcome_line"
       local _pr_intent_nudge_prompt
@@ -1166,6 +1166,7 @@ main() {
         --attempts 1
         --nonce "${RUN_NONCE:-}"
         --log-path "$_last_stream_log"
+        --signal-carrier "${BOX_SIGNAL_CARRIER:-log}"
         --resumed-outcome-line "$_last_outcome_line"
         --resumed-driver-text-log "$_last_driver_text_log"
         --original-outcome-line "$_original_ready_outcome_line"
