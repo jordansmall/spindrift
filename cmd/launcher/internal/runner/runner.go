@@ -59,6 +59,13 @@ type Box struct {
 	// which is what the mount layer reads.
 	Sockets []SocketMount
 
+	// SignalSocket locates the launcher-side Signal listener (issue #3725)
+	// when it is reachable over TCP. A unix-verdict Signal socket travels as
+	// a Sockets entry instead, exactly as the registry proxy's does; this
+	// field's Endpoint is the zero value in that case, so it never
+	// contributes an --add-host mapping.
+	SignalSocket SignalSocketLocation
+
 	// ClosureGeneration optionally names the agent-closure generation this
 	// launch binds (issue #2681); nil binds the adapter's own default.
 	ClosureGeneration *AgentGeneration
@@ -87,6 +94,46 @@ type RegistryProxyLocation struct {
 	// runtime (Docker Desktop, Rancher Desktop/Lima) the mapping overrides
 	// working resolution with the in-VM bridge gateway, so it is probed.
 	TCPAddHost bool
+}
+
+// SignalSocketLocation describes where the launcher-side Signal listener
+// (issue #3725) is reachable from inside this Box, mirroring
+// RegistryProxyLocation's TCP half. It carries no Endpoint/TCPSecret pairing
+// beyond what add-host needs: dispatch forwards the listener's secret through
+// box.Env (SIGNAL_SOCKET_SECRET) rather than a field here.
+type SignalSocketLocation struct {
+	// Endpoint is the TCP host the Signal listener is reachable at when the
+	// transport verdict is TCP; the zero value means no TCP location (either
+	// the feature is off or the verdict was unix, in which case the socket
+	// travels as a Box.Sockets entry instead).
+	Endpoint registrymanifest.Endpoint
+
+	// TCPAddHost reports whether reaching Endpoint's host requires an
+	// explicit --add-host <host>:host-gateway mapping, mirroring
+	// RegistryProxyLocation.TCPAddHost.
+	TCPAddHost bool
+}
+
+// addHostTargets returns the distinct TCP hosts needing an explicit
+// --add-host <host>:host-gateway mapping, in registry-proxy-then-Signal-socket
+// order, skipping a duplicate when both resolve to the same host (they share
+// one transport verdict, so that is the normal TCP case).
+func addHostTargets(box Box) []string {
+	var hosts []string
+	add := func(want bool, host string) {
+		if !want {
+			return
+		}
+		for _, h := range hosts {
+			if h == host {
+				return
+			}
+		}
+		hosts = append(hosts, host)
+	}
+	add(box.RegistryProxy.TCPAddHost, box.RegistryProxy.Endpoint.Host())
+	add(box.SignalSocket.TCPAddHost, box.SignalSocket.Endpoint.Host())
+	return hosts
 }
 
 // Runner manages agent sandbox life-cycles for one runtime.

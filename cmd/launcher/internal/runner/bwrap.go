@@ -93,7 +93,10 @@ var offArgvKeys = map[string]bool{
 	// Registry-proxy TCP fallback secret, a bearer-token-shaped credential
 	// (issue #3111).
 	"REGISTRY_PROXY_TCP_SECRET": true,
-	"FORGEJO_TOKEN":             true,
+	// Signal socket's TCP fallback secret, a bearer-token-shaped credential
+	// (issue #3725).
+	"SIGNAL_SOCKET_SECRET": true,
+	"FORGEJO_TOKEN":        true,
 	// The subject issue's injected body and comments (issue #3445). ADR 0032
 	// keeps local issues private, and a private-repo GitHub body is sensitive.
 	"ISSUE_TEXT": true,

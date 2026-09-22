@@ -604,11 +604,11 @@ func TestBuildRunArgs_MultipleSockets_TwoMountFlags(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, Sockets: []SocketMount{
 		{Source: sockA, Target: RegistryProxySocketTarget},
-		{Source: sockB, Target: "/signal.sock"},
+		{Source: sockB, Target: SignalSocketTarget},
 	}}
 	args := a.buildRunArgs(box)
 
-	for _, want := range []string{sockA + ":" + RegistryProxySocketTarget, sockB + ":/signal.sock"} {
+	for _, want := range []string{sockA + ":" + RegistryProxySocketTarget, sockB + ":" + SignalSocketTarget} {
 		if !containsArg(args, want) {
 			t.Errorf("missing socket mount %q in args: %v", want, args)
 		}
@@ -654,6 +654,29 @@ func TestBuildRunArgs_OffArgvKeyRendersBareFlag(t *testing.T) {
 	}
 	if !containsArg(args, "ISSUE_NUMBER=1") {
 		t.Errorf("expected off-argv-exempt ISSUE_NUMBER=1 to render unchanged in args: %v", args)
+	}
+}
+
+// SIGNAL_SOCKET_SECRET (issue #3725) is an offArgvKeys entry, so it must
+// render as a bare `-e SIGNAL_SOCKET_SECRET` under OCI, mirroring
+// REGISTRY_PROXY_TCP_SECRET's treatment above.
+func TestBuildRunArgs_SignalSocketSecretRendersBareFlag(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{
+		"SIGNAL_SOCKET_SECRET": "s1gnal-s3cr3t-token",
+	}}
+	args := a.buildRunArgs(box)
+
+	if !containsArg(args, "SIGNAL_SOCKET_SECRET") {
+		t.Errorf("expected bare -e SIGNAL_SOCKET_SECRET in args: %v", args)
+	}
+	for _, arg := range args {
+		if strings.Contains(arg, "SIGNAL_SOCKET_SECRET=") {
+			t.Errorf("SIGNAL_SOCKET_SECRET must render as a bare -e flag, never -e SIGNAL_SOCKET_SECRET=...; found %q in args: %v", arg, args)
+		}
+		if strings.Contains(arg, "s1gnal-s3cr3t-token") {
+			t.Errorf("SIGNAL_SOCKET_SECRET value must never appear on argv; found %q in args: %v", arg, args)
+		}
 	}
 }
 
@@ -815,6 +838,101 @@ func TestBuildRunArgs_TCPHostUnset_NoAddHost(t *testing.T) {
 
 	if containsArg(args, "--add-host") {
 		t.Errorf("--add-host must be absent when TCPHost is unset; args: %v", args)
+	}
+}
+
+// addHostCount returns how many --add-host flags appear in args, so a test
+// can pin an exact count, not just presence.
+func addHostCount(args []string) int {
+	n := 0
+	for _, arg := range args {
+		if arg == "--add-host" {
+			n++
+		}
+	}
+	return n
+}
+
+// A Box with only the Signal socket's TCP location set (no registry proxy at
+// all, so box.RegistryProxy stays the zero value) still gets its host-gateway
+// mapping (issue #3725): addHostTargets must not depend on RegistryProxy
+// being set.
+func TestBuildRunArgs_SignalSocketOnlyAddHost(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, SignalSocket: SignalSocketLocation{
+		Endpoint:   registrymanifest.NewTCPEndpoint("host.containers.internal", ""),
+		TCPAddHost: true,
+	}}
+	args := a.buildRunArgs(box)
+
+	if addHostCount(args) != 1 {
+		t.Fatalf("want exactly 1 --add-host, got %d: %v", addHostCount(args), args)
+	}
+	found := false
+	for i, arg := range args {
+		if arg == "--add-host" && i+1 < len(args) && args[i+1] == "host.containers.internal:host-gateway" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected --add-host host.containers.internal:host-gateway in args: %v", args)
+	}
+}
+
+// Registry proxy and Signal socket sharing the same TCP host (the normal
+// case: both ride the same transport verdict) collapse to one --add-host,
+// not two.
+func TestBuildRunArgs_ProxyAndSignalSocketSameHost_OneAddHost(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+	box := Box{
+		Name: "agent-issue-1",
+		Env:  map[string]string{},
+		RegistryProxy: RegistryProxyLocation{
+			Endpoint:   registrymanifest.NewTCPEndpoint("host.containers.internal", ""),
+			TCPAddHost: true,
+		},
+		SignalSocket: SignalSocketLocation{
+			Endpoint:   registrymanifest.NewTCPEndpoint("host.containers.internal", ""),
+			TCPAddHost: true,
+		},
+	}
+	args := a.buildRunArgs(box)
+
+	if addHostCount(args) != 1 {
+		t.Fatalf("want exactly 1 --add-host for a shared host, got %d: %v", addHostCount(args), args)
+	}
+}
+
+// Registry proxy and Signal socket resolving to different TCP hosts each get
+// their own --add-host, proxy first.
+func TestBuildRunArgs_ProxyAndSignalSocketDifferentHosts_BothAddHostInOrder(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+	box := Box{
+		Name: "agent-issue-1",
+		Env:  map[string]string{},
+		RegistryProxy: RegistryProxyLocation{
+			Endpoint:   registrymanifest.NewTCPEndpoint("proxy-host.internal", ""),
+			TCPAddHost: true,
+		},
+		SignalSocket: SignalSocketLocation{
+			Endpoint:   registrymanifest.NewTCPEndpoint("signal-host.internal", ""),
+			TCPAddHost: true,
+		},
+	}
+	args := a.buildRunArgs(box)
+
+	if addHostCount(args) != 2 {
+		t.Fatalf("want exactly 2 --add-host for distinct hosts, got %d: %v", addHostCount(args), args)
+	}
+	var hosts []string
+	for i, arg := range args {
+		if arg == "--add-host" && i+1 < len(args) {
+			hosts = append(hosts, args[i+1])
+		}
+	}
+	want := []string{"proxy-host.internal:host-gateway", "signal-host.internal:host-gateway"}
+	if len(hosts) != 2 || hosts[0] != want[0] || hosts[1] != want[1] {
+		t.Errorf("--add-host order = %v, want %v (registry proxy before Signal socket)", hosts, want)
 	}
 }
 

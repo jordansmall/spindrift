@@ -628,7 +628,7 @@ func TestBuildMountSpecs_MultipleSockets_OneWritableSpecEach(t *testing.T) {
 	sockB := newTestSocket(t, "signal.sock")
 	box := Box{Sockets: []SocketMount{
 		{Source: sockA, Target: RegistryProxySocketTarget},
-		{Source: sockB, Target: "/signal.sock"},
+		{Source: sockB, Target: SignalSocketTarget},
 	}}
 
 	specs := buildMountSpecs(MountParams{}, box)
@@ -639,8 +639,8 @@ func TestBuildMountSpecs_MultipleSockets_OneWritableSpecEach(t *testing.T) {
 	if specs[0].Source != sockA || specs[0].Target != RegistryProxySocketTarget {
 		t.Errorf("specs[0] = %+v, want Source=%q Target=%q", specs[0], sockA, RegistryProxySocketTarget)
 	}
-	if specs[1].Source != sockB || specs[1].Target != "/signal.sock" {
-		t.Errorf("specs[1] = %+v, want Source=%q Target=%q", specs[1], sockB, "/signal.sock")
+	if specs[1].Source != sockB || specs[1].Target != SignalSocketTarget {
+		t.Errorf("specs[1] = %+v, want Source=%q Target=%q", specs[1], sockB, SignalSocketTarget)
 	}
 	for _, s := range specs {
 		if s.ReadOnly {
@@ -654,7 +654,7 @@ func TestBuildMountSpecs_MultipleSockets_OneWritableSpecEach(t *testing.T) {
 func TestBuildMountSpecs_MultipleSockets_SkipsBadEntryKeepsGoodOne(t *testing.T) {
 	sockA := newTestSocket(t, "registry-proxy.sock")
 	box := Box{Sockets: []SocketMount{
-		{Source: filepath.Join(t.TempDir(), "does-not-exist.sock"), Target: "/signal.sock"},
+		{Source: filepath.Join(t.TempDir(), "does-not-exist.sock"), Target: SignalSocketTarget},
 		{Source: sockA, Target: RegistryProxySocketTarget},
 	}}
 

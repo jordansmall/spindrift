@@ -19,6 +19,11 @@ const operatorSkillsDir = "/operator-skills"
 // name this in-box path in REGISTRY_PROXY_MANIFEST, not the host-side source.
 const RegistryProxySocketTarget = "/registry-proxy.sock"
 
+// SignalSocketTarget is the in-box path the Signal socket's unix socket
+// mounts onto (issue #3725); the listener expects it there, so it is not
+// configurable. Mirrors RegistryProxySocketTarget above.
+const SignalSocketTarget = "/signal-socket.sock"
+
 // SocketMount names one launcher-owned unix socket buildMountSpecs mounts
 // into a Box (issue #3723): Source is the launcher-side host path, Target the
 // fixed in-Box path it always lands at. No ReadOnly or Message field: every
