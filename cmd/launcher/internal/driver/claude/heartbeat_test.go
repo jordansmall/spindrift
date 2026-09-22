@@ -1423,3 +1423,77 @@ func TestEncodeSpindriftOpLandDeltaRoundTrip(t *testing.T) {
 		t.Errorf("round-tripped SpindriftOp = %+v, want %+v", *ev.SpindriftOp, want)
 	}
 }
+
+// A signal op renders its kind, byte count and content hash on accept, and its
+// kind plus the reject reason on reject (issue #3724).
+func TestFormatSpindriftOpSignal(t *testing.T) {
+	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{
+		Op:       "signal",
+		Kind:     "comment",
+		Size:     412,
+		Hash:     "sha256:abc123",
+		Decision: "accept",
+	})
+	if !strings.Contains(got, "signal comment accepted \xc2\xb7 412 bytes \xc2\xb7 sha256:abc123") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain the accepted kind, size and hash", got)
+	}
+
+	gotReject := claude.FormatSpindriftOp("7", claude.SpindriftOp{
+		Op:       "signal",
+		Kind:     "comment",
+		Size:     70000,
+		Hash:     "sha256:def456",
+		Decision: "reject",
+		Reason:   "body exceeds the 65536-byte limit",
+	})
+	if !strings.Contains(gotReject, "signal comment rejected: body exceeds the 65536-byte limit") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain the rejected kind and reason", gotReject)
+	}
+	if strings.Contains(gotReject, "\n") {
+		t.Errorf("FormatSpindriftOp = %q, want no embedded newline", gotReject)
+	}
+
+	gotRead := claude.FormatSpindriftOp("7", claude.SpindriftOp{
+		Op:       "signal",
+		Kind:     "status",
+		Decision: "read",
+	})
+	if !strings.Contains(gotRead, "signal status read") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain the read disposition", gotRead)
+	}
+	if strings.Contains(gotRead, "bytes") || strings.Contains(gotRead, "sha256:") {
+		t.Errorf("FormatSpindriftOp = %q, want no byte count or hash on a read", gotRead)
+	}
+}
+
+// The signal op's kind, size, hash and decision survive the same stream-json
+// encode/decode seam every other op kind already does (issue #3724).
+func TestEncodeSpindriftOpSignalRoundTrip(t *testing.T) {
+	want := claude.SpindriftOp{
+		Op:       "signal",
+		Kind:     "pr-intent",
+		Size:     412,
+		Hash:     "sha256:9f2c",
+		Decision: "accept",
+	}
+	line := claude.EncodeSpindriftOp(want)
+
+	for _, key := range []string{`"kind":"pr-intent"`, `"size":412`, `"hash":"sha256:9f2c"`, `"decision":"accept"`} {
+		if !strings.Contains(line, key) {
+			t.Errorf("EncodeSpindriftOp = %q, want it to contain %s", line, key)
+		}
+	}
+
+	var ev struct {
+		SpindriftOp *claude.SpindriftOp `json:"spindrift_op"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &ev); err != nil {
+		t.Fatalf("json.Unmarshal(%q) = %v", line, err)
+	}
+	if ev.SpindriftOp == nil {
+		t.Fatalf("decoded spindrift_op is nil")
+	}
+	if !reflect.DeepEqual(*ev.SpindriftOp, want) {
+		t.Errorf("round-tripped SpindriftOp = %+v, want %+v", *ev.SpindriftOp, want)
+	}
+}
