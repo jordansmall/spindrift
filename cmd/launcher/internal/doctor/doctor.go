@@ -127,6 +127,7 @@ type Config struct {
 // other tiers and extraChecks are advisory. stdin is the caller's own scanner, so
 // Quickstart can hand one over mid-flow without losing already-buffered input.
 func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
+	rep := NewReporter(w)
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
 	if c.TokenHint != "" {
 		tokenHint, slugHint = c.TokenHint, c.SlugHint
@@ -217,20 +218,20 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		// writing the failing row's MISSING line here too would double-report it.
 		// It never prints the Remedy, so write that one line or the remedy reaches
 		// the operator nowhere.
-		ReportResults(w, results[:len(results)-1])
+		rep.Results(results[:len(results)-1])
 		failing := results[len(results)-1]
 		if suffix := remedySuffix(failing.Check.Remedy, cerr.Error()); suffix != "" {
 			fmt.Fprintf(w, "  remedy: %s\n", suffix)
 		}
 		return cerr
 	}
-	ReportResults(w, results)
+	rep.Results(results)
 
 	// A blocking repository-state failure is reported inline, unlike the failing
 	// connectivity row above: the report continues past it, so suppressing the
 	// MISSING line would leave an orphan remedy line under no row at all.
 	repoStateResults := RunChecks(repoStateChecks)
-	ReportResults(w, repoStateResults)
+	rep.Results(repoStateResults)
 	deferredRepoStateErr := FirstRequiredError(repoStateResults)
 	defer func() {
 		// This error wins the return value, so a later error from the label
@@ -246,7 +247,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 
 	// extraChecks are informational: a failing row at either tier never makes Run
 	// return an error.
-	ReportResults(w, RunChecks(extraChecks))
+	rep.Results(RunChecks(extraChecks))
 
 	// Runtime row, advisory and never fatal. Rationale on Config.Runtime.
 	if c.Runtime == "" {

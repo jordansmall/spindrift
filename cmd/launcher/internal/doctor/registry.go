@@ -3,15 +3,13 @@ package doctor
 import (
 	"errors"
 	"fmt"
-	"io"
-	"strings"
 )
 
 // ErrDegraded marks a Probe error as indeterminate: the probe could not
 // determine the condition it checks, as distinct from affirmatively detecting
 // it. Wrapping it makes FirstRequiredError and RunChecksFailFast treat the
-// failure as non-blocking even at Required tier. ReportResults still prints
-// the failure and its Remedy, as an advisory line.
+// failure as non-blocking even at Required tier. Reporter.Results still
+// prints the failure and its Remedy, as an advisory line.
 var ErrDegraded = errors.New("check degraded: probe could not determine result")
 
 // Tier classifies a Check as blocking (Required) or non-blocking (Advisory).
@@ -30,7 +28,7 @@ type Check struct {
 	Name string
 	Tier Tier
 	// Probe runs the check, returning a non-nil error on failure. On success
-	// ReportResults passes its first return value to SuccessMsg, so a Probe
+	// Reporter.Results passes its first return value to SuccessMsg, so a Probe
 	// need not stash that value in a variable a sibling closure captures.
 	Probe func() (any, error)
 	// Remedy is a short hint printed alongside a failure, e.g. "set
@@ -45,8 +43,9 @@ type Check struct {
 // Result is the outcome of running one Check's Probe.
 type Result struct {
 	Check Check
-	// Output is what Probe returned alongside a nil Err, which ReportResults
-	// passes to Check.SuccessMsg. Meaningless when Err is non-nil.
+	// Output is what Probe returned alongside a nil Err, which
+	// Reporter.Results passes to Check.SuccessMsg. Meaningless when Err is
+	// non-nil.
 	Output any
 	// Err is nil on success.
 	Err error
@@ -121,8 +120,8 @@ func FirstRequiredError(results []Result) error {
 
 // RemedyError pairs a blocking Check's Probe error with the Check, so Error()
 // can append the Remedy hint to a fail-fast caller's error text. Error() shares
-// Remedy's text and suppression rule with ReportResults, but prints
-// "\nremedy: ..." where ReportResults indents.
+// Remedy's text and suppression rule with Reporter.Results, but prints
+// "\nremedy: ..." where Reporter.Results indents.
 type RemedyError struct {
 	// Err is the failing Check's Probe error, unmodified.
 	Err error
@@ -181,45 +180,4 @@ func RunRequiredFailFast(checks []Check) error {
 		return nil
 	}
 	return WithRemedy(*r)
-}
-
-// rowPrefix returns the status-line prefix for a Tier: "MISSING" for Required,
-// "advisory" for Advisory. ReportResults and doctor.go's label rows share it;
-// reporters outside this package spell their own prefixes.
-func rowPrefix(t Tier) string {
-	if t == Advisory {
-		return "advisory"
-	}
-	return "MISSING"
-}
-
-// ReportResults writes one line per Result to w: "ok: <name>" on success, or a
-// status line keyed on r.Check.Tier plus a "  remedy: <remedy>" line on
-// failure. An Err wrapping ErrDegraded prints as "advisory:" whatever the
-// Check's own Tier, with the sentinel's text trimmed off.
-func ReportResults(w io.Writer, results []Result) {
-	for _, r := range results {
-		if r.Err == nil {
-			if r.Check.SuccessMsg != nil {
-				fmt.Fprintf(w, "ok: %s\n", r.Check.SuccessMsg(r.Output))
-				continue
-			}
-			fmt.Fprintf(w, "ok: %s\n", r.Check.Name)
-			continue
-		}
-		// An indeterminate probe demotes the row's tier for rendering
-		// only; the Check's own Tier is left alone.
-		tier := r.Check.Tier
-		msg := r.Err.Error()
-		if errors.Is(r.Err, ErrDegraded) {
-			tier = Advisory
-			// Strips the sentinel only where every call site puts it:
-			// wrapped last in the chain.
-			msg = strings.TrimSuffix(msg, ": "+ErrDegraded.Error())
-		}
-		fmt.Fprintf(w, "%s: %s: %s\n", rowPrefix(tier), r.Check.Name, msg)
-		if suffix := remedySuffix(r.Check.Remedy, msg); suffix != "" {
-			fmt.Fprintf(w, "  remedy: %s\n", suffix)
-		}
-	}
 }
