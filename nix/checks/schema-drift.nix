@@ -847,12 +847,14 @@ checkedMerge {
         "host"
       ]
     ) "lib/env-schema.nix: networkMode.choices must be [ open no-host-loopback none host ]";
-    assert assertMsg (
-      schema.signalCarrier.choices or [ ] == [
-        "log"
-        "socket"
-      ]
-    ) "lib/env-schema.nix: signalCarrier.choices must be [ log socket ]";
+    assert assertMsg
+      (
+        schema.signalCarrier.choices or [ ] == [
+          "log"
+          "socket"
+        ]
+      )
+      "lib/env-schema.nix: signalCarrier.choices must be [ log socket ] — cmd/launcher/daemon/main.go's validateSignalCarrier hand-copies this list and must change with it (issue #3727)";
     pkgs.runCommand "schema-choices" { } "touch $out";
 
   # Regression guard (issue #2519): injects a tenth synthetic choices-bearing
@@ -898,6 +900,29 @@ checkedMerge {
     assert assertMsg (!result.success)
       "schema-choices-knobset-guard: expected the choices-bearing knob-set assertion to reject a schema with an injected tenth choices knob (extraChoiceKnob), but it evaluated successfully";
     pkgs.runCommand "schema-choices-knobset-guard" { } "touch $out";
+
+  # signalCarrier must stay out of the settings map: ChildCommand
+  # (cmd/launcher/internal/daemon/command.go) withoutKeys-strips every
+  # settings key from a child's environment, so a flakeOption promotion would
+  # silently break the documented `BOX_SIGNAL_CARRIER=socket nix run .#daemon`
+  # gesture. The second assert is the issue #2519-style guard that the first
+  # one is not vacuous — and, with the `?` test, that a rename cannot make it
+  # pass by absence.
+  signal-carrier-env-only =
+    let
+      inherit (pkgs.lib) assertMsg;
+      envOnly = s: s ? signalCarrier && !(s.signalCarrier.flakeOption or false);
+      badSchema = schema // {
+        signalCarrier = schema.signalCarrier // {
+          flakeOption = true;
+        };
+      };
+    in
+    assert assertMsg (envOnly schema)
+      "lib/env-schema.nix: signalCarrier must exist and keep flakeOption unset — a settings-map knob is stripped from every child's environment (issue #3727)";
+    assert assertMsg (!(envOnly badSchema))
+      "signal-carrier-env-only: expected the env-only predicate to reject a signalCarrier with flakeOption = true, but it accepted one";
+    pkgs.runCommand "signal-carrier-env-only" { } "touch $out";
 
   # Regression guard (issue #872): the completion renderers scope `choices` to
   # nonSecret knobs, since a secret gets only a `--*-file` flag, so `choices`
