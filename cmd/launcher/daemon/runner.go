@@ -28,12 +28,45 @@ type hostRunner struct {
 	env        []string // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
 	knobs      []string // keys of the Launcher input document's settings map, stripped from env before a child sees it
 
-	// fetchMu serializes ResolveRevision across Slots goroutines sharing one
-	// repoPath: concurrent `git fetch` calls race the refs/remotes/origin/*
-	// ref lock the instant the remote tip actually moves, and even past that,
-	// one call's fetch+rev-parse can interleave with another's on the single
-	// FETCH_HEAD file fetch writes and rev-parse reads (issue #3539).
-	fetchMu sync.Mutex
+	// flightMu guards flight below, plus the Moved baseline and the
+	// self-path memo fields further down: resolveTipOnce is the sole leader
+	// while flight is non-nil, and it writes all of them before clearing
+	// flight, so the next leader's Lock is ordered after that write by the
+	// same lock/unlock pair (see ResolveTip). It replaces fetchMu (now
+	// gone): RunChild's signal forwarding (forwardSignals) takes no lock of
+	// its own — it starts fresh per child from req.Stop/req.Abort, needing
+	// no shared state — so nothing else in this runner could contend with
+	// flightMu anyway.
+	flightMu sync.Mutex
+	flight   *tipFlight
+
+	// lastRevision/haveLastRevision are the Tip.Moved baseline (design
+	// decision 1, issue #3625): Runner-global, not per-slot. haveLastRevision
+	// is false until the first resolution ever completes, so that one always
+	// reports Moved == false — no last one means nothing moved.
+	lastRevision     string
+	haveLastRevision bool
+
+	// memoRevision/memoPath/haveMemo are the self-path memo (design decision
+	// 7): a single entry, not a map, since git history moves forward and a
+	// revision is never revisited — this gives one `nix eval` per distinct
+	// tip however many slots ask, with no unbounded growth over a long
+	// night. A self-eval failure never writes here, so it can't poison a
+	// later resolution at the same revision into serving a path it never got.
+	memoRevision string
+	memoPath     string
+	haveMemo     bool
+}
+
+// tipFlight is one in-flight (or just-finished, until its leader clears
+// r.flight) ResolveTip resolution shared by every caller that arrived while
+// it was running. done is closed once tip/err are set, which is what
+// publishes them to joiners — they must only be read after <-done (design
+// decision 8, issue #3625).
+type tipFlight struct {
+	done chan struct{}
+	tip  daemon.Tip
+	err  error
 }
 
 // hostRunnerConfig is everything one hostRunner needs, grouped into a
@@ -70,16 +103,24 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 	}, nil
 }
 
-// fetchRevision shells out to git fetch + rev-parse via CommandContext, not
-// Command, so a cancelled ctx (SIGINT/SIGTERM with no child yet to forward
-// to) tears the fetch down instead of hanging the daemon until SIGKILL
-// (issue #3538).
-func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
-	r.fetchMu.Lock()
-	defer r.fetchMu.Unlock()
+// runnerFetchCommand is ResolveTip's fetch-half exec seam: a test overrides
+// it to skip a real git remote, the way runnerExecCommand/runnerEvalCommand
+// already stand in for RunChild/the eval half below. Both the `git fetch`
+// and the `git rev-parse` go through it, so a test can count invocations
+// (three callers, one fetch) or block inside the first call to synchronise
+// on the leader actually being in flight, rather than sleeping and hoping.
+var runnerFetchCommand = exec.CommandContext
 
+// fetchRevision shells out to git fetch + rev-parse via runnerFetchCommand
+// (context-aware), so a cancelled ctx (SIGINT/SIGTERM with no child yet to
+// forward to) tears the fetch down instead of hanging the daemon until
+// SIGKILL (issue #3538). No longer serialized by a mutex of its own: the
+// single flight in ResolveTip already guarantees at most one fetchRevision
+// call runs at a time per hostRunner, which is what used to need fetchMu
+// (issue #3539's FETCH_HEAD race) — the flight subsumes that reasoning.
+func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 	const remote = "origin" // nothing varies this yet; inline until a caller needs it (issue #3538 review)
-	fetch := exec.CommandContext(ctx, "git", "-C", r.repoPath, "fetch", remote, r.baseBranch)
+	fetch := runnerFetchCommand(ctx, "git", "-C", r.repoPath, "fetch", remote, r.baseBranch)
 	var stderr bytes.Buffer
 	fetch.Stderr = &stderr
 	if err := fetch.Run(); err != nil {
@@ -88,7 +129,7 @@ func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 	// FETCH_HEAD, not the local baseBranch ref: a bare `fetch` never moves
 	// any local branch, and resolving the local ref instead would silently
 	// pin a stale tip whenever the operator's checkout lags origin.
-	out, err := exec.CommandContext(ctx, "git", "-C", r.repoPath, "rev-parse", "FETCH_HEAD").Output()
+	out, err := runnerFetchCommand(ctx, "git", "-C", r.repoPath, "rev-parse", "FETCH_HEAD").Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse FETCH_HEAD: %w", err)
 	}
@@ -128,12 +169,10 @@ var stopSignalSequence = [...]os.Signal{syscall.SIGTERM, syscall.SIGINT}
 // evalSelfPath evaluates the daemon attribute's store path at revision via
 // `nix eval`, shelled out with a context-aware exec so a cancelled ctx tears
 // the evaluation down instead of hanging the daemon until SIGKILL — same
-// reasoning as fetchRevision above.
-//
-// It does not take r.fetchMu: that mutex only serializes the FETCH_HEAD race
-// between concurrent git fetch/rev-parse pairs (see its doc above), and nix
-// eval touches neither, so sharing it here would only add latency behind an
-// unrelated slot's in-flight fetch.
+// reasoning as fetchRevision above. It takes no lock of its own: like
+// fetchRevision, it is only ever called from resolveTipOnce, which
+// ResolveTip's single flight already limits to one goroutine per
+// hostRunner at a time.
 func (r *hostRunner) evalSelfPath(ctx context.Context, revision string) (string, error) {
 	argv, err := daemon.SelfCommand(daemon.SelfSpec{
 		RepoPath: r.repoPath,
@@ -155,29 +194,110 @@ func (r *hostRunner) evalSelfPath(ctx context.Context, revision string) (string,
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ResolveTip fetches the current revision and, when the self check is
-// configured (selfAttr != ""), evaluates the daemon's own build at that
-// revision in the same call — daemon.Runner's two halves of one tip
-// resolution. r.selfAttr == "" means the self check is off (see
-// main.go's SPINDRIFT_DAEMON_PROGRAM handling): ResolveTip then skips the
-// eval outright and returns a Tip with an empty SelfPath, rather than
-// evaluating anything to throw away.
-//
-// Moved is always false in this slice: the "did the tip move since the
-// last one this runner handed out" baseline lands in a later slice.
+// runnerFlightJoined fires each time a caller joins an in-flight resolution
+// instead of starting its own leader; nil in production. It is what lets a
+// test synchronise on the coalescing itself — wait for exactly two joins,
+// then release the leader — rather than releasing it after a fixed sleep
+// and hoping the joiners arrived in time, which would be flaky by
+// construction.
+var runnerFlightJoined func()
+
+// ResolveTip resolves the tip once per caller that isn't already covered by
+// someone else's in-flight resolution (design decision 8, issue #3625): the
+// first caller becomes the leader and does the work below via
+// resolveTipOnce; every caller that arrives while that leader's flight is
+// registered waits on it instead and receives its exact Tip/error, rather
+// than doing its own fetch. There is no TTL — once a flight's done channel
+// is closed and r.flight cleared, the next caller starts a fresh one, so no
+// slot is ever handed a revision older than the moment it asked.
 func (r *hostRunner) ResolveTip(ctx context.Context) (daemon.Tip, error) {
+	r.flightMu.Lock()
+	if flight := r.flight; flight != nil {
+		r.flightMu.Unlock()
+		if runnerFlightJoined != nil {
+			runnerFlightJoined()
+		}
+		// A joiner selects on ctx.Done() rather than blocking on <-flight.done
+		// unconditionally: a caller left waiting on someone else's fetch
+		// after its own ctx died is exactly the hang issue #3538 forbids,
+		// just relocated from "waiting on my own git process" to "waiting on
+		// another goroutine's".
+		select {
+		case <-flight.done:
+			return flight.tip, flight.err
+		case <-ctx.Done():
+			return daemon.Tip{}, ctx.Err()
+		}
+	}
+	flight := &tipFlight{done: make(chan struct{})}
+	r.flight = flight
+	r.flightMu.Unlock()
+
+	tip, err := r.resolveTipOnce(ctx)
+	flight.tip, flight.err = tip, err
+
+	r.flightMu.Lock()
+	r.flight = nil
+	r.flightMu.Unlock()
+	close(flight.done)
+
+	return tip, err
+}
+
+// resolveTipOnce does one leader's fetch and, when the self check is
+// configured (selfAttr != ""), the eval half — daemon.Runner's two halves of
+// one tip resolution — plus the Moved-baseline and self-path-memo
+// bookkeeping ResolveTip's flight wraps around it. Only one goroutine per
+// hostRunner ever runs this at a time: ResolveTip only calls it while
+// holding the sole registered flight.
+//
+// r.selfAttr == "" means the self check is off (see main.go's
+// SPINDRIFT_DAEMON_PROGRAM handling): resolveTipOnce then skips the eval
+// outright and returns a Tip with an empty SelfPath, rather than evaluating
+// anything to throw away.
+func (r *hostRunner) resolveTipOnce(ctx context.Context) (daemon.Tip, error) {
 	revision, err := r.fetchRevision(ctx)
 	if err != nil {
 		return daemon.Tip{}, err
 	}
+
+	// The baseline updates as soon as the fetch half succeeds, before the
+	// eval half runs, so a self-eval failure below never leaves it behind
+	// (design decision 1) — today's runSlot assigned its own lastRevision at
+	// exactly this point too.
+	r.flightMu.Lock()
+	moved := r.haveLastRevision && revision != r.lastRevision
+	r.lastRevision = revision
+	r.haveLastRevision = true
+	r.flightMu.Unlock()
+
 	if r.selfAttr == "" {
-		return daemon.Tip{Revision: revision}, nil
+		return daemon.Tip{Revision: revision, Moved: moved}, nil
 	}
+
+	r.flightMu.Lock()
+	if r.haveMemo && r.memoRevision == revision {
+		path := r.memoPath
+		r.flightMu.Unlock()
+		return daemon.Tip{Revision: revision, SelfPath: path, Moved: moved}, nil
+	}
+	r.flightMu.Unlock()
+
 	path, err := r.evalSelfPath(ctx, revision)
 	if err != nil {
-		return daemon.Tip{Revision: revision}, &daemon.SelfEvalError{Err: err}
+		// The memo is left untouched: a failed eval must not poison a later
+		// resolution at this same revision into serving a path it never got
+		// (design decision 7).
+		return daemon.Tip{Revision: revision, Moved: moved}, &daemon.SelfEvalError{Err: err}
 	}
-	return daemon.Tip{Revision: revision, SelfPath: path}, nil
+
+	r.flightMu.Lock()
+	r.memoRevision = revision
+	r.memoPath = path
+	r.haveMemo = true
+	r.flightMu.Unlock()
+
+	return daemon.Tip{Revision: revision, SelfPath: path, Moved: moved}, nil
 }
 
 func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
