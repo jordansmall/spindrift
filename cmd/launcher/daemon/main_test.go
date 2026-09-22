@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -548,206 +547,156 @@ func TestNixSystemDouble(t *testing.T) {
 	}
 }
 
-// TestHandleStopSignals asserts the first signal cancels ctx and forwards
-// once, the second forwards again (the escalation) without cancelling twice
-// or panicking, and a third is a no-op — the daemon's signal-wiring
-// goroutine, extracted out of main so the halt path is exercised without
-// sending the test process a real signal (issue #3538, escalation #3546).
-// Table-driven over signal-kind combinations because only first-vs-second
-// matters, never which kind (mirrors cmd/launcher/main.go's relaySignals
-// contract).
-func TestHandleStopSignals(t *testing.T) {
-	tests := []struct {
-		name   string
-		first  os.Signal
-		second os.Signal
-	}{
-		{"term-term", syscall.SIGTERM, syscall.SIGTERM},
-		{"term-int", syscall.SIGTERM, syscall.SIGINT},
-		{"int-int", syscall.SIGINT, syscall.SIGINT},
-		{"int-term", syscall.SIGINT, syscall.SIGTERM},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sig := make(chan os.Signal, 2)
-			quit := make(chan struct{})
-			ctx, cancel := context.WithCancel(context.Background())
-
-			var mu sync.Mutex
-			forwardCalls := 0
-			forward := func() {
-				mu.Lock()
-				forwardCalls++
-				mu.Unlock()
-			}
-
-			var buf bytes.Buffer
-			em := daemon.NewEmitter(&buf, time.Now)
-
-			done := make(chan struct{})
-			go func() {
-				handleStopSignals(sig, quit, cancel, forward, em)
-				close(done)
-			}()
-
-			sig <- tt.first
-			sig <- tt.second
-
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-				t.Fatal("handleStopSignals did not return after two signals")
-			}
-
-			if ctx.Err() == nil {
-				t.Error("ctx.Err() = nil, want context cancelled")
-			}
-			mu.Lock()
-			got := forwardCalls
-			mu.Unlock()
-			if got != 2 {
-				t.Errorf("forward called %d times, want 2", got)
-			}
-
-			// A third signal, sent after the handler has already
-			// returned (done is closed above), must never bump
-			// forwardCalls: the handler drains sig only twice and
-			// nothing else reads it, so there is no race to wait out.
-			sig <- syscall.SIGTERM
-			mu.Lock()
-			got = forwardCalls
-			mu.Unlock()
-			if got != 2 {
-				t.Errorf("forward called %d times after a third signal, want 2 (third must be a no-op)", got)
-			}
-
-			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-			if len(lines) != 2 {
-				t.Fatalf("event stream has %d lines, want 2: %q", len(lines), buf.String())
-			}
-			var drain, escalate daemon.Event
-			if err := json.Unmarshal([]byte(lines[0]), &drain); err != nil {
-				t.Fatalf("decode drain event %q: %v", lines[0], err)
-			}
-			if err := json.Unmarshal([]byte(lines[1]), &escalate); err != nil {
-				t.Fatalf("decode escalate event %q: %v", lines[1], err)
-			}
-			if drain.Event != "shutdown" || drain.Reason != daemon.ShutdownDrain {
-				t.Errorf("first event = %+v, want event=shutdown reason=%q", drain, daemon.ShutdownDrain)
-			}
-			if escalate.Event != "shutdown" || escalate.Reason != daemon.ShutdownEscalate {
-				t.Errorf("second event = %+v, want event=shutdown reason=%q", escalate, daemon.ShutdownEscalate)
-			}
-		})
-	}
-}
-
-// TestHandleStopSignals_QuitBeforeFirstSignal asserts that closing quit
-// before any signal arrives unparks handleStopSignals rather than leaving it
-// blocked on <-sig forever — the leak mainRun's repeated test-driving would
-// otherwise accumulate one goroutine per call (issue #3546).
-func TestHandleStopSignals_QuitBeforeFirstSignal(t *testing.T) {
-	sig := make(chan os.Signal, 2)
+// TestAnnounceStop asserts the first latch emits exactly the
+// shutdown/ShutdownDrain event, cancels the startup context, and closes the
+// returned pool Stop — with the event visible in the emitted stream before
+// that close is observed (asserted from inside a goroutine that reads the
+// buffer only once poolStop has closed, not merely that both happened) —
+// and the second latch emits ShutdownEscalate then closes poolAbort, same
+// ordering. announceStop replaces handleStopSignals (issue #3626): the
+// shared stopsignal relay now owns the signal wiring, this function only
+// re-derives the pool's own Stop/Abort pair from it.
+func TestAnnounceStop(t *testing.T) {
+	stop := make(chan struct{})
+	abort := make(chan struct{})
 	quit := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var mu sync.Mutex
-	forwardCalls := 0
-	forward := func() {
-		mu.Lock()
-		forwardCalls++
-		mu.Unlock()
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, time.Now)
+
+	poolStop, poolAbort := announceStop(stop, abort, quit, cancel, em)
+
+	// No lock needed around buf: announceStop's em.Emit happens strictly
+	// before its close(stopCh) in program order, and a channel close
+	// happens-before the receive it unblocks, so <-poolStop already
+	// orders this read after that write under the Go memory model.
+	drainSeen := make(chan string, 1)
+	go func() {
+		<-poolStop
+		drainSeen <- buf.String()
+	}()
+
+	close(stop)
+
+	var drainAtClose string
+	select {
+	case drainAtClose = <-drainSeen:
+	case <-time.After(5 * time.Second):
+		t.Fatal("poolStop never closed after the first latch")
 	}
+	if ctx.Err() == nil {
+		t.Error("ctx.Err() = nil, want the startup context cancelled on the first latch")
+	}
+	lines := strings.Split(strings.TrimSpace(drainAtClose), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("event stream at poolStop close = %d lines, want 1: %q", len(lines), drainAtClose)
+	}
+	var drain daemon.Event
+	if err := json.Unmarshal([]byte(lines[0]), &drain); err != nil {
+		t.Fatalf("decode drain event %q: %v", lines[0], err)
+	}
+	if drain.Event != "shutdown" || drain.Reason != daemon.ShutdownDrain {
+		t.Errorf("first event = %+v, want event=shutdown reason=%q", drain, daemon.ShutdownDrain)
+	}
+
+	escalateSeen := make(chan string, 1)
+	go func() {
+		<-poolAbort
+		escalateSeen <- buf.String()
+	}()
+
+	close(abort)
+
+	var full string
+	select {
+	case full = <-escalateSeen:
+	case <-time.After(5 * time.Second):
+		t.Fatal("poolAbort never closed after the second latch")
+	}
+	lines = strings.Split(strings.TrimSpace(full), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("event stream at poolAbort close = %d lines, want 2: %q", len(lines), full)
+	}
+	var escalate daemon.Event
+	if err := json.Unmarshal([]byte(lines[1]), &escalate); err != nil {
+		t.Fatalf("decode escalate event %q: %v", lines[1], err)
+	}
+	if escalate.Event != "shutdown" || escalate.Reason != daemon.ShutdownEscalate {
+		t.Errorf("second event = %+v, want event=shutdown reason=%q", escalate, daemon.ShutdownEscalate)
+	}
+}
+
+// TestAnnounceStop_QuitBeforeFirstLatch asserts that closing quit before any
+// latch fires unparks announceStop's goroutine rather than leaving it
+// blocked on <-stop forever — the leak mainRun's repeated test-driving would
+// otherwise accumulate one goroutine per call (issue #3546, carried to
+// announceStop by #3626).
+func TestAnnounceStop_QuitBeforeFirstLatch(t *testing.T) {
+	stop := make(chan struct{})
+	abort := make(chan struct{})
+	quit := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	var buf bytes.Buffer
 	em := daemon.NewEmitter(&buf, time.Now)
 
-	done := make(chan struct{})
-	go func() {
-		handleStopSignals(sig, quit, cancel, forward, em)
-		close(done)
-	}()
+	poolStop, poolAbort := announceStop(stop, abort, quit, cancel, em)
 
 	close(quit)
 
 	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("handleStopSignals did not return after quit closed before any signal")
+	case <-poolStop:
+		t.Error("poolStop closed after quit with no latch, want it to stay open")
+	case <-time.After(50 * time.Millisecond):
 	}
-
+	select {
+	case <-poolAbort:
+		t.Error("poolAbort closed after quit with no latch, want it to stay open")
+	case <-time.After(50 * time.Millisecond):
+	}
 	if ctx.Err() != nil {
-		t.Errorf("ctx.Err() = %v, want nil: quit before a signal must not cancel", ctx.Err())
-	}
-	mu.Lock()
-	got := forwardCalls
-	mu.Unlock()
-	if got != 0 {
-		t.Errorf("forward called %d times, want 0", got)
+		t.Errorf("ctx.Err() = %v, want nil: quit before a latch must not cancel", ctx.Err())
 	}
 	if buf.Len() != 0 {
 		t.Errorf("event stream = %q, want empty", buf.String())
 	}
 }
 
-// TestHandleStopSignals_QuitAfterFirstSignal asserts that closing quit after
-// the first signal but before the second still returns handleStopSignals,
-// with the first signal's cancel/forward/shutdown-event side effects already
-// applied — the second select's quit case must unpark it just as the
-// first's does.
-func TestHandleStopSignals_QuitAfterFirstSignal(t *testing.T) {
-	sig := make(chan os.Signal, 2)
+// TestAnnounceStop_QuitAfterFirstLatch asserts that closing quit after the
+// first latch but before the second still unparks the goroutine, with the
+// first latch's cancel/close/shutdown-event side effects already applied
+// and no escalation.
+func TestAnnounceStop_QuitAfterFirstLatch(t *testing.T) {
+	stop := make(chan struct{})
+	abort := make(chan struct{})
 	quit := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
-
-	var mu sync.Mutex
-	forwardCalls := 0
-	forward := func() {
-		mu.Lock()
-		forwardCalls++
-		mu.Unlock()
-	}
+	defer cancel()
 
 	var buf bytes.Buffer
 	em := daemon.NewEmitter(&buf, time.Now)
 
-	done := make(chan struct{})
-	go func() {
-		handleStopSignals(sig, quit, cancel, forward, em)
-		close(done)
-	}()
+	poolStop, poolAbort := announceStop(stop, abort, quit, cancel, em)
 
-	sig <- syscall.SIGTERM
+	close(stop)
 
-	// Give the goroutine a chance to consume the first signal and apply its
-	// side effects before quit closes, so this test observes "quit while
-	// waiting on the second" rather than racing the first receive itself.
-	for i := 0; i < 1000; i++ {
-		mu.Lock()
-		forwarded := forwardCalls != 0
-		mu.Unlock()
-		if forwarded {
-			break
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case <-poolStop:
+	case <-time.After(5 * time.Second):
+		t.Fatal("poolStop never closed after the first latch")
 	}
 	close(quit)
 
 	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("handleStopSignals did not return after quit closed between signals")
+	case <-poolAbort:
+		t.Error("poolAbort closed after quit with no second latch, want it to stay open")
+	case <-time.After(50 * time.Millisecond):
 	}
-
 	if ctx.Err() == nil {
-		t.Error("ctx.Err() = nil, want context cancelled from the first signal")
-	}
-	mu.Lock()
-	got := forwardCalls
-	mu.Unlock()
-	if got != 1 {
-		t.Errorf("forward called %d times, want 1", got)
+		t.Error("ctx.Err() = nil, want the startup context cancelled from the first latch")
 	}
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	if len(lines) != 1 {
@@ -1304,7 +1253,7 @@ func TestMainRun_StatusOutsideGitCheckout(t *testing.T) {
 // ever lowered into that band.
 func TestExitSelfChanged_OutsideChildExitBand(t *testing.T) {
 	for exit := 0; exit < 256; exit++ {
-		outcome, action, _ := daemon.Interpret(exit)
+		outcome, action, _ := daemon.Interpret(exit, false)
 		// The band is two things, and neither alone is all of it: the 0-7 span
 		// the doc names (exit 1 is a child's generic failure, which Interpret
 		// leaves unclassified), plus every code Interpret *does* classify, so a
@@ -2045,4 +1994,184 @@ func TestMainRun_DispatchChildGetsCapturedEnv(t *testing.T) {
 	}
 
 	assertCapturedEnvT(t, "dispatch child", captured.Env)
+}
+
+// childDrainThenEscalate is the scripted child for
+// TestMainRun_EndToEndSignalDrainsThenEscalates: it traps both TERM and
+// INT (the daemon only ever sends SIGTERM then SIGINT, forwardSignals'
+// own doc), writes a distinct word to the transcript file ($1) per signal
+// it has actually received, and exits 7 only on the second — the same
+// "operator stopped this child" exit code childExitOnSecondSignal above
+// uses, but with a transcript instead of a bare counter so the test can
+// tell drain and escalation apart, not just count two signals. `: >"$0"`
+// arms the marker (waitForArmed's contract) once the trap is installed.
+const childDrainThenEscalate = `
+n=0
+trap 'n=$((n+1)); if [ "$n" -eq 1 ]; then echo drain >>"$1"; else echo escalate >>"$1"; exit 7; fi' TERM INT
+: >"$0"
+while :; do sleep 0.05; done`
+
+// waitForFileContains polls path until its contents contain want, bounded
+// like waitForArmed's own 2s budget — a plain os.ReadFile poll is enough
+// here because the transcript is a small file one shell script appends to,
+// not a socket or pipe a reader could observe half-written.
+func waitForFileContains(t *testing.T, path, want string) {
+	t.Helper()
+	for i := 0; i < 1000; i++ {
+		if data, err := os.ReadFile(path); err == nil && strings.Contains(string(data), want) {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("%s never contained %q", path, want)
+}
+
+// TestMainRun_EndToEndSignalDrainsThenEscalates is the one test that
+// actually drives mainRun through daemon.Loop with a real child process
+// (issue #3626's Seam 2, T7): every other link in the drain/escalate chain
+// — the stopsignal relay, announceStop, Config.Stop/Abort, ChildRequest,
+// forwardSignals — has its own narrower test elsewhere, but this is the
+// only one that wires all of them together and watches a real SIGTERM then
+// SIGINT actually reach a real process. It earns its cost (a real git
+// checkout, a real child, two real signal deliveries) as the regression
+// tripwire for that whole chain: any single broken link here fails this
+// test even if every narrower test above it still passes on its own.
+//
+// It drives the stop/abort latch directly through installStopSignal's test
+// seam (never a real signal to the test binary itself — mainRun's own
+// argument for the same seam applies here too) and stubs the doctor and
+// child exec seams so the daemon needs nothing but a real git checkout with
+// a fetchable origin — ResolveRevision's own contract (see the package doc
+// on bareOriginConsumerT's other callers).
+func TestMainRun_EndToEndSignalDrainsThenEscalates(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	// Disables the self-change check (SelfPath): unset, this configuration
+	// never reaches runnerEvalCommand, so there is nothing else to stub.
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "")
+
+	dirConsumer := bareOriginConsumerT(t)
+
+	doc := validKnobDocument()
+	// Small enough that nothing in this test could ever wait one out —
+	// the scripted child never exits on its own, so idle/failure backoff
+	// never actually triggers, but a tiny value keeps that true even if a
+	// future change to the flow adds an extra iteration before shutdown.
+	doc.Settings["DAEMON_IDLE_FLOOR"] = "1ms"
+	doc.Settings["DAEMON_IDLE_CAP"] = "2ms"
+	doc.Settings["DAEMON_FAILURE_BACKOFF"] = "0s"
+	path := writeInputDocument(t, doc)
+
+	t.Chdir(dirConsumer)
+
+	// The test's own two-channel latch, driven directly rather than through
+	// a real OS signal — installStopSignal's whole reason for existing.
+	stop := make(chan struct{})
+	abort := make(chan struct{})
+	origInstall := installStopSignal
+	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
+		return stop, abort, func() {}
+	}
+	t.Cleanup(func() { installStopSignal = origInstall })
+
+	origDoctor := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	dir := t.TempDir()
+	armed := filepath.Join(dir, "armed")
+	transcript := filepath.Join(dir, "transcript")
+
+	origExec := runnerExecCommand
+	var mu sync.Mutex
+	var childCmd *exec.Cmd
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		mu.Lock()
+		defer mu.Unlock()
+		childCmd = exec.Command("/bin/sh", "-c", childDrainThenEscalate, armed, transcript)
+		return childCmd
+	}
+	t.Cleanup(func() {
+		runnerExecCommand = origExec
+		mu.Lock()
+		c := childCmd
+		mu.Unlock()
+		if c != nil && c.Process != nil {
+			_ = c.Process.Kill()
+		}
+	})
+
+	var stdout, stderr bytes.Buffer
+	doneCh := make(chan int, 1)
+	go func() {
+		doneCh <- mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
+	}()
+
+	waitForArmed(t, armed)
+	close(stop)
+	waitForFileContains(t, transcript, "drain")
+	close(abort)
+
+	var got int
+	select {
+	case got = <-doneCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("mainRun did not return after stop then abort — the child was signalled but never reaped, or the pool never halted")
+	}
+	if got != 0 {
+		t.Fatalf("mainRun() = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	data, err := os.ReadFile(transcript)
+	if err != nil {
+		t.Fatalf("read transcript: %v", err)
+	}
+	gotLines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	wantLines := []string{"drain", "escalate"}
+	if !slices.Equal(gotLines, wantLines) {
+		t.Fatalf("transcript = %v, want %v (drain must reach the child before escalation, never the reverse or a repeat)", gotLines, wantLines)
+	}
+
+	var shutdownReasons []string
+	var haltSeen bool
+	var haltReason string
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var ev daemon.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("decode event line %q: %v", line, err)
+		}
+		switch ev.Event {
+		case "shutdown":
+			shutdownReasons = append(shutdownReasons, ev.Reason)
+		case "halt":
+			haltSeen = true
+			haltReason = ev.Reason
+		}
+	}
+	wantShutdowns := []string{daemon.ShutdownDrain, daemon.ShutdownEscalate}
+	if !slices.Equal(shutdownReasons, wantShutdowns) {
+		t.Errorf("shutdown reasons = %v, want %v", shutdownReasons, wantShutdowns)
+	}
+	if !haltSeen {
+		t.Fatalf("no halt event in the stream: %s", stdout.String())
+	}
+	// Either reason is a clean stop reaching the same operator-visible
+	// fact (exit 0): the pool's own Stop watcher (loop.go) and the slot
+	// reading the child's exit 7 while Stop is closed (Interpret) race to
+	// record the halt first, and idempotency (pool.halt) means only the
+	// winner's reason survives — which one wins is not a contract this
+	// test pins, only that whichever it is, it is one of the two clean
+	// stops.
+	if haltReason != "context-cancelled: stop requested" && haltReason != "outcome: signalled-stop" {
+		t.Errorf("halt reason = %q, want %q or %q", haltReason, "context-cancelled: stop requested", "outcome: signalled-stop")
+	}
 }

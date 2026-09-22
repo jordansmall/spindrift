@@ -28,23 +28,11 @@ type hostRunner struct {
 	env        []string // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
 	knobs      []string // keys of the Launcher input document's settings map, stripped from env before a child sees it
 
-	mu       sync.Mutex
-	children map[int]*os.Process // slot -> currently running child, for signal forwarding; empty when idle
-	// stopsForwarded counts stop requests actually forwarded so far (not
-	// merely received): it indexes stopSignalSequence, so it never exceeds
-	// len(stopSignalSequence) — forwardStop enforces that bound itself,
-	// rather than relying on callers to stop asking at two. Replayed onto a
-	// child born mid-fan-out (see RunChild).
-	stopsForwarded int
-
 	// fetchMu serializes ResolveRevision across Slots goroutines sharing one
 	// repoPath: concurrent `git fetch` calls race the refs/remotes/origin/*
 	// ref lock the instant the remote tip actually moves, and even past that,
 	// one call's fetch+rev-parse can interleave with another's on the single
-	// FETCH_HEAD file fetch writes and rev-parse reads (issue #3539). Not the
-	// same mutex as mu: mu guards children and forwardStop takes it while a
-	// child is running, so sharing it here would block a SIGTERM fan-out
-	// behind an in-flight fetch.
+	// FETCH_HEAD file fetch writes and rev-parse reads (issue #3539).
 	fetchMu sync.Mutex
 }
 
@@ -79,7 +67,6 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 		nixSystem:  cfg.nixSystem,
 		env:        cfg.env,
 		knobs:      cfg.knobs,
-		children:   make(map[int]*os.Process),
 	}, nil
 }
 
@@ -119,24 +106,14 @@ var runnerExecCommand = exec.Command
 // `/bin/sh -c ...` in its place.
 var runnerEvalCommand = exec.CommandContext
 
-// runnerSignal is the signal seam: both forwardStop's fan-out and
-// RunChild's replay send through it rather than calling p.Signal directly.
-// OS-level delivery can't show the replay's sequence to a test — a child
-// born mid-fan-out hasn't installed its handler yet, so the first signal
-// kills it on the default disposition and the second is unobservable from
-// outside. Routing both call sites through one seam is the only way a test
-// can assert "two sends, distinct kinds" instead of just "process died".
+// runnerSignal is the signal seam: forwardSignals' goroutine sends through
+// it rather than calling p.Signal directly. OS-level delivery can't show a
+// test the *sequence* — a child started after Stop/Abort are already
+// closed has installed no handler yet, so the first signal can kill it on
+// the default disposition before the second is even sent, leaving no trace
+// outside. Routing the send through one seam is the only way a test can
+// assert "two sends, distinct kinds" instead of just "process died".
 var runnerSignal = func(p *os.Process, sig os.Signal) error { return p.Signal(sig) }
-
-// stopSignalSequence is the ordered pair of signal kinds forwarded on the
-// first and second stop request: SIGTERM, then SIGINT. Two different
-// standard signals can't coalesce — the kernel keeps a separate pending
-// bit per signal number — whereas two SIGTERMs sent back-to-back collapse
-// into one pending signal if the child hasn't drained the first yet. The
-// kind is irrelevant to the child: main.go's relaySignals (#3521) counts
-// first-vs-second only, on either SIGTERM or SIGINT. A third request has no
-// third kind and forwards nothing — see forwardStop's bound.
-var stopSignalSequence = [...]os.Signal{syscall.SIGTERM, syscall.SIGINT}
 
 // SelfPath evaluates the daemon attribute's store path at revision via
 // `nix eval`, shelled out with a context-aware exec so a cancelled ctx tears
@@ -186,7 +163,7 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	cmd.Env = childCmd.Env
 	// A terminal Ctrl-C delivers SIGINT to the whole foreground process
 	// group (daemon, nix run, launcher); the daemon only treats SIGTERM as
-	// a drain request (see forwardStop below), so without this the group
+	// a drain request (see forwardSignals below), so without this the group
 	// signal would kill the child outright and abandon a running Box
 	// mid-flight — exactly what issue #3538 forbids. Same reasoning as
 	// internal/runner/nixrealize.go's background `nix build` fork; see
@@ -207,26 +184,8 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 		return daemon.ChildResult{}, fmt.Errorf("daemon: start child: %w", err)
 	}
 
-	r.mu.Lock()
-	r.children[req.Slot] = cmd.Process
-	stopsForwarded := r.stopsForwarded
-	r.mu.Unlock()
-	defer func() {
-		r.mu.Lock()
-		delete(r.children, req.Slot)
-		r.mu.Unlock()
-	}()
-	// Replay every stop request that landed before this child was published:
-	// forwardStop can run in the window between runSlot's cancellation check
-	// and this publish (Start already happened, but r.children didn't hold
-	// the process yet), fanning out over a map that doesn't yet include this
-	// child. Without the replay, that child runs its Box to completion
-	// unsignalled instead of draining. Replayed in order — SIGTERM before
-	// SIGINT — so a child born after two forwardStop calls sees the same
-	// sequence a live child would have seen.
-	for i := 0; i < stopsForwarded; i++ {
-		_ = runnerSignal(cmd.Process, stopSignalSequence[i])
-	}
+	stopForwarding := forwardSignals(cmd.Process, req.Stop, req.Abort)
+	defer stopForwarding()
 
 	var issues []string
 	seen := make(map[string]bool)
@@ -332,31 +291,51 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error
 	return 0, fmt.Errorf("daemon: run doctor: %w", waitErr)
 }
 
-// forwardStop sends the Nth stop request's signal — stopSignalSequence[N-1]
-// — to every currently running child, if any: SIGTERM the first time,
-// SIGINT the second, an escalation the child itself distinguishes by
-// counting deliveries, not by kind (#3521) — so the daemon needs no
-// separate escalate method; calling forwardStop twice is the escalation.
-// Same gesture as dogfood.sh's request_stop and
-// cmd/launcher/main.go's notifyStopSignal. A third and later call forwards
-// nothing: stopSignalSequence has only two kinds, and a child that hasn't
-// exited after both has nothing left to distinguish (relaySignals stops
-// counting past two as well). Never kills a child; a no-op when none is
-// running or the sequence is spent.
-func (r *hostRunner) forwardStop() {
-	r.mu.Lock()
-	if r.stopsForwarded >= len(stopSignalSequence) {
-		r.mu.Unlock()
-		return
-	}
-	sig := stopSignalSequence[r.stopsForwarded]
-	r.stopsForwarded++
-	children := make([]*os.Process, 0, len(r.children))
-	for _, child := range r.children {
-		children = append(children, child)
-	}
-	r.mu.Unlock()
-	for _, child := range children {
-		_ = runnerSignal(child, sig)
+// forwardSignals starts one goroutine that watches stop and abort for the
+// life of a single child and relays each onto p: SIGTERM when stop closes,
+// SIGINT when abort closes. It replaces the old shared children
+// map/counter/replay with per-child state that needs no lock: a child
+// started after stop (and/or abort) is already closed observes the close
+// immediately — a select on a closed channel fires at once — which is
+// exactly the old replay loop's job, now structural rather than counted.
+// nil stop/abort (a ChildRequest carrying no latch, e.g. a one-off doctor
+// run) is safe: a select on a nil channel simply never fires.
+//
+// SIGTERM then SIGINT, never twice the same kind: two identical standard
+// signals sent back-to-back can coalesce into one pending delivery (the
+// kernel keeps one pending bit per signal number), so a SIGTERM escalation
+// could be lost the same way; two distinct kinds can't coalesce. The child
+// itself only counts deliveries, not kinds (stopsignal.Relay, #3521),
+// so which signal arrives is the daemon's problem to get right, not the
+// child's.
+//
+// The returned stop func tears the goroutine down without sending anything
+// once the child has already exited on its own (RunChild's deferred call);
+// without it the goroutine would sit on stop/abort for the life of the
+// daemon process instead of the life of its one child. It blocks until the
+// goroutine is actually gone: closing done alone only *asks* it to stop, and
+// a goroutine still unscheduled when RunChild returns would then reach its
+// select with stop closed too and pick that case at random, signalling a
+// child that has already exited.
+func forwardSignals(p *os.Process, stop, abort <-chan struct{}) (stopForwarding func()) {
+	done := make(chan struct{})
+	gone := make(chan struct{})
+	go func() {
+		defer close(gone)
+		select {
+		case <-stop:
+			_ = runnerSignal(p, syscall.SIGTERM)
+		case <-done:
+			return
+		}
+		select {
+		case <-abort:
+			_ = runnerSignal(p, syscall.SIGINT)
+		case <-done:
+		}
+	}()
+	return func() {
+		close(done)
+		<-gone
 	}
 }
