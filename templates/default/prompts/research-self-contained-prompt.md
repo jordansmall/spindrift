@@ -25,7 +25,7 @@ Render exactly one of these verdicts:
 
 # POST THE VERDICT
 
-${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}
+${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP}${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_LOCAL_SOCKET_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP}
 Structure the verdict in this order:
 
 1. **Verdict** — `<RESEARCH_VERDICT_ENUM>`, plus a one-line rationale.
@@ -39,7 +39,7 @@ Carry the machine marker `<!-- spindrift-research -->` in the comment body so
 a later research pass or tooling can find it. Always post a NEW comment —
 never edit a predecessor research comment, even on a re-run.
 
-${RESEARCH_FILE_ISSUES_RELAY_STEP}Never edit the issue body, never add or remove a label, never close the
+${RESEARCH_FILE_ISSUES_RELAY_STEP}${RESEARCH_FILE_ISSUES_RELAY_SOCKET_STEP}Never edit the issue body, never add or remove a label, never close the
 issue, never promote it to dispatchable, and never file an issue yourself.
 Comments only.
 

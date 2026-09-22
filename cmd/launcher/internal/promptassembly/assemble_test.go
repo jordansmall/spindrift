@@ -1341,25 +1341,28 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 
 		for _, boxWriteEnabled := range []bool{true, false} {
 			for _, orchestratorEnabled := range []bool{true, false} {
-				boxWriteEnabled, orchestratorEnabled := boxWriteEnabled, orchestratorEnabled
-				t.Run(fmt.Sprintf("%s/never direct-file boxWrite=%v orchestrator=%v", name, boxWriteEnabled, orchestratorEnabled), func(t *testing.T) {
-					env := coveredEnv()
-					env.DispatchKind = "research"
-					env.SelfContained = selfContained
-					env.ResearchStatusEnum = "recommend|reject|unclear"
-					env.FilerEnabled = true
-					env.BoxWriteEnabled = boxWriteEnabled
-					env.OrchestratorEnabled = orchestratorEnabled
+				for _, signalCarrier := range []string{"", "log", "socket"} {
+					boxWriteEnabled, orchestratorEnabled, signalCarrier := boxWriteEnabled, orchestratorEnabled, signalCarrier
+					t.Run(fmt.Sprintf("%s/never direct-file boxWrite=%v orchestrator=%v carrier=%q", name, boxWriteEnabled, orchestratorEnabled, signalCarrier), func(t *testing.T) {
+						env := coveredEnv()
+						env.DispatchKind = "research"
+						env.SelfContained = selfContained
+						env.ResearchStatusEnum = "recommend|reject|unclear"
+						env.FilerEnabled = true
+						env.BoxWriteEnabled = boxWriteEnabled
+						env.OrchestratorEnabled = orchestratorEnabled
+						env.SignalCarrier = signalCarrier
 
-					result, err := Assemble(env, reg)
-					if err != nil {
-						t.Fatalf("Assemble: %v", err)
-					}
+						result, err := Assemble(env, reg)
+						if err != nil {
+							t.Fatalf("Assemble: %v", err)
+						}
 
-					if strings.Contains(result.Prompt, "gh issue create --title") {
-						t.Errorf("Prompt contains filer-file-direct.md's direct-file literal, want never in a research prompt: %q", result.Prompt)
-					}
-				})
+						if strings.Contains(result.Prompt, "gh issue create --title") {
+							t.Errorf("Prompt contains filer-file-direct.md's direct-file literal, want never in a research prompt: %q", result.Prompt)
+						}
+					})
+				}
 			}
 		}
 	}
@@ -1674,6 +1677,217 @@ func TestAssembleResearchPromptCavemanLocalTracker(t *testing.T) {
 	}
 	if !strings.Contains(result.Prompt, markerGrammarSpindriftCommentExcerpt) {
 		t.Errorf("Prompt's marker-grammar exemption paragraph doesn't name SPINDRIFT_COMMENT: %q", result.Prompt)
+	}
+}
+
+// Issue #3726: the research-verdict relay forks a second time on
+// BOX_SIGNAL_CARRIER, independent of the tracker-backend split above. A
+// read-only github research cell must carry exactly one of the log
+// fragment's SPINDRIFT_COMMENT relay line or the socket fragment's
+// driver-exec verb text, never both, and SignalCarrier alone must pick
+// which.
+func TestAssembleResearchPromptCarrierSelectsLogOrSocketFragment(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	base := coveredEnv()
+	base.DispatchKind = "research"
+	base.SelfContained = false
+	base.ResearchStatusEnum = "recommend|reject|unclear"
+	base.BoxWriteEnabled = false
+
+	logEnv := base
+	logEnv.SignalCarrier = "log"
+	logResult, err := Assemble(logEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(log): %v", err)
+	}
+	if !strings.Contains(logResult.Prompt, "SPINDRIFT_COMMENT run-nonce-abc123") {
+		t.Errorf("SignalCarrier=log prompt missing research-verdict-github-readonly.md's SPINDRIFT_COMMENT relay line: %q", logResult.Prompt)
+	}
+	if strings.Contains(logResult.Prompt, "driver-exec signal comment") {
+		t.Errorf("SignalCarrier=log prompt contains the socket fragment's driver-exec verb, want absent: %q", logResult.Prompt)
+	}
+
+	socketEnv := base
+	socketEnv.SignalCarrier = "socket"
+	socketResult, err := Assemble(socketEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(socket): %v", err)
+	}
+	if !strings.Contains(socketResult.Prompt, "driver-exec signal comment") {
+		t.Errorf("SignalCarrier=socket prompt missing research-verdict-github-readonly-socket.md's driver-exec verb: %q", socketResult.Prompt)
+	}
+	// caveman-default-research.md names SPINDRIFT_COMMENT unconditionally
+	// in its marker-grammar exemption paragraph (a later slice's concern),
+	// so this asserts against the log fragment's actual relay line, not
+	// the bare marker name.
+	if strings.Contains(socketResult.Prompt, "SPINDRIFT_COMMENT run-nonce-abc123") {
+		t.Errorf("SignalCarrier=socket prompt contains the log fragment's SPINDRIFT_COMMENT relay line, want absent: %q", socketResult.Prompt)
+	}
+}
+
+// Issue #3726 slice 3: the PR-intent channel forks the same way on the
+// carrier. A read-only WORK box never posts the PR itself, so it either
+// prints the nonce-guarded SPINDRIFT_PR_INTENT stdout line (log carrier) or
+// sends the intent over the Signal socket via `driver-exec signal
+// pr-intent` (socket carrier) — for both the OPEN A PULL REQUEST step and
+// the IF BLOCKED step, never both fragments at once.
+func TestAssembleWorkPromptCarrierSelectsLogOrSocketPRIntentFragment(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	base := coveredEnv()
+	base.BoxWriteEnabled = false
+
+	logEnv := base
+	logEnv.SignalCarrier = "log"
+	logResult, err := Assemble(logEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(log): %v", err)
+	}
+	// caveman-default-worker.md names SPINDRIFT_PR_INTENT unconditionally in
+	// its marker-grammar exemption paragraph, so assert against the log
+	// fragments' actual substituted nonce line, not the bare marker name.
+	if !strings.Contains(logResult.Prompt, "SPINDRIFT_PR_INTENT run-nonce-abc123") {
+		t.Errorf("SignalCarrier=log prompt missing the open-pr-create-outbox.md/if-blocked-pr-outbox.md substituted SPINDRIFT_PR_INTENT line: %q", logResult.Prompt)
+	}
+	// caveman-default.md also names the bare `driver-exec signal pr-intent`
+	// verb unconditionally in its exemption paragraph, so anchor on the
+	// socket fragments' own flag-bearing command line, not the bare verb.
+	if strings.Contains(logResult.Prompt, `driver-exec signal pr-intent -title "<conventional title>"`) {
+		t.Errorf("SignalCarrier=log prompt contains the socket fragments' driver-exec command line, want absent: %q", logResult.Prompt)
+	}
+
+	socketEnv := base
+	socketEnv.SignalCarrier = "socket"
+	socketResult, err := Assemble(socketEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(socket): %v", err)
+	}
+	if !strings.Contains(socketResult.Prompt, `driver-exec signal pr-intent -title "<conventional title>"`) {
+		t.Errorf("SignalCarrier=socket prompt missing the socket fragments' driver-exec command line: %q", socketResult.Prompt)
+	}
+	if strings.Contains(socketResult.Prompt, "SPINDRIFT_PR_INTENT run-nonce-abc123") {
+		t.Errorf("SignalCarrier=socket prompt contains the log fragments' substituted SPINDRIFT_PR_INTENT line, want absent: %q", socketResult.Prompt)
+	}
+}
+
+// Issue #3726 slice 4: the issue-intent channel forks the same way as the
+// comment/pr-intent channels above. A read-only Filer either emits the
+// nonce-guarded SPINDRIFT_ISSUE_INTENT stdout line (log carrier) or sends
+// each issue over the Signal socket via `driver-exec signal issue-intent`
+// (socket carrier) — never both, in the coordinator's own delegation step
+// and in the Filer's own prompt, on both the work and research paths.
+func TestAssembleWorkPromptCarrierSelectsLogOrSocketIssueIntentFragment(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	base := coveredEnv()
+	base.FilerEnabled = true
+	base.BoxWriteEnabled = false
+	base.OrchestratorEnabled = true
+	base.AgentsJSONTemplate = `{"filer":{"model":"m"}}`
+	base.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
+
+	// caveman-default.md names SPINDRIFT_ISSUE_INTENT (and SPINDRIFT_PR_INTENT)
+	// unconditionally in its marker-grammar exemption paragraph, so assert
+	// against each fragment's own distinguishing sentence, not the bare
+	// marker name, which the caveman fragment puts in both prompts either way.
+	logEnv := base
+	logEnv.SignalCarrier = "log"
+	logResult, err := Assemble(logEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(log): %v", err)
+	}
+	if !strings.Contains(logResult.Prompt, "it emits\n`SPINDRIFT_ISSUE_INTENT` lines instead") {
+		t.Errorf("SignalCarrier=log coordinator prompt missing file-issues-relay.md's relay sentence: %q", logResult.Prompt)
+	}
+	// caveman-default.md also names the bare `driver-exec signal issue-intent`
+	// verb unconditionally in its exemption paragraph, so anchor on
+	// file-issues-relay-socket.md's own "via ..." sentence, not the bare verb.
+	if strings.Contains(logResult.Prompt, "via `driver-exec signal issue-intent`") {
+		t.Errorf("SignalCarrier=log coordinator prompt contains file-issues-relay-socket.md's relay sentence, want absent: %q", logResult.Prompt)
+	}
+	logFilerPrompt := agentPromptFromJSON(t, logResult.AgentsJSON, "filer")
+	if !strings.Contains(logFilerPrompt, "print\n   one `SPINDRIFT_ISSUE_INTENT run-nonce-abc123") {
+		t.Errorf("SignalCarrier=log filer prompt missing filer-file-relay.md's nonce-guarded marker line: %q", logFilerPrompt)
+	}
+	// filer-prompt.md's own report-format prose also names the bare verb
+	// unconditionally (its QUEUED-report line), so anchor on
+	// filer-file-relay-socket.md's own flag-bearing command line.
+	if strings.Contains(logFilerPrompt, `driver-exec signal issue-intent -title "<title>" -type bug`) {
+		t.Errorf("SignalCarrier=log filer prompt contains filer-file-relay-socket.md's driver-exec command line, want absent: %q", logFilerPrompt)
+	}
+
+	socketEnv := base
+	socketEnv.SignalCarrier = "socket"
+	socketResult, err := Assemble(socketEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(socket): %v", err)
+	}
+	if !strings.Contains(socketResult.Prompt, "via `driver-exec signal issue-intent`") {
+		t.Errorf("SignalCarrier=socket coordinator prompt missing file-issues-relay-socket.md's relay sentence: %q", socketResult.Prompt)
+	}
+	if strings.Contains(socketResult.Prompt, "it emits\n`SPINDRIFT_ISSUE_INTENT` lines instead") {
+		t.Errorf("SignalCarrier=socket coordinator prompt contains the log fragment's relay sentence, want absent: %q", socketResult.Prompt)
+	}
+	// filer-prompt.md's own report-format prose names SPINDRIFT_ISSUE_INTENT
+	// (and the bare driver-exec verb) unconditionally too (its QUEUED-report
+	// line), so assert filer-file-relay-socket.md's own flag-bearing command
+	// line rather than bare-marker or bare-verb absence.
+	socketFilerPrompt := agentPromptFromJSON(t, socketResult.AgentsJSON, "filer")
+	if !strings.Contains(socketFilerPrompt, `driver-exec signal issue-intent -title "<title>" -type bug`) {
+		t.Errorf("SignalCarrier=socket filer prompt missing filer-file-relay-socket.md's driver-exec command line: %q", socketFilerPrompt)
+	}
+	if strings.Contains(socketFilerPrompt, "print\n   one `SPINDRIFT_ISSUE_INTENT run-nonce-abc123") {
+		t.Errorf("SignalCarrier=socket filer prompt contains filer-file-relay.md's nonce-guarded marker line, want absent: %q", socketFilerPrompt)
+	}
+	// signal_cmd.go's issue-intent case rejects an empty -title (and an
+	// empty -type) with exit 1, so filer-file-relay-socket.md must not
+	// claim -title is optional (issue #3726 review finding).
+	if strings.Contains(socketFilerPrompt, "Unlike `-title`, `-type` is required") {
+		t.Errorf("SignalCarrier=socket filer prompt wrongly claims -title is optional: %q", socketFilerPrompt)
+	}
+	if !strings.Contains(socketFilerPrompt, "Both `-title` and `-type` are required") {
+		t.Errorf("SignalCarrier=socket filer prompt missing filer-file-relay-socket.md's both-required sentence: %q", socketFilerPrompt)
+	}
+}
+
+// Same fork on the research path (ADR 0041's researchForceRelay), asserted
+// against result.Prompt directly since research-file-issues-relay.md/-socket
+// render in the coordinator's own research prompt, not a delegated one.
+func TestAssembleResearchPromptCarrierSelectsLogOrSocketIssueIntentFragment(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	base := coveredEnv()
+	base.DispatchKind = "research"
+	base.ResearchStatusEnum = "recommend|reject|unclear"
+	base.FilerEnabled = true
+	base.BoxWriteEnabled = true
+	base.OrchestratorEnabled = false
+
+	logEnv := base
+	logEnv.SignalCarrier = "log"
+	logResult, err := Assemble(logEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(log): %v", err)
+	}
+	if !strings.Contains(logResult.Prompt, "SPINDRIFT_ISSUE_INTENT") {
+		t.Errorf("SignalCarrier=log research prompt missing research-file-issues-relay.md's SPINDRIFT_ISSUE_INTENT marker: %q", logResult.Prompt)
+	}
+	if strings.Contains(logResult.Prompt, "driver-exec signal issue-intent") {
+		t.Errorf("SignalCarrier=log research prompt contains the socket fragment's driver-exec verb, want absent: %q", logResult.Prompt)
+	}
+
+	socketEnv := base
+	socketEnv.SignalCarrier = "socket"
+	socketResult, err := Assemble(socketEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(socket): %v", err)
+	}
+	if !strings.Contains(socketResult.Prompt, "driver-exec signal issue-intent") {
+		t.Errorf("SignalCarrier=socket research prompt missing research-file-issues-relay-socket.md's driver-exec verb: %q", socketResult.Prompt)
+	}
+	if strings.Contains(socketResult.Prompt, "SPINDRIFT_ISSUE_INTENT") {
+		t.Errorf("SignalCarrier=socket research prompt contains SPINDRIFT_ISSUE_INTENT, want absent: %q", socketResult.Prompt)
 	}
 }
 
