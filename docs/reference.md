@@ -5081,10 +5081,27 @@ exit would destroy exactly that.
 Writes are atomic — a temp file in the same dir, then `os.Rename` — so a
 reader never sees a half-written object, and a failed write is reported to
 stderr and otherwise ignored: advisory data must never fail the daemon.
-It is rewritten on state change rather than on a timer because every
-state change the daemon makes already emits an event, so the publish is
-folded into the emit (`pool.emit`) — "on state change" is structural, not
-a list of call sites to keep in sync.
+It is rewritten on every `mutate` — the pool's one path to changing
+anything — rather than on a timer. The publish cannot simply be folded
+into whatever gets emitted, because not every state change has an event
+to ride along with: a phase move, a backoff reset, and an issue append
+raise no event of their own. So it is folded into `mutate` instead:
+`mutate` allocates a sequence number in the same lock hold it took the
+snapshot in, and hands both to `StatusWriter.Publish`, which drops any
+snapshot whose sequence is older than the last one it wrote — so two
+slots publishing concurrently can never leave the older state on disk,
+without the publish calls themselves needing to arrive in order.
+
+Riding the `mutate` rather than the change means a `mutate` that alters
+nothing republishes the same state. That covers the pool's opening
+snapshot, every slot iteration's top-of-loop `noteAwakeOpen` on an
+already-open window, a re-park wake that still finds the window shut, an
+`emit` of an event that carries no state of its own (`box`,
+`child_finish`, `baton_hold`), and an issue announced by a slot that has
+already cleared. So the cadence is "every `mutate`", which is more often
+than "on state change" alone would suggest. There is still no periodic
+rewrite ticker, though: every rewrite traces back to something the
+daemon did, even where what it did was wake from a clock-computed sleep.
 
 The most load-bearing part of the file is `state`, and specifically the
 two ways of being idle that look identical from outside and mean
@@ -5114,11 +5131,23 @@ still genuinely running even though the window has since shut; `jammed`
 vs `waiting` only applies once every kind is gated; `checking` is the
 fallback when nothing is gated and nothing is running.
 
-Per-slot, `slots[]` carries `slot`, `busy`, and for a busy slot the
-`kind`, the `revision` it is pinned to, and the `issues` its child has
-announced so far — enough to correlate a running Box with the commit that
-produced it. The issues arrive live, appended via `ChildRequest.OnIssue`
-as each announce line is read (`pool.noteIssue`), because
+Per-slot, `slots[]` carries `slot`, `phase`, `busy`, and for a busy slot
+the `kind`, the `revision` it is pinned to, and the `issues` its child
+has announced so far — enough to correlate a running Box with the commit
+that produced it. `phase` is the slot's own position in its iteration,
+one of five values: `idle` (parked, holding nothing), `awaiting_window`
+(parked because the Awake window is shut), `resolving` (fetching the
+tip, or evaluating the daemon's own self-build), `running` (a child in
+flight), or `backing_off` (sleeping out a failure backoff). A slot that
+has stopped for good — the pool is halting, and this slot's goroutine has
+already returned — reads `idle` as well: it holds nothing, so it must not
+read as engaged while a sibling drains its own child. `busy` is
+exactly `phase == "running"` and nothing more — a reader that only knows
+`busy` sees what it always saw. The `jam` alarm (see `jam` in **Event
+stream**, below) fires only when every *sibling* slot is `idle` or
+`awaiting_window`; a sibling that is `resolving`, `running`, or
+`backing_off` suppresses it. The issues arrive live, appended via
+`ChildRequest.OnIssue` as each announce line is read (`pool.noteIssue`), because
 `ChildResult.Issues` only lands after the child exits and so can only
 ever say what a slot *had*, never what it currently has. Per-kind,
 `checks[]` carries each configured kind's `nextCheck` (RFC3339, empty
@@ -5235,7 +5264,7 @@ in-place wait.
 |------|---------|----------------|
 | 0    | dispatched work | go again at once; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
 | 2    | queue empty | record it against this kind's own backoff (emit `idle`), then loop back around: switch to the other configured kind at once if it is still runnable, or sleep — via the shared `idleSleep` — only if every kind is now gated. A queue-empty gate is never itself polled mid-wait: a merge cannot create work in an empty queue, so polling for one would only spend a query for nothing |
-| 3    | none dispatchable | with a sibling slot's child running, routine — record it against this kind's backoff (emit `idle`) the same as exit 2; with the whole pool otherwise idle, nothing can start — record it as a jam instead (emit `jam`), same routing (a single-slot daemon therefore reports every exit 3 as a jam). Either way the slot switches to the other configured kind at once if that kind is still runnable; only once every kind is gated, *and* at least one of them is jammed, does the shared `idleSleep` poll `ResolveRevision` between `IdleFloor`-sized sleep slices, since a merge here *can* unblock the jam — the first no-work wait for a kind is exactly one `IdleFloor` slice and so polls nothing, with mid-wait polling starting only once that kind's backoff has grown past the floor; if the tip has moved, the slot emits `tip_moved` once and resets *every currently-jammed kind's* backoff to `IdleFloor` (the observed change is evidence for all of them, not just the kind this slot was running), and goes again at once instead of riding out the rest of the wait. A poll that errors is treated as no change observed — it never feeds the breaker, since the next iteration's own top-of-loop fetch is what reports a broken fetch |
+| 3    | none dispatchable | with any sibling slot `resolving`, `running` or `backing_off` — doing anything at all but waiting for its own turn — routine: record it against this kind's backoff (emit `idle`) the same as exit 2. Only once every sibling is `idle` or `awaiting_window` is it recorded as a jam instead (emit `jam`), same routing (a single-slot daemon has no siblings at all and so reports every exit 3 as a jam). Either way the slot switches to the other configured kind at once if that kind is still runnable; only once every kind is gated, *and* at least one of them is jammed, does the shared `idleSleep` poll `ResolveRevision` between `IdleFloor`-sized sleep slices, since a merge here *can* unblock the jam — the first no-work wait for a kind is exactly one `IdleFloor` slice and so polls nothing, with mid-wait polling starting only once that kind's backoff has grown past the floor; if the tip has moved, the slot emits `tip_moved` once and resets *every currently-jammed kind's* backoff to `IdleFloor` (the observed change is evidence for all of them, not just the kind this slot was running), and goes again at once instead of riding out the rest of the wait. A poll that errors is treated as no change observed — it never feeds the breaker, since the next iteration's own top-of-loop fetch is what reports a broken fetch |
 | 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
 | 5    | host-tainted | halt the pool |
 | 6    | config-invalid | halt the pool |
@@ -5745,8 +5774,8 @@ slot's own goroutine.
 | `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched |
 | `box` | `time`, `kind`, `issue`, `revision`, `slot` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
 | `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
-| `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot's child running; `wait` carries `kind`'s own idle backoff, so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
-| `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | recording a no-work result against `kind` after `none-dispatchable` with the whole pool otherwise idle — nothing running and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries `kind`'s own idle backoff, same as `idle` above |
+| `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot `resolving`, `running`, or `backing_off`; `wait` carries `kind`'s own idle backoff, so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
+| `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | recording a no-work result against `kind` after `none-dispatchable` with every sibling slot `idle` or `awaiting_window` — nothing running, resolving, or backing off anywhere else in the pool, and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries `kind`'s own idle backoff, same as `idle` above |
 | `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | a poll during the shared idle sleep, entered because every configured kind was gated and at least one of them was jammed, found `BASE_BRANCH`'s tip had moved since this slot's last child ran, so the slot reset every currently-jammed kind's backoff and started its next iteration at once instead of sleeping out the rest of the wait. `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
