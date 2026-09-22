@@ -15,32 +15,84 @@ import (
 // idle wait or blocked in ResolveRevision stops promptly instead of riding
 // out the full interval or fetch.
 type pool struct {
-	cfg   Config
-	r     Runner
-	em    *Emitter
-	clk   Clock
-	b     *breaker
-	kinds map[Kind]*kindBackoff
+	cfg Config
+	r   Runner
+	em  *Emitter
+	clk Clock
 
 	cancel context.CancelFunc
-
-	mu        sync.Mutex
-	halted    bool
-	reason    Halt
-	occupied  map[int]slotFlight
-	awakeShut bool // true once awake_close has fired, until the matching awake_open
 
 	// baton is the discovery token (issue #3684): at most one slot may be
 	// between "started" and "announced a Box" at any moment, on the first
 	// wave and on every refill alike — a pool that lets two slots run
 	// discovery against the same tracker snapshot at once risks both
-	// selecting the same issue. batonSlot (below, guarded by p.mu) is the
-	// current holder, or noBaton when the token is free; baton itself is
-	// the capacity-1 channel the holder sends into when it passes. nil
-	// means there is no baton to wait on at all — a single-slot pool has
-	// no sibling to stagger against (see newPool).
-	baton     chan struct{}
+	// selecting the same issue. st.batonSlot is the current holder, or
+	// noBaton when the token is free; baton itself is the capacity-1
+	// channel the holder sends into when it passes. nil means there is no
+	// baton to wait on at all — a single-slot pool has no sibling to
+	// stagger against (see newPool).
+	baton chan struct{}
+
+	mu  sync.Mutex
+	st  state
+	seq uint64 // publish sequence counter; see mutate
+}
+
+// state is all of the pool's mutable state, in one value: every field here
+// is read and written only under p.mu, and only ever changed by mutate.
+type state struct {
+	halted    bool
+	reason    Halt
+	slots     []slotState
+	awakeShut bool // true once awake_close has fired, until the matching awake_open
+	b         breaker
+	kinds     map[Kind]kindBackoff
 	batonSlot int
+}
+
+// slotState is one slot's own state: where it is in its iteration, and
+// what its child has in flight while it is running. flight is meaningful
+// only while phase == PhaseRunning: finishChild zeroes it on the way out
+// of that phase, and snapshotLocked reads it for a running slot only, so a
+// flight a bare setPhase left behind is never reachable as stale occupancy
+// data.
+type slotState struct {
+	phase  Phase
+	flight slotFlight
+}
+
+// mutate is the pool's one path to changing anything in state: every
+// change — a halt, an occupancy flip, a baton pass, a backoff record — goes
+// through here, and nowhere else takes p.mu to write. It holds the lock
+// while f applies the change and while the events f returns are emitted:
+// Emitter has its own mutex and never reaches back into the pool, so
+// emitting under p.mu is safe, and it is exactly what orders this mutate's
+// events ahead of any later mutate's without a special case — no other
+// mutate's f can run, and so no other mutate's events can reach the
+// stream, until this one releases the lock. The snapshot's sequence number
+// is allocated in that same hold, right after, which is what lets
+// StatusWriter.Publish drop a stale snapshot on disk instead of needing the
+// publish calls themselves to arrive in order.
+//
+// f must touch nothing but the *state it is handed: a p.-receiver method
+// that itself takes p.mu would deadlock here.
+//
+// Two costs come with that, both accepted as the price of ordering by
+// construction: the event-stream writer's I/O runs inside this same lock
+// hold, so a stalled writer stalls every state change, halt included; and
+// every mutate publishes, so status-file write volume now tracks state
+// changes rather than the nine hand-placed call sites it replaces.
+func (p *pool) mutate(f func(s *state) []Event) {
+	p.mu.Lock()
+	evs := f(&p.st)
+	for _, ev := range evs {
+		p.em.Emit(ev)
+	}
+	p.seq++
+	seq := p.seq
+	snap := p.snapshotLocked()
+	p.mu.Unlock()
+	p.publish(seq, snap)
 }
 
 // leadSlot is the pool's designated initial baton holder: a fixed slot
@@ -119,20 +171,26 @@ type slotFlight struct {
 // threading them as parameters.
 func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) (*pool, context.Context) {
 	pctx, cancel := context.WithCancel(ctx)
-	kinds := make(map[Kind]*kindBackoff, len(cfg.Kinds))
+	kinds := make(map[Kind]kindBackoff, len(cfg.Kinds))
 	for _, k := range cfg.Kinds {
 		kinds[k] = newKindBackoff(cfg.IdleFloor, cfg.IdleCap)
 	}
+	slots := make([]slotState, cfg.Slots)
+	for i := range slots {
+		slots[i].phase = PhaseIdle
+	}
 	p := &pool{
-		cfg:       cfg,
-		r:         r,
-		em:        em,
-		clk:       clk,
-		b:         newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
-		kinds:     kinds,
-		cancel:    cancel,
-		occupied:  make(map[int]slotFlight),
-		batonSlot: leadSlot,
+		cfg:    cfg,
+		r:      r,
+		em:     em,
+		clk:    clk,
+		cancel: cancel,
+		st: state{
+			slots:     slots,
+			b:         newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
+			kinds:     kinds,
+			batonSlot: leadSlot,
+		},
 	}
 	if cfg.Slots > 1 {
 		// A single slot has no sibling to race, so it must take no wait
@@ -178,60 +236,141 @@ func slotOrder(kinds []Kind, reservation, slot int) []Kind {
 // first kind in its preference order that is not currently backed off. ok is
 // false when every configured kind has backed off into an empty result — the
 // daemon is genuinely idle, and the caller sleeps instead of dispatching.
+// A pure read, not a mutate: nothing here changes state.
 func (p *pool) pickKind(slot int) (Kind, bool) {
+	// Sample now before taking p.mu: no Clock implementation takes p.mu
+	// itself, but calling one under the lock anyway would hold it for
+	// however long that call takes, for no reason — the lock only needs
+	// to guard the kinds map read below.
 	now := p.clk.Now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for _, kind := range slotOrder(p.cfg.Kinds, p.cfg.ResearchReservation, slot) {
-		if p.kinds[kind].runnable(now) {
+		if p.st.kinds[kind].runnable(now) {
 			return kind, true
 		}
 	}
 	return "", false
 }
 
-// occupy marks slot as having a child running right now. A slot calls this
-// immediately before RunChild, and unoccupy immediately after RunChild
-// returns — before the result is interpreted. That ordering is the whole
-// point: a slot must clear its own occupancy before it ever asks
-// siblingsOccupied, or it would count itself as a running sibling and "none
-// dispatchable, pool otherwise idle" could never be true for a lone slot.
-func (p *pool) occupy(slot int, kind Kind, revision string) {
-	p.mu.Lock()
-	p.occupied[slot] = slotFlight{kind: kind, revision: revision}
-	p.mu.Unlock()
+// resetKind clears kind's backoff gate: runSlot calls this on a Continue
+// outcome (exit 0 or 4), so a check that answered something other than
+// "nothing to do" ends whatever no-work streak this kind's backoff was
+// tracking.
+func (p *pool) resetKind(kind Kind) {
+	p.mutate(func(s *state) []Event {
+		s.kinds[kind] = s.kinds[kind].reset()
+		return nil
+	})
 }
 
-// unoccupy clears slot's occupancy (see occupy's doc for the ordering).
-func (p *pool) unoccupy(slot int) {
-	p.mu.Lock()
-	delete(p.occupied, slot)
-	p.mu.Unlock()
+// markNoWork records one no-work result for kind and returns the wait it
+// gates for — see kindBackoff.markNoWork for what jammed means. Kept for
+// the package's own tests: noteWaitResult is the one production path to a
+// no-work fold, and no production caller reaches for this one.
+func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
+	var wait time.Duration
+	p.mutate(func(s *state) []Event {
+		s.kinds[kind], wait = s.kinds[kind].markNoWork(now, jammed)
+		return nil
+	})
+	return wait
+}
+
+// noteWaitResult is runSlot's Wait-case fold: it records kind's no-work
+// result and evaluates the jam predicate in the same mutate, so the two can
+// never be read from two different instants the way a separate
+// siblingsEngaged call followed by a separate markNoWork call used to
+// allow. "none-dispatchable" carries a second axis exit 2 doesn't: whether
+// a sibling is doing anything at all. With a sibling genuinely running (or
+// fetching, or resolving its own self-build, or sleeping out a failure
+// backoff), the issues this slot found "none dispatchable" were claimed or
+// overlap-deferred against that very sibling — routine, reported like any
+// other idle wait. With every sibling idle or merely parked on the shut
+// Awake window too, nothing is running and nothing can start: a jam an
+// operator may need to clear. The jam alarm's predicate below is
+// deliberately not the same as jammed itself: jammed records the queue
+// condition this check saw (see kindBackoff.markNoWork), while the alarm
+// only fires when no sibling is doing anything a fetch, a self-build check,
+// a child, or a backoff sleep counts as (issue #3571).
+func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool) {
+	now := p.clk.Now()
+	p.mutate(func(s *state) []Event {
+		var wait time.Duration
+		s.kinds[kind], wait = s.kinds[kind].markNoWork(now, noneDispatchable)
+		if noneDispatchable && !s.siblingsEngaged(slot) {
+			return []Event{{Event: "jam", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is running"}}
+		}
+		return []Event{{Event: "idle", Kind: kind, Wait: wait.String(), Slot: intPtr(slot)}}
+	})
+}
+
+// startChild marks slot running for kind at revision and returns the
+// child_start event, together in one mutate: the phase flip is therefore
+// always visible to any snapshot that publishes alongside this event, which
+// a hand-placed write after a separately-emitted child_start could not
+// otherwise guarantee.
+func (p *pool) startChild(slot int, kind Kind, revision string) {
+	p.mutate(func(s *state) []Event {
+		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision}}
+		return []Event{{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot)}}
+	})
+}
+
+// finishChild moves slot back to idle and zeroes its flight. A slot calls this
+// immediately after RunChild returns, before the result is interpreted: it
+// must clear its own running phase before it ever asks siblingsEngaged, or
+// it would count itself as an engaged sibling and "none dispatchable, pool
+// otherwise idle" could never be true for a lone slot.
+func (p *pool) finishChild(slot int) {
+	p.mutate(func(s *state) []Event {
+		s.slots[slot] = slotState{phase: PhaseIdle}
+		return nil
+	})
 }
 
 // noteIssue appends issue to slot's in-flight issue list, for a snapshot to
-// report while the child is still running. A no-op if slot is not occupied:
-// the child announced after the slot cleared, which can only be a race
-// (RunChild already returned), not a state worth publishing. Dedupe is
+// report while the child is still running. A no-op if slot is not currently
+// running: the child announced after the slot cleared, which can only be a
+// race (RunChild already returned), not a state worth publishing. Dedupe is
 // already done by the runner, so this never re-dedupes.
 func (p *pool) noteIssue(slot int, issue string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	fl, ok := p.occupied[slot]
-	if !ok {
-		return
-	}
-	fl.issues = append(fl.issues, issue)
-	p.occupied[slot] = fl
+	p.mutate(func(s *state) []Event {
+		if s.slots[slot].phase != PhaseRunning {
+			return nil
+		}
+		s.slots[slot].flight.issues = append(s.slots[slot].flight.issues, issue)
+		return nil
+	})
 }
 
-// siblingsOccupied reports whether any slot other than slot currently has a
-// child running. Callers use it only after their own unoccupy(slot) has
-// already run, so any entry found here is a genuine sibling, never the
-// caller counting itself.
-func (p *pool) siblingsOccupied(slot int) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for s := range p.occupied {
-		if s != slot {
+// working reports whether any slot's phase is running — snapshotLocked's
+// StateWorking predicate, one bool derived from the same per-slot phase
+// siblingsEngaged reads, rather than a second occupancy notion tracked
+// alongside it.
+func (s *state) working() bool {
+	for _, ss := range s.slots {
+		if ss.phase == PhaseRunning {
+			return true
+		}
+	}
+	return false
+}
+
+// siblingsEngaged reports whether any slot other than slot is doing
+// anything but waiting for its own turn: any phase but idle or
+// awaiting-window counts, since a sibling fetching, resolving its
+// self-build, running a child, or sleeping out a failure backoff can still
+// be the reason this slot's own queue read nothing dispatchable (issue
+// #3571). idle and awaiting-window are the only two phases a slot can sit
+// in indefinitely while genuinely doing nothing, which is exactly the
+// "every sibling parked" case the jam alarm exists to catch.
+func (s *state) siblingsEngaged(slot int) bool {
+	for sl, ss := range s.slots {
+		if sl == slot {
+			continue
+		}
+		if ss.phase != PhaseIdle && ss.phase != PhaseAwaitingWindow {
 			return true
 		}
 	}
@@ -246,21 +385,10 @@ func (p *pool) awaitWindow(ctx context.Context, slot int) {
 	for {
 		wait := p.cfg.Awake.Until(p.clk.Now())
 		if wait <= 0 {
-			if p.noteAwakeOpen(slot) {
-				// noteAwakeOpen emits under p.mu (see its own doc), so it
-				// can never call publish itself; publish the transition
-				// here, a hair after the emit — the status file is
-				// advisory, the event stream is the ordered record. Gated
-				// on the transition itself: a slot that finds the window
-				// already open (or every sibling racing the same open)
-				// must not repeat a publish nothing changed.
-				p.publish()
-			}
+			p.noteAwakeOpen(slot)
 			return
 		}
-		if p.noteAwakeClose(slot, wait) {
-			p.publish()
-		}
+		p.noteAwakeClose(slot, wait)
 		p.clk.Sleep(ctx, wait)
 		if p.stopped() || ctx.Err() != nil {
 			return
@@ -268,47 +396,44 @@ func (p *pool) awaitWindow(ctx context.Context, slot int) {
 	}
 }
 
-// noteAwakeClose records the pool-wide transition into a shut window and
-// emits awake_close, but only for the caller that actually observes the
-// transition: with several slots parking on the same close, only the first
-// to flip awakeShut reports it, so the stream carries exactly one
-// awake_close per closing however many slots are waiting on it. The emit
-// happens while p.mu is still held so the flag flip and the emit are one
-// atomic step — otherwise two slots whose clk.Now() calls straddle the
-// opening instant could publish awake_open before awake_close. Returns
-// whether this call was the one that observed the transition, so
-// awaitWindow can skip the publish too on every iteration that finds the
-// window still shut with nothing new to report.
-func (p *pool) noteAwakeClose(slot int, wait time.Duration) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	first := !p.awakeShut
-	p.awakeShut = true
-
-	if first {
-		p.em.Emit(Event{Event: "awake_close", Slot: intPtr(slot), Wait: wait.String(), Reason: "outside the Awake window"})
-	}
-	return first
+// noteAwakeClose records the pool-wide transition into a shut window and,
+// only for the caller that actually observes the transition, returns the
+// awake_close event: with several slots parking on the same close, only the
+// first to flip awakeShut reports it, so the stream carries exactly one
+// awake_close per closing however many slots are waiting on it. The phase
+// write is unconditional, though, unlike the event: every parking slot is
+// about to sleep out the shut window, whether or not it was the one that
+// noticed the edge, so each must record its own phase regardless.
+func (p *pool) noteAwakeClose(slot int, wait time.Duration) {
+	p.mutate(func(s *state) []Event {
+		first := !s.awakeShut
+		s.awakeShut = true
+		s.slots[slot].phase = PhaseAwaitingWindow
+		if !first {
+			return nil
+		}
+		return []Event{{Event: "awake_close", Slot: intPtr(slot), Wait: wait.String(), Reason: "outside the Awake window"}}
+	})
 }
 
-// noteAwakeOpen is noteAwakeClose's counterpart: it fires awake_open only
-// when a close was already reported, so a daemon that starts (or every
-// slot merely finds the window already open) never emits an open with no
-// matching close. As in noteAwakeClose, the emit happens under p.mu so the
-// flag flip and the emit stay one atomic step: an awake_open therefore
-// never reaches the stream ahead of the awake_close whose flag flip it
-// observed. Returns whether this call was the one that observed the
-// transition (see noteAwakeClose).
-func (p *pool) noteAwakeOpen(slot int) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	was := p.awakeShut
-	p.awakeShut = false
-
-	if was {
-		p.em.Emit(Event{Event: "awake_open", Slot: intPtr(slot), Reason: "the Awake window reopened"})
-	}
-	return was
+// noteAwakeOpen is noteAwakeClose's counterpart: it returns awake_open only
+// when a close was already reported, so a daemon that starts (or every slot
+// merely finds the window already open) never emits an open with no
+// matching close. It is also the top-of-iteration phase reset: awaitWindow
+// returns through here on every open-window pass, so every path that loops
+// back to the top of runSlot lands here and clears whatever phase (backing
+// off, awaiting window) it left behind, with no publish of its own beyond
+// the one this mutate already makes.
+func (p *pool) noteAwakeOpen(slot int) {
+	p.mutate(func(s *state) []Event {
+		was := s.awakeShut
+		s.awakeShut = false
+		s.slots[slot].phase = PhaseIdle
+		if !was {
+			return nil
+		}
+		return []Event{{Event: "awake_open", Slot: intPtr(slot), Reason: "the Awake window reopened"}}
+	})
 }
 
 // awaitBaton parks slot until it holds the discovery baton. Returns at once
@@ -330,7 +455,7 @@ func (p *pool) awaitBaton(ctx context.Context, slot int) {
 		return
 	}
 	p.mu.Lock()
-	held := p.batonSlot == slot
+	held := p.st.batonSlot == slot
 	p.mu.Unlock()
 	if held {
 		return
@@ -351,9 +476,10 @@ func (p *pool) awaitBaton(ctx context.Context, slot int) {
 
 // takeBaton records slot as the current baton holder.
 func (p *pool) takeBaton(slot int) {
-	p.mu.Lock()
-	p.batonSlot = slot
-	p.mu.Unlock()
+	p.mutate(func(s *state) []Event {
+		s.batonSlot = slot
+		return nil
+	})
 }
 
 // passBaton hands the baton on. A no-op unless slot actually holds it,
@@ -363,8 +489,13 @@ func (p *pool) takeBaton(slot int) {
 // actually find itself the holder is the one whose reason reaches the
 // stream.
 //
-// The baton_pass emit happens before the send, not after: sending first
-// could let an awaitBaton call already blocked on <-p.baton wake and
+// The holder check is a fast-path read, not itself a mutate: only the
+// holder ever clears its own hold, and only that slot ever sets it, so a
+// slot that just observed itself as the holder stays the holder until it
+// clears the flag itself a few lines below — nothing else can race that
+// read stale. Once confirmed, one mutate clears batonSlot and returns the
+// baton_pass event; the channel send happens after, not before: sending
+// first could let an awaitBaton call already blocked on <-p.baton wake and
 // publish its own next event before baton_pass itself reaches the stream,
 // which would make the durable record say a sibling acted before the event
 // that explains why it was allowed to. The send itself cannot block: the
@@ -376,13 +507,15 @@ func (p *pool) passBaton(slot int, reason string) {
 		return
 	}
 	p.mu.Lock()
-	if p.batonSlot != slot {
-		p.mu.Unlock()
+	held := p.st.batonSlot == slot
+	p.mu.Unlock()
+	if !held {
 		return
 	}
-	p.batonSlot = noBaton
-	p.mu.Unlock()
-	p.emit(Event{Event: "baton_pass", Slot: intPtr(slot), Reason: reason})
+	p.mutate(func(s *state) []Event {
+		s.batonSlot = noBaton
+		return []Event{{Event: "baton_pass", Slot: intPtr(slot), Reason: reason}}
+	})
 	p.baton <- struct{}{}
 }
 
@@ -391,7 +524,7 @@ func (p *pool) passBaton(slot int, reason string) {
 func (p *pool) stopped() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.halted
+	return p.st.halted
 }
 
 // halt records h as the pool's halt reason if none is recorded yet, emits
@@ -400,16 +533,19 @@ func (p *pool) stopped() bool {
 // slot that merely rediscovers the same cancellation) are no-ops — the
 // first h wins and no second halt event is ever emitted.
 func (p *pool) halt(h Halt) {
-	p.mu.Lock()
-	if p.halted {
-		p.mu.Unlock()
+	first := false
+	p.mutate(func(s *state) []Event {
+		if s.halted {
+			return nil
+		}
+		s.halted = true
+		s.reason = h
+		first = true
+		return []Event{h.Event()}
+	})
+	if !first {
 		return
 	}
-	p.halted = true
-	p.reason = h
-	p.mu.Unlock()
-
-	p.emit(h.Event())
 	p.cancel()
 }
 
@@ -435,10 +571,19 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 	// caller.
 	p.passBaton(slot, batonPassFailed)
 
-	count, crossed := p.b.recordAndCheck(p.clk.Now())
+	// Sample now before taking p.mu, same reasoning as pickKind.
+	now := p.clk.Now()
+	var count int
+	var crossed bool
+	p.mutate(func(s *state) []Event {
+		s.b, count, crossed = s.b.recordAndCheck(now)
+		if !crossed {
+			return nil
+		}
+		return []Event{{Event: "breaker_trip", Kind: kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()}}
+	})
 	if crossed {
 		detail := fmt.Sprintf("%d failures within %s reached threshold %d", count, p.cfg.BreakerWindow, p.cfg.BreakerThreshold)
-		p.emit(Event{Event: "breaker_trip", Kind: kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()})
 		p.halt(Halt{Class: HaltBreaker, Detail: detail, Kind: kind, Revision: revision})
 		return true
 	}
@@ -451,9 +596,29 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 		return true
 	}
 
-	p.emit(Event{Event: "backoff", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason})
+	p.mutate(func(s *state) []Event {
+		s.slots[slot].phase = PhaseBackingOff
+		return []Event{{Event: "backoff", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason}}
+	})
 	p.clk.Sleep(ctx, p.cfg.FailureBackoff)
+	// The sleep is the whole backing-off span; once it returns this slot is
+	// idle again, not merely about to be — the next loop through
+	// awaitWindow would reset it anyway on an open window, but a shut one
+	// would instead overwrite backing-off with awaiting-window and never
+	// idle in between, understating how this iteration actually ended.
+	p.setPhase(slot, PhaseIdle)
 	return false
+}
+
+// setPhase moves slot to phase with no event of its own — for transitions
+// that ride no operator-visible event: resolving (the fetch and self-build
+// check share it, since both are the same kind of outside-world evaluation)
+// and the idle reset once a backoff sleep ends.
+func (p *pool) setPhase(slot int, phase Phase) {
+	p.mutate(func(s *state) []Event {
+		s.slots[slot].phase = phase
+		return nil
+	})
 }
 
 // selfVerdict is what checkSelfBuild tells a slot to do next.
@@ -533,17 +698,41 @@ func (p *pool) checkSelfBuild(ctx context.Context, slot int, kind Kind, revision
 // slot has never yet resolved one); a poll result that differs from it is
 // the "tip moved" signal.
 func (p *pool) idleSleep(ctx context.Context, slot int, lastRevision string) {
+	// Sample now before taking p.mu, same reasoning as pickKind. The scan
+	// itself runs under one lock hold (idleWait) so it never observes two
+	// kinds at different instants; the actual sleep happens after the lock
+	// is released — p.clk.Sleep must never run under p.mu.
 	now := p.clk.Now()
+	wait, jammedGate, ok := p.idleWait(now)
+	if !ok {
+		return
+	}
+
+	if jammedGate && lastRevision != "" {
+		p.pollSlices(ctx, slot, wait, lastRevision)
+		return
+	}
+	p.clk.Sleep(ctx, wait)
+}
+
+// idleWait scans every kind's backoff under one p.mu hold and reports the
+// wait until the earliest kind's deadline and whether any gated kind is
+// currently jammed. ok is false when there is nothing to sleep for at all:
+// either a kind turned out runnable already at now (a sibling's reset()
+// raced in between pickKind's failed pass and this call, or a deadline has
+// already elapsed — the caller loops back around to pickKind at once), or
+// p.st.kinds is empty (Loop's own validation, len(cfg.Kinds) == 0, rejects
+// that before a pool is ever built, but newPool itself doesn't enforce it,
+// so this also guards a caller — a test, say — that builds a pool
+// directly). A pure read, not a mutate: nothing here changes state.
+func (p *pool) idleWait(now time.Time) (wait time.Duration, jammedGate bool, ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	var earliest time.Time
-	jammedGate := false
-	for _, k := range p.kinds {
+	for _, k := range p.st.kinds {
 		at, gated := k.readyAt(now)
 		if !gated {
-			// This kind is runnable at now — a sibling's reset() raced in
-			// between pickKind's failed pass and this call, or its own
-			// deadline has already elapsed. Either way there is nothing to
-			// sleep for; the caller loops back around to pickKind at once.
-			return
+			return 0, false, false
 		}
 		if earliest.IsZero() || at.Before(earliest) {
 			earliest = at
@@ -553,20 +742,9 @@ func (p *pool) idleSleep(ctx context.Context, slot int, lastRevision string) {
 		}
 	}
 	if earliest.IsZero() {
-		// p.kinds is empty, so the loop above never ran at all — Loop's own
-		// validation (len(cfg.Kinds) == 0) rejects this before a pool is
-		// ever built, but newPool itself doesn't enforce that, so this
-		// guards a caller (a test, say) that builds a pool directly.
-		return
+		return 0, false, false
 	}
-
-	wait := earliest.Sub(now)
-
-	if jammedGate && lastRevision != "" {
-		p.pollSlices(ctx, slot, wait, lastRevision)
-		return
-	}
-	p.clk.Sleep(ctx, wait)
+	return earliest.Sub(now), jammedGate, true
 }
 
 // pollSlices sleeps wait in IdleFloor-sized slices, polling ResolveRevision
@@ -617,51 +795,57 @@ func (p *pool) pollSlices(ctx context.Context, slot int, wait time.Duration, rev
 			// once, and the tip that moved is evidence for all of them, not
 			// whichever this slot happened to be running. Kinds names the
 			// set actually reset below; iterating cfg.Kinds rather than the
-			// p.kinds map keeps that set's order deterministic.
-			var reset []Kind
-			for _, kind := range p.cfg.Kinds {
-				if k := p.kinds[kind]; k.jammedNow() {
-					k.reset()
-					reset = append(reset, kind)
+			// kinds map keeps that set's order deterministic. The scan,
+			// resets, and the tip_moved event itself all happen in one
+			// mutate, so the set an operator reads on the event is exactly
+			// the set that was reset, not a snapshot taken a moment either
+			// side of it.
+			p.mutate(func(s *state) []Event {
+				var reset []Kind
+				for _, kind := range p.cfg.Kinds {
+					if k := s.kinds[kind]; k.jammedNow() {
+						s.kinds[kind] = k.reset()
+						reset = append(reset, kind)
+					}
 				}
-			}
-			p.emit(Event{Event: "tip_moved", Slot: intPtr(slot), Revision: newRevision, Reason: "a merge can unblock a jammed queue", Kinds: reset})
+				return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: newRevision, Reason: "a merge can unblock a jammed queue", Kinds: reset}}
+			})
 			return
 		}
 	}
 }
 
-// snapshot builds a Status from pool state alone, for publish to hand to
-// StatusWriter.Publish as its snap func. Takes p.mu for the whole build so a
-// reader never sees state from two different instants stitched together, and
-// calls p.clk.Now() under that lock — safe, since no Clock implementation
-// takes p.mu — so readyAt can tell a kind whose deadline has already elapsed
-// from one still gated, the same now-aware check idleSleep makes outside the
-// lock. It also calls kindBackoff.readyAt/jammedNow, which take kindBackoff's
-// own separate mutex — that nesting is safe (nothing under kindBackoff's
-// mutex ever takes p.mu), but noteAwakeClose/noteAwakeOpen emit while
-// holding p.mu, so they must never call publish (and therefore never call
-// snapshot); see awaitWindow, which publishes after they return instead, and
-// publish's own doc for the w.mu → p.mu order snapshot also runs under.
+// snapshot takes p.mu and builds a Status from pool state alone; see
+// snapshotLocked for the build itself. Kept for the package's own tests:
+// mutate is the one production path to a fresh snapshot, and no production
+// caller reaches for this one.
 func (p *pool) snapshot() Status {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.snapshotLocked()
+}
 
-	slots := make([]SlotStatus, p.cfg.Slots)
-	for i := range slots {
-		slots[i] = SlotStatus{Slot: i}
-		fl, ok := p.occupied[i]
-		if !ok {
+// snapshotLocked builds a Status from pool state alone; the caller must
+// already hold p.mu. Building the whole Status under one lock hold means a
+// reader never sees state from two different instants stitched together,
+// and lets it call p.clk.Now() under that same hold — safe, since no Clock
+// implementation takes p.mu — so readyAt can tell a kind whose deadline has
+// already elapsed from one still gated, the same now-aware check idleSleep
+// makes outside the lock.
+func (p *pool) snapshotLocked() Status {
+	slots := make([]SlotStatus, len(p.st.slots))
+	for i, ss := range p.st.slots {
+		slots[i] = SlotStatus{Slot: i, Phase: ss.phase, Busy: ss.phase == PhaseRunning}
+		if ss.phase != PhaseRunning {
 			continue
 		}
-		slots[i].Busy = true
-		slots[i].Kind = fl.kind
-		slots[i].Revision = fl.revision
-		if len(fl.issues) > 0 {
+		slots[i].Kind = ss.flight.kind
+		slots[i].Revision = ss.flight.revision
+		if len(ss.flight.issues) > 0 {
 			// A snapshot handed to a writer must not alias state this slot
 			// keeps appending to.
-			issues := make([]string, len(fl.issues))
-			copy(issues, fl.issues)
+			issues := make([]string, len(ss.flight.issues))
+			copy(issues, ss.flight.issues)
 			slots[i].Issues = issues
 		}
 	}
@@ -679,7 +863,7 @@ func (p *pool) snapshot() Status {
 	allGated := true
 	anyJammed := false
 	for _, k := range p.cfg.Kinds {
-		kb := p.kinds[k]
+		kb := p.st.kinds[k]
 		at, gated := kb.readyAt(now)
 		kc := KindCheck{Kind: k}
 		if gated {
@@ -710,30 +894,30 @@ func (p *pool) snapshot() Status {
 	// when nothing is gated and nothing is running.
 	//
 	// Asleep is keyed off windowOpensAt (the same now-aware Awake.Until
-	// check nextCheck already floors on above), not p.awakeShut: awakeShut
-	// is edge-triggered by whichever slot's awaitWindow observes the
-	// close, so a pool built outside its window and snapshotted before any
-	// slot parks would still read awakeShut false and disagree with a
-	// nextCheck already naming the reopening. p.awakeShut therefore has no
-	// reader left outside the note*Awake* pair itself, which still needs
+	// check nextCheck already floors on above), not p.st.awakeShut:
+	// awakeShut is edge-triggered by whichever slot's awaitWindow observes
+	// the close, so a pool built outside its window and snapshotted before
+	// any slot parks would still read awakeShut false and disagree with a
+	// nextCheck already naming the reopening. p.st.awakeShut therefore has
+	// no reader left outside the note*Awake* pair itself, which still needs
 	// it to edge-trigger awake_close/awake_open.
-	state := StateChecking
+	computedState := StateChecking
 	reason := ""
 	switch {
-	case p.halted:
-		state = StateHalted
-		reason = p.reason.String()
-	case len(p.occupied) > 0:
-		state = StateWorking
+	case p.st.halted:
+		computedState = StateHalted
+		reason = p.st.reason.String()
+	case p.st.working():
+		computedState = StateWorking
 	case !windowOpensAt.IsZero():
-		state = StateAsleep
+		computedState = StateAsleep
 	case allGated && anyJammed:
-		state = StateJammed
+		computedState = StateJammed
 	case allGated:
-		state = StateWaiting
+		computedState = StateWaiting
 	}
 
-	// Copied, not aliased, matching the fl.issues copy above: nothing
+	// Copied, not aliased, matching the issues copy above: nothing
 	// mutates cfg.Kinds today, but a returned Status must never assume a
 	// future writer keeps that true.
 	kinds := make([]Kind, len(p.cfg.Kinds))
@@ -741,44 +925,46 @@ func (p *pool) snapshot() Status {
 
 	return Status{
 		Kinds:  kinds,
-		State:  state,
+		State:  computedState,
 		Reason: reason,
 		Slots:  slots,
 		Checks: checks,
 	}
 }
 
-// publish writes the pool's current snapshot to Config.Status, if
-// configured. A nil Status is the deliberate opt-out — a daemon that never
+// publish writes s (already sequence-numbered by mutate) to Config.Status,
+// if configured. Called from mutate alone — there is no other publish call
+// site. A nil Status is the deliberate opt-out — a daemon that never
 // located a git dir to publish into, or an operator who chose not to
 // publish — not a swallowed error, so publish is silently a no-op rather
 // than reporting anything. A write failure is advisory-only and must never
 // fail the daemon: it is reported to emitErrW and otherwise ignored.
-//
-// Publish, not Write, so p.snapshot runs under StatusWriter.mu: that is what
-// stops two slot goroutines publishing concurrently from sampling in one
-// order and writing in the other. Lock order is therefore w.mu → p.mu, which
-// is deadlock-free only because nothing calls publish while already holding
-// p.mu.
-func (p *pool) publish() {
+func (p *pool) publish(seq uint64, s Status) {
 	if p.cfg.Status == nil {
 		return
 	}
-	if err := p.cfg.Status.Publish(p.snapshot); err != nil {
+	if err := p.cfg.Status.Publish(seq, s); err != nil {
 		fmt.Fprintf(emitErrW, "daemon: status file write failed: %v\n", err)
 	}
 }
 
-// emit writes ev to the event stream and republishes the status file:
-// folding the publish in makes "on state change" structural for every event
-// routed through emit, rather than one more call site to remember. It does
-// not cover every state change, though: the note*Awake* pair emits directly
-// under p.mu, where calling emit (and its own publish) would deadlock, and
-// hand-places a publish once the lock is released (awaitWindow); occupy,
-// unoccupy, noteIssue, and kindBackoff.reset change pool state with no
-// event of their own to ride, so their callers hand-place a publish too
-// (loop.go).
-func (p *pool) emit(ev Event) { p.em.Emit(ev); p.publish() }
+// publishInitial reports the pool's startup state before any slot has made
+// its own first change, so a freshly started daemon's status file says
+// something at once instead of only on its first state change. It goes
+// through mutate, changing nothing, rather than calling snapshot/publish
+// directly: the snapshot and its sequence number must come from the one
+// operation that allocates both, or this initial publish could race a
+// slot's first real mutate and overwrite that slot's fresher state with
+// this stale one.
+func (p *pool) publishInitial() {
+	p.mutate(func(*state) []Event { return nil })
+}
+
+// emit is mutate's trivial case, for the events that ride no state change
+// of their own: box, child_finish and baton_hold.
+func (p *pool) emit(ev Event) {
+	p.mutate(func(*state) []Event { return []Event{ev} })
+}
 
 // haltReason returns the pool's recorded Halt. Only meaningful after
 // every slot goroutine has returned (Loop calls it after its WaitGroup
@@ -788,5 +974,5 @@ func (p *pool) emit(ev Event) { p.em.Emit(ev); p.publish() }
 func (p *pool) haltReason() Halt {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.reason
+	return p.st.reason
 }

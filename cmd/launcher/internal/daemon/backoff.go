@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"sync"
 	"time"
 )
 
@@ -12,27 +11,29 @@ import (
 // kindBackoff below, so the quantity each embedding bounds is that one kind's
 // own rate-limit spend against the forge, and a slot observing work resets
 // only the kind it was working, not its sibling's.
+//
+// A plain value, not a mutex-guarded object (issue #3623): the pool holds
+// its per-kind idleBackoffs (via kindBackoff, below) as map values under
+// p.mu, so next()/reset() read the receiver and return the updated value
+// for the caller to store back, rather than mutating in place.
 type idleBackoff struct {
 	floor time.Duration
 	cap   time.Duration
 
-	mu  sync.Mutex
 	cur time.Duration
 }
 
 // newIdleBackoff builds an idleBackoff starting at floor, doubling toward
 // cap on each next() call.
-func newIdleBackoff(floor, cap time.Duration) *idleBackoff {
-	return &idleBackoff{floor: floor, cap: cap, cur: floor}
+func newIdleBackoff(floor, cap time.Duration) idleBackoff {
+	return idleBackoff{floor: floor, cap: cap, cur: floor}
 }
 
-// next records one no-work check and returns the wait for it: the current
-// value, before it doubles. Doubling only while cur is still below cap, and
-// clamping after, keeps cur from overshooting cap — not a general int64
-// overflow guard.
-func (b *idleBackoff) next() time.Duration {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+// next records one no-work check and returns the updated backoff alongside
+// the wait for this check: the current value, before it doubles. Doubling
+// only while cur is still below cap, and clamping after, keeps cur from
+// overshooting cap — not a general int64 overflow guard.
+func (b idleBackoff) next() (idleBackoff, time.Duration) {
 	wait := b.cur
 	if b.cur < b.cap {
 		b.cur *= 2
@@ -40,15 +41,14 @@ func (b *idleBackoff) next() time.Duration {
 			b.cur = b.cap
 		}
 	}
-	return wait
+	return b, wait
 }
 
-// reset returns the backoff to floor: a check produced real work, so the
+// reset returns the backoff at floor: a check produced real work, so the
 // rate-limit pressure this backoff exists to relieve is gone.
-func (b *idleBackoff) reset() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (b idleBackoff) reset() idleBackoff {
 	b.cur = b.floor
+	return b
 }
 
 // kindBackoff is one Dispatch kind's own no-work state: the idle backoff it
@@ -58,78 +58,72 @@ func (b *idleBackoff) reset() {
 // does not slow research down (and vice versa), so each kind's streak — and
 // the growing wait it earns — has to live and reset independently of the
 // other's.
+//
+// A plain value (issue #3623): the pool holds its kinds map as
+// map[Kind]kindBackoff under p.mu, so every method here reads the receiver
+// and returns the updated value for the caller to store back into the map,
+// rather than mutating a shared object in place.
 type kindBackoff struct {
-	mu     sync.Mutex
-	b      *idleBackoff
+	b      idleBackoff
 	until  time.Time
 	jammed bool
 }
 
 // newKindBackoff builds a kindBackoff whose underlying idleBackoff starts at
 // floor, doubling toward cap on each no-work result, same as idleBackoff.
-func newKindBackoff(floor, cap time.Duration) *kindBackoff {
-	return &kindBackoff{b: newIdleBackoff(floor, cap)}
+func newKindBackoff(floor, cap time.Duration) kindBackoff {
+	return kindBackoff{b: newIdleBackoff(floor, cap)}
 }
 
 // markNoWork records one no-work result for this kind and gates it until the
-// wait it returns has elapsed. jammed records whether the gating result was
-// "none dispatchable" (exit 3) rather than "queue empty" (exit 2): only a jam
-// is worth polling a moved tip for.
+// wait it returns has elapsed, returning the updated kindBackoff alongside
+// that wait. jammed records whether the gating result was "none
+// dispatchable" (exit 3) rather than "queue empty" (exit 2): only a jam is
+// worth polling a moved tip for.
 //
 // Deliberately exit-3-alone: sibling occupancy plays no part. jammed doubles
 // as idleSleep's tip-poll gate (jammedGate, pool.go) as well as status data,
 // and a sibling that actually drains the queue clears it through reset() on
 // its own next Continue — so occupancy is the jam *event*'s narrower
-// predicate (loop.go's poolJammed, an operator alarm), not this flag's.
-func (k *kindBackoff) markNoWork(now time.Time, jammed bool) time.Duration {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	wait := k.b.next()
+// predicate (state.siblingsEngaged, reached from noteWaitResult, an
+// operator alarm), not this flag's.
+func (k kindBackoff) markNoWork(now time.Time, jammed bool) (kindBackoff, time.Duration) {
+	b, wait := k.b.next()
+	k.b = b
 	k.until = now.Add(wait)
 	k.jammed = jammed
-	return wait
+	return k, wait
 }
 
-// runnableLocked is runnable's predicate, shared with readyAt so the two
-// can never drift apart on the deadline boundary. Caller must hold k.mu.
-func (k *kindBackoff) runnableLocked(now time.Time) bool {
+// runnable reports whether this kind may be tried at now, shared with
+// readyAt so the two can never drift apart on the deadline boundary.
+func (k kindBackoff) runnable(now time.Time) bool {
 	// !Before, not After: a fake clock that advances by exactly the slept
 	// duration must land on the deadline as runnable, not one tick short.
 	return k.until.IsZero() || !now.Before(k.until)
 }
 
-// runnable reports whether this kind may be tried at now.
-func (k *kindBackoff) runnable(now time.Time) bool {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	return k.runnableLocked(now)
-}
-
 // readyAt returns the instant this kind may next be tried, and whether it is
 // gated at now — false once a deadline that was set has already elapsed,
-// matching runnable's own boundary exactly (see runnableLocked). A caller
-// must never publish an until from a gated=false result: it may be a stale
+// matching runnable's own boundary exactly (see runnable). A caller must
+// never publish an until from a gated=false result: it may be a stale
 // deadline from a since-elapsed gate, not a live one.
-func (k *kindBackoff) readyAt(now time.Time) (time.Time, bool) {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	return k.until, !k.runnableLocked(now)
+func (k kindBackoff) readyAt(now time.Time) (time.Time, bool) {
+	return k.until, !k.runnable(now)
 }
 
 // jammedNow reports whether this kind is currently gated by a
 // none-dispatchable result.
-func (k *kindBackoff) jammedNow() bool {
-	k.mu.Lock()
-	defer k.mu.Unlock()
+func (k kindBackoff) jammedNow() bool {
 	return k.jammed
 }
 
-// reset clears the gate and returns the backoff to its floor: this kind
-// produced real work (or the tip moved under a jam), so the streak is over.
-func (k *kindBackoff) reset() {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	k.b.reset()
+// reset clears the gate and returns the updated kindBackoff at its floor:
+// this kind produced real work (or the tip moved under a jam), so the
+// streak is over.
+func (k kindBackoff) reset() kindBackoff {
+	k.b = k.b.reset()
 	k.until = time.Time{}
 	k.jammed = false
+	return k
 }

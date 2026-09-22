@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -545,6 +546,192 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	}
 }
 
+// TestPoolExit3WithSiblingResolvingReportsIdleNotJam pins the tightened
+// half of the jam predicate (issue #3623/#3571): a sibling blocked inside
+// ResolveRevision is doing something, even though it is not (yet) running
+// a child — the old occupied-only predicate could not see that and would
+// have reported a spurious jam here.
+//
+// Call numbering is deterministic despite two concurrent slots: call 1 is
+// slot 0's fetch as the pre-assigned baton holder (no wait); call 2 is
+// slot 1's fetch, unblocked only once slot 0's onStart passes the baton
+// live during its first RunChild call (same reasoning as
+// TestPoolSnapshotSlots's own doc); call 3 is slot 0's second-round fetch,
+// reached only after slot 0's first child is released below, by which
+// point slot 1 is parked in its own first, held RunChild call and cannot
+// be issuing a competing fetch of its own.
+func TestPoolExit3WithSiblingResolvingReportsIdleNotJam(t *testing.T) {
+	const slots = 2
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
+	r.announceEachSlot()
+
+	resolving := make(chan struct{})
+	var closeOnce sync.Once
+	r.onResolve = func(ctx context.Context, call int) error {
+		if call == 3 {
+			closeOnce.Do(func() { close(resolving) })
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}
+	clk := &testClock{}
+	nw := newNotifyWriter()
+	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	cfg := testConfig(slots)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan Halt, 1)
+	go func() {
+		done <- Loop(ctx, cfg, r, em, clk)
+	}()
+
+	seen := map[int]bool{}
+	for i := 0; i < slots; i++ {
+		seen[r.awaitStart(t)] = true
+	}
+	if len(seen) != slots {
+		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
+	}
+
+	// Slot 0 restarts for its second round and gets stuck on that round's
+	// fetch (call 3, hooked above) — resolving, not idle.
+	r.releaseSlot(t, 0, ChildResult{Exit: 0})
+	<-resolving
+
+	// Slot 1 exits none-dispatchable with slot 0 resolving: this must
+	// report idle, not jam.
+	r.releaseSlot(t, 1, ChildResult{Exit: 3})
+	nw.waitForLine(t, "\"event\":\"idle\"")
+
+	// End the test: cancelling ctx releases slot 0's blocked fetch (the
+	// hook itself selects on ctx.Done()) and any wait slot 1 has since
+	// parked in, so both slots return via stopOnCancel without either one
+	// ever needing a scripted result this test does not provide.
+	cancel()
+	reason := (<-done).String()
+	if !strings.Contains(reason, "context-cancelled") {
+		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
+	}
+
+	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
+	for _, ev := range events {
+		if ev.Event == "jam" {
+			t.Fatalf("events = %v, want no jam event: slot 0 was resolving when slot 1 exited none-dispatchable", eventNames(events))
+		}
+	}
+}
+
+// TestPoolResolvingSlotResetsToIdleOnCancel pins the reset half of phase
+// tracking (issue #3623): a slot that returns from inside the resolving
+// span (here, ctx cancellation landing mid-fetch) must not go on
+// publishing "resolving" after it has left runSlot entirely — siblingsEngaged
+// (pool.go) counts any non-idle, non-awaiting-window phase as engaged, so a
+// stale "resolving" would keep suppressing a real sibling's jam alarm even
+// though this slot is doing nothing at all anymore.
+func TestPoolResolvingSlotResetsToIdleOnCancel(t *testing.T) {
+	const slots = 2
+	dir, sw := statusDir(t)
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	resolving := make(chan struct{})
+	var closeOnce sync.Once
+	r.onResolve = func(ctx context.Context, call int) error {
+		closeOnce.Do(func() { close(resolving) })
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	cfg := testConfig(slots)
+	cfg.Status = sw
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan Halt, 1)
+	go func() {
+		done <- Loop(ctx, cfg, r, em, clk)
+	}()
+
+	<-resolving
+	cancel()
+	reason := (<-done).String()
+	if !strings.Contains(reason, "context-cancelled") {
+		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
+	}
+
+	st := readStatus(t, dir)
+	if len(st.Slots) != slots {
+		t.Fatalf("slots = %d, want %d", len(st.Slots), slots)
+	}
+	if st.Slots[0].Phase != PhaseIdle {
+		t.Fatalf("slot 0 phase = %q, want %q after returning from the resolving span on cancellation", st.Slots[0].Phase, PhaseIdle)
+	}
+}
+
+// TestPoolExit3WithSiblingBackingOffReportsIdleNotJam extends the same
+// tightened predicate to the third engaged phase: a sibling asleep out a
+// failure backoff (not running, not resolving) still suppresses the jam
+// alarm. Slot 0's first child fails the RunChild seam itself (runErrAt/
+// runErr), landing it in backoffOrHalt's parked Sleep; slot 1's own fetch
+// is held at the onResolve hook until that Sleep is confirmed entered (the
+// sleepSignal below), so slot 1's later exit-3 is guaranteed to land while
+// slot 0 is genuinely backing off, never racing the two into some other
+// interleaving.
+func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
+	const slots = 2
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		runErrAt:  1,
+		runErr:    errors.New("run-boom"),
+		results:   []ChildResult{{}, {Exit: 3}},
+	}
+	backingOff := make(chan struct{})
+	r.onResolve = func(ctx context.Context, call int) error {
+		if call == 2 {
+			select {
+			case <-backingOff:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+	clk := &testClock{sleepSignal: make(chan struct{}, slots+1)}
+	clk.park()
+	nw := newNotifyWriter()
+	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	cfg := testConfig(slots)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan Halt, 1)
+	go func() {
+		done <- Loop(ctx, cfg, r, em, clk)
+	}()
+
+	// Slot 0's seam error lands it in backoffOrHalt's parked Sleep; slot 1
+	// stays held at the hook (call 2, its own fetch) until this fires, so
+	// there is exactly one sleepSignal to drain before slot 1 is let
+	// through.
+	<-clk.sleepSignal
+	close(backingOff)
+
+	nw.waitForLine(t, "\"event\":\"idle\"")
+
+	cancel()
+	reason := (<-done).String()
+	if !strings.Contains(reason, "context-cancelled") {
+		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
+	}
+
+	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
+	for _, ev := range events {
+		if ev.Event == "jam" {
+			t.Fatalf("events = %v, want no jam event: slot 0 was backing off when slot 1 exited none-dispatchable", eventNames(events))
+		}
+	}
+}
+
 // TestIdleWaitLastSliceClampsToRemaining pins the clamp at the tail of
 // pollSlices's slicing loop: when IdleFloor does not evenly divide the
 // requested wait, the final slice must shrink to what's left rather than
@@ -575,31 +762,55 @@ func TestIdleWaitLastSliceClampsToRemaining(t *testing.T) {
 	}
 }
 
-// TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots pins the
-// edge-triggered contract: with several slots all parking on the same
-// closed window, the stream carries exactly one awake_close and one
-// awake_open, never one per parked slot.
-func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing.T) {
+// probeWriter is an Emitter sink that runs probe, if set, on every Write
+// before delegating to the embedded buffer — letting a test observe what
+// held true at the exact moment an event reached the stream, rather than
+// only after the fact once the whole write is done.
+type probeWriter struct {
+	bytes.Buffer
+	probe func()
+}
+
+func (w *probeWriter) Write(p []byte) (int, error) {
+	if w.probe != nil {
+		w.probe()
+	}
+	return w.Buffer.Write(p)
+}
+
+// setupAwakeWindowRace builds the two-slot-or-more Awake-window race both
+// TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots and
+// TestPoolAwakeWindowCloseOrderedBeforeOpenAcrossSlots stage: several slots
+// all parking on the same closed window, released at once by one clock
+// step. hook, if non-nil, runs after newPool but before the slot
+// goroutines start, so a caller can reach into the pool it just built and
+// the sink it emits through — e.g. to point the sink's probe at p.mu. It
+// returns the decoded event stream once every awaitWindow goroutine has
+// returned.
+func setupAwakeWindowRace(t *testing.T, slots int, hook func(p *pool, pw *probeWriter)) []Event {
+	t.Helper()
+	pw := &probeWriter{}
 	win, err := ParseWindow("09:00-17:00 UTC")
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
 	}
-	const slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	// clk: testClock's step mode, unlike an additive advance (unsound once
 	// several Sleep calls race the same shared clock), only changes now on
 	// step and releases every Sleep blocked so far at once, modeling "all
-	// three slots are asleep waiting for the same instant" with no
-	// additive artifact.
+	// slots are asleep waiting for the same instant" with no additive
+	// artifact.
 	clk := &testClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), sleepSignal: make(chan struct{}, slots)}
 	clk.park()
-	var buf bytes.Buffer
-	em := newTestEmitter(&buf)
+	em := NewEmitter(pw, func() time.Time { return time.Unix(0, 0).UTC() })
 
 	cfg := testConfig(slots)
 	cfg.Awake = win
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
+	if hook != nil {
+		hook(p, pw)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(slots)
@@ -611,10 +822,20 @@ func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing
 	}
 
 	clk.awaitSleep(t, slots)
-	clk.step(time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)) // window opens, releases all three
+	clk.step(time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)) // window opens, releases every parked Sleep at once
 	wg.Wait()
 
-	events := decodeEvents(t, &buf)
+	return decodeEvents(t, &pw.Buffer)
+}
+
+// TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots pins the
+// edge-triggered contract: with several slots all parking on the same
+// closed window, the stream carries exactly one awake_close and one
+// awake_open, never one per parked slot.
+func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing.T) {
+	const slots = 3
+	events := setupAwakeWindowRace(t, slots, nil)
+
 	closes, opens := 0, 0
 	for _, ev := range events {
 		switch ev.Event {
@@ -632,12 +853,145 @@ func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing
 	}
 }
 
-// TestAwaitWindowSkipsPublishOnNonTransitionIteration pins that awaitWindow
-// only writes the status file on a real awake_close/awake_open transition
-// (review finding pool.go:169-180): a second iteration that still finds the
-// window shut, with nothing new to report, must perform no additional
-// write, even though noteAwakeClose runs again on every iteration.
-func TestAwaitWindowSkipsPublishOnNonTransitionIteration(t *testing.T) {
+// TestPoolAwakeWindowCloseOrderedBeforeOpenAcrossSlots pins issue #3623's
+// core ordering property: mutate holds p.mu across both applying a state
+// change and emitting the events it returns, so one mutate's events always
+// reach the stream before any later mutate's can. It shares
+// setupAwakeWindowRace's two-slot race with the count test above, through
+// the ordinary noteAwakeClose/noteAwakeOpen path — neither one holds p.mu
+// itself or hand-places a publish any more, so there is no under-lock
+// special case left for this ordering to lean on — and adds a probe on the
+// emitter's writer that catches an event reaching the stream while p.mu is
+// free, the one way this ordering could actually break.
+func TestPoolAwakeWindowCloseOrderedBeforeOpenAcrossSlots(t *testing.T) {
+	const slots = 2
+	events := setupAwakeWindowRace(t, slots, func(p *pool, pw *probeWriter) {
+		pw.probe = func() {
+			// TryLock reports false whenever p.mu is held by anyone,
+			// including this same goroutine (Go mutexes are not
+			// reentrant) — so a successful TryLock here means this
+			// event's Write reached the wire with p.mu already
+			// released, the exact regression mutate's docstring rules
+			// out. t.Errorf, not Fatalf: this runs on a slot goroutine.
+			if p.mu.TryLock() {
+				p.mu.Unlock()
+				t.Errorf("event written to the stream while p.mu was not held")
+			}
+		}
+	})
+
+	closeIdx, openIdx := -1, -1
+	for i, ev := range events {
+		switch ev.Event {
+		case "awake_close":
+			if closeIdx == -1 {
+				closeIdx = i
+			}
+		case "awake_open":
+			if openIdx == -1 {
+				openIdx = i
+			}
+		}
+	}
+	if closeIdx == -1 || openIdx == -1 {
+		t.Fatalf("want exactly one awake_close and one awake_open, got %v", eventNames(events))
+	}
+	if closeIdx > openIdx {
+		t.Fatalf("awake_close at index %d, awake_open at index %d, want close ordered before open (%v)", closeIdx, openIdx, eventNames(events))
+	}
+}
+
+// TestAwaitWindowReportsAwaitingWindowThenIdle pins noteAwakeClose's phase
+// write (issue #3623 review finding): a slot parked on a shut Awake window
+// must publish PhaseAwaitingWindow while it waits, not just the awake_close
+// event, since it is the sampled phase — not the edge-triggered event — that
+// siblingsEngaged and the status file consult. Both edges are checked: the
+// slot must come back out of that phase when the window reopens, which is
+// noteAwakeOpen's own reset.
+func TestAwaitWindowReportsAwaitingWindowThenIdle(t *testing.T) {
+	win, err := ParseWindow("09:00-17:00 UTC")
+	if err != nil {
+		t.Fatalf("ParseWindow: %v", err)
+	}
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	clk := &testClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), sleepSignal: make(chan struct{}, 1)}
+	clk.park()
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Awake = win
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.awaitWindow(pctx, 0)
+	}()
+
+	clk.awaitSleep(t, 1)
+	if got := p.snapshot().Slots[0].Phase; got != PhaseAwaitingWindow {
+		t.Fatalf("phase while parked on a shut window = %q, want %q", got, PhaseAwaitingWindow)
+	}
+
+	clk.step(time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)) // window opens
+	wg.Wait()
+
+	if got := p.snapshot().Slots[0].Phase; got != PhaseIdle {
+		t.Fatalf("phase after the window opened = %q, want %q", got, PhaseIdle)
+	}
+}
+
+// TestJamIgnoresSiblingAwaitingWindow pins siblingsEngaged's
+// awaiting-window arm (issue #3623/#3571 review finding): a sibling parked
+// on a shut Awake window is doing nothing and must count the same as an
+// idle sibling, not as engaged. Narrowing the condition to
+// ss.phase != PhaseIdle would make a sibling parked on the window count as
+// engaged, silently suppressing the jam alarm for the entire time the pool
+// sits outside its Awake window.
+func TestJamIgnoresSiblingAwaitingWindow(t *testing.T) {
+	const slots = 2
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(slots)
+	p, _ := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	// Park slot 1 on the shut window directly at the pool seam, without
+	// running awaitWindow itself: noteAwakeClose is the one call that
+	// writes the awaiting-window phase, and that phase write is exactly
+	// what siblingsEngaged must see as unengaged.
+	p.noteAwakeClose(1, time.Hour)
+
+	p.noteWaitResult(0, KindDispatch, "rev1", true)
+
+	events := decodeEvents(t, &buf)
+	foundJam := false
+	for _, ev := range events {
+		if ev.Event == "jam" {
+			foundJam = true
+		}
+		if ev.Event == "idle" && ev.Slot != nil && *ev.Slot == 0 {
+			t.Fatalf("events = %v, want no idle for slot 0: its only sibling was merely awaiting the window, which must not count as engaged", eventNames(events))
+		}
+	}
+	if !foundJam {
+		t.Fatalf("events = %v, want a jam event: slot 0 had nothing dispatchable and its only sibling was awaiting the window, not engaged", eventNames(events))
+	}
+}
+
+// TestAwaitWindowPublishesOnEveryIteration pins issue #3623's tradeoff:
+// every noteAwakeClose/noteAwakeOpen call goes through mutate now, and
+// mutate publishes unconditionally, so a second iteration that still finds
+// the window shut (no awake_close/awake_open transition, nothing new to
+// report) still writes the status file — there is no special case left
+// that skips a write just because nothing changed.
+func TestAwaitWindowPublishesOnEveryIteration(t *testing.T) {
 	win, err := ParseWindow("22:00-06:00 UTC")
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
@@ -695,12 +1049,13 @@ func TestAwaitWindowSkipsPublishOnNonTransitionIteration(t *testing.T) {
 	afterClose := readStatus(t, dir).Time
 
 	// Advance to a still-shut instant: a second iteration, still no
-	// transition (awakeShut was already true), must publish nothing new.
+	// transition (awakeShut was already true), still writes — mutate
+	// publishes every call, not just the ones that flip a flag.
 	clk.step(time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC))
 	clk.awaitSleep(t, 1)
 	afterSecondShutIteration := readStatus(t, dir).Time
-	if afterSecondShutIteration != afterClose {
-		t.Fatalf("status Time changed on a non-transition iteration: got %q, want unchanged %q", afterSecondShutIteration, afterClose)
+	if afterSecondShutIteration == afterClose {
+		t.Fatalf("status Time did not change on a non-transition iteration, want a write anyway (mutate publishes unconditionally)")
 	}
 
 	// Advance past the reopening: the transition back to open must still
@@ -740,7 +1095,7 @@ func TestPollSlicesTipMovedStampsJammedKinds(t *testing.T) {
 			defer p.cancel()
 
 			for _, k := range tc.jam {
-				p.kinds[k].markNoWork(clk.Now(), true)
+				p.markNoWork(k, clk.Now(), true)
 			}
 
 			p.pollSlices(pctx, 0, 2*cfg.IdleFloor, "rev1")
@@ -1198,11 +1553,19 @@ func TestPoolSnapshotSlots(t *testing.T) {
 	if !st.Slots[0].Busy || st.Slots[0].Kind != KindDispatch || st.Slots[0].Revision != "rev1" {
 		t.Fatalf("slot 0 = %+v, want busy dispatch@rev1", st.Slots[0])
 	}
+	if st.Slots[0].Phase != PhaseRunning {
+		t.Fatalf("slot 0 phase = %q, want %q", st.Slots[0].Phase, PhaseRunning)
+	}
 	if !reflect.DeepEqual(st.Slots[0].Issues, []string{"7"}) {
 		t.Fatalf("slot 0 issues = %v, want [7]", st.Slots[0].Issues)
 	}
 	if st.Slots[1].Busy {
 		t.Fatalf("slot 1 = %+v, want unoccupied", st.Slots[1])
+	}
+	// Slot 1 is parked in awaitBaton the whole run (see this test's own
+	// doc) — idle, never having reached awaitWindow's close.
+	if st.Slots[1].Phase != PhaseIdle {
+		t.Fatalf("slot 1 phase = %q, want %q", st.Slots[1].Phase, PhaseIdle)
 	}
 }
 
@@ -1219,7 +1582,7 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
-	p.occupy(0, KindDispatch, "rev1")
+	p.startChild(0, KindDispatch, "rev1")
 	p.noteIssue(0, "42")
 
 	snap := p.snapshot()
@@ -1331,7 +1694,7 @@ func TestPoolSnapshotElapsedGateReadsAsCheckingNotWaiting(t *testing.T) {
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
-	wait := p.kinds[KindDispatch].markNoWork(clk.Now(), false)
+	wait := p.markNoWork(KindDispatch, clk.Now(), false)
 	clk.advanceBy(wait + time.Millisecond) // past the deadline
 
 	snap := p.snapshot()
@@ -1344,18 +1707,19 @@ func TestPoolSnapshotElapsedGateReadsAsCheckingNotWaiting(t *testing.T) {
 }
 
 // TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears pins the
-// reviewer's rejected fix that would key jammedNow off runSlot's own
-// poolJammed predicate instead of markNoWork's outcome flag: it drives the
-// real runSlot call site rather than calling markNoWork directly, so a future regression back
-// to the rejected poolJammed predicate would fail this test. Slot 1 has a
-// research child running when slot 0's dispatch check returns exit 3 —
-// siblingsOccupied is true at that exact instant — and the dispatch kind's
+// reviewer's rejected fix that would key jammedNow off state.siblingsEngaged
+// — the predicate runSlot only reaches through markNoWork — instead of
+// markNoWork's own outcome flag: it drives the real runSlot call site rather
+// than calling markNoWork directly, so a future regression back to that
+// rejected predicate would fail this test. Slot 1 has a research child
+// running when slot 0's dispatch check returns exit 3 —
+// siblingsEngaged is true at that exact instant — and the dispatch kind's
 // jammed flag must still flip true, unaffected by occupancy. It must also
 // stay true once the sibling clears, so the pool-level state reads jammed,
 // never waiting: an open, none-dispatchable queue must never be reported as
 // "every queue empty". Stays off Loop for the same reason it drives runSlot
 // by hand rather than a full pool: it needs slot 1's occupancy faked in
-// directly (p.occupy) at an exact instant relative to slot 0's own exit-3,
+// directly (p.startChild) at an exact instant relative to slot 0's own exit-3,
 // with no wait for a real research child to actually be scheduled there —
 // an interleaving no Loop hook pins down deterministically across two live
 // slots.
@@ -1378,8 +1742,8 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	// configured, an ungated research would have slot 0's own loop retry
 	// it the moment dispatch backs off, rather than parking in idleSleep —
 	// this test's synchronization point.
-	p.kinds[KindResearch].markNoWork(clk.Now(), false)
-	p.occupy(1, KindResearch, "rev1")
+	p.markNoWork(KindResearch, clk.Now(), false)
+	p.startChild(1, KindResearch, "rev1")
 
 	done := make(chan struct{})
 	go func() {
@@ -1396,15 +1760,15 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	// rather than a sample taken mid-iteration.
 	<-clk.sleepSignal
 
-	if !p.kinds[KindDispatch].jammedNow() {
+	if !p.st.kinds[KindDispatch].jammedNow() {
 		t.Fatalf("dispatch jammedNow = false with a sibling occupied, want true (exit 3 alone gates this)")
 	}
 
 	// A busy slot outranks jammed/waiting in snapshot's precedence, so the
 	// sibling has to clear before the state under test is observable.
-	p.unoccupy(1)
+	p.finishChild(1)
 
-	if !p.kinds[KindDispatch].jammedNow() {
+	if !p.st.kinds[KindDispatch].jammedNow() {
 		t.Fatalf("dispatch jammedNow = false after the sibling cleared, want still true")
 	}
 	if s := p.snapshot().State; s != StateJammed {
@@ -1597,9 +1961,9 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 			}
 			var buf bytes.Buffer
 			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
-			p.awakeShut = tc.awakeShut
+			p.st.awakeShut = tc.awakeShut
 			for _, k := range tc.gate {
-				p.kinds[k].markNoWork(clk.Now(), false)
+				p.markNoWork(k, clk.Now(), false)
 			}
 
 			snap := p.snapshot()
