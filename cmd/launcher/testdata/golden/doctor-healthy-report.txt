@@ -1,0 +1,25 @@
+ok: issue tracker confirmed — owner/repo is reachable
+ok: code forge confirmed — owner/repo is reachable
+ok: base branch "main" is protected
+ok: 0 recoverable issue(s) — run `spindrift recover <issue>` to land each
+advisory: RUNTIME not set — skipping runtime check
+ok: label "ready-for-agent" present
+ok: label "agent-in-progress" present
+ok: label "agent-failed" present
+ok: label "agent-complete" present
+ok: label "agent-research" present
+ok: label "agent-research-in-progress" present
+ok: label "agent-research-failed" present
+ok: label "agent-research-recommend" present
+ok: label "agent-research-reject" present
+ok: label "agent-research-unclear" present
+ok: label "agent-research-finding" present
+ok: label "agent-priority-critical" present
+ok: label "agent-priority-high" present
+ok: label "agent-priority-low" present
+ok: label "agent-ambiguous-spec" present
+ok: all triage, research, priority, and ambiguous-spec labels present
+ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op
+ok: read-only-capability
+ok: network-mode-runtime
+ok: signal-carrier-network-mode
