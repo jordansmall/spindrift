@@ -5268,7 +5268,7 @@ in-place wait.
 | 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
 | 5    | host-tainted | halt the pool |
 | 6    | config-invalid | halt the pool |
-| 7    | signalled stop | halt the pool |
+| 7    | signalled stop | halt the pool once the operator's Stop latch is already closed; while Stop is still open, an unrecognised operator-external signal instead backs this slot off (see **Failures** below) |
 | anything else | unrecognised (an unclassified exit code, a `RunChild` seam error, or a `ResolveRevision`/fetch error all land here) | back this slot off alone for `FailureBackoff` and refill it — see **Failures** below |
 
 **Failures.** An unclassified failure — an exit code `Interpret`
@@ -5277,13 +5277,14 @@ seam error, a `ResolveRevision` fetch error, or a `SelfPath` self-build
 evaluation error (see **Self-change halt** below) — no longer halts the pool
 by itself: the failing slot backs off for `DAEMON_FAILURE_BACKOFF` (default 1
 minute, see [Advanced tuning](#advanced-tuning)) and refills itself, and the
-sibling slots never notice. A `RunChild` seam error or an unrecognised exit
-code that lands once a stop has already been requested — a child killed on
-SIGTERM's default disposition before it installed its own handler, or one
-that raced the seam's own teardown — is carved out first and never counted
-at all: it is an ordinary shutdown, not evidence of a systemic fault, so it
-can no longer trip the breaker and turn a clean operator stop into a non-zero
-exit. That alone would burn every slot on a fault no retry clears, so these
+sibling slots never notice. A `RunChild` seam error, an unrecognised exit
+code, or exit 7 while Stop was still open — every one of these reaching
+`backoffOrHalt` (`cmd/launcher/internal/daemon/pool.go`) — is carved out
+first and never counted at all once the operator's Stop latch was already
+closed when it landed (issue #3595, now by construction): it is an
+ordinary shutdown, not evidence of a systemic fault, so it can no longer
+trip the breaker and turn a clean operator stop into a non-zero exit. That
+alone would burn every slot on a fault no retry clears, so these
 failures are also counted pool-wide by a circuit breaker
 (`cmd/launcher/internal/daemon/breaker.go`): `DAEMON_BREAKER_THRESHOLD`
 (default 5) of them within a trailing `DAEMON_BREAKER_WINDOW` (default 15
@@ -5296,9 +5297,12 @@ four backoffs instead — slower, but still well inside the window, because a
 lone slot that keeps failing has no sibling doing useful work for a spared
 breaker to protect. All three defaults are a defensible first cut, not a
 tuned answer — revisiting them is now a settings change, not a code change.
-The halt-mapped exits (5/6/7) are untouched by the breaker: a tainted host,
-an invalid config, and a signalled stop still halt the pool at once, since no
-retry clears the first two and the third is the operator's own request.
+The halt-mapped exits 5 and 6 are untouched by the breaker: a tainted host
+and an invalid config still halt the pool at once, since no retry clears
+either. Exit 7 only joins them once the operator's Stop latch is already
+closed — the operator's own request; while Stop is still open, exit 7 is
+the unclassified failure above instead, and backs its own slot off rather
+than halting anything.
 
 **Self-change halt.** At each slot's iteration boundary — after that
 iteration's own fetch resolves the tip, before any child is launched — the
@@ -5394,81 +5398,98 @@ undersized podman machine, so a supervisor must treat 11 as a standing
 refusal to fix by hand, not a transient fault to bounce past.
 
 **Halting.** A `SIGINT` or `SIGTERM` to the daemon is the first of two
-signals it consumes (`handleStopSignals`, `cmd/launcher/daemon/main.go`):
-it cancels the loop between iterations and forwards a `SIGTERM` to any
-running child, as a drain request — the same gesture as `dogfood.sh`'s
-`request_stop` and the launcher's own `notifyStopSignal`. It never kills a
-child that is already running its Boxes: the child chooses to drain, and a
-pool halt is the same courtesy at pool scale — halting cancels a context
-shared by every slot, so a sibling asleep in its idle wait or blocked in a
-fetch stops promptly, but any child already running is always waited out
-and always gets its `child_finish` before the process exits, never
-abandoned mid-run — the race window just below is the one exception to that
-courtesy. The daemon implements no drain or reap of its own: it only
-forwards signals and waits, since
+signals it consumes, through the same shared relay the launcher itself uses
+(`stopsignal.Notify`/`stopsignal.Relay`,
+`cmd/launcher/internal/stopsignal/relay.go`): the first of either kind
+closes the daemon's own Stop latch, which `announceStop`
+(`cmd/launcher/daemon/main.go`) turns into a `shutdown` event before
+closing the pool's own `cfg.Stop` channel in turn. The pool's own Stop
+watcher (`Loop`, `cmd/launcher/internal/daemon/loop.go`) halts the pool the
+moment that channel closes — the same `HaltOperatorStop` class, reason
+`context-cancelled: stop requested`, a caller's own hard-cancelled context
+already renders as — cancelling a context shared by every slot, so a
+sibling asleep in its idle wait or blocked in a fetch stops promptly. Every
+running child's own `forwardSignals` goroutine
+(`cmd/launcher/daemon/runner.go`), started once per child by `RunChild`,
+sends it a `SIGTERM` at that same close — the drain request, the same
+gesture as `dogfood.sh`'s `request_stop` and the launcher's own relay. It
+never kills a child that is already running its Boxes: the child chooses to
+drain, and a pool halt is the same courtesy at pool scale — any child
+already running is always waited out and always gets its `child_finish`
+before the process exits, never abandoned mid-run. The daemon implements no
+drain or reap of its own: it only forwards signals and waits, since
 `daemon.Loop`'s own `wg.Wait()` is what waits every child out, before and
 after the escalation below alike — the launcher, not the daemon, is what
 holds the in-flight Boxes. The child is started in its own process group
 (`cmd/launcher/daemon/runner.go`), so a Ctrl-C aimed at the daemon's own
 foreground process group — which would otherwise deliver a group-wide
-SIGINT straight to the child — spares it; only a signal the daemon forwards
-explicitly reaches it.
+SIGINT straight to the child — spares it; only a signal the daemon
+forwards explicitly reaches it.
 
-A child that starts in the race window between the loop's last
-cancellation check and its own publication into the children map is still
-signalled: `forwardStop` counts every stop request it has forwarded, and
-`RunChild` replays that count onto the child the moment it publishes
-(`cmd/launcher/daemon/runner.go`). But that replay fires the instant
-`RunChild` publishes — in production, microseconds after `nix run` starts
-and long before the launcher has gotten far enough to install its own
-handler — so a child caught in this window typically dies on the signal's
-default disposition instead of draining: an abrupt end for a Box that had
-only just started, chosen over the alternative of a Box that runs to
-completion after the operator asked everything to stop. That is also why
-a signalled child's exit is spared the circuit breaker (`stopOnCancel`,
-`cmd/launcher/internal/daemon/loop.go`): an unrecognised exit reaching that
-guard is this race, not evidence of a systemic fault.
+A child that starts after Stop has already closed is still signalled,
+promptly rather than by any replay: `forwardSignals`'s select on an
+already-closed channel fires at once, so a child born mid-shutdown is
+signalled the instant it starts, rather than racing a shared counter the
+way the daemon's old children-map replay once did (issue #3626). A
+signal a child receives from anywhere other than the daemon — systemd's
+own `KillMode=control-group`, an operator signalling the child directly —
+is a different story: the daemon never asked for it, so an exit 7 it
+produces while the daemon's own Stop latch is still open is not "the
+operator stopped this child", and is instead an unclassified failure like
+any other (`Interpret`, `cmd/launcher/internal/daemon/outcome.go`) — it
+backs that slot off alone and counts toward the breaker rather than halting
+the pool with a clean exit 0. Only once the Stop latch has closed does exit
+7 mean "the operator stopped this child" and halt the pool at once
+(`HaltChildSignalled`) — the breaker's one carve-out (issue #3595, now by
+construction; `backoffOrHalt`, `cmd/launcher/internal/daemon/pool.go`) is
+exactly that: a failure of any kind that lands once the operator's Stop
+latch was already closed is never counted, because it is an ordinary
+shutdown rather than evidence of a systemic fault.
 
-A second `SIGINT`/`SIGTERM` to the daemon is the escalation:
-`handleStopSignals` forwards it too, but as a `SIGINT` this time rather
-than a repeat `SIGTERM` — two identical signals sent back-to-back can
-coalesce into a single delivery (the kernel keeps one pending bit per
-signal number, not a queue), so `forwardStop` escalates by switching kind
-on the second call rather than repeating the first. The child counts
-deliveries, not kinds (issue #3521), so whichever kind lands as its second
-signal is what makes it abort the drain — reap its in-flight Boxes and
-release their issues back to the dispatchable pool — instead of waiting
-the drain out to completion. The daemon's own signal channel is buffered
-at 2 so that an already-delivered second signal is never dropped for want
-of room while the handler goroutine is between receives — it cannot buy
-back a repeat of the same signal number arriving in the same instant, since
-that coalescing happens earlier, in the kernel, before either delivery
-reaches the channel; an operator wanting a reliable escalation should send
-the other kind, or leave a gap between the two. A third and later signal
-is a genuine no-op: `handleStopSignals` returns after the second, `signal.Stop`
-is never called, and nothing else ever reads the channel again — a
-persistent operator has no further escalation to give past the second
-signal, only a `SIGKILL` on the daemon itself, which orphans the child's
-isolated process group rather than killing it.
+A second `SIGINT`/`SIGTERM` to the daemon is the escalation: the relay
+closes Abort, and every running child's `forwardSignals` goroutine sends it
+a `SIGINT` this time rather than a repeat `SIGTERM` — two identical
+signals sent back-to-back can coalesce into a single delivery (the kernel
+keeps one pending bit per signal number, not a queue), so escalation
+switches kind rather than repeating the first. The child counts deliveries,
+not kinds (issue #3521), so whichever kind lands as its second signal is
+what makes it abort the drain — reap its in-flight Boxes and release
+their issues back to the dispatchable pool — instead of waiting the drain
+out to completion. The relay's own signal channel is buffered at 2 so that
+an already-delivered second signal is never dropped for want of room while
+the relay goroutine is between receives — it cannot buy back a repeat of
+the same signal number arriving in the same instant, since that coalescing
+happens earlier, in the kernel, before either delivery reaches the channel;
+an operator wanting a reliable escalation should send the other kind, or
+leave a gap between the two. A third and later signal is a genuine no-op:
+the relay returns once it closes Abort on the second, and nothing else ever
+reads the channel again — a persistent operator has no further escalation
+to give past the second signal, only a `SIGKILL` on the daemon itself,
+which orphans the child's isolated process group rather than killing it.
 
-A `systemctl stop` sends the daemon a `SIGTERM`, which the daemon
-forwards as that same drain request — but only under a unit that keeps
-systemd's own `SIGTERM` away from the child. The default
-`KillMode=control-group` signals *every* process in the unit's cgroup,
-and the process-group isolation above isolates a process group, not a
-cgroup, so the child launcher receives systemd's `SIGTERM` as well as the
-daemon's own forwarded one — and the daemon's first forwarded signal is
-always a `SIGTERM` too, so these two are the same kind, sent close
-together — the very coalescing the escalation above switches kind to avoid.
-The kernel may fold the two into a single delivery, in which case the child
-sees one signal and drains, or it may keep them distinct, in which case the
-child counts two and aborts. Under the default `KillMode` a plain
-`systemctl stop` is therefore a race between draining and reaping rather
-than a reliable path to either — unpredictable, which is its own reason to
-avoid it. Set `KillMode=mixed`, which sends the stop signal to the main
-process alone, leaving the forwarded drain request as the child's only
-signal, paired with `TimeoutStopSec=infinity` (see **Service unit**
-below for the full unit).
+A `systemctl stop` sends the daemon a `SIGTERM`, which the daemon forwards
+as that same drain request — but only under a unit that keeps systemd's
+own `SIGTERM` away from the child. The default `KillMode=control-group`
+signals *every* process in the unit's cgroup, and the process-group
+isolation above isolates a process group, not a cgroup, so the child
+launcher receives systemd's `SIGTERM` as well as the daemon's own forwarded
+one — and the daemon's first forwarded signal is always a `SIGTERM` too,
+so these two are the same kind, sent close together — the very coalescing
+the escalation above switches kind to avoid. The kernel may fold the two
+into a single delivery, in which case the child sees one signal and drains,
+or it may keep them distinct, in which case the child counts two and
+aborts. Under the default `KillMode` a plain `systemctl stop` is therefore
+a race between draining and reaping rather than a reliable path to either
+— unpredictable, which is its own reason to avoid it. Worse, systemd's
+own `SIGTERM` reaches the child directly, not through the daemon: if the
+kernel keeps the two deliveries distinct, the child's own exit 7 lands
+while the daemon's Stop latch may still be open, which the daemon now
+treats as an unclassified failure — backing that slot off and counting it
+toward the breaker — rather than the clean, pool-halting exit 0 a
+daemon-requested stop gets. Set `KillMode=mixed`, which sends the stop
+signal to the main process alone, leaving the forwarded drain request as
+the child's only signal, paired with `TimeoutStopSec=infinity` (see
+**Service unit** below for the full unit).
 
 The daemon always waits out a started child before exiting
 (`daemon.Loop`), so by the time systemd sees the main process go there is
@@ -5501,8 +5522,9 @@ it no longer has to reach the *child launcher* directly. `systemctl kill
 as a no-op and never resends the stop signal. `--kill-whom=main` matters
 under `KillMode=mixed`: it targets the daemon alone, which then forwards
 that second stop request as the child's second signal — a `SIGINT` this
-time, since `forwardStop` escalates by switching kind rather than
-repeating `SIGTERM` — the signal the child counts as its own abort
+time, since escalation switches kind rather than repeating `SIGTERM` (the
+relay closing Abort, `forwardSignals` sending it) — the signal the child
+counts as its own abort
 escalation. Under the default `KillMode=control-group`, though, there is
 nothing reliable left to escalate: the first `systemctl stop` already
 delivered systemd's own `SIGTERM` to the child alongside the daemon's own
@@ -5761,8 +5783,8 @@ always names the slot giving the baton up, never the slot receiving it, so
 the receiver is identified by the `child_start` that follows, not by the
 pass event itself. `halt` and `shutdown` are the only events with no `slot` at
 all, since neither belongs to one slot: `halt` is the pool-wide exit, and
-`shutdown` is emitted from the signal handler, which runs outside every
-slot's own goroutine.
+`shutdown` is emitted from `announceStop` (`cmd/launcher/daemon/main.go`),
+which runs outside every slot's own goroutine.
 
 | event | fields | when |
 |-------|--------|------|
@@ -5773,7 +5795,7 @@ slot's own goroutine.
 | `preflight` | `time`, `revision`, `exit`, `outcome` (`reason` instead of `exit` on the paths with no doctor exit code to report — a seam failure, or an operator's stop) | emitted exactly once, at startup, before the first slot, on every path the preflight can take: a pass, a refusal, a seam failure, or an operator's Ctrl-C — so "ran and was healthy" and "never ran" cannot look identical the morning after; `outcome` is `ClassifyPreflight`'s own `doctor-`-prefixed label (`doctor-healthy`, `doctor-required-labels-missing`, `doctor-config-invalid`, `doctor-connectivity`, `doctor-unclassified`, `doctor-unknown`) or one of the two the daemon itself adds on the paths that never reached a verdict (`doctor-seam-error` for a failure resolving the tip or running doctor at all, `doctor-cancelled` for a stop signal during the preflight), never `Interpret`'s child-outcome vocabulary, so it can never be confused with a `child_finish` outcome |
 | `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched |
 | `box` | `time`, `kind`, `issue`, `revision`, `slot` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
-| `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
+| `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
 | `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot `resolving`, `running`, or `backing_off`; `wait` carries `kind`'s own idle backoff, so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
 | `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | recording a no-work result against `kind` after `none-dispatchable` with every sibling slot `idle` or `awaiting_window` — nothing running, resolving, or backing off anywhere else in the pool, and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries `kind`'s own idle backoff, same as `idle` above |
 | `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | a poll during the shared idle sleep, entered because every configured kind was gated and at least one of them was jammed, found `BASE_BRANCH`'s tip had moved since this slot's last child ran, so the slot reset every currently-jammed kind's backoff and started its next iteration at once instead of sleeping out the rest of the wait. `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
