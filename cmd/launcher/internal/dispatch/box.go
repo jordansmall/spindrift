@@ -274,6 +274,11 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	// feature off entirely: no directory, no listener, no probe, no socket
 	// path on box.
 	var registryProxyLocation runner.RegistryProxyLocation
+	// boxSockets collects every Box-facing socket mount this Dispatch mints,
+	// under whichever transport verdict RegistryProxyTransport returns once
+	// below — a future second socket (the Signal socket, ADR 0052) appends
+	// here too, still gated on the same verdict.
+	var boxSockets []runner.SocketMount
 	if len(d.cfg.RegistryProxyRoutes) > 0 {
 		// Rewrite rows come from ecosystem.Table, not d.cfg: which response
 		// shapes get rewritten is static per-ecosystem knowledge, not
@@ -315,6 +320,9 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			}
 			registryProxyLocation = runner.RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(socketPath)}
 			manifestEndpoint = registrymanifest.NewUnixEndpoint(runner.RegistryProxySocketTarget)
+			// socketPath is the mount SOURCE on the host; only the unix
+			// verdict has one to mount at all, TCP dials directly.
+			boxSockets = append(boxSockets, runner.SocketMount{Source: socketPath, Target: runner.RegistryProxySocketTarget})
 		case transport.IsTCP():
 			tcpHost := transport.Host()
 			secret := newRegistryProxyTCPSecret()
@@ -371,6 +379,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		DriverCacheDir:    driverCacheDir,
 		OutboxDir:         outboxDir,
 		RegistryProxy:     registryProxyLocation,
+		Sockets:           boxSockets,
 		ClosureGeneration: d.agentGeneration,
 	}
 	return d.runner.Run(box)

@@ -677,6 +677,122 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	}
 }
 
+// TestRunOnce_RegistryProxyUnixTransport_SocketsHasProxyEntry verifies that
+// under a unix transport verdict, box.Sockets carries exactly one entry
+// whose Source is the same host path RegistryProxy.Endpoint.SocketPath()
+// mints and whose Target is runner.RegistryProxySocketTarget (issue #3723):
+// the mount layer reads Sockets, not RegistryProxy, so the registry proxy
+// socket must appear there or it never reaches the Box.
+func TestRunOnce_RegistryProxyUnixTransport_SocketsHasProxyEntry(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("hello from upstream")) //nolint:errcheck
+	}))
+	defer upstream.Close()
+
+	cfg := retryConfig(3, 0, 0)
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, EnforcedPaths: []string{"/"}}})
+
+	fr := runner.NewFake()
+	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
+	var sockets []runner.SocketMount
+	var proxySocketPath string
+	var dialErr error
+	fr.RunFunc = func(box runner.Box) error {
+		sockets = box.Sockets
+		proxySocketPath = box.RegistryProxy.Endpoint.SocketPath()
+		// Dial while the proxy is still listening: the proxy and its
+		// socket dir are torn down by defers that fire once runOnce
+		// returns, so dialing after d.Run() completes would race a
+		// closed listener.
+		if len(sockets) == 1 {
+			var conn net.Conn
+			conn, dialErr = net.Dial("unix", sockets[0].Source)
+			if dialErr == nil {
+				conn.Close() //nolint:errcheck
+			}
+		}
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+		return nil
+	}
+
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+	result := d.Run()
+
+	if !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if proxySocketPath == "" {
+		t.Fatal("box.RegistryProxy.Endpoint.SocketPath() was empty, want a minted host path")
+	}
+	if len(sockets) != 1 {
+		t.Fatalf("box.Sockets = %+v, want exactly one entry", sockets)
+	}
+	if sockets[0].Source != proxySocketPath {
+		t.Errorf("box.Sockets[0].Source = %q, want %q (RegistryProxy.Endpoint.SocketPath())", sockets[0].Source, proxySocketPath)
+	}
+	if sockets[0].Target != runner.RegistryProxySocketTarget {
+		t.Errorf("box.Sockets[0].Target = %q, want %q", sockets[0].Target, runner.RegistryProxySocketTarget)
+	}
+	if dialErr != nil {
+		t.Errorf("dial box.Sockets[0].Source %q: %v, want a connectable listening socket", sockets[0].Source, dialErr)
+	}
+}
+
+// TestRunOnce_RegistryProxyTCPTransport_SocketsEmpty verifies that under a
+// TCP transport verdict the Box dials the proxy directly, so box.Sockets
+// stays empty rather than carrying a meaningless mount entry (issue #3723).
+func TestRunOnce_RegistryProxyTCPTransport_SocketsEmpty(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("hello from upstream")) //nolint:errcheck
+	}))
+	defer upstream.Close()
+
+	cfg := retryConfig(3, 0, 0)
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, EnforcedPaths: []string{"/"}}})
+
+	fr := runner.NewFake()
+	fr.RegistryProxyTransportEndpoint = registrymanifest.NewTCPEndpoint("host.docker.internal", "")
+	var sockets []runner.SocketMount
+	fr.RunFunc = func(box runner.Box) error {
+		sockets = box.Sockets
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+		return nil
+	}
+
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+	result := d.Run()
+
+	if !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if len(sockets) != 0 {
+		t.Errorf("box.Sockets = %+v, want empty on the TCP transport branch", sockets)
+	}
+}
+
+// TestRunOnce_NoRegistryProxyRoutes_SocketsEmpty verifies that with no
+// RegistryProxyRoutes configured, box.Sockets stays empty: the feature is
+// off entirely, so nothing mints a socket to list (issue #3723).
+func TestRunOnce_NoRegistryProxyRoutes_SocketsEmpty(t *testing.T) {
+	fr := runner.NewFake()
+	var sockets []runner.SocketMount
+	fr.RunFunc = func(box runner.Box) error {
+		sockets = box.Sockets
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+		return nil
+	}
+
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
+	result := d.Run()
+
+	if !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if len(sockets) != 0 {
+		t.Errorf("box.Sockets = %+v, want empty when RegistryProxyRoutes is unset", sockets)
+	}
+}
+
 // setLongTMPDir points $TMPDIR at a base long enough to overflow AF_UNIX's
 // sun_path limit on any platform spindrift targets (104 darwin / 108 linux,
 // see cmd/launcher/internal/registryproxy) once a generated temp dir name
