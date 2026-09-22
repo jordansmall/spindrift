@@ -93,8 +93,10 @@ func (l *Listener) ListenAndServe(socketPath string) error {
 }
 
 // ListenAndServeTCP serves Handler on addr in the background. The caller owns
-// addr and must pass a loopback address (e.g. "127.0.0.1:0"): nothing here
-// restricts it to one. A TCP port has no filesystem permissions of its own,
+// addr and nothing here narrows it: loopback ("127.0.0.1:0") is the safe
+// default, but the launcher deliberately binds every interface ("0.0.0.0:0")
+// because a Box on a docker bridge reaches the host at the bridge IP, not at
+// loopback. A TCP port has no filesystem permissions of its own,
 // so Handler must already be gated (built with NewGatedHandler) -- serving an
 // ungated Handler here would let any local process reach the four routes with
 // no secret at all, so this fails closed instead. Call Addr to learn an
