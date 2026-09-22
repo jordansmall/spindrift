@@ -84,15 +84,15 @@ Base64-encode the entire verdict body (e.g. `base64 -w0`) into one unbroken
 token with no embedded newlines or spaces. Emit at most one valid such
 line, before the SPINDRIFT_OUTCOME line below.
 
-The launcher reads that line back out of the Bash tool result, so what
-reaches the host is the echoed output of the command you run — and the Box
-caps a Bash result at 8192 characters, cutting it there with no truncation
-notice. The `SPINDRIFT_COMMENT ` token, the nonce, and the space after it
-take 51 of those, leaving 8141 characters for the base64 payload: at most
-6105 bytes of Markdown before encoding. Aim for 4884 bytes and treat 6105
-as a ceiling, not a target — 6105 bytes encode to exactly 8140 characters,
-and the marker prefix and trailing newline take the rest of the cap, so
-the ceiling has no headroom at all.
+On the `log` Signal carrier, the launcher reads that line back out of the
+Bash tool result, so what reaches the host is the echoed output of the
+command you run — and the Box caps a Bash result at 8192 characters,
+cutting it there with no truncation notice. The `SPINDRIFT_COMMENT ` token,
+the nonce, and the space after it take 51 of those, leaving 8141 characters
+for the base64 payload: at most 6105 bytes of Markdown before encoding. Aim
+for 4884 bytes and treat 6105 as a ceiling, not a target — 6105 bytes
+encode to exactly 8140 characters, and the marker prefix and trailing newline
+take the rest of the cap, so the ceiling has no headroom at all.
 
 Check the size in the command itself; you cannot check it by reading the
 echoed line back. A Bash result over 4096 bytes reaches you as its *last*
