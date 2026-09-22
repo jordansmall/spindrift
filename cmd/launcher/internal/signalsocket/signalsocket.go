@@ -239,8 +239,8 @@ func (b *Buffer) checkKind(k signalwire.Kind) *signalwire.Reject {
 
 // field is one content field: its wire name and its value. Every field is
 // bounded by signalwire.MaxBodyBytes -- title and type included, not just
-// body -- since MaxRequestBytes alone leaves room for a field far past what
-// any tracker would accept.
+// body -- because the alternative is a per-field guess: without it a title is
+// held only by MaxRequestBytes, seven times the limit any tracker accepts.
 type field struct {
 	name  string
 	value string

@@ -65,7 +65,9 @@ type Listener struct {
 // ListenAndServe removes any stale file at socketPath, listens on a unix
 // domain socket there, and serves Handler in the background. It returns once
 // the listener is established. The transport carries no secret: the socket
-// file's permissions are the gate.
+// file's permissions are the gate. A nil Handler fails closed here, as it
+// does on ListenAndServeTCP, rather than binding and then panicking once per
+// request inside net/http's recover.
 func (l *Listener) ListenAndServe(socketPath string) error {
 	if l.Handler == nil {
 		return errors.New("signalsocket: refusing to listen on a unix socket with a nil handler")
