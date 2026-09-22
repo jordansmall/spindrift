@@ -309,11 +309,12 @@ func TestDoctorCheckSets_PutsPodmanMachineMemoryInBothClassifyAndReport(t *testi
 	classify, report := doctorCheckSets(c)
 
 	checkByName(t, classify, podmanMachineMemoryCheckName)
-	// This config is neither bwrap nor route-declaring, so doctorCheckSets'
-	// true append order (extra, bwrap, podman-machine-memory, perRoute,
-	// drift, registry-proxy-transport) collapses to the extra rows, then
-	// podman-machine-memory, then the always-last transport row -- pin that
-	// position rather than only presence.
+	// This config is neither bwrap nor route-declaring, and leaves
+	// signalCarrier at its log default, so doctorCheckSets' true append order
+	// (extra, bwrap, podman-machine-memory, perRoute, drift,
+	// registry-proxy-transport, signal-socket-transport) collapses to the
+	// extra rows, then podman-machine-memory, then registry-proxy-transport
+	// -- pin that position rather than only presence.
 	gotIdx := -1
 	for i, ch := range report {
 		if ch.Name == podmanMachineMemoryCheckName {
