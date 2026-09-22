@@ -53,7 +53,7 @@ tier as a commit message — on a blocked or ambiguous stop it is posted
 verbatim as a comment on the tracker issue, so caveman-compressing it
 ships caveman prose straight to a human reader.
 
-Every exempted marker line above must keep its required shape exactly
+Where a marker line is the carrier, it must keep its required shape exactly
 intact — never reworded, reflowed, or line-wrapped: the leading token,
 the outcome line's key=value pairs, and the PR-intent line's nonce and
 base64 payload as one unbroken token. The verdict line must additionally

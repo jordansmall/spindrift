@@ -88,7 +88,7 @@ func TestCavemanDefaultFragmentParity(t *testing.T) {
 		},
 		{
 			name: "marker-shape requirement clause is shared verbatim by base and review",
-			clause: "Every exempted marker line above must keep its required shape exactly intact " +
+			clause: "Where a marker line is the carrier, it must keep its required shape exactly intact " +
 				"— never reworded, reflowed, or line-wrapped: the leading token, the outcome line's key=value " +
 				"pairs, and the PR-intent line's nonce and base64 payload as one unbroken token. The verdict line " +
 				"must additionally remain the first line of the agent's final message.",

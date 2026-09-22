@@ -25,8 +25,20 @@ func TestCavemanDefaultFragmentContract(t *testing.T) {
 			clause: "the `note=` field of the SPINDRIFT_OUTCOME line is exempt",
 		},
 		{
+			name:   "signal payload is exempt whichever carrier takes it",
+			clause: "The payload those signals carry is exempt on that same tier, whichever carrier takes it",
+		},
+		{
+			name:   "PR title/body and filed issue title/body stay full human-quality prose",
+			clause: "the draft PR's title and body, and a filed issue's title and body, stay full human-quality prose",
+		},
+		{
+			name:   "socket-carrier payload named: driver-exec signal pr-intent / issue-intent, no marker line renders",
+			clause: "as the text you hand `driver-exec signal pr-intent` or `driver-exec signal issue-intent` under the `socket` carrier, where no marker line renders at all",
+		},
+		{
 			name:   "shape requirement is scoped to marker lines, not every exemption",
-			clause: "Every exempted marker line above must keep its required shape exactly intact",
+			clause: "Where a marker line is the carrier, it must keep its required shape exactly intact",
 		},
 		{
 			name:   "outcome line's key=value pairs stay intact",

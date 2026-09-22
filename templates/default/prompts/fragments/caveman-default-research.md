@@ -14,11 +14,14 @@ whatever you do post stays full human-quality prose.
 
 The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`
 line and its `note=` field, and any host-relay signal line such as
-`SPINDRIFT_COMMENT` — on a read-only dispatch, or when the issue tracker
-is a local tracker, it is the sole carrier of the posted verdict comment
-above. Never route these through `/caveman`.
+`SPINDRIFT_COMMENT` — under the log carrier, on a read-only dispatch or
+when the issue tracker is a local tracker, `SPINDRIFT_COMMENT` is the sole
+carrier of the posted verdict comment above. Under the socket carrier the
+comment instead goes through the signal relay, not a marker line, but the
+text you hand it is that same posted verdict comment, already exempt in
+full under the paragraph above. Never route these through `/caveman`.
 
-Every exempted marker line above must keep its required shape exactly
+Where a marker line is the carrier, it must keep its required shape exactly
 intact — never reworded, reflowed, or line-wrapped: the leading token,
 the outcome line's key=value pairs, and the SPINDRIFT_COMMENT line's
 nonce and base64 payload as one unbroken token.
