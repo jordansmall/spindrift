@@ -66,16 +66,14 @@ type scriptedRunner struct {
 	resolveHold  chan struct{}
 	resolveJoins chan struct{}
 
-	// Result scripting, most specific winning: bySlot (keyed by the
-	// caller's own per-slot call index — needed wherever several slots
-	// call RunChild concurrently, since a shared call counter would hand
-	// a result to whichever slot happened to call next) beats byKind
-	// (keyed by the caller's own per-kind call index, for two
-	// independently-emptying dispatch/research queues) beats the single
-	// shared results sequence in total call order. runErrAt
-	// is a 1-based *total* call index (across every slot and kind) that
-	// wins over all three when it matches.
-	bySlot       map[int][]ChildResult
+	// Result scripting, most specific winning: runErrAt (a 1-based
+	// *total* call index, across every slot and kind) wins over all
+	// (a held slot short-circuits even this); then byKind (keyed by
+	// the caller's own per-kind call index, for two independently-
+	// emptying dispatch/research queues); then the single shared
+	// results sequence in total call order. A test wanting per-slot
+	// results pins the call order instead — holdSlots/releaseSlot, or
+	// a hook that serialises the slots — never a slot-keyed tier here.
 	byKind       map[Kind][]ChildResult
 	results      []ChildResult
 	runErrAt     int
@@ -95,7 +93,6 @@ type scriptedRunner struct {
 	selfCalls    int
 	runCalls     []runCall
 	kindCalls    map[Kind]int
-	slotCalls    map[int]int
 	inFlight     int
 	peak         int
 	onIssue      map[int]func(string)
@@ -453,11 +450,6 @@ func (r *scriptedRunner) RunChild(ctx context.Context, req ChildRequest) (ChildR
 	}
 	kindIdx := r.kindCalls[req.Kind]
 	r.kindCalls[req.Kind]++
-	if r.slotCalls == nil {
-		r.slotCalls = make(map[int]int)
-	}
-	slotIdx := r.slotCalls[req.Slot]
-	r.slotCalls[req.Slot]++
 	if r.onIssue == nil {
 		r.onIssue = make(map[int]func(string))
 	}
@@ -502,9 +494,6 @@ func (r *scriptedRunner) RunChild(ctx context.Context, req ChildRequest) (ChildR
 
 	if r.runErrAt != 0 && total == r.runErrAt {
 		return ChildResult{Issues: r.runErrIssues}, r.runErr
-	}
-	if list, ok := r.bySlot[req.Slot]; ok {
-		return pickScripted(list, slotIdx), nil
 	}
 	if list, ok := r.byKind[req.Kind]; ok {
 		return pickScripted(list, kindIdx), nil
@@ -745,8 +734,8 @@ func TestScriptedRunnerSelfPathUnscriptedNeverServed(t *testing.T) {
 	}
 }
 
-// An all-unset scriptedRunner (no results, byKind, bySlot, or revisions)
-// must return zero values rather than panicking on the empty-list index.
+// An all-unset scriptedRunner (no results, byKind, or revisions) must
+// return zero values rather than panicking on the empty-list index.
 func TestScriptedRunnerAllUnsetYieldsZeroValuesNotPanic(t *testing.T) {
 	r := &scriptedRunner{}
 	res, err := r.RunChild(context.Background(), ChildRequest{Slot: 0})
@@ -839,43 +828,6 @@ func TestScriptedRunnerByKindScripting(t *testing.T) {
 	}
 }
 
-func TestScriptedRunnerBySlotScripting(t *testing.T) {
-	r := &scriptedRunner{
-		bySlot: map[int][]ChildResult{
-			0: {{Exit: 0}, {Exit: 2}},
-			1: {{Exit: 7}},
-		},
-	}
-	ctx := context.Background()
-
-	res, _ := r.RunChild(ctx, ChildRequest{Slot: 0})
-	if res.Exit != 0 {
-		t.Fatalf("slot0 call1 exit = %d, want 0", res.Exit)
-	}
-	res, _ = r.RunChild(ctx, ChildRequest{Slot: 1})
-	if res.Exit != 7 {
-		t.Fatalf("slot1 call1 exit = %d, want 7", res.Exit)
-	}
-	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0})
-	if res.Exit != 2 {
-		t.Fatalf("slot0 call2 exit = %d, want 2", res.Exit)
-	}
-}
-
-// bySlot must win over byKind and results when more than one is set, per
-// the acceptance criteria's "most specific winning" ordering.
-func TestScriptedRunnerBySlotWinsOverByKindAndResults(t *testing.T) {
-	r := &scriptedRunner{
-		bySlot:  map[int][]ChildResult{0: {{Exit: 42}}},
-		byKind:  map[Kind][]ChildResult{KindDispatch: {{Exit: 1}}},
-		results: []ChildResult{{Exit: 2}},
-	}
-	res, _ := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindDispatch})
-	if res.Exit != 42 {
-		t.Fatalf("exit = %d, want 42 (bySlot wins)", res.Exit)
-	}
-}
-
 func TestScriptedRunnerByKindWinsOverResults(t *testing.T) {
 	r := &scriptedRunner{
 		byKind:  map[Kind][]ChildResult{KindDispatch: {{Exit: 5}}},
@@ -884,6 +836,18 @@ func TestScriptedRunnerByKindWinsOverResults(t *testing.T) {
 	res, _ := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindDispatch})
 	if res.Exit != 5 {
 		t.Fatalf("exit = %d, want 5 (byKind wins over results)", res.Exit)
+	}
+}
+
+func TestScriptedRunnerRunErrAtWinsOverByKind(t *testing.T) {
+	r := &scriptedRunner{
+		byKind:   map[Kind][]ChildResult{KindDispatch: {{Exit: 5}}},
+		runErrAt: 1,
+		runErr:   errors.New("runboom"),
+	}
+	res, err := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindDispatch})
+	if err == nil || res.Exit != 0 || res.Issues != nil {
+		t.Fatalf("= (%+v, %v), want (zero ChildResult, runErr) (runErrAt wins over byKind)", res, err)
 	}
 }
 
