@@ -168,9 +168,9 @@ func kindForPath(path string) string {
 // each route arm has to remember.
 func (h *handler) mirror(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// decision starts "reject", not "": FormatSpindriftOp treats any
-		// non-"reject" decision as an accept, so a record no route arm
-		// touches must never render as one.
+		// decision starts "reject", not "": FormatSpindriftOp renders an
+		// unrecognised decision, "" included, through its accept arm, so a
+		// record no route arm touches must never render as one.
 		rec := &opRecord{kind: kindForPath(r.URL.Path), decision: "reject"}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), opRecordKey{}, rec)))
 		h.emit(claude.SpindriftOp{
