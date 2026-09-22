@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -293,13 +294,13 @@ func gitOutputT(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// TestResolveRevision_FetchesWithoutMutatingWorkingTree builds a bare
+// TestResolveTip_FetchesWithoutMutatingWorkingTree builds a bare
 // "origin" plus two clones: dirConsumer (the operator's checkout under
 // test) and dirAdvancer, which pushes a second commit to origin after
-// dirConsumer was created. ResolveRevision(dirConsumer, ...) must then
+// dirConsumer was created. ResolveTip(dirConsumer, ...) must then
 // resolve to that second commit while leaving dirConsumer's own HEAD,
 // branch, and working tree exactly as they were — a fetch, never a pull.
-func TestResolveRevision_FetchesWithoutMutatingWorkingTree(t *testing.T) {
+func TestResolveTip_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -336,13 +337,16 @@ func TestResolveRevision_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 	gitRunT(t, dirAdvancer, "push", "origin", "main")
 	wantTip := strings.TrimSpace(gitOutputT(t, dirAdvancer, "rev-parse", "HEAD"))
 
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	got, err := r.ResolveRevision(context.Background())
+	// selfAttr left empty: this test is about the fetch half only, and an
+	// empty selfAttr is what keeps ResolveTip from also shelling out to a
+	// real `nix eval` against a repo with no flake.
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
+	tip, err := r.ResolveTip(context.Background())
 	if err != nil {
-		t.Fatalf("ResolveRevision() error: %v", err)
+		t.Fatalf("ResolveTip() error: %v", err)
 	}
-	if got != wantTip {
-		t.Errorf("ResolveRevision() = %q, want %q (origin's advanced tip)", got, wantTip)
+	if tip.Revision != wantTip {
+		t.Errorf("ResolveTip().Revision = %q, want %q (origin's advanced tip)", tip.Revision, wantTip)
 	}
 
 	if headAfter := gitOutputT(t, dirConsumer, "rev-parse", "HEAD"); headAfter != consumerHeadBefore {
@@ -356,7 +360,7 @@ func TestResolveRevision_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 	}
 }
 
-// TestResolveRevision_ConcurrentCallsDoNotRace drives several concurrent
+// TestResolveTip_ConcurrentCallsDoNotRace drives several concurrent
 // ResolveRevision calls on one hostRunner against a repo whose origin/main
 // has genuinely advanced since dirConsumer's clone, so each `git fetch` must
 // actually move (re-lock) refs/remotes/origin/main rather than finding it
@@ -364,7 +368,7 @@ func TestResolveRevision_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 // fetches raced that ref lock and interleaved on the FETCH_HEAD file one
 // fetch writes and the next rev-parse reads (issue #3539). Every call must
 // return the same advanced tip with no error.
-func TestResolveRevision_ConcurrentCallsDoNotRace(t *testing.T) {
+func TestResolveTip_ConcurrentCallsDoNotRace(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -399,7 +403,9 @@ func TestResolveRevision_ConcurrentCallsDoNotRace(t *testing.T) {
 	wantTip := strings.TrimSpace(gitOutputT(t, dirAdvancer, "rev-parse", "HEAD"))
 
 	const n = 5
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	// selfAttr left empty: this test is about the fetch half's own
+	// concurrency, not ResolveTip's self half.
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
 	var wg sync.WaitGroup
 	results := make([]string, n)
 	errs := make([]error, n)
@@ -407,8 +413,8 @@ func TestResolveRevision_ConcurrentCallsDoNotRace(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			got, err := r.ResolveRevision(context.Background())
-			results[i] = got
+			tip, err := r.ResolveTip(context.Background())
+			results[i] = tip.Revision
 			errs[i] = err
 		}(i)
 	}
@@ -416,21 +422,21 @@ func TestResolveRevision_ConcurrentCallsDoNotRace(t *testing.T) {
 
 	for i := 0; i < n; i++ {
 		if errs[i] != nil {
-			t.Errorf("call %d: ResolveRevision() error: %v", i, errs[i])
+			t.Errorf("call %d: ResolveTip() error: %v", i, errs[i])
 		}
 		if results[i] != wantTip {
-			t.Errorf("call %d: ResolveRevision() = %q, want %q", i, results[i], wantTip)
+			t.Errorf("call %d: ResolveTip().Revision = %q, want %q", i, results[i], wantTip)
 		}
 	}
 }
 
-// TestResolveRevision_CancelledContext guards against the ctx-discarding bug
-// (issue #3538): ResolveRevision must wire ctx into the underlying
+// TestResolveTip_CancelledContext guards against the ctx-discarding bug
+// (issue #3538): ResolveTip must wire ctx into the underlying
 // git invocations so a caller who cancels (SIGINT/SIGTERM with no child to
 // forward to) gets an error back promptly instead of the daemon hanging
 // until SIGKILL. The deadline below is the regression tripwire — before the
 // fix this test would hang instead of failing.
-func TestResolveRevision_CancelledContext(t *testing.T) {
+func TestResolveTip_CancelledContext(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -452,20 +458,21 @@ func TestResolveRevision_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	// selfAttr left empty: only the fetch half is under test here.
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.ResolveRevision(ctx)
+		_, err := r.ResolveTip(ctx)
 		done <- err
 	}()
 
 	select {
 	case err := <-done:
 		if err == nil {
-			t.Error("ResolveRevision(cancelled ctx) error = nil, want non-nil")
+			t.Error("ResolveTip(cancelled ctx) error = nil, want non-nil")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("ResolveRevision(cancelled ctx) did not return promptly")
+		t.Fatal("ResolveTip(cancelled ctx) did not return promptly")
 	}
 }
 
@@ -891,42 +898,81 @@ func TestRunChild_NilStopAbortRunsNormally(t *testing.T) {
 	}
 }
 
-// TestSelfPath_HappyPath points the eval seam at a scripted shell command
-// instead of nix, and asserts the trimmed stdout comes back with no error.
-func TestSelfPath_HappyPath(t *testing.T) {
+// TestResolveTip_SelfPathHappyPath points the eval seam at a scripted shell
+// command instead of nix, and asserts ResolveTip's self half comes back with
+// the trimmed stdout and no error. It needs a real (if minimal) git remote
+// so the fetch half ResolveTip runs first actually succeeds.
+func TestResolveTip_SelfPathHappyPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
 	orig := runnerEvalCommand
 	t.Cleanup(func() { runnerEvalCommand = orig })
 	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf '/nix/store/abc-daemon\n'`)
 	}
 
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	got, err := r.SelfPath(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	dirConsumer := bareOriginConsumerT(t)
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	tip, err := r.ResolveTip(context.Background())
 	if err != nil {
-		t.Fatalf("SelfPath() unexpected error: %v", err)
+		t.Fatalf("ResolveTip() unexpected error: %v", err)
 	}
-	if want := "/nix/store/abc-daemon"; got != want {
-		t.Errorf("SelfPath() = %q, want %q", got, want)
+	if want := "/nix/store/abc-daemon"; tip.SelfPath != want {
+		t.Errorf("ResolveTip().SelfPath = %q, want %q", tip.SelfPath, want)
 	}
 }
 
-// TestSelfPath_EvalFailureCarriesStderr asserts a failing evaluation's error
-// folds in the captured stderr rather than reducing to a bare "exit status
-// 1" — the same shape ResolveRevision's git fetch error takes.
-func TestSelfPath_EvalFailureCarriesStderr(t *testing.T) {
+// TestResolveTip_SelfPathEvalFailureCarriesStderr asserts a failing
+// evaluation's error folds in the captured stderr rather than reducing to a
+// bare "exit status 1" — the same shape fetchRevision's git fetch error
+// takes — and that ResolveTip wraps it as a *daemon.SelfEvalError, the
+// class the pool's backoff reason depends on.
+func TestResolveTip_SelfPathEvalFailureCarriesStderr(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
 	orig := runnerEvalCommand
 	t.Cleanup(func() { runnerEvalCommand = orig })
 	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf 'error: attribute missing\n' >&2; exit 1`)
 	}
 
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	_, err := r.SelfPath(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
-	if err == nil {
-		t.Fatal("SelfPath() error = nil, want non-nil")
+	dirConsumer := bareOriginConsumerT(t)
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	_, err := r.ResolveTip(context.Background())
+	var se *daemon.SelfEvalError
+	if !errors.As(err, &se) {
+		t.Fatalf("ResolveTip() error = %v, want a *daemon.SelfEvalError", err)
 	}
-	if !strings.Contains(err.Error(), "attribute missing") {
-		t.Errorf("SelfPath() error = %q, want it to contain the captured stderr", err.Error())
+	if !strings.Contains(se.Error(), "attribute missing") {
+		t.Errorf("SelfEvalError.Error() = %q, want it to contain the captured stderr", se.Error())
+	}
+}
+
+// TestResolveTip_EmptySelfAttrSkipsEval asserts that hostRunnerConfig.selfAttr
+// == "" (the self check off, per main.go's SPINDRIFT_DAEMON_PROGRAM handling)
+// makes ResolveTip skip the eval half entirely: runnerEvalCommand must never
+// be invoked, and the returned Tip.SelfPath is empty.
+func TestResolveTip_EmptySelfAttrSkipsEval(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	orig := runnerEvalCommand
+	t.Cleanup(func() { runnerEvalCommand = orig })
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		t.Fatal("runnerEvalCommand invoked, want no evaluation with selfAttr == \"\"")
+		return nil
+	}
+
+	dirConsumer := bareOriginConsumerT(t)
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
+	tip, err := r.ResolveTip(context.Background())
+	if err != nil {
+		t.Fatalf("ResolveTip() unexpected error: %v", err)
+	}
+	if tip.SelfPath != "" {
+		t.Errorf("ResolveTip().SelfPath = %q, want empty", tip.SelfPath)
 	}
 }
 
@@ -1069,7 +1115,7 @@ func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
 
 // TestRunDoctor_CancelledContextTearsDownChild asserts a cancelled ctx tears
 // the child down rather than waiting it out, mirroring
-// TestResolveRevision_CancelledContext's shape for a different seam.
+// TestResolveTip_CancelledContext's shape for a different seam.
 func TestRunDoctor_CancelledContextTearsDownChild(t *testing.T) {
 	orig := runnerDoctorCommand
 	t.Cleanup(func() { runnerDoctorCommand = orig })

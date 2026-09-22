@@ -1272,7 +1272,7 @@ func TestExitSelfChanged_OutsideChildExitBand(t *testing.T) {
 // preflightRunner that never shells out, scripted per test.
 type fakePreflightRunner struct {
 	revision   string
-	resolveErr error
+	fetchErr   error
 	doctorExit int
 	doctorErr  error
 
@@ -1280,9 +1280,9 @@ type fakePreflightRunner struct {
 	doctorCalls int
 }
 
-func (f *fakePreflightRunner) ResolveRevision(ctx context.Context) (string, error) {
-	if f.resolveErr != nil {
-		return "", f.resolveErr
+func (f *fakePreflightRunner) fetchRevision(ctx context.Context) (string, error) {
+	if f.fetchErr != nil {
+		return "", f.fetchErr
 	}
 	return f.revision, nil
 }
@@ -1465,7 +1465,7 @@ func TestStartupPreflight_RunsExactlyOnce(t *testing.T) {
 func TestStartupPreflight_ResolveRevisionFailure(t *testing.T) {
 	var buf bytes.Buffer
 	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
-	r := &fakePreflightRunner{resolveErr: errors.New("git fetch boom")}
+	r := &fakePreflightRunner{fetchErr: errors.New("git fetch boom")}
 
 	h := startupPreflight(context.Background(), r, em)
 	if h.Class != daemon.HaltPreflight {
@@ -1515,7 +1515,7 @@ func TestStartupPreflight_ContextCancelled(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			if tt.name == "resolve" {
-				tt.r.resolveErr = ctx.Err()
+				tt.r.fetchErr = ctx.Err()
 			} else {
 				tt.r.doctorErr = ctx.Err()
 			}

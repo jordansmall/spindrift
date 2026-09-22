@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,7 +13,7 @@ import (
 // and why. First halt wins — Loop emits exactly one "halt" event per call,
 // whichever slot gets there first — and every slot shares one derived
 // context that pool cancels the moment it halts, so a sibling asleep in its
-// idle wait or blocked in ResolveRevision stops promptly instead of riding
+// idle wait or blocked in ResolveTip stops promptly instead of riding
 // out the full interval or fetch.
 type pool struct {
 	cfg Config
@@ -125,13 +126,13 @@ const (
 	batonPassChildEnded = "the holder's child ended without announcing a Box: passing the baton to the next waiting slot"
 	// batonPassFailed fires on an unclassified failure that reaches
 	// backoffOrHalt before the holder ever started a child — a
-	// ResolveRevision error or a self-build evaluation failure: the holder
+	// ResolveTip error or a self-build evaluation failure: the holder
 	// is about to back off alone, and holding the pool through that
 	// backoff would stall every sibling's own discovery on a problem
 	// backoffOrHalt already handles per-slot.
 	batonPassFailed = "the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"
 	// batonPassWindowClosed fires when the Awake window shuts between the
-	// holder's ResolveRevision fetch and starting its child: the holder is
+	// holder's ResolveTip fetch and starting its child: the holder is
 	// about to loop back around into awaitWindow, and holding the pool
 	// through that whole shut span would stall every sibling's own
 	// discovery for no reason.
@@ -607,7 +608,7 @@ func (p *pool) halt(h Halt) {
 }
 
 // backoffOrHalt is what a slot calls on an unclassified failure (a
-// ResolveRevision error, a RunChild seam error, an unrecognised exit code,
+// ResolveTip error, a RunChild seam error, an unrecognised exit code,
 // or exit 7 while Stop is open — someone else signalled that child): it
 // records the failure in the pool-wide breaker and either trips the pool
 // (enough failures landed across the pool within the window to look
@@ -644,7 +645,7 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 		return true
 	}
 
-	// Only an unclassified pre-child failure (a ResolveRevision or
+	// Only an unclassified pre-child failure (a ResolveTip or
 	// self-build evaluation error) can still be holding the baton here:
 	// loop.go releases it unconditionally right after RunChild returns,
 	// before the exit is interpreted, so this call is already a no-op on
@@ -704,60 +705,20 @@ func (p *pool) setPhase(slot int, phase Phase) {
 	})
 }
 
-// selfVerdict is what checkSelfBuild tells a slot to do next.
-type selfVerdict int
-
-const (
-	// selfOK: the daemon's own build is unchanged at revision (or the check
-	// is disabled), so the slot starts this iteration's child.
-	selfOK selfVerdict = iota
-	// selfRetry: the evaluation itself failed and this slot has already
-	// backed off; the slot restarts its iteration from the fetch.
-	selfRetry
-	// selfStop: the pool halted (a changed build, or a persistent
-	// evaluation failure that tripped the breaker) or the caller's ctx was
-	// cancelled; the slot returns.
-	selfStop
-)
-
-// checkSelfBuild compares the daemon's own build against what the daemon
-// attribute evaluates to at revision, the freshly fetched tip, and reports
-// what the slot should do next. cfg.SelfProgram == "" skips the check
-// entirely — SelfPath is never called.
-//
-// A SelfPath error is treated as an unclassified per-slot failure, the same
-// class as a ResolveRevision or RunChild seam error (backoffOrHalt):
-// silently ignoring it would disable this safety property for as long as
-// the evaluation stays broken, so instead this one slot backs off and
-// retries alone, and only a persistent failure reaches the breaker.
-//
-// A mismatch never re-execs the daemon: it only records a halt reason and
-// cancels the pool's context — the same "stop starting new work, wait out
-// whatever is running" halt every other reason already uses (see halt) —
-// so a freshly merged but broken daemon cannot auto-load with nobody awake.
-func (p *pool) checkSelfBuild(ctx context.Context, slot int, kind Kind, revision string) selfVerdict {
-	if p.cfg.SelfProgram == "" {
-		return selfOK
+// resolveFailure turns a ResolveTip error into the revision and reason
+// backoffOrHalt should record. A *SelfEvalError means the fetch itself
+// succeeded (tip.Revision is valid) but the self-build evaluation at that
+// revision failed; it is rendered through Halt rather than a raw
+// "resolve-revision: " literal so the documented self-build grammar keeps
+// exactly one renderer (Halt.String()) even though this reason only ever
+// reaches a halt indirectly, via the breaker. Any other error means the
+// fetch itself failed and carries no revision.
+func (p *pool) resolveFailure(tip Tip, err error) (revision, reason string) {
+	var se *SelfEvalError
+	if errors.As(err, &se) {
+		return tip.Revision, Halt{Class: HaltSelfBuild, Detail: se.Err.Error()}.String()
 	}
-	path, err := p.r.SelfPath(ctx, revision)
-	if err != nil {
-		// Rendered through Halt rather than a raw "self-build: " literal so
-		// the documented self-build grammar has exactly one renderer
-		// (Halt.String()) even though this reason only ever reaches a halt
-		// indirectly, via the breaker — backoffOrHalt's own reason param
-		// stays a plain string because its other two callers pass
-		// non-halt-grammar strings.
-		if p.backoffOrHalt(ctx, slot, kind, revision, Halt{Class: HaltSelfBuild, Detail: err.Error()}.String()) {
-			return selfStop
-		}
-		return selfRetry
-	}
-	if path == p.cfg.SelfProgram {
-		return selfOK
-	}
-	detail := fmt.Sprintf("daemon build at %s is %s, running %s", revision, path, p.cfg.SelfProgram)
-	p.halt(Halt{Class: HaltSelfChanged, Detail: detail, Kind: kind, Revision: revision})
-	return selfStop
+	return "", fmt.Sprintf("resolve-revision: %v", err)
 }
 
 // idleSleep is what a slot calls when pickKind finds every configured kind
@@ -823,7 +784,7 @@ func (p *pool) idleWait(now time.Time) (wait time.Duration, jammedGate bool, ok 
 	return earliest.Sub(now), jammedGate, true
 }
 
-// pollSlices sleeps wait in IdleFloor-sized slices, polling ResolveRevision
+// pollSlices sleeps wait in IdleFloor-sized slices, polling ResolveTip
 // between slices so a merge that unblocks a jammed queue is noticed instead
 // of riding out the rest of a long backoff. Only idleSleep's jammed case
 // reaches here; a queue-empty gate stays the plain, single p.clk.Sleep in
@@ -856,16 +817,17 @@ func (p *pool) pollSlices(ctx context.Context, slot int, wait time.Duration, rev
 			return
 		}
 
-		newRevision, err := p.r.ResolveRevision(ctx)
+		tip, err := p.r.ResolveTip(ctx)
 		if err != nil {
 			// This poll is opportunistic, not the loop's own per-iteration
 			// fetch: a failure here just means no change was observed, so
 			// keep sleeping out the remaining slices rather than treating it
-			// as a failure. The next iteration's top-of-loop ResolveRevision
-			// is the one that properly reports and backs off on a broken
-			// fetch.
+			// as a failure — a *SelfEvalError included, same as a plain
+			// fetch error. The next iteration's top-of-loop ResolveTip is
+			// the one that properly reports and backs off on either.
 			continue
 		}
+		newRevision := tip.Revision
 		if newRevision != revision {
 			// No single Kind names this: several kinds can be jammed at
 			// once, and the tip that moved is evidence for all of them, not

@@ -16,17 +16,20 @@ import (
 // fields and the concurrent reads several slot goroutines make of them
 // once a multi-slot test is under way.
 type scriptedRunner struct {
-	// revisions/resolveAt/resolveErr: one revision per ResolveRevision
-	// call, last value repeating once exhausted; resolveAt is a 1-based
-	// call index that returns resolveErr instead.
+	// revisions/resolveAt/resolveErr: one revision per ResolveTip call's
+	// resolve half, last value repeating once exhausted; resolveAt is a
+	// 1-based call index that returns resolveErr instead (before the self
+	// half is ever reached).
 	revisions  []string
 	resolveAt  int
 	resolveErr error
 
-	// selfPaths/selfErrAt/selfErr: the same convention as revisions, but an
-	// empty selfPaths yields ("", nil) rather than panicking, since most
-	// tests never script a self-path at all (Config.SelfProgram left
-	// empty short-circuits the seam before it's ever called).
+	// selfPaths/selfErrAt/selfErr: the same convention as revisions, for
+	// ResolveTip's self half. That half is only served (and counted in
+	// selfCalls) when a test actually scripts it — len(selfPaths) > 0,
+	// selfErrAt != 0, or onSelf != nil — since most tests never script a
+	// self-path at all (Config.SelfProgram left empty short-circuits the
+	// check before it's ever reached).
 	selfPaths []string
 	selfErrAt int
 	selfErr   error
@@ -190,7 +193,16 @@ func (r *scriptedRunner) calls() []runCall {
 	return out
 }
 
-func (r *scriptedRunner) ResolveRevision(ctx context.Context) (string, error) {
+// ResolveTip serves the resolve half first: resolveAt short-circuits with
+// resolveErr before the self half is ever reached, so selfCalls is not
+// incremented on that path — the same ordering the pool had when the two
+// were separate methods. The self half then only runs (and counts in
+// selfCalls) when a test actually scripted it; otherwise the returned
+// Tip.SelfPath is left empty, same as Config.SelfProgram == "" skipping the
+// check outright. A scripted self failure still carries the resolved
+// revision on the returned Tip, wrapped as *SelfEvalError, so the pool's
+// backoff event has a revision to report.
+func (r *scriptedRunner) ResolveTip(ctx context.Context) (Tip, error) {
 	r.mu.Lock()
 	r.resolveCalls++
 	call := r.resolveCalls
@@ -198,55 +210,57 @@ func (r *scriptedRunner) ResolveRevision(ctx context.Context) (string, error) {
 
 	if r.onResolve != nil {
 		if err := r.onResolve(ctx, call); err != nil {
-			return "", err
+			return Tip{}, err
 		}
 	}
 
 	if r.resolveAt != 0 && call == r.resolveAt {
-		return "", r.resolveErr
+		return Tip{}, r.resolveErr
 	}
-	// An empty revisions yields ("", nil) rather than panicking, same as
-	// SelfPath's guard above: most tests never script a revision at all.
-	if len(r.revisions) == 0 {
-		return "", nil
+	// An empty revisions yields "" rather than panicking: most tests never
+	// script a revision at all.
+	revision := ""
+	if len(r.revisions) > 0 {
+		idx := call - 1
+		if idx >= len(r.revisions) {
+			idx = len(r.revisions) - 1
+		}
+		revision = r.revisions[idx]
 	}
-	idx := call - 1
-	if idx >= len(r.revisions) {
-		idx = len(r.revisions) - 1
-	}
-	return r.revisions[idx], nil
-}
 
-func (r *scriptedRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+	if len(r.selfPaths) == 0 && r.selfErrAt == 0 && r.onSelf == nil {
+		return Tip{Revision: revision}, nil
+	}
+
 	r.mu.Lock()
 	r.selfCalls++
-	call := r.selfCalls
+	selfCall := r.selfCalls
 	r.mu.Unlock()
 
 	if r.onSelf != nil {
-		if err := r.onSelf(ctx, call, revision); err != nil {
-			return "", err
+		if err := r.onSelf(ctx, selfCall, revision); err != nil {
+			return Tip{Revision: revision}, &SelfEvalError{Err: err}
 		}
 	}
 
-	if r.selfErrAt != 0 && call == r.selfErrAt {
-		return "", r.selfErr
+	if r.selfErrAt != 0 && selfCall == r.selfErrAt {
+		return Tip{Revision: revision}, &SelfEvalError{Err: r.selfErr}
 	}
 	if len(r.selfPaths) == 0 {
-		return "", nil
+		return Tip{Revision: revision}, nil
 	}
-	idx := call - 1
+	idx := selfCall - 1
 	if idx >= len(r.selfPaths) {
 		idx = len(r.selfPaths) - 1
 	}
-	return r.selfPaths[idx], nil
+	return Tip{Revision: revision, SelfPath: r.selfPaths[idx]}, nil
 }
 
 // pickScripted clamps idx to the last index of list, mirroring every
 // scripting field's "last value repeats once exhausted" rule in one place.
 // An empty list yields the zero ChildResult rather than panicking, same as
-// ResolveRevision/SelfPath's empty guards: an all-unset scriptedRunner is a
-// valid, if boring, script.
+// ResolveTip's own empty guards: an all-unset scriptedRunner is a valid, if
+// boring, script.
 func pickScripted(list []ChildResult, idx int) ChildResult {
 	if len(list) == 0 {
 		return ChildResult{}
@@ -486,18 +500,18 @@ func TestScriptedRunnerRevisionScripting(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1", "rev2"}, resolveAt: 3, resolveErr: errors.New("boom")}
 	ctx := context.Background()
 
-	got, err := r.ResolveRevision(ctx)
-	if err != nil || got != "rev1" {
-		t.Fatalf("call 1 = (%q, %v), want (rev1, nil)", got, err)
+	tip, err := r.ResolveTip(ctx)
+	if err != nil || tip.Revision != "rev1" {
+		t.Fatalf("call 1 = (%+v, %v), want (rev1, nil)", tip, err)
 	}
-	got, err = r.ResolveRevision(ctx)
-	if err != nil || got != "rev2" {
-		t.Fatalf("call 2 = (%q, %v), want (rev2, nil)", got, err)
+	tip, err = r.ResolveTip(ctx)
+	if err != nil || tip.Revision != "rev2" {
+		t.Fatalf("call 2 = (%+v, %v), want (rev2, nil)", tip, err)
 	}
 	// exhausted: repeats the last value
-	got, err = r.ResolveRevision(ctx)
-	if err == nil || got != "" {
-		t.Fatalf("call 3 = (%q, %v), want (\"\", err) per resolveAt", got, err)
+	tip, err = r.ResolveTip(ctx)
+	if err == nil || tip.Revision != "" {
+		t.Fatalf("call 3 = (%+v, %v), want (zero Tip, err) per resolveAt", tip, err)
 	}
 	if r.resolveCount() != 3 {
 		t.Fatalf("resolveCount = %d, want 3", r.resolveCount())
@@ -508,39 +522,53 @@ func TestScriptedRunnerRevisionRepeatsLastAfterExhaustion(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		got, err := r.ResolveRevision(ctx)
-		if err != nil || got != "rev1" {
-			t.Fatalf("call %d = (%q, %v), want (rev1, nil)", i+1, got, err)
+		tip, err := r.ResolveTip(ctx)
+		if err != nil || tip.Revision != "rev1" {
+			t.Fatalf("call %d = (%+v, %v), want (rev1, nil)", i+1, tip, err)
 		}
 	}
 }
 
+// TestScriptedRunnerSelfPathScripting scripts revisions alongside selfPaths
+// so ResolveTip's resolve half succeeds and its self half is actually
+// reached each call.
 func TestScriptedRunnerSelfPathScripting(t *testing.T) {
-	r := &scriptedRunner{selfPaths: []string{"/nix/store/a", "/nix/store/b"}, selfErrAt: 3, selfErr: errors.New("selfboom")}
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		selfPaths: []string{"/nix/store/a", "/nix/store/b"}, selfErrAt: 3, selfErr: errors.New("selfboom"),
+	}
 	ctx := context.Background()
 
-	got, err := r.SelfPath(ctx, "rev1")
-	if err != nil || got != "/nix/store/a" {
-		t.Fatalf("call 1 = (%q, %v), want (/nix/store/a, nil)", got, err)
+	tip, err := r.ResolveTip(ctx)
+	if err != nil || tip.SelfPath != "/nix/store/a" {
+		t.Fatalf("call 1 = (%+v, %v), want (/nix/store/a, nil)", tip, err)
 	}
-	got, err = r.SelfPath(ctx, "rev1")
-	if err != nil || got != "/nix/store/b" {
-		t.Fatalf("call 2 = (%q, %v), want (/nix/store/b, nil)", got, err)
+	tip, err = r.ResolveTip(ctx)
+	if err != nil || tip.SelfPath != "/nix/store/b" {
+		t.Fatalf("call 2 = (%+v, %v), want (/nix/store/b, nil)", tip, err)
 	}
-	got, err = r.SelfPath(ctx, "rev1")
-	if err == nil || got != "" {
-		t.Fatalf("call 3 = (%q, %v), want (\"\", err) per selfErrAt", got, err)
+	tip, err = r.ResolveTip(ctx)
+	var se *SelfEvalError
+	if !errors.As(err, &se) || tip.SelfPath != "" {
+		t.Fatalf("call 3 = (%+v, %v), want (empty SelfPath, *SelfEvalError) per selfErrAt", tip, err)
 	}
 	if r.selfCount() != 3 {
 		t.Fatalf("selfCount = %d, want 3", r.selfCount())
 	}
 }
 
-func TestScriptedRunnerSelfPathEmptyYieldsNoError(t *testing.T) {
+// TestScriptedRunnerSelfPathUnscriptedNeverServed asserts ResolveTip never
+// touches the self half at all when a test scripts none of selfPaths,
+// selfErrAt, or onSelf — selfCalls stays 0 rather than counting a call that
+// only served a zero value.
+func TestScriptedRunnerSelfPathUnscriptedNeverServed(t *testing.T) {
 	r := &scriptedRunner{}
-	got, err := r.SelfPath(context.Background(), "rev1")
-	if err != nil || got != "" {
-		t.Fatalf("SelfPath with no scripted paths = (%q, %v), want (\"\", nil)", got, err)
+	tip, err := r.ResolveTip(context.Background())
+	if err != nil || tip.SelfPath != "" {
+		t.Fatalf("ResolveTip with no scripted self path = (%+v, %v), want (empty SelfPath, nil)", tip, err)
+	}
+	if r.selfCount() != 0 {
+		t.Fatalf("selfCount = %d, want 0 (self half never scripted, never served)", r.selfCount())
 	}
 }
 
@@ -552,9 +580,9 @@ func TestScriptedRunnerAllUnsetYieldsZeroValuesNotPanic(t *testing.T) {
 	if err != nil || res.Exit != 0 || res.Issues != nil {
 		t.Fatalf("RunChild with nothing scripted = (%+v, %v), want (zero ChildResult, nil)", res, err)
 	}
-	rev, err := r.ResolveRevision(context.Background())
-	if err != nil || rev != "" {
-		t.Fatalf("ResolveRevision with nothing scripted = (%q, %v), want (\"\", nil)", rev, err)
+	tip, err := r.ResolveTip(context.Background())
+	if err != nil || tip.Revision != "" {
+		t.Fatalf("ResolveTip with nothing scripted = (%+v, %v), want (zero Tip, nil)", tip, err)
 	}
 }
 
@@ -760,13 +788,13 @@ func TestScriptedRunnerOnResolveHook(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if _, err := r.ResolveRevision(ctx); err != nil {
+	if _, err := r.ResolveTip(ctx); err != nil {
 		t.Fatalf("call 1 err = %v, want nil", err)
 	}
 	if seenCall != 1 {
 		t.Fatalf("seenCall = %d, want 1", seenCall)
 	}
-	if _, err := r.ResolveRevision(ctx); err == nil || err.Error() != "hookboom" {
+	if _, err := r.ResolveTip(ctx); err == nil || err.Error() != "hookboom" {
 		t.Fatalf("call 2 err = %v, want hookboom (hook short-circuits, scripted value never consulted)", err)
 	}
 }
@@ -774,15 +802,17 @@ func TestScriptedRunnerOnResolveHook(t *testing.T) {
 func TestScriptedRunnerOnSelfHook(t *testing.T) {
 	var seenRevision string
 	r := &scriptedRunner{
+		revisions: []string{"rev7"},
 		selfPaths: []string{"/nix/store/x"},
 		onSelf: func(ctx context.Context, call int, revision string) error {
 			seenRevision = revision
 			return errors.New("selfhookboom")
 		},
 	}
-	_, err := r.SelfPath(context.Background(), "rev7")
-	if err == nil || err.Error() != "selfhookboom" {
-		t.Fatalf("err = %v, want selfhookboom", err)
+	_, err := r.ResolveTip(context.Background())
+	var se *SelfEvalError
+	if !errors.As(err, &se) || se.Error() != "selfhookboom" {
+		t.Fatalf("err = %v, want *SelfEvalError wrapping selfhookboom", err)
 	}
 	if seenRevision != "rev7" {
 		t.Fatalf("seenRevision = %q, want rev7", seenRevision)

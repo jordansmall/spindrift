@@ -1153,7 +1153,8 @@ let
   };
 
   # daemonBin is one input to the wrapper whose own $0
-  # (SPINDRIFT_DAEMON_PROGRAM) is what checkSelfBuild compares at each
+  # (SPINDRIFT_DAEMON_PROGRAM) is what runSlot's inline Tip.SelfPath
+  # comparison (cmd/launcher/internal/daemon/loop.go) compares at each
   # iteration boundary (issue #3543); a mismatch halts a running daemon with
   # exit 10. src is scoped with lib.fileset, not launcherSrc: launcherSrc
   # copies ../docs alongside cmd/launcher for launcherBin's checkPhase
