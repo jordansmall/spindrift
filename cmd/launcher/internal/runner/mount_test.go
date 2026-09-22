@@ -11,7 +11,6 @@ import (
 
 	"spindrift.dev/launcher/internal/agentpaths"
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // Both sides of the Target comparison read agentpaths.PromptsDir, so a rename
@@ -398,7 +397,7 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   mp,
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(proxySocket)}}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir, Sockets: []SocketMount{{Source: proxySocket, Target: RegistryProxySocketTarget}}}
 
 	ociArgs := strings.Join(oci.buildRunArgs(box), " ")
 	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
@@ -593,7 +592,7 @@ func TestCandidateSocketMount_EmptyPath_NoMount(t *testing.T) {
 // ADR 0044 fixes the in-box target at /registry-proxy.sock.
 func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
-	specs := buildMountSpecs(MountParams{}, Box{RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}})
+	specs := buildMountSpecs(MountParams{}, Box{Sockets: []SocketMount{{Source: sock, Target: RegistryProxySocketTarget}}})
 
 	var found *MountSpec
 	for i := range specs {
@@ -617,7 +616,54 @@ func TestBuildMountSpecs_RegistryProxySocketUnset_NoMount(t *testing.T) {
 
 	for _, s := range specs {
 		if s.Target == "/registry-proxy.sock" {
-			t.Errorf("unexpected /registry-proxy.sock spec when RegistryProxy.Endpoint is unset: %+v", specs)
+			t.Errorf("unexpected /registry-proxy.sock spec when Box.Sockets is unset: %+v", specs)
 		}
+	}
+}
+
+// issue #3723: buildMountSpecs mounts every entry of Box.Sockets, in order,
+// each at its own fixed target — not just a single hardcoded socket.
+func TestBuildMountSpecs_MultipleSockets_OneWritableSpecEach(t *testing.T) {
+	sockA := newTestSocket(t, "registry-proxy.sock")
+	sockB := newTestSocket(t, "signal.sock")
+	box := Box{Sockets: []SocketMount{
+		{Source: sockA, Target: RegistryProxySocketTarget},
+		{Source: sockB, Target: "/signal.sock"},
+	}}
+
+	specs := buildMountSpecs(MountParams{}, box)
+
+	if len(specs) != 2 {
+		t.Fatalf("want 2 specs, got %d: %+v", len(specs), specs)
+	}
+	if specs[0].Source != sockA || specs[0].Target != RegistryProxySocketTarget {
+		t.Errorf("specs[0] = %+v, want Source=%q Target=%q", specs[0], sockA, RegistryProxySocketTarget)
+	}
+	if specs[1].Source != sockB || specs[1].Target != "/signal.sock" {
+		t.Errorf("specs[1] = %+v, want Source=%q Target=%q", specs[1], sockB, "/signal.sock")
+	}
+	for _, s := range specs {
+		if s.ReadOnly {
+			t.Errorf("socket mount %+v must be writable, not read-only", s)
+		}
+	}
+}
+
+// A non-existent or non-socket source is dropped, but a good entry
+// elsewhere in the list still mounts (issue #3723).
+func TestBuildMountSpecs_MultipleSockets_SkipsBadEntryKeepsGoodOne(t *testing.T) {
+	sockA := newTestSocket(t, "registry-proxy.sock")
+	box := Box{Sockets: []SocketMount{
+		{Source: filepath.Join(t.TempDir(), "does-not-exist.sock"), Target: "/signal.sock"},
+		{Source: sockA, Target: RegistryProxySocketTarget},
+	}}
+
+	specs := buildMountSpecs(MountParams{}, box)
+
+	if len(specs) != 1 {
+		t.Fatalf("want 1 spec, got %d: %+v", len(specs), specs)
+	}
+	if specs[0].Source != sockA || specs[0].Target != RegistryProxySocketTarget {
+		t.Errorf("specs[0] = %+v, want Source=%q Target=%q", specs[0], sockA, RegistryProxySocketTarget)
 	}
 }
