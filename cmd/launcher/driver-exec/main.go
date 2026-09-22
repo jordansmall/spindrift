@@ -51,6 +51,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if isForwardRegistryTCPInvocation(argv) {
 		return runForwardRegistryTCP(argv[1:], stdout)
 	}
+	if isSignalInvocation(argv) {
+		// The only verb handed stdin: a signal's body never travels on argv.
+		return runSignal(argv[1:], os.Stdin, stdout)
+	}
 
 	fs := flag.NewFlagSet("driver-exec", flag.ContinueOnError)
 	fs.SetOutput(stderr)
