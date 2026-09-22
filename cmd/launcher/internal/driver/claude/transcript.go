@@ -70,8 +70,8 @@ type CacheCreation struct {
 // Writer can show it live.
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
-	// "decision", "run_state_error", "pass_usage", "land_delta", or
-	// "delta_review_trigger".
+	// "decision", "run_state_error", "pass_usage", "land_delta",
+	// "delta_review_trigger", or "signal".
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
@@ -81,10 +81,21 @@ type SpindriftOp struct {
 	// from the legacy single-loop path that never distinguishes roles.
 	Role    string `json:"role,omitempty"`
 	Verdict string `json:"verdict,omitempty"`
-	// Decision is "continue" or "stop" on a "decision" op, or "fire" or
-	// "skip" on a "delta_review_trigger" op (issue #3246). Both op kinds
-	// share the field because each is a two-valued outcome always paired
-	// with a Reason.
+	// Kind names the signal kind on a "signal" op (issue #3724): "comment",
+	// "pr-intent", "issue-intent", "status", or "unknown" (kindForPath's
+	// sentinel for a path outside the four routes). Empty on every other op
+	// kind.
+	Kind string `json:"kind,omitempty"`
+	// Size is the signal's content byte count and Hash its content hash,
+	// "sha256:"-prefixed hex, on a "signal" op.
+	Size int    `json:"size,omitempty"`
+	Hash string `json:"hash,omitempty"`
+	// Decision is "continue" or "stop" on a "decision" op, "fire" or
+	// "skip" on a "delta_review_trigger" op (issue #3246), or "accept",
+	// "reject", or "read" on a "signal" op (issue #3724) -- "read" for the
+	// status route, which never accepts or rejects content and so carries
+	// no Reason. The op kinds share the field because each names a small,
+	// fixed set of outcomes, normally paired with a Reason.
 	Decision string `json:"decision,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Phase    string `json:"phase,omitempty"` // "read", "write", "findings_log", "dispositions_log", "dispositions_budget", "decisions_log", or "decisions_budget", for run_state_error

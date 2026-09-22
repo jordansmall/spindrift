@@ -185,6 +185,17 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 			d.Reason = "no delta reported"
 		}
 		sb.WriteString(sanitizeRole(d.Summary()))
+	case "signal":
+		// A reject's Reason is the whole point of the line, so it stands in
+		// for the size/hash detail an accept carries (issue #3724).
+		switch op.Decision {
+		case "reject":
+			fmt.Fprintf(&sb, "signal %s rejected: %s", sanitizeRole(op.Kind), sanitizeRole(op.Reason))
+		case "read":
+			fmt.Fprintf(&sb, "signal %s read", sanitizeRole(op.Kind))
+		default:
+			fmt.Fprintf(&sb, "signal %s accepted \xc2\xb7 %d bytes \xc2\xb7 %s", sanitizeRole(op.Kind), op.Size, sanitizeRole(op.Hash))
+		}
 	case "delta_review_trigger":
 		// The Reason is the whole point of this op (issue #3246) and must show
 		// even on the common "skip" path, so this mirrors the "decision" case
