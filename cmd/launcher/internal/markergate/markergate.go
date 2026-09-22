@@ -12,7 +12,15 @@ import (
 
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/signalwire"
 )
+
+// signalCarrierSocket is the BOX_SIGNAL_CARRIER value (issue #3725) that
+// routes the PR-intent presence check through the Signal socket's status
+// route instead of a log scan (issue #3726). Every other value, including
+// the default "log" and the empty string an older caller might still pass,
+// keeps the log scan.
+const signalCarrierSocket = "socket"
 
 // Marker identifies which required-marker gate row a decision is for.
 type Marker string
@@ -39,7 +47,22 @@ type NudgeConfig struct {
 	// Its meaning depends on cfg.Marker: for MarkerOutcome, the Driver's
 	// unwrapped and markdown-stripped final-message text, not the raw
 	// stream-json log; for MarkerPRIntent, the raw Driver stream_log.
+	// Under SignalCarrier == "socket", MarkerPRIntent ignores LogPath
+	// entirely (issue #3726): a socket-mode marker line in the log carries
+	// no data (retry.go's own rule), so scanning it would be wrong.
 	LogPath string
+
+	// SignalCarrier is the BOX_SIGNAL_CARRIER knob value (issue #3725).
+	// MarkerPRIntent branches on it: "socket" calls SignalStatus instead of
+	// scanning LogPath. MarkerOutcome ignores it -- the outcome marker has
+	// no socket carrier.
+	SignalCarrier string
+	// SignalStatus queries the Signal socket's status route, required
+	// (non-nil) whenever SignalCarrier == "socket" and cfg.Marker is
+	// MarkerPRIntent. A nil SignalStatus under socket mode is a caller bug,
+	// reported as an error rather than silently falling back to a log scan
+	// (ADR 0052 exists to remove exactly that kind of silent fallback).
+	SignalStatus func() (signalwire.Status, error)
 }
 
 // RenderNudgePrompt renders the corrective resume prompt for cfg.Marker. The
@@ -92,6 +115,12 @@ func substituteFieldShape(fieldShape, issue, landing string) string {
 }
 
 func renderPRIntentNudge(cfg NudgeConfig) string {
+	if cfg.SignalCarrier == signalCarrierSocket {
+		return fmt.Sprintf(
+			"Your last message ended with a status=ready %s line but you never sent a PR intent over the Signal socket, so the launcher has no draft PR to open. Send it now: driver-exec signal pr-intent -title \"<conventional title>\" -body-file <path to a file holding the body> (or omit -body-file and pipe the body on stdin) -- no nonce or base64 needed. A zero exit means it was accepted; a non-zero exit prints why it was rejected, so fix and resend. Then repeat this exact line as your final message: %s",
+			outcome.Token, cfg.OriginalOutcomeLine,
+		)
+	}
 	return fmt.Sprintf(
 		"Your last message ended with a status=ready %s line but printed no %s line, so the launcher has no draft PR to open. Print exactly one %s line, grammar: %s %s <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: %s",
 		outcome.Token, outcome.PRIntentToken, outcome.PRIntentToken, outcome.PRIntentToken, cfg.Nonce, cfg.OriginalOutcomeLine,
@@ -120,15 +149,30 @@ func ShouldNudgePRIntent(cfg NudgeConfig) (bool, error) {
 	if !outcome.ReadyBeforeNote(cfg.OriginalOutcomeLine) {
 		return false, nil
 	}
-	present, err := prIntentPresent(cfg.LogPath, cfg.Nonce)
+	present, err := prIntentPresent(cfg.LogPath, cfg.Nonce, cfg.SignalCarrier, cfg.SignalStatus)
 	return !present, err
 }
 
 // prIntentPresent is the one presence rule both ShouldNudgePRIntent and
-// Resolve gate on. A scan error means every token-bearing line failed to
-// verify (a spoof or a corrupted line), never that the token was absent; the
-// message carries the rejected-line count but never the nonce.
-func prIntentPresent(path, nonce string) (bool, error) {
+// Resolve gate on. Under signalCarrierSocket it never touches path -- a
+// socket-mode marker line in the log carries no data (retry.go's rule) -- and
+// asks statusFn instead; statusFn == nil there is a caller bug, reported as
+// an error rather than a silent log-scan fallback (ADR 0052). Otherwise it
+// scans path exactly as before: a scan error means every token-bearing line
+// failed to verify (a spoof or a corrupted line), never that the token was
+// absent, and the message carries the rejected-line count but never the
+// nonce.
+func prIntentPresent(path, nonce, carrier string, statusFn func() (signalwire.Status, error)) (bool, error) {
+	if carrier == signalCarrierSocket {
+		if statusFn == nil {
+			return false, errors.New("BOX_SIGNAL_CARRIER=socket but no signal-status function was provided")
+		}
+		status, err := statusFn()
+		if err != nil {
+			return false, fmt.Errorf("query the signal socket for %s status: %w", outcome.PRIntentToken, err)
+		}
+		return status.PRIntent != nil, nil
+	}
 	_, found, rejected, err := outcome.LastPRIntentInLog(path, nonce)
 	if err != nil {
 		return found, fmt.Errorf("scan %s for a verified %s line (%d rejected): %w", path, outcome.PRIntentToken, rejected.Total(), err)
@@ -183,6 +227,12 @@ type ResolveConfig struct {
 	OutcomeViaBackstop bool
 	// ResumeExitCode is the corrective resume's own driver exit code.
 	ResumeExitCode int
+
+	// SignalCarrier and SignalStatus mirror NudgeConfig's fields of the same
+	// name: Resolve gates on prIntentPresent too, the same presence rule
+	// ShouldNudgePRIntent uses, so it needs the same carrier-aware inputs.
+	SignalCarrier string
+	SignalStatus  func() (signalwire.Status, error)
 }
 
 // Resolution is Resolve's result. Its fields are independently gated, so a
@@ -209,12 +259,16 @@ type Resolution struct {
 func Resolve(cfg ResolveConfig) (Resolution, error) {
 	var r Resolution
 
-	present, prIntentErr := prIntentPresent(cfg.LogPath, cfg.Nonce)
+	present, prIntentErr := prIntentPresent(cfg.LogPath, cfg.Nonce, cfg.SignalCarrier, cfg.SignalStatus)
 	if !present {
+		reason := "no marker line, handing off blocked"
+		if cfg.SignalCarrier == signalCarrierSocket {
+			reason = "no PR intent on the signal socket status route, handing off blocked"
+		}
 		r.OpLine = claude.EncodeSpindriftOp(claude.SpindriftOp{
 			Op:       "decision",
 			Decision: "stop",
-			Reason:   fmt.Sprintf("read-only PR-intent nudge exhausted after %d attempt; no marker line, handing off blocked", cfg.Attempts),
+			Reason:   fmt.Sprintf("read-only PR-intent nudge exhausted after %d attempt; %s", cfg.Attempts, reason),
 		})
 	}
 

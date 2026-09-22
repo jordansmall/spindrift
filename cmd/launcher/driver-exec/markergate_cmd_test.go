@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/signalsocket"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -207,6 +208,94 @@ func TestRunMarkerGate_NudgePRIntentShouldNudgeFalseWhenPresent(t *testing.T) {
 	}
 	if out.ShouldNudge {
 		t.Fatalf("expected should_nudge=false, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
+}
+
+// --signal-carrier socket must query the real Signal socket's status route
+// (not stub it), matching startSignalServer's whole-stack precedent in
+// signal_cmd_test.go: no intent posted yet means Status.PRIntent is nil, so
+// the gate nudges even though --log-path names a file carrying a valid
+// marker line -- proof the log is never consulted under socket carrier.
+func TestRunMarkerGate_NudgePRIntentSocketCarrierAbsentIgnoresLog(t *testing.T) {
+	startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
+	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
+	var stdout bytes.Buffer
+	rc := runMarkerGate([]string{
+		"--phase", "nudge",
+		"--marker", "pr-intent",
+		"--nonce", "abc123",
+		"--log-path", logPath,
+		"--signal-carrier", "socket",
+		"--original-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	var out nudgeOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
+	}
+	if !out.ShouldNudge {
+		t.Fatalf("expected should_nudge=true, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
+	if !strings.Contains(out.Prompt, "driver-exec signal pr-intent") {
+		t.Fatalf("expected socket-carrier prompt to name driver-exec signal pr-intent, got %q", out.Prompt)
+	}
+}
+
+// Once a pr-intent has actually been accepted by the socket, the gate must
+// not nudge, regardless of --log-path.
+func TestRunMarkerGate_NudgePRIntentSocketCarrierPresent(t *testing.T) {
+	startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
+	if rc, out := runVerb(t, "the body", "pr-intent", "-title", "a title"); rc != 0 {
+		t.Fatalf("runVerb(pr-intent) exit = %d, want 0 (out=%q)", rc, out)
+	}
+
+	var stdout bytes.Buffer
+	rc := runMarkerGate([]string{
+		"--phase", "nudge",
+		"--marker", "pr-intent",
+		"--nonce", "abc123",
+		"--signal-carrier", "socket",
+		"--original-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	var out nudgeOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
+	}
+	if out.ShouldNudge {
+		t.Fatalf("expected should_nudge=false, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
+}
+
+// The default --signal-carrier is "log": omitting the flag entirely must
+// keep scanning --log-path, unchanged from before this gate learned about
+// carriers at all.
+func TestRunMarkerGate_NudgePRIntentDefaultCarrierIsLog(t *testing.T) {
+	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
+	var stdout bytes.Buffer
+	rc := runMarkerGate([]string{
+		"--phase", "nudge",
+		"--marker", "pr-intent",
+		"--nonce", "abc123",
+		"--log-path", logPath,
+		"--original-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	var out nudgeOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
+	}
+	if out.ShouldNudge {
+		t.Fatalf("expected should_nudge=false (default carrier scans --log-path and finds the marker line), got %v (stdout=%q)", out.ShouldNudge, stdout.String())
 	}
 }
 

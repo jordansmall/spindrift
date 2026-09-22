@@ -1,6 +1,7 @@
 package markergate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/signalwire"
 )
 
 // wantSubstitutedOutcomeShape is the one hand-typed transcription of the
@@ -109,6 +111,32 @@ func TestRenderNudgePrompt_PRIntent(t *testing.T) {
 	)
 	if got != want {
 		t.Fatalf("RenderNudgePrompt() =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// Under SignalCarrier == "socket" the rendered nudge must name the
+// driver-exec signal verb instead of the log grammar, and it must stop
+// mentioning the base64/nonce line grammar entirely -- the socket transport
+// has neither.
+func TestRenderNudgePrompt_PRIntentSocket(t *testing.T) {
+	originalOutcomeLine := outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done"
+	got, err := RenderNudgePrompt(NudgeConfig{
+		Marker:              MarkerPRIntent,
+		Nonce:               "abc123",
+		OriginalOutcomeLine: originalOutcomeLine,
+		SignalCarrier:       "socket",
+	})
+	if err != nil {
+		t.Fatalf("RenderNudgePrompt() error = %v, want nil", err)
+	}
+	if !strings.Contains(got, "driver-exec signal pr-intent") {
+		t.Fatalf("RenderNudgePrompt() socket-carrier prompt = %q, want it to name driver-exec signal pr-intent", got)
+	}
+	if strings.Contains(got, outcome.PRIntentToken) {
+		t.Fatalf("RenderNudgePrompt() socket-carrier prompt = %q, want no mention of the log-carrier %s token", got, outcome.PRIntentToken)
+	}
+	if !strings.HasSuffix(got, originalOutcomeLine) {
+		t.Fatalf("RenderNudgePrompt() socket-carrier prompt = %q, want it to end with the original outcome line %q", got, originalOutcomeLine)
 	}
 }
 
@@ -377,6 +405,111 @@ func TestShouldNudgePRIntent_MalformedOriginalOutcomeLine(t *testing.T) {
 	}
 }
 
+// Log mode (the default, empty SignalCarrier) must never call SignalStatus:
+// a call there would mean the log arm silently gained a network dependency.
+func TestShouldNudgePRIntent_LogCarrierNeverCallsSignalStatus(t *testing.T) {
+	logPath := writeLog(t, outcome.PRIntentToken+" abc123 dGVzdA==\n")
+	called := false
+	got, err := ShouldNudgePRIntent(NudgeConfig{
+		Nonce:               "abc123",
+		OriginalOutcomeLine: outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done",
+		LogPath:             logPath,
+		SignalStatus: func() (signalwire.Status, error) {
+			called = true
+			return signalwire.Status{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("ShouldNudgePRIntent() error = %v, want nil", err)
+	}
+	if got {
+		t.Fatalf("ShouldNudgePRIntent() = true, want false (genuine PR-intent line already present)")
+	}
+	if called {
+		t.Fatalf("ShouldNudgePRIntent() called SignalStatus under the default log carrier, want it left untouched")
+	}
+}
+
+// SignalCarrier == "socket" with Status.PRIntent != nil suppresses the
+// nudge, and it must ignore LogPath entirely: pointing LogPath at a file
+// that *does* carry a valid marker line proves the log is never consulted, a
+// socket-mode marker line in the log carries no data (retry.go's rule).
+func TestShouldNudgePRIntent_SocketCarrierPresentSuppressesNudge(t *testing.T) {
+	logPath := writeLog(t, outcome.PRIntentToken+" abc123 dGVzdA==\n")
+	got, err := ShouldNudgePRIntent(NudgeConfig{
+		Nonce:               "abc123",
+		OriginalOutcomeLine: outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done",
+		LogPath:             logPath,
+		SignalCarrier:       "socket",
+		SignalStatus: func() (signalwire.Status, error) {
+			return signalwire.Status{PRIntent: &signalwire.Receipt{Kind: "pr-intent"}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("ShouldNudgePRIntent() error = %v, want nil", err)
+	}
+	if got {
+		t.Fatalf("ShouldNudgePRIntent() = true, want false (Status.PRIntent set)")
+	}
+}
+
+// SignalCarrier == "socket" with Status.PRIntent == nil fires the nudge even
+// though LogPath carries a valid marker line -- proof the log scan never ran.
+func TestShouldNudgePRIntent_SocketCarrierAbsentFiresNudgeDespiteLogMarker(t *testing.T) {
+	logPath := writeLog(t, outcome.PRIntentToken+" abc123 dGVzdA==\n")
+	got, err := ShouldNudgePRIntent(NudgeConfig{
+		Nonce:               "abc123",
+		OriginalOutcomeLine: outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done",
+		LogPath:             logPath,
+		SignalCarrier:       "socket",
+		SignalStatus: func() (signalwire.Status, error) {
+			return signalwire.Status{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("ShouldNudgePRIntent() error = %v, want nil", err)
+	}
+	if !got {
+		t.Fatalf("ShouldNudgePRIntent() = false, want true (Status.PRIntent nil, log marker line must be ignored under socket carrier)")
+	}
+}
+
+// A SignalStatus error must propagate rather than being read as "absent" or
+// silently falling back to the log scan.
+func TestShouldNudgePRIntent_SocketCarrierStatusErrorPropagates(t *testing.T) {
+	wantErr := errors.New("boom")
+	_, err := ShouldNudgePRIntent(NudgeConfig{
+		Nonce:               "abc123",
+		OriginalOutcomeLine: outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done",
+		LogPath:             writeLog(t, ""),
+		SignalCarrier:       "socket",
+		SignalStatus: func() (signalwire.Status, error) {
+			return signalwire.Status{}, wantErr
+		},
+	})
+	if err == nil || !errors.Is(err, wantErr) {
+		t.Fatalf("ShouldNudgePRIntent() error = %v, want it to wrap %v", err, wantErr)
+	}
+}
+
+// A nil SignalStatus under socket carrier is a caller bug and must fail
+// loudly rather than silently falling back to a log scan (ADR 0052).
+func TestShouldNudgePRIntent_SocketCarrierNilStatusFuncFailsLoudly(t *testing.T) {
+	logPath := writeLog(t, outcome.PRIntentToken+" abc123 dGVzdA==\n")
+	got, err := ShouldNudgePRIntent(NudgeConfig{
+		Nonce:               "abc123",
+		OriginalOutcomeLine: outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done",
+		LogPath:             logPath,
+		SignalCarrier:       "socket",
+	})
+	if err == nil {
+		t.Fatalf("ShouldNudgePRIntent() error = nil, want non-nil (nil SignalStatus under socket carrier)")
+	}
+	if !got {
+		t.Fatalf("ShouldNudgePRIntent() = false, want true (fail-safe: nil SignalStatus reads as marker absent)")
+	}
+}
+
 func TestResolve_PRIntentEmptySetsOpLine(t *testing.T) {
 	got, err := Resolve(ResolveConfig{Attempts: 1})
 	if err != nil {
@@ -446,6 +579,80 @@ func TestResolve_PRIntentPresentNoOpLine(t *testing.T) {
 	}
 	if got.OpLine != "" {
 		t.Fatalf("expected empty OpLine, got %q", got.OpLine)
+	}
+}
+
+// Resolve gates on the same prIntentPresent rule as ShouldNudgePRIntent, so
+// it must be equally carrier-aware: socket carrier with Status.PRIntent set
+// clears OpLine even though LogPath carries no marker line at all.
+func TestResolve_SocketCarrierPresentNoOpLine(t *testing.T) {
+	got, err := Resolve(ResolveConfig{
+		Attempts:      1,
+		LogPath:       writeLog(t, ""),
+		SignalCarrier: "socket",
+		SignalStatus: func() (signalwire.Status, error) {
+			return signalwire.Status{PRIntent: &signalwire.Receipt{Kind: "pr-intent"}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil", err)
+	}
+	if got.OpLine != "" {
+		t.Fatalf("expected empty OpLine, got %q", got.OpLine)
+	}
+}
+
+// Socket carrier with Status.PRIntent nil sets OpLine even though LogPath
+// carries a valid marker line -- proof Resolve's presence check ignores the
+// log under socket carrier exactly as ShouldNudgePRIntent's does.
+func TestResolve_SocketCarrierAbsentSetsOpLineDespiteLogMarker(t *testing.T) {
+	logPath := writeLog(t, outcome.PRIntentToken+" abc123 dGVzdA==\n")
+	got, err := Resolve(ResolveConfig{
+		Attempts:      1,
+		LogPath:       logPath,
+		Nonce:         "abc123",
+		SignalCarrier: "socket",
+		SignalStatus: func() (signalwire.Status, error) {
+			return signalwire.Status{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil", err)
+	}
+	if got.OpLine == "" {
+		t.Fatalf("expected non-empty OpLine (Status.PRIntent nil, log marker line must be ignored under socket carrier)")
+	}
+}
+
+// Resolve's give-up reason is carrier-forked the same way RenderNudgePrompt's
+// nudge is: the log arm names "no marker line" (there is one to scan for),
+// the socket arm names the signal socket status route instead (there is no
+// marker line in play under that carrier).
+func TestResolve_GiveUpReasonNamesCarrier(t *testing.T) {
+	got, err := Resolve(ResolveConfig{Attempts: 1, LogPath: writeLog(t, "")})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil", err)
+	}
+	if !strings.Contains(got.OpLine, "no marker line, handing off blocked") {
+		t.Fatalf("Resolve() log-carrier OpLine = %q, want it to contain %q", got.OpLine, "no marker line, handing off blocked")
+	}
+
+	gotSocket, err := Resolve(ResolveConfig{
+		Attempts:      1,
+		LogPath:       writeLog(t, ""),
+		SignalCarrier: "socket",
+		SignalStatus: func() (signalwire.Status, error) {
+			return signalwire.Status{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil", err)
+	}
+	if !strings.Contains(gotSocket.OpLine, "no PR intent on the signal socket status route, handing off blocked") {
+		t.Fatalf("Resolve() socket-carrier OpLine = %q, want it to contain %q", gotSocket.OpLine, "no PR intent on the signal socket status route, handing off blocked")
+	}
+	if strings.Contains(gotSocket.OpLine, "no marker line") {
+		t.Fatalf("Resolve() socket-carrier OpLine = %q, want no mention of the log-carrier wording", gotSocket.OpLine)
 	}
 }
 
