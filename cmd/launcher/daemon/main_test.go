@@ -491,6 +491,40 @@ func TestParseBreakerWindow(t *testing.T) {
 	}
 }
 
+// TestValidateSignalCarrier pins BOX_SIGNAL_CARRIER's startup check: unset is
+// valid (the knob is env-only, so an absent value means "let the child
+// take the schema default"), and the two schema choices are valid; anything
+// else is rejected by name.
+func TestValidateSignalCarrier(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{name: "log", raw: "log"},
+		{name: "socket", raw: "socket"},
+		{name: "unset", raw: ""},
+		{name: "bogus rejected", raw: "carrier-pigeon", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSignalCarrier(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("validateSignalCarrier(%q) = nil; want an error", tt.raw)
+				}
+				if !strings.Contains(err.Error(), "BOX_SIGNAL_CARRIER") {
+					t.Errorf("validateSignalCarrier(%q) error = %q, want it to name BOX_SIGNAL_CARRIER", tt.raw, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateSignalCarrier(%q) unexpected error: %v", tt.raw, err)
+			}
+		})
+	}
+}
+
 // TestMainRun_BadDaemonIdleCapFailsStartup is the end-to-end case: an
 // --input document whose DAEMON_IDLE_CAP sits below DAEMON_IDLE_FLOOR must
 // refuse the start before any slot, any claim, any Box — exit 1, with
@@ -513,6 +547,30 @@ func TestMainRun_BadDaemonIdleCapFailsStartup(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "DAEMON_IDLE_CAP") || !strings.Contains(stderr.String(), "DAEMON_IDLE_FLOOR") {
 		t.Errorf("stderr = %q, want it to name both DAEMON_IDLE_CAP and DAEMON_IDLE_FLOOR", stderr.String())
+	}
+}
+
+// TestMainRun_BadSignalCarrierFailsStartup is the end-to-end case: a
+// BOX_SIGNAL_CARRIER value outside the schema's choices must refuse the
+// start before any child is spawned — exit 1, with stderr naming the knob,
+// the same seam TestMainRun_BadDaemonIdleCapFailsStartup uses for its own
+// knobs.
+func TestMainRun_BadSignalCarrierFailsStartup(t *testing.T) {
+	clearKnobEnvT(t)
+	t.Setenv("BOX_SIGNAL_CARRIER", "carrier-pigeon")
+	docPath := writeInputDocT(t, map[string]string{
+		"DAEMON_APP":   ".#dogfood",
+		"BASE_BRANCH":  "main",
+		"MAX_PARALLEL": "1",
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", docPath, "dispatch"}, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("mainRun() = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), "BOX_SIGNAL_CARRIER") {
+		t.Errorf("stderr = %q, want it to name BOX_SIGNAL_CARRIER", stderr.String())
 	}
 }
 
@@ -769,7 +827,7 @@ func clearKnobEnvT(t *testing.T) {
 	for _, v := range []string{
 		"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION",
 		"DAEMON_IDLE_FLOOR", "DAEMON_IDLE_CAP", "DAEMON_FAILURE_BACKOFF",
-		"DAEMON_BREAKER_THRESHOLD", "DAEMON_BREAKER_WINDOW",
+		"DAEMON_BREAKER_THRESHOLD", "DAEMON_BREAKER_WINDOW", "BOX_SIGNAL_CARRIER",
 	} {
 		t.Setenv(v, "")
 	}

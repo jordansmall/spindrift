@@ -183,6 +183,22 @@ func parseBreakerWindow(raw string) (time.Duration, error) {
 	return inputdoc.ParseDuration("DAEMON_BREAKER_WINDOW", "positive duration", raw, time.Nanosecond)
 }
 
+// validateSignalCarrier is the daemon-side counterpart of the launcher's own
+// validateChoice (cmd/launcher/flags.go), whose wording it mirrors: the two
+// are separate package mains, so the generated schemaFlags table is out of
+// reach here and the choices are spelled out instead. They mirror
+// lib/env-schema.nix's signalCarrier.choices, itself pinned against drift by
+// nix/checks/schema-drift.nix — change that list and change this one. An
+// empty value is valid and means unset: the knob is env-only (never in the
+// --input document's settings), so an unset knob stays out of the child
+// environment and the child takes the schema default.
+func validateSignalCarrier(raw string) error {
+	if raw == "" || raw == "log" || raw == "socket" {
+		return nil
+	}
+	return fmt.Errorf("BOX_SIGNAL_CARRIER=%q is not valid; must be log or socket", raw)
+}
+
 // nixSystemDouble maps Go's GOOS/GOARCH to the nix system double the self
 // check's flake attribute path needs (daemon.SelfSpec.System). It takes both
 // as parameters, rather than reading runtime.GOOS/runtime.GOARCH itself, so
@@ -596,6 +612,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	breakerWindow, err := parseBreakerWindow(breakerWindowRaw)
 	if err != nil {
+		return fail(stderr, err)
+	}
+
+	// BOX_SIGNAL_CARRIER is env-only (absent from the --input document's
+	// settings map), so it is read with os.Getenv rather than doc.Resolve —
+	// Resolve would fail on a legitimately-unset knob.
+	if err := validateSignalCarrier(os.Getenv("BOX_SIGNAL_CARRIER")); err != nil {
 		return fail(stderr, err)
 	}
 
