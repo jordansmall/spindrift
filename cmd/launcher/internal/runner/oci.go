@@ -462,12 +462,15 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		args = append(args, "-v", m.Source+":"+dst)
 	}
 	// A TCP-transport Box may need an explicit host-gateway mapping to resolve
-	// TCPHost, which plain Linux docker will not resolve without it. Never
-	// make it unconditional: a VM-backed runtime (Docker Desktop, Rancher
-	// Desktop/Lima) resolves the name to the real host, and the mapping
-	// overrides that with the in-VM bridge gateway (issue #3111).
-	if box.RegistryProxy.TCPAddHost {
-		args = append(args, "--add-host", box.RegistryProxy.Endpoint.Host()+":host-gateway")
+	// its listener's host, which plain Linux docker will not resolve without
+	// it. Never make it unconditional: a VM-backed runtime (Docker Desktop,
+	// Rancher Desktop/Lima) resolves the name to the real host, and the
+	// mapping overrides that with the in-VM bridge gateway (issue #3111).
+	// addHostTargets covers both the registry proxy and the Signal socket
+	// (issue #3725), since either one alone can leave box.RegistryProxy at
+	// its zero value.
+	for _, host := range addHostTargets(box) {
+		args = append(args, "--add-host", host+":host-gateway")
 	}
 	// These two are unconditional, so no consumer knob can weaken the sandbox.
 	args = append(args, "--cap-drop=all", "--security-opt=no-new-privileges")

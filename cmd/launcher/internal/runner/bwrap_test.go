@@ -1419,6 +1419,7 @@ func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
 		"ANTHROPIC_API_KEY":         "anthropic-key-value",
 		"OPENCODE_AUTH_CONTENT":     "opencode-auth-value",
 		"REGISTRY_PROXY_TCP_SECRET": "registry-proxy-secret-value",
+		"SIGNAL_SOCKET_SECRET":      "signal-socket-secret-value",
 		"FORGEJO_TOKEN":             "forgejo-token-value",
 		"ISSUE_TEXT":                "issue-text-value",
 	}
@@ -1606,6 +1607,45 @@ func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 	}
 	if !found {
 		t.Error("sandbox process env missing REGISTRY_PROXY_TCP_SECRET sentinel")
+	}
+}
+
+// SIGNAL_SOCKET_SECRET (issue #3725's Signal socket TCP fallback secret) must
+// stay off the bwrap command line the same way REGISTRY_PROXY_TCP_SECRET
+// does, while still reaching the sandbox through process environment
+// inheritance (bwrap has no --clearenv).
+func TestBwrapRun_SignalSocketSecretOffArgvButInProcessEnv(t *testing.T) {
+	const sentinel = "signal-socket-secret-sentinel-value"
+
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	box := Box{Env: map[string]string{"SIGNAL_SOCKET_SECRET": sentinel}}
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+		if strings.Contains(arg, sentinel) {
+			t.Errorf("SIGNAL_SOCKET_SECRET sentinel found in bwrap argv: %v", arg)
+		}
+	}
+
+	found := false
+	for _, kv := range gotCmd.Env {
+		if kv == "SIGNAL_SOCKET_SECRET="+sentinel {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("sandbox process env missing SIGNAL_SOCKET_SECRET sentinel")
 	}
 }
 

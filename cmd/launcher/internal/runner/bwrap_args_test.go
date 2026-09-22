@@ -148,14 +148,14 @@ func TestBwrapArgs_MultipleSockets_TwoBindPairs(t *testing.T) {
 	}
 	box := Box{Env: map[string]string{}, Sockets: []SocketMount{
 		{Source: sockA, Target: RegistryProxySocketTarget},
-		{Source: sockB, Target: "/signal.sock"},
+		{Source: sockB, Target: SignalSocketTarget},
 	}}
 	args := a.buildArgs("/tmp/fake-etc", box)
 	argStr := strings.Join(args, " ")
 
 	for _, m := range []struct{ source, target string }{
 		{sockA, RegistryProxySocketTarget},
-		{sockB, "/signal.sock"},
+		{sockB, SignalSocketTarget},
 	} {
 		if !strings.Contains(argStr, "--dir "+filepath.Dir(m.target)) {
 			t.Errorf("missing --dir for parent of %q in args: %v", m.target, args)
