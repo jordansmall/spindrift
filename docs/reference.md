@@ -5044,7 +5044,7 @@ image tag here for concurrent children to race over.
 **Child environment.** Every child the daemon starts — a dispatch child, a
 research child, and the doctor preflight below — execs with the daemon's own
 environment minus every key present in the `--input` document's `settings`
-(`childEnv`, `cmd/launcher/internal/daemon/command.go`, called from both
+(`withoutKeys`, `cmd/launcher/internal/daemon/command.go`, called from both
 `ChildCommand` and `DoctorCommand`; assigned to `cmd.Env` by `RunChild` and
 `RunDoctor` in `cmd/launcher/daemon/runner.go`). That strips exactly the
 non-secret knobs — a secret knob never enters the document at all — so a
@@ -5052,9 +5052,23 @@ child's only knob source becomes its own input document plus the argv the
 daemon built for it. Everything else — secrets, `PATH`, `HOME`, `NIX_*`,
 `XDG_*`, and any variable the document does not name — passes through
 untouched, which is why the `EnvironmentFile` recipe under **Service unit**
-below still reaches a child's forge credentials unmolested. At startup,
-right after the input document loads, the daemon checks each stripped key
-against its own environment (`settingsKeys` and `warnStrippedChildEnv`,
+below still reaches a child's forge credentials unmolested.
+[`BOX_SIGNAL_CARRIER`](#signal-socket-box_signal_carriersocket) is one of the
+values that passes through this way, and it has to: the knob is deliberately
+not a `flakeOption`, so it never enters the input document's `settings` map
+(`signalCarrier`, `lib/env-schema.nix`, whose own doc string spells out the
+same rationale) and the daemon's environment is its only route to a child.
+`BOX_SIGNAL_CARRIER=socket nix run .#daemon` therefore flips the carrier for
+every child the daemon starts — set on the daemon, the knob is present in
+each child; unset, it is absent and the child takes the schema default `log`
+— as it does for an empty export, which rides through as a present-but-empty
+entry the child's own `getenvSchema` read (`cmd/launcher/main.go`) collapses.
+There is no live toggle: a restart is the flip. A value outside the schema's
+choices refuses the daemon's start — exit 1, with a stderr line naming the
+knob (`validateSignalCarrier`, `cmd/launcher/daemon/main.go`) — before any
+child is spawned. Earlier still, right after the input document loads and
+ahead of that refusal, the daemon checks each stripped key against its own
+environment (`settingsKeys` and `warnStrippedChildEnv`,
 `cmd/launcher/daemon/main.go`) and, for every one actually set, prints one
 stderr line before the startup preflight runs:
 
@@ -5062,13 +5076,13 @@ stderr line before the startup preflight runs:
 MODEL=x set in environment — not forwarded to children; use the --input document's settings.MODEL
 ```
 
-It never refuses to start over this. An exported `CONTINUOUS_DISPATCH=1` or
-`ISSUE_NUMBER` or `MODEL` now configures the daemon alone — its own knob
-resolution is unchanged, and an ambient value still wins there with its own,
-separate deprecation warning (`lookupKnob`, same file) — it simply never
-reaches a child. Anything a child's own wrapper re-sources from
-`harness.env` in its working directory is outside the daemon's control and
-stays so.
+It never refuses to start over this, unlike the `BOX_SIGNAL_CARRIER` check
+that runs after it. An exported `CONTINUOUS_DISPATCH=1` or `ISSUE_NUMBER` or
+`MODEL` now configures the daemon alone — its own knob resolution is
+unchanged, and an ambient value still wins there with its own, separate
+deprecation warning (`lookupKnob`, same file) — it simply never reaches a
+child. Anything a child's own wrapper re-sources from `harness.env` in its
+working directory is outside the daemon's control and stays so.
 
 **Startup preflight.** After the instance lock and the signal wiring, before
 any slot, claim, or Box, the daemon runs the pinned child's `doctor`
