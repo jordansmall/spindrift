@@ -14,16 +14,21 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"runtime"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/stopsignal"
 )
+
+// installStopSignal is a package-level test seam, like the launcher's own
+// (cmd/launcher/main.go) — a test drives the latch through fake stop/abort
+// channels instead of registering a real signal handler or sending a real
+// SIGTERM/SIGINT to the test binary.
+var installStopSignal = stopsignal.Notify
 
 // parsedArgs is the result of parsing argv: `--input <path>` plus an
 // optional positional kind-set selector (dispatch|research, default both —
@@ -348,44 +353,46 @@ func (hostClock) Sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-// handleStopSignals waits for the first two signals on sig and forwards
-// each: the first stops the daemon from filling any more slots (cancel) and
-// forwards a SIGTERM so anything already running starts draining right away
-// instead of only being noticed once it exits on its own; the second
-// forwards again, which hostRunner.forwardStop's own count turns into the
-// escalation (issue #3521's child launcher aborts a drain on its second
-// signal). The daemon implements no drain or reap of its own — Loop only
-// checks ctx.Err() between iterations and always waits out a started child
-// (daemon.Loop's doc), and it is daemon.Loop's own wg.Wait() that waits the
-// children out, here and after escalation alike. The kind of signal never
-// matters, only first versus second — same contract as
-// cmd/launcher/main.go's relaySignals/notifyStopSignal. A third and later
-// signal is a no-op: this function returns after the second and nothing
-// else ever reads sig again.
+// announceStop watches the shared stopsignal relay's stop/abort latch
+// (installStopSignal) and re-derives the pool's own Stop/Abort pair from it,
+// closing each in turn rather than handing daemon.Config the relay's
+// channels directly. The extra hop exists for ordering: it emits the
+// daemon's "shutdown" event — ShutdownDrain on the first latch,
+// ShutdownEscalate on the second — before closing the corresponding
+// returned channel, so the pool's own Stop watcher (which turns a closed
+// Stop into the "halt" event) never observes the halt ahead of the
+// shutdown an operator's event-stream reading expects it to follow.
+//
+// cancel ends the startup preflight's own context on the first latch: the
+// pool that would otherwise watch Stop does not exist yet during
+// startupPreflight, so nothing else would honour an operator's Ctrl-C
+// there.
 //
 // quit lets a caller unpark this goroutine when no second signal ever
 // arrives — mainRun is driven repeatedly under test, and without a way out
-// each call would leak a goroutine blocked on <-sig forever. signal.Stop is
-// deliberately not called: Go's own handler stays installed, so the third
-// signal above is swallowed in the buffer rather than killing the daemon
-// outright.
-func handleStopSignals(sig <-chan os.Signal, quit <-chan struct{}, cancel context.CancelFunc, forward func(), em *daemon.Emitter) {
-	select {
-	case <-sig:
-	case <-quit:
-		return
-	}
-	em.Emit(daemon.Event{Event: "shutdown", Reason: daemon.ShutdownDrain})
-	cancel()
-	forward()
+// each call would leak a goroutine parked on <-stop forever.
+func announceStop(stop, abort <-chan struct{}, quit <-chan struct{}, cancel context.CancelFunc, em *daemon.Emitter) (poolStop, poolAbort <-chan struct{}) {
+	stopCh := make(chan struct{})
+	abortCh := make(chan struct{})
+	go func() {
+		select {
+		case <-stop:
+		case <-quit:
+			return
+		}
+		em.Emit(daemon.Event{Event: "shutdown", Reason: daemon.ShutdownDrain})
+		cancel()
+		close(stopCh)
 
-	select {
-	case <-sig:
-	case <-quit:
-		return
-	}
-	em.Emit(daemon.Event{Event: "shutdown", Reason: daemon.ShutdownEscalate})
-	forward()
+		select {
+		case <-abort:
+		case <-quit:
+			return
+		}
+		em.Emit(daemon.Event{Event: "shutdown", Reason: daemon.ShutdownEscalate})
+		close(abortCh)
+	}()
+	return stopCh, abortCh
 }
 
 // preflightRunner is the slice of the runner startupPreflight needs — a
@@ -673,9 +680,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// information a stale read is designed to surface.
 	statusWriter := daemon.NewStatusWriter(gitDirPath, clk.Now)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	r, err := newHostRunner(hostRunnerConfig{
 		repoPath:   repoPath,
 		appAttr:    appAttr,
@@ -691,20 +695,26 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
-	// Buffered at 2, not 1, so a signal isn't dropped for want of room
-	// between receives — see notifyStopSignal's buffer-of-2 reasoning.
-	sig := make(chan os.Signal, 2)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	// preflightCtx exists only for startupPreflight, which runs before the
+	// pool (and its own Stop watcher) exist: announceStop cancels it on the
+	// first latch so an operator's Ctrl-C during the preflight is still
+	// honoured, and the defer covers the ordinary return path where no
+	// signal ever arrives.
+	preflightCtx, cancelPreflight := context.WithCancel(context.Background())
+	defer cancelPreflight()
+
+	stopSig, abortSig, stopCleanup := installStopSignal()
+	defer stopCleanup()
 	quit := make(chan struct{})
 	defer close(quit)
-	go handleStopSignals(sig, quit, cancel, r.forwardStop, em)
+	poolStop, poolAbort := announceStop(stopSig, abortSig, quit, cancelPreflight, em)
 
 	// After the signal wiring, so an operator's Ctrl-C during the preflight
 	// is honoured; before Loop, so a refusal happens before any slot, any
 	// claim, any Box. After AcquireCheckoutLock above, so a second daemon
 	// against the same checkout is still refused by the lock's own cheaper
 	// path rather than after a full doctor run.
-	if h := startupPreflight(ctx, r, em); h.Class != daemon.HaltNone {
+	if h := startupPreflight(preflightCtx, r, em); h.Class != daemon.HaltNone {
 		fmt.Fprintf(stderr, "daemon: %s\n", h)
 		return finish(stderr, em, statusWriter, args.Kinds, h)
 	}
@@ -721,9 +731,16 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		BreakerWindow:       breakerWindow,
 		Awake:               awake,
 		Status:              statusWriter,
+		Stop:                poolStop,
+		Abort:               poolAbort,
 	}
 
-	return daemon.Loop(ctx, cfg, r, em, clk).ExitCode()
+	// loopCtx is never cancelled in production — cfg.Stop/cfg.Abort above
+	// are what stop the pool now. A hard-cancel context.Background() here
+	// (rather than a CancelFunc threaded through and left uncalled) keeps
+	// that fact visible at the call site; the only reason Loop still takes
+	// a context at all is for tests and any future embedder (issue #3626).
+	return daemon.Loop(context.Background(), cfg, r, em, clk).ExitCode()
 }
 
 func main() {
