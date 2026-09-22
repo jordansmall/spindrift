@@ -12,9 +12,13 @@ type choiceKnobRow struct {
 }
 
 // choiceKnobRegistry is the ordered set of choice knobs whose resolved values
-// validateChoice checks against schemaFlags' declared choices. It is the only
-// enumeration of them: validate() and validateConfig() (main.go) both walk it,
-// so the two cannot drift on which knobs get validated.
+// validateChoice checks against schemaFlags' declared choices. It is this
+// binary's only enumeration of them: validate() and validateConfig()
+// (main.go) both walk it, so the two cannot drift on which knobs get
+// validated. The daemon is a separate package main that cannot reach
+// schemaFlags, so it re-checks the one knob on this list that rides its own
+// environment into a child itself (validateSignalCarrier,
+// cmd/launcher/daemon/main.go).
 var choiceKnobRegistry = []choiceKnobRow{
 	{Env: "MERGE_MODE", Value: func(c config) string { return c.mergeMode }},
 	{Env: "MERGE_METHOD", Value: func(c config) string { return c.mergeMethod }},
