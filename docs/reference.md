@@ -4881,7 +4881,7 @@ exists to let sibling slots share. Apart from the pre-assigned initial
 holder's very first round, a slot never holds the baton across a resolve —
 every path that loops back to the top of the loop passes it first. A claim
 releases the baton live, the instant the holder's child announces a Box
-(`OnIssue`), not at child exit, so the hold never spans a whole Box run;
+(`OnRecord`), not at child exit, so the hold never spans a whole Box run;
 every other way a round can end without a claim passes it too
 (`passBaton`) — the child returning having announced nothing (queue empty,
 none dispatchable, an unrecognised exit, or a `RunChild` seam error, one
@@ -5155,8 +5155,11 @@ fallback when nothing is gated and nothing is running.
 
 Per-slot, `slots[]` carries `slot`, `phase`, `busy`, and for a busy slot
 the `kind`, the `revision` it is pinned to, and the `issues` its child
-has announced so far — enough to correlate a running Box with the commit
-that produced it. `phase` is the slot's own position in its iteration,
+has announced so far, deduped — a fix pass or conflict-resolve for an
+issue already in the list is the same claim continuing, not a second
+one, so each issue names once no matter how many boxes it takes —
+enough to correlate a running Box with the commit that produced it.
+`phase` is the slot's own position in its iteration,
 one of five values: `idle` (parked, holding nothing), `awaiting_window`
 (parked because the Awake window is shut), `resolving` (fetching the
 tip, or evaluating the daemon's own self-build), `running` (a child in
@@ -5168,10 +5171,12 @@ exactly `phase == "running"` and nothing more — a reader that only knows
 `busy` sees what it always saw. The `jam` alarm (see `jam` in **Event
 stream**, below) fires only when every *sibling* slot is `idle` or
 `awaiting_window`; a sibling that is `resolving`, `running`, or
-`backing_off` suppresses it. The issues arrive live, appended via
-`ChildRequest.OnIssue` as each announce line is read (`pool.noteIssue`), because
-`ChildResult.Issues` only lands after the child exits and so can only
-ever say what a slot *had*, never what it currently has. Per-kind,
+`backing_off` suppresses it. The issues arrive live, appended (once per
+new issue) via `ChildRequest.OnRecord` as each `box` record is read off
+the report pipe (`pool.noteBox`, see **Event stream** below) — there is
+no post-exit carrier at all any more, so what a slot's status shows is
+always what it currently has, never a stale replay of what it once had.
+Per-kind,
 `checks[]` carries each configured kind's `nextCheck` (RFC3339, empty
 when the kind is runnable now) and `jammed` (true when this kind's last
 check found open issues none of which were dispatchable, and it is still
@@ -5787,7 +5792,7 @@ stderr instead. Event names and fields (`cmd/launcher/internal/daemon/events.go`
 present — a reader wanting only "what is happening right now" reads that
 file instead of replaying the stream from the top:
 
-Every per-slot event — `child_start`, `box`, `child_finish`, `idle`, `jam`,
+Every per-slot event — `child_start`, `box`, `settled`, `child_finish`, `idle`, `jam`,
 `tip_moved`, `backoff`, `breaker_trip` — carries a `slot` (0-based, the pool slot the
 event belongs to); `breaker_trip`'s `slot` is whichever slot's failure was
 the one that crossed `BreakerThreshold`, since the breaker itself counts
@@ -5821,11 +5826,12 @@ which runs outside every slot's own goroutine.
 | `awake_close` | `time`, `kind`, `slot`, `wait`, `reason` | the first slot parks on a shut Awake window — not the close instant itself, so a pool still busy at the close reports the transition, and computes `wait` (how long until the next opening), at that later parking |
 | `awake_open` | `time`, `kind`, `slot`, `reason` | the Awake window reopens after a prior `awake_close`; never emitted for a daemon that starts inside an already-open window |
 | `baton_hold` | `time`, `slot`, `reason` | a slot reaches `awaitBaton` (`pool.go`) and finds another slot still discovering, so it parks — one event per park, since each parking slot logs independently on its own pass through the loop; `reason` is the fixed `batonHoldReason`, `"waiting for the discovery baton: another slot's child is still discovering"`, matching the other wait events in this stream |
-| `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child announces via `OnIssue`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `RunChild` seam error (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs — or the holder returning for any reason at all before its round otherwise resolved (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
+| `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child's `box` record arrives via `OnRecord`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `RunChild` seam error (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs — or the holder returning for any reason at all before its round otherwise resolved (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
 | `preflight` | `time`, `revision`, `exit`, `outcome` (`reason` instead of `exit` on the paths with no doctor exit code to report — a seam failure, or an operator's stop) | emitted exactly once, at startup, before the first slot, on every path the preflight can take: a pass, a refusal, a seam failure, or an operator's Ctrl-C — so "ran and was healthy" and "never ran" cannot look identical the morning after; `outcome` is `ClassifyPreflight`'s own `doctor-`-prefixed label (`doctor-healthy`, `doctor-required-labels-missing`, `doctor-config-invalid`, `doctor-connectivity`, `doctor-unclassified`, `doctor-unknown`) or one of the two the daemon itself adds on the paths that never reached a verdict (`doctor-seam-error` for a failure resolving the tip or running doctor at all, `doctor-cancelled` for a stop signal during the preflight), never `Interpret`'s child-outcome vocabulary, so it can never be confused with a `child_finish` outcome |
-| `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched |
-| `box` | `time`, `kind`, `issue`, `revision`, `slot` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
-| `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
+| `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched; carries no `issue` — the daemon cannot know which issue a freshly started child will work until it reports a `box` record, and waiting on that would either hide the child from the stream for its whole queue scan or, for a child that never claims, emit nothing at all |
+| `box` | `time`, `kind`, `issue`, `phase`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later |
+| `child_finish` | `time`, `kind`, `issue`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `issue` is whichever issue the child last claimed (the last `box` record's issue), or absent if it claimed none. `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
+| `settled` | `time`, `kind`, `issue`, `state`, `note`, `revision`, `slot` | emitted once per issue, at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path and `recoverFailed` each reach exactly one terminal state per issue and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk |
 | `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot `resolving`, `running`, or `backing_off`; `wait` carries `kind`'s own idle backoff, so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
 | `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | recording a no-work result against `kind` after `none-dispatchable` with every sibling slot `idle` or `awaiting_window` — nothing running, resolving, or backing off anywhere else in the pool, and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries `kind`'s own idle backoff, same as `idle` above |
 | `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | any resolve that finds `BASE_BRANCH`'s tip differs from the revision the Runner most recently handed out — the baseline is Runner-global, not per-slot, so it tracks whichever slot resolved last, whichever kind it was running. That resolve can be the ordinary one made after `pickKind` on any iteration, or the opportunistic one made mid-wait during a jammed idle sleep (there is no separate poll — see exit 3's row above); either way the slot reset every currently-jammed kind's backoff, and, on the mid-wait path, started its next iteration at once instead of sleeping out the rest of the wait. `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
@@ -5833,6 +5839,50 @@ which runs outside every slot's own goroutine.
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`, never started; `reason` is prefixed by cause, now including `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal instead carries the same `context-cancelled: …` reason a context cancellation anywhere else in the loop does), and `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above) alongside a halt-mapped child outcome, a context cancellation, a tripped breaker, or an invalid startup config |
+
+**How `box` and `settled` reach the stream.** The child (a Launcher process,
+whether dispatch or research) does not write these two events to its own
+stdout — stdout already belongs to the Box and its subprocesses, and a
+daemon scraping human-facing output for machine facts is exactly the
+fragility this event stream replaced. Instead the daemon opens a pipe per
+child before it starts one, hands the write end down as the child's first
+extra descriptor (`exec.Cmd.ExtraFiles`' first entry, which always lands at
+fd 3), and names that same descriptor in the child's environment as
+`SPINDRIFT_REPORT_FD` (`cmd/launcher/internal/report`). This is daemon-to-child
+plumbing, not a knob: no operator sets it, it appears in no knob table above,
+and a launcher run by hand or driven by `dogfood.sh` sees it unset and writes
+nothing — the reporting package is silent unless a daemon put a pipe there
+first. The child checks by `fstat` that the descriptor really does name a
+pipe and refuses — one line to stderr, no crash — if it names anything
+else; `FromEnv` accepts any `S_IFIFO` descriptor, so this catches a
+misconfigured fd pointing at a file or socket, not a fd spoofed as a pipe.
+The child never opens the descriptor itself — it inherits it via
+`exec.Cmd.ExtraFiles` — but `mainRun` marks it close-on-exec at the top of
+the function, before this process spawns its first Box, runtime, or
+subprocess, so none of them can inherit or hold the write end open. With
+the write end no longer shared with anything the child launches, the
+child's own stdout is free to be
+relayed to the daemon's stderr byte-for-byte, with no userspace scan or
+copy in between — what the daemon's log shows is exactly what the child
+printed, unmodified by this event stream sitting alongside it on a
+different descriptor. On the read side, an unknown record event is ignored
+with no error, and a malformed line is reported once to stderr and skipped
+rather than aborting the read loop — so a child built from a newer source
+tree than its daemon, reporting an event type the daemon doesn't recognise
+yet, degrades to silently dropping that one record rather than crashing the
+daemon's read loop (in practice the two are built from one source tree and
+change atomically, so this is a safety margin, not an expected occurrence).
+One record is one line, and a line is bounded: the reader will not buffer
+past `report.MaxLine` bytes (newline included) before discarding a line, so
+the writer clips the record's only unbounded field, `note`, to fit — a
+trailing `…` marks a reason that was cut. That bound is one shared constant
+rather than a number each side declares for itself, because a `settled`
+record is most valuable exactly when its reason is longest (a Box's
+multi-kilobyte `status=blocked note=…`), and a reason too long to carry must
+cost the tail of the note, never the whole record.
+The doctor preflight (**Startup preflight**, above) gets neither the
+variable nor the descriptor — it dispatches nothing and settles no issue,
+so it has nothing to report.
 
 **What this first cut doesn't do.** The instance lock, the queryable status
 file (issue #3545, above), the self-change halt (issue #3543, above) and
