@@ -62,7 +62,15 @@ type hostRunnerConfig struct {
 	knobs      []string
 }
 
-func newHostRunner(cfg hostRunnerConfig) *hostRunner {
+// newHostRunner rejects a nil cfg.env. childEnv
+// (internal/daemon/command.go) returns a non-nil slice either way, so past
+// this constructor an uncaptured nil and an explicitly empty environment
+// are indistinguishable — and the nil is never "inherit the parent", it
+// execs every child with no PATH (#3692).
+func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
+	if cfg.env == nil {
+		return nil, errors.New("host runner: no captured environment (hostRunnerConfig.env is nil) — children would exec with no PATH; pass os.Environ()")
+	}
 	return &hostRunner{
 		repoPath:   cfg.repoPath,
 		appAttr:    cfg.appAttr,
@@ -72,7 +80,7 @@ func newHostRunner(cfg hostRunnerConfig) *hostRunner {
 		env:        cfg.env,
 		knobs:      cfg.knobs,
 		children:   make(map[int]*os.Process),
-	}
+	}, nil
 }
 
 // ResolveRevision shells out to git fetch + rev-parse via CommandContext, not

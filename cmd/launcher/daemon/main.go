@@ -676,7 +676,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	r := newHostRunner(hostRunnerConfig{
+	r, err := newHostRunner(hostRunnerConfig{
 		repoPath:   repoPath,
 		appAttr:    appAttr,
 		baseBranch: baseBranch,
@@ -687,6 +687,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		env:   os.Environ(),
 		knobs: strippedKeys,
 	})
+	if err != nil {
+		return fail(stderr, err)
+	}
 
 	// Buffered at 2, not 1, so a signal isn't dropped for want of room
 	// between receives — see notifyStopSignal's buffer-of-2 reasoning.
