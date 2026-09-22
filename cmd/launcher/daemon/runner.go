@@ -16,9 +16,9 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 )
 
-// hostRunner is the production daemon.Runner: ResolveRevision shells out to
-// git, RunChild and SelfPath shell out to nix. It is the only place in this
-// binary that touches either.
+// hostRunner is the production daemon.Runner: ResolveTip's fetch half shells
+// out to git, and RunChild and ResolveTip's eval half shell out to nix. It
+// is the only place in this binary that touches either.
 type hostRunner struct {
 	repoPath   string
 	appAttr    string
@@ -70,11 +70,11 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 	}, nil
 }
 
-// ResolveRevision shells out to git fetch + rev-parse via CommandContext, not
+// fetchRevision shells out to git fetch + rev-parse via CommandContext, not
 // Command, so a cancelled ctx (SIGINT/SIGTERM with no child yet to forward
 // to) tears the fetch down instead of hanging the daemon until SIGKILL
 // (issue #3538).
-func (r *hostRunner) ResolveRevision(ctx context.Context) (string, error) {
+func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 	r.fetchMu.Lock()
 	defer r.fetchMu.Unlock()
 
@@ -115,16 +115,26 @@ var runnerEvalCommand = exec.CommandContext
 // assert "two sends, distinct kinds" instead of just "process died".
 var runnerSignal = func(p *os.Process, sig os.Signal) error { return p.Signal(sig) }
 
-// SelfPath evaluates the daemon attribute's store path at revision via
+// stopSignalSequence is the ordered pair of signal kinds forwarded on the
+// first and second stop request: SIGTERM, then SIGINT. Two different
+// standard signals can't coalesce — the kernel keeps a separate pending
+// bit per signal number — whereas two SIGTERMs sent back-to-back collapse
+// into one pending signal if the child hasn't drained the first yet. The
+// kind is irrelevant to the child: main.go's relaySignals (#3521) counts
+// first-vs-second only, on either SIGTERM or SIGINT. A third request has no
+// third kind and forwards nothing — see forwardStop's bound.
+var stopSignalSequence = [...]os.Signal{syscall.SIGTERM, syscall.SIGINT}
+
+// evalSelfPath evaluates the daemon attribute's store path at revision via
 // `nix eval`, shelled out with a context-aware exec so a cancelled ctx tears
 // the evaluation down instead of hanging the daemon until SIGKILL — same
-// reasoning as ResolveRevision above.
+// reasoning as fetchRevision above.
 //
 // It does not take r.fetchMu: that mutex only serializes the FETCH_HEAD race
 // between concurrent git fetch/rev-parse pairs (see its doc above), and nix
 // eval touches neither, so sharing it here would only add latency behind an
 // unrelated slot's in-flight fetch.
-func (r *hostRunner) SelfPath(ctx context.Context, revision string) (string, error) {
+func (r *hostRunner) evalSelfPath(ctx context.Context, revision string) (string, error) {
 	argv, err := daemon.SelfCommand(daemon.SelfSpec{
 		RepoPath: r.repoPath,
 		SelfAttr: r.selfAttr,
@@ -143,6 +153,31 @@ func (r *hostRunner) SelfPath(ctx context.Context, revision string) (string, err
 		return "", fmt.Errorf("nix eval %s: %w: %s", strings.Join(argv[1:], " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// ResolveTip fetches the current revision and, when the self check is
+// configured (selfAttr != ""), evaluates the daemon's own build at that
+// revision in the same call — daemon.Runner's two halves of one tip
+// resolution. r.selfAttr == "" means the self check is off (see
+// main.go's SPINDRIFT_DAEMON_PROGRAM handling): ResolveTip then skips the
+// eval outright and returns a Tip with an empty SelfPath, rather than
+// evaluating anything to throw away.
+//
+// Moved is always false in this slice: the "did the tip move since the
+// last one this runner handed out" baseline lands in a later slice.
+func (r *hostRunner) ResolveTip(ctx context.Context) (daemon.Tip, error) {
+	revision, err := r.fetchRevision(ctx)
+	if err != nil {
+		return daemon.Tip{}, err
+	}
+	if r.selfAttr == "" {
+		return daemon.Tip{Revision: revision}, nil
+	}
+	path, err := r.evalSelfPath(ctx, revision)
+	if err != nil {
+		return daemon.Tip{Revision: revision}, &daemon.SelfEvalError{Err: err}
+	}
+	return daemon.Tip{Revision: revision, SelfPath: path}, nil
 }
 
 func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {

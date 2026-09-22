@@ -1234,6 +1234,122 @@ func TestLoopEmptySelfProgramSkipsCheck(t *testing.T) {
 	}
 }
 
+// TestLoopEmptySelfProgramNeverHaltsEvenWithSelfPathReported asserts the
+// comparison itself is skipped, not merely made harmless: even when the
+// runner's Tip carries a SelfPath (this slice's scriptedRunner serves the
+// self half whenever a test scripts selfPaths, whatever cfg.SelfProgram is),
+// an empty Config.SelfProgram must never halt on it.
+func TestLoopEmptySelfProgramNeverHaltsEvenWithSelfPathReported(t *testing.T) {
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 0}, {Exit: 5}},
+		selfPaths: []string{"/nix/store/whatever-path"},
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	h := Loop(context.Background(), testConfig(1), r, em, clk)
+
+	if h.Class == HaltSelfChanged {
+		t.Fatalf("halt class = %v, want no self-changed halt: Config.SelfProgram is empty", h.Class)
+	}
+	if r.runCount() != 2 {
+		t.Fatalf("run calls = %d, want 2: an empty SelfProgram must never stop children from running", r.runCount())
+	}
+}
+
+// TestLoopSelfChangeHaltDetailFormat pins the exact detail string a
+// self-build mismatch halts with — the same "daemon build at %s is %s,
+// running %s" grammar checkSelfBuild used before this slice folded it into
+// runSlot's own field comparison.
+func TestLoopSelfChangeHaltDetailFormat(t *testing.T) {
+	r := &scriptedRunner{revisions: []string{"rev1"}, selfPaths: []string{"/nix/store/new-path"}}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.SelfProgram = "/nix/store/old-path"
+
+	h := Loop(context.Background(), cfg, r, em, clk)
+
+	want := "daemon build at rev1 is /nix/store/new-path, running /nix/store/old-path"
+	if h.Detail != want {
+		t.Errorf("halt detail = %q, want %q", h.Detail, want)
+	}
+}
+
+// TestLoopResolveTipErrorClassification is the regression tripwire for
+// design decision 2 (issue #3625): the halt class an operator's exit code
+// depends on must stay distinguishable between ResolveTip's two error
+// shapes. A *SelfEvalError backs off under the self-build reason and
+// carries the resolved revision on the backoff event (the fetch half
+// succeeded); a plain fetch error backs off under "resolve-revision:" with
+// no revision at all (nothing was ever resolved).
+func TestLoopResolveTipErrorClassification(t *testing.T) {
+	tests := []struct {
+		name         string
+		r            *scriptedRunner
+		wantPrefix   string
+		wantRevision string
+	}{
+		{
+			name: "self eval error",
+			r: &scriptedRunner{
+				revisions: []string{"rev1"},
+				results:   []ChildResult{{Exit: 5}},
+				selfErrAt: 1,
+				selfErr:   errors.New("eval boom"),
+			},
+			wantPrefix:   "self-build:",
+			wantRevision: "rev1",
+		},
+		{
+			name: "fetch error",
+			r: &scriptedRunner{
+				revisions:  []string{"rev1"},
+				results:    []ChildResult{{Exit: 5}},
+				resolveAt:  1,
+				resolveErr: errors.New("fetch boom"),
+			},
+			wantPrefix:   "resolve-revision:",
+			wantRevision: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clk := &testClock{}
+			var buf bytes.Buffer
+			em := newTestEmitter(&buf)
+
+			cfg := testConfig(1)
+			cfg.SelfProgram = "/nix/store/same-path"
+			cfg.FailureBackoff = 5 * time.Millisecond
+
+			Loop(context.Background(), cfg, tt.r, em, clk)
+
+			events := decodeEvents(t, &buf)
+			var backoff *Event
+			for i := range events {
+				if events[i].Event == "backoff" {
+					backoff = &events[i]
+					break
+				}
+			}
+			if backoff == nil {
+				t.Fatalf("events = %v, want a backoff event", eventNames(events))
+			}
+			if !strings.HasPrefix(backoff.Reason, tt.wantPrefix) {
+				t.Errorf("backoff reason = %q, want prefix %q", backoff.Reason, tt.wantPrefix)
+			}
+			if backoff.Revision != tt.wantRevision {
+				t.Errorf("backoff revision = %q, want %q", backoff.Revision, tt.wantRevision)
+			}
+		})
+	}
+}
+
 // TestLoopSelfPathErrorBacksOff asserts a SelfPath error is treated like any
 // other unclassified iteration-boundary failure: this slot backs off
 // (reason prefixed self-build:) and retries, rather than halting the pool.

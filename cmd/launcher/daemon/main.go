@@ -223,7 +223,7 @@ func gitRevParse(dir, flag string) (string, error) {
 		// git's own stderr, not just the bare error: the likeliest cause is
 		// a `safe.directory` refusal, and without this the fail-fast
 		// diagnostic reduces to "exit status 128" (same shape as
-		// hostRunner.ResolveRevision's fetch error).
+		// hostRunner.fetchRevision's fetch error).
 		return "", fmt.Errorf("not a git checkout: %s: %w: %s", dir, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
@@ -400,8 +400,16 @@ func announceStop(stop, abort <-chan struct{}, quit <-chan struct{}, cancel cont
 // test can drive startupPreflight with a small fake without daemon.Runner
 // growing a RunDoctor method the loop itself never calls. *hostRunner
 // already satisfies it.
+//
+// fetchRevision, not ResolveTip: the preflight only needs the revision to
+// pin doctor to, never the self-eval half ResolveTip also runs when
+// SPINDRIFT_DAEMON_PROGRAM is set. Naming the unexported fetch-only method
+// here (main.go and runner.go share package main) makes that self-eval
+// unreachable from the preflight by type, not by convention: a self-eval
+// failure is a per-slot backoff under the self-build halt grammar, never
+// grounds to refuse startup outright (issue #3625 review finding).
 type preflightRunner interface {
-	ResolveRevision(ctx context.Context) (string, error)
+	fetchRevision(ctx context.Context) (string, error)
 	RunDoctor(ctx context.Context, revision string) (int, error)
 }
 
@@ -415,8 +423,10 @@ type preflightRunner interface {
 func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter) daemon.Halt {
 	// Resolve at the same freshly fetched tip the first child will run at,
 	// so the preflight validates the build about to actually run rather
-	// than the operator's possibly-stale working tree.
-	revision, err := r.ResolveRevision(ctx)
+	// than the operator's possibly-stale working tree. fetchRevision only —
+	// never ResolveTip's self-eval half — so a self-check failure can never
+	// hard-refuse the preflight; see preflightRunner's doc.
+	revision, err := r.fetchRevision(ctx)
 	// refuseCancelled reports an operator's Ctrl-C during the preflight: a
 	// clean stop, not a refusal — HaltOperatorStop's ExitCode is 0 by
 	// class, so there is nothing left to distinguish by string layout.

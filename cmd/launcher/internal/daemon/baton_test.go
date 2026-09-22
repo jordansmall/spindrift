@@ -271,9 +271,9 @@ func TestPoolSingleSlotNeverHoldsABaton(t *testing.T) {
 
 // TestPoolBatonCancellationNeverDeadlocksAWaitingSlot pins issue #3684's
 // AC5: a slot parked in awaitBaton must never hang past ctx cancellation.
-// The initial holder's own ResolveRevision call (guaranteed to be call 1:
+// The initial holder's own ResolveTip call (guaranteed to be call 1:
 // every sibling is still parked in awaitBaton, so none has reached
-// ResolveRevision yet) blocks on ctx.Done() rather than returning, so the
+// ResolveTip yet) blocks on ctx.Done() rather than returning, so the
 // holder never starts a child and never passes the baton on its own; once
 // a sibling has reported its own baton_hold, the ctx is cancelled and Loop
 // must still return rather than leaving that sibling stuck on <-p.baton
@@ -521,7 +521,7 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 
 // TestPoolBatonPassesWhenWindowClosesBeforeChildStart pins the pre-child
 // Awake re-check in runSlot: the window can shut between the holder's
-// ResolveRevision fetch and its own child_start, and the holder is about to
+// ResolveTip fetch and its own child_start, and the holder is about to
 // loop back into awaitWindow for the whole shut span — holding the baton
 // through that would stall the sibling's own discovery for no reason.
 func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
@@ -539,7 +539,7 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 			if call == 1 {
 				// call 1 is guaranteed the holder's own: the sibling is
 				// still parked on the baton and has not reached
-				// ResolveRevision yet.
+				// ResolveTip yet.
 				<-proceed
 				clk.setNow(clk.Now().Add(2 * time.Minute))
 			}
@@ -683,11 +683,11 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 
 // TestPoolBatonPassesOnPreChildFailure pins the backoffOrHalt release site
 // for a failure that lands before any child ever starts (here, the
-// holder's very first ResolveRevision): the holder is about to back off
+// holder's very first ResolveTip): the holder is about to back off
 // alone, and holding the pool through that backoff would stall the
 // sibling's own discovery on a problem backoffOrHalt already handles
 // per-slot. Call 1 is guaranteed the holder's own: the sibling is still
-// parked on the baton and has not reached ResolveRevision yet.
+// parked on the baton and has not reached ResolveTip yet.
 func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 	const slots = 2
 	wantErr := errors.New("boom")
@@ -790,7 +790,7 @@ func TestPoolBatonPassesWhenNoKindIsRunnable(t *testing.T) {
 // TestPoolBatonPassesWhenHolderStopsBeforeResolving pins runSlot's own
 // deferred passBaton (batonPassStopped): a holder that stops before any of
 // the other release sites ever resolves — here, an operator cancellation
-// landing inside its very first ResolveRevision — must still release the
+// landing inside its very first ResolveTip — must still release the
 // baton on its way out, or the sibling parked in awaitBaton would hang
 // forever on a token nothing else will ever pass. Complements, and does
 // not duplicate,
@@ -806,7 +806,7 @@ func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 			if call == 1 {
 				// call 1 is guaranteed the holder's own: the sibling is
 				// still parked on the baton and has not reached
-				// ResolveRevision yet.
+				// ResolveTip yet.
 				<-proceed
 				cancel()
 				return rctx.Err()

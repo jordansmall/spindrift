@@ -548,7 +548,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 
 // TestPoolExit3WithSiblingResolvingReportsIdleNotJam pins the tightened
 // half of the jam predicate (issue #3623/#3571): a sibling blocked inside
-// ResolveRevision is doing something, even though it is not (yet) running
+// ResolveTip is doing something, even though it is not (yet) running
 // a child — the old occupied-only predicate could not see that and would
 // have reported a spurious jam here.
 //
@@ -1023,7 +1023,7 @@ func TestAwaitWindowPublishesOnEveryIteration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// The first ResolveRevision is the seam immediately after awaitWindow
+	// The first ResolveTip is the seam immediately after awaitWindow
 	// returns, and nothing publishes between the awake_open publish and
 	// it, so the Time captured here is the one that transition wrote.
 	// Cancelling from the same hook halts Loop, keeping every later
@@ -1063,7 +1063,7 @@ func TestAwaitWindowPublishesOnEveryIteration(t *testing.T) {
 	clk.step(time.Date(2026, 1, 1, 22, 0, 0, 0, time.UTC))
 	<-done
 	if afterOpen == "" {
-		t.Fatalf("ResolveRevision was never reached, so the awake_open publish went unobserved")
+		t.Fatalf("ResolveTip was never reached, so the awake_open publish went unobserved")
 	}
 	if afterOpen == afterSecondShutIteration {
 		t.Fatalf("status Time did not change on the awake_open transition")
@@ -1286,7 +1286,7 @@ func TestPoolSnapshotState(t *testing.T) {
 		{
 			// Loop's up-front publish (loop.go) fires before any slot
 			// starts a child and before any kind has ever backed off; the
-			// first ResolveRevision call happens after that publish and
+			// first ResolveTip call happens after that publish and
 			// before anything else has changed, so reading there catches
 			// exactly that instant.
 			name: "checking when nothing gated and nothing running",
@@ -1500,8 +1500,8 @@ func TestPoolSnapshotState(t *testing.T) {
 // initial baton holder (pool.go's leadSlot), so it alone resolves and
 // occupies on the first round while slot 1 parks in awaitBaton. Announcing
 // slot 0's issue via req.OnIssue passes the baton, so slot 1's own
-// ResolveRevision call (call index 2 — onResolve is keyed by call, not
-// slot, since ResolveRevision carries no slot) is parked forever on
+// ResolveTip call (call index 2 — onResolve is keyed by call, not
+// slot, since ResolveTip carries no slot) is parked forever on
 // ctx.Done(), which keeps slot 1 from ever reaching occupy regardless of
 // scheduling.
 func TestPoolSnapshotSlots(t *testing.T) {

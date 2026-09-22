@@ -7,26 +7,45 @@ import (
 	"time"
 )
 
+// Tip is one resolution of the base branch's tip: the revision to pin the
+// next child to, plus what that same fetch found out about the daemon's own
+// build. SelfPath and Moved are both properties of the resolution itself,
+// not separate outside-world questions, which is why ResolveTip hands them
+// back together instead of behind their own methods.
+type Tip struct {
+	Revision string
+	SelfPath string // the daemon attribute's store path at Revision; empty when the self check is off (Runner has no self attr configured)
+	Moved    bool   // Revision differs from the last one this Runner handed out
+}
+
+// SelfEvalError marks the self-path half of a ResolveTip call as the half
+// that failed — the fetch itself succeeded (Tip.Revision is still valid),
+// but evaluating the daemon attribute at that revision did not. Error()
+// returns the wrapped error's own text unchanged, so a caller that renders
+// it through Halt{Class: HaltSelfBuild, Detail: err.Error()} reproduces
+// today's self-build reason byte-for-byte.
+type SelfEvalError struct{ Err error }
+
+func (e *SelfEvalError) Error() string { return e.Err.Error() }
+func (e *SelfEvalError) Unwrap() error { return e.Err }
+
 // Runner is the daemon's one seam onto the outside world: resolve the
-// revision to pin the next child to, run a child of a given Dispatch kind
-// at that revision, and evaluate what the daemon's own program would be if
-// rebuilt from that revision. All three fold behind one seam: the self
-// check (SelfPath) is the same kind of outside-world question as the other
-// two — an evaluation at the fetched tip — so it belongs behind this seam
-// rather than a second one a test would need to fake separately.
+// current tip (the revision to pin the next child to, and what the
+// daemon's own build would be at that revision) and run a child of a given
+// Dispatch kind at a resolved revision.
 //
 // RunChild may return a ChildResult carrying Issues alongside a non-nil
 // error: a child can announce Boxes and only then fail the seam itself (a
 // wait failure that is no ExitError), and those Boxes are real work already
 // in flight, so Loop emits them before it halts.
 type Runner interface {
-	ResolveRevision(ctx context.Context) (string, error)
+	// ResolveTip fetches the base branch's current tip. An error that
+	// unwraps to *SelfEvalError means the fetch itself succeeded (the
+	// returned Tip.Revision is valid) but evaluating the daemon's own
+	// build at that revision failed; any other error means the fetch
+	// failed and the returned Tip is the zero value.
+	ResolveTip(ctx context.Context) (Tip, error)
 	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
-
-	// SelfPath returns the store path the daemon's own app attribute
-	// evaluates to at revision — what this daemon's program would be if
-	// it were rebuilt from the fetched tip.
-	SelfPath(ctx context.Context, revision string) (string, error)
 }
 
 // ChildRequest is one child invocation's parameters. Slot is the daemon
@@ -117,7 +136,7 @@ type Config struct {
 	// its build resolved to when it started. At each iteration boundary,
 	// before starting a child, the loop compares this against what the
 	// daemon attribute evaluates to at the freshly fetched tip
-	// (Runner.SelfPath): a mismatch means a newer daemon has already
+	// (Runner.ResolveTip's Tip.SelfPath): a mismatch means a newer daemon has already
 	// merged, so continuing to orchestrate fresh Boxes from this stale
 	// build risks running work under code nobody has actually loaded. On
 	// a mismatch the loop finishes what is running and halts at the
@@ -142,7 +161,7 @@ type Config struct {
 
 	// FailureBackoff is how long a slot sleeps before refilling itself
 	// after an unclassified failure (an unrecognised exit code, a
-	// RunChild seam error, or a ResolveRevision error): the bad
+	// RunChild seam error, or a ResolveTip error): the bad
 	// slot backs off and retries alone, rather than the whole pool
 	// stopping over one issue. Must be non-negative.
 	FailureBackoff time.Duration
@@ -299,7 +318,7 @@ func invalidConfig(em *Emitter, cfg Config, detail string) Halt {
 // because this slot decided to halt it or because a sibling did. ctx is the
 // pool's own derived context (not the caller's ctx directly): cancelling it
 // is how the pool tells every slot to stop promptly, including one asleep
-// in clk.Sleep or blocked inside ResolveRevision.
+// in clk.Sleep or blocked inside ResolveTip.
 //
 // All waiting lives at the top of the loop, via pickKind/idleSleep, rather
 // than inline in the Wait case below: with two kinds sharing a slot, a Wait
@@ -352,40 +371,46 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			continue
 		}
 
-		// Resolving covers checkSelfBuild's SelfPath call too, below: both
-		// are outside-world evaluations at the fetched tip, and a slot
-		// inside either is no more idle than one inside a fetch — nothing
-		// between here and startChild (or a failure exit) changes phase
-		// again, so one setPhase covers the whole span.
+		// Resolving covers the self-path half of ResolveTip too: both
+		// halves are outside-world evaluations at the fetched tip, and a
+		// slot inside either is no more idle than one inside a fetch —
+		// nothing between here and startChild (or a failure exit) changes
+		// phase again, so one setPhase covers the whole span.
 		p.setPhase(slot, PhaseResolving)
-		revision, err := p.r.ResolveRevision(ctx)
+		tip, err := p.r.ResolveTip(ctx)
 		if err != nil {
-			// A failed fetch is exactly the transient blip this slice's
-			// breaker exists for: back off and retry alone, unless enough
-			// failures have piled up pool-wide to say this is systemic
-			// (backoffOrHalt below).
-			if p.backoffOrHalt(ctx, slot, kind, "", fmt.Sprintf("resolve-revision: %v", err)) {
+			// A failed fetch and a failed self-eval are both the transient
+			// blip this slice's breaker exists for, but they keep the halt
+			// classes today's two separate seams gave them (resolveFailure);
+			// backoffOrHalt's own breaker-vs-retry logic doesn't care which.
+			revision, reason := p.resolveFailure(tip, err)
+			if p.backoffOrHalt(ctx, slot, kind, revision, reason) {
 				return
 			}
 			continue
 		}
+		revision := tip.Revision
 		lastRevision = revision
 
-		switch p.checkSelfBuild(ctx, slot, kind, revision) {
-		case selfStop:
+		if p.cfg.SelfProgram != "" && tip.SelfPath != p.cfg.SelfProgram {
+			// Never re-execs: this only records a halt reason and cancels
+			// the pool's context — the same "stop starting new work, wait
+			// out whatever is running" halt every other reason already uses
+			// (see halt) — so a freshly merged but broken daemon cannot
+			// auto-load with nobody awake. An empty cfg.SelfProgram (the
+			// self check is off) always skips this comparison, since
+			// tip.SelfPath is then empty too, by construction of ResolveTip.
+			p.halt(Halt{
+				Class:    HaltSelfChanged,
+				Detail:   fmt.Sprintf("daemon build at %s is %s, running %s", revision, tip.SelfPath, p.cfg.SelfProgram),
+				Kind:     kind,
+				Revision: revision,
+			})
 			return
-		case selfRetry:
-			// The evaluation failed and this slot has already backed off.
-			// Restart the iteration rather than re-checking against the
-			// revision resolved before that wait: every other backoff on
-			// this path re-fetches too, and pinning a child to a tip
-			// resolved a backoff ago is the staleness the per-iteration
-			// fetch exists to avoid.
-			continue
 		}
 
 		if !cfg.Awake.Open(p.clk.Now()) {
-			// ResolveRevision (a git fetch) can outlast the window's own
+			// ResolveTip (a git fetch) can outlast the window's own
 			// close; re-check here so that fetch never launches a child
 			// outside the window. No event here: awaitWindow's
 			// edge-triggered noteAwakeClose reports the transition when
