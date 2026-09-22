@@ -60,8 +60,10 @@ const (
 	// window is shut.
 	PhaseAwaitingWindow Phase = "awaiting_window"
 	// PhaseResolving means the slot is fetching the tip or evaluating the
-	// daemon's own self-build, ahead of a child of its own; the
-	// opportunistic fetch in pollSlices reads idle, not resolving.
+	// daemon's own self-build, ahead of a child of its own; this covers
+	// resolveOpportunistic's own mid-idle-wait resolve too, not just the
+	// per-iteration one — both are outside-world evaluations at the fetched
+	// tip.
 	PhaseResolving Phase = "resolving"
 	// PhaseRunning means the slot has a child in flight; this is the one
 	// phase Busy reports.

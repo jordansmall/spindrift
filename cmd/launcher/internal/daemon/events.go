@@ -27,7 +27,7 @@ type Event struct {
 	Event string `json:"event"`
 	Kind  Kind   `json:"kind,omitempty"`
 	// Kinds is tip_moved's own field, naming the kinds whose backoff the
-	// reset actually ended (see pool.go's pollSlices) — plural because a
+	// reset actually ended (see pool.go's noteTipMoved) — plural because a
 	// moved tip is evidence for every jammed kind at once, not just
 	// whichever kind Kind would have named.
 	Kinds    []Kind `json:"kinds,omitempty"`

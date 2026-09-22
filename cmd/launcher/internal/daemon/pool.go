@@ -723,18 +723,20 @@ func (p *pool) resolveFailure(tip Tip, err error) (revision, reason string) {
 
 // idleSleep is what a slot calls when pickKind finds every configured kind
 // backed off: a genuine drought, not just a kind this slot doesn't prefer
-// right now. It sleeps until the nearest gated kind's deadline (the pool as
-// a whole can move the instant any one kind's gate lifts, even though this
-// slot only picks up work once it wakes and re-runs pickKind), polling for a
-// moved tip along the way only if a jammed kind is among those gated — a
-// merge can unblock a jammed queue, but it cannot create new work in a kind
-// that is merely queue-empty, so polling there would only spend a query for
-// nothing.
+// right now. With no jammed kind among those gated, it sleeps the whole wait
+// in one call, same as ever: a merge can unblock a jammed queue, but it
+// cannot create new work in a kind that is merely queue-empty, so resolving
+// early there would only spend a fetch for nothing.
 //
-// lastRevision is the revision this slot's last child ran at (empty if this
-// slot has never yet resolved one); a poll result that differs from it is
-// the "tip moved" signal.
-func (p *pool) idleSleep(ctx context.Context, slot int, lastRevision string) {
+// With a jammed kind gated, it instead sleeps only one IdleFloor-sized slice
+// (or the whole wait, if that is shorter) and reports back, via resolveTip,
+// whether time remained afterward — exactly the condition under which
+// today's caller should make one opportunistic resolution before its next
+// pickKind (runSlot, loop.go): that resolution, not a call made here, is
+// what can observe Tip.Moved and report it, so the wait's very first
+// IdleFloor slice alone (resolveTip false) resolves nothing extra and fires
+// no tip_moved (design decision 5, issue #3625).
+func (p *pool) idleSleep(ctx context.Context, slot int) (resolveTip bool) {
 	// Sample now before taking p.mu, same reasoning as pickKind. The scan
 	// itself runs under one lock hold (idleWait) so it never observes two
 	// kinds at different instants; the actual sleep happens after the lock
@@ -742,14 +744,50 @@ func (p *pool) idleSleep(ctx context.Context, slot int, lastRevision string) {
 	now := p.clk.Now()
 	wait, jammedGate, ok := p.idleWait(now)
 	if !ok {
-		return
+		return false
 	}
 
-	if jammedGate && lastRevision != "" {
-		p.pollSlices(ctx, slot, wait, lastRevision)
-		return
+	if !jammedGate {
+		p.clk.Sleep(ctx, wait)
+		return false
 	}
-	p.clk.Sleep(ctx, wait)
+
+	slice := p.cfg.IdleFloor
+	if slice > wait {
+		slice = wait
+	}
+	p.clk.Sleep(ctx, slice)
+	if p.stopped() || ctx.Err() != nil {
+		// A sibling halted the pool, or the caller's ctx was cancelled,
+		// while this slot slept. The slot's own top-of-loop haltIfStopping
+		// does the halt bookkeeping next; no resolution is worth making.
+		return false
+	}
+	return wait > slice
+}
+
+// resolveOpportunistic makes the one opportunistic ResolveTip call idleSleep's
+// resolveTip return asks runSlot for, ahead of its next pickKind. tip, true
+// on success — on Tip.Moved, it also emits noteTipMoved, so the caller that
+// keeps this tip for the current iteration never has to check Moved itself.
+// A failure is no change observed (design decision 6): it is not the
+// per-iteration fetch's own site, so it carries no haltIfStopping guard, no
+// backoffOrHalt, and no breaker failure — only that fetch, made after
+// pickKind finds a kind runnable, reports a genuinely broken fetch. The
+// phase is reset to idle on failure so a slot that falls through into
+// idleSleep right after is not still counted as PhaseResolving by a
+// sibling's siblingsEngaged (pool.go:369).
+func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
+	p.setPhase(slot, PhaseResolving)
+	tip, err := p.r.ResolveTip(ctx)
+	if err != nil {
+		p.setPhase(slot, PhaseIdle)
+		return Tip{}, false
+	}
+	if tip.Moved {
+		p.noteTipMoved(slot, tip.Revision)
+	}
+	return tip, true
 }
 
 // idleWait scans every kind's backoff under one p.mu hold and reports the
@@ -784,73 +822,29 @@ func (p *pool) idleWait(now time.Time) (wait time.Duration, jammedGate bool, ok 
 	return earliest.Sub(now), jammedGate, true
 }
 
-// pollSlices sleeps wait in IdleFloor-sized slices, polling ResolveTip
-// between slices so a merge that unblocks a jammed queue is noticed instead
-// of riding out the rest of a long backoff. Only idleSleep's jammed case
-// reaches here; a queue-empty gate stays the plain, single p.clk.Sleep in
-// idleSleep itself.
-//
-// revision is idleSleep's lastRevision; a poll result that differs from it
-// is the "tip moved" signal. On that signal, pollSlices emits tip_moved,
-// resets every currently-jammed kind's backoff (the observed change ends
-// each of their no-work streaks same as real work would — a queue-empty
-// kind's streak is untouched, since a moved tip is not evidence an empty
-// queue refilled), and returns immediately so the slot starts its next
-// iteration at once rather than sleeping out the rest of the wait.
-func (p *pool) pollSlices(ctx context.Context, slot int, wait time.Duration, revision string) {
-	remaining := wait
-	for remaining > 0 {
-		slice := p.cfg.IdleFloor
-		if slice > remaining {
-			slice = remaining
+// noteTipMoved records that revision is a tip a resolution actually observed
+// as moved (Tip.Moved), and resets every currently-jammed kind's backoff —
+// the observed change ends each of their no-work streaks same as real work
+// would (a queue-empty kind's streak is untouched, since a moved tip is not
+// evidence an empty queue refilled). No single Kind names this: several
+// kinds can be jammed at once, and the tip that moved is evidence for all of
+// them, not whichever this slot happened to be running. Kinds names the set
+// actually reset below; iterating cfg.Kinds rather than the kinds map keeps
+// that set's order deterministic. The scan, resets, and the tip_moved event
+// itself all happen in one mutate, so the set an operator reads on the event
+// is exactly the set that was reset, not a snapshot taken a moment either
+// side of it.
+func (p *pool) noteTipMoved(slot int, revision string) {
+	p.mutate(func(s *state) []Event {
+		var reset []Kind
+		for _, kind := range p.cfg.Kinds {
+			if k := s.kinds[kind]; k.jammedNow() {
+				s.kinds[kind] = k.reset()
+				reset = append(reset, kind)
+			}
 		}
-		p.clk.Sleep(ctx, slice)
-		remaining -= slice
-
-		if p.stopped() || ctx.Err() != nil {
-			// A sibling halted the pool, or the caller's ctx was cancelled,
-			// while this slot slept. Stop polling and return: the slot's own
-			// top-of-loop haltIfStopping does the halt bookkeeping next.
-			return
-		}
-		if remaining <= 0 {
-			return
-		}
-
-		tip, err := p.r.ResolveTip(ctx)
-		if err != nil {
-			// This poll is opportunistic, not the loop's own per-iteration
-			// fetch: a failure here just means no change was observed, so
-			// keep sleeping out the remaining slices rather than treating it
-			// as a failure — a *SelfEvalError included, same as a plain
-			// fetch error. The next iteration's top-of-loop ResolveTip is
-			// the one that properly reports and backs off on either.
-			continue
-		}
-		newRevision := tip.Revision
-		if newRevision != revision {
-			// No single Kind names this: several kinds can be jammed at
-			// once, and the tip that moved is evidence for all of them, not
-			// whichever this slot happened to be running. Kinds names the
-			// set actually reset below; iterating cfg.Kinds rather than the
-			// kinds map keeps that set's order deterministic. The scan,
-			// resets, and the tip_moved event itself all happen in one
-			// mutate, so the set an operator reads on the event is exactly
-			// the set that was reset, not a snapshot taken a moment either
-			// side of it.
-			p.mutate(func(s *state) []Event {
-				var reset []Kind
-				for _, kind := range p.cfg.Kinds {
-					if k := s.kinds[kind]; k.jammedNow() {
-						s.kinds[kind] = k.reset()
-						reset = append(reset, kind)
-					}
-				}
-				return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: newRevision, Reason: "a merge can unblock a jammed queue", Kinds: reset}}
-			})
-			return
-		}
-	}
+		return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: revision, Reason: "a merge can unblock a jammed queue", Kinds: reset}}
+	})
 }
 
 // snapshot takes p.mu and builds a Status from pool state alone; see

@@ -797,6 +797,7 @@ func TestLoopRejectsInvalidIdleConfig(t *testing.T) {
 func TestLoopTipMovedShortCircuitsNoneDispatchableWait(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1", "rev1", "rev1", "rev1", "rev2"},
+		moved:     []bool{false, false, false, false, true},
 		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
 	}
 	clk := &testClock{}
@@ -915,6 +916,7 @@ func TestLoopQueueEmptyWaitIgnoresTipMoved(t *testing.T) {
 func TestLoopTipMovedResetsBackoffForNextWait(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1", "rev1", "rev1", "rev1", "rev2"},
+		moved:     []bool{false, false, false, false, true},
 		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
 	}
 	clk := &testClock{}
@@ -944,21 +946,110 @@ func TestLoopTipMovedResetsBackoffForNextWait(t *testing.T) {
 	}
 }
 
-// TestLoopIdleWaitSwallowsMidWaitPollFailure pins idleWait's mid-wait
-// poll-failure branch (cmd/launcher/internal/daemon/pool.go): a
-// ResolveRevision error during idleWait's mid-wait poll is
-// opportunistic, not the loop's own per-iteration fetch, so it must be
-// swallowed as "no change observed" rather than routed to backoffOrHalt
-// (which would trip the pool-wide breaker over a transient fetch blip).
+// TestLoopTipMovedResolvesOnceNotFetchThenRefetch is the headline regression
+// tripwire for #3579: the slot that observes a mid-wait tip move must reuse
+// that same resolution for the child it runs next, not fetch it again at the
+// top of the following iteration. Two consecutive no-work checks grow the
+// wait past one IdleFloor, so the second's idleSleep asks for an
+// opportunistic resolve; that resolve is scripted to report the move
+// straight away, so pickKind finds dispatch runnable again in the very same
+// iteration and must run with the tip already in hand — one resolution per
+// run, not the fetch-then-refetch pair there was before this slice.
+func TestLoopTipMovedResolvesOnceNotFetchThenRefetch(t *testing.T) {
+	r := &scriptedRunner{
+		revisions: []string{"rev1", "rev1", "rev2"},
+		moved:     []bool{false, false, true},
+		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 5}},
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	if r.runCount() != 3 {
+		t.Fatalf("run calls = %d, want 3", r.runCount())
+	}
+	if got := r.calls()[2].Revision; got != "rev2" {
+		t.Fatalf("run calls[2].Revision = %q, want rev2: the child that follows an observed move must run at the resolution that observed it", got)
+	}
+	if r.resolveCount() != 3 {
+		t.Fatalf("resolveCalls = %d, want 3: one resolution per run, not a fetch-then-refetch pair (#3579)", r.resolveCount())
+	}
+}
+
+// TestLoopTipMovedFollowsMovedFlagNotRevisionDiff pins that tip_moved is
+// driven by Tip.Moved alone, never a revision-string diff: Moved and
+// Revision are scripted to disagree in both directions, and the event must
+// follow the flag each time.
+func TestLoopTipMovedFollowsMovedFlagNotRevisionDiff(t *testing.T) {
+	cases := []struct {
+		name      string
+		revisions []string
+		moved     []bool
+		wantMoved bool
+	}{
+		{
+			name:      "moved true with an unchanged revision still fires",
+			revisions: []string{"rev1", "rev1", "rev1"},
+			moved:     []bool{false, false, true},
+			wantMoved: true,
+		},
+		{
+			name:      "a changed revision with moved false stays silent",
+			revisions: []string{"rev1", "rev1", "rev2"},
+			moved:     []bool{false, false, false},
+			wantMoved: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &scriptedRunner{
+				revisions: tc.revisions,
+				moved:     tc.moved,
+				results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 5}},
+			}
+			clk := &testClock{}
+			var buf bytes.Buffer
+			em := newTestEmitter(&buf)
+
+			Loop(context.Background(), testConfig(1), r, em, clk)
+
+			events := decodeEvents(t, &buf)
+			var tipMoved *Event
+			for i := range events {
+				if events[i].Event == "tip_moved" {
+					tipMoved = &events[i]
+				}
+			}
+			if tc.wantMoved && tipMoved == nil {
+				t.Fatalf("events = %v, want a tip_moved event", eventNames(events))
+			}
+			if !tc.wantMoved && tipMoved != nil {
+				t.Fatalf("events = %v, want no tip_moved event", eventNames(events))
+			}
+		})
+	}
+}
+
+// TestLoopIdleWaitSwallowsMidWaitPollFailure pins resolveOpportunistic's
+// failure branch (design decision 6, issue #3625): a ResolveTip error during
+// the opportunistic resolve idleSleep's resolveTip return asks for is not
+// the loop's own per-iteration fetch, so it must be swallowed as "no change
+// observed" rather than routed to backoffOrHalt (which would trip the
+// pool-wide breaker over a transient fetch blip).
 //
-// Iteration 1: ResolveRevision call #1 (top of loop) -> exit 3 -> wait =
-// floor; idleWait sleeps one slice and returns without polling (remaining
-// hits 0 exactly). Iteration 2: call #2 (top of loop) -> exit 3 -> wait =
-// 2*floor; idleWait sleeps slice 1, then polls -- that's call #3, the one
-// set to fail -- swallows it, and sleeps slice 2. Iteration 3: call #4
-// (top) -> exit 5 -> halt. FailureBackoff is set apart from the floor so a
-// stray failure-backoff sleep (a regression routing the poll failure to
-// backoffOrHalt) would be unmistakable in clk.waits().
+// Iteration 1: ResolveTip call #1 (top of loop) -> exit 3 -> wait = floor;
+// idleSleep sleeps one slice and returns resolveTip = false (nothing
+// remained). Iteration 2: call #2 (top of loop) -> exit 3 -> wait = 2*floor;
+// idleSleep sleeps slice 1 and returns resolveTip = true. Iteration 3: the
+// opportunistic resolve this asked for is call #3, the one set to fail --
+// swallowed, phase reset, pickKind still gated -> idleSleep sleeps slice 2
+// and returns resolveTip = false. Iteration 4: call #4 (top of loop, dispatch
+// now runnable) -> exit 5 -> halt. FailureBackoff is set apart from the
+// floor so a stray failure-backoff sleep (a regression routing the
+// opportunistic failure to backoffOrHalt) would be unmistakable in
+// clk.waits().
 func TestLoopIdleWaitSwallowsMidWaitPollFailure(t *testing.T) {
 	r := &scriptedRunner{
 		revisions:  []string{"rev1"},
