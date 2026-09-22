@@ -1,5 +1,22 @@
 # Migration Guide
 
+## `spindrift doctor` is quiet by default; `--verbose`/`-v` restores the old report (issue #3777)
+
+A healthy `spindrift doctor` run used to print roughly 35 `ok:`/`advisory:`
+lines even when there was nothing to act on. It now prints nothing on a
+healthy run and exits 0. Only findings still print unconditionally:
+`MISSING:` rows and their `remedy:` lines, plus the interactive
+create-label prompt — with the advisory labels it offers re-listed
+immediately above it, since their own rows were suppressed — and its
+`created:`/still-missing lines. The old full report — every `ok:` row,
+every `advisory:` row, and the `WARNING:` line a *passing* read-only token
+gate prints when it cannot introspect the Box token — is still one flag
+away: pass `--verbose` or its short form `-v` to get it back verbatim.
+
+Exit codes and the on-failure stderr summary are unchanged. If a wrapper
+script parses `spindrift doctor`'s stdout rather than just its exit code,
+add `--verbose`/`-v` to that invocation to keep seeing the lines it expects.
+
 ## Continuous dispatch is deprecated in favour of the daemon (issue #3547)
 
 `CONTINUOUS_DISPATCH`, the `--continuous-dispatch` flag (and its

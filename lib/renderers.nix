@@ -1355,6 +1355,7 @@ rec {
         "--yes"
         "--force"
         "--continuous"
+        "--verbose"
         "--help"
         "--version"
         "--secret-cmd"
@@ -1478,6 +1479,10 @@ rec {
           doc = "bare-flag alias for the deprecated --continuous-dispatch bool (still available, spelled --continuous-dispatch=1)";
         }
         {
+          flag = "verbose";
+          doc = "show the full doctor report — every check and gate row, not just failures (short form: -v)";
+        }
+        {
           flag = "help";
           doc = "show usage and exit";
         }
@@ -1563,6 +1568,7 @@ rec {
         "    '--yes:skip the confirmation prompt when dispatching unlabeled issues'\n"
         "    '--force:alias for --yes'\n"
         "    '--continuous:bare-flag alias for the deprecated --continuous-dispatch bool (still available, spelled --continuous-dispatch=1)'\n"
+        "    '--verbose:show the full doctor report — every check and gate row, not just failures (short form: -v)'\n"
         "    '--help:show usage'\n"
         "    '--version:show version'\n"
         "    '--secret-cmd:templated secret-fetch command; {name} substitutes the kebab-case env name (lowest precedence)'\n"
