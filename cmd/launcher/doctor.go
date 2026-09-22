@@ -32,7 +32,7 @@ func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, int
 	if v.configErr != nil {
 		fmt.Fprintf(stderr, "%s\n", v.configErr)
 	}
-	runErr := runDoctor(rc.issueTracker, rc.codeForge, rc.config, stdout, stdin, interactive, v.reportChecks)
+	runErr := runDoctor(rc.issueTracker, rc.codeForge, rc.config, doctor.NewReporter(stdout), stdout, stdin, interactive, v.reportChecks)
 	if runErr != nil {
 		fmt.Fprintf(stderr, "%s\n", runErr)
 	}
@@ -65,7 +65,11 @@ func doctorExitCodeFor(configErr, runErr error) int {
 // shared internal/doctor package (ADR 0027). The caller passes extraChecks in
 // rather than runDoctor building them from c: rebuilding them here would create
 // un-memoized checks and run each credential Probe a second time (issue #3144).
-func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check) error {
+// checkW is separate from rep: it's a gate Check's own operator-facing writer
+// (issue #2942 AC5), which for `spindrift doctor` happens to be the same
+// underlying stdout rep wraps, but the two params stay distinct since only one
+// of them is the report stream.
+func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check) error {
 	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    c.issueTracker,
@@ -78,7 +82,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 		Runtime:         c.runtime,
 		MergePolicy:     c.mergeMode,
 		BaseBranch:      c.baseBranch,
-	}, doctor.NewReporter(w), bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
+	}, rep, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
 	// The two token gates are Applicable only under read-only (issue #2942), so
@@ -87,11 +91,11 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 	// printing it from gatedContext would add stdout noise to preview and
 	// bootstrap, which must stay quiet.
 	if c.boxForgeAndIssueAccess == "read-write" {
-		fmt.Fprintln(w, "ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
+		rep.Success("BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
 	}
 	// Walk the launch gates (issue #2942) through the same
 	// splitGateRegistryByNetwork construction gatedContext enforces with, not
 	// gateRegistry's raw declaration order, so doctor cannot report a different
 	// set or order from what gatedContext enforces.
-	return walkSplitGateRegistry(gateRegistry, c, w, w, true)
+	return walkSplitGateRegistry(gateRegistry, c, checkW, rep, true)
 }
