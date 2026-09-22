@@ -69,6 +69,17 @@ type Config struct {
 	// "read-write" or "read-only".
 	BoxForgeAndIssueAccess string
 
+	// SignalCarrier is the BOX_SIGNAL_CARRIER knob value (issue #3725). An
+	// empty or unrecognised value means the "log" carrier (fail-closed,
+	// exactly the way BoxForgeAndIssueAccess is matched exactly rather than
+	// negated at buildBoxEnv below): only the exact string "socket" selects
+	// the socket carrier.
+	SignalCarrier string
+
+	// NetworkMode is the NETWORK_MODE knob value, read by startSignalSocket's
+	// transport-verdict gate inside the Dispatch (issue #3725).
+	NetworkMode string
+
 	// These are nix-resolved static prompt-gate values (issue #2533;
 	// ScoutProvisioned added by #3157), forwarded into the Box unmodified.
 	TrackerAxisRead        string
@@ -109,6 +120,15 @@ type Config struct {
 	// owns the terminal in alt-screen raw mode, where a bare-\n heartbeat line
 	// stairsteps down the screen instead of returning to column 0.
 	HeartbeatOut io.Writer
+}
+
+// signalCarrierSocket reports whether c selects the socket signal carrier.
+// The one spelling of the comparison inside this package, so no dispatch-side
+// caller re-spells it. cmd/launcher's own startup gate
+// (signalcarrier_gate.go) reads the value off its own config type across the
+// package boundary and does re-spell it.
+func (c Config) signalCarrierSocket() bool {
+	return c.SignalCarrier == "socket"
 }
 
 // buildBoxEnv assembles the Box env from the schema boxEnv=true vars, the

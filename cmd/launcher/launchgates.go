@@ -49,6 +49,9 @@ var gateRegistry = []launchGate{
 	{Name: "network-mode-runtime", Check: func(c config, _ io.Writer) error {
 		return checkNetworkModeRuntimeGate(c)
 	}},
+	{Name: "signal-carrier-network-mode", Check: func(c config, _ io.Writer) error {
+		return checkSignalCarrierNetworkModeGate(c)
+	}},
 	{
 		Name: "read-only-token-github",
 		Applicable: func(c config) bool {

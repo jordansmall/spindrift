@@ -533,6 +533,17 @@ in
     nixSubPath = "retry.maxFix";
     boxEnv = false;
   };
+  signalCarrier = {
+    env = "BOX_SIGNAL_CARRIER";
+    group = "dispatch";
+    default = "log";
+    doc = "transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: 'log' (default) is unchanged behaviour for every existing Consumer -- nonce-guarded marker lines in the Box log; 'socket' routes those channels over the launcher-owned Signal socket instead (ADR 0052, docs/adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md); requesting 'socket' where the transport cannot work is a startup error, never a silent fallback to 'log'. Not a flakeOption: this is a runtime-only knob the launcher itself reads, so it stays out of the Launcher input document's settings map and instead rides the daemon's own child environment through ChildCommand's withoutKeys(s.Env, s.Knobs) filter (cmd/launcher/internal/daemon/command.go) rather than being stripped.";
+    choices = [
+      "log"
+      "socket"
+    ];
+    boxEnv = false;
+  };
   maxRebaseAttempts = {
     env = "MAX_REBASE_ATTEMPTS";
     group = "dispatch";
