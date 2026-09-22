@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -973,6 +974,344 @@ func TestResolveTip_EmptySelfAttrSkipsEval(t *testing.T) {
 	}
 	if tip.SelfPath != "" {
 		t.Errorf("ResolveTip().SelfPath = %q, want empty", tip.SelfPath)
+	}
+}
+
+// scriptedFetchSeamT builds a runnerFetchCommand replacement that never
+// touches a real git remote: the "fetch" subcommand runs onFetch (a hook a
+// test can use to block the leader, or to fail), and the "rev-parse"
+// subcommand always echoes whatever revision() currently returns, so a test
+// can move the "remote" tip between calls by mutating the string a closure
+// reads. Recognising the subcommand by args[2] mirrors fetchRevision's own
+// call shape: runnerFetchCommand(ctx, "git", "-C", repoPath, sub, ...).
+func scriptedFetchSeamT(t *testing.T, revision func() string, onFetch func()) func(ctx context.Context, name string, args ...string) *exec.Cmd {
+	t.Helper()
+	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if len(args) < 3 {
+			t.Fatalf("runnerFetchCommand args = %v, want at least 3", args)
+		}
+		if args[2] == "fetch" {
+			if onFetch != nil {
+				onFetch()
+			}
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+		}
+		return exec.CommandContext(ctx, "/bin/sh", "-c", fmt.Sprintf("printf '%s\\n'", revision()))
+	}
+}
+
+// TestResolveTip_ConcurrentCallersCoalesceIntoOneFetchAndOneEval drives three
+// concurrent ResolveTip callers against a leader deliberately held inside
+// the fetch seam until both other callers have joined its flight (via
+// runnerFlightJoined — no sleeps as synchronisation), and asserts the whole
+// group costs exactly one `git fetch` and one `nix eval` despite three
+// callers, with every caller receiving the identical Tip.
+func TestResolveTip_ConcurrentCallersCoalesceIntoOneFetchAndOneEval(t *testing.T) {
+	origFetch, origEval, origJoined := runnerFetchCommand, runnerEvalCommand, runnerFlightJoined
+	t.Cleanup(func() {
+		runnerFetchCommand, runnerEvalCommand, runnerFlightJoined = origFetch, origEval, origJoined
+	})
+
+	var fetchCalls, evalCalls int32
+	gate := make(chan struct{})
+	leaderBlocked := make(chan struct{})
+	joins := make(chan struct{}, 2)
+
+	runnerFetchCommand = scriptedFetchSeamT(t, func() string { return "deadbeef" }, func() {
+		atomic.AddInt32(&fetchCalls, 1)
+		close(leaderBlocked)
+		<-gate
+	})
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		atomic.AddInt32(&evalCalls, 1)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf '/nix/store/abc-daemon\n'`)
+	}
+	runnerFlightJoined = func() { joins <- struct{}{} }
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	const n = 3
+	tips := make([]daemon.Tip, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			tips[i], errs[i] = r.ResolveTip(context.Background())
+		}(i)
+	}
+
+	<-leaderBlocked
+	<-joins
+	<-joins
+	close(gate)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&fetchCalls); got != 1 {
+		t.Errorf("fetch calls = %d, want 1", got)
+	}
+	if got := atomic.LoadInt32(&evalCalls); got != 1 {
+		t.Errorf("eval calls = %d, want 1", got)
+	}
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Errorf("caller %d: ResolveTip() error: %v", i, errs[i])
+		}
+		if tips[i] != (daemon.Tip{Revision: "deadbeef", SelfPath: "/nix/store/abc-daemon", Moved: false}) {
+			t.Errorf("caller %d: ResolveTip() = %+v, want the shared leader Tip", i, tips[i])
+		}
+	}
+}
+
+// TestResolveTip_NoTTLSequentialCallsEachFetch asserts two sequential
+// ResolveTip calls — the second arriving after the first's flight has
+// already finished and cleared — each trigger their own `git fetch`: there
+// is no TTL caching a completed resolution (design decision 8).
+func TestResolveTip_NoTTLSequentialCallsEachFetch(t *testing.T) {
+	orig := runnerFetchCommand
+	t.Cleanup(func() { runnerFetchCommand = orig })
+
+	var fetchCalls int32
+	runnerFetchCommand = scriptedFetchSeamT(t, func() string { return "deadbeef" }, func() {
+		atomic.AddInt32(&fetchCalls, 1)
+	})
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
+	if _, err := r.ResolveTip(context.Background()); err != nil {
+		t.Fatalf("first ResolveTip() error: %v", err)
+	}
+	if _, err := r.ResolveTip(context.Background()); err != nil {
+		t.Fatalf("second ResolveTip() error: %v", err)
+	}
+	if got := atomic.LoadInt32(&fetchCalls); got != 2 {
+		t.Errorf("fetch calls = %d, want 2 (no TTL — each call starts its own flight)", got)
+	}
+}
+
+// TestResolveTip_SelfPathMemoisedPerRevision asserts two resolutions at the
+// same revision cost one `nix eval` (the memo serves the second), and a
+// resolution at a new revision evaluates again (design decision 7). The
+// fetch count is not what this test is about.
+func TestResolveTip_SelfPathMemoisedPerRevision(t *testing.T) {
+	origFetch, origEval := runnerFetchCommand, runnerEvalCommand
+	t.Cleanup(func() { runnerFetchCommand, runnerEvalCommand = origFetch, origEval })
+
+	revision := "deadbeef1"
+	runnerFetchCommand = scriptedFetchSeamT(t, func() string { return revision }, nil)
+	var evalCalls int32
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		atomic.AddInt32(&evalCalls, 1)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf '/nix/store/abc-daemon\n'`)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	if _, err := r.ResolveTip(context.Background()); err != nil {
+		t.Fatalf("first ResolveTip() error: %v", err)
+	}
+	if _, err := r.ResolveTip(context.Background()); err != nil {
+		t.Fatalf("second ResolveTip() (same revision) error: %v", err)
+	}
+	if got := atomic.LoadInt32(&evalCalls); got != 1 {
+		t.Errorf("eval calls after two same-revision resolutions = %d, want 1", got)
+	}
+
+	revision = "deadbeef2"
+	if _, err := r.ResolveTip(context.Background()); err != nil {
+		t.Fatalf("third ResolveTip() (new revision) error: %v", err)
+	}
+	if got := atomic.LoadInt32(&evalCalls); got != 2 {
+		t.Errorf("eval calls after a new-revision resolution = %d, want 2", got)
+	}
+}
+
+// TestResolveTip_Moved walks Tip.Moved through the cases design decision 1
+// spells out: false on the first resolution ever, false while the revision
+// is unchanged, true on the resolution that first reports a new one, and
+// false again on the next one at that same new revision — then confirms
+// every caller sharing one flight sees the same value.
+func TestResolveTip_Moved(t *testing.T) {
+	origFetch, origJoined := runnerFetchCommand, runnerFlightJoined
+	t.Cleanup(func() { runnerFetchCommand, runnerFlightJoined = origFetch, origJoined })
+
+	revision := "rev1"
+	runnerFetchCommand = scriptedFetchSeamT(t, func() string { return revision }, nil)
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	tip, err := r.ResolveTip(context.Background())
+	if err != nil {
+		t.Fatalf("first ResolveTip() error: %v", err)
+	}
+	if tip.Moved {
+		t.Error("first resolution ever: Moved = true, want false")
+	}
+
+	tip, err = r.ResolveTip(context.Background())
+	if err != nil {
+		t.Fatalf("second ResolveTip() error: %v", err)
+	}
+	if tip.Moved {
+		t.Error("resolution at the unchanged revision: Moved = true, want false")
+	}
+
+	revision = "rev2"
+	tip, err = r.ResolveTip(context.Background())
+	if err != nil {
+		t.Fatalf("third ResolveTip() error: %v", err)
+	}
+	if !tip.Moved {
+		t.Error("resolution at a new revision: Moved = false, want true")
+	}
+
+	tip, err = r.ResolveTip(context.Background())
+	if err != nil {
+		t.Fatalf("fourth ResolveTip() error: %v", err)
+	}
+	if tip.Moved {
+		t.Error("resolution at the same new revision: Moved = true, want false")
+	}
+
+	// A final shared-flight group at yet another new revision: every joiner
+	// must see the same Moved the leader computed.
+	revision = "rev3"
+	gate := make(chan struct{})
+	leaderBlocked := make(chan struct{})
+	joins := make(chan struct{}, 2)
+	runnerFetchCommand = scriptedFetchSeamT(t, func() string { return revision }, func() {
+		close(leaderBlocked)
+		<-gate
+	})
+	runnerFlightJoined = func() { joins <- struct{}{} }
+
+	const n = 3
+	tips := make([]daemon.Tip, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			tips[i], errs[i] = r.ResolveTip(context.Background())
+		}(i)
+	}
+	<-leaderBlocked
+	<-joins
+	<-joins
+	close(gate)
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Errorf("caller %d: ResolveTip() error: %v", i, errs[i])
+		}
+		if !tips[i].Moved {
+			t.Errorf("caller %d: Moved = false, want true (shared flight at the new revision)", i)
+		}
+	}
+}
+
+// TestResolveTip_FetchErrorReachesEveryJoiner asserts a failing `git fetch`
+// reaches every caller sharing that leader's flight with the identical
+// error — the same wrapping fetchRevision produces today — rather than
+// only the leader seeing it.
+func TestResolveTip_FetchErrorReachesEveryJoiner(t *testing.T) {
+	origFetch, origJoined := runnerFetchCommand, runnerFlightJoined
+	t.Cleanup(func() { runnerFetchCommand, runnerFlightJoined = origFetch, origJoined })
+
+	gate := make(chan struct{})
+	leaderBlocked := make(chan struct{})
+	joins := make(chan struct{}, 2)
+	runnerFetchCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if len(args) < 3 {
+			t.Fatalf("runnerFetchCommand args = %v, want at least 3", args)
+		}
+		if args[2] != "fetch" {
+			t.Fatalf("runnerFetchCommand subcommand = %q, want \"fetch\" (rev-parse should never run after a fetch failure)", args[2])
+		}
+		close(leaderBlocked)
+		<-gate
+		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf 'fatal: no such remote origin\n' >&2; exit 1`)
+	}
+	runnerFlightJoined = func() { joins <- struct{}{} }
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	const n = 3
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = r.ResolveTip(context.Background())
+		}(i)
+	}
+	<-leaderBlocked
+	<-joins
+	<-joins
+	close(gate)
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		if errs[i] == nil {
+			t.Fatalf("caller %d: ResolveTip() error = nil, want the shared fetch failure", i)
+		}
+	}
+	want := errs[0].Error()
+	if !strings.Contains(want, "git fetch origin main") || !strings.Contains(want, "no such remote origin") {
+		t.Errorf("ResolveTip() error = %q, want it to name the fetch and carry the stderr", want)
+	}
+	for i := 1; i < n; i++ {
+		if errs[i].Error() != want {
+			t.Errorf("caller %d: error = %q, want the same text as caller 0 (%q)", i, errs[i].Error(), want)
+		}
+	}
+}
+
+// TestResolveTip_SelfEvalFailureDoesNotPoisonMemo asserts a self-eval
+// failure still returns Tip{Revision: <fetched revision>} alongside a
+// *daemon.SelfEvalError, and leaves the self-path memo untouched: the next
+// resolution at that same revision evaluates again rather than serving a
+// path it never got (design decision 7).
+func TestResolveTip_SelfEvalFailureDoesNotPoisonMemo(t *testing.T) {
+	origFetch, origEval := runnerFetchCommand, runnerEvalCommand
+	t.Cleanup(func() { runnerFetchCommand, runnerEvalCommand = origFetch, origEval })
+
+	const revision = "deadbeef"
+	runnerFetchCommand = scriptedFetchSeamT(t, func() string { return revision }, nil)
+	var evalCalls int32
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if atomic.AddInt32(&evalCalls, 1) == 1 {
+			return exec.CommandContext(ctx, "/bin/sh", "-c", `printf 'error: attribute missing\n' >&2; exit 1`)
+		}
+		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf '/nix/store/abc-daemon\n'`)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	tip, err := r.ResolveTip(context.Background())
+	var se *daemon.SelfEvalError
+	if !errors.As(err, &se) {
+		t.Fatalf("first ResolveTip() error = %v, want a *daemon.SelfEvalError", err)
+	}
+	if tip.Revision != revision {
+		t.Errorf("first ResolveTip().Revision = %q, want %q", tip.Revision, revision)
+	}
+	if tip.SelfPath != "" {
+		t.Errorf("first ResolveTip().SelfPath = %q, want empty on a failed eval", tip.SelfPath)
+	}
+
+	tip, err = r.ResolveTip(context.Background())
+	if err != nil {
+		t.Fatalf("second ResolveTip() (same revision, retried eval) error: %v", err)
+	}
+	if want := "/nix/store/abc-daemon"; tip.SelfPath != want {
+		t.Errorf("second ResolveTip().SelfPath = %q, want %q", tip.SelfPath, want)
+	}
+	if got := atomic.LoadInt32(&evalCalls); got != 2 {
+		t.Errorf("eval calls = %d, want 2 (a failed eval must not memoise and skip the retry)", got)
 	}
 }
 
