@@ -362,7 +362,7 @@ func TestResolveTip_FetchesWithoutMutatingWorkingTree(t *testing.T) {
 }
 
 // TestResolveTip_ConcurrentCallsDoNotRace drives several concurrent
-// ResolveRevision calls on one hostRunner against a repo whose origin/main
+// ResolveTip calls on one hostRunner against a repo whose origin/main
 // has genuinely advanced since dirConsumer's clone, so each `git fetch` must
 // actually move (re-lock) refs/remotes/origin/main rather than finding it
 // already at the wanted tip — the scenario where unsynchronized concurrent
@@ -988,7 +988,12 @@ func scriptedFetchSeamT(t *testing.T, revision func() string, onFetch func()) fu
 	t.Helper()
 	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if len(args) < 3 {
-			t.Fatalf("runnerFetchCommand args = %v, want at least 3", args)
+			// t.Errorf, not t.Fatalf: this closure runs as runnerFetchCommand
+			// on whatever goroutine calls ResolveTip, which in the
+			// coalescing tests is a caller goroutine, not the test
+			// goroutine — Fatalf (FailNow) is only safe from the latter.
+			t.Errorf("runnerFetchCommand args = %v, want at least 3", args)
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
 		}
 		if args[2] == "fetch" {
 			if onFetch != nil {
@@ -1067,7 +1072,7 @@ func TestResolveTip_ConcurrentCallersCoalesceIntoOneFetchAndOneEval(t *testing.T
 // TestResolveTip_NoTTLSequentialCallsEachFetch asserts two sequential
 // ResolveTip calls — the second arriving after the first's flight has
 // already finished and cleared — each trigger their own `git fetch`: there
-// is no TTL caching a completed resolution (design decision 8).
+// is no TTL caching a completed resolution.
 func TestResolveTip_NoTTLSequentialCallsEachFetch(t *testing.T) {
 	orig := runnerFetchCommand
 	t.Cleanup(func() { runnerFetchCommand = orig })
@@ -1091,7 +1096,7 @@ func TestResolveTip_NoTTLSequentialCallsEachFetch(t *testing.T) {
 
 // TestResolveTip_SelfPathMemoisedPerRevision asserts two resolutions at the
 // same revision cost one `nix eval` (the memo serves the second), and a
-// resolution at a new revision evaluates again (design decision 7). The
+// resolution at a new revision evaluates again. The
 // fetch count is not what this test is about.
 func TestResolveTip_SelfPathMemoisedPerRevision(t *testing.T) {
 	origFetch, origEval := runnerFetchCommand, runnerEvalCommand
@@ -1126,8 +1131,8 @@ func TestResolveTip_SelfPathMemoisedPerRevision(t *testing.T) {
 	}
 }
 
-// TestResolveTip_Moved walks Tip.Moved through the cases design decision 1
-// spells out: false on the first resolution ever, false while the revision
+// TestResolveTip_Moved walks Tip.Moved through every case it must cover:
+// false on the first resolution ever, false while the revision
 // is unchanged, true on the resolution that first reports a new one, and
 // false again on the next one at that same new revision — then confirms
 // every caller sharing one flight sees the same value.
@@ -1270,11 +1275,63 @@ func TestResolveTip_FetchErrorReachesEveryJoiner(t *testing.T) {
 	}
 }
 
+// TestResolveTip_LeaderPanicReleasesJoiner asserts a panic in the leader's
+// resolveTipOnce still releases every joiner instead of stranding it: the
+// leader's cleanup (clear r.flight, close flight.done) runs via defer, so it
+// still fires while the panic unwinds.
+func TestResolveTip_LeaderPanicReleasesJoiner(t *testing.T) {
+	origFetch, origJoined := runnerFetchCommand, runnerFlightJoined
+	t.Cleanup(func() { runnerFetchCommand, runnerFlightJoined = origFetch, origJoined })
+
+	gate := make(chan struct{})
+	leaderBlocked := make(chan struct{})
+	joins := make(chan struct{}, 1)
+	runnerFetchCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		close(leaderBlocked)
+		<-gate
+		panic("simulated leader panic")
+	}
+	runnerFlightJoined = func() { joins <- struct{}{} }
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	leaderDone := make(chan struct{})
+	var recovered any
+	go func() {
+		defer close(leaderDone)
+		defer func() { recovered = recover() }()
+		_, _ = r.ResolveTip(context.Background())
+	}()
+	<-leaderBlocked
+
+	joinerDone := make(chan struct{})
+	go func() {
+		defer close(joinerDone)
+		_, _ = r.ResolveTip(context.Background())
+	}()
+	<-joins
+	close(gate)
+
+	select {
+	case <-joinerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("joiner did not return after the leader panicked — want it released, not hung")
+	}
+	select {
+	case <-leaderDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("leader goroutine did not finish unwinding its panic")
+	}
+	if recovered == nil {
+		t.Fatal("leader did not panic as scripted — test setup is broken")
+	}
+}
+
 // TestResolveTip_SelfEvalFailureDoesNotPoisonMemo asserts a self-eval
 // failure still returns Tip{Revision: <fetched revision>} alongside a
 // *daemon.SelfEvalError, and leaves the self-path memo untouched: the next
 // resolution at that same revision evaluates again rather than serving a
-// path it never got (design decision 7).
+// path it never got.
 func TestResolveTip_SelfEvalFailureDoesNotPoisonMemo(t *testing.T) {
 	origFetch, origEval := runnerFetchCommand, runnerEvalCommand
 	t.Cleanup(func() { runnerFetchCommand, runnerEvalCommand = origFetch, origEval })

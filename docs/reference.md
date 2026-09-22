@@ -4802,34 +4802,36 @@ that invokes `nix` at runtime: it cannot exec the launcher store path it was
 built against, since that path is precisely the stale one a rebuild exists
 to replace, so each child Dispatch runs through `nix run` instead.
 
-Each slot's own iteration resolves the tip of `BASE_BRANCH`, then pins its
-next child Dispatch to that revision via a `git+file://...?rev=...`
-flakeref. The resolution itself fetches — never pulls — and never mutates
-the operator's working tree, so they can keep editing while the daemon
-runs. A caller that arrives while a resolution is already in flight waits
-on that one and takes its result, so concurrent resolutions cost one forge
-request however many callers share them; within a single pool that sharing
-is latent rather than routine, since the discovery baton (below) lets one
-slot at a time through the span a resolution happens in and sibling slots
-therefore resolve one after another. There is no time-to-live on the
-sharing either way: a caller arriving after a resolution has already
-finished fetches again rather than reusing a stale one, which is what
-keeps the pin below exact. The pin
-also means a checkout landing mid-evaluation can't produce a build of a
-tree that never existed as a commit, and a child started an hour into the
-night is still pinned to the tip as it was when that slot came free, not
-the tip at daemon startup.
+Each slot's own iteration resolves the tip of `BASE_BRANCH`, then pins
+its next child Dispatch to that revision via a `git+file://...?rev=...`
+flakeref. The resolution itself fetches — never pulls — and never
+mutates the operator's working tree, so they can keep editing while the
+daemon runs. A caller that arrives while a resolution is already in flight
+waits on that one and takes its result, so concurrent resolutions cost one
+forge request and, when the self check is on, one evaluation — the single
+flight collapses every joiner onto the same leader's fetch and eval, so a
+turnover of three concurrently-resolving slots costs one forge fetch and
+one evaluation, not three and three. The self-path memo is a separate
+saving on top, for calls that don't overlap: a later resolution that lands
+on a revision the memo already covers skips the eval half outright rather
+than re-evaluating a tip it's already seen. There
+is no time-to-live on the sharing either way: a caller arriving after a
+resolution has already finished fetches again rather than reusing a stale
+one, which is what keeps the pin below exact. The pin also means a checkout
+landing mid-evaluation can't produce a build of a tree that never existed
+as a commit, and a child started an hour into the night is still pinned to
+the tip as it was when that slot came free, not the tip at daemon startup.
 
 **Pool.** `MAX_PARALLEL` is the daemon's own pool size (`Config.Slots`,
 `cmd/launcher/internal/daemon/loop.go`): `Loop` runs that many slot
 goroutines, each independently resolving and driving its own children
 (concurrent resolutions share one fetch, as above), rather than one loop
 iterating a single child. When both kinds are in play, they draw from that
-same single pool rather than one pool
-apiece (`Config.Kinds`, issue #3541): research runs through the full Box
-and costs exactly what work costs, so a second, research-only pool would
-quietly invalidate the operator's `MEMORY_LIMIT` × `MAX_PARALLEL` sizing by
-letting the daemon's real peak exceed what that sizing accounted for. The
+same single pool rather than one pool apiece (`Config.Kinds`, issue #3541):
+research runs through the full Box and costs exactly what work costs,
+so a second, research-only pool would quietly invalidate the operator's
+`MEMORY_LIMIT` × `MAX_PARALLEL` sizing by letting the daemon's real
+peak exceed what that sizing accounted for. The
 cap still covers everything the daemon runs — one child means one Box
 (`ChildCommand` appends `--max-jobs 1 --max-parallel 1` to every
 invocation, `cmd/launcher/internal/daemon/command.go`), so a slot can never
@@ -4870,21 +4872,31 @@ pre-assigns the initial holder to `leadSlot` (slot 0), so a cold start's
 first discovering slot is fixed rather than decided by scheduler luck, but
 `leadSlot` is no longer a "leader" with any lasting powers — once its first
 round ends, the baton is just a token circulating to whichever slot holds
-it. Acquisition (`awaitBaton`) sits after the Awake-window wait, not before:
-apart from the pre-assigned initial holder's very first round, a slot never
-parks in `awaitWindow` while holding the baton. A claim releases the baton
-live, the instant the holder's child announces a Box (`OnIssue`), not at
-child exit, so the hold never spans a whole Box run; every other way a
-round can end without a claim passes it too (`passBaton`) — the child
-returning having announced nothing (queue empty, none dispatchable, an
-unrecognised exit, or a `RunChild` seam error, one site covering all four),
-a pre-child unclassified failure reaching `backoffOrHalt` (a fetch or
-self-build evaluation error), the Awake window shutting between the fetch
-and the child start, `pickKind` finding no runnable kind before an idle
-sleep, and the holder returning for any reason at all, caught by one
-deferred pass in `runSlot` that needs no guard of its own since `passBaton`
-no-ops for a slot that isn't holding. `MAX_PARALLEL=1` builds no baton at
-all and emits no baton event — a single slot has no sibling to stagger
+it. Acquisition (`awaitBaton`) sits immediately before the child start —
+after the tip resolution and the self-build mismatch check, not before
+either — because the baton guards discovery, and resolving the tip or
+picking a kind selects no issue; holding the baton across a resolution
+would serialize the resolutions the single-flight in `ResolveTip` (above)
+exists to let sibling slots share. Apart from the pre-assigned initial
+holder's very first round, a slot never holds the baton across a resolve —
+every path that loops back to the top of the loop passes it first. A claim
+releases the baton live, the instant the holder's child announces a Box
+(`OnIssue`), not at child exit, so the hold never spans a whole Box run;
+every other way a round can end without a claim passes it too
+(`passBaton`) — the child returning having announced nothing (queue empty,
+none dispatchable, an unrecognised exit, or a `RunChild` seam error, one
+site covering all four), the Awake window shutting between the fetch and
+the child start, and the holder returning for any reason at all, caught by
+one deferred pass in `runSlot` that needs no guard of its own since
+`passBaton` no-ops for a slot that isn't holding. Two more release reasons
+exist in code — a pre-child unclassified failure reaching `backoffOrHalt`
+(a fetch or self-build evaluation error), and `pickKind` finding no
+runnable kind before an idle sleep — but since the baton is now acquired
+after both of those points, only the pre-assigned initial holder's very
+first round can ever reach them still holding it; every later round for
+every slot has already passed the baton, or not yet acquired it, by the
+time either can fire. `MAX_PARALLEL=1` builds no baton at all and emits
+no baton event — a single slot has no sibling to stagger
 against. Serialized discovery is an accepted cost, not a shortfall to work
 around: a child's start-to-claim is on the order of fifteen seconds against
 Box runs of tens of minutes, and a daemon runs unattended, so fill latency
@@ -4892,8 +4904,8 @@ does not matter, while in exchange the claim protocol stays untouched and
 the daemon path needs no host-side race handling of its own — no claim
 preconditions, no per-issue locks, no log-rotation guards. The runner's
 container-name check remains the backstop only for a manual dispatch run
-that happens to land beside a daemon. Cancellation is handled the same way
-every other wait in this loop is: `awaitBaton`'s blocking select also
+that happens to land beside a daemon. Cancellation is handled the same
+way every other wait in this loop is: `awaitBaton`'s blocking select also
 watches `ctx.Done()`, so a pool cancelled while a slot waits on the baton
 never deadlocks that slot.
 
@@ -5323,7 +5335,9 @@ the resulting program store path against its own, a field comparison in
 `runSlot` (`cmd/launcher/internal/daemon/loop.go`) against the self-path
 `ResolveTip` already returned. The evaluation is memoised by revision, so
 one `nix eval` covers a given tip however many slots ask about it, and a
-new tip is what triggers a fresh evaluation. The attribute is
+new tip is what triggers a fresh evaluation. A failed evaluation is never
+memoised — the memo is left untouched so it can't serve a later caller at
+that same revision a path it never actually got. The attribute is
 `DAEMON_SELF_APP` (default `.#daemon`), the daemon's own app, distinct from
 `DAEMON_APP`, the child Dispatch app the slot is about to launch — see the
 `DAEMON_APP` note above. A Consumer that re-exports the daemon under a
@@ -5807,14 +5821,14 @@ which runs outside every slot's own goroutine.
 | `awake_close` | `time`, `kind`, `slot`, `wait`, `reason` | the first slot parks on a shut Awake window — not the close instant itself, so a pool still busy at the close reports the transition, and computes `wait` (how long until the next opening), at that later parking |
 | `awake_open` | `time`, `kind`, `slot`, `reason` | the Awake window reopens after a prior `awake_close`; never emitted for a daemon that starts inside an already-open window |
 | `baton_hold` | `time`, `slot`, `reason` | a slot reaches `awaitBaton` (`pool.go`) and finds another slot still discovering, so it parks — one event per park, since each parking slot logs independently on its own pass through the loop; `reason` is the fixed `batonHoldReason`, `"waiting for the discovery baton: another slot's child is still discovering"`, matching the other wait events in this stream |
-| `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child announces via `OnIssue`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `RunChild` seam error (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`), the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`), or the holder returning for any reason at all before its round otherwise resolved (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
+| `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child announces via `OnIssue`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `RunChild` seam error (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs — or the holder returning for any reason at all before its round otherwise resolved (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
 | `preflight` | `time`, `revision`, `exit`, `outcome` (`reason` instead of `exit` on the paths with no doctor exit code to report — a seam failure, or an operator's stop) | emitted exactly once, at startup, before the first slot, on every path the preflight can take: a pass, a refusal, a seam failure, or an operator's Ctrl-C — so "ran and was healthy" and "never ran" cannot look identical the morning after; `outcome` is `ClassifyPreflight`'s own `doctor-`-prefixed label (`doctor-healthy`, `doctor-required-labels-missing`, `doctor-config-invalid`, `doctor-connectivity`, `doctor-unclassified`, `doctor-unknown`) or one of the two the daemon itself adds on the paths that never reached a verdict (`doctor-seam-error` for a failure resolving the tip or running doctor at all, `doctor-cancelled` for a stop signal during the preflight), never `Interpret`'s child-outcome vocabulary, so it can never be confused with a `child_finish` outcome |
 | `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched |
 | `box` | `time`, `kind`, `issue`, `revision`, `slot` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
 | `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
 | `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot `resolving`, `running`, or `backing_off`; `wait` carries `kind`'s own idle backoff, so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
 | `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | recording a no-work result against `kind` after `none-dispatchable` with every sibling slot `idle` or `awaiting_window` — nothing running, resolving, or backing off anywhere else in the pool, and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries `kind`'s own idle backoff, same as `idle` above |
-| `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | a poll during the shared idle sleep, entered because every configured kind was gated and at least one of them was jammed, found `BASE_BRANCH`'s tip had moved since this slot's last child ran, so the slot reset every currently-jammed kind's backoff and started its next iteration at once instead of sleeping out the rest of the wait. `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
+| `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | any resolve that finds `BASE_BRANCH`'s tip differs from the revision the Runner most recently handed out — the baseline is Runner-global, not per-slot, so it tracks whichever slot resolved last, whichever kind it was running. That resolve can be the ordinary one made after `pickKind` on any iteration, or the opportunistic one made mid-wait during a jammed idle sleep (there is no separate poll — see exit 3's row above); either way the slot reset every currently-jammed kind's backoff, and, on the mid-wait path, started its next iteration at once instead of sleeping out the rest of the wait. `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |

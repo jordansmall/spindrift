@@ -237,7 +237,7 @@ func TestLoopUnknownExitBacksOffThenHalts(t *testing.T) {
 }
 
 // TestLoopResolveErrorBacksOffThenHalts pins the new contract: a
-// ResolveRevision error (a failed git fetch) is exactly the transient blip
+// ResolveTip fetch error (a failed git fetch) is exactly the transient blip
 // that must not end the night, so it backs off its slot rather than
 // halting the pool. A follow-up host-tainted exit gives the fake a real
 // halt so the test still terminates.
@@ -408,15 +408,15 @@ func TestLoopCancelledContextHaltsBeforeStartingNewWork(t *testing.T) {
 	}
 }
 
-// TestLoopCancelledDuringResolveRevisionStillHaltsAtTheNextAdmission pins
+// TestLoopCancelledDuringResolveTipStillHaltsAtTheNextAdmission pins
 // issue #3626's collapse to one admission check: a ctx cancelled mid-fetch
 // (a bare caller cancel, not cfg.Stop — no ChildRequest.Stop exists to
 // forward it to a running child) is no longer re-checked between
-// ResolveRevision and RunChild, so this iteration's child still starts and
+// ResolveTip and RunChild, so this iteration's child still starts and
 // runs to completion; the loop only notices the cancellation back at the
 // top of its next iteration, and still halts with the context-cancelled
 // reason rather than ever reaching the breaker.
-func TestLoopCancelledDuringResolveRevisionStillHaltsAtTheNextAdmission(t *testing.T) {
+func TestLoopCancelledDuringResolveTipStillHaltsAtTheNextAdmission(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
@@ -433,7 +433,7 @@ func TestLoopCancelledDuringResolveRevisionStillHaltsAtTheNextAdmission(t *testi
 	reason := Loop(ctx, testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 1 {
-		t.Fatalf("run calls = %d, want 1: nothing re-checks ctx between ResolveRevision and RunChild anymore", r.runCount())
+		t.Fatalf("run calls = %d, want 1: nothing re-checks ctx between ResolveTip and RunChild anymore", r.runCount())
 	}
 	wantEvents(t, &buf, []string{"child_start", "child_finish", "halt"}, "the child that was already admitted still runs and finishes before the halt")
 	if !strings.Contains(reason, "context") {
@@ -472,15 +472,15 @@ func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
 	}
 }
 
-// TestLoopSelfPathCtxCancelledIsNotABreakerFailure asserts that a SelfPath
-// call whose ctx is cancelled out from under it (an operator SIGTERM racing
-// the evaluation) reports a plain context-cancelled halt, not a breaker
-// failure: with MAX_PARALLEL >= the breaker threshold, several slots hitting
-// this on one SIGTERM could otherwise trip the breaker and turn a clean
-// stop's exit 0 into exit 1 (issue #3543).
-func TestLoopSelfPathCtxCancelledIsNotABreakerFailure(t *testing.T) {
+// TestLoopSelfEvalCtxCancelledIsNotABreakerFailure asserts that ResolveTip's
+// self-eval half, when its ctx is cancelled out from under it (an operator
+// SIGTERM racing the evaluation), reports a plain context-cancelled halt,
+// not a breaker failure: with MAX_PARALLEL >= the breaker threshold, several
+// slots hitting this on one SIGTERM could otherwise trip the breaker and
+// turn a clean stop's exit 0 into exit 1 (issue #3543).
+func TestLoopSelfEvalCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r := newCancelErrRunner(cancel, seamSelfPath, "rev1")
+	r := newCancelErrRunner(cancel, phaseSelfEval, "rev1")
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -493,13 +493,13 @@ func TestLoopSelfPathCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	assertCancelledStopNoBreaker(t, reason, decodeEvents(t, &buf))
 }
 
-// TestLoopResolveRevisionCtxCancelledIsNotABreakerFailure is
-// TestLoopSelfPathCtxCancelledIsNotABreakerFailure's sibling for the
-// ResolveRevision error path in runSlot (loop.go), which has had this same
+// TestLoopFetchCtxCancelledIsNotABreakerFailure is
+// TestLoopSelfEvalCtxCancelledIsNotABreakerFailure's sibling for
+// ResolveTip's fetch half in runSlot (loop.go), which has had this same
 // hazard since before this diff.
-func TestLoopResolveRevisionCtxCancelledIsNotABreakerFailure(t *testing.T) {
+func TestLoopFetchCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r := newCancelErrRunner(cancel, seamResolveRevision, "")
+	r := newCancelErrRunner(cancel, phaseFetch, "")
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -571,32 +571,37 @@ func TestLoopCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	}
 }
 
-type cancelSeam string
+// cancelPhase names which half of one ResolveTip call an operator SIGTERM
+// lands inside — the fetch half or the self-eval half — not a separate
+// Runner seam: ResolveTip is the only seam onto ResolveTip, and both halves
+// run inside that one call.
+type cancelPhase string
 
 const (
-	seamResolveRevision cancelSeam = "resolve-revision"
-	seamSelfPath        cancelSeam = "self-path"
+	phaseFetch    cancelPhase = "fetch"
+	phaseSelfEval cancelPhase = "self-eval"
 )
 
-// newCancelErrRunner models an operator SIGTERM landing inside one seam:
-// the seam cancelIn names cancels the parent ctx and returns its ctx.Err(),
-// and every seam the loop must not reach afterwards errors loudly rather
-// than handing back a zero value the loop would read as a real answer.
-func newCancelErrRunner(cancel context.CancelFunc, cancelIn cancelSeam, revision string) *scriptedRunner {
+// newCancelErrRunner models an operator SIGTERM landing inside one phase of
+// ResolveTip: the phase cancelIn names cancels the parent ctx and returns
+// its ctx.Err(), and every phase the loop must not reach afterwards errors
+// loudly rather than handing back a zero value the loop would read as a
+// real answer.
+func newCancelErrRunner(cancel context.CancelFunc, cancelIn cancelPhase, revision string) *scriptedRunner {
 	r := &scriptedRunner{revisions: []string{revision}}
 	r.onResolve = func(ctx context.Context, call int) error {
-		if cancelIn == seamResolveRevision {
+		if cancelIn == phaseFetch {
 			cancel()
 			return ctx.Err()
 		}
 		return nil
 	}
 	r.onSelf = func(ctx context.Context, call int, revision string) error {
-		if cancelIn == seamSelfPath {
+		if cancelIn == phaseSelfEval {
 			cancel()
 			return ctx.Err()
 		}
-		return fmt.Errorf("must not be called: the %s seam cancels before the self check runs", cancelIn)
+		return fmt.Errorf("must not be called: the %s phase cancels before the self check runs", cancelIn)
 	}
 	r.onStart = func(ctx context.Context, req ChildRequest) error {
 		return fmt.Errorf("must not be called: a cancelled %s must halt before a child ever starts", cancelIn)
@@ -879,7 +884,7 @@ func TestLoopNoneDispatchableWaitSleepsFullWaitWhenTipNeverMoves(t *testing.T) {
 
 // TestLoopQueueEmptyWaitIgnoresTipMoved pins the asymmetric half of the
 // short-circuit that costs nothing: a queue-empty wait (exit 2) never
-// polls mid-wait, however far the backoff has grown, and ResolveRevision is
+// polls mid-wait, however far the backoff has grown, and ResolveTip is
 // called no more than the once-per-iteration the loop already does.
 func TestLoopQueueEmptyWaitIgnoresTipMoved(t *testing.T) {
 	r := &scriptedRunner{
@@ -898,7 +903,7 @@ func TestLoopQueueEmptyWaitIgnoresTipMoved(t *testing.T) {
 	}
 
 	if r.resolveCount() != 4 {
-		t.Errorf("resolveCalls = %d, want 4: exactly one ResolveRevision per iteration, no mid-wait poll", r.resolveCount())
+		t.Errorf("resolveCalls = %d, want 4: exactly one ResolveTip call per iteration, no mid-wait poll", r.resolveCount())
 	}
 
 	events := decodeEvents(t, &buf)
@@ -915,8 +920,15 @@ func TestLoopQueueEmptyWaitIgnoresTipMoved(t *testing.T) {
 // short-circuited streak left off.
 func TestLoopTipMovedResetsBackoffForNextWait(t *testing.T) {
 	r := &scriptedRunner{
-		revisions: []string{"rev1", "rev1", "rev1", "rev1", "rev2"},
-		moved:     []bool{false, false, false, false, true},
+		// A trailing explicit false, not left to the "last value repeats"
+		// convention: resolveTip (pool.go, issue #3625) now reports a
+		// Moved tip from the post-pickKind site too, not only the
+		// opportunistic one, so a 6th resolve call that repeated moved's
+		// last scripted value (true) would observe the still-jammed gate
+		// a second time and fire a second tip_moved this test does not
+		// intend to exercise.
+		revisions: []string{"rev1", "rev1", "rev1", "rev1", "rev2", "rev2"},
+		moved:     []bool{false, false, false, false, true, false},
 		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 3}, {Exit: 5}},
 	}
 	clk := &testClock{}
@@ -1033,9 +1045,9 @@ func TestLoopTipMovedFollowsMovedFlagNotRevisionDiff(t *testing.T) {
 }
 
 // TestLoopIdleWaitSwallowsMidWaitPollFailure pins resolveOpportunistic's
-// failure branch (design decision 6, issue #3625): a ResolveTip error during
-// the opportunistic resolve idleSleep's resolveTip return asks for is not
-// the loop's own per-iteration fetch, so it must be swallowed as "no change
+// failure branch: a ResolveTip error during the opportunistic resolve
+// idleSleep's resolveTip return asks for is not the loop's own
+// per-iteration fetch, so it must be swallowed as "no change
 // observed" rather than routed to backoffOrHalt (which would trip the
 // pool-wide breaker over a transient fetch blip).
 //
@@ -1084,6 +1096,71 @@ func TestLoopIdleWaitSwallowsMidWaitPollFailure(t *testing.T) {
 
 	if r.runCount() != 3 {
 		t.Fatalf("run calls = %d, want 3", r.runCount())
+	}
+}
+
+// TestLoopTipMovedFiresDespiteSelfEvalErrorOnSameResolve pins the reviewer
+// finding on resolveTip (pool.go, issue #3625 review round 2): a resolution
+// that observes Moved=true must report it even when that same call's
+// self-eval half fails and wraps the result in *SelfEvalError. The runner's
+// baseline is already advanced by the time a *SelfEvalError is returned
+// (resolveTipOnce, double_test.go), so an err == nil guard on the report
+// would drop the move for good — no later resolve can ever re-observe it.
+//
+// The script mirrors TestLoopIdleWaitSwallowsMidWaitPollFailure's jam setup
+// (two exit-3 results gate dispatch, growing its backoff), but the
+// opportunistic resolve idleSleep asks for (call #3) is scripted with
+// Moved=true and a self-eval error rather than a plain fetch error. With the
+// fix, resolveTip reports the move before resolveOpportunistic swallows the
+// error, so noteTipMoved resets dispatch's backoff mid-iteration: pickKind
+// finds it runnable at once, and the ordinary post-pickKind resolve (call
+// #4) proceeds in that same loop pass rather than idleSleep sleeping out a
+// second slice. That collapses the wait sequence to two Sleep calls instead
+// of three, which is the observable this test pins alongside the event
+// itself: the pre-fix guard leaves dispatch jammed through call #3, costing
+// a third slice before the natural elapse at call #4 unblocks it anyway.
+func TestLoopTipMovedFiresDespiteSelfEvalErrorOnSameResolve(t *testing.T) {
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		moved:     []bool{false, false, true, false},
+		selfPaths: []string{"/nix/store/same-path"},
+		selfErrAt: 3,
+		selfErr:   errors.New("eval boom"),
+		results:   []ChildResult{{Exit: 3}, {Exit: 3}, {Exit: 5}},
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.SelfProgram = "/nix/store/same-path"
+
+	reason := Loop(context.Background(), cfg, r, em, clk).String()
+
+	events := decodeEvents(t, &buf)
+	var tipMoved *Event
+	for i := range events {
+		if events[i].Event == "tip_moved" {
+			tipMoved = &events[i]
+		}
+	}
+	if tipMoved == nil {
+		t.Fatalf("events = %v, want a tip_moved event despite the self-eval error on the same resolve", eventNames(events))
+	}
+	if len(tipMoved.Kinds) != 1 || tipMoved.Kinds[0] != KindDispatch {
+		t.Fatalf("tip_moved.Kinds = %v, want [%v]: the jammed kind's backoff must be the one reset", tipMoved.Kinds, KindDispatch)
+	}
+
+	want := []time.Duration{testIdleFloor, testIdleFloor}
+	if fmt.Sprint(clk.waits()) != fmt.Sprint(want) {
+		t.Fatalf("waits = %v, want %v: the reset must unblock dispatch mid-iteration, not cost a third idle slice", clk.waits(), want)
+	}
+
+	if r.runCount() != 3 {
+		t.Fatalf("run calls = %d, want 3", r.runCount())
+	}
+	if !strings.Contains(reason, "host-tainted") {
+		t.Errorf("halt reason = %q, want it to name host-tainted", reason)
 	}
 }
 
@@ -1187,14 +1264,14 @@ func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
 	wantEvents(t, &buf, []string{"child_start", "child_finish", "awake_close", "awake_open", "child_start", "child_finish", "halt"}, "no idle/jam step consumed for the wait the closed window owns")
 }
 
-// TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting pins
+// TestLoopAwakeWindowClosesDuringResolveTipParksInsteadOfStarting pins
 // a blocking review finding on runSlot: awaitWindow only decides the
-// window is open once, and ResolveRevision's git fetch can outlast that
-// decision, so runSlot re-checks the window after ResolveRevision returns.
+// window is open once, and ResolveTip's git fetch can outlast that
+// decision, so runSlot re-checks the window after ResolveTip returns.
 // A child must never start once the fetch comes back outside the window --
 // the slot should park (awake_close/awake_open) and try again, not launch
 // straight away.
-func TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting(t *testing.T) {
+func TestLoopAwakeWindowClosesDuringResolveTipParksInsteadOfStarting(t *testing.T) {
 	win, err := ParseWindow("09:00-17:00 UTC")
 	if err != nil {
 		t.Fatalf("ParseWindow: %v", err)
@@ -1203,7 +1280,7 @@ func TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting(t *tes
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 5}},
-		// ResolveRevision advances the shared clock, simulating a fetch that
+		// ResolveTip advances the shared clock, simulating a fetch that
 		// spans the window's close: the decision to run was made while
 		// still open, but time has moved on by the time the revision comes
 		// back. Guarded to call 1 only, so a slot that parks and retries
@@ -1231,7 +1308,7 @@ func TestLoopAwakeWindowClosesDuringResolveRevisionParksInsteadOfStarting(t *tes
 }
 
 // TestLoopSelfChangeHaltsAtIterationBoundary asserts the loop halts before
-// starting a child when Runner.SelfPath reports the daemon's own build
+// starting a child when ResolveTip's Tip.SelfPath reports the daemon's own build
 // changed at the fetched tip, and that the halt reason names it.
 func TestLoopSelfChangeHaltsAtIterationBoundary(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, selfPaths: []string{"/nix/store/new-path"}}
@@ -1310,7 +1387,7 @@ func TestLoopSelfPathMatchDoesNotHalt(t *testing.T) {
 }
 
 // TestLoopEmptySelfProgramSkipsCheck asserts Config.SelfProgram == "" never
-// calls Runner.SelfPath at all — the check is fully disabled, not merely
+// evaluates the self path at all — the check is fully disabled, not merely
 // non-halting.
 func TestLoopEmptySelfProgramSkipsCheck(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
@@ -1321,7 +1398,7 @@ func TestLoopEmptySelfProgramSkipsCheck(t *testing.T) {
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
 	if r.selfCount() != 0 {
-		t.Fatalf("selfCalls = %d, want 0: an empty SelfProgram must never call SelfPath", r.selfCount())
+		t.Fatalf("selfCalls = %d, want 0: an empty SelfProgram must never evaluate the self path", r.selfCount())
 	}
 }
 
@@ -1371,13 +1448,12 @@ func TestLoopSelfChangeHaltDetailFormat(t *testing.T) {
 	}
 }
 
-// TestLoopResolveTipErrorClassification is the regression tripwire for
-// design decision 2 (issue #3625): the halt class an operator's exit code
-// depends on must stay distinguishable between ResolveTip's two error
-// shapes. A *SelfEvalError backs off under the self-build reason and
-// carries the resolved revision on the backoff event (the fetch half
-// succeeded); a plain fetch error backs off under "resolve-revision:" with
-// no revision at all (nothing was ever resolved).
+// TestLoopResolveTipErrorClassification is the regression tripwire that
+// keeps the halt class an operator's exit code depends on distinguishable
+// between ResolveTip's two error shapes. A *SelfEvalError backs off under
+// the self-build reason and carries the resolved revision on the backoff
+// event (the fetch half succeeded); a plain fetch error backs off under
+// "resolve-revision:" with no revision at all (nothing was ever resolved).
 func TestLoopResolveTipErrorClassification(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -1491,18 +1567,32 @@ func TestLoopSelfPathErrorBacksOff(t *testing.T) {
 // rather than killing them" criterion for the self-change halt specifically:
 // with one slot's child already running when a sibling slot's self-check
 // halts the pool, the running child's child_finish is still emitted and
-// Loop only returns once that child has actually returned.
+// neither slot returns until that child has actually returned. It drives
+// runSlot against a newPool rather than Loop so the two slots can be
+// launched in a pinned order, for the reason below; Loop adds nothing over
+// that here beyond the goroutine fan-out this does itself.
 //
-// Whichever slot's SelfPath call lands first "wins" the matching path and
-// goes on to run the child; call order between the two goroutines is
-// otherwise unconstrained, so the test does not assume which slot number
-// plays which role.
+// leadSlot must win the matching (call 1) path, not siblingSlot: leadSlot
+// is newPool's pre-assigned baton holder (pool.go), and awaitBaton now
+// sits after the resolve/self-check, right before the child start (issue
+// #3625's structural fix). If leadSlot instead landed on call 2 — the
+// branch that blocks on `started`, which only a child actually starting
+// can close — it would sit in self-eval forever waiting for a child that
+// can never start: starting requires the baton, and leadSlot cannot pass
+// a baton it is holding while blocked inside its own self-eval. That is a
+// genuine deadlock, but purely a test-construction one:
+// self-eval never depends cross-slot in production, only this fixture's
+// own `started` handshake does — so the fix is pinning call order via a
+// staggered launch, the same pattern the baton release-path tests use,
+// rather than leaving it to a shared call-index race.
 func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 	const matchPath = "/nix/store/old-path"
 	const newPath = "/nix/store/new-path"
-	started := make(chan struct{}) // closed by onStart the moment the child starts
-	release := make(chan struct{}) // closed by the test to let RunChild return
+	leadEntered := make(chan struct{}) // closed by onSelf once leadSlot's call 1 lands
+	started := make(chan struct{})     // closed by onStart the moment the child starts
+	release := make(chan struct{})     // closed by the test to let RunChild return
 	var startOnce sync.Once
+	var leadEnteredOnce sync.Once
 
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
@@ -1510,6 +1600,7 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 		results:   []ChildResult{{Exit: 0}},
 		onSelf: func(ctx context.Context, call int, revision string) error {
 			if call == 1 {
+				leadEnteredOnce.Do(func() { close(leadEntered) })
 				return nil
 			}
 			// Not first: wait for the other slot's child to actually be
@@ -1532,15 +1623,28 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 	cfg := testConfig(2)
 	cfg.SelfProgram = matchPath
 
-	done := make(chan Halt, 1)
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		done <- Loop(context.Background(), cfg, r, em, clk)
+		defer wg.Done()
+		runSlot(pctx, leadSlot, cfg, p)
+	}()
+	<-leadEntered
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, siblingSlot, cfg, p)
 	}()
 
 	<-started      // the long-running child is confirmed running
 	close(release) // let it finish now that it is known to have been running
 
-	h := <-done
+	wg.Wait()
+	h := p.haltReason()
 
 	if h.Class != HaltSelfChanged {
 		t.Fatalf("halt class = %v, want %v", h.Class, HaltSelfChanged)
@@ -1701,23 +1805,19 @@ func TestLoopInvalidConfigPublishesHaltedStatus(t *testing.T) {
 
 // TestLoopCoalescesConcurrentResolvesAcrossSlots is the Loop-seam
 // acceptance test for issue #3625's coalescing criterion: three slots
-// whose rounds arrive at ResolveTip together must cost the shared Runner
-// one resolve, not three.
+// released together, in one pool, cost the shared Runner one resolve, not
+// three.
 //
-// A single multi-slot pool cannot itself produce that overlap: its own
-// discovery baton (pool.go's awaitBaton) holds one slot at a time between
-// acquiring it and passing it on, and ResolveTip only ever runs inside
-// that span (loop.go's runSlot) — so cross-slot resolves are already
-// strictly serialized by the baton, one caller finishing before the next
-// is ever let in. What a shared Runner actually needs to survive is
-// concurrent callers, however many pools or slots end up driving it
-// concurrently — the same property a production hostRunner instance
-// handed to more than one caller relies on. Three single-slot loops (no
-// baton at all — awaitBaton no-ops when a pool has only one slot) sharing
-// one scriptedRunner reproduce exactly that: "three slots released
-// together" as three independent rounds hitting the same Runner at once,
-// without fighting a serialization mechanism that exists for a different
-// reason.
+// This is one Loop with Slots: 3, not three independent one-slot Loops:
+// the baton no longer gates ResolveTip (issue #3625's structural fix moved
+// acquisition past it, to immediately before the child start), so every
+// slot's very first round reaches the post-pickKind resolve concurrently
+// with no setup needed to force it — that overlap is what makes
+// resolveCount() == 1 a claim about Loop's own behaviour rather than about
+// the double's single-flight in isolation. Against a Loop that still
+// serialized resolves behind the baton, only the leader would ever reach
+// holdResolve's park and awaitResolveJoins below would time out waiting
+// for joiners that could never arrive, rather than the test passing.
 //
 // coalesceResolve+holdResolve pins the leader in place until the other two
 // have genuinely joined its flight (not merely started their own — a sleep
@@ -1725,33 +1825,114 @@ func TestLoopInvalidConfigPublishesHaltedStatus(t *testing.T) {
 // resolve should answer all three. resolveCount() == 1 is the tripwire —
 // three independently resolving slots would have left it at 3.
 func TestLoopCoalescesConcurrentResolvesAcrossSlots(t *testing.T) {
-	const n = 3
+	const slots = 3
 	r := &scriptedRunner{
 		revisions:       []string{"rev1"},
-		results:         []ChildResult{{Exit: 7}}, // signalled-stop: each loop halts right after its one round
+		results:         []ChildResult{{Exit: 5}}, // host-tainted: halts the whole pool once any slot starts a child
 		coalesceResolve: true,
 	}
-	r.holdResolve(n - 1) // the leader itself never joins its own flight
+	r.holdResolve(slots - 1) // the leader itself never joins its own flight
 
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	done := make(chan Halt, n)
-	for i := 0; i < n; i++ {
-		go func() {
-			done <- Loop(context.Background(), testConfig(1), r, em, clk)
-		}()
-	}
+	done := make(chan Halt, 1)
+	go func() {
+		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
+	}()
 
-	r.awaitResolveJoins(t, n-1)
-	r.releaseResolve()
+	r.awaitResolveJoins(t, slots-1)
+	r.releaseResolve(t)
 
-	for i := 0; i < n; i++ {
-		<-done
-	}
+	<-done
 
 	if got := r.resolveCount(); got != 1 {
 		t.Fatalf("resolveCalls = %d, want 1: three slots resolving independently would have made 3", got)
+	}
+}
+
+// TestLoopCoalescedResolveFailureBacksOffEverySlot is the Loop-seam
+// acceptance test for issue #3625 acceptance criterion 6: a fetch error
+// surfaced to every caller sharing one flight still leaves each of them
+// backing off on its own, same as an uncoalesced failure would. The
+// coalescing collapses the fetch itself, not the per-slot backoff that
+// follows it.
+//
+// holdResolve+awaitResolveJoins forces the same genuine three-way overlap
+// TestLoopCoalescesConcurrentResolvesAcrossSlots relies on, so resolveErr
+// answers all three callers of one shared flight rather than three
+// independent resolves that merely happened to fail identically. rearmResolve
+// then re-uses the same join count for round 2 as a synchronization
+// barrier — all three slots reaching round 2's flight is only possible once
+// every slot has finished its own round-1 backoff — before the events
+// buffer is read. A follow-up successful resolve (resolveAt is 1-based and
+// only matches the first leader) and a host-tainted exit then give the pool
+// a real halt, the same way TestLoopResolveErrorBacksOffThenHalts ends its
+// single-slot case, so this test terminates rather than looping forever on
+// backoffs.
+func TestLoopCoalescedResolveFailureBacksOffEverySlot(t *testing.T) {
+	const slots = 3
+	wantErr := errors.New("boom: no such revision")
+	r := &scriptedRunner{
+		revisions:       []string{"rev1"},
+		resolveAt:       1,
+		resolveErr:      wantErr,
+		results:         []ChildResult{{Exit: 5}}, // host-tainted: halts the pool once any slot starts a child
+		coalesceResolve: true,
+	}
+	r.holdResolve(slots - 1) // the leader itself never joins its own flight
+
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	done := make(chan Halt, 1)
+	go func() {
+		done <- Loop(context.Background(), testConfig(slots), r, em, clk)
+	}()
+
+	r.awaitResolveJoins(t, slots-1)
+
+	// Each slot must finish its own backoffOrHalt (and thus emit its own
+	// "backoff" event) before it loops back for round 2's resolve, so
+	// seeing all three converge on round 2's flight is the synchronization
+	// point that proves round 1's backoffs are all done — without it, a
+	// fast leader could race ahead into round 2 and beyond before the
+	// other two slots recorded anything, which is exactly the -race
+	// failure an earlier version of this test hit. rearmResolve installs
+	// round 2's hold before releasing round 1's, so no slot can slip
+	// through unheld between the two rounds (see rearmResolve's own doc).
+	r.rearmResolve(t, slots-1) // round 1's shared flight fails for all three
+	r.awaitResolveJoins(t, slots-1)
+
+	// Without coalescing, resolveAt: 1 would only ever fail the one caller
+	// that happened to make call #1 — the other two would succeed and run
+	// a child straight away, never backing off at all. All three slots
+	// reporting their own backoff below is only possible because the one
+	// shared flight's error answered all of them.
+	events := decodeEvents(t, &buf)
+	seen := map[int]bool{}
+	for _, ev := range events {
+		if ev.Event != "backoff" {
+			continue
+		}
+		if ev.Slot == nil {
+			t.Fatalf("backoff event has no slot: %+v", ev)
+		}
+		if !strings.Contains(ev.Reason, wantErr.Error()) {
+			t.Errorf("backoff event slot %d reason = %q, want it to name %v", *ev.Slot, ev.Reason, wantErr)
+		}
+		seen[*ev.Slot] = true
+	}
+	if len(seen) != slots {
+		t.Fatalf("slots reporting their own backoff = %v, want all %d slots: the shared failure must not merge into fewer backoffs than slots", seen, slots)
+	}
+
+	r.releaseResolve(t) // round 2 succeeds (resolveAt matches only call #1); the pool runs a child and halts
+
+	reason := (<-done).String()
+	if !strings.Contains(reason, "host-tainted") {
+		t.Errorf("halt reason = %q, want the follow-up host-tainted halt, not the shared resolve failure itself", reason)
 	}
 }

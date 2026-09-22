@@ -41,11 +41,11 @@ func TestLoopClosedStopHaltsWithNoChildStarted(t *testing.T) {
 	}
 }
 
-// TestLoopClosedStopEndsInProgressResolveRevisionPromptly closes Stop while
-// a slot is blocked inside ResolveRevision (standing in for the production
+// TestLoopClosedStopEndsInProgressResolveTipPromptly closes Stop while
+// a slot is blocked inside ResolveTip (standing in for the production
 // adapter's git fetch), and asserts the pool's own cancelled context is what
 // unblocks it — Loop must not wait out any backoff or idle interval first.
-func TestLoopClosedStopEndsInProgressResolveRevisionPromptly(t *testing.T) {
+func TestLoopClosedStopEndsInProgressResolveTipPromptly(t *testing.T) {
 	stop := make(chan struct{})
 	resolving := make(chan struct{})
 	unblocked := make(chan struct{})
@@ -57,7 +57,7 @@ func TestLoopClosedStopEndsInProgressResolveRevisionPromptly(t *testing.T) {
 			// Signals the fetch is genuinely in flight before the test
 			// closes Stop — otherwise a fast scheduler could have the
 			// watcher goroutine halt the pool before runSlot ever reaches
-			// ResolveRevision, and this test would pass for the wrong
+			// ResolveTip, and this test would pass for the wrong
 			// reason (no fetch to interrupt at all).
 			close(resolving)
 			<-ctx.Done()
@@ -78,14 +78,14 @@ func TestLoopClosedStopEndsInProgressResolveRevisionPromptly(t *testing.T) {
 	select {
 	case <-resolving:
 	case <-time.After(5 * time.Second):
-		t.Fatalf("ResolveRevision was never called")
+		t.Fatalf("ResolveTip was never called")
 	}
 	close(stop)
 
 	select {
 	case <-unblocked:
 	case <-time.After(5 * time.Second):
-		t.Fatalf("ResolveRevision's ctx was never cancelled after Stop closed")
+		t.Fatalf("ResolveTip's ctx was never cancelled after Stop closed")
 	}
 
 	select {
@@ -103,7 +103,7 @@ func TestLoopClosedStopEndsInProgressResolveRevisionPromptly(t *testing.T) {
 
 // TestLoopClosedStopEndsInProgressBackoffSleepPromptly covers the other half
 // of the "closed Stop ends an in-progress wait promptly" acceptance
-// criterion (TestLoopClosedStopEndsInProgressResolveRevisionPromptly above
+// criterion (TestLoopClosedStopEndsInProgressResolveTipPromptly above
 // covers the fetch half): a slot parked in the failure backoff sleep must
 // unblock the instant Stop closes, not sleep out the rest of
 // FailureBackoff. BreakerThreshold defaults to 1000 (testConfig), so this
@@ -202,7 +202,7 @@ func TestChildRequestCarriesStopThenAbortInOrder(t *testing.T) {
 
 // TestChildRequestBothAlreadyClosedSeenImmediately drives the public Loop
 // seam, not newPool/runSlot directly: with the mid-iteration admission
-// checks gone (issue #3626), a slot parked in ResolveRevision when both
+// checks gone (issue #3626), a slot parked in ResolveTip when both
 // latches close goes on to start its child anyway — the very race
 // ChildRequest.Stop/Abort's per-child forwarding exists for — so this is
 // now reachable without reaching around Loop's own Stop watcher.
@@ -253,7 +253,7 @@ func TestChildRequestBothAlreadyClosedSeenImmediately(t *testing.T) {
 	select {
 	case <-resolving:
 	case <-time.After(5 * time.Second):
-		t.Fatalf("ResolveRevision was never called")
+		t.Fatalf("ResolveTip was never called")
 	}
 	close(stop)
 	close(abort)

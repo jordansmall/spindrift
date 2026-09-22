@@ -1460,9 +1460,9 @@ func TestStartupPreflight_RunsExactlyOnce(t *testing.T) {
 	}
 }
 
-// TestStartupPreflight_ResolveRevisionFailure: a preflight that cannot run
+// TestStartupPreflight_FetchRevisionFailure: a preflight that cannot run
 // is not a preflight that passed.
-func TestStartupPreflight_ResolveRevisionFailure(t *testing.T) {
+func TestStartupPreflight_FetchRevisionFailure(t *testing.T) {
 	var buf bytes.Buffer
 	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
 	r := &fakePreflightRunner{fetchErr: errors.New("git fetch boom")}
@@ -1483,6 +1483,44 @@ func TestStartupPreflight_ResolveRevisionFailure(t *testing.T) {
 	}
 	if events[0].Event != "preflight" || events[0].Outcome != "doctor-seam-error" {
 		t.Errorf("events[0] = %+v, want preflight/doctor-seam-error", events[0])
+	}
+}
+
+// TestStartupPreflight_NeverEvaluatesSelfPath is the regression pinned by
+// the #3625 review finding: startupPreflight only needs a revision to pin
+// doctor to, and must never reach ResolveTip's self `nix eval` half even
+// with the self check configured (selfAttr set). Driven against a real
+// *hostRunner — not fakePreflightRunner — because the bug was in
+// preflightRunner's shape (ResolveTip, not fetchRevision), which a fake
+// satisfying the narrowed interface can no longer exercise; only the real
+// runner's ResolveTip has an eval half to wrongly reach. runnerEvalCommand
+// fails were it ever invoked, so the assertion is "0 calls", not "calls
+// succeeded" — the finding was that a failing self-eval hard-refused
+// startup, so a stub that quietly passes would hide exactly that.
+func TestStartupPreflight_NeverEvaluatesSelfPath(t *testing.T) {
+	origFetch, origEval, origDoctor := runnerFetchCommand, runnerEvalCommand, runnerDoctorCommand
+	t.Cleanup(func() { runnerFetchCommand, runnerEvalCommand, runnerDoctorCommand = origFetch, origEval, origDoctor })
+
+	runnerFetchCommand = scriptedFetchSeamT(t, func() string { return "deadbeef" }, nil)
+	var evalCalls int
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		evalCalls++
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "echo 'nix eval should never run in the preflight' >&2; exit 1")
+	}
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	h := startupPreflight(context.Background(), r, em)
+	if h.Class != daemon.HaltNone {
+		t.Fatalf("startupPreflight() = %+v, want the zero Halt (self-eval failure must never reach the preflight)", h)
+	}
+	if evalCalls != 0 {
+		t.Errorf("runnerEvalCommand called %d times, want 0", evalCalls)
 	}
 }
 
@@ -1826,7 +1864,7 @@ func TestMainRun_NoKnobsSetNoWarning(t *testing.T) {
 // bareOriginConsumerT sets up a bare origin repo plus a clone with one
 // commit pushed to main, and returns the clone's path. Both
 // TestMainRun_*ChildGetsCapturedEnv tests need a real git remote so
-// ResolveRevision's `git fetch` succeeds during mainRun's preflight.
+// ResolveTip's `git fetch` succeeds during mainRun's preflight.
 func bareOriginConsumerT(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -1983,7 +2021,7 @@ func TestMainRun_DispatchChildGetsCapturedEnv(t *testing.T) {
 		t.Fatalf("mainRun() = %d, want 1 (breaker halt); stdout=%q stderr=%q", got, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "breaker_trip") {
-		// threshold 1 also trips on a pre-child failure (ResolveRevision,
+		// threshold 1 also trips on a pre-child failure (ResolveTip's fetch,
 		// self-build), so this alone doesn't prove a child dispatched — the
 		// captured == nil check below carries that claim.
 		t.Errorf("stdout = %q, want a breaker_trip event", stdout.String())
@@ -2041,7 +2079,7 @@ func waitForFileContains(t *testing.T, path, want string) {
 // seam (never a real signal to the test binary itself — mainRun's own
 // argument for the same seam applies here too) and stubs the doctor and
 // child exec seams so the daemon needs nothing but a real git checkout with
-// a fetchable origin — ResolveRevision's own contract (see the package doc
+// a fetchable origin — ResolveTip's own contract (see the package doc
 // on bareOriginConsumerT's other callers).
 func TestMainRun_EndToEndSignalDrainsThenEscalates(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {

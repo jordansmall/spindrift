@@ -42,19 +42,22 @@ type scriptedRunner struct {
 	// is driven by the flag alone, never a revision-string diff.
 	moved []bool
 
-	// coalesceResolve, when set, makes ResolveTip coalesce concurrent
-	// callers into one flight the way hostRunner.ResolveTip does
-	// (cmd/launcher/daemon/runner.go, issue #3625): a caller that arrives
-	// while a resolution is in flight waits on it and returns its exact
-	// Tip/error, without bumping resolveCalls, so resolveCount() counts
-	// resolutions, not callers. Off by default: every existing test scripts
-	// revisions/moved/selfPaths/resolveAt by call index, and turning
-	// coalescing on would silently change which call index a given caller
-	// lands on — never flip it on for an existing test.
+	// coalesceResolve, when set, makes resolveCount() count resolutions
+	// rather than callers: a caller that finds a resolution already
+	// registered waits on it and shares its exact Tip/error instead of
+	// resolving itself. This is a counter, not a re-implementation of
+	// hostRunner.ResolveTip's single-flight (cmd/launcher/daemon/runner.go)
+	// — it skips the ctx-aware joiner exit and the TTL that production
+	// needs, since no test here exercises either; the real flight's
+	// semantics (shared results, shared errors, no TTL) are pinned
+	// directly against hostRunner in
+	// cmd/launcher/daemon/runner_test.go, not by this double. Off by
+	// default: every existing test scripts revisions/moved/selfPaths/
+	// resolveAt by call index, and turning coalescing on would silently
+	// change which call index a given caller lands on — never flip it on
+	// for an existing test.
 	coalesceResolve bool
-
-	resolveFlightMu sync.Mutex
-	resolveFlight   *scriptedResolveFlight
+	resolveFlight   *scriptedResolveFlight // guarded by mu
 
 	// resolveHold/resolveJoins: installed by holdResolve for a test that
 	// needs to pin a coalesced flight's leader in place while it counts
@@ -122,21 +125,28 @@ func (r *scriptedRunner) holdSlots(n int) {
 }
 
 // scriptedResolveFlight is one in-flight (or just-finished, until its
-// leader clears r.resolveFlight) coalesced ResolveTip resolution, the
-// double's mirror of hostRunner's tipFlight.
+// leader clears r.resolveFlight) coalesced ResolveTip resolution — just
+// enough state for resolveCount() to count resolutions rather than
+// callers, not a mirror of hostRunner's tipFlight.
 type scriptedResolveFlight struct {
 	done chan struct{}
 	tip  Tip
 	err  error
 }
 
-// holdResolve switches a coalesced flight's leader (coalesceResolve must
-// also be set) into blocking mode: after registering its flight, it parks
-// on resolveHold until releaseResolve, giving joiners a real window to
-// arrive rather than a race a sleep would only paper over. n sizes the
-// joins channel awaitResolveJoins drains, the same "size the channel to
-// the wait" gesture holdSlots(n) makes for started.
+// holdResolve switches a coalesced flight's leader into blocking mode:
+// after registering its flight, it parks on resolveHold until
+// releaseResolve, giving joiners a real window to arrive rather than a
+// race a sleep would only paper over. n sizes the joins channel
+// awaitResolveJoins drains, the same "size the channel to the wait"
+// gesture holdSlots(n) makes for started. coalesceResolve must also be set
+// — enforced here, since a hold installed on an uncoalesced runner would
+// sit unread and every caller would hang on awaitResolveJoins instead of
+// failing at the setup mistake itself.
 func (r *scriptedRunner) holdResolve(n int) {
+	if !r.coalesceResolve {
+		panic("scriptedRunner: holdResolve requires coalesceResolve")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.resolveHold = make(chan struct{})
@@ -161,11 +171,42 @@ func (r *scriptedRunner) awaitResolveJoins(t *testing.T, n int) {
 }
 
 // releaseResolve lets a leader parked by holdResolve proceed with its
-// resolution.
-func (r *scriptedRunner) releaseResolve() {
+// resolution. It fails the test rather than closing a nil channel, same
+// guard as releaseSlot, since a caller with no matching holdResolve would
+// otherwise panic on close(nil).
+func (r *scriptedRunner) releaseResolve(t *testing.T) {
+	t.Helper()
 	r.mu.Lock()
 	hold := r.resolveHold
 	r.mu.Unlock()
+	if hold == nil {
+		t.Fatalf("scriptedRunner: releaseResolve: no hold installed (holdResolve?)")
+	}
+	close(hold)
+}
+
+// rearmResolve releases the currently held flight and arms the next
+// round's hold in one critical section — the one span resolveHold and
+// resolveJoins are ever mutated together. Two separate calls
+// (releaseResolve then holdResolve) leave a window between them during
+// which resolveHold still points at the just-closed round's channel: a
+// slot fast enough to re-enter ResolveTip and become the next leader in
+// that window reads the stale, already-closed hold and sails through
+// unheld, so the next round's awaitResolveJoins would never see it join.
+// Installing the new hold before closing the old one closes that window.
+func (r *scriptedRunner) rearmResolve(t *testing.T, n int) {
+	t.Helper()
+	if !r.coalesceResolve {
+		panic("scriptedRunner: rearmResolve requires coalesceResolve")
+	}
+	r.mu.Lock()
+	hold := r.resolveHold
+	r.resolveHold = make(chan struct{})
+	r.resolveJoins = make(chan struct{}, n)
+	r.mu.Unlock()
+	if hold == nil {
+		t.Fatalf("scriptedRunner: rearmResolve: no hold installed (holdResolve?)")
+	}
 	close(hold)
 }
 
@@ -271,43 +312,35 @@ func (r *scriptedRunner) calls() []runCall {
 }
 
 // ResolveTip dispatches straight to resolveTipOnce unless coalesceResolve
-// is set, in which case it wraps that call in a single-flight the same
-// shape as hostRunner.ResolveTip (cmd/launcher/daemon/runner.go): the first
-// caller becomes the leader and registers the flight, then (if holdResolve
-// installed a hold) parks until released; every caller that arrives while
-// the flight is registered joins it instead — signalling resolveJoins,
-// then waiting on flight.done — without ever calling resolveTipOnce
-// itself, so resolveCalls only ever counts leaders. No TTL: once a flight's
-// done channel is closed and r.resolveFlight cleared, the next caller
-// starts a fresh one, same as production.
+// is set, in which case the first caller becomes the leader and registers
+// the flight, then (if holdResolve installed a hold) parks until released;
+// every caller that arrives while the flight is registered joins it
+// instead — signalling resolveJoins, then blocking on flight.done — without
+// ever calling resolveTipOnce itself, so resolveCalls only ever counts
+// leaders. This is deliberately thinner than hostRunner.ResolveTip's real
+// single-flight: no ctx-aware joiner exit, no TTL, because no test here
+// needs either — see coalesceResolve's own doc for where the real
+// semantics are pinned instead.
 func (r *scriptedRunner) ResolveTip(ctx context.Context) (Tip, error) {
 	if !r.coalesceResolve {
 		return r.resolveTipOnce(ctx)
 	}
 
-	r.resolveFlightMu.Lock()
+	r.mu.Lock()
 	if flight := r.resolveFlight; flight != nil {
-		r.resolveFlightMu.Unlock()
-		r.mu.Lock()
 		joins := r.resolveJoins
 		r.mu.Unlock()
 		if joins != nil {
 			joins <- struct{}{}
 		}
-		select {
-		case <-flight.done:
-			return flight.tip, flight.err
-		case <-ctx.Done():
-			return Tip{}, ctx.Err()
-		}
+		<-flight.done
+		return flight.tip, flight.err
 	}
 	flight := &scriptedResolveFlight{done: make(chan struct{})}
 	r.resolveFlight = flight
-	r.resolveFlightMu.Unlock()
-
-	r.mu.Lock()
 	hold := r.resolveHold
 	r.mu.Unlock()
+
 	if hold != nil {
 		<-hold
 	}
@@ -315,9 +348,9 @@ func (r *scriptedRunner) ResolveTip(ctx context.Context) (Tip, error) {
 	tip, err := r.resolveTipOnce(ctx)
 	flight.tip, flight.err = tip, err
 
-	r.resolveFlightMu.Lock()
+	r.mu.Lock()
 	r.resolveFlight = nil
-	r.resolveFlightMu.Unlock()
+	r.mu.Unlock()
 	close(flight.done)
 
 	return tip, err

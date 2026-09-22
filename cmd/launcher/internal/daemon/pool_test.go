@@ -552,14 +552,17 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 // a child — the old occupied-only predicate could not see that and would
 // have reported a spurious jam here.
 //
-// Call numbering is deterministic despite two concurrent slots: call 1 is
-// slot 0's fetch as the pre-assigned baton holder (no wait); call 2 is
-// slot 1's fetch, unblocked only once slot 0's onStart passes the baton
-// live during its first RunChild call (same reasoning as
-// TestPoolSnapshotSlots's own doc); call 3 is slot 0's second-round fetch,
-// reached only after slot 0's first child is released below, by which
-// point slot 1 is parked in its own first, held RunChild call and cannot
-// be issuing a competing fetch of its own.
+// Call 1/2 are the two slots' round-1 fetches, racing each other in either
+// order: the baton no longer gates ResolveTip (issue #3625's structural
+// fix moved acquisition to after the resolve), so both round-1 fetches now
+// run concurrently and the hook below treats them identically either way.
+// Call 3, the one the hook actually cares about, is still deterministically
+// slot 0's second-round fetch: slot 0 is released into its second round
+// below, and slot 1's own kind stays gated (noteWaitResult) after its
+// exit-3, none-dispatchable result — with clk parked, slot 1's idleSleep
+// blocks rather than spinning the virtual clock forward and slipping into
+// a genuine, unreleased second RunChild call, so it can never issue a
+// competing fetch of its own before the test ends.
 func TestPoolExit3WithSiblingResolvingReportsIdleNotJam(t *testing.T) {
 	const slots = 2
 	r := &scriptedRunner{revisions: []string{"rev1"}}
@@ -577,6 +580,7 @@ func TestPoolExit3WithSiblingResolvingReportsIdleNotJam(t *testing.T) {
 		return nil
 	}
 	clk := &testClock{}
+	clk.park()
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 	cfg := testConfig(slots)
@@ -678,6 +682,13 @@ func TestPoolResolvingSlotResetsToIdleOnCancel(t *testing.T) {
 // sleepSignal below), so slot 1's later exit-3 is guaranteed to land while
 // slot 0 is genuinely backing off, never racing the two into some other
 // interleaving.
+//
+// leadSlot is launched alone first and confirmed resolved (call 1) before
+// siblingSlot is launched: the baton no longer gates ResolveTip (issue
+// #3625's structural fix), so both slots' round-1 resolves would otherwise
+// race for call 1/2, and runErrAt=1 (a global RunChild-call index, the same
+// convention as call) needs slot 0's own RunChild to land on index 1
+// deterministically too.
 func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
 	const slots = 2
 	r := &scriptedRunner{
@@ -687,13 +698,17 @@ func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
 		results:   []ChildResult{{}, {Exit: 3}},
 	}
 	backingOff := make(chan struct{})
+	leadResolved := make(chan struct{})
+	var leadResolvedOnce sync.Once
 	r.onResolve = func(ctx context.Context, call int) error {
-		if call == 2 {
-			select {
-			case <-backingOff:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+		if call == 1 {
+			leadResolvedOnce.Do(func() { close(leadResolved) })
+			return nil
+		}
+		select {
+		case <-backingOff:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 		return nil
 	}
@@ -704,9 +719,21 @@ func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
 	cfg := testConfig(slots)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan Halt, 1)
+	p, pctx := newPool(ctx, cfg, r, em, clk)
+	defer p.cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		done <- Loop(ctx, cfg, r, em, clk)
+		defer wg.Done()
+		runSlot(pctx, leadSlot, cfg, p)
+	}()
+	<-leadResolved
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, siblingSlot, cfg, p)
 	}()
 
 	// Slot 0's seam error lands it in backoffOrHalt's parked Sleep; slot 1
@@ -719,7 +746,8 @@ func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
 	nw.waitForLine(t, "\"event\":\"idle\"")
 
 	cancel()
-	reason := (<-done).String()
+	wg.Wait()
+	reason := p.haltReason().String()
 	if !strings.Contains(reason, "context-cancelled") {
 		t.Fatalf("halt reason = %q, want it to name context-cancelled", reason)
 	}
@@ -992,6 +1020,60 @@ func TestJamIgnoresSiblingAwaitingWindow(t *testing.T) {
 	}
 }
 
+// TestBatonParkPublishesIdle pins awaitBaton's baton arm (issue #3625
+// review finding), siblingsEngaged's other doing-nothing case alongside
+// TestJamIgnoresSiblingAwaitingWindow above: a slot parked waiting for the
+// discovery baton is waiting for its own turn, not doing anything, and
+// must read as PhaseIdle -- even though it enters awaitBaton still
+// PhaseResolving, the real state at the loop.go call site -- or a stuck
+// sibling's jam alarm silently degrades to idle.
+func TestBatonParkPublishesIdle(t *testing.T) {
+	const slots = 2
+	clk := &testClock{}
+	nw := newNotifyWriter()
+	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+
+	cfg := testConfig(slots)
+	p, pctx := newPool(context.Background(), cfg, &scriptedRunner{revisions: []string{"rev1"}}, em, clk)
+	defer p.cancel()
+
+	p.setPhase(1, PhaseResolving)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.awaitBaton(pctx, 1)
+	}()
+
+	// baton_hold is emitted from inside the same mutate that writes the
+	// phase, so observing the line proves the phase is already written.
+	nw.waitForLine(t, "\"event\":\"baton_hold\"")
+
+	if got := p.snapshot().Slots[1].Phase; got != PhaseIdle {
+		t.Fatalf("phase while parked on the baton = %q, want %q", got, PhaseIdle)
+	}
+
+	p.noteWaitResult(0, KindDispatch, "rev1", true)
+
+	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
+	foundJam := false
+	for _, ev := range events {
+		if ev.Event == "jam" {
+			foundJam = true
+		}
+		if ev.Event == "idle" && ev.Slot != nil && *ev.Slot == 0 {
+			t.Fatalf("events = %v, want no idle for slot 0: its only sibling was merely awaiting the baton, which must not count as engaged", eventNames(events))
+		}
+	}
+	if !foundJam {
+		t.Fatalf("events = %v, want a jam event: slot 0 had nothing dispatchable and its only sibling was awaiting the baton, not engaged", eventNames(events))
+	}
+
+	p.cancel()
+	wg.Wait()
+}
+
 // TestAwaitWindowPublishesOnEveryIteration pins issue #3623's tradeoff:
 // every noteAwakeClose/noteAwakeOpen call goes through mutate now, and
 // mutate publishes unconditionally, so a second iteration that still finds
@@ -1130,8 +1212,8 @@ func TestNoteTipMovedStampsJammedKinds(t *testing.T) {
 	}
 }
 
-// TestIdleSleepFirstJamWaitResolvesNothingExtra pins design decision 5
-// (issue #3625): a slot's very first no-work wait, grown to exactly one
+// TestIdleSleepFirstJamWaitResolvesNothingExtra pins the opportunistic-
+// resolve threshold: a slot's very first no-work wait, grown to exactly one
 // IdleFloor, must not ask for an opportunistic resolve — only a wait that
 // outlives its first IdleFloor slice earns one.
 func TestIdleSleepFirstJamWaitResolvesNothingExtra(t *testing.T) {
@@ -1154,8 +1236,8 @@ func TestIdleSleepFirstJamWaitResolvesNothingExtra(t *testing.T) {
 	}
 }
 
-// TestResolveOpportunisticFailureIsNoChangeObserved pins design decision 6
-// (issue #3625): a failed opportunistic resolve is treated as no change
+// TestResolveOpportunisticFailureIsNoChangeObserved pins how a failed
+// opportunistic resolve must be handled: treated as no change
 // observed, not fed to the breaker and not stamped with any event — only the
 // iteration's own post-pickKind resolve reports a genuinely broken fetch.
 // It also leaves the slot PhaseIdle, not stranded PhaseResolving, so a
@@ -1187,6 +1269,163 @@ func TestResolveOpportunisticFailureIsNoChangeObserved(t *testing.T) {
 			t.Fatalf("events = %v, want no backoff/breaker_trip/tip_moved event from a swallowed opportunistic failure", eventNames(events))
 		}
 	}
+}
+
+// TestResolveTipPostPickKindSiteReportsMoved pins the #3625 review finding's
+// fix directly at the pool seam: resolveTip is now the one method both
+// idleSleep's opportunistic call and runSlot's post-pickKind fetch go
+// through, so a Moved tip observed at *either* site reports noteTipMoved.
+// Before the fix, loop.go's post-pickKind ResolveTip call read Tip.Moved
+// and discarded it — this test drives that exact call shape (a resolve made
+// after a kind is already known runnable, the same site runSlot's
+// post-pickKind p.resolveTip call used to own alone) and asserts the
+// jammed sibling kind's gate still clears.
+func TestResolveTipPostPickKindSiteReportsMoved(t *testing.T) {
+	r := &scriptedRunner{revisions: []string{"rev2"}, moved: []bool{true}}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := dualKindConfig(1, 0)
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	p.markNoWork(KindDispatch, clk.Now(), true) // dispatch jammed; research untouched, still runnable
+
+	tip, err := p.resolveTip(pctx, 0)
+	if err != nil {
+		t.Fatalf("resolveTip error = %v, want nil", err)
+	}
+	if tip.Revision != "rev2" {
+		t.Fatalf("tip.Revision = %q, want rev2", tip.Revision)
+	}
+
+	events := decodeEvents(t, &buf)
+	var tipMoved *Event
+	for i := range events {
+		if events[i].Event == "tip_moved" {
+			tipMoved = &events[i]
+		}
+	}
+	if tipMoved == nil {
+		t.Fatalf("events = %v, want a tip_moved event from the post-pickKind resolve site", eventNames(events))
+	}
+	if !reflect.DeepEqual(tipMoved.Kinds, []Kind{KindDispatch}) {
+		t.Fatalf("tip_moved kinds = %v, want [dispatch]", tipMoved.Kinds)
+	}
+	if p.st.kinds[KindDispatch].jammedNow() {
+		t.Fatalf("dispatch still jammedNow after a post-pickKind resolve observed Moved=true, want the gate cleared")
+	}
+}
+
+// TestNoteTipMovedNoEventWithNothingJammed pins the event-stream guarantee
+// the #3625 fix's gating exists to preserve: resolveTip now reports every
+// Moved tip, including the ordinary per-iteration fetch made while nothing
+// is jammed (dispatch and research both idle no-work-free) — that resolve
+// must not grow a tip_moved event just because noteTipMoved was reached.
+// Before this gate, folding the post-pickKind site onto noteTipMoved would
+// have fired tip_moved on every advance of the base branch, not only the
+// ones that actually unblocked something.
+func TestNoteTipMovedNoEventWithNothingJammed(t *testing.T) {
+	r := &scriptedRunner{}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := dualKindConfig(1, 0)
+	p, _ := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	p.noteTipMoved(0, "rev2") // no kind jammed
+
+	events := decodeEvents(t, &buf)
+	for _, ev := range events {
+		if ev.Event == "tip_moved" {
+			t.Fatalf("events = %v, want no tip_moved event when noteTipMoved reset nothing", eventNames(events))
+		}
+	}
+}
+
+// TestLoopMultiSlotSiblingResolveClearsJam pins the invariant the #3625
+// review finding actually turns on: Tip.Moved is Runner-global
+// (cmd/launcher/daemon/runner.go:52-57, lastRevision/haveLastRevision), so
+// exactly one resolution ever observes a given move — whichever slot that
+// is must report it, or the move is lost for the whole pool. Two slots,
+// dispatch seeded jammed before either starts and research left runnable,
+// so pickKind hands both slots research (the only runnable kind, whichever
+// preference order slotOrder gives them) and both reach the post-pickKind
+// resolve concurrently — the baton no longer gates ResolveTip (issue
+// #3625's structural fix moved acquisition past it). Both resolutions are
+// scripted to observe the same Moved=true/rev2 answer, modelling the
+// shared result concurrent callers of a coalesced flight would get in
+// production; only one of the two noteTipMoved calls this produces should
+// find dispatch still jammed and actually reset it, so exactly one
+// tip_moved event should reach the stream.
+func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
+	const slots = 2
+	cfg := dualKindConfig(slots, 0)
+	r := &scriptedRunner{revisions: []string{"rev2"}, moved: []bool{true}}
+	r.holdSlots(slots)
+	// announceEachSlot: without it, the first slot to reach RunChild would
+	// never pass the baton onward (that happens on the child's first
+	// announced issue, runSlot's ChildRequest.OnIssue callback's
+	// passBaton(batonPassClaimed) call), so the second slot would stay
+	// parked in awaitBaton forever and this test's "both slots really ran"
+	// premise would never be reached.
+	r.announceEachSlot()
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+	p.markNoWork(KindDispatch, clk.Now(), true) // dispatch jammed before either slot starts; research left runnable
+
+	var wg sync.WaitGroup
+	wg.Add(slots)
+	for s := 0; s < slots; s++ {
+		go func(s int) {
+			defer wg.Done()
+			runSlot(pctx, s, cfg, p)
+		}(s)
+	}
+
+	// Both slots reach RunChild — the pool really did run two slots, not
+	// one slot and a sibling that never got there.
+	seen := map[int]bool{}
+	for i := 0; i < slots; i++ {
+		seen[r.awaitStart(t)] = true
+	}
+	if len(seen) != slots {
+		t.Fatalf("distinct slots started = %v, want %d distinct slots", seen, slots)
+	}
+
+	events := decodeEvents(t, &buf)
+	var tipMovedCount int
+	var tipMoved *Event
+	for i := range events {
+		if events[i].Event == "tip_moved" {
+			tipMovedCount++
+			tipMoved = &events[i]
+		}
+	}
+	if tipMovedCount != 1 {
+		t.Fatalf("tip_moved events = %d, want exactly 1: %v", tipMovedCount, eventNames(events))
+	}
+	if !reflect.DeepEqual(tipMoved.Kinds, []Kind{KindDispatch}) {
+		t.Fatalf("tip_moved kinds = %v, want [dispatch]", tipMoved.Kinds)
+	}
+
+	// pickKind, not a bare p.st read, is the lock-respecting way to observe
+	// dispatch's gate cleared.
+	if kind, ok := p.pickKind(0); !ok || kind != KindDispatch {
+		t.Fatalf("pickKind(0) after the resolve = (%q, %v), want (dispatch, true): dispatch's gate must be cleared", kind, ok)
+	}
+
+	for s := 0; s < slots; s++ {
+		r.releaseSlot(t, s, ChildResult{Exit: 5}) // host-tainted: halts the whole pool cleanly
+	}
+	awaitWG(t, r, &wg)
 }
 
 // TestSlotOrderDerivesFromKinds pins slotOrder to the kinds argument rather
@@ -1568,27 +1807,47 @@ func TestPoolSnapshotState(t *testing.T) {
 
 // TestPoolSnapshotSlots pins that snapshot names each slot's kind, revision
 // and in-flight issues from occupancy, leaving an unoccupied slot bare.
-// Driven through Loop with a 2-slot pool: slot 0 is the pre-assigned
-// initial baton holder (pool.go's leadSlot), so it alone resolves and
-// occupies on the first round while slot 1 parks in awaitBaton. Announcing
-// slot 0's issue via req.OnIssue passes the baton, so slot 1's own
-// ResolveTip call (call index 2 — onResolve is keyed by call, not
-// slot, since ResolveTip carries no slot) is parked forever on
-// ctx.Done(), which keeps slot 1 from ever reaching occupy regardless of
-// scheduling.
+// Driven against a 2-slot pool: slot 0 is the pre-assigned initial baton
+// holder (pool.go's leadSlot), so it alone occupies on the first round
+// while slot 1 parks in awaitBaton.
+//
+// The baton no longer gates ResolveTip (issue #3625's structural fix), so
+// both slots' round-1 resolves now race for call index 1/2, and a bare
+// call>=2 script would risk pinning slot 0 itself — the pre-assigned
+// holder that never explicitly acquires the baton on its first round — to
+// the blocked branch, leaving nothing to ever pass a baton nobody
+// explicitly took: a genuine deadlock, not just a stale assumption. slot 0
+// is launched alone first and confirmed resolved (call 1) before slot 1 is
+// launched, so slot 1's own resolve is deterministically call 2 and parks
+// forever on ctx.Done(), which keeps slot 1 from ever reaching occupy
+// regardless of scheduling.
+//
+// Slot 0 then stays parked in that same call 1 until slot 1 has entered
+// its own resolve: resolveTip (pool.go) publishes PhaseResolving before
+// calling ResolveTip, so that hold is what orders slot 1's phase ahead of
+// the status read onStart makes. Without it slot 0 can reach onStart
+// before slot 1's goroutine is scheduled at all, snapshotting slot 1 as
+// still idle.
 func TestPoolSnapshotSlots(t *testing.T) {
 	dir, sw := statusDir(t)
 	clk := &testClock{}
 	var st *Status
 	var readErr error
+	leadEntered := make(chan struct{})
+	var leadEnteredOnce sync.Once
+	siblingResolving := make(chan struct{})
+	var siblingResolvingOnce sync.Once
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		onResolve: func(ctx context.Context, call int) error {
-			if call >= 2 {
-				<-ctx.Done()
-				return ctx.Err()
+			if call == 1 {
+				leadEnteredOnce.Do(func() { close(leadEntered) })
+				<-siblingResolving
+				return nil
 			}
-			return nil
+			siblingResolvingOnce.Do(func() { close(siblingResolving) })
+			<-ctx.Done()
+			return ctx.Err()
 		},
 		onStart: func(ctx context.Context, req ChildRequest) error {
 			req.OnIssue("7")
@@ -1602,16 +1861,29 @@ func TestPoolSnapshotSlots(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	done := make(chan Halt, 1)
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+	p.publishInitial()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		done <- Loop(context.Background(), cfg, r, em, clk)
+		defer wg.Done()
+		runSlot(pctx, leadSlot, cfg, p)
+	}()
+	<-leadEntered
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, siblingSlot, cfg, p)
 	}()
 
 	if got := r.awaitStart(t); got != 0 {
 		t.Fatalf("started slot = %d, want 0 (the initial baton holder)", got)
 	}
 	r.releaseSlot(t, 0, ChildResult{Exit: 5}) // host-tainted: halts the pool, which cancels the ctx onResolve is parked on
-	<-done
+	wg.Wait()
 
 	if readErr != nil {
 		t.Fatalf("%v", readErr)
@@ -1634,10 +1906,11 @@ func TestPoolSnapshotSlots(t *testing.T) {
 	if st.Slots[1].Busy {
 		t.Fatalf("slot 1 = %+v, want unoccupied", st.Slots[1])
 	}
-	// Slot 1 is parked in awaitBaton the whole run (see this test's own
-	// doc) — idle, never having reached awaitWindow's close.
-	if st.Slots[1].Phase != PhaseIdle {
-		t.Fatalf("slot 1 phase = %q, want %q", st.Slots[1].Phase, PhaseIdle)
+	// Slot 1 is parked inside its own ResolveTip call for the whole run
+	// (see this test's own doc): resolving now happens before the baton is
+	// ever acquired, so it never reaches awaitBaton at all.
+	if st.Slots[1].Phase != PhaseResolving {
+		t.Fatalf("slot 1 phase = %q, want %q", st.Slots[1].Phase, PhaseResolving)
 	}
 }
 

@@ -129,7 +129,11 @@ const (
 	// ResolveTip error or a self-build evaluation failure: the holder
 	// is about to back off alone, and holding the pool through that
 	// backoff would stall every sibling's own discovery on a problem
-	// backoffOrHalt already handles per-slot.
+	// backoffOrHalt already handles per-slot. The baton is acquired only
+	// after the resolve completes (see runSlot, loop.go), so a
+	// non-holder never reaches this path with the baton to pass — it is
+	// only live for the pre-assigned initial holder's (leadSlot) very
+	// first round, the one round a slot gets here already holding it.
 	batonPassFailed = "the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"
 	// batonPassWindowClosed fires when the Awake window shuts between the
 	// holder's ResolveTip fetch and starting its child: the holder is
@@ -139,7 +143,10 @@ const (
 	batonPassWindowClosed = "the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"
 	// batonPassIdle fires when pickKind finds every configured kind backed
 	// off for the holder: the holder is about to idleSleep, and a slot
-	// must never sleep out an idle wait holding the baton.
+	// must never sleep out an idle wait holding the baton. pickKind runs
+	// before the baton is acquired, so a non-holder never reaches this
+	// path holding it — only the pre-assigned initial holder (leadSlot)
+	// can, on its very first round.
 	batonPassIdle = "no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"
 	// batonPassStopped fires when the holder returns before any of the
 	// above resolved (a cancelled ctx, a halt, or a self-build mismatch):
@@ -467,7 +474,16 @@ func (p *pool) awaitBaton(ctx context.Context, slot int) {
 		return
 	default:
 	}
-	p.emit(Event{Event: "baton_hold", Slot: intPtr(slot), Reason: batonHoldReason})
+	// A slot parked here is waiting for its own turn, not doing anything,
+	// so it must read as PhaseIdle: siblingsEngaged counts every other
+	// phase as engaged, and a slot that parked straight out of its own
+	// resolve would otherwise suppress a sibling's real jam for the whole
+	// hold. Rides in the same mutate as baton_hold so the phase is always
+	// visible to the snapshot that publishes alongside that event.
+	p.mutate(func(s *state) []Event {
+		s.slots[slot].phase = PhaseIdle
+		return []Event{{Event: "baton_hold", Slot: intPtr(slot), Reason: batonHoldReason}}
+	})
 	select {
 	case <-ctx.Done():
 	case <-p.baton:
@@ -713,7 +729,7 @@ func (p *pool) setPhase(slot int, phase Phase) {
 // exactly one renderer (Halt.String()) even though this reason only ever
 // reaches a halt indirectly, via the breaker. Any other error means the
 // fetch itself failed and carries no revision.
-func (p *pool) resolveFailure(tip Tip, err error) (revision, reason string) {
+func resolveFailure(tip Tip, err error) (revision, reason string) {
 	var se *SelfEvalError
 	if errors.As(err, &se) {
 		return tip.Revision, Halt{Class: HaltSelfBuild, Detail: se.Err.Error()}.String()
@@ -729,14 +745,13 @@ func (p *pool) resolveFailure(tip Tip, err error) (revision, reason string) {
 // early there would only spend a fetch for nothing.
 //
 // With a jammed kind gated, it instead sleeps only one IdleFloor-sized slice
-// (or the whole wait, if that is shorter) and reports back, via resolveTip,
+// (or the whole wait, if that is shorter) and reports back, via wantResolve,
 // whether time remained afterward — exactly the condition under which
-// today's caller should make one opportunistic resolution before its next
-// pickKind (runSlot, loop.go): that resolution, not a call made here, is
-// what can observe Tip.Moved and report it, so the wait's very first
-// IdleFloor slice alone (resolveTip false) resolves nothing extra and fires
-// no tip_moved (design decision 5, issue #3625).
-func (p *pool) idleSleep(ctx context.Context, slot int) (resolveTip bool) {
+// runSlot (loop.go) should make one opportunistic resolution before its next
+// pickKind: that resolution, not a call made here, is what can observe
+// Tip.Moved and report it, so the wait's very first IdleFloor slice alone
+// (wantResolve false) resolves nothing extra and fires no tip_moved.
+func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
 	// Sample now before taking p.mu, same reasoning as pickKind. The scan
 	// itself runs under one lock hold (idleWait) so it never observes two
 	// kinds at different instants; the actual sleep happens after the lock
@@ -752,6 +767,10 @@ func (p *pool) idleSleep(ctx context.Context, slot int) (resolveTip bool) {
 		return false
 	}
 
+	// A never-run slot slicing its wait and resolving during a sibling's
+	// jam is safe: haveLastRevision makes the first resolution any slot
+	// ever makes report Moved == false, whichever slot makes it, so there
+	// is no spurious first-ever "moved" to guard against.
 	slice := p.cfg.IdleFloor
 	if slice > wait {
 		slice = wait
@@ -766,26 +785,51 @@ func (p *pool) idleSleep(ctx context.Context, slot int) (resolveTip bool) {
 	return wait > slice
 }
 
-// resolveOpportunistic makes the one opportunistic ResolveTip call idleSleep's
-// resolveTip return asks runSlot for, ahead of its next pickKind. tip, true
-// on success — on Tip.Moved, it also emits noteTipMoved, so the caller that
-// keeps this tip for the current iteration never has to check Moved itself.
-// A failure is no change observed (design decision 6): it is not the
-// per-iteration fetch's own site, so it carries no haltIfStopping guard, no
-// backoffOrHalt, and no breaker failure — only that fetch, made after
-// pickKind finds a kind runnable, reports a genuinely broken fetch. The
-// phase is reset to idle on failure so a slot that falls through into
-// idleSleep right after is not still counted as PhaseResolving by a
-// sibling's siblingsEngaged (pool.go:369).
-func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
+// resolveTip is the one seam runSlot's post-pickKind fetch and
+// resolveOpportunistic (the opportunistic call idleSleep's return asks for)
+// both call to reach Runner.ResolveTip: it sets PhaseResolving and, on a
+// Moved tip, reports noteTipMoved before returning. Folding the
+// noteTipMoved call in here is what makes it impossible for a caller to
+// receive a moved Tip and forget to report it — a caller that reads a Tip
+// without passing through here loses that observation for good. Under
+// coalescing every joiner of a shared flight
+// sees the same Moved=true and lands here, so it is noteTipMoved's own
+// len(reset) == 0 guard, not this seam, that keeps a merge from firing more
+// than one tip_moved.
+//
+// The report fires on tip.Moved alone, whatever err is: a *SelfEvalError
+// (runner.go) still carries the revision the fetch half resolved, and the
+// runner's baseline is already advanced by the time that error comes back,
+// so a move dropped here because the self-eval half also failed is dropped
+// for good — no later resolve can ever re-observe it. Errors themselves are
+// returned unchanged: each caller keeps its own error handling
+// (resolveOpportunistic's own swallow, versus runSlot's
+// haltIfStopping/backoffOrHalt).
+func (p *pool) resolveTip(ctx context.Context, slot int) (Tip, error) {
 	p.setPhase(slot, PhaseResolving)
 	tip, err := p.r.ResolveTip(ctx)
+	if tip.Moved {
+		p.noteTipMoved(slot, tip.Revision)
+	}
+	return tip, err
+}
+
+// resolveOpportunistic makes the one opportunistic ResolveTip call idleSleep's
+// resolveTip return asks runSlot for, ahead of its next pickKind. tip, true
+// on success — the underlying resolveTip already reports Tip.Moved, so the
+// caller that keeps this tip for the current iteration never has to check
+// Moved itself. A failure here is deliberately treated as no change
+// observed: it is not the per-iteration fetch's own site, so it carries no
+// haltIfStopping guard, no backoffOrHalt, and no breaker failure — only that
+// fetch, made after pickKind finds a kind runnable, reports a genuinely
+// broken fetch. The phase is reset to idle on failure so a slot that falls
+// through into idleSleep right after is not still counted as PhaseResolving
+// by a sibling's siblingsEngaged.
+func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
+	tip, err := p.resolveTip(ctx, slot)
 	if err != nil {
 		p.setPhase(slot, PhaseIdle)
 		return Tip{}, false
-	}
-	if tip.Moved {
-		p.noteTipMoved(slot, tip.Revision)
 	}
 	return tip, true
 }
@@ -834,6 +878,18 @@ func (p *pool) idleWait(now time.Time) (wait time.Duration, jammedGate bool, ok 
 // itself all happen in one mutate, so the set an operator reads on the event
 // is exactly the set that was reset, not a snapshot taken a moment either
 // side of it.
+//
+// The event is emitted only when reset is non-empty: resolveTip (pool.go,
+// see its own doc) reports every per-iteration fetch's Moved tip here, not
+// just the opportunistic call a jammed kind gates. Without the guard,
+// tip_moved would fire on every ordinary advance of the base branch rather
+// than staying the jam signal it is.
+//
+// The Runner-global baseline also changes the count: the per-slot baselines
+// this replaced fired one tip_moved per idling slot that crossed a merge,
+// where two slots crossing the same merge now share one baseline and so
+// produce exactly one between them. A single event still does the whole job,
+// since the backoff reset below is pool-wide.
 func (p *pool) noteTipMoved(slot int, revision string) {
 	p.mutate(func(s *state) []Event {
 		var reset []Kind
@@ -842,6 +898,9 @@ func (p *pool) noteTipMoved(slot int, revision string) {
 				s.kinds[kind] = k.reset()
 				reset = append(reset, kind)
 			}
+		}
+		if len(reset) == 0 {
+			return nil
 		}
 		return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: revision, Reason: "a merge can unblock a jammed queue", Kinds: reset}}
 	})
