@@ -74,6 +74,7 @@ let
     // (import ./quickstart-golden.nix common)
     // (import ./dispatch-labels.nix common)
     // (import ./gh-token-intervals.nix common)
+    // (import ./doctor-report-routing.nix common)
     // (import ./agent-workflow-smoke.nix common)
     // (import ./changelog.nix common)
     // (import ./versioning-prompt-template-carve-out.nix common)
