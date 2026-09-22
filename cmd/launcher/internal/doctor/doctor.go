@@ -8,7 +8,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -126,8 +125,7 @@ type Config struct {
 // missing ones when interactive. Only missing work-tier labels fail the run; the
 // other tiers and extraChecks are advisory. stdin is the caller's own scanner, so
 // Quickstart can hand one over mid-flow without losing already-buffered input.
-func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
-	rep := NewReporter(w)
+func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
 	if c.TokenHint != "" {
 		tokenHint, slugHint = c.TokenHint, c.SlugHint
@@ -220,9 +218,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		// the operator nowhere.
 		rep.Results(results[:len(results)-1])
 		failing := results[len(results)-1]
-		if suffix := remedySuffix(failing.Check.Remedy, cerr.Error()); suffix != "" {
-			fmt.Fprintf(w, "  remedy: %s\n", suffix)
-		}
+		rep.remedyLine(failing.Check.Remedy, cerr.Error())
 		return cerr
 	}
 	rep.Results(results)
@@ -239,7 +235,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		// all. Print it to w first.
 		if deferredRepoStateErr != nil {
 			if err != nil {
-				fmt.Fprintf(w, "MISSING: %v\n", err)
+				rep.Finding(Required, "%v", err)
 			}
 			err = deferredRepoStateErr
 		}
@@ -251,11 +247,11 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 
 	// Runtime row, advisory and never fatal. Rationale on Config.Runtime.
 	if c.Runtime == "" {
-		fmt.Fprintln(w, "advisory: RUNTIME not set — skipping runtime check")
+		rep.Finding(Advisory, "RUNTIME not set — skipping runtime check")
 	} else if rerr := runner.ValidateRuntime(c.Runtime); rerr != nil {
-		fmt.Fprintf(w, "advisory: runtime %q not ready: %v — does not fail this check\n", c.Runtime, rerr)
+		rep.Finding(Advisory, "runtime %q not ready: %v — does not fail this check", c.Runtime, rerr)
 	} else {
-		fmt.Fprintf(w, "ok: runtime %q found on PATH\n", c.Runtime)
+		rep.Success("runtime %q found on PATH", c.Runtime)
 	}
 
 	// A missing row's prefix mirrors its tier's exit-code weight: MISSING for the
@@ -264,10 +260,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		var missing []string
 		for _, label := range names {
 			if present[label] {
-				fmt.Fprintf(w, "ok: label %q present\n", label)
+				rep.Success("label %q present", label)
 				continue
 			}
-			fmt.Fprintf(w, "%s: label %q missing\n", rowPrefix(tier), label)
+			rep.Finding(tier, "label %q missing", label)
 			missing = append(missing, label)
 		}
 		return missing
@@ -298,17 +294,17 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return err
 	}
 	if len(researchMissing) > 0 {
-		fmt.Fprintf(w, "advisory: %d research label(s) missing (ADR 0022 / ADR 0041) — does not fail this check\n", len(researchMissing))
+		rep.Finding(Advisory, "%d research label(s) missing (ADR 0022 / ADR 0041) — does not fail this check", len(researchMissing))
 	}
 	if len(priorityMissing) > 0 {
-		fmt.Fprintf(w, "advisory: %d priority label(s) missing (ADR 0040) — does not fail this check\n", len(priorityMissing))
+		rep.Finding(Advisory, "%d priority label(s) missing (ADR 0040) — does not fail this check", len(priorityMissing))
 	}
 	if len(ambiguousMissing) > 0 {
-		fmt.Fprintf(w, "advisory: %d ambiguous-spec label(s) missing — does not fail this check\n", len(ambiguousMissing))
+		rep.Finding(Advisory, "%d ambiguous-spec label(s) missing — does not fail this check", len(ambiguousMissing))
 	}
 	missing := append(append(append(append([]string{}, workMissing...), researchMissing...), priorityMissing...), ambiguousMissing...)
 	if len(missing) == 0 {
-		fmt.Fprintln(w, "ok: all triage, research, priority, and ambiguous-spec labels present")
+		rep.Success("all triage, research, priority, and ambiguous-spec labels present")
 		return nil
 	}
 
@@ -328,10 +324,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	if advisoryCount > 0 {
 		advisoryClause += " (declining is safe, does not fail this check)"
 	}
-	fmt.Fprintf(w, "Create %d missing label(s) — %s and %s? [y/N] ",
+	rep.Passthrough("Create %d missing label(s) — %s and %s? [y/N] ",
 		len(missing), requiredClause, advisoryClause)
 	if !stdin.Scan() || strings.ToLower(strings.TrimSpace(stdin.Text())) != "y" {
-		fmt.Fprintln(w)
+		rep.Passthrough("\n")
 		if len(workMissing) > 0 {
 			return errRequiredLabelsMissing(workMissing)
 		}
@@ -373,10 +369,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 			if workSet[name] {
 				return fmt.Errorf("%w: create label %q: %w", ErrConnectivity, name, cerr)
 			}
-			fmt.Fprintf(w, "advisory: create label %q failed: %v — does not fail this check\n", name, cerr)
+			rep.Finding(Advisory, "create label %q failed: %v — does not fail this check", name, cerr)
 			continue
 		}
-		fmt.Fprintf(w, "created: label %q\n", name)
+		rep.Passthrough("created: label %q\n", name)
 	}
 
 	workMissing, researchMissing, priorityMissing, ambiguousMissing, err = checkLabels()
@@ -390,21 +386,25 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	// ADR 0041 / #2275) gets its own wrap-up line here, or one success line
 	// naming all four tiers when none is still short.
 	stillMissing := false
+	// These three lines carry the "advisory:" prefix like a Finding, but they
+	// report a CreateLabel outcome that already happened rather than a fresh
+	// probe result, so the acceptance criteria class them as always-on
+	// passthrough instead of routing them through Finding's tier gate.
 	if len(researchMissing) > 0 {
-		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022 / ADR 0041) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
+		rep.Passthrough("advisory: %d research label(s) still missing after creation (ADR 0022 / ADR 0041) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
 		stillMissing = true
 	}
 	if len(priorityMissing) > 0 {
-		fmt.Fprintf(w, "advisory: %d priority label(s) still missing after creation (ADR 0040) — does not fail this check: %s\n", len(priorityMissing), strings.Join(priorityMissing, ", "))
+		rep.Passthrough("advisory: %d priority label(s) still missing after creation (ADR 0040) — does not fail this check: %s\n", len(priorityMissing), strings.Join(priorityMissing, ", "))
 		stillMissing = true
 	}
 	if len(ambiguousMissing) > 0 {
-		fmt.Fprintf(w, "advisory: %d ambiguous-spec label(s) still missing after creation — does not fail this check: %s\n", len(ambiguousMissing), strings.Join(ambiguousMissing, ", "))
+		rep.Passthrough("advisory: %d ambiguous-spec label(s) still missing after creation — does not fail this check: %s\n", len(ambiguousMissing), strings.Join(ambiguousMissing, ", "))
 		stillMissing = true
 	}
 	if stillMissing {
 		return nil
 	}
-	fmt.Fprintln(w, "ok: all triage, research, priority, and ambiguous-spec labels present")
+	rep.Success("all triage, research, priority, and ambiguous-spec labels present")
 	return nil
 }

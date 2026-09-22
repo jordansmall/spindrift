@@ -33,7 +33,7 @@ func TestRun_ConnectivityAndRecoverableIssuesProbesSucceed(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestRun_MissingResearchLabelsAreAdvisoryNotFatal(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestRun_IssueTrackerAuthFailure_CodeForgeProbeDoesNotRun(t *testing.T) {
 	cf.ProbeRepo = "owner/repo"
 
 	var buf bytes.Buffer
-	err := Run(it, cf, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(it, cf, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -126,7 +126,7 @@ func TestRun_IssueTrackerRateLimit_CodeForgeProbeDoesNotRun(t *testing.T) {
 	cf.ProbeRepo = "owner/repo"
 
 	var buf bytes.Buffer
-	err := Run(it, cf, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(it, cf, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -160,7 +160,7 @@ func TestRun_CodeForgeProbeFailure_ReportsMissingLineAndSkipsRecoverableCheck(t 
 	cf.ProbeErr = wantErr
 
 	var buf bytes.Buffer
-	err := Run(it, cf, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(it, cf, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -200,7 +200,7 @@ func TestRun_ExtraChecks_FailingRequiredRowIsReportedButDoesNotFailRun(t *testin
 	}
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, extra)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, extra)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestRun_ExtraChecks_FailingAdvisoryRowDoesNotFailRun(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, extra)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, extra)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestRun_BranchProtection_RequiredTierUnprotectedFailsRun(t *testing.T) {
 			cfg.BaseBranch = "main"
 
 			var buf bytes.Buffer
-			err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+			err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -278,7 +278,7 @@ func TestRun_BranchProtection_AdvisoryTierUnprotectedReportsButDoesNotFailRun(t 
 	cfg.BaseBranch = "main"
 
 	var buf bytes.Buffer
-	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestRun_BranchProtection_NotApplicableForForgeWithoutProtectionAPI(t *testi
 			cfg.BaseBranch = "main"
 
 			var buf bytes.Buffer
-			err := Run(it, cf, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+			err := Run(it, cf, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -333,7 +333,7 @@ func TestRun_BranchProtection_ProbeFailureDegradesAndDoesNotFailRun(t *testing.T
 	cfg.BaseBranch = "main"
 
 	var buf bytes.Buffer
-	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestRun_BranchProtection_ProtectedAndRequiredSucceeds(t *testing.T) {
 	cfg.BaseBranch = "main"
 
 	var buf bytes.Buffer
-	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestRun_RecoverableIssuesProbeFailure_WrapsErrConnectivity(t *testing.T) {
 	f.ListIssuesErr = wantErr
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -408,7 +408,7 @@ func TestRun_ListLabelsFailure_WrapsErrConnectivity(t *testing.T) {
 	f.ListLabelsErr = wantErr
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -430,7 +430,7 @@ func TestRun_CreateLabelFailure_WrapsErrConnectivity(t *testing.T) {
 	f.CreateLabelErr = wantErr
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("y\n")), true, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -449,19 +449,24 @@ func TestRun_CreateLabelFailure_WrapsErrConnectivity(t *testing.T) {
 func TestRun_CreateLabelFailure_AdvisoryLabelDoesNotFailRun(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	// All four work labels are present and every research label is missing, so
-	// the accepted create-labels prompt only creates advisory-tier labels.
-	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	// Every label is present except the single ambiguous-spec one, so exactly
+	// one CreateLabel call happens — pinning the row's exact text needs a
+	// single deterministic miss rather than the whole research family.
+	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"},
+		append(ResearchLabelNames(), PriorityLabelNames()...)...)
 	wantErr := errors.New("boom")
 	f.CreateLabelErr = wantErr
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("y\n")), true, nil)
 	if err != nil {
 		t.Fatalf("advisory-label create failure must not fail Run, got: %v", err)
 	}
-	if !strings.Contains(buf.String(), "advisory: create label") {
-		t.Errorf("want an advisory create-failure line, got:\n%s", buf.String())
+	// Pins the row through rep.Finding(Advisory, ...): the "advisory: " prefix
+	// plus a trailing newline, and nothing else on the line.
+	want := "advisory: create label \"agent-ambiguous-spec\" failed: boom — does not fail this check\n"
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("want exact advisory create-failure line %q, got:\n%s", want, buf.String())
 	}
 }
 
@@ -474,7 +479,7 @@ func TestRun_NonInteractive_MissingWorkLabels_WrapsErrRequiredLabelsMissing(t *t
 	f.Labels = []string{"ready-for-agent"} // agent-in-progress, agent-failed, agent-complete missing
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -497,12 +502,19 @@ func TestRun_TTY_Decline_WrapsErrRequiredLabelsMissing(t *testing.T) {
 	f.Labels = []string{"ready-for-agent"} // three work labels missing
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("n\n")), true, nil)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("n\n")), true, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if !errors.Is(err, ErrRequiredLabelsMissing) {
 		t.Errorf("want ErrRequiredLabelsMissing (issue #2569 exit-code vocabulary), got %v", err)
+	}
+	// A declined prompt writes one bare "\n" through Passthrough — no "ok:",
+	// "MISSING:", or "advisory:" prefix — right after the prompt's own
+	// trailing "] ". Pins that Passthrough adds no prefix and no extra
+	// newline of its own.
+	if got := buf.String(); !strings.HasSuffix(got, "] \n") {
+		t.Errorf("want the declined prompt followed by a bare newline with no prefix, got tail: %q", got[max(0, len(got)-30):])
 	}
 }
 
@@ -517,7 +529,7 @@ func TestRun_StillMissingAfterCreation_WrapsErrRequiredLabelsMissing(t *testing.
 	}
 
 	var buf bytes.Buffer
-	err := Run(f, f, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf), bufio.NewScanner(strings.NewReader("y\n")), true, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -544,7 +556,7 @@ func TestRun_BranchProtection_RequiredTierUnprotectedDoesNotSkipLaterRows(t *tes
 	cfg.BaseBranch = "main"
 
 	var buf bytes.Buffer
-	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -583,7 +595,7 @@ func TestRun_BranchProtection_RequiredTierUnprotected_StillOffersLabelCreation(t
 	cfg.BaseBranch = "main"
 
 	var buf bytes.Buffer
-	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("y\n")), true, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -623,7 +635,7 @@ func TestRun_BranchProtection_RequiredTierUnprotected_NonInteractivePrecedence(t
 	cfg.BaseBranch = "main"
 
 	var buf bytes.Buffer
-	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -650,7 +662,7 @@ func TestRun_BranchProtection_RequiredTierUnprotected_ListLabelsErrorReportedNot
 	cfg.BaseBranch = "main"
 
 	var buf bytes.Buffer
-	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -683,7 +695,7 @@ func TestRun_BranchProtection_RequiredTierUnprotected_CreateLabelErrorReportedNo
 	cfg.BaseBranch = "main"
 
 	var buf bytes.Buffer
-	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("y\n")), true, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -719,7 +731,7 @@ func TestRun_RecoverableIssuesRequiredFailure_PrecedesLaterListLabelsError(t *te
 	cfg.BaseBranch = "main"
 
 	var buf bytes.Buffer
-	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	err := Run(f, f, cfg, NewReporter(&buf), bufio.NewScanner(strings.NewReader("")), false, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

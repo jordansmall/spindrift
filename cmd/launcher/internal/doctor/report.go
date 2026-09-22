@@ -52,8 +52,8 @@ func (r *Reporter) Passthrough(format string, a ...any) {
 }
 
 // rowPrefix returns the status-line prefix for a Tier: "MISSING" for Required,
-// "advisory" for Advisory. Finding and doctor.go's label rows share it;
-// reporters outside this package spell their own prefixes.
+// "advisory" for Advisory. Finding is its only caller; reporters outside this
+// package spell their own prefixes.
 func rowPrefix(t Tier) string {
 	if t == Advisory {
 		return "advisory"

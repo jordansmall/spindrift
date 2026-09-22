@@ -544,7 +544,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		Runtime:         runtime,
 		MergePolicy:     defaultMergePolicy,
 		BaseBranch:      defaultBaseBranch,
-	}, w, scanner, interactive, launcherRows); err != nil {
+	}, doctor.NewReporter(w), scanner, interactive, launcherRows); err != nil {
 		return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
 	}
 

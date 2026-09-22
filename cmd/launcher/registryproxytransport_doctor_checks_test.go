@@ -138,7 +138,7 @@ func TestRegistryProxyTransportCheck_TCPReportsTCPTransportWithoutError(t *testi
 	}
 }
 
-// A prober error is indeterminate (ErrDegraded), which ReportResults renders as
+// A prober error is indeterminate (ErrDegraded), which Reporter.Results renders as
 // "advisory:" rather than "MISSING:". The probe failed to determine an answer,
 // it did not detect a broken transport.
 func TestRegistryProxyTransportCheck_ProbeErrorWrapsErrDegraded(t *testing.T) {

@@ -204,7 +204,7 @@ func TestDoctorCheckSets_SocketCarrierWiresSignalSocketTransportCheckToReportOnl
 
 // The row degrades for two unrelated reasons -- a network mode that leaves
 // the socket no transport, and a probe that answered nothing usable -- and
-// ReportResults prints one Remedy for both, so it must name the runtime fix
+// Reporter.Results prints one Remedy for both, so it must name the runtime fix
 // alongside the knob fix.
 func TestSignalSocketTransportCheck_RemedyNamesBothTheKnobAndTheRuntimeFix(t *testing.T) {
 	c := minimalValidConfig()
