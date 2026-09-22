@@ -78,7 +78,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 		Runtime:         c.runtime,
 		MergePolicy:     c.mergeMode,
 		BaseBranch:      c.baseBranch,
-	}, w, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
+	}, doctor.NewReporter(w), bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
 	// The two token gates are Applicable only under read-only (issue #2942), so
