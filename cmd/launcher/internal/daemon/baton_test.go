@@ -756,7 +756,7 @@ func TestPoolBatonPassesWhenNoKindIsRunnable(t *testing.T) {
 
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
-	p.kinds[KindDispatch].markNoWork(clk.Now(), false)
+	p.markNoWork(KindDispatch, clk.Now(), false)
 	r.holdSlots(slots)
 
 	var wg sync.WaitGroup

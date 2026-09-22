@@ -205,9 +205,7 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 
 	p, pctx := newPool(ctx, cfg, r, em, clk)
 	defer p.cancel()
-	// Publish once up front so a freshly started daemon reports its initial
-	// state at once, instead of only on its first state change.
-	p.publish()
+	p.publishInitial()
 
 	var wg sync.WaitGroup
 	wg.Add(cfg.Slots)
@@ -260,6 +258,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	// way. passBaton no-ops unless slot actually holds the baton, so this
 	// defer needs no guard of its own.
 	defer p.passBaton(slot, batonPassStopped)
+	// A slot that has left this function is doing nothing at all, whatever
+	// phase it last published (issue #3623): one returning mid-resolve would
+	// otherwise keep reporting "resolving", and siblingsEngaged would go on
+	// counting an exited slot as engaged, suppressing a sibling's real jam.
+	// Declared after passBaton so LIFO runs it first — the reset lands before
+	// the baton is freed, so the sibling that hand-off wakes never reads this
+	// slot as still resolving.
+	defer p.setPhase(slot, PhaseIdle)
 	var lastRevision string // the revision this slot's last child ran at; the "tip moved" baseline
 	for {
 		if stopOnCancel(ctx, "", p) {
@@ -297,6 +303,12 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			continue
 		}
 
+		// Resolving covers checkSelfBuild's SelfPath call too, below: both
+		// are outside-world evaluations at the fetched tip, and a slot
+		// inside either is no more idle than one inside a fetch — nothing
+		// between here and startChild (or a failure exit) changes phase
+		// again, so one setPhase covers the whole span.
+		p.setPhase(slot, PhaseResolving)
 		revision, err := p.r.ResolveRevision(ctx)
 		if err != nil {
 			// A ctx cancelled out from under an in-flight fetch (an operator
@@ -351,27 +363,20 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			continue
 		}
 
-		p.emit(Event{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot)})
-
-		p.occupy(slot, kind, revision)
-		// The child_start emit above fired before occupy, so its own
-		// publish could not see this slot's new occupancy.
-		p.publish()
+		p.startChild(slot, kind, revision)
 		req := ChildRequest{
 			Slot:     slot,
 			Kind:     kind,
 			Revision: revision,
 			OnIssue: func(issue string) {
 				p.noteIssue(slot, issue)
-				p.publish()
 				// A claim settles discovery the moment it happens, live,
 				// rather than waiting for this child to exit.
 				p.passBaton(slot, batonPassClaimed)
 			},
 		}
 		result, err := p.r.RunChild(ctx, req)
-		p.unoccupy(slot)
-		p.publish()
+		p.finishChild(slot)
 		// One site covers every post-child exit without a claim at once:
 		// queue empty, none dispatchable, an unrecognised exit, or a
 		// RunChild seam error. A no-op when OnIssue already passed the
@@ -417,8 +422,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// answered something other than "nothing to do", so whatever
 			// streak of no-work checks this kind's backoff was tracking is
 			// over. The other kind's own timer, if any, is untouched.
-			p.kinds[kind].reset()
-			p.publish()
+			p.resetKind(kind)
 			continue
 		case Wait:
 			if !cfg.Awake.Open(p.clk.Now()) {
@@ -431,22 +435,11 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 				// off.
 				continue
 			}
-			// "none-dispatchable" carries a second axis exit 2 doesn't: pool
-			// occupancy. With a sibling genuinely running, the issues this
-			// slot found "none dispatchable" were claimed or overlap-deferred
-			// against that very sibling — routine, reported like any other
-			// idle wait. With every sibling parked too, nothing is running
-			// and nothing can start: a jam an operator may need to clear.
-			// The flag below is deliberately not this predicate: the alarm
-			// fires only when nothing else is running, while the flag
-			// records the queue condition this check saw (see markNoWork).
-			poolJammed := outcome == outcomeNoneDispatchable && !p.siblingsOccupied(slot)
-			wait := p.kinds[kind].markNoWork(p.clk.Now(), outcome == outcomeNoneDispatchable)
-			if poolJammed {
-				p.emit(Event{Event: "jam", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is running"})
-			} else {
-				p.emit(Event{Event: "idle", Kind: kind, Wait: wait.String(), Slot: intPtr(slot)})
-			}
+			// noteWaitResult records the no-work result and decides the
+			// jam-vs-idle predicate together, in one mutate — see its own
+			// doc for why the two must not be read from two different
+			// instants.
+			p.noteWaitResult(slot, kind, revision, outcome == outcomeNoneDispatchable)
 			// No sleep here: this kind is now gated until its markNoWork
 			// deadline, and the top of the loop's pickKind/idleSleep decides
 			// whether that means switching to the other kind at once or

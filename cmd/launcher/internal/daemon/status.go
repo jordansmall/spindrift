@@ -36,12 +36,39 @@ type Status struct {
 
 // SlotStatus is one pool slot's occupancy at the moment of publish.
 type SlotStatus struct {
-	Slot     int      `json:"slot"`
+	Slot int `json:"slot"`
+	// Phase is the slot's own position in its iteration (issue #3623).
+	// No omitempty: idle is a real, reportable value, and eliding it would
+	// make a slot that has never run look identical to a missing field.
+	Phase    Phase    `json:"phase"`
 	Busy     bool     `json:"busy"`
 	Kind     Kind     `json:"kind,omitempty"`
 	Revision string   `json:"revision,omitempty"`
 	Issues   []string `json:"issues,omitempty"`
 }
+
+// Phase is one slot's own position in its iteration, published per slot
+// alongside busy (issue #3623). busy is phase == PhaseRunning and nothing
+// more, so a reader that only knows busy is unaffected by this field.
+type Phase string
+
+const (
+	// PhaseIdle means the slot holds nothing: parked between iterations,
+	// or returned for good, by whatever route it left runSlot.
+	PhaseIdle Phase = "idle"
+	// PhaseAwaitingWindow means the slot is parked because the Awake
+	// window is shut.
+	PhaseAwaitingWindow Phase = "awaiting_window"
+	// PhaseResolving means the slot is fetching the tip or evaluating the
+	// daemon's own self-build, ahead of a child of its own; the
+	// opportunistic fetch in pollSlices reads idle, not resolving.
+	PhaseResolving Phase = "resolving"
+	// PhaseRunning means the slot has a child in flight; this is the one
+	// phase Busy reports.
+	PhaseRunning Phase = "running"
+	// PhaseBackingOff means the slot is sleeping out a failure backoff.
+	PhaseBackingOff Phase = "backing_off"
+)
 
 // KindCheck is one configured kind's next-poll status.
 type KindCheck struct {
@@ -93,7 +120,8 @@ type StatusWriter struct {
 	started string
 	now     func() time.Time
 
-	mu sync.Mutex
+	mu      sync.Mutex
+	lastSeq uint64
 }
 
 // NewStatusWriter builds a StatusWriter for dir, capturing the process
@@ -114,26 +142,32 @@ func NewStatusWriter(dir string, now func() time.Time) *StatusWriter {
 	}
 }
 
-// Write publishes the constant s via Publish, for a caller that already has
-// a Status in hand rather than one sampled fresh under the lock — the
-// pre-pool halt paths (invalidConfig, and the daemon's preflight refusal,
-// both before any pool exists to snapshot) and tests. See Publish for the
-// write mechanics.
+// Write publishes s at seq 0, the unsequenced pre-pool path: it is called
+// only before any pool exists to allocate a real seq (invalidConfig, and
+// the daemon's preflight refusal) and by tests. lastSeq starts at 0 and the
+// drop rule is strictly-older, so seq 0 always writes until the pool's
+// first sequenced Publish call takes over.
 func (w *StatusWriter) Write(s Status) error {
-	return w.Publish(func() Status { return s })
+	return w.Publish(0, s)
 }
 
-// Publish samples snap() under w.mu and publishes the result, so sampling
-// and writing are one atomic unit: two concurrent publishers can otherwise
-// each sample a consistent Status but interleave their writes, leaving the
-// file holding the older sample — a slot reported busy on an idle daemon,
-// which nothing then corrects, since every publish is driven by a state
-// change rather than a timer. Write is the constant-snap special case.
-func (w *StatusWriter) Publish(snap func() Status) error {
+// Publish writes s if seq is not older than the last seq this writer has
+// written, and drops it (returning nil, untouched file) otherwise. seq is
+// the caller's ordering token, not sampled here: the caller (pool.publish)
+// must allocate seq in the same critical section it took the snapshot in,
+// or two callers could allocate seq 1/2 but snapshot in the opposite order,
+// and Publish would have no way to tell the resulting write from a correct
+// one. w.mu here only serializes the read-compare-write of lastSeq and the
+// file write itself, matching whatever seq order the caller already fixed.
+func (w *StatusWriter) Publish(seq uint64, s Status) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	s := snap()
+	if seq < w.lastSeq {
+		return nil
+	}
+	w.lastSeq = seq
+
 	s.Pid = w.pid
 	s.Host = w.host
 	s.Started = w.started

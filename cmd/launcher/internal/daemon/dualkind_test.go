@@ -498,19 +498,19 @@ func TestPoolPerKindBackoffGrowsIndependently(t *testing.T) {
 
 	wantWork := []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond, 8 * time.Millisecond}
 	for i, want := range wantWork {
-		got := p.kinds[KindDispatch].markNoWork(clk.Now(), false)
+		got := p.markNoWork(KindDispatch, clk.Now(), false)
 		if got != want {
 			t.Fatalf("dispatch markNoWork()[%d] = %v, want %v", i, got, want)
 		}
 		// Research dispatching (Continue -> reset) between each of dispatch's
 		// empty checks must never touch dispatch's own streak.
-		p.kinds[KindResearch].reset()
-		if until, gated := p.kinds[KindResearch].readyAt(clk.Now()); gated || !until.IsZero() {
+		p.resetKind(KindResearch)
+		if until, gated := p.st.kinds[KindResearch].readyAt(clk.Now()); gated || !until.IsZero() {
 			t.Fatalf("research readyAt() = (%v, %v) after reset, want (zero, false)", until, gated)
 		}
 	}
 
-	if got := p.kinds[KindDispatch].markNoWork(clk.Now(), false); got != 16*time.Millisecond {
+	if got := p.markNoWork(KindDispatch, clk.Now(), false); got != 16*time.Millisecond {
 		t.Fatalf("dispatch markNoWork() after 4 prior checks and interleaved research resets = %v, want 16ms (research's timer never advanced dispatch's)", got)
 	}
 }

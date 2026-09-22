@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -295,62 +293,63 @@ func TestReadStatus_LockHeldFalseUnderConcurrentSharedProbe(t *testing.T) {
 	}
 }
 
-// TestStatusWriter_PublishSerializesSnapshotAndWrite guards against the
-// issue #3545 review finding: Publish must hold w.mu across snap() itself,
-// not just the write, or two concurrent publishers can sample in one order
-// and land their writes in the other, leaving the file describing neither
-// caller's actual state.
-func TestStatusWriter_PublishSerializesSnapshotAndWrite(t *testing.T) {
+// TestStatusWriter_PublishDropsOlderSeq pins issue #3623's ordering rule: a
+// Publish whose seq is older than the last one written must leave the file
+// holding the newer snapshot, even though the older one landed second —
+// the scenario that used to require serializing sample-and-write under
+// w.mu (issue #3545) is now handled by seq order instead, so an
+// out-of-order arrival is a no-op rather than a race.
+func TestStatusWriter_PublishDropsOlderSeq(t *testing.T) {
 	dir := t.TempDir()
 	fixed := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	w := NewStatusWriter(dir, func() time.Time { return fixed })
 
-	var inA atomic.Bool
-	var overlap atomic.Bool
-	aEntered := make(chan struct{})
-	releaseA := make(chan struct{})
-	bSnapRan := make(chan struct{})
+	newer := Status{State: StateWorking}
+	older := Status{State: StateWaiting}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		_ = w.Publish(func() Status {
-			inA.Store(true)
-			close(aEntered)
-			<-releaseA
-			inA.Store(false)
-			return Status{State: StateWorking}
-		})
-	}()
-
-	<-aEntered
-	go func() {
-		defer wg.Done()
-		_ = w.Publish(func() Status {
-			if inA.Load() {
-				overlap.Store(true)
-			}
-			close(bSnapRan)
-			return Status{State: StateWaiting}
-		})
-	}()
-
-	// B's snap must block on w.mu until A releases — give it a short,
-	// bounded window to prove it never ran early. Under the pre-fix shape
-	// (snapshot taken outside the lock) B's snap runs immediately and this
-	// select fires on bSnapRan instead of the timeout.
-	select {
-	case <-bSnapRan:
-		t.Fatalf("B's snap ran while A's Publish was still in flight")
-	case <-time.After(100 * time.Millisecond):
+	if err := w.Publish(2, newer); err != nil {
+		t.Fatalf("Publish(2, newer): unexpected error: %v", err)
+	}
+	if err := w.Publish(1, older); err != nil {
+		t.Fatalf("Publish(1, older): unexpected error: %v", err)
 	}
 
-	close(releaseA)
-	wg.Wait()
+	report, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatalf("ReadStatus: unexpected error: %v", err)
+	}
+	if report.Status == nil {
+		t.Fatalf("ReadStatus: Status is nil")
+	}
+	if got := report.Status.State; got != StateWorking {
+		t.Errorf("State = %q, want %q (older seq must not overwrite newer)", got, StateWorking)
+	}
+}
 
-	if overlap.Load() {
-		t.Errorf("B's snap observed A's snap still in progress")
+// TestStatusWriter_PublishWritesInOrderSeq is TestStatusWriter_PublishDropsOlderSeq's
+// counterpart: a strictly increasing seq sequence must still write every
+// snapshot, so the drop rule only ever suppresses a real reordering.
+func TestStatusWriter_PublishWritesInOrderSeq(t *testing.T) {
+	dir := t.TempDir()
+	fixed := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	w := NewStatusWriter(dir, func() time.Time { return fixed })
+
+	if err := w.Publish(1, Status{State: StateWaiting}); err != nil {
+		t.Fatalf("Publish(1, ...): unexpected error: %v", err)
+	}
+	if err := w.Publish(2, Status{State: StateWorking}); err != nil {
+		t.Fatalf("Publish(2, ...): unexpected error: %v", err)
+	}
+
+	report, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatalf("ReadStatus: unexpected error: %v", err)
+	}
+	if report.Status == nil {
+		t.Fatalf("ReadStatus: Status is nil")
+	}
+	if got := report.Status.State; got != StateWorking {
+		t.Errorf("State = %q, want %q", got, StateWorking)
 	}
 }
 

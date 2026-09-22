@@ -10,7 +10,9 @@ func TestIdleBackoffGrowsAndCaps(t *testing.T) {
 
 	got := []time.Duration{}
 	for i := 0; i < 6; i++ {
-		got = append(got, b.next())
+		var wait time.Duration
+		b, wait = b.next()
+		got = append(got, wait)
 	}
 
 	want := []time.Duration{1, 2, 4, 8, 8, 8}
@@ -24,13 +26,13 @@ func TestIdleBackoffGrowsAndCaps(t *testing.T) {
 func TestIdleBackoffReset(t *testing.T) {
 	b := newIdleBackoff(1, 8)
 
-	b.next() // 1
-	b.next() // 2
-	b.next() // 4
+	b, _ = b.next() // 1
+	b, _ = b.next() // 2
+	b, _ = b.next() // 4
 
-	b.reset()
+	b = b.reset()
 
-	if got := b.next(); got != 1 {
+	if _, got := b.next(); got != 1 {
 		t.Fatalf("next() after reset = %v, want floor (1)", got)
 	}
 }
@@ -54,7 +56,9 @@ func TestIdleBackoffCapsAtShippedDefaults(t *testing.T) {
 
 	got := []time.Duration{}
 	for i := 0; i < 5; i++ {
-		got = append(got, b.next())
+		var wait time.Duration
+		b, wait = b.next()
+		got = append(got, wait)
 	}
 
 	// 4*floor (20m) is still under cap; doubling that (40m) is what
@@ -84,7 +88,7 @@ func TestKindBackoffGatesUntilDeadline(t *testing.T) {
 	k := newKindBackoff(time.Second, 8*time.Second)
 	now := time.Now()
 
-	wait := k.markNoWork(now, false)
+	k, wait := k.markNoWork(now, false)
 	if wait != time.Second {
 		t.Fatalf("markNoWork() = %v, want %v", wait, time.Second)
 	}
@@ -115,7 +119,7 @@ func TestKindBackoffReadyAtElapsedDeadline(t *testing.T) {
 	k := newKindBackoff(time.Second, 8*time.Second)
 	now := time.Now()
 
-	wait := k.markNoWork(now, false)
+	k, wait := k.markNoWork(now, false)
 	deadline := now.Add(wait)
 
 	if until, gated := k.readyAt(deadline.Add(-1)); !gated || !until.Equal(deadline) {
@@ -135,7 +139,9 @@ func TestKindBackoffMarkNoWorkGrowsLikeIdleBackoff(t *testing.T) {
 
 	got := []time.Duration{}
 	for i := 0; i < 4; i++ {
-		got = append(got, k.markNoWork(now, false))
+		var wait time.Duration
+		k, wait = k.markNoWork(now, false)
+		got = append(got, wait)
 	}
 
 	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
@@ -150,12 +156,12 @@ func TestKindBackoffJammedFlag(t *testing.T) {
 	k := newKindBackoff(time.Second, 8*time.Second)
 	now := time.Now()
 
-	k.markNoWork(now, true)
+	k, _ = k.markNoWork(now, true)
 	if !k.jammedNow() {
 		t.Fatalf("jammedNow() after markNoWork(jammed=true): want true")
 	}
 
-	k.markNoWork(now, false)
+	k, _ = k.markNoWork(now, false)
 	if k.jammedNow() {
 		t.Fatalf("jammedNow() after markNoWork(jammed=false): want false")
 	}
@@ -165,10 +171,10 @@ func TestKindBackoffReset(t *testing.T) {
 	k := newKindBackoff(time.Second, 8*time.Second)
 	now := time.Now()
 
-	k.markNoWork(now, true)
-	k.markNoWork(now, true)
+	k, _ = k.markNoWork(now, true)
+	k, _ = k.markNoWork(now, true)
 
-	k.reset()
+	k = k.reset()
 
 	if !k.runnable(now) {
 		t.Fatalf("runnable(now) after reset: want runnable")
@@ -179,7 +185,7 @@ func TestKindBackoffReset(t *testing.T) {
 	if until, gated := k.readyAt(now); gated || !until.IsZero() {
 		t.Fatalf("readyAt() after reset = (%v, %v), want (zero, false)", until, gated)
 	}
-	if got := k.markNoWork(now, false); got != time.Second {
+	if _, got := k.markNoWork(now, false); got != time.Second {
 		t.Fatalf("markNoWork() after reset = %v, want floor (%v)", got, time.Second)
 	}
 }
