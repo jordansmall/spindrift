@@ -11,12 +11,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -35,6 +33,7 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
+	"spindrift.dev/launcher/internal/stopsignal"
 	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/waves"
 )
@@ -1162,62 +1161,7 @@ var snapshotGeneration = runner.SnapshotGeneration
 // above, so tests drive waves.Config.Stop and waves.Config.Abort through
 // fake channels instead of registering a real signal handler or sending a
 // real SIGTERM/SIGINT to the test binary (#3520, #3521).
-var installStopSignal = notifyStopSignal
-
-// notifyStopSignal installs a SIGTERM and SIGINT handler and relays them
-// onto the returned channels, the wind-down/escalation seam
-// waves.Config.Stop and waves.Config.Abort expect. The kind of signal never
-// matters, only first versus second (#3521): the first of either kind closes
-// stop (drain), the second closes abort (escalate). sig is buffered at 2,
-// not 1, so a second signal delivered back-to-back with the first -- before
-// the relay goroutine has had a chance to run -- is queued rather than
-// dropped; a third or later signal, once the buffer and the relay's own
-// count are both spent, is simply dropped, which is exactly the "third and
-// later are no-ops" requirement (nothing ever drains sig again once the
-// relay has closed abort and returned). cleanup stops the relay goroutine
-// but deliberately never calls signal.Stop -- reverting the disposition
-// mid-teardown would let a third signal reach the OS default (kill) while
-// the launcher's cleanup and each Box's deferred teardown are still running
-// (#3520).
-func notifyStopSignal() (<-chan struct{}, <-chan struct{}, func()) {
-	sig := make(chan os.Signal, 2)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
-	return relaySignals(sig)
-}
-
-// relaySignals is factored out of notifyStopSignal so a test can drive it
-// from a fake chan os.Signal instead of sending a real OS signal to the test
-// binary (#3520). It closes stopCh/abortCh, rather than merely writing to
-// them, since RunContinuous's refill guard, terminal check, and
-// stop/abort-watcher goroutines all read cfg.Stop/cfg.Abort independently
-// and concurrently -- a close is the only send every one of them observes.
-// The goroutine returns immediately after closing abortCh: escalation is
-// edge-triggered and happens exactly once, so a third value on sig (mashing
-// Ctrl-C) finds nothing left reading the channel, and can neither re-enter
-// the abort path nor race the teardown it triggered (#3521).
-func relaySignals(sig <-chan os.Signal) (stop, abort <-chan struct{}, cleanup func()) {
-	stopCh := make(chan struct{})
-	abortCh := make(chan struct{})
-	quit := make(chan struct{})
-	go func() {
-		for n := 0; ; {
-			select {
-			case <-sig:
-				n++
-				switch n {
-				case 1:
-					close(stopCh)
-				case 2:
-					close(abortCh)
-					return
-				}
-			case <-quit:
-				return
-			}
-		}
-	}()
-	return stopCh, abortCh, func() { close(quit) }
-}
+var installStopSignal = stopsignal.Notify
 
 // exitConfigInvalid is the exit code for a bootstrap failure whose error wraps
 // errConfigInvalid; see bootstrapExitCode.
@@ -1747,7 +1691,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
 	// stopCleanup retires the relay goroutine only; the SIGTERM/SIGINT
 	// disposition deliberately stays installed for the rest of the process
-	// (#3520, see notifyStopSignal).
+	// (#3520, see stopsignal.Notify).
 	stopCh, abortCh, stopCleanup := installStopSignal()
 	defer stopCleanup()
 	cfg.Stop = stopCh
