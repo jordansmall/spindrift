@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/signalsocket"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
@@ -53,6 +54,14 @@ type Dispatch struct {
 	// Factory.Kill (issue #3521). Nil for a Dispatch built without a Factory,
 	// which then behaves exactly as it did before.
 	killed <-chan struct{}
+
+	// signalBuffer holds this attempt's Signal socket buffer (ADR 0052, issue
+	// #3725), set by runOnce only under BOX_SIGNAL_CARRIER=socket, for
+	// outcomeResult to read once the Box exits. runOnce resets it to nil before
+	// every attempt starts a listener, so a killed or retried attempt's buffer
+	// can never leak into a later attempt's Result; nil also covers the log
+	// carrier, where no buffer is ever minted.
+	signalBuffer *signalsocket.Buffer
 }
 
 var _ Dispatcher = (*Dispatch)(nil)
@@ -258,6 +267,10 @@ func (d *Dispatch) Close() {
 // live run (possibly orphaned by a killed launcher) owns that log, so
 // runOnce returns ErrAlreadyRunning first (#562).
 func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string) error {
+	// Reset before any listener starts: a killed or retried attempt's
+	// buffer must never leak into a later attempt's Result (issue #3725).
+	d.signalBuffer = nil
+
 	if d.isKilled() {
 		return errKilled
 	}
@@ -275,6 +288,11 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		return fmt.Errorf("create log: %w", err)
 	}
 	defer logFile.Close()
+
+	// Unconditional: the stream view is byte-transparent, so a log-carrier
+	// run writes exactly what it wrote before.
+	boxLog := newBoxLog(logFile)
+	defer func() { _ = boxLog.flush() }()
 
 	// A HostMediatedRemote backend always needs an outbox (ADR 0033,
 	// CODE_FORGE=local); an OutboxRelayCapable one needs it only under
@@ -297,10 +315,24 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	var registryProxyLocation runner.RegistryProxyLocation
 	// boxSockets collects every Box-facing socket mount this Dispatch mints,
 	// under whichever transport verdict RegistryProxyTransport returns once
-	// below — a future second socket (the Signal socket, ADR 0052) appends
-	// here too, still gated on the same verdict.
+	// below: the registry proxy's unix verdict appends here, and so does the
+	// Signal socket's (ADR 0052, issue #3725), both gated on the same probe.
 	var boxSockets []runner.SocketMount
-	if len(d.cfg.RegistryProxyRoutes) > 0 {
+	// signalSocketLocation is the Signal socket's TCP-only counterpart to
+	// registryProxyLocation; the zero value covers the log carrier and the
+	// unix verdict alike, where the socket travels through boxSockets instead.
+	var signalSocketLocation runner.SignalSocketLocation
+
+	needRegistryProxy := len(d.cfg.RegistryProxyRoutes) > 0
+	needSignalSocket := d.cfg.signalCarrierSocket()
+
+	// The routes are validated before the probe below, the order this had
+	// before the one-probe hoist: a malformed-routes value is a static
+	// configuration mistake, so it must not wait on -- or lose its error to
+	// -- a container-runtime probe subprocess that has nothing to say about
+	// it.
+	var proxy *registryproxy.Proxy
+	if needRegistryProxy {
 		// Rewrite rows come from ecosystem.Table, not d.cfg: which response
 		// shapes get rewritten is static per-ecosystem knowledge, not
 		// something a run resolves per-route the way routes are.
@@ -308,18 +340,33 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		if err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
 		}
-		proxy := &registryproxy.Proxy{Handler: handler}
+		proxy = &registryproxy.Proxy{Handler: handler}
+	}
 
-		// The runner probes the transport live (issue #3111): a unix socket
-		// that cannot cross into the guest (a remote-context docker/podman, a
-		// VM-backed runtime) needs the loopback-TCP fallback, so the transport
-		// can never be inferred from GOOS. The probe returns only the kind and
-		// host; this dispatch mints the real path or port below.
-		transport, tcpAddHost, err := d.runner.RegistryProxyTransport()
+	// The runner probes the transport live at most once per Dispatch (issue
+	// #3111; one-probe rule for the Signal socket too, ADR 0052): a unix
+	// socket that cannot cross into the guest (a remote-context
+	// docker/podman, a VM-backed runtime) needs the loopback-TCP fallback, so
+	// the transport can never be inferred from GOOS. The registry proxy and
+	// the Signal socket share this one verdict rather than probing twice.
+	// Neither feature configured takes no probe at all, exactly as before
+	// this knob existed.
+	var transport registrymanifest.Endpoint
+	var tcpAddHost bool
+	if needRegistryProxy || needSignalSocket {
+		t, addHost, err := d.runner.RegistryProxyTransport()
 		if err != nil {
-			return fmt.Errorf("registry proxy: %w", err)
+			// The registry-proxy wrapping is pinned by existing tests; a
+			// probe taken for the Signal socket alone reports as its own.
+			if needRegistryProxy {
+				return fmt.Errorf("registry proxy: %w", err)
+			}
+			return fmt.Errorf("signal socket: %w", err)
 		}
+		transport, tcpAddHost = t, addHost
+	}
 
+	if needRegistryProxy {
 		// manifestEndpoint is what REGISTRY_PROXY_MANIFEST carries, and is
 		// deliberately not always registryProxyLocation.Endpoint: that one is
 		// the mount SOURCE (a host path buildMountSpecs reads), while a
@@ -392,15 +439,30 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		defer proxy.Close()
 	}
 
+	if needSignalSocket {
+		mount, loc, closeSignalSocket, err := d.startSignalSocket(transport, tcpAddHost, env, boxLog.mirror())
+		if err != nil {
+			return err
+		}
+		if mount != nil {
+			boxSockets = append(boxSockets, *mount)
+		}
+		signalSocketLocation = loc
+		if closeSignalSocket != nil {
+			defer closeSignalSocket()
+		}
+	}
+
 	box := runner.Box{
 		Issue:             d.number,
 		Name:              name,
 		Env:               env,
-		Output:            d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), driverkit.RenderOptions{}),
+		Output:            d.driver.NewHeartbeatWriter(boxLog.stream(), d.number, d.humanOut(), driverkit.RenderOptions{}),
 		DriverCacheDir:    driverCacheDir,
 		OutboxDir:         outboxDir,
 		RegistryProxy:     registryProxyLocation,
 		Sockets:           boxSockets,
+		SignalSocket:      signalSocketLocation,
 		ClosureGeneration: d.agentGeneration,
 	}
 	return d.runner.Run(box)
@@ -447,46 +509,74 @@ const registryProxySocketFile = "proxy.sock"
 
 const spindriftRegistryProxyDirPattern = "spindrift-registry-proxy-*"
 
+// signalSocketFile and spindriftSignalSocketDirPattern are the Signal
+// socket's counterparts (ADR 0052, issue #3725): the two mounted unix
+// sockets share the same over-long-sun_path fallback mechanism (issue #3077)
+// through mkSocketDir/socketDirWithFallback below, rather than a second
+// copy-pasted variant.
+const signalSocketFile = "signal.sock"
+const spindriftSignalSocketDirPattern = "spindrift-signal-socket-*"
+
 // registryProxyMkdirTemp and registryProxyRemoveAll are swappable in tests the
 // way statCgroupControllerFile is (runner/validate.go, issue #3103): the
 // RemoveAll failure branch below is reachable only through an
-// EACCES/EROFS/EBUSY-class error no test can provoke deterministically.
+// EACCES/EROFS/EBUSY-class error no test can provoke deterministically. Both
+// the registry proxy's and the Signal socket's directories are created
+// through registryProxyMkdirTemp (via mkSocketDir below), but only the
+// registry proxy's removal goes through registryProxyRemoveAll -- the Signal
+// socket's cleanup calls os.RemoveAll directly (signal_socket.go).
 var (
 	registryProxyMkdirTemp = os.MkdirTemp
 	registryProxyRemoveAll = os.RemoveAll
 )
 
-// mkProxyDir creates a fresh, unique directory for the registry proxy's
-// unix socket under base ("" means os.MkdirTemp's own default, os.TempDir()).
-func mkProxyDir(base string) (string, error) {
-	dir, err := registryProxyMkdirTemp(base, spindriftRegistryProxyDirPattern)
+// mkSocketDir creates a fresh, unique directory for one of this Dispatch's
+// launcher-owned unix sockets under base ("" means os.MkdirTemp's own
+// default, os.TempDir()). label names the caller in error text ("registry
+// proxy" or "signal socket").
+func mkSocketDir(base, pattern, label string) (string, error) {
+	dir, err := registryProxyMkdirTemp(base, pattern)
 	if err != nil {
-		return "", fmt.Errorf("mktemp registry proxy dir under %q: %w", base, err)
+		return "", fmt.Errorf("mktemp %s dir under %q: %w", label, base, err)
 	}
 	return dir, nil
 }
 
-// registryProxySocketDir returns a fresh directory for the registry proxy's
-// unix socket, preferring os.TempDir() but falling back to /tmp when appending
-// "proxy.sock" would overflow the platform's AF_UNIX sun_path limit (issue
-// #3077), as macOS's $TMPDIR under nix develop's nix-shell.XXXXXX/ prefix
-// does. Any other os.MkdirTemp failure is returned as-is, never rerouted.
-func registryProxySocketDir() (string, error) {
-	dir, err := mkProxyDir("")
+// socketDirWithFallback returns a fresh directory for label's unix socket
+// file named socketFile, preferring os.TempDir() but falling back to /tmp
+// when appending socketFile would overflow the platform's AF_UNIX sun_path
+// limit (issue #3077), as macOS's $TMPDIR under nix develop's
+// nix-shell.XXXXXX/ prefix does. Any other os.MkdirTemp failure is returned
+// as-is, never rerouted. registryProxySocketDir and signalSocketDir are both
+// thin callers of this one mechanism (ADR 0052).
+func socketDirWithFallback(pattern, socketFile, label string) (string, error) {
+	dir, err := mkSocketDir("", pattern, label)
 	if err != nil {
 		return "", err
 	}
-	if !unixsocket.TooLong(filepath.Join(dir, registryProxySocketFile)) {
+	if !unixsocket.TooLong(filepath.Join(dir, socketFile)) {
 		return dir, nil
 	}
 	if err := registryProxyRemoveAll(dir); err != nil {
-		return "", fmt.Errorf("remove over-long registry proxy dir: %w", err)
+		return "", fmt.Errorf("remove over-long %s dir: %w", label, err)
 	}
 
 	// A too-long path from this fallback is ListenAndServe's error to raise:
 	// it already names the platform, the cap, and the byte length (issue
 	// #3077), so a second message here would only drift out of sync.
-	return mkProxyDir("/tmp")
+	return mkSocketDir("/tmp", pattern, label)
+}
+
+// registryProxySocketDir returns a fresh directory for the registry proxy's
+// unix socket (issue #3077/#3723).
+func registryProxySocketDir() (string, error) {
+	return socketDirWithFallback(spindriftRegistryProxyDirPattern, registryProxySocketFile, "registry proxy")
+}
+
+// signalSocketDir returns a fresh directory for the Signal socket's unix
+// socket, mirroring registryProxySocketDir (ADR 0052, issue #3725).
+func signalSocketDir() (string, error) {
+	return socketDirWithFallback(spindriftSignalSocketDirPattern, signalSocketFile, "signal socket")
 }
 
 // needsOutbox reports whether cfg's dispatch needs a writable per-issue outbox
