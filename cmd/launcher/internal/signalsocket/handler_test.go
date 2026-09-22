@@ -313,8 +313,8 @@ func TestHandlerMirrorsOneOpPerRequest(t *testing.T) {
 		if want.decision == "reject" && got.Reason == "" {
 			t.Errorf("op %d = %+v, want the reject reason", i, got)
 		}
-		if want.decision == "accept" && got.Reason != "" {
-			t.Errorf("op %d = %+v, want no reason on an accept", i, got)
+		if want.decision != "reject" && got.Reason != "" {
+			t.Errorf("op %d = %+v, want no reason on a non-reject", i, got)
 		}
 	}
 }
