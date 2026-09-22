@@ -430,6 +430,51 @@ func TestChildCommandStripsAmbientReportFD(t *testing.T) {
 	}
 }
 
+// TestChildCommandCarriesSignalCarrier pins the knob's whole reason for
+// being env-only (see flagtable_gen.go): BOX_SIGNAL_CARRIER never lands in
+// the Launcher input document's settings map, so it is never a Knobs entry
+// and withoutKeys never strips it — it rides s.Env straight through. The
+// "beside a stripped knob" case is the one that exercises the strip path:
+// Knobs names a settings key, that key goes, and the carrier beside it
+// stays.
+func TestChildCommandCarriesSignalCarrier(t *testing.T) {
+	tests := []struct {
+		name  string
+		env   []string
+		knobs []string
+		want  []string
+	}{
+		{
+			name: "set",
+			env:  []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=socket"},
+			want: []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=socket", "SPINDRIFT_REPORT_FD=3"},
+		},
+		{
+			name: "absent",
+			env:  []string{"PATH=/bin"},
+			want: []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3"},
+		},
+		{
+			name:  "beside a stripped knob",
+			env:   []string{"PATH=/bin", "MODEL=opus", "BOX_SIGNAL_CARRIER=socket"},
+			knobs: []string{"MODEL"},
+			want:  []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=socket", "SPINDRIFT_REPORT_FD=3"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch, Env: tc.env, Knobs: tc.knobs}
+			got, err := ChildCommand(spec)
+			if err != nil {
+				t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
+			}
+			if !reflect.DeepEqual(got.Env, tc.want) {
+				t.Fatalf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, tc.want)
+			}
+		})
+	}
+}
+
 // TestDoctorCommandOmitsReportFD guards the other half: the doctor
 // preflight dispatches nothing, so it gets no report pipe and no
 // SPINDRIFT_REPORT_FD.
