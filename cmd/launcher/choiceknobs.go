@@ -21,6 +21,7 @@ var choiceKnobRegistry = []choiceKnobRow{
 	{Env: "SYNC_METHOD", Value: func(c config) string { return c.syncMethod }},
 	{Env: "OVERLAP_GATE", Value: func(c config) string { return c.overlapGate }},
 	{Env: "NETWORK_MODE", Value: func(c config) string { return c.networkMode }},
+	{Env: "BOX_SIGNAL_CARRIER", Value: func(c config) string { return c.signalCarrier }},
 	{
 		Env:                  "BOX_FORGE_AND_ISSUE_ACCESS",
 		Value:                func(c config) string { return c.boxForgeAndIssueAccess },

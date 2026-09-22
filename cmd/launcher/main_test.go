@@ -2306,6 +2306,32 @@ func TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesRetirementError(t *testi
 	}
 }
 
+// Issue #3725: BOX_SIGNAL_CARRIER joins choiceKnobRegistry, so
+// validate() rejects an out-of-enum value at startup naming the knob, and
+// accepts both declared values.
+func TestValidate_RejectsOutOfEnumSignalCarrier(t *testing.T) {
+	c := minimalValidConfig()
+	c.signalCarrier = "bogus"
+
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() = nil, want error for out-of-enum BOX_SIGNAL_CARRIER")
+	}
+	if !strings.Contains(err.Error(), "BOX_SIGNAL_CARRIER") {
+		t.Fatalf("want error to mention BOX_SIGNAL_CARRIER, got: %v", err)
+	}
+}
+
+func TestValidate_AcceptsBothSignalCarrierValues(t *testing.T) {
+	for _, v := range []string{"log", "socket"} {
+		c := minimalValidConfig()
+		c.signalCarrier = v
+		if err := validate(c); err != nil {
+			t.Errorf("validate() with BOX_SIGNAL_CARRIER=%q = %v, want nil", v, err)
+		}
+	}
+}
+
 // The inverse: BOX_FORGE_AND_ISSUE_ACCESS is the one choiceKnobRegistry row
 // marked AfterCrossKnobChecks, so with both broken the registry-proxy-routes
 // retirement error must win. This catches AfterCrossKnobChecks being flipped
@@ -3150,6 +3176,26 @@ func TestDispatchConfig_CopiesDescriptorRowsThrough(t *testing.T) {
 	}
 }
 
+// Pins issue #3725: SignalCarrier and NetworkMode must reach dispatch.Config
+// unchanged, since startSignalSocket's per-Dispatch transport gate reads them off
+// this value rather than re-resolving c directly.
+func TestDispatchConfig_ForwardsSignalCarrierAndNetworkMode(t *testing.T) {
+	cf := forge.NewFake()
+	it := forge.NewFake()
+	c := minimalValidConfig()
+	c.signalCarrier = "socket"
+	c.networkMode = "no-host-loopback"
+
+	cfg := dispatchConfig(c, it, testWired(it), cf, forge.Capabilities{})
+
+	if cfg.SignalCarrier != "socket" {
+		t.Errorf("dispatchConfig() SignalCarrier = %q, want %q", cfg.SignalCarrier, "socket")
+	}
+	if cfg.NetworkMode != "no-host-loopback" {
+		t.Errorf("dispatchConfig() NetworkMode = %q, want %q", cfg.NetworkMode, "no-host-loopback")
+	}
+}
+
 // Pins issue #3062: a loaded document whose Settings match the resolved names
 // but whose Artifacts contradict the caps argument must not reach
 // dispatchConfig's Capabilities. resolveCapabilitySignals trusts that
@@ -3794,6 +3840,7 @@ func minimalValidConfig() config {
 			overlapGate:            "defer",
 			boxForgeAndIssueAccess: "read-write",
 			networkMode:            "open",
+			signalCarrier:          "log",
 		},
 	}
 }

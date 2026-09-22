@@ -764,7 +764,7 @@ checkedMerge {
   # A knob's `choices` must be a non-empty list of strings and its `default` a
   # member, or tab-completion would offer values the knob can never hold
   # (issue #554). The per-knob asserts below pin each exact value set, and the
-  # set of choices-bearing knob names is itself asserted so a ninth knob
+  # set of choices-bearing knob names is itself asserted so a tenth knob
   # declaring `choices` cannot go unpinned silently (issue #2519).
   schema-choices =
     let
@@ -786,6 +786,7 @@ checkedMerge {
         "syncMethod"
         "boxForgeAndIssueAccess"
         "networkMode"
+        "signalCarrier"
       ];
     in
     assert assertMsg (choiceKnobNames == expectedChoiceKnobNames)
@@ -846,11 +847,17 @@ checkedMerge {
         "host"
       ]
     ) "lib/env-schema.nix: networkMode.choices must be [ open no-host-loopback none host ]";
+    assert assertMsg (
+      schema.signalCarrier.choices or [ ] == [
+        "log"
+        "socket"
+      ]
+    ) "lib/env-schema.nix: signalCarrier.choices must be [ log socket ]";
     pkgs.runCommand "schema-choices" { } "touch $out";
 
-  # Regression guard (issue #2519): injects a ninth synthetic choices-bearing
+  # Regression guard (issue #2519): injects a tenth synthetic choices-bearing
   # knob, so the knob-set assertion above is known to reject one rather than
-  # passing vacuously because the real schema has exactly the eight names.
+  # passing vacuously because the real schema has exactly the nine names.
   schema-choices-knobset-guard =
     let
       schema = import ../../lib/env-schema.nix;
@@ -881,6 +888,7 @@ checkedMerge {
         "syncMethod"
         "boxForgeAndIssueAccess"
         "networkMode"
+        "signalCarrier"
       ];
       result = builtins.tryEval (
         assert choiceKnobNames == expectedChoiceKnobNames;
@@ -888,7 +896,7 @@ checkedMerge {
       );
     in
     assert assertMsg (!result.success)
-      "schema-choices-knobset-guard: expected the choices-bearing knob-set assertion to reject a schema with an injected ninth choices knob (extraChoiceKnob), but it evaluated successfully";
+      "schema-choices-knobset-guard: expected the choices-bearing knob-set assertion to reject a schema with an injected tenth choices knob (extraChoiceKnob), but it evaluated successfully";
     pkgs.runCommand "schema-choices-knobset-guard" { } "touch $out";
 
   # Regression guard (issue #872): the completion renderers scope `choices` to

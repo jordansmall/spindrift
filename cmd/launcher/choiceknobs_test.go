@@ -63,13 +63,14 @@ func TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks(t *
 // longer recognizes, goes unvalidated by both validate() and validateConfig()
 // while the rest of the suite stays green, because validateChoice is a no-op
 // for an Env absent from schemaFlags. Only full membership catches that.
-func TestChoiceKnobRegistry_HasSixExpectedRows(t *testing.T) {
+func TestChoiceKnobRegistry_HasSevenExpectedRows(t *testing.T) {
 	want := []string{
 		"MERGE_MODE",
 		"MERGE_METHOD",
 		"SYNC_METHOD",
 		"OVERLAP_GATE",
 		"NETWORK_MODE",
+		"BOX_SIGNAL_CARRIER",
 		"BOX_FORGE_AND_ISSUE_ACCESS",
 	}
 

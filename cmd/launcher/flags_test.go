@@ -1879,4 +1879,32 @@ func TestValidateChoice(t *testing.T) {
 			t.Errorf("validateChoice(MODEL, whatever) = %v, want nil", err)
 		}
 	})
+
+	// Issue #3725: BOX_SIGNAL_CARRIER's two values, "log" and
+	// "socket", must both be accepted and any other value rejected naming
+	// the knob.
+	t.Run("BOX_SIGNAL_CARRIER accepts log", func(t *testing.T) {
+		if err := validateChoice("BOX_SIGNAL_CARRIER", "log"); err != nil {
+			t.Errorf("validateChoice(BOX_SIGNAL_CARRIER, log) = %v, want nil", err)
+		}
+	})
+
+	t.Run("BOX_SIGNAL_CARRIER accepts socket", func(t *testing.T) {
+		if err := validateChoice("BOX_SIGNAL_CARRIER", "socket"); err != nil {
+			t.Errorf("validateChoice(BOX_SIGNAL_CARRIER, socket) = %v, want nil", err)
+		}
+	})
+
+	t.Run("BOX_SIGNAL_CARRIER rejects an out-of-enum value naming the knob", func(t *testing.T) {
+		err := validateChoice("BOX_SIGNAL_CARRIER", "bogus")
+		if err == nil {
+			t.Fatal("validateChoice(BOX_SIGNAL_CARRIER, bogus) = nil, want error")
+		}
+		msg := err.Error()
+		for _, want := range []string{"BOX_SIGNAL_CARRIER", "bogus", "log", "socket"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("error %q missing %q", msg, want)
+			}
+		}
+	})
 }

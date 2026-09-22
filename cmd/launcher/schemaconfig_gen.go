@@ -71,6 +71,7 @@ type schemaConfig struct {
 	repoSlug                     string
 	researchReservation          int
 	researchVerdicts             string
+	signalCarrier                string
 	spindriftPromptDir           string
 	spindriftSkillsDir           string
 	syncMethod                   string
@@ -145,6 +146,7 @@ func loadSchemaConfig() schemaConfig {
 		repoSlug:                getenvSchema("REPO_SLUG"),
 		researchReservation:     atoiNonnegSchema("RESEARCH_RESERVATION"),
 		researchVerdicts:        getenvSchema("RESEARCH_VERDICTS"),
+		signalCarrier:           getenvSchema("BOX_SIGNAL_CARRIER"),
 		spindriftPromptDir:      getenvSchema("SPINDRIFT_PROMPT_DIR"),
 		spindriftSkillsDir:      getenvSchema("SPINDRIFT_SKILLS_DIR"),
 		syncMethod:              getenvSchema("SYNC_METHOD"),

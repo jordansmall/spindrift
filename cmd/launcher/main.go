@@ -857,6 +857,8 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		Policy:                 retryPolicy(c),
 		DriverSessionCacheDir:  c.driverSessionCacheDir,
 		RegistryProxyRoutes:    c.registryProxyRoutes,
+		SignalCarrier:          c.signalCarrier,
+		NetworkMode:            c.networkMode,
 		// forge.ResolveOpenPR (issue #565) keeps a zero-exit rate-limited retry
 		// from re-running a box whose work already landed a PR.
 		OpenPRForIssue: func(number string) (bool, error) {
