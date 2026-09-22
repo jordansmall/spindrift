@@ -28,7 +28,7 @@ func TestBwrapCapabilityChecks_ReturnsThreeRowsInOrder(t *testing.T) {
 	}
 }
 
-// ReportResults prints Remedy alongside a failure, so a row with no Remedy
+// Reporter.Results prints Remedy alongside a failure, so a row with no Remedy
 // leaves an operator with only the bare error text.
 func TestBwrapCapabilityChecks_RemedyNonEmpty(t *testing.T) {
 	c := minimalValidConfig()
@@ -121,7 +121,7 @@ func TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing(t *test
 	c.runnerKind = freshness.KindBwrap
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.ReportResults(&buf, results)
+	doctor.NewReporter(&buf).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "advisory: bwrap-cgroup-delegation") {
 		t.Errorf("want advisory: framing for failing bwrap-cgroup-delegation, got:\n%s", out)
@@ -146,7 +146,7 @@ func TestBwrapCapabilityChecks_OverlayRendersAdvisoryNotMissing(t *testing.T) {
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.ReportResults(&buf, results)
+	doctor.NewReporter(&buf).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "advisory: bwrap-overlay-support") {
 		t.Errorf("want advisory: framing for failing bwrap-overlay-support, got:\n%s", out)
@@ -169,7 +169,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersAdvisoryNotMissing(t *test
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.ReportResults(&buf, results)
+	doctor.NewReporter(&buf).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "advisory: bwrap-network-isolation") {
 		t.Errorf("want advisory: framing for failing bwrap-network-isolation, got:\n%s", out)
@@ -194,7 +194,7 @@ func TestBwrapCapabilityChecks_OverlayRendersMissingWhenRequired(t *testing.T) {
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.ReportResults(&buf, results)
+	doctor.NewReporter(&buf).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "MISSING: bwrap-overlay-support") {
 		t.Errorf("want MISSING: framing for failing required bwrap-overlay-support, got:\n%s", out)
@@ -216,7 +216,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersMissingWhenRequired(t *tes
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.ReportResults(&buf, results)
+	doctor.NewReporter(&buf).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "MISSING: bwrap-network-isolation") {
 		t.Errorf("want MISSING: framing for failing required bwrap-network-isolation, got:\n%s", out)
@@ -280,7 +280,7 @@ func TestBwrapCapabilityChecks_OverlayRendersOkWhenPassing(t *testing.T) {
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.ReportResults(&buf, results)
+	doctor.NewReporter(&buf).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "ok: bwrap-overlay-support") {
 		t.Errorf("want ok: framing for passing bwrap-overlay-support, got:\n%s", out)
@@ -298,7 +298,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersOkWhenPassing(t *testing.T
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.ReportResults(&buf, results)
+	doctor.NewReporter(&buf).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "ok: bwrap-network-isolation") {
 		t.Errorf("want ok: framing for passing bwrap-network-isolation, got:\n%s", out)
@@ -316,7 +316,7 @@ func TestBwrapCapabilityChecks_CgroupDelegationRendersOkWhenPassing(t *testing.T
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.ReportResults(&buf, results)
+	doctor.NewReporter(&buf).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "ok: bwrap-cgroup-delegation") {
 		t.Errorf("want ok: framing for passing bwrap-cgroup-delegation, got:\n%s", out)

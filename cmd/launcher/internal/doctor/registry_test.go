@@ -209,21 +209,21 @@ func TestRunChecks_NilProbeReturnsErrorInsteadOfPanicking(t *testing.T) {
 	}
 }
 
-func TestReportResults_PrintsOkForSuccess(t *testing.T) {
+func TestReporter_Results_PrintsOkForSuccess(t *testing.T) {
 	results := []Result{
 		{Check: Check{Name: "git-user-name"}, Err: nil},
 	}
 
 	var buf bytes.Buffer
-	ReportResults(&buf, results)
+	NewReporter(&buf).Results(results)
 
 	want := "ok: git-user-name\n"
 	if buf.String() != want {
-		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
+		t.Fatalf("Results() wrote %q, want %q", buf.String(), want)
 	}
 }
 
-func TestReportResults_UsesSuccessMsgWhenSet(t *testing.T) {
+func TestReporter_Results_UsesSuccessMsgWhenSet(t *testing.T) {
 	results := []Result{
 		{
 			Check: Check{
@@ -235,17 +235,17 @@ func TestReportResults_UsesSuccessMsgWhenSet(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	ReportResults(&buf, results)
+	NewReporter(&buf).Results(results)
 
 	want := "ok: github-repo: jordansmall/spindrift\n"
 	if buf.String() != want {
-		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
+		t.Fatalf("Results() wrote %q, want %q", buf.String(), want)
 	}
 }
 
 // SuccessMsg must read the Output its parameter carries, not a value an outer
 // closure captured on the side.
-func TestReportResults_SuccessMsgReceivesProbeOutput(t *testing.T) {
+func TestReporter_Results_SuccessMsgReceivesProbeOutput(t *testing.T) {
 	check := Check{
 		Name: "github-repo",
 		Probe: func() (any, error) {
@@ -259,11 +259,11 @@ func TestReportResults_SuccessMsgReceivesProbeOutput(t *testing.T) {
 	results := RunChecks([]Check{check})
 
 	var buf bytes.Buffer
-	ReportResults(&buf, results)
+	NewReporter(&buf).Results(results)
 
 	want := "ok: ok: some-value\n"
 	if buf.String() != want {
-		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
+		t.Fatalf("Results() wrote %q, want %q", buf.String(), want)
 	}
 }
 
@@ -273,7 +273,7 @@ const gitUserNameErrText = "GIT_USER_NAME is unset"
 // does not, so remedySuffix keeps it rather than suppressing it as a repeat.
 const gitUserNameRemedy = "set GIT_USER_NAME, or configure git user.name on the host"
 
-func TestReportResults_PrintsNameErrAndRemedyForFailure(t *testing.T) {
+func TestReporter_Results_PrintsNameErrAndRemedyForFailure(t *testing.T) {
 	results := []Result{
 		{
 			Check: Check{
@@ -285,12 +285,12 @@ func TestReportResults_PrintsNameErrAndRemedyForFailure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	ReportResults(&buf, results)
+	NewReporter(&buf).Results(results)
 
 	want := "MISSING: git-user-name: GIT_USER_NAME is unset\n" +
 		"  remedy: " + gitUserNameRemedy + "\n"
 	if buf.String() != want {
-		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
+		t.Fatalf("Results() wrote %q, want %q", buf.String(), want)
 	}
 }
 
@@ -384,7 +384,7 @@ func TestRunChecksFailFast_NonDegradedRequiredFailureStillStopsIteration(t *test
 	}
 }
 
-func TestReportResults_PrintsAdvisoryForDegradedFailure(t *testing.T) {
+func TestReporter_Results_PrintsAdvisoryForDegradedFailure(t *testing.T) {
 	results := []Result{
 		{
 			Check: Check{
@@ -397,16 +397,16 @@ func TestReportResults_PrintsAdvisoryForDegradedFailure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	ReportResults(&buf, results)
+	NewReporter(&buf).Results(results)
 
 	want := "advisory: branch-protection: branch protection probe for \"main\" failed: permission denied\n" +
 		"  remedy: protect main: block direct pushes and require CI status checks\n"
 	if buf.String() != want {
-		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
+		t.Fatalf("Results() wrote %q, want %q", buf.String(), want)
 	}
 }
 
-func TestReportResults_SkipsRemedyLineWhenIdenticalToErrText(t *testing.T) {
+func TestReporter_Results_SkipsRemedyLineWhenIdenticalToErrText(t *testing.T) {
 	results := []Result{
 		{
 			Check: Check{
@@ -418,11 +418,11 @@ func TestReportResults_SkipsRemedyLineWhenIdenticalToErrText(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	ReportResults(&buf, results)
+	NewReporter(&buf).Results(results)
 
 	want := "MISSING: git-user-name: GIT_USER_NAME is unset\n"
 	if buf.String() != want {
-		t.Fatalf("ReportResults() wrote %q, want %q (no duplicate remedy line)", buf.String(), want)
+		t.Fatalf("Results() wrote %q, want %q (no duplicate remedy line)", buf.String(), want)
 	}
 }
 
@@ -539,7 +539,7 @@ func TestWithRemedy_AppendsRemedyAndUnwraps(t *testing.T) {
 
 // The Check's Tier picks the row prefix, but an Err wrapping ErrDegraded
 // demotes any row to "advisory:" and trims the sentinel text off the message.
-func TestReportResults_TierAndDegradedDriveRowPrefix(t *testing.T) {
+func TestReporter_Results_TierAndDegradedDriveRowPrefix(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		check Check
@@ -581,10 +581,10 @@ func TestReportResults_TierAndDegradedDriveRowPrefix(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			ReportResults(&buf, []Result{{Check: tc.check, Err: tc.err}})
+			NewReporter(&buf).Results([]Result{{Check: tc.check, Err: tc.err}})
 
 			if buf.String() != tc.want {
-				t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), tc.want)
+				t.Fatalf("Results() wrote %q, want %q", buf.String(), tc.want)
 			}
 		})
 	}
