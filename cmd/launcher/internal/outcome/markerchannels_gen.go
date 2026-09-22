@@ -8,7 +8,10 @@ package outcome
 // pr-intent, issue-intent, review-verdict. Each channel's token and
 // fieldShape are rendered into Go (issue #2996); its defense (structural /
 // nonce / fold) and carrier stay Nix-only, recorded in that registry, the
-// citable home for the trust model.
+// citable home for the trust model. The three signal channels (comment,
+// pr-intent, issue-intent) additionally record a socketCarrier/
+// socketDefense pair for BOX_SIGNAL_CARRIER=socket (ADR 0052, issue #3726),
+// also Nix-only.
 const (
 	markerChannelOutcomeToken       = "SPINDRIFT_OUTCOME"
 	markerChannelCommentToken       = "SPINDRIFT_COMMENT"

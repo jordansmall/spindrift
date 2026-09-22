@@ -971,7 +971,10 @@ rec {
     + "// pr-intent, issue-intent, review-verdict. Each channel's token and\n"
     + "// fieldShape are rendered into Go (issue #2996); its defense (structural /\n"
     + "// nonce / fold) and carrier stay Nix-only, recorded in that registry, the\n"
-    + "// citable home for the trust model.\n"
+    + "// citable home for the trust model. The three signal channels (comment,\n"
+    + "// pr-intent, issue-intent) additionally record a socketCarrier/\n"
+    + "// socketDefense pair for BOX_SIGNAL_CARRIER=socket (ADR 0052, issue #3726),\n"
+    + "// also Nix-only.\n"
     + "const (\n"
     + constLines
     + ")\n"

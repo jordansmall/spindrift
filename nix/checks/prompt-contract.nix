@@ -154,6 +154,40 @@ in
       "prompt-contract: the set of severity==\"warn\" validateMarkers row ids changed from [${concatStringsSep ", " wantWarnIds}] to [${concatStringsSep ", " gotWarnIds}] -- promoting a warn row to \"reject\" (or adding/removing a warn row) is a deliberate design decision (issue #2996), not a silent flip: update this check's wantWarnIds, and revisit the promoted row's fixtures in nix/checks/prompt-contract-parity.nix, whose prompt-contract-parity-warn-rows-never-reject derives its warn set from severityById and so starts demanding a different verdict for them";
     pkgs.runCommand "prompt-contract-validate-markers-warn-row-ids" { } "touch $out";
 
+  # issue #3726: exactly the four signal-channel rows carry socketMarker (the
+  # verb string Validate scans for instead of marker when
+  # SIGNAL_CARRIER_SOCKET is active); reviewer-verdict never crosses the
+  # Signal socket and must stay carrier-blind. socketMarker and socketMessage
+  # are always both-present or both-absent -- a row carrying one without the
+  # other is a half-wired socket variant that would either scan for an empty
+  # string or emit an empty diagnostic.
+  prompt-contract-validate-markers-socket-fields-match-signal-rows =
+    let
+      signalIds = [
+        "verdict-comment-relay"
+        "pr-intent"
+        "issue-intent"
+        "research-issue-intent"
+      ];
+      hasSocketMarker = r: r ? socketMarker && r.socketMarker != "";
+      hasSocketMessage = r: r ? socketMessage && r.socketMessage != "";
+      badCoverage = builtins.filter (
+        r: hasSocketMarker r != builtins.elem r.id signalIds
+      ) promptContract.validateMarkers;
+      badPairing = builtins.filter (
+        r: hasSocketMarker r != hasSocketMessage r
+      ) promptContract.validateMarkers;
+    in
+    assert assertMsg (badCoverage == [ ])
+      "exactly the validateMarkers rows [${concatStringsSep ", " signalIds}] must carry a non-empty socketMarker, offending ids: [${
+        concatStringsSep ", " (map (r: r.id) badCoverage)
+      }]";
+    assert assertMsg (badPairing == [ ])
+      "every validateMarkers row must carry socketMarker and socketMessage together (both non-empty or both absent/empty), offending ids: [${
+        concatStringsSep ", " (map (r: r.id) badPairing)
+      }]";
+    pkgs.runCommand "prompt-contract-validate-markers-socket-fields-match-signal-rows" { } "touch $out";
+
   prompt-contract-forbidden-markers-every-row-when-box-access-read-only =
     let
       bad = builtins.filter (r: r.when != "boxAccessReadOnly") promptContract.forbiddenMarkers;
@@ -237,6 +271,27 @@ in
     assert assertMsg (bad == [ ])
       "every prompt-only forbiddenMarkers row must carry no runtimeMessage, offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-prompt-only-rows-have-no-runtime-message" { }
+      "touch $out";
+
+  # issue #3726: the baked shim text cannot know a run's carrier, so the
+  # three `gh` rows whose signal has a socket-mode verb must point at both
+  # routes -- pin the verb string so a later edit cannot silently drop it.
+  prompt-contract-forbidden-markers-gh-signal-rows-name-driver-exec-signal =
+    let
+      ids = [
+        "forbidden-gh-pr-create"
+        "forbidden-gh-issue-comment"
+        "forbidden-gh-issue-create"
+      ];
+      rows = builtins.filter (r: builtins.elem r.id ids) promptContract.forbiddenMarkers;
+      bad = builtins.filter (r: !(pkgs.lib.hasInfix "driver-exec signal" r.runtimeMessage)) rows;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (builtins.length rows == builtins.length ids)
+      "expected exactly ${builtins.toString (builtins.length ids)} forbiddenMarkers rows [${concatStringsSep ", " ids}], found ${builtins.toString (builtins.length rows)}";
+    assert assertMsg (bad == [ ])
+      "every gh pr create / gh issue comment / gh issue create forbiddenMarkers row's runtimeMessage must name \"driver-exec signal\", offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-forbidden-markers-gh-signal-rows-name-driver-exec-signal" { }
       "touch $out";
 
   # buildTimeRejectVerdicts (issue #2250) resolves each validateMarkers
@@ -446,6 +501,82 @@ in
       { }
       "touch $out";
 
+  # buildTimeSignalFragmentViolations (issue #3726) proves a _LOG/_SOCKET
+  # fragment pair's socket half actually instructs the verb (driver-exec
+  # signal <channel>) its carrier requires -- the missing half of "the prompt
+  # contract proves the verb in both modes" that validateMarkers' runtime
+  # socketMarker covers on the log/marker side.
+  prompt-contract-build-time-signal-fragment-violations-detects-socket-fragment-missing-verb =
+    let
+      out = promptContract.buildTimeSignalFragmentViolations {
+        fragmentRows = [
+          {
+            gate = "BOX_ACCESS_READ_ONLY_SOCKET";
+            fragment = "fixture-socket.md";
+            signalChannel = "pr-intent";
+          }
+        ];
+        fragmentContentByFile = {
+          "fixture-socket.md" = "no verb mentioned here";
+        };
+      };
+    in
+    assert assertMsg (builtins.length out == 1)
+      "buildTimeSignalFragmentViolations must report one violation when a _SOCKET-gated fragment's content is missing its channel's driver-exec verb, got: ${toString (builtins.length out)}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-violations-detects-socket-fragment-missing-verb"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-signal-fragment-violations-detects-log-fragment-missing-marker =
+    let
+      out = promptContract.buildTimeSignalFragmentViolations {
+        fragmentRows = [
+          {
+            gate = "BOX_ACCESS_READ_ONLY_LOG";
+            fragment = "fixture-log.md";
+            signalChannel = "pr-intent";
+          }
+        ];
+        fragmentContentByFile = {
+          "fixture-log.md" = "no marker mentioned here";
+        };
+      };
+    in
+    assert assertMsg (builtins.length out == 1)
+      "buildTimeSignalFragmentViolations must report one violation when a _LOG-gated fragment's content is missing its channel's markerChannels token, got: ${toString (builtins.length out)}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-violations-detects-log-fragment-missing-marker"
+      { }
+      "touch $out";
+
+  # The real-registry pass: every _LOG/_SOCKET-paired row in lib/fragments.nix
+  # against the real on-disk fragment content under
+  # templates/default/prompts/fragments/, so a future edit that drops a
+  # channel's verb or marker from one carrier's fragment fails the build.
+  prompt-contract-build-time-signal-fragment-violations-real-registry-passes =
+    let
+      fragments = import ../../lib/fragments.nix;
+      signalFragmentRows = builtins.filter (row: row ? signalChannel) fragments;
+      socketRows = builtins.filter (row: hasSuffix "_SOCKET" row.gate) signalFragmentRows;
+      fragmentContentByFile = builtins.listToAttrs (
+        map (row: {
+          name = row.fragment;
+          value = builtins.readFile ../../templates/default/prompts/fragments/${row.fragment};
+        }) signalFragmentRows
+      );
+      out = promptContract.buildTimeSignalFragmentViolations {
+        fragmentRows = signalFragmentRows;
+        inherit fragmentContentByFile;
+      };
+    in
+    assert assertMsg (socketRows != [ ])
+      "prompt-contract-build-time-signal-fragment-violations-real-registry-passes: expected at least one _SOCKET-gated signalChannel row in lib/fragments.nix, got none -- fixture is vacuous";
+    assert assertMsg (out == [ ])
+      "buildTimeSignalFragmentViolations must return no violations against the real fragments.nix registry and real fragment content (issue #3726: both carrier modes must instruct the same verb), got: ${builtins.toJSON out}";
+    pkgs.runCommand "prompt-contract-build-time-signal-fragment-violations-real-registry-passes" { }
+      "touch $out";
+
   # issue #2524: outcomeStatusSets' research row must derive from
   # lib/research-verdicts.nix's defaultVerdicts plus the "blocked" crash
   # escape hatch, never a hand-typed restatement, so the research vocabulary
@@ -512,6 +643,44 @@ in
       "every markerChannels row's carrier must be one of \"final-message\"/\"mid-run-log\"/\"subagent-first-line\", offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-marker-channels-every-row-carrier-known-value" { } "touch $out";
 
+  # issue #3726: only the three signal rows cross the Signal socket, so only
+  # they may carry socketCarrier/socketDefense -- outcome and review-verdict
+  # never cross it.
+  prompt-contract-marker-channels-only-signal-rows-carry-socket-fields =
+    let
+      signalIds = [
+        "comment"
+        "pr-intent"
+        "issue-intent"
+      ];
+      bad = builtins.filter (
+        r: (r ? socketCarrier || r ? socketDefense) != builtins.elem r.id signalIds
+      ) promptContract.markerChannels;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "exactly the markerChannels rows [${concatStringsSep ", " signalIds}] must carry socketCarrier/socketDefense, offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-marker-channels-only-signal-rows-carry-socket-fields" { }
+      "touch $out";
+
+  prompt-contract-marker-channels-socket-fields-have-known-value =
+    let
+      withSocketFields = builtins.filter (
+        r: r ? socketCarrier || r ? socketDefense
+      ) promptContract.markerChannels;
+      bad = builtins.filter (
+        r:
+        !(r ? socketCarrier)
+        || !(r ? socketDefense)
+        || r.socketCarrier != "signal-socket"
+        || r.socketDefense != "launcher-owned-listener"
+      ) withSocketFields;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every markerChannels row carrying socketCarrier/socketDefense must have both present, with socketCarrier == \"signal-socket\" and socketDefense == \"launcher-owned-listener\", offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-marker-channels-socket-fields-have-known-value" { } "touch $out";
+
   # Unlike defense and carrier above, fieldShape has no enum to pin: it is a
   # human-readable grammar that markergate's substituteFieldShape consumes for
   # its whitespace and key=value layout. This is deliberately not a grammar
@@ -526,8 +695,7 @@ in
     in
     assert assertMsg (bad == [ ])
       "every markerChannels row's fieldShape must be a non-empty string, offending ids: [${concatStringsSep ", " badIds}]";
-    pkgs.runCommand "prompt-contract-marker-channels-every-row-field-shape-non-empty" { }
-      "touch $out";
+    pkgs.runCommand "prompt-contract-marker-channels-every-row-field-shape-non-empty" { } "touch $out";
 
   # Cross-registry drift guard, so one marker spelling cannot diverge from the
   # other: markerChannels' `token` and validateMarkers' `marker` name the same
