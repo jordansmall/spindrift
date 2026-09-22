@@ -85,8 +85,9 @@ func bwrapCapabilityChecks(c config) []doctor.Check {
 // most once across the one set this call builds -- run-wide that holds only
 // at readContext.validation(), the single call site building one set and
 // running both halves over it. classify omits the bwrap, drift, and
-// transport rows, which must never make validateConfig exit 2 (issue #2671,
-// ADR 0045, issue #3114); the per-route rows stay, so a bad credential still
+// transport rows (both the registry-proxy and signal-socket transport rows),
+// which must never make validateConfig exit 2 (issue #2671, ADR 0045, issue
+// #3114, issue #3728); the per-route rows stay, so a bad credential still
 // exits 2. podman-machine-memory joins classify too (issue #3544) -- it is
 // the one extraCheck row whose Required tier must actually fail the run: the
 // daemon's startup preflight reads doctor's exit code, and an undersized
@@ -119,13 +120,15 @@ func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	classify = append(classify, perRoute...)
 
 	bwrap := bwrapCapabilityChecks(c)
-	report = make([]doctor.Check, 0, len(extra)+len(bwrap)+len(podmanMemory)+len(perRoute)+len(drift)+1)
+	signalSocket := signalSocketTransportChecks(c)
+	report = make([]doctor.Check, 0, len(extra)+len(bwrap)+len(podmanMemory)+len(perRoute)+len(drift)+len(signalSocket)+1)
 	report = append(report, extra...)
 	report = append(report, bwrap...)
 	report = append(report, podmanMemory...)
 	report = append(report, perRoute...)
 	report = append(report, drift...)
 	report = append(report, registryProxyTransportCheck(c))
+	report = append(report, signalSocket...)
 
 	return classify, report
 }
