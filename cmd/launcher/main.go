@@ -1978,8 +1978,16 @@ type verbHandler func(args []string, stderr io.Writer) int
 // completion verb stays out of it and is dispatched ahead of the table lookup,
 // since it is not a documented verb.
 var verbHandlers = map[string]verbHandler{
-	"build":     func(args []string, stderr io.Writer) int { return cmdBuild() },
-	"doctor":    func(args []string, stderr io.Writer) int { return cmdDoctor() },
+	"build": func(args []string, stderr io.Writer) int { return cmdBuild() },
+	"doctor": func(args []string, stderr io.Writer) int {
+		verbose, bad, ok := doctorVerboseArgs(args)
+		if !ok {
+			fmt.Fprintf(stderr, "unrecognized argument: %s\n", bad)
+			fmt.Fprintln(stderr, "usage: spindrift doctor [--verbose|-v]")
+			return 1
+		}
+		return cmdDoctor(verbose)
+	},
 	"reconcile": func(args []string, stderr io.Writer) int { return cmdReconcile() },
 	"console": func(args []string, stderr io.Writer) int {
 		lc, err := bootstrap(true, dispatchKindWork, false)

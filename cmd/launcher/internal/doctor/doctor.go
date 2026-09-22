@@ -32,6 +32,13 @@ func errRequiredLabelsMissing(workMissing []string) error {
 	return fmt.Errorf("%w: %s missing — create them in the repository", ErrRequiredLabelsMissing, strings.Join(workMissing, ", "))
 }
 
+// labelMissingMsg is the message body shared by checkLabelSet's real "label
+// %q missing" row and the quiet recap's hand-drawn copy of it, so the two
+// cannot drift apart (issue #3777).
+func labelMissingMsg(label string) string {
+	return fmt.Sprintf("label %q missing", label)
+}
+
 // LabelMeta holds the default color and description for a triage label.
 type LabelMeta struct {
 	Description string
@@ -263,7 +270,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 				rep.Success("label %q present", label)
 				continue
 			}
-			rep.Finding(tier, "label %q missing", label)
+			rep.Finding(tier, "%s", labelMissingMsg(label))
 			missing = append(missing, label)
 		}
 		return missing
@@ -302,7 +309,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	if len(ambiguousMissing) > 0 {
 		rep.Finding(Advisory, "%d ambiguous-spec label(s) missing — does not fail this check", len(ambiguousMissing))
 	}
-	missing := append(append(append(append([]string{}, workMissing...), researchMissing...), priorityMissing...), ambiguousMissing...)
+	advisoryMissing := append(append(append([]string{}, researchMissing...), priorityMissing...), ambiguousMissing...)
+	missing := append(append([]string{}, workMissing...), advisoryMissing...)
 	if len(missing) == 0 {
 		rep.Success("all triage, research, priority, and ambiguous-spec labels present")
 		return nil
@@ -315,7 +323,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		return nil
 	}
 
-	advisoryCount := len(researchMissing) + len(priorityMissing) + len(ambiguousMissing)
+	advisoryCount := len(advisoryMissing)
 	requiredClause := fmt.Sprintf("%d required", len(workMissing))
 	if len(workMissing) > 0 {
 		requiredClause += " (declining leaves this check failing)"
@@ -323,6 +331,16 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	advisoryClause := fmt.Sprintf("%d advisory", advisoryCount)
 	if advisoryCount > 0 {
 		advisoryClause += " (declining is safe, does not fail this check)"
+	}
+	// Quiet suppresses the advisory Finding rows above, but the prompt still
+	// offers to create those labels — recap them here so an operator never
+	// approves creating a label they were never shown (issue #3777 AC5). Gated
+	// on rep.verbose so the verbose report, which already printed these rows,
+	// stays byte-for-byte unchanged.
+	if !rep.verbose {
+		for _, label := range advisoryMissing {
+			rep.Passthrough("%s: %s\n", rowPrefix(Advisory), labelMissingMsg(label))
+		}
 	}
 	rep.Passthrough("Create %d missing label(s) — %s and %s? [y/N] ",
 		len(missing), requiredClause, advisoryClause)

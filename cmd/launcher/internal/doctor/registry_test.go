@@ -215,7 +215,7 @@ func TestReporter_Results_PrintsOkForSuccess(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	NewReporter(&buf).Results(results)
+	NewReporter(&buf, true).Results(results)
 
 	want := "ok: git-user-name\n"
 	if buf.String() != want {
@@ -235,7 +235,7 @@ func TestReporter_Results_UsesSuccessMsgWhenSet(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	NewReporter(&buf).Results(results)
+	NewReporter(&buf, true).Results(results)
 
 	want := "ok: github-repo: jordansmall/spindrift\n"
 	if buf.String() != want {
@@ -259,7 +259,7 @@ func TestReporter_Results_SuccessMsgReceivesProbeOutput(t *testing.T) {
 	results := RunChecks([]Check{check})
 
 	var buf bytes.Buffer
-	NewReporter(&buf).Results(results)
+	NewReporter(&buf, true).Results(results)
 
 	want := "ok: ok: some-value\n"
 	if buf.String() != want {
@@ -285,7 +285,7 @@ func TestReporter_Results_PrintsNameErrAndRemedyForFailure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	NewReporter(&buf).Results(results)
+	NewReporter(&buf, true).Results(results)
 
 	want := "MISSING: git-user-name: GIT_USER_NAME is unset\n" +
 		"  remedy: " + gitUserNameRemedy + "\n"
@@ -397,7 +397,7 @@ func TestReporter_Results_PrintsAdvisoryForDegradedFailure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	NewReporter(&buf).Results(results)
+	NewReporter(&buf, true).Results(results)
 
 	want := "advisory: branch-protection: branch protection probe for \"main\" failed: permission denied\n" +
 		"  remedy: protect main: block direct pushes and require CI status checks\n"
@@ -418,7 +418,7 @@ func TestReporter_Results_SkipsRemedyLineWhenIdenticalToErrText(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	NewReporter(&buf).Results(results)
+	NewReporter(&buf, true).Results(results)
 
 	want := "MISSING: git-user-name: GIT_USER_NAME is unset\n"
 	if buf.String() != want {
@@ -581,7 +581,7 @@ func TestReporter_Results_TierAndDegradedDriveRowPrefix(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			NewReporter(&buf).Results([]Result{{Check: tc.check, Err: tc.err}})
+			NewReporter(&buf, true).Results([]Result{{Check: tc.check, Err: tc.err}})
 
 			if buf.String() != tc.want {
 				t.Fatalf("Results() wrote %q, want %q", buf.String(), tc.want)
