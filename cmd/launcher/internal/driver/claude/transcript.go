@@ -82,9 +82,8 @@ type SpindriftOp struct {
 	Role    string `json:"role,omitempty"`
 	Verdict string `json:"verdict,omitempty"`
 	// Kind names the signal kind on a "signal" op (issue #3724): "comment",
-	// "pr-intent", "issue-intent", "status", or "unknown" (kindForPath's
-	// sentinel for a path outside the four routes). Empty on every other op
-	// kind.
+	// "pr-intent", "issue-intent", "status", or "unknown" (the sentinel for
+	// a path outside the four routes). Empty on every other op kind.
 	Kind string `json:"kind,omitempty"`
 	// Size is the signal's content byte count and Hash its content hash,
 	// "sha256:"-prefixed hex, on a "signal" op.
