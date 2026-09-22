@@ -19,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
@@ -139,7 +140,7 @@ func conflictLogPathFor(pwd, number string) string {
 func (d *Dispatch) Run() Result {
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
-		fmt.Fprint(d.humanOut(), announceLine(d.number, "", d.title))
+		d.announce(report.PhaseInitial)
 		if !resumeAfterHold && !d.runner.IsRunning(BoxName(d.number)) {
 			// Only on this Run()'s first attempt, and only when no live
 			// container owns this issue's log (the same guard
@@ -170,7 +171,7 @@ func (d *Dispatch) Run() Result {
 func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
-		fmt.Fprint(d.humanOut(), announceLine(d.number, fmt.Sprintf("fix-pass-%d", pass), d.title))
+		d.announce(report.PhaseFixPass(pass))
 		env, err := buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce)
 		if err != nil {
 			return err
@@ -185,7 +186,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 // bundled to the outbox for the launcher to relay, issue #1979), and exits
 // without the main agent prompt, so it needs neither retry nor driver cache.
 func (d *Dispatch) ResolveConflict(pr string) error {
-	fmt.Fprint(d.humanOut(), announceLine(d.number, "conflict-resolve", d.title))
+	d.announce(report.PhaseConflictResolve)
 	env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
 	if err != nil {
 		return err
@@ -194,19 +195,39 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 	return d.runOnce(d.conflictLogPath(), env, "")
 }
 
+// announce prints the human announce line for phase and emits the matching
+// report.Box record (issue #3627), so the two cannot drift apart. phase is
+// the report vocabulary spelled once in report.PhaseInitial,
+// report.PhaseConflictResolve, and report.PhaseFixPass; humanPhase maps it
+// onto announceLine's own vocabulary here rather than at the two call sites,
+// so a phase name only needs to be spelled once per caller.
+func (d *Dispatch) announce(phase string) {
+	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.title))
+	report.Box(d.number, phase)
+}
+
+// humanPhase maps report's phase vocabulary onto announceLine's
+// parenthesized-suffix vocabulary: the initial Box names no phase in the
+// human line, and every other phase passes through unchanged.
+func humanPhase(phase string) string {
+	if phase == report.PhaseInitial {
+		return ""
+	}
+	return phase
+}
+
 // announceLine builds the one line of human-facing output announcing a
-// dispatched Box for number, shared by Run, Fix, and ResolveConflict so the
-// three call sites cannot drift out of sync with each other. phase is the
-// parenthesized suffix ("", "fix-pass-N", or "conflict-resolve") — not a
-// daemon.Kind, which the rest of this branch means by "kind"; "" omits the
-// parens entirely.
+// dispatched Box for number, shared by Run, Fix, and ResolveConflict (via
+// announce) so the three call sites cannot drift out of sync with each other.
+// phase is the parenthesized suffix ("", "fix-pass-N", or "conflict-resolve")
+// — not a daemon.Kind, which the rest of this branch means by "kind"; ""
+// omits the parens entirely.
 //
-// This is the only channel naming the dispatched issue (issue #3538): a
-// second reader, internal/daemon's ParseAnnouncedIssue, parses this exact
-// shape back out of a child launcher's stdout. TestAnnounceLine_ParsesBack
-// (internal/dispatch/announce_test.go) feeds this function's own output
-// through that parser, so an edit here that breaks the pairing fails in the
-// package that owns the format, not silently in the daemon.
+// This line is human output, not the machine channel: the daemon now relays
+// child stdout unchanged rather than parsing it (issue #3627), so this exact
+// wording is operator-visible text, not a wire format, and internal/daemon no
+// longer has a ParseAnnouncedIssue reader over it. The machine channel is the
+// report record announce emits alongside this line.
 func announceLine(number, phase, title string) string {
 	if phase == "" {
 		return fmt.Sprintf("    -> #%s: %s\n", number, title)

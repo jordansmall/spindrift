@@ -29,6 +29,7 @@ import (
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -1439,6 +1440,12 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 		return origErr
 	}
 	note := fmt.Sprintf("recover attempted and declined to change anything: %v. This issue was already `agent-complete` before recover claimed it — that state is restored rather than parking `agent-failed`.", origErr)
+	// Emitted after the TransitionState above succeeded, not on every exit from
+	// recoverFailed: a failed transition falls through to origErr and the
+	// caller settles that failure itself. Inline rather than through
+	// settle/gate.go's latch, which exists for a path that can reach a second,
+	// contradicting terminal transition; this one reaches at most one.
+	report.Settled(num, forge.Complete.String(), note)
 	if commentErr := it.Comment(num, note); commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
 	}
@@ -2050,6 +2057,10 @@ var verbHandlers = map[string]verbHandler{
 // process exit code. stdout and stderr are injected so tests can assert on
 // help and error output without touching the real process streams.
 func mainRun(argv []string, stdout, stderr io.Writer) int {
+	// Installed before any subcommand handler runs, so SPINDRIFT_REPORT_FD is
+	// close-on-exec before this process spawns its first Box, runtime, or
+	// subprocess (issue #3627).
+	report.Install(report.FromEnv(os.Getenv, stderr))
 	help, helpAll := false, false
 	for _, a := range argv {
 		switch a {

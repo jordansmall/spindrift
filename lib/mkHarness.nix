@@ -1207,12 +1207,11 @@ let
   # graph, not the graph itself: it subtracts the driver-exec, orchestrator,
   # quickstart and daemon subtrees (each an independent `package main` the
   # launcher never imports), plus internal/daemon (issue #3538: no
-  # non-test package outside cmd/launcher/daemon imports it, and the
-  # one test that does -- internal/dispatch/announce_test.go -- is
-  # filtered out with every other _test.go below). A reviewer found 13
-  # directories included here that are outside the real import graph
-  # (internal/testutil, for one), so perturbing those still moves this
-  # outPath (issue #2677 review fix).
+  # non-test package outside cmd/launcher/daemon imports it, and every test
+  # file is filtered out below). A reviewer found 13 directories included
+  # here that are outside the real import graph (internal/testutil, for
+  # one), so perturbing those still moves this outPath (issue #2677 review
+  # fix).
   launcherCurrencyFileset =
     lib.fileset.difference
       (lib.fileset.unions [

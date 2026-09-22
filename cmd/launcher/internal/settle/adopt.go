@@ -14,6 +14,7 @@ import (
 // SHA may not come from this process, so the gate waits for evidence the
 // rollup registered (issue #1652), bounded by registrationWindowPolls (#2475).
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+	defer s.flushSettled(num)
 	branch := s.cf.AgentBranch(num)
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
 	landing, reason := s.selfHealAdopted(d, num, gen, prURL)
@@ -52,7 +53,7 @@ func (s *Settle) verifyMerged(num, pr string) {
 		reason = fmt.Sprintf("issue does not carry '%s'", s.cfg.CompleteLabel)
 	}
 	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
-	s.transitionState(num, forge.InProgress, forge.Failed)
+	s.transitionState(num, forge.InProgress, forge.Failed, reason)
 }
 
 // postUsageComment posts d's aggregate usage-statistics comment to the issue.
