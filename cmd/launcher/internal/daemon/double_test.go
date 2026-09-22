@@ -34,6 +34,14 @@ type scriptedRunner struct {
 	selfErrAt int
 	selfErr   error
 
+	// moved: the same "one value per call, last value repeating once
+	// exhausted" convention as revisions, for Tip.Moved. An empty moved
+	// yields false for every call -- most tests never care whether the tip
+	// moved -- so a test that does care can script Moved independently of
+	// revisions, including in disagreement with it (issue #3625): tip_moved
+	// is driven by the flag alone, never a revision-string diff.
+	moved []bool
+
 	// Result scripting, most specific winning: bySlot (keyed by the
 	// caller's own per-slot call index — needed wherever several slots
 	// call RunChild concurrently, since a shared call counter would hand
@@ -227,9 +235,19 @@ func (r *scriptedRunner) ResolveTip(ctx context.Context) (Tip, error) {
 		}
 		revision = r.revisions[idx]
 	}
+	// An empty moved yields false rather than panicking, same reasoning:
+	// most tests never care whether the tip moved.
+	moved := false
+	if len(r.moved) > 0 {
+		idx := call - 1
+		if idx >= len(r.moved) {
+			idx = len(r.moved) - 1
+		}
+		moved = r.moved[idx]
+	}
 
 	if len(r.selfPaths) == 0 && r.selfErrAt == 0 && r.onSelf == nil {
-		return Tip{Revision: revision}, nil
+		return Tip{Revision: revision, Moved: moved}, nil
 	}
 
 	r.mu.Lock()
@@ -239,21 +257,21 @@ func (r *scriptedRunner) ResolveTip(ctx context.Context) (Tip, error) {
 
 	if r.onSelf != nil {
 		if err := r.onSelf(ctx, selfCall, revision); err != nil {
-			return Tip{Revision: revision}, &SelfEvalError{Err: err}
+			return Tip{Revision: revision, Moved: moved}, &SelfEvalError{Err: err}
 		}
 	}
 
 	if r.selfErrAt != 0 && selfCall == r.selfErrAt {
-		return Tip{Revision: revision}, &SelfEvalError{Err: r.selfErr}
+		return Tip{Revision: revision, Moved: moved}, &SelfEvalError{Err: r.selfErr}
 	}
 	if len(r.selfPaths) == 0 {
-		return Tip{Revision: revision}, nil
+		return Tip{Revision: revision, Moved: moved}, nil
 	}
 	idx := selfCall - 1
 	if idx >= len(r.selfPaths) {
 		idx = len(r.selfPaths) - 1
 	}
-	return Tip{Revision: revision, SelfPath: r.selfPaths[idx]}, nil
+	return Tip{Revision: revision, Moved: moved, SelfPath: r.selfPaths[idx]}, nil
 }
 
 // pickScripted clamps idx to the last index of list, mirroring every

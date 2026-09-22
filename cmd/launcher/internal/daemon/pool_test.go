@@ -732,14 +732,17 @@ func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
 	}
 }
 
-// TestIdleWaitLastSliceClampsToRemaining pins the clamp at the tail of
-// pollSlices's slicing loop: when IdleFloor does not evenly divide the
-// requested wait, the final slice must shrink to what's left rather than
-// overshoot it. That is a legal config — IdleCap need not be a multiple of
-// IdleFloor — but the shipped 5m/30m pair always divides evenly, so nothing
-// else in this package reaches the clamp.
-func TestIdleWaitLastSliceClampsToRemaining(t *testing.T) {
-	r := &scriptedRunner{revisions: []string{"rev1"}}
+// TestIdleSleepClampsSliceToRemainingWait pins idleSleep's own clamp (issue
+// #3625 folded pollSlices's slicing loop into idleSleep, one slice per
+// call): when less than a full IdleFloor remains before a jammed kind's
+// deadline, the slice must shrink to what's left rather than overshoot it,
+// and resolveTip must report false — nothing remains to resolve for. That is
+// a legal config — IdleCap need not be a multiple of IdleFloor, and a
+// deadline need not land on an IdleFloor boundary — but the shipped 5m/30m
+// pair always divides evenly, so nothing else in this package reaches the
+// clamp.
+func TestIdleSleepClampsSliceToRemainingWait(t *testing.T) {
+	r := &scriptedRunner{}
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -749,16 +752,20 @@ func TestIdleWaitLastSliceClampsToRemaining(t *testing.T) {
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
 
-	p.pollSlices(pctx, 0, 10*time.Millisecond, "rev1")
+	// One no-work jammed result gates dispatch until now+3ms (IdleFloor);
+	// advancing 2ms leaves exactly 1ms before that deadline, less than a
+	// full slice.
+	p.markNoWork(KindDispatch, clk.Now(), true)
+	clk.advanceBy(2 * time.Millisecond)
 
-	want := []time.Duration{3 * time.Millisecond, 3 * time.Millisecond, 3 * time.Millisecond, time.Millisecond}
-	if clk.waitCount() != len(want) {
-		t.Fatalf("waits = %v, want %v", clk.waits(), want)
+	resolveTip := p.idleSleep(pctx, 0)
+
+	want := time.Millisecond
+	if clk.waitCount() != 1 || clk.waits()[0] != want {
+		t.Fatalf("waits = %v, want a single slice of %v (clamped to what remained, not the 3ms floor)", clk.waits(), want)
 	}
-	for i := range want {
-		if clk.waits()[i] != want[i] {
-			t.Fatalf("waits = %v, want %v", clk.waits(), want)
-		}
+	if resolveTip {
+		t.Fatalf("resolveTip = true, want false: nothing remained after the clamped slice")
 	}
 }
 
@@ -1070,11 +1077,14 @@ func TestAwaitWindowPublishesOnEveryIteration(t *testing.T) {
 	}
 }
 
-// TestPollSlicesTipMovedStampsJammedKinds pins tip_moved's Kinds field
-// (issue #3541 review finding) to exactly the kinds jammed at the moment the
-// tip moved, in cfg.Kinds order, whether that's one kind or several — and
-// proves a queue-empty (non-jammed) kind is never included.
-func TestPollSlicesTipMovedStampsJammedKinds(t *testing.T) {
+// TestNoteTipMovedStampsJammedKinds pins tip_moved's Kinds field (issue
+// #3541 review finding) to exactly the kinds jammed at the moment the tip
+// moved, in cfg.Kinds order, whether that's one kind or several — and
+// proves a queue-empty (non-jammed) kind is never included. noteTipMoved is
+// the pool method issue #3625 pulled pollSlices's mutate body into verbatim,
+// so this test moved with it rather than driving the fetch loop that used
+// to call it.
+func TestNoteTipMovedStampsJammedKinds(t *testing.T) {
 	cases := []struct {
 		name string
 		jam  []Kind
@@ -1085,20 +1095,20 @@ func TestPollSlicesTipMovedStampsJammedKinds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &scriptedRunner{revisions: []string{"rev2"}}
+			r := &scriptedRunner{}
 			clk := &testClock{}
 			var buf bytes.Buffer
 			em := newTestEmitter(&buf)
 
 			cfg := dualKindConfig(1, 0)
-			p, pctx := newPool(context.Background(), cfg, r, em, clk)
+			p, _ := newPool(context.Background(), cfg, r, em, clk)
 			defer p.cancel()
 
 			for _, k := range tc.jam {
 				p.markNoWork(k, clk.Now(), true)
 			}
 
-			p.pollSlices(pctx, 0, 2*cfg.IdleFloor, "rev1")
+			p.noteTipMoved(0, "rev2")
 
 			events := decodeEvents(t, &buf)
 			var tipMoved *Event
@@ -1110,10 +1120,72 @@ func TestPollSlicesTipMovedStampsJammedKinds(t *testing.T) {
 			if tipMoved == nil {
 				t.Fatalf("events = %v, want a tip_moved event", eventNames(events))
 			}
+			if tipMoved.Revision != "rev2" {
+				t.Fatalf("tip_moved revision = %q, want rev2", tipMoved.Revision)
+			}
 			if !reflect.DeepEqual(tipMoved.Kinds, tc.want) {
 				t.Fatalf("tip_moved kinds = %v, want %v", tipMoved.Kinds, tc.want)
 			}
 		})
+	}
+}
+
+// TestIdleSleepFirstJamWaitResolvesNothingExtra pins design decision 5
+// (issue #3625): a slot's very first no-work wait, grown to exactly one
+// IdleFloor, must not ask for an opportunistic resolve — only a wait that
+// outlives its first IdleFloor slice earns one.
+func TestIdleSleepFirstJamWaitResolvesNothingExtra(t *testing.T) {
+	r := &scriptedRunner{}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	p.markNoWork(KindDispatch, clk.Now(), true) // first no-work result: wait = IdleFloor exactly
+
+	if resolveTip := p.idleSleep(pctx, 0); resolveTip {
+		t.Fatalf("resolveTip = true, want false: a first no-work wait of exactly one IdleFloor must resolve nothing extra")
+	}
+	if r.resolveCount() != 0 {
+		t.Fatalf("resolveCalls = %d, want 0", r.resolveCount())
+	}
+}
+
+// TestResolveOpportunisticFailureIsNoChangeObserved pins design decision 6
+// (issue #3625): a failed opportunistic resolve is treated as no change
+// observed, not fed to the breaker and not stamped with any event — only the
+// iteration's own post-pickKind resolve reports a genuinely broken fetch.
+// It also leaves the slot PhaseIdle, not stranded PhaseResolving, so a
+// sibling's siblingsEngaged read is never fooled by it.
+func TestResolveOpportunisticFailureIsNoChangeObserved(t *testing.T) {
+	r := &scriptedRunner{resolveAt: 1, resolveErr: errors.New("boom")}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	tip, ok := p.resolveOpportunistic(pctx, 0)
+	if ok {
+		t.Fatalf("resolveOpportunistic ok = true, want false on a failed resolve")
+	}
+	if tip != (Tip{}) {
+		t.Fatalf("tip = %+v, want the zero value on failure", tip)
+	}
+	if got := p.snapshot().Slots[0].Phase; got != PhaseIdle {
+		t.Fatalf("phase after a failed opportunistic resolve = %q, want %q", got, PhaseIdle)
+	}
+
+	events := decodeEvents(t, &buf)
+	for _, ev := range events {
+		if ev.Event == "backoff" || ev.Event == "breaker_trip" || ev.Event == "tip_moved" {
+			t.Fatalf("events = %v, want no backoff/breaker_trip/tip_moved event from a swallowed opportunistic failure", eventNames(events))
+		}
 	}
 }
 
@@ -1358,10 +1430,10 @@ func TestPoolSnapshotState(t *testing.T) {
 			// Same shape as "waiting" above, but dispatch exits 3
 			// (none-dispatchable, and the pool's only slot, so it is a
 			// jam) while research exits 2 (queue-empty). A jammed gated
-			// kind routes idleSleep through pollSlices instead of a bare
-			// Sleep, but pollSlices's first slice is still a clk.Sleep
-			// call, so the same onSleep hook still lands on the instant
-			// both kinds are gated.
+			// kind still routes idleSleep's first slice through a
+			// clk.Sleep call (even though idleSleep no longer loops
+			// through several slices itself), so the same onSleep hook
+			// still lands on the instant both kinds are gated.
 			name: "jammed when every kind gated and one jammed",
 			run: func(t *testing.T, dir string, sw *StatusWriter) *Status {
 				clk := &testClock{}

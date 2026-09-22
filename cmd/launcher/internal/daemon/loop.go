@@ -341,7 +341,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	// the baton is freed, so the sibling that hand-off wakes never reads this
 	// slot as still resolving.
 	defer p.setPhase(slot, PhaseIdle)
-	var lastRevision string // the revision this slot's last child ran at; the "tip moved" baseline
+	// resolveTip carries idleSleep's return across the loop: set when a
+	// jammed kind's wait outlived its first IdleFloor slice (idleSleep,
+	// pool.go), it asks the next round to make one opportunistic resolution
+	// before pickKind, rather than idleSleep polling internally — the
+	// restart in between passes through awaitWindow and awaitBaton, either
+	// of which can block for hours, so nothing is carried across that span
+	// but the flag itself (design decision 4, issue #3625).
+	var resolveTip bool
 	for {
 		// The pool's one admission check (issue #3626): with cfg.Stop
 		// riding every ChildRequest, a child started after Stop closes is
@@ -360,37 +367,66 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		// top passes the baton first (see the release sites below).
 		p.awaitBaton(ctx, slot)
 
+		// The opportunistic resolution idleSleep's return asked for, made
+		// before pickKind so a newly unblocked kind (noteTipMoved resets its
+		// backoff) is visible to pickKind in this same round. A failure
+		// here is swallowed inside resolveOpportunistic itself (design
+		// decision 6): haveTip stays false and the ordinary post-pickKind
+		// resolve below is left to report a genuinely broken fetch.
+		var tip Tip
+		var haveTip bool
+		if resolveTip {
+			resolveTip = false
+			if t, ok := p.resolveOpportunistic(ctx, slot); ok {
+				tip, haveTip = t, true
+			}
+		}
+
 		kind, ok := p.pickKind(slot)
 		if !ok {
 			// Every configured kind has backed off into an empty result:
 			// this is the daemon genuinely idling, not merely a kind this
 			// slot happens not to prefer right now. A slot must never sleep
 			// out an idle wait holding the baton.
+			//
+			// The explicit setPhase matters here (issue #3625 review
+			// finding waiting to happen): a resolveOpportunistic call just
+			// above can have left this slot PhaseResolving on success, and
+			// siblingsEngaged (pool.go) counts that phase as engaged — a
+			// slot that fell into idleSleep still reporting PhaseResolving
+			// would suppress a sibling's real jam. The window is open by
+			// the time pickKind runs, so idle is the right phase to park
+			// in, the same one runSlot's own deferred setPhase resets to on
+			// every other exit.
+			p.setPhase(slot, PhaseIdle)
 			p.passBaton(slot, batonPassIdle)
-			p.idleSleep(ctx, slot, lastRevision)
+			resolveTip = p.idleSleep(ctx, slot)
 			continue
 		}
 
-		// Resolving covers the self-path half of ResolveTip too: both
-		// halves are outside-world evaluations at the fetched tip, and a
-		// slot inside either is no more idle than one inside a fetch —
-		// nothing between here and startChild (or a failure exit) changes
-		// phase again, so one setPhase covers the whole span.
-		p.setPhase(slot, PhaseResolving)
-		tip, err := p.r.ResolveTip(ctx)
-		if err != nil {
-			// A failed fetch and a failed self-eval are both the transient
-			// blip this slice's breaker exists for, but they keep the halt
-			// classes today's two separate seams gave them (resolveFailure);
-			// backoffOrHalt's own breaker-vs-retry logic doesn't care which.
-			revision, reason := p.resolveFailure(tip, err)
-			if p.backoffOrHalt(ctx, slot, kind, revision, reason) {
-				return
+		if !haveTip {
+			// Resolving covers the self-path half of ResolveTip too: both
+			// halves are outside-world evaluations at the fetched tip, and a
+			// slot inside either is no more idle than one inside a fetch —
+			// nothing between here and startChild (or a failure exit)
+			// changes phase again, so one setPhase covers the whole span.
+			p.setPhase(slot, PhaseResolving)
+			t, err := p.r.ResolveTip(ctx)
+			if err != nil {
+				// A failed fetch and a failed self-eval are both the
+				// transient blip this slice's breaker exists for, but they
+				// keep the halt classes today's two separate seams gave
+				// them (resolveFailure); backoffOrHalt's own
+				// breaker-vs-retry logic doesn't care which.
+				revision, reason := p.resolveFailure(t, err)
+				if p.backoffOrHalt(ctx, slot, kind, revision, reason) {
+					return
+				}
+				continue
 			}
-			continue
+			tip = t
 		}
 		revision := tip.Revision
-		lastRevision = revision
 
 		if p.cfg.SelfProgram != "" && tip.SelfPath != p.cfg.SelfProgram {
 			// Never re-execs: this only records a halt reason and cancels
