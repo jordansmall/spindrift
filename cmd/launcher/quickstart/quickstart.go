@@ -533,6 +533,9 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	// doctor.Config.Runtime below already reports runtime validity, so the
 	// extraChecks rows must be runtime-stripped or the row reports twice.
 	launcherRows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, backendName), quickstartCheckDeps(a)))
+	// Verbose: quickstart's finish line always reports in full, whatever
+	// `spindrift doctor`'s own quiet default does (issue #3777).
+	rep := doctor.NewReporter(w, true)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    tracker.issueTracker,
 		TokenHint:       tokenHint,
@@ -544,7 +547,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		Runtime:         runtime,
 		MergePolicy:     defaultMergePolicy,
 		BaseBranch:      defaultBaseBranch,
-	}, doctor.NewReporter(w), scanner, interactive, launcherRows); err != nil {
+	}, rep, scanner, interactive, launcherRows); err != nil {
 		return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
 	}
 

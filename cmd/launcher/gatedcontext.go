@@ -24,8 +24,8 @@ func newGatedContext(w io.Writer, kind string, selfContained bool) (gatedContext
 		return gatedContext{}, err
 	}
 	// Enforcement has no report stream, so both halves discard it here;
-	// hoisted into one instance rather than one io.Discard Reporter per call.
-	discardRep := doctor.NewReporter(io.Discard)
+	// hoisted into one instance rather than one per call.
+	discardRep := doctor.NewDiscardReporter()
 	nonNetwork, network := splitGateRegistryByNetwork(gateRegistry)
 	if err := walkGateRegistry(nonNetwork, rc.config, w, discardRep, false); err != nil {
 		return gatedContext{}, err

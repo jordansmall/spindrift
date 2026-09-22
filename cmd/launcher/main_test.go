@@ -177,6 +177,41 @@ func TestRegistry_MissingOrUnknownSubcommand_UsageError(t *testing.T) {
 	}
 }
 
+// `doctor`'s verb handler rejects an unrecognised positional before ever
+// reaching cmdDoctor/newReadContext (issue #3777), so this stays hermetic —
+// no real network call, and nothing on stdout since the report never runs.
+// A "--"-prefixed bogus flag never reaches the verb handler at all: parseFlags
+// (main.go, ahead of the verbHandlers dispatch) already rejects any
+// unrecognised "--flag" for every subcommand, pre-ticket behavior this slice
+// leaves untouched — pinned below so a regression there is still caught.
+func TestDoctor_UnrecognizedArg_UsageError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"doctor", "extra"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun(doctor extra) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: spindrift doctor [--verbose|-v]") {
+		t.Errorf("mainRun(doctor extra) stderr = %q, want the usage message", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("mainRun(doctor extra) stdout = %q, want empty (doctor report must not run)", stdout.String())
+	}
+}
+
+func TestDoctor_UnrecognizedFlag_RejectedUpstreamOfVerbHandler(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"doctor", "--bogus"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun(doctor --bogus) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "unknown flag: --bogus") {
+		t.Errorf("mainRun(doctor --bogus) stderr = %q, want it to mention the unknown flag", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("mainRun(doctor --bogus) stdout = %q, want empty (doctor report must not run)", stdout.String())
+	}
+}
+
 // `recover` rejects the research-only --self-contained the same way dispatch
 // does (issue #2202).
 func TestRecover_RejectsSelfContained(t *testing.T) {
@@ -3862,7 +3897,7 @@ func TestRunDoctor_WiresLauncherChecksIntoOutput(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err) // extraChecks are informational-only, never fail Run
 	}
 	out := buf.String()
@@ -3904,7 +3939,7 @@ func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err) // extraChecks are informational-only, never fail Run
 	}
 	out := buf.String()
@@ -3921,7 +3956,7 @@ func TestDoctor_Success(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(buf.String(), "owner/repo") {
@@ -3942,7 +3977,7 @@ func TestDoctor_ReportsEachSeamsOwnSlug(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(it, cf, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(it, cf, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -3961,7 +3996,7 @@ func TestDoctor_AuthFailure(t *testing.T) {
 	var buf bytes.Buffer
 	c := config{}
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -3981,7 +4016,7 @@ func TestDoctor_AuthFailure_NotDoublyReported(t *testing.T) {
 	var buf bytes.Buffer
 	c := config{}
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -4000,7 +4035,7 @@ func TestDoctor_AuthFailure_Jira(t *testing.T) {
 	var buf bytes.Buffer
 	c := config{schemaConfig: schemaConfig{issueTracker: "jira"}}
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -4016,7 +4051,7 @@ func TestDoctor_RepoNotFound(t *testing.T) {
 	var buf bytes.Buffer
 	c := config{}
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -4035,7 +4070,7 @@ func TestDoctor_AuthFailure_Forgejo(t *testing.T) {
 	var buf bytes.Buffer
 	c := config{schemaConfig: schemaConfig{issueTracker: "forgejo"}}
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -4056,7 +4091,7 @@ func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
 	var buf bytes.Buffer
 	c := config{schemaConfig: schemaConfig{issueTracker: "forgejo"}}
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -4079,7 +4114,7 @@ func TestDoctor_AuthFailure_Local(t *testing.T) {
 	var buf bytes.Buffer
 	c := config{schemaConfig: schemaConfig{issueTracker: "local"}}
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -4122,7 +4157,7 @@ func TestDoctor_RuntimeRow_OnPath_PrintsOk(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -4144,7 +4179,7 @@ func TestDoctor_RuntimeRow_AbsentFromPATH_PrintsAdvisoryNotFatal(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -4168,7 +4203,7 @@ func TestDoctor_RuntimeRow_Unset_PrintsAdvisorySkipped(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -4190,7 +4225,7 @@ func TestDoctor_RuntimeRow_ReportedExactlyOnce(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -4211,7 +4246,7 @@ func TestDoctor_LabelsAllPresent(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -4245,7 +4280,7 @@ func TestDoctor_ReportsRecoverableCount(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -4275,7 +4310,7 @@ func TestDoctor_RecoverableCount_ZeroWhenLabelUnmapped(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -4298,7 +4333,7 @@ func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -4315,7 +4350,7 @@ func TestDoctor_LabelsSomeMissing(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected non-zero exit for missing labels, got nil")
 	}
@@ -4333,7 +4368,7 @@ func TestDoctor_LabelsAllMissing(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected non-zero exit for all-missing labels, got nil")
 	}
@@ -4354,7 +4389,7 @@ func TestDoctor_NoTTY_ResearchLabelsMissing_ExitZero(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err != nil {
 		t.Fatalf("missing research labels must not fail doctor, got: %v", err)
 	}
@@ -4381,7 +4416,7 @@ func TestDoctor_NoTTY_NoPrompt(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil {
 		t.Fatal("expected non-zero exit for missing labels, got nil")
 	}
@@ -4401,7 +4436,7 @@ func TestDoctor_TTY_Decline(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("n\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("n\n"), true, report)
 	if err == nil {
 		t.Fatal("expected non-zero exit on decline, got nil")
 	}
@@ -4430,7 +4465,7 @@ func TestDoctor_TTY_Decline_PromptShowsTierBreakdown(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("n\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("n\n"), true, report)
 	if err == nil {
 		t.Fatal("expected non-zero exit on decline, got nil")
 	}
@@ -4468,7 +4503,7 @@ func TestDoctor_TTY_Decline_PromptOmitsConsequenceWhenNoRequiredMissing(t *testi
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("n\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("n\n"), true, report)
 	if err != nil {
 		t.Fatalf("missing advisory labels alone must not fail doctor, got: %v", err)
 	}
@@ -4501,7 +4536,7 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("y\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("y\n"), true, report)
 	if err != nil {
 		t.Fatalf("unexpected error after confirm: %v", err)
 	}
@@ -4546,7 +4581,7 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("y\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("y\n"), true, report)
 	if err != nil {
 		t.Fatalf("unexpected error after confirm: %v", err)
 	}
@@ -4626,7 +4661,7 @@ func TestDoctor_TTY_Confirm_RenamedLifecycleLabel_UsesCorrectMeta(t *testing.T) 
 
 			var buf bytes.Buffer
 			_, report := doctorCheckSets(cfg)
-			err := runDoctor(f, f, cfg, doctor.NewReporter(&buf), &buf, strings.NewReader("y\n"), true, report)
+			err := runDoctor(f, f, cfg, doctor.NewReporter(&buf, true), &buf, strings.NewReader("y\n"), true, report)
 			if err != nil {
 				t.Fatalf("unexpected error after confirm: %v", err)
 			}
@@ -4665,7 +4700,7 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("y\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("y\n"), true, report)
 	if err != nil {
 		t.Fatalf("research labels still missing after creation must not fail doctor, got: %v", err)
 	}
@@ -4701,7 +4736,7 @@ func TestDoctor_NoTTY_PriorityLabelsMissing_ExitZero(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err != nil {
 		t.Fatalf("missing priority labels must not fail doctor, got: %v", err)
 	}
@@ -4743,7 +4778,7 @@ func TestDoctor_TTY_Confirm_PriorityLabels(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("y\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("y\n"), true, report)
 	if err != nil {
 		t.Fatalf("unexpected error after confirm: %v", err)
 	}
@@ -4781,7 +4816,7 @@ func TestDoctor_TTY_Confirm_PriorityStillMissing_Advisory(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("y\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("y\n"), true, report)
 	if err != nil {
 		t.Fatalf("priority labels still missing after creation must not fail doctor, got: %v", err)
 	}
@@ -4817,7 +4852,7 @@ func TestDoctor_NoTTY_AmbiguousLabelMissing_ExitZero(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err != nil {
 		t.Fatalf("missing ambiguous-spec label must not fail doctor, got: %v", err)
 	}
@@ -4859,7 +4894,7 @@ func TestDoctor_TTY_Confirm_AmbiguousLabel(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("y\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("y\n"), true, report)
 	if err != nil {
 		t.Fatalf("unexpected error after confirm: %v", err)
 	}
@@ -4898,7 +4933,7 @@ func TestDoctor_TTY_Confirm_AmbiguousStillMissing_Advisory(t *testing.T) {
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader("y\n"), true, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader("y\n"), true, report)
 	if err != nil {
 		t.Fatalf("ambiguous-spec label still missing after creation must not fail doctor, got: %v", err)
 	}
@@ -5749,7 +5784,7 @@ func TestDoctor_ReadOnlyTokenGate_ReadWriteReportsNoOp(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -5777,7 +5812,7 @@ func TestDoctor_ReadOnlyTokenGate_MissingBoxTokenFails(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil || !strings.Contains(err.Error(), "BOX_GH_TOKEN") {
 		t.Fatalf("runDoctor() error = %v, want a BOX_GH_TOKEN error", err)
 	}
@@ -5799,7 +5834,7 @@ func TestDoctor_ReadOnlyTokenGate_NonIntrospectableTokenDoesNotClaimVerified(t *
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -5828,7 +5863,7 @@ func TestDoctor_ReadOnlyForgejoTokenGate_MissingBoxTokenFails(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report)
+	err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report)
 	if err == nil || !strings.Contains(err.Error(), "BOX_FORGEJO_TOKEN") {
 		t.Fatalf("runDoctor() error = %v, want a BOX_FORGEJO_TOKEN error", err)
 	}
@@ -5851,7 +5886,7 @@ func TestDoctor_ReadOnlyForgejoTokenGate_DistinctTokenWarns(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -5887,7 +5922,7 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(it, cf, c, doctor.NewReporter(&buf), &buf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(it, cf, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()

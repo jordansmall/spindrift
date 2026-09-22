@@ -241,6 +241,83 @@ func TestParseFlags_MissingValue(t *testing.T) {
 	}
 }
 
+// --verbose must survive the global flag pass to reach doctorVerboseArgs
+// (issue #3777); without a passthrough entry parseFlags would reject it as
+// an unknown flag before the doctor verb handler ever sees it.
+func TestParseFlags_VerbosePassesThrough(t *testing.T) {
+	remaining, err := parseFlags([]string{"doctor", "--verbose"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(remaining) != 2 || remaining[0] != "doctor" || remaining[1] != "--verbose" {
+		t.Errorf("remaining = %v, want [doctor --verbose]", remaining)
+	}
+}
+
+// parseFlags verb-scopes the "--verbose" spelling to doctor; every other
+// verb still hits the ordinary unknown-flag error, whether --verbose trails
+// the verb or (since parseFlags hasn't seen a verb yet) leads it. The bare
+// "-v" spelling has no "--" prefix, so parseFlags forwards it as a
+// positional to whatever verb follows: doctorVerboseArgs accepts it as the
+// short spelling of --verbose for doctor, while other verbs reject it their
+// own way, e.g. as a bogus issue ID (issue #3777).
+func TestParseFlags_VerboseRejectedUnlessAfterDoctor(t *testing.T) {
+	cases := [][]string{
+		{"dispatch", "--verbose"},
+		{"recover", "--verbose"},
+		{"--verbose", "doctor"},
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, err := parseFlags(args)
+			if err == nil || !strings.Contains(err.Error(), "unknown flag: --verbose") {
+				t.Errorf("parseFlags(%v) err = %v, want unknown flag: --verbose", args, err)
+			}
+		})
+	}
+}
+
+// A dispatch-only boolean ahead of the verb (e.g. --no-build) must not
+// confuse the --verbose verb guard into reading remaining[0] as the verb
+// (issue #3777).
+func TestParseFlags_VerboseAfterLeadingDispatchFlag(t *testing.T) {
+	remaining, err := parseFlags([]string{"--no-build", "doctor", "--verbose"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(remaining) != 3 || remaining[0] != "--no-build" || remaining[1] != "doctor" || remaining[2] != "--verbose" {
+		t.Errorf("remaining = %v, want [--no-build doctor --verbose]", remaining)
+	}
+}
+
+// doctorVerboseArgs is doctor's own arg parser (issue #3777): --verbose or
+// -v requests the full report; anything else, flag or positional, is a
+// usage error naming the bad token, since doctor takes no positionals.
+func TestDoctorVerboseArgs(t *testing.T) {
+	cases := []struct {
+		name        string
+		args        []string
+		wantVerbose bool
+		wantBad     string
+		wantOK      bool
+	}{
+		{"long flag", []string{"--verbose"}, true, "", true},
+		{"short flag", []string{"-v"}, true, "", true},
+		{"no args", nil, false, "", true},
+		{"bogus flag", []string{"--bogus"}, false, "--bogus", false},
+		{"positional", []string{"foo"}, false, "foo", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			verbose, bad, ok := doctorVerboseArgs(tc.args)
+			if verbose != tc.wantVerbose || bad != tc.wantBad || ok != tc.wantOK {
+				t.Errorf("doctorVerboseArgs(%v) = (%v, %q, %v), want (%v, %q, %v)",
+					tc.args, verbose, bad, ok, tc.wantVerbose, tc.wantBad, tc.wantOK)
+			}
+		})
+	}
+}
+
 // DEPS_POLL_SECS and DEPS_WAIT_SECS configured the in-process
 // dependency-wave poll that #522/#524 deleted, so they must not survive in
 // the schema-generated flag table (ADR 0019).

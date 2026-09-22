@@ -159,7 +159,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 
 	results := doctor.RunChecks(checks)
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "ok: registry-route-drift (no drift)") {
 		t.Errorf("want %q in Results() output, got:\n%s", "ok: registry-route-drift (no drift)", out)
@@ -203,7 +203,7 @@ registries = ["internal"]
 
 	results := doctor.RunChecks(checks)
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "ok: registry-route-drift (no drift)") {
 		t.Errorf("want %q in Results() output, got:\n%s", "ok: registry-route-drift (no drift)", out)
@@ -339,7 +339,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_ADVISORY_RENDER" }
 
 	results := doctor.RunChecks([]doctor.Check{ch})
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "advisory: registry-route-drift") {
 		t.Errorf("want advisory: framing for a failing registry-route-drift row, got:\n%s", out)

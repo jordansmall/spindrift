@@ -16,10 +16,18 @@ import (
 // checks the actual remote it will push to instead of the IssueTracker's repo
 // a second time. It needs no runner/dispatch/settle wiring, so it builds its
 // own via newReadContext (issue #2941) instead of bootstrap.
-func cmdDoctor() int {
+func cmdDoctor(verbose bool) int {
 	// doctor never dispatches, so it carries no dispatch kind (issue #2944).
 	rc := newReadContext("", false)
-	return doctorReport(rc, os.Stdout, os.Stderr, os.Stdin, isStdinTTY())
+	return doctorReport(rc, os.Stdout, os.Stderr, os.Stdin, doctorOptions{interactive: isStdinTTY(), verbose: verbose})
+}
+
+// doctorOptions is doctorReport's last parameter. A struct rather than two
+// adjacent same-typed bools because Go cannot catch swapped bools at a call
+// site (issue #3060).
+type doctorOptions struct {
+	interactive bool
+	verbose     bool
 }
 
 // doctorReport runs cmdDoctor's exit-vocabulary classification (issue #2569).
@@ -27,12 +35,15 @@ func cmdDoctor() int {
 // prints the full report (issue #2559), and both failures explain themselves on
 // stderr so redirecting stdout never loses the reason for a non-zero exit. Call
 // rc.validation() once: it holds the memoized Probes (issues #3144, #2992).
-func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, interactive bool) int {
+// opts.verbose gates the report's ok:/advisory: rows (issue #3777); it never
+// changes which exit code doctorExitCodeFor returns.
+func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, opts doctorOptions) int {
 	v := rc.validation()
 	if v.configErr != nil {
 		fmt.Fprintf(stderr, "%s\n", v.configErr)
 	}
-	runErr := runDoctor(rc.issueTracker, rc.codeForge, rc.config, doctor.NewReporter(stdout), stdout, stdin, interactive, v.reportChecks)
+	rep := doctor.NewReporter(stdout, opts.verbose)
+	runErr := runDoctor(rc.issueTracker, rc.codeForge, rc.config, rep, rep.AdvisoryWriter(), stdin, opts.interactive, v.reportChecks)
 	if runErr != nil {
 		fmt.Fprintf(stderr, "%s\n", runErr)
 	}
@@ -66,9 +77,12 @@ func doctorExitCodeFor(configErr, runErr error) int {
 // rather than runDoctor building them from c: rebuilding them here would create
 // un-memoized checks and run each credential Probe a second time (issue #3144).
 // checkW is separate from rep: it's a gate Check's own operator-facing writer
-// (issue #2942 AC5), which for `spindrift doctor` happens to be the same
-// underlying stdout rep wraps, but the two params stay distinct since only one
-// of them is the report stream.
+// (issue #2942 AC5). For `spindrift doctor`, doctorReport hands it rep's own
+// AdvisoryWriter() rather than raw stdout, so a passing gate's own prose
+// (e.g. the read-only token gates' WARNING: line on a Box token that cannot
+// be introspected) obeys the same quiet gate as an advisory: row instead of
+// bypassing the Reporter (issue #3777). The two params stay distinct since
+// only one of them is the report stream.
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check) error {
 	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{

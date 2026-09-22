@@ -9,18 +9,55 @@ import (
 
 // Reporter owns every line doctor writes to its report stream and
 // classifies each one at its call site: a success row, a finding keyed on
-// Tier, or a passthrough line that fits neither shape.
+// Tier, or a passthrough line that fits neither shape. verbose is the one
+// stored flag driving the quiet/verbose split (issue #3777); same-package
+// code (the quiet-only recap in doctor.go) also reads it directly.
 type Reporter struct {
-	w io.Writer
+	w       io.Writer
+	verbose bool
 }
 
-// NewReporter returns a Reporter that writes to w.
-func NewReporter(w io.Writer) *Reporter {
-	return &Reporter{w: w}
+// NewReporter returns a Reporter that writes to w. verbose true reproduces
+// today's full report; false suppresses Success rows and Advisory-tier
+// Finding rows (issue #3777).
+func NewReporter(w io.Writer, verbose bool) *Reporter {
+	return &Reporter{w: w, verbose: verbose}
 }
 
-// Success writes an "ok: " row, followed by a newline.
+// NewDiscardReporter returns a Reporter that drops every row it is handed.
+// It takes no verbose bool: the quiet/verbose split is moot when the
+// destination is io.Discard regardless.
+func NewDiscardReporter() *Reporter {
+	return NewReporter(io.Discard, false)
+}
+
+// AdvisoryWriter returns the writer for a sub-component (e.g. a launch
+// gate's Check) that writes operator-facing prose straight to a raw
+// io.Writer, bypassing Success/Finding. Reporter picks that writer — r.w
+// when verbose, io.Discard otherwise — so the sub-component's raw prose
+// obeys the same quiet gate as an advisory: row (issue #3777).
+func (r *Reporter) AdvisoryWriter() io.Writer {
+	if r.verbose {
+		return r.w
+	}
+	return io.Discard
+}
+
+// visible reports whether a row at Tier t should print: a Required row
+// always does (that's the whole point of a blocking failure); an Advisory
+// one only under --verbose. Finding and Results both route through this so
+// the quiet/verbose line never drifts between the two.
+func (r *Reporter) visible(t Tier) bool {
+	return t == Required || r.verbose
+}
+
+// Success writes an "ok: " row, followed by a newline. Suppressed unless
+// verbose (issue #3777): a passing check has nothing for a quiet run to act
+// on.
 func (r *Reporter) Success(format string, a ...any) {
+	if !r.verbose {
+		return
+	}
 	line := fmt.Sprintf(format, a...)
 	fmt.Fprint(r.w, "ok: "+line+"\n")
 }
@@ -28,14 +65,22 @@ func (r *Reporter) Success(format string, a ...any) {
 // Finding writes a "MISSING: " (Required) or "advisory: " (Advisory) row,
 // followed by a newline. The prefix is keyed on t, not on any Check's own
 // Tier — a caller demoting a row (e.g. for ErrDegraded) passes the demoted
-// tier here.
+// tier here. Advisory is suppressed unless verbose (issue #3777); Required
+// always writes since a quiet run must still surface what's blocking it.
 func (r *Reporter) Finding(t Tier, format string, a ...any) {
+	if !r.visible(t) {
+		return
+	}
 	line := fmt.Sprintf(format, a...)
 	fmt.Fprint(r.w, rowPrefix(t)+": "+line+"\n")
 }
 
 // remedyLine writes a finding's indented "  remedy: <remedy>" line, or
-// nothing when remedySuffix reports the remedy repeats the error text.
+// nothing when remedySuffix reports the remedy repeats the error text. It
+// writes unconditionally, ignoring verbose: its standalone call site
+// (doctor.go's connectivity fail-fast path) deliberately drops the row above
+// it and still needs the remedy to reach the operator. Results, which pairs
+// it with a row, is the one that gates it on that row's own visibility.
 func (r *Reporter) remedyLine(remedy, msg string) {
 	if suffix := remedySuffix(remedy, msg); suffix != "" {
 		fmt.Fprint(r.w, "  remedy: "+suffix+"\n")
@@ -84,6 +129,11 @@ func (r *Reporter) Results(results []Result) {
 			// Strips the sentinel only where every call site puts it:
 			// wrapped last in the chain.
 			msg = strings.TrimSuffix(msg, ": "+ErrDegraded.Error())
+		}
+		// visible gates both lines together: a suppressed row must not
+		// leave its remedy printed underneath nothing (issue #3777).
+		if !r.visible(tier) {
+			continue
 		}
 		r.Finding(tier, "%s: %s", res.Check.Name, msg)
 		r.remedyLine(res.Check.Remedy, msg)

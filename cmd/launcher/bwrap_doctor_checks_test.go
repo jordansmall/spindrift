@@ -121,7 +121,7 @@ func TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing(t *test
 	c.runnerKind = freshness.KindBwrap
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "advisory: bwrap-cgroup-delegation") {
 		t.Errorf("want advisory: framing for failing bwrap-cgroup-delegation, got:\n%s", out)
@@ -146,7 +146,7 @@ func TestBwrapCapabilityChecks_OverlayRendersAdvisoryNotMissing(t *testing.T) {
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "advisory: bwrap-overlay-support") {
 		t.Errorf("want advisory: framing for failing bwrap-overlay-support, got:\n%s", out)
@@ -169,7 +169,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersAdvisoryNotMissing(t *test
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "advisory: bwrap-network-isolation") {
 		t.Errorf("want advisory: framing for failing bwrap-network-isolation, got:\n%s", out)
@@ -194,7 +194,7 @@ func TestBwrapCapabilityChecks_OverlayRendersMissingWhenRequired(t *testing.T) {
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "MISSING: bwrap-overlay-support") {
 		t.Errorf("want MISSING: framing for failing required bwrap-overlay-support, got:\n%s", out)
@@ -216,7 +216,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersMissingWhenRequired(t *tes
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "MISSING: bwrap-network-isolation") {
 		t.Errorf("want MISSING: framing for failing required bwrap-network-isolation, got:\n%s", out)
@@ -280,7 +280,7 @@ func TestBwrapCapabilityChecks_OverlayRendersOkWhenPassing(t *testing.T) {
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "ok: bwrap-overlay-support") {
 		t.Errorf("want ok: framing for passing bwrap-overlay-support, got:\n%s", out)
@@ -298,7 +298,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersOkWhenPassing(t *testing.T
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "ok: bwrap-network-isolation") {
 		t.Errorf("want ok: framing for passing bwrap-network-isolation, got:\n%s", out)
@@ -316,7 +316,7 @@ func TestBwrapCapabilityChecks_CgroupDelegationRendersOkWhenPassing(t *testing.T
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
-	doctor.NewReporter(&buf).Results(results)
+	doctor.NewReporter(&buf, true).Results(results)
 	out := buf.String()
 	if !strings.Contains(out, "ok: bwrap-cgroup-delegation") {
 		t.Errorf("want ok: framing for passing bwrap-cgroup-delegation, got:\n%s", out)
@@ -528,7 +528,7 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_UNRESOLVABLE_ROUTE_CREDENTIAL
 `)
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true})
 
 	if got != 2 {
 		t.Errorf("doctorReport() = %d, want 2 (configuration invalid) for an unresolvable route credential, stderr=%q", got, stderr.String())

@@ -23,7 +23,7 @@ func TestWalkGateRegistry_CallsEveryGateInOrder(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf), false); err != nil {
+	if err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf, true), false); err != nil {
 		t.Fatalf("walkGateRegistry() unexpected error: %v", err)
 	}
 
@@ -43,7 +43,7 @@ func TestWalkGateRegistry_StopsAtFirstFailure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf), false)
+	err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf, true), false)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("walkGateRegistry() error = %v, want %v", err, wantErr)
 	}
@@ -70,7 +70,7 @@ func TestWalkGateRegistry_SkipsInapplicableGateEntirely(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf), false); err != nil {
+	if err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf, true), false); err != nil {
 		t.Fatalf("walkGateRegistry() unexpected error: %v", err)
 	}
 
@@ -92,7 +92,7 @@ func TestWalkGateRegistry_FailingGateWritesMissingReportLine(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf), false)
+	err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf, true), false)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("walkGateRegistry() error = %v, want %v", err, wantErr)
 	}
@@ -117,7 +117,7 @@ func TestWalkGateRegistry_CollectAllRunsEveryNonNetworkGateBeforeStopping(t *tes
 	}
 
 	var buf bytes.Buffer
-	err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf), true)
+	err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf, true), true)
 
 	if !firstCalled || !secondCalled {
 		t.Fatalf("firstCalled=%v secondCalled=%v, want both non-network gates invoked despite the first failing", firstCalled, secondCalled)
@@ -154,7 +154,7 @@ func TestWalkGateRegistry_CollectAllStopsAtFailingNetworkGate(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf), true)
+	err := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf, true), true)
 
 	if afterCalled {
 		t.Error("walkGateRegistry() invoked the gate after a failing network gate, want fail-fast resumed")
@@ -174,7 +174,7 @@ func TestWalkGateRegistry_CollectAllFalseSingleErrorTextUnchanged(t *testing.T) 
 	}
 
 	var buf bytes.Buffer
-	got := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf), false)
+	got := walkGateRegistry(registry, config{}, &buf, doctor.NewReporter(&buf, true), false)
 
 	if got.Error() != "boom: sentinel" {
 		t.Fatalf("walkGateRegistry() error text = %q, want %q", got.Error(), "boom: sentinel")
@@ -231,7 +231,7 @@ func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
 
 	var reportBuf bytes.Buffer
 	_, report := doctorCheckSets(c)
-	if err := runDoctor(f, f, c, doctor.NewReporter(&reportBuf), &reportBuf, strings.NewReader(""), false, report); err != nil {
+	if err := runDoctor(f, f, c, doctor.NewReporter(&reportBuf, true), &reportBuf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("runDoctor() unexpected error: %v", err)
 	}
 	// doctor.Run's own launcherChecks, label and runtime probes print "ok: <text>"
@@ -306,7 +306,7 @@ func TestGateRegistry_TokenGatesInapplicableUnderReadWrite(t *testing.T) {
 	c := minimalValidConfig() // boxForgeAndIssueAccess: read-write, codeForge/issueTracker: github
 
 	var buf bytes.Buffer
-	if err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf), true); err != nil {
+	if err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf, true), true); err != nil {
 		t.Fatalf("walkGateRegistry() unexpected error: %v", err)
 	}
 
@@ -331,7 +331,7 @@ func TestGateRegistry_TokenGatesInapplicableWhenNeitherBackendMatches(t *testing
 	c.issueTracker = "local"
 
 	var buf bytes.Buffer
-	if err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf), true); err != nil {
+	if err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf, true), true); err != nil {
 		t.Fatalf("walkGateRegistry() unexpected error: %v", err)
 	}
 
@@ -368,7 +368,7 @@ func TestGateRegistry_TokenGateAppliesAndChecksWhenBackendSharesTokenEnvVarUnder
 	t.Setenv("BOX_GH_TOKEN", "")
 
 	var buf bytes.Buffer
-	err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf), true)
+	err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf, true), true)
 
 	if err == nil {
 		t.Fatal("walkGateRegistry() error = nil, want a missing-BOX_GH_TOKEN error: read-only-token-github must actually run, not silently no-op, when the active codeForge shares GitHub's TokenEnvVar under a different name")

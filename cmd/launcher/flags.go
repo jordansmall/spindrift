@@ -61,6 +61,22 @@ func dispatchSelfContainedArgs(args []string) (selfContained bool, remaining []s
 	return
 }
 
+// doctorVerboseArgs parses doctor's own args: --verbose or -v requests the
+// full report (issue #3777). Unlike the dispatch-only parsers above, doctor
+// takes no positionals of its own, so any other token — flag or bare word —
+// is a usage error; ok is false exactly when badArg holds that token.
+func doctorVerboseArgs(args []string) (verbose bool, badArg string, ok bool) {
+	for _, a := range args {
+		switch a {
+		case "--verbose", "-v":
+			verbose = true
+		default:
+			return false, a, false
+		}
+	}
+	return verbose, "", true
+}
+
 // issueArgs is parseIssuePositionals's result. A struct rather than four
 // return values because three of them are same-typed bools, which Go cannot
 // catch swapped at a call site (issue #3060).
@@ -221,6 +237,19 @@ type subcommandEntry struct {
 	doc   string
 }
 
+// verbSoFar returns the verb parseFlags has accumulated into remaining so
+// far — the first token that isn't itself a "--"-prefixed flag — or "" if no
+// verb has appeared yet. Dispatch-only booleans like --no-build pass through
+// into remaining ahead of the verb, so the verb is not always remaining[0].
+func verbSoFar(remaining []string) string {
+	for _, tok := range remaining {
+		if !strings.HasPrefix(tok, "--") {
+			return tok
+		}
+	}
+	return ""
+}
+
 // parseFlags injects matching --flag value pairs into the process environment
 // via os.Setenv so loadConfig picks them up. A flag lands in the same env
 // channel as a deprecated ambient knob env var, which is how it wins the
@@ -282,8 +311,17 @@ func parseFlags(args []string) ([]string, error) {
 			i++
 			continue
 		}
-		// Dispatch-only boolean flags pass through to the verb handler.
+		// Dispatch-only boolean flags pass through to the verb handler
+		// unconditionally.
 		if arg == "--no-build" || arg == "--yes" || arg == "--force" || arg == "--self-contained" {
+			remaining = append(remaining, arg)
+			i++
+			continue
+		}
+		// --verbose is a subcommand flag and must follow the "doctor" verb on
+		// the command line; every other verb falls through to the unknown-flag
+		// error below (issue #3777).
+		if arg == "--verbose" && verbSoFar(remaining) == "doctor" {
 			remaining = append(remaining, arg)
 			i++
 			continue
