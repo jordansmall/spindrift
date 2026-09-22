@@ -338,24 +338,24 @@ func TestChildEnv(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := childEnv(tc.env, tc.knobs)
+			got := withoutKeys(tc.env, tc.knobs)
 			if got == nil {
-				t.Fatalf("childEnv(%v, %v) = nil, want non-nil", tc.env, tc.knobs)
+				t.Fatalf("withoutKeys(%v, %v) = nil, want non-nil", tc.env, tc.knobs)
 			}
 			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("childEnv(%v, %v) = %v, want %v", tc.env, tc.knobs, got, tc.want)
+				t.Fatalf("withoutKeys(%v, %v) = %v, want %v", tc.env, tc.knobs, got, tc.want)
 			}
 		})
 	}
 }
 
 func TestChildEnvEmptyEnvReturnsNonNil(t *testing.T) {
-	got := childEnv(nil, []string{"MODEL"})
+	got := withoutKeys(nil, []string{"MODEL"})
 	if got == nil {
-		t.Fatalf("childEnv(nil, ...) = nil, want non-nil empty slice")
+		t.Fatalf("withoutKeys(nil, ...) = nil, want non-nil empty slice")
 	}
 	if len(got) != 0 {
-		t.Fatalf("childEnv(nil, ...) = %v, want empty", got)
+		t.Fatalf("withoutKeys(nil, ...) = %v, want empty", got)
 	}
 }
 
@@ -369,7 +369,11 @@ func TestChildCommandReturnsChildEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
 	}
-	want := []string{"PATH=/bin"}
+	// SPINDRIFT_REPORT_FD=3 rides every ChildCommand result now (see
+	// TestChildCommandSetsReportFD below for that half in isolation); this
+	// test's own focus stays on the knob-stripping behaviour it shares with
+	// DoctorCommand.
+	want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3"}
 	if !reflect.DeepEqual(got.Env, want) {
 		t.Fatalf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, want)
 	}
@@ -388,5 +392,72 @@ func TestDoctorCommandReturnsChildEnv(t *testing.T) {
 	want := []string{"PATH=/bin"}
 	if !reflect.DeepEqual(got.Env, want) {
 		t.Fatalf("DoctorCommand(%+v) env = %v, want %v", spec, got.Env, want)
+	}
+}
+
+// TestChildCommandSetsReportFD pins the host seam's half of issue #3627: a
+// dispatch or research child gets SPINDRIFT_REPORT_FD=3, doctor gets
+// neither the variable nor (elsewhere, at the exec.Cmd level) the
+// descriptor.
+func TestChildCommandSetsReportFD(t *testing.T) {
+	for _, kind := range []Kind{KindDispatch, KindResearch} {
+		spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: kind, Env: []string{"PATH=/bin"}}
+		got, err := ChildCommand(spec)
+		if err != nil {
+			t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
+		}
+		want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3"}
+		if !reflect.DeepEqual(got.Env, want) {
+			t.Errorf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, want)
+		}
+	}
+}
+
+// TestChildCommandStripsAmbientReportFD guards withoutKeys's promise: an
+// operator's stray SPINDRIFT_REPORT_FD (or a nested daemon's) already
+// sitting in the daemon's own environment must not survive alongside the
+// value ChildCommand sets, or the child would see two conflicting
+// definitions of the same variable.
+func TestChildCommandStripsAmbientReportFD(t *testing.T) {
+	spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch, Env: []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=9"}}
+	got, err := ChildCommand(spec)
+	if err != nil {
+		t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
+	}
+	want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3"}
+	if !reflect.DeepEqual(got.Env, want) {
+		t.Fatalf("ChildCommand(%+v) env = %v, want %v (ambient SPINDRIFT_REPORT_FD=9 must not survive)", spec, got.Env, want)
+	}
+}
+
+// TestDoctorCommandOmitsReportFD guards the other half: the doctor
+// preflight dispatches nothing, so it gets no report pipe and no
+// SPINDRIFT_REPORT_FD.
+func TestDoctorCommandOmitsReportFD(t *testing.T) {
+	spec := DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Env: []string{"PATH=/bin"}}
+	got, err := DoctorCommand(spec)
+	if err != nil {
+		t.Fatalf("DoctorCommand(%+v): unexpected error: %v", spec, err)
+	}
+	want := []string{"PATH=/bin"}
+	if !reflect.DeepEqual(got.Env, want) {
+		t.Fatalf("DoctorCommand(%+v) env = %v, want %v (doctor must not get SPINDRIFT_REPORT_FD)", spec, got.Env, want)
+	}
+}
+
+// TestDoctorCommandStripsAmbientReportFD is TestChildCommandStripsAmbientReportFD's
+// other half (issue #3627's review finding): unlike ChildCommand, DoctorCommand
+// never re-adds SPINDRIFT_REPORT_FD, so an ambient one in DoctorSpec.Env must
+// still be stripped rather than left to leak through untouched — the preflight
+// gets neither an ambient nor a daemon-assigned report fd.
+func TestDoctorCommandStripsAmbientReportFD(t *testing.T) {
+	spec := DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Env: []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=9"}}
+	got, err := DoctorCommand(spec)
+	if err != nil {
+		t.Fatalf("DoctorCommand(%+v): unexpected error: %v", spec, err)
+	}
+	want := []string{"PATH=/bin"}
+	if !reflect.DeepEqual(got.Env, want) {
+		t.Fatalf("DoctorCommand(%+v) env = %v, want %v (ambient SPINDRIFT_REPORT_FD=9 must not survive)", spec, got.Env, want)
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"syscall"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/report"
 )
 
 // hostRunner is the production daemon.Runner: ResolveTip's fetch half shells
@@ -311,6 +311,8 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 
 	cmd := runnerExecCommand(childCmd.Argv[0], childCmd.Argv[1:]...)
 	// Knob-stripped env, not the raw process environment — see childEnv.
+	// ChildCommand already set SPINDRIFT_REPORT_FD=3 in it; the pipe below
+	// is what makes that promise true.
 	cmd.Env = childCmd.Env
 	// A terminal Ctrl-C delivers SIGINT to the whole foreground process
 	// group (daemon, nix run, launcher); the daemon only treats SIGTERM as
@@ -320,75 +322,120 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	// internal/runner/nixrealize.go's background `nix build` fork; see
 	// "Background realize process isolation" in docs/reference.md.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// Stdout is scanned line-by-line for announce lines (there is no
-	// machine-readable channel for them — daemon.ParseAnnouncedIssue's own
-	// doc), so it cannot also go straight to os.Stderr via cmd.Stdout; each
-	// line is re-emitted below instead, which keeps it "combined output on
-	// stderr" without giving up the scan.
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return daemon.ChildResult{}, fmt.Errorf("daemon: stdout pipe: %w", err)
-	}
+	// The child's stdout now reaches the daemon's stderr through the
+	// descriptor itself, byte-for-byte, with no userspace copy: the daemon's
+	// own stdout is the JSON-lines event stream, so the child's output (and
+	// anything it itself sends to stderr) both land on the daemon's stderr,
+	// same as RunDoctor below.
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
+	reportRead, reportWrite, err := os.Pipe()
+	if err != nil {
+		return daemon.ChildResult{}, fmt.Errorf("daemon: report pipe: %w", err)
+	}
+	// The write end is exec.Cmd.ExtraFiles' first (and only) entry, which
+	// always lands at fd 3 in the child — daemon.ReportFD names that same
+	// number, and ChildCommand's SPINDRIFT_REPORT_FD=3 is how the child
+	// learns it.
+	cmd.ExtraFiles = []*os.File{reportWrite}
+
 	if err := cmd.Start(); err != nil {
+		_ = reportRead.Close()
+		_ = reportWrite.Close()
 		return daemon.ChildResult{}, fmt.Errorf("daemon: start child: %w", err)
 	}
+	// The parent's copy of the write end must close right after Start: the
+	// child has its own (inherited, distinct fd) copy, but as long as the
+	// parent also holds one open, the read loop below never sees EOF even
+	// after the child exits — Wait would then hang behind a read that never
+	// returns.
+	_ = reportWrite.Close()
 
 	stopForwarding := forwardSignals(cmd.Process, req.Stop, req.Abort)
 	defer stopForwarding()
 
-	var issues []string
-	seen := make(map[string]bool)
-	scanner := bufio.NewScanner(stdout)
-	// Raising bufio's 64 KiB default line cap keeps the scan parsing lines
-	// a child can legitimately write (a single announce — or stray — line
-	// can exceed the default), but the cap is still a cap. What actually
-	// keeps an over-long line from wedging the daemon is the drain below:
-	// once Scan stops, nothing reads the pipe the child is still writing
-	// into, and cmd.Wait() would block forever.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fmt.Fprintln(os.Stderr, line)
-		if issue, ok := daemon.ParseAnnouncedIssue(line); ok && !seen[issue] {
-			seen[issue] = true
-			issues = append(issues, issue)
-			// Fires as the announce line is read, not after the child
-			// exits: ChildResult.Issues below only arrives post-exit, so
-			// it can never name the issue a slot has in flight right now
-			// (ChildRequest.OnIssue's own doc, issue #3545).
-			if req.OnIssue != nil {
-				req.OnIssue(issue)
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "daemon: scan child stdout: %s\n", err)
-		// Drain whatever's left before Wait: the child may still be writing,
-		// and Wait never returns while it blocks on an unread pipe. These
-		// bytes are relayed but never parsed, so a Box announced past the
-		// cap gets no `box` event; report a failed drain rather than
-		// compounding that loss with a silent one.
-		if _, err := io.Copy(os.Stderr, stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "daemon: drain child stdout: %s\n", err)
-		}
-	}
+	// Read to EOF (the normal case: the write end closes when the child
+	// exits) before Wait, right here rather than on a separate goroutine —
+	// there is no stdout goroutine any more, and this read is the only
+	// thing standing between the child exiting and Wait returning.
+	readReports(reportRead, req.OnRecord)
+	// Close the read end before Wait, not after: a child still writing past
+	// this point (there shouldn't be any, since readReports just hit EOF)
+	// gets EPIPE instead of wedging the daemon on a pipe nobody drains.
+	_ = reportRead.Close()
 
 	waitErr := cmd.Wait()
 	if waitErr == nil {
-		return daemon.ChildResult{Exit: 0, Issues: issues}, nil
+		return daemon.ChildResult{Exit: 0}, nil
 	}
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
 		// A non-zero exit is the child's own outcome, not a seam failure —
 		// daemon.Loop's Interpret is what turns it into a verdict.
-		return daemon.ChildResult{Exit: exitErr.ExitCode(), Issues: issues}, nil
+		return daemon.ChildResult{Exit: exitErr.ExitCode()}, nil
 	}
-	// Issues travel with the error too: the child may have announced Boxes
-	// before a non-ExitError wait failure, and those Boxes are real work
-	// already in flight — dropping them here would lose them from the stream.
-	return daemon.ChildResult{Issues: issues}, fmt.Errorf("daemon: wait child: %w", waitErr)
+	return daemon.ChildResult{}, fmt.Errorf("daemon: wait child: %w", waitErr)
+}
+
+// readReports reads report-protocol lines from r to EOF and, for each one
+// daemon.ParseRecord accepts, calls onRecord (when non-nil). It uses a
+// bufio.Reader's ReadSlice rather than a bufio.Scanner deliberately: a
+// Scanner reintroduces exactly the line cap and drain-or-wedge problem this
+// change deletes the stdout scan to get rid of, and unlike the ReadString
+// this replaced, the reader's own fixed buffer size (report.MaxLine) is the
+// bound — ReadSlice reports bufio.ErrBufferFull instead of growing the
+// buffer, so a line longer than the cap is discarded up to its next newline
+// (or EOF) rather than accumulated in memory. Only the first malformed line
+// is reported, on os.Stderr, so a hostile or buggy child spamming bad lines
+// can't spam the daemon's own log; every malformed line (first and later,
+// including an over-long one) is otherwise skipped and parsing continues.
+// report.MaxLine — rather than a local literal — is shared with the writer
+// side (report.emit), so a legitimate child's line can never itself be over
+// this cap; the over-long path below stays as the defence against a
+// hostile/buggy child (issue #3627's review finding).
+func readReports(r *os.File, onRecord func(daemon.Record)) {
+	reader := bufio.NewReaderSize(r, report.MaxLine)
+	reportedBad := false
+	reportOnce := func(err error) {
+		if !reportedBad {
+			reportedBad = true
+			fmt.Fprintf(os.Stderr, "daemon: read child report: %s\n", err)
+		}
+	}
+	for {
+		line, err := reader.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			reportOnce(fmt.Errorf("line exceeds %d bytes, discarding", report.MaxLine))
+			// The line so far didn't fit; keep pulling from the same line
+			// (never parsing the fragment already in hand — it isn't a
+			// complete record) until a newline surfaces or the reader hits
+			// EOF/another error, then resume the normal loop.
+			for errors.Is(err, bufio.ErrBufferFull) {
+				_, err = reader.ReadSlice('\n')
+			}
+			if err != nil {
+				return
+			}
+			continue
+		}
+		line = bytes.TrimSuffix(line, []byte("\n"))
+		if len(line) != 0 {
+			rec, ok, parseErr := daemon.ParseRecord(string(line))
+			switch {
+			case parseErr != nil:
+				reportOnce(parseErr)
+			case ok && onRecord != nil:
+				onRecord(rec)
+			}
+		}
+		if err != nil {
+			// EOF (the normal case, once the write end closes at child
+			// exit) and any other read error both just end the loop: there
+			// is nothing left to read either way.
+			return
+		}
+	}
 }
 
 // runnerDoctorCommand is RunDoctor's exec seam: a test overrides it to skip
@@ -414,8 +461,10 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error
 	// Both stdout and stderr go straight to the daemon's own stderr: the
 	// daemon's stdout is the JSON-lines event stream, so a doctor report
 	// written there would corrupt it, and the report itself is where the
-	// operator reads which row failed and its remedy. Unlike RunChild there
-	// are no announce lines to scan, so no pipe/scanner is needed here.
+	// operator reads which row failed and its remedy. Unlike RunChild, the
+	// preflight gets no report pipe and no SPINDRIFT_REPORT_FD (doctorCmd.Env
+	// above never carries it — see DoctorCommand): it dispatches nothing, so
+	// it has nothing to report.
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	// cmd.Stdin left nil (os/exec gives the child /dev/null) so doctor takes

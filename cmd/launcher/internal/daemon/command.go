@@ -6,6 +6,17 @@ import (
 	"strings"
 )
 
+// ReportFD is the file descriptor SPINDRIFT_REPORT_FD names in a dispatch
+// or research child's environment: the first (and only) entry in
+// exec.Cmd.ExtraFiles always lands at fd 3 in the child, since fds 0-2 are
+// already stdin/stdout/stderr — the host runner's pipe wiring and this
+// constant must agree on that number, which is why both point here.
+const ReportFD = 3
+
+// reportFDEnv is the environment variable name that carries ReportFD to a
+// child; not exported, since only ChildCommand ever sets it.
+const reportFDEnv = "SPINDRIFT_REPORT_FD"
+
 // ChildSpec is everything one pinned child invocation needs.
 type ChildSpec struct {
 	RepoPath string // absolute path to the operator's checkout
@@ -21,7 +32,7 @@ type ChildSpec struct {
 // results (both are built by ChildCommand/DoctorCommand; see their docs).
 // Whenever one of those builders returns a nil error, Env is non-nil; the
 // zero Command it returns alongside an error is not meant to be used at
-// all. See childEnv for why non-nil matters once this reaches exec.Cmd.Env.
+// all. See withoutKeys for why non-nil matters once this reaches exec.Cmd.Env.
 type Command struct {
 	Argv []string
 	Env  []string
@@ -65,22 +76,27 @@ func ChildCommand(s ChildSpec) (Command, error) {
 			"--max-jobs", "1",
 			"--max-parallel", "1",
 		},
-		Env: childEnv(s.Env, s.Knobs),
+		// SPINDRIFT_REPORT_FD is appended after stripping the knobs and then
+		// re-run through withoutKeys with just that one key, so an ambient
+		// SPINDRIFT_REPORT_FD already in the daemon's own environment (a
+		// nested daemon, an operator's stray export) cannot survive
+		// alongside the value set here — the child must see exactly one.
+		Env: append(withoutKeys(withoutKeys(s.Env, s.Knobs), []string{reportFDEnv}), fmt.Sprintf("%s=%d", reportFDEnv, ReportFD)),
 	}, nil
 }
 
-// childEnv filters env down to the entries whose key (the text before the
-// first '=') is not in knobs, preserving env's order. It always returns a
+// withoutKeys filters env down to the entries whose key (the text before the
+// first '=') is not in keys, preserving env's order. It always returns a
 // non-nil slice, even when the result is empty: this becomes Command.Env,
 // which callers assign straight to exec.Cmd.Env, where nil means "inherit
 // the parent's environment" — exactly the ambient-knob leak this change
 // closes, so an empty-but-non-nil slice must stay empty rather than falling
 // back to inheritance. An entry with no '=' has no key to match and always
-// passes through. knobs is small (one schema's worth of keys), so a map
-// built per call is fine.
-func childEnv(env, knobs []string) []string {
-	strip := make(map[string]struct{}, len(knobs))
-	for _, k := range knobs {
+// passes through. keys is small (one schema's worth of knobs, or a single
+// env var name), so a map built per call is fine.
+func withoutKeys(env, keys []string) []string {
+	strip := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
 		strip[k] = struct{}{}
 	}
 	out := make([]string, 0, len(env))
@@ -213,15 +229,20 @@ type DoctorSpec struct {
 // DoctorCommand builds the Command for the daemon's own startup preflight:
 // the same pinned flakeref ChildCommand resolves (same repo/attr/revision,
 // same validation) and the same env-minus-Knobs stripping (see ChildCommand
-// and childEnv), but invoking "doctor" instead of a dispatch kind, and with
+// and withoutKeys), but invoking "doctor" instead of a dispatch kind, and with
 // neither --max-jobs nor --max-parallel appended — those cap a child's wave
 // of dispatched work, and doctor dispatches nothing to cap. Pure like
 // ChildCommand: the caller supplies Env, DoctorCommand never reads
 // os.Environ itself.
+//
+// Unlike ChildCommand, reportFDEnv is stripped and never re-added: the
+// preflight emits no records, so it must see no report fd at all, not even
+// an ambient one surviving from the daemon's own environment (a stray
+// operator export, a nested daemon) — issue #3627's review finding.
 func DoctorCommand(s DoctorSpec) (Command, error) {
 	flakeref, err := appFlakeref(s.RepoPath, s.AppAttr, s.Revision, "a preflight must always be pinned")
 	if err != nil {
 		return Command{}, err
 	}
-	return Command{Argv: []string{"nix", "run", flakeref, "--", "doctor"}, Env: childEnv(s.Env, s.Knobs)}, nil
+	return Command{Argv: []string{"nix", "run", flakeref, "--", "doctor"}, Env: withoutKeys(withoutKeys(s.Env, s.Knobs), []string{reportFDEnv})}, nil
 }

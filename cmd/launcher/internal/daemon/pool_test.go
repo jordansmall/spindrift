@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/report"
 )
 
 // notifyWriter is an Emitter sink that also publishes each write on a
@@ -317,8 +319,8 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 			// the other slots would still be parked waiting for it and
 			// could never join the barrier this test's whole premise
 			// depends on.
-			if req.OnIssue != nil {
-				req.OnIssue(fmt.Sprintf("issue-%d", req.Slot))
+			if req.OnRecord != nil {
+				req.OnRecord(Record{Event: report.EventBox, Issue: fmt.Sprintf("issue-%d", req.Slot)})
 			}
 			// Non-blocking, because the number of later calls is
 			// unbounded: a non-crossing slot races around through its
@@ -1368,7 +1370,7 @@ func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 	r.holdSlots(slots)
 	// announceEachSlot: without it, the first slot to reach RunChild would
 	// never pass the baton onward (that happens on the child's first
-	// announced issue, runSlot's ChildRequest.OnIssue callback's
+	// announced issue, runSlot's ChildRequest.OnRecord callback's
 	// passBaton(batonPassClaimed) call), so the second slot would stay
 	// parked in awaitBaton forever and this test's "both slots really ran"
 	// premise would never be reached.
@@ -1731,7 +1733,7 @@ func TestPoolSnapshotState(t *testing.T) {
 			// The window is open when the child starts (so it really did
 			// start under it), and onStart — while the child is still
 			// "running" from the pool's point of view — advances the
-			// clock past the window's close and republishes via OnIssue
+			// clock past the window's close and republishes via OnRecord
 			// before reading, so the read genuinely observes a running
 			// child under a since-shut window, not one that merely never
 			// closed.
@@ -1745,7 +1747,7 @@ func TestPoolSnapshotState(t *testing.T) {
 					results:   []ChildResult{{Exit: 5}}, // host-tainted: halts promptly after the read
 					onStart: func(ctx context.Context, req ChildRequest) error {
 						clk.advanceBy(10 * time.Minute)
-						req.OnIssue("x")
+						req.OnRecord(Record{Event: report.EventBox, Issue: "x"})
 						// onStart runs on a pool slot goroutine, not this
 						// test's own: a fatal read here would Goexit that
 						// goroutine mid-RunChild, and Loop's wg.Wait (called
@@ -1850,7 +1852,7 @@ func TestPoolSnapshotSlots(t *testing.T) {
 			return ctx.Err()
 		},
 		onStart: func(ctx context.Context, req ChildRequest) error {
-			req.OnIssue("7")
+			req.OnRecord(Record{Event: report.EventBox, Issue: "7"})
 			st, readErr = readStatusErr(dir)
 			return nil
 		},
@@ -1928,17 +1930,53 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.startChild(0, KindDispatch, "rev1")
-	p.noteIssue(0, "42")
+	p.noteBox(0, KindDispatch, "rev1", "42", "")
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
 		t.Fatalf("issues = %v, want [42]", snap.Slots[0].Issues)
 	}
 
-	p.noteIssue(0, "99") // mutate the pool's copy after snapshotting
+	p.noteBox(0, KindDispatch, "rev1", "99", "") // mutate the pool's copy after snapshotting
 
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
 		t.Fatalf("snapshot issues changed after mutating pool state: got %v, want [42]", snap.Slots[0].Issues)
+	}
+}
+
+// TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents pins the fix for
+// a repeat-issue regression: a child that boxes the same issue twice (a
+// fix-pass box after its own initial box) must publish that issue once in
+// the slot's status Issues list — restoring origin/main's dedupe semantics
+// — while the box event itself still fires once per record, since a
+// fix-pass box is a real thing that happened and the stream must show
+// both phases (issue #3627's review finding).
+func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
+	clk := &testClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+
+	p.startChild(0, KindDispatch, "rev1")
+	p.noteBox(0, KindDispatch, "rev1", "123", "initial")
+	p.noteBox(0, KindDispatch, "rev1", "123", "fix-pass-1")
+
+	snap := p.snapshot()
+	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"123"}) {
+		t.Fatalf("issues = %v, want [123] (deduped)", snap.Slots[0].Issues)
+	}
+
+	events := wantEvents(t, &buf, []string{"child_start", "box", "box"}, "")
+	if events[1].Issue != "123" || events[1].Phase != "initial" {
+		t.Errorf("first box event = %+v, want issue 123 phase initial", events[1])
+	}
+	if events[2].Issue != "123" || events[2].Phase != "fix-pass-1" {
+		t.Errorf("second box event = %+v, want issue 123 phase fix-pass-1", events[2])
+	}
+
+	if got := p.flightIssue(0); got != "123" {
+		t.Errorf("flightIssue(0) = %q, want %q (the most recently boxed issue)", got, "123")
 	}
 }
 

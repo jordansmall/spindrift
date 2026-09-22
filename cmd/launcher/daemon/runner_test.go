@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/report"
 )
 
 // mustHostRunner is the call-site helper for the tests below that build a
@@ -31,23 +33,20 @@ func mustHostRunner(t *testing.T, cfg hostRunnerConfig) *hostRunner {
 	return r
 }
 
-// TestRunChild_ExitCodeAndIssues points the exec seam at a scripted shell
-// command instead of nix (this repo's tests never shell out to nix), and
-// asserts a non-zero exit comes back as ChildResult.Exit with no error while
-// duplicate/announce lines fold into ChildResult.Issues in first-seen order.
-func TestRunChild_ExitCodeAndIssues(t *testing.T) {
+// TestRunChild_ExitCode points the exec seam at a scripted shell command
+// instead of nix (this repo's tests never shell out to nix), and asserts a
+// non-zero exit comes back as ChildResult.Exit with no error.
+func TestRunChild_ExitCode(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
-	script := `printf '    -> #101: fix bug\n    -> #102 (fix-pass-2): retry\n    -> #101: fix bug again\nplain line\n'; exit 2`
 	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("/bin/sh", "-c", script)
+		return exec.Command("/bin/sh", "-c", "exit 2")
 	}
 
 	// Every runner the tests below use passes env: os.Environ() — a nil env
 	// is rejected at construction now (TestNewHostRunner_RejectsNilEnv), and
 	// the snapshot is load-bearing for the tests whose children shell out:
-	// TestRunChild_OversizedLineDoesNotHang,
 	// TestRunChild_ChildInOwnProcessGroup, TestRunChild_ChildStartedAfterBothLatchesClosedSeesBothKinds,
 	// TestRunDoctor_CancelledContextTearsDownChild.
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
@@ -58,22 +57,65 @@ func TestRunChild_ExitCodeAndIssues(t *testing.T) {
 	if got.Exit != 2 {
 		t.Errorf("Exit = %d, want 2", got.Exit)
 	}
-	want := []string{"101", "102"}
-	if !reflect.DeepEqual(got.Issues, want) {
-		t.Errorf("Issues = %v, want %v", got.Issues, want)
+}
+
+// captureStderr redirects os.Stderr to a pipe for the caller and returns a
+// func that restores the original and hands back everything written while
+// redirected. RunChild relays a child's stdout/stderr and its own
+// malformed-record diagnostic through os.Stderr, so this is the only
+// observable route onto either from a test.
+func captureStderr(t *testing.T) func() []byte {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("captureStderr: pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	// Drain concurrently rather than once the caller is done: RunChild wires
+	// the child's stdout straight to this descriptor, and
+	// TestRunChild_StdoutRelayedUnchanged deliberately writes 70 KiB — past
+	// a pipe's capacity on both Linux and macOS. With nothing reading, the
+	// child blocks in write() forever, so it never exits, never closes its
+	// report descriptor, and wedges RunChild's read of the report pipe.
+	type capture struct {
+		out []byte
+		err error
+	}
+	done := make(chan capture, 1)
+	go func() {
+		out, err := io.ReadAll(r)
+		done <- capture{out, err}
+	}()
+	t.Cleanup(func() {
+		if os.Stderr == w {
+			os.Stderr = orig
+		}
+		_ = w.Close()
+		_ = r.Close()
+	})
+	return func() []byte {
+		os.Stderr = orig
+		_ = w.Close()
+		got := <-done
+		if got.err != nil {
+			t.Fatalf("captureStderr: read: %v", got.err)
+		}
+		return got.out
 	}
 }
 
-// TestRunChild_OnIssueFiresPerDistinctAnnounce asserts RunChild calls
-// ChildRequest.OnIssue once per distinct announced issue, in announce
-// order, and never for a repeat of one already seen — the live channel a
-// slot has no other way to learn "what is this child working on right now"
-// before it exits (issue #3545).
-func TestRunChild_OnIssueFiresPerDistinctAnnounce(t *testing.T) {
+// TestRunChild_OnRecordDeliversBoxAndSettledInOrder drives a scripted child
+// that writes one "box" and one "settled" record to descriptor 3 (the
+// report pipe RunChild hands it — see daemon.ReportFD/SPINDRIFT_REPORT_FD),
+// and asserts both reach ChildRequest.OnRecord, in order, with every field
+// intact: the live channel a slot has no other way to learn what a child is
+// doing, or how it settled, before it exits (issue #3545, #3627).
+func TestRunChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
-	script := `printf '    -> #101: fix bug\n    -> #102 (fix-pass-2): retry\n    -> #101: fix bug again\nplain line\n'; exit 2`
+	script := `printf '%s\n%s\n' '{"event":"box","issue":"101","phase":"initial"}' '{"event":"settled","issue":"101","state":"merged"}' >&3; exit 0`
 	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("/bin/sh", "-c", script)
 	}
@@ -81,27 +123,272 @@ func TestRunChild_OnIssueFiresPerDistinctAnnounce(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 
 	var mu sync.Mutex
-	var announced []string
+	var got []daemon.Record
 	req := daemon.ChildRequest{
 		Slot:     0,
 		Kind:     daemon.KindDispatch,
 		Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-		OnIssue: func(issue string) {
+		OnRecord: func(rec daemon.Record) {
 			mu.Lock()
 			defer mu.Unlock()
-			announced = append(announced, issue)
+			got = append(got, rec)
 		},
 	}
-	got, err := r.RunChild(context.Background(), req)
+	if _, err := r.RunChild(context.Background(), req); err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	want := []daemon.Record{
+		{Event: "box", Issue: "101", Phase: "initial"},
+		{Event: "settled", Issue: "101", State: "merged"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("OnRecord calls = %+v, want %+v", got, want)
+	}
+}
+
+// TestRunChild_UnknownEventIgnored asserts an event daemon.ParseRecord
+// doesn't recognise is ignored outright: no OnRecord call, no error, no
+// stderr diagnostic, and the child's own clean exit still comes through —
+// a forward-compatible reader must tolerate an event it doesn't understand
+// yet (see ParseRecord's doc).
+func TestRunChild_UnknownEventIgnored(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	script := `printf '%s\n' '{"event":"nope","issue":"42"}' >&3; exit 0`
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", script)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	readStderr := captureStderr(t)
+	var got []daemon.Record
+	req := daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
+	}
+	result, err := r.RunChild(context.Background(), req)
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
-	want := []string{"101", "102"}
-	if !reflect.DeepEqual(got.Issues, want) {
-		t.Errorf("Issues = %v, want %v", got.Issues, want)
+	if result.Exit != 0 {
+		t.Errorf("Exit = %d, want 0", result.Exit)
 	}
-	if !reflect.DeepEqual(announced, want) {
-		t.Errorf("OnIssue calls = %v, want %v (once per distinct issue, in order, no repeat)", announced, want)
+	if len(got) != 0 {
+		t.Errorf("OnRecord calls = %+v, want none", got)
+	}
+	if stderr := readStderr(); len(stderr) != 0 {
+		t.Errorf("stderr = %q, want empty (an unknown event is not an error)", stderr)
+	}
+}
+
+// TestRunChild_MalformedLinesReportOnceThenValidArrives drives a child that
+// writes two malformed lines followed by one valid record: exactly one
+// stderr diagnostic must come out (not two — a hostile or buggy child
+// spamming bad lines must not spam the daemon's own log), and the valid
+// record after them must still reach OnRecord.
+func TestRunChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	script := `printf '%s\n%s\n%s\n' 'not json' 'also not json' '{"event":"box","issue":"7","phase":"fix-pass-1"}' >&3; exit 0`
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", script)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	readStderr := captureStderr(t)
+	var got []daemon.Record
+	req := daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
+	}
+	if _, err := r.RunChild(context.Background(), req); err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	want := []daemon.Record{{Event: "box", Issue: "7", Phase: "fix-pass-1"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("OnRecord calls = %+v, want %+v", got, want)
+	}
+	stderr := string(readStderr())
+	if n := strings.Count(stderr, "daemon: read child report:"); n != 1 {
+		t.Errorf("stderr diagnostic count = %d, want exactly 1 (got stderr: %q)", n, stderr)
+	}
+}
+
+// TestRunChild_OverLongLineDiscardedThenValidArrives drives a child that
+// writes one unterminated line well past report.MaxLine, then a valid record:
+// readReports must neither buffer the over-long run without limit nor wedge
+// on it (issue #3627's review finding) — the over-long line is reported
+// exactly once, like any other malformed line, and the record after it still
+// reaches OnRecord.
+func TestRunChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	// 5000 'x' bytes with no newline is comfortably past report.MaxLine
+	// (4096); the trailing printf supplies the newline that ends it, then a
+	// well-formed record on its own line.
+	script := `head -c 5000 /dev/zero | tr '\0' 'x' >&3; printf '\n%s\n' '{"event":"box","issue":"9","phase":"initial"}' >&3; exit 0`
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", script)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	readStderr := captureStderr(t)
+	var got []daemon.Record
+	req := daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
+	}
+	if _, err := r.RunChild(context.Background(), req); err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	want := []daemon.Record{{Event: "box", Issue: "9", Phase: "initial"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("OnRecord calls = %+v, want %+v", got, want)
+	}
+	stderr := string(readStderr())
+	if n := strings.Count(stderr, "daemon: read child report:"); n != 1 {
+		t.Errorf("stderr diagnostic count = %d, want exactly 1 (got stderr: %q)", n, stderr)
+	}
+}
+
+// TestRunChild_SettledLongNoteDeliveredOneRecord closes issue #3627's review
+// finding at the point it was reported: a Box's SPINDRIFT_OUTCOME note=<~5KB
+// prose> threads through settle/gate.go into report.Settled, and before the
+// fix the resulting JSON line exceeded report.MaxLine, so readReports hit
+// bufio.ErrBufferFull and discarded the whole record (0 delivered). The
+// bytes this test feeds fd 3 are produced by the real report.Reporter over a
+// throwaway pipe — not hand-rolled JSON — so the assertion exercises
+// report.emit's own clipping, not a stand-in for it. With the fix, the note
+// is clipped before the line ever reaches the wire, so exactly one record
+// reaches onRecord with the right issue and state.
+func TestRunChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	rep := report.FromEnv(func(k string) string {
+		if k == "SPINDRIFT_REPORT_FD" {
+			return fmt.Sprint(pw.Fd())
+		}
+		return ""
+	}, io.Discard)
+	if rep == nil {
+		t.Fatalf("report.FromEnv: got nil Reporter")
+	}
+	note := strings.Repeat("a", 5000)
+	rep.Settled("123", "blocked", note)
+	pw.Close()
+	line, err := io.ReadAll(pr)
+	if err != nil {
+		t.Fatalf("read produced record: %v", err)
+	}
+	pr.Close()
+
+	dir := t.TempDir()
+	lineFile := filepath.Join(dir, "line.json")
+	if err := os.WriteFile(lineFile, line, 0o644); err != nil {
+		t.Fatalf("write lineFile: %v", err)
+	}
+
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", `cat "$1" >&3`, "sh", lineFile)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	readStderr := captureStderr(t)
+	var got []daemon.Record
+	req := daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
+	}
+	if _, err := r.RunChild(context.Background(), req); err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("OnRecord calls = %+v, want exactly 1", got)
+	}
+	if got[0].Event != "settled" || got[0].Issue != "123" || got[0].State != "blocked" {
+		t.Errorf("record = %+v, want event=settled issue=123 state=blocked", got[0])
+	}
+	if stderr := readStderr(); len(stderr) != 0 {
+		t.Errorf("stderr = %q, want empty (a within-bound record is not malformed)", stderr)
+	}
+}
+
+// TestRunChild_StdoutRelayedUnchanged asserts a child's stdout reaches the
+// daemon's stderr byte-for-byte, with no userspace copy: the child prints a
+// line matching the old (now-deleted) announce regex, followed by a line
+// past both bufio's 64 KiB default and the old raised 1 MiB cap, proving
+// the cap is really gone rather than just raised further.
+func TestRunChild_StdoutRelayedUnchanged(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	dir := t.TempDir()
+	bigLine := strings.Repeat("a", 70*1024) + "\n"
+	bigFile := filepath.Join(dir, "big.txt")
+	if err := os.WriteFile(bigFile, []byte(bigLine), 0o644); err != nil {
+		t.Fatalf("write bigFile: %v", err)
+	}
+	literalLine := "    -> #42 (fix-pass-1): title\n"
+
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", `cat "$1"; printf '%s' "$2"`, "sh", bigFile, literalLine)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	readStderr := captureStderr(t)
+	req := daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		OnRecord: func(rec daemon.Record) {
+			t.Errorf("OnRecord called with %+v, want none (nothing written to the report pipe)", rec)
+		},
+	}
+	result, err := r.RunChild(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	if result.Exit != 0 {
+		t.Errorf("Exit = %d, want 0", result.Exit)
+	}
+	want := bigLine + literalLine
+	if got := string(readStderr()); got != want {
+		t.Errorf("relayed stdout does not match byte-for-byte\ngot len=%d\nwant len=%d", len(got), len(want))
+	}
+}
+
+// TestRunChild_CleanExitNoRecords pins the other end of the report-pipe
+// seam: a clean exit with nothing written to descriptor 3 reports Exit 0
+// and fires OnRecord not at all.
+func TestRunChild_CleanExitNoRecords(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", `printf 'nothing to see\n'; exit 0`)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	var got []daemon.Record
+	req := daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindResearch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
+	}
+	result, err := r.RunChild(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	if result.Exit != 0 {
+		t.Errorf("Exit = %d, want 0", result.Exit)
+	}
+	if len(got) != 0 {
+		t.Errorf("OnRecord calls = %+v, want none", got)
 	}
 }
 
@@ -127,8 +414,8 @@ func assertEnvStripsKnobsKeepsSecrets(t *testing.T, dumped string) {
 
 // TestRunChild_EnvStripsKnobsKeepsSecrets drives the exec seam with a
 // scripted child that dumps its own environment to a temp file (RunChild's
-// stdout is scanned for announce lines and re-emitted to os.Stderr, so a
-// temp file is the observable route here, same as RunDoctor's test below).
+// stdout now goes straight to os.Stderr with no userspace copy, so a temp
+// file is the observable route here, same as RunDoctor's test below).
 func TestRunChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -160,58 +447,6 @@ func TestRunChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 		t.Fatalf("read dumped env: %v", err)
 	}
 	assertEnvStripsKnobsKeepsSecrets(t, string(dumped))
-}
-
-// TestRunChild_ZeroExitNoAnnounce pins the other end of the same seam: a
-// clean exit with no announce lines reports Exit 0 and a nil Issues slice.
-func TestRunChild_ZeroExitNoAnnounce(t *testing.T) {
-	orig := runnerExecCommand
-	t.Cleanup(func() { runnerExecCommand = orig })
-
-	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("/bin/sh", "-c", `printf 'nothing to see\n'; exit 0`)
-	}
-
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindResearch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
-	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
-	}
-	if got.Exit != 0 {
-		t.Errorf("Exit = %d, want 0", got.Exit)
-	}
-	if len(got.Issues) != 0 {
-		t.Errorf("Issues = %v, want empty", got.Issues)
-	}
-}
-
-// TestRunChild_OversizedLineDoesNotHang drives a child that writes a single
-// stdout line past bufio.Scanner's 64 KiB default (and past even the raised
-// 1 MiB cap here) with no trailing newline, then exits with a distinct code.
-// Before the buffer raise + drain-before-Wait fix, scanner.Scan() would stop
-// on the oversized line while the child kept writing into an unread pipe,
-// and cmd.Wait() below would never return — this is the regression tripwire
-// (issue #3538).
-func TestRunChild_OversizedLineDoesNotHang(t *testing.T) {
-	orig := runnerExecCommand
-	t.Cleanup(func() { runnerExecCommand = orig })
-	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("/bin/sh", "-c", "head -c 2000000 /dev/zero | tr '\\0' 'a'; exit 5")
-	}
-
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	resultCh, errCh := startChild(t, r, nil, nil)
-
-	select {
-	case err := <-errCh:
-		t.Fatalf("RunChild() unexpected error: %v", err)
-	case got := <-resultCh:
-		if got.Exit != 5 {
-			t.Errorf("Exit = %d, want 5", got.Exit)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("RunChild() did not return: an oversized line left the child blocked on an unread pipe")
-	}
 }
 
 // TestRunChild_ChildInOwnProcessGroup asserts the child started through the
