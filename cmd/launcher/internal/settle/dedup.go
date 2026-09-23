@@ -3,6 +3,7 @@ package settle
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -180,14 +181,47 @@ func listBacklogForDedup(it forge.IssueTracker) ([]forge.Issue, error) {
 	return it.ListOpenIssues()
 }
 
-// matchDedup reports whether any of keys is already present in index,
-// returning the first match's reference. Map iteration order is random, so on
-// multiple matches the returned reference is arbitrary but always valid.
-func matchDedup(index map[string]string, keys map[string]bool) (string, bool) {
+// dedupOverlap records how much of an intent's dedup key set the index
+// already tracks. A multi-site finding emits one key per site (filer socket
+// spec), so a hit on one key proves only that site is tracked -- suppressing
+// the whole intent would leave the uncovered site tracked nowhere (issue
+// #3808).
+type dedupOverlap struct {
+	// covered is the subset of the intent's keys already tracked, sorted.
+	covered []string
+	// refs names the distinct issues covering them -- more than one when
+	// the finding's sites are tracked by separate backlog issues. It is
+	// built by walking covered in its sorted order, which is what makes it
+	// deterministic despite Go's randomized map order.
+	refs []string
+	// full is true only when every key is covered and there was at least
+	// one: an empty key set must never read as "already tracked".
+	full bool
+}
+
+// partial reports the middle arm of the none/partial/full decision: some of
+// the intent's sites are already tracked, but not all, so the intent still
+// files and says so.
+func (ov dedupOverlap) partial() bool { return !ov.full && len(ov.covered) > 0 }
+
+// matchDedup partitions keys against index, returning how much of the set
+// index already tracks.
+func matchDedup(index map[string]string, keys map[string]bool) dedupOverlap {
+	var ov dedupOverlap
 	for k := range keys {
-		if ref, ok := index[k]; ok {
-			return ref, true
+		if _, ok := index[k]; ok {
+			ov.covered = append(ov.covered, k)
 		}
 	}
-	return "", false
+	sort.Strings(ov.covered)
+	seen := make(map[string]bool)
+	for _, k := range ov.covered {
+		ref := index[k]
+		if !seen[ref] {
+			seen[ref] = true
+			ov.refs = append(ov.refs, ref)
+		}
+	}
+	ov.full = len(keys) > 0 && len(ov.covered) == len(keys)
+	return ov
 }

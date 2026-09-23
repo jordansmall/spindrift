@@ -191,15 +191,74 @@ func TestBuildDedupMarker_AllInvalidTermsProducesEmpty(t *testing.T) {
 	}
 }
 
-// matchDedup finds a hit on any key in the set and returns its reference; a
-// key set with no hit reports ok=false.
+// matchDedup partitions keys into the subset index already tracks; a
+// multi-site intent must file when even one of its sites is untracked, so the
+// caller needs a three-way answer, not an any-hit boolean: full decides
+// skip-versus-file, covered names which sites were already tracked, and refs
+// names every distinct issue tracking them.
 func TestMatchDedup(t *testing.T) {
-	index := map[string]string{"race in settle": "#42"}
-	if ref, ok := matchDedup(index, map[string]bool{"race in settle": true, "other": true}); !ok || ref != "#42" {
-		t.Errorf("matchDedup hit = (%q, %v), want (#42, true)", ref, ok)
+	// Both keys covered by the same issue: full, refs names it once.
+	index := map[string]string{"site a": "#42", "site b": "#42"}
+	ov := matchDedup(index, map[string]bool{"site a": true, "site b": true})
+	if !ov.full || len(ov.refs) != 1 || ov.refs[0] != "#42" {
+		t.Errorf("matchDedup(all covered, one issue) = %+v, want full, refs [#42]", ov)
 	}
-	if _, ok := matchDedup(index, map[string]bool{"nothing here": true}); ok {
-		t.Error("matchDedup reported a hit for a disjoint key set")
+
+	// Both keys covered, but by two different issues: full, refs names both
+	// in covered-key-sorted order.
+	index = map[string]string{"site a": "#42", "site b": "#43"}
+	ov = matchDedup(index, map[string]bool{"site a": true, "site b": true})
+	if !ov.full || len(ov.refs) != 2 || ov.refs[0] != "#42" || ov.refs[1] != "#43" {
+		t.Errorf("matchDedup(all covered, two issues) = %+v, want full, refs [#42 #43]", ov)
+	}
+
+	// Only one of two keys covered: the caller must still file, so covered
+	// must name exactly the tracked site, not the whole set.
+	ov = matchDedup(index, map[string]bool{"site a": true, "site c": true})
+	if ov.full || len(ov.covered) != 1 || ov.covered[0] != "site a" || len(ov.refs) != 1 || ov.refs[0] != "#42" {
+		t.Errorf("matchDedup(partial) = %+v, want not full, covered [site a], refs [#42]", ov)
+	}
+
+	// Two of three keys covered, by two different issues: not full, but
+	// refs still names both -- the partial-overlap line prints them all.
+	ov = matchDedup(index, map[string]bool{"site a": true, "site b": true, "site c": true})
+	if ov.full || len(ov.covered) != 2 || len(ov.refs) != 2 || ov.refs[0] != "#42" || ov.refs[1] != "#43" {
+		t.Errorf("matchDedup(partial, two issues) = %+v, want not full, covered [site a site b], refs [#42 #43]", ov)
+	}
+
+	// Disjoint key set: nothing covered, no refs.
+	ov = matchDedup(index, map[string]bool{"nothing here": true})
+	if ov.full || len(ov.covered) != 0 || len(ov.refs) != 0 {
+		t.Errorf("matchDedup(disjoint) = %+v, want not full, empty covered and refs", ov)
+	}
+
+	// An empty key set must never read as "all covered" -- see
+	// TestFileIssueIntentsDetailed_Dedup_NoTermsWarns for the caller-side
+	// guard this backs.
+	ov = matchDedup(index, map[string]bool{})
+	if ov.full || len(ov.covered) != 0 || len(ov.refs) != 0 {
+		t.Errorf("matchDedup(empty keys) = %+v, want not full, empty covered and refs", ov)
+	}
+}
+
+// Map iteration order is randomized, so the returned covered keys and refs
+// must both be deterministic: sorted key order, not whichever key the runtime
+// visits first. Looped to pin this against map-order flakiness.
+func TestMatchDedup_DeterministicRefsAcrossManyCoveredKeys(t *testing.T) {
+	index := map[string]string{
+		"a site": "#1",
+		"b site": "#2",
+		"c site": "#3",
+	}
+	keys := map[string]bool{"a site": true, "b site": true, "c site": true}
+	for i := 0; i < 20; i++ {
+		ov := matchDedup(index, keys)
+		if !ov.full || len(ov.covered) != 3 || ov.covered[0] != "a site" || ov.covered[1] != "b site" || ov.covered[2] != "c site" {
+			t.Fatalf("iteration %d: matchDedup = %+v, want full, covered [a site b site c site]", i, ov)
+		}
+		if len(ov.refs) != 3 || ov.refs[0] != "#1" || ov.refs[1] != "#2" || ov.refs[2] != "#3" {
+			t.Fatalf("iteration %d: matchDedup = %+v, want refs [#1 #2 #3]", i, ov)
+		}
 	}
 }
 

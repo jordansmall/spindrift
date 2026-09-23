@@ -130,10 +130,24 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 		} else if dedupIndex == nil {
 			dedupIndex = backlogDedupIndex(it, num)
 		}
-		if ref, dup := matchDedup(dedupIndex, keys); dup {
+		ov := matchDedup(dedupIndex, keys)
+		if ov.full {
+			// Every covering ref, not just the first: per-site dedup lets
+			// several issues jointly cover one intent, so a DupRef naming
+			// one of them would point a reader at a partial answer.
+			ref := strings.Join(ov.refs, ", ")
 			fmt.Printf("    #%s  skipped duplicate issue-intent: %q (already tracked: %s)\n", num, in.Title, ref)
 			out = append(out, filedIntent{Title: in.Title, Skipped: true, DupRef: ref})
 			continue
+		}
+		// A partial overlap still files (issue #3808): the tally stays an
+		// ordinary ok, but the run's output would otherwise go silent on the
+		// fact that some of the finding's sites were already tracked -- the
+		// same visibility #3609 required for a full skip. The covered keys
+		// are bracketed because both halves of the line are lists: without
+		// it, "site a, site b via #501, #502" reads as one four-item list.
+		if ov.partial() {
+			fmt.Printf("    #%s  filing issue-intent %q despite partial dedup overlap (already tracked: [%s] via %s)\n", num, in.Title, strings.Join(ov.covered, ", "), strings.Join(ov.refs, ", "))
 		}
 		body := in.Body
 		if bodyBacklink != "" {
@@ -142,6 +156,9 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 		// The launcher's own marker goes last unconditionally, even carrying
 		// no terms: parseDedupMarker is last-wins, so omitting it would let a
 		// marker line quoted in body prose speak for this issue's key set.
+		// On a partial overlap the marker deliberately carries the
+		// already-covered term too: both issues are then valid "already
+		// tracked" answers, and the next run sees full coverage and skips.
 		marker := buildDedupMarker(in.DedupTerms)
 		if marker == "" {
 			marker = dedupMarkerPrefix + dedupMarkerSuffix
