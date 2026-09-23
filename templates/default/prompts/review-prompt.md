@@ -101,8 +101,9 @@ surfaced, into exactly one of the two buckets below:
   stays Non-blocking, as do a phrase repeated within one sentence, a
   tautological clause, and where a trailer sits among the commits. Surface
   every finding — they don't gate the merge; the work loop fixes cheap,
-  in-scope ones and escalates only what needs a human, so don't sit on a nit
-  and don't dress a one-line fix up as a blocking finding.
+  in-scope ones, drops a correct but trivial, out-of-scope one without
+  filing it, and escalates only what genuinely needs a human, so don't sit
+  on a nit and don't dress a one-line fix up as a blocking finding.
 
 Output — final message exactly this shape (max ~40 lines):
 

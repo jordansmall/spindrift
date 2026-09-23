@@ -5266,8 +5266,8 @@ func TestSeedPromptFromStateIncludesFindingsLog(t *testing.T) {
 	if !strings.Contains(gotStr, "not just this round's Reviewer findings above") {
 		t.Errorf("seeded prompt = %q, want it to contrast the findings log with the last-round-only Reviewer findings bullet", gotStr)
 	}
-	if !strings.Contains(gotStr, "already fixed inline in an earlier round's fix pass is resolved, not re-filed") {
-		t.Errorf("seeded prompt = %q, want it to reconcile the union path with file-issues-direct.md's \"do not re-file what you just fixed\"", gotStr)
+	if !strings.Contains(gotStr, "an earlier round's fix pass already fixed inline, or already dropped, is resolved, not re-filed") {
+		t.Errorf("seeded prompt = %q, want it to reconcile the union path with file-issues-direct.md's \"do not re-file what you just fixed or dropped.\"", gotStr)
 	}
 }
 

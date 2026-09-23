@@ -187,15 +187,19 @@ directly in your own output this turn, so the claim is auditable from
 this log. A failure you cannot prove this way is a failure this branch
 caused: fix it, do not wave it off.
 
-Also triage the Non-blocking findings — do NOT reflexively file them. Filing
-every finding spawns more issues than the work ever closes, so resolving a
-cheap, in-scope finding here stays the default regardless of round (item
-1 below, unchanged by round). Only the tiebreak for an ambiguous finding
-is round-aware (item 2 below): this is the first review round if you've
-invoked the reviewer exactly once this turn; it is the second review round
-or later once you've already been through at least one BLOCK-fix-reinvoke
-cycle above. This round-awareness applies only to the non-blocking triage
-below, not the BLOCK loop above, which always repeats until clear:
+Also triage the Non-blocking findings — do NOT reflexively file
+them. There are three outcomes: fix inline, drop, or escalate. Filing
+every finding spawns more issues than the work ever closes, so resolving
+a cheap, in-scope finding here stays the default regardless of round
+(item 1 below, unchanged by round), and dropping a correct-but-trivial,
+out-of-scope finding (item 2 below) is also unchanged by round. Only the
+tiebreak for an ambiguous finding
+headed for escalation is round-aware (item 3 below): this is the first
+review round if you've invoked the reviewer exactly once this turn; it
+is the second review round or later once you've already been through at
+least one BLOCK-fix-reinvoke cycle above. This round-awareness applies
+only to the non-blocking triage below, not the BLOCK loop above, which
+always repeats until clear:
 
 1. Fix inline, on this branch, every finding whose fix is cheap and in scope
    for the slice as originally authored and the issue's own acceptance
@@ -206,7 +210,16 @@ below, not the BLOCK loop above, which always repeats until clear:
    amended into the commit each logically belongs to unless it is a
    reasonably separate scope, which earns its own commit. They never
    become issues.
-2. Escalate — to the filer if present, else the PR body — only a finding
+2. Drop a finding that is correct but trivial and out of scope for
+   this slice — the fix would be cheap, but the surface is one this
+   slice never touched, and nobody would ever prioritise it as a tracked
+   issue. Two examples: swapping a bare commit SHA for an issue reference
+   in a test comment, and preferring a numeric sort over a lexical one
+   in one line of list output. Dropping is a legitimate third outcome,
+   not a failure to act — a tracked issue nobody will ever pick up costs
+   more than the nit does. The floor is worth, not certainty: a finding
+   you are merely unsure about is not dropped, it goes to item 3 below.
+3. Escalate — to the filer if present, else the PR body — only a finding
    that genuinely needs a human: a real design trade-off, work outside
    this issue's scope, or a change too large to fold in without derailing
    the slice. When unsure whether a finding clears that bar: on the first

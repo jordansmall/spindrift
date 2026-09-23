@@ -714,7 +714,7 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	// (AC4): skip the bullet rather than point the land pass at a file that
 	// isn't there.
 	if state.FindingsLogPath != "" && pathExists(state.FindingsLogPath) {
-		fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding already fixed inline in an earlier round's fix pass is resolved, not re-filed)\n", state.FindingsLogPath)
+		fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding an earlier round's fix pass already fixed inline, or already dropped, is resolved, not re-filed)\n", state.FindingsLogPath)
 	}
 	// promptfence.Block stops this agent-authored log, downstream of
 	// untrusted issue and comment text (CLAUDE.md's comment-injection trust
