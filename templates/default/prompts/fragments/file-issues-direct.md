@@ -9,8 +9,10 @@ findings that survived that triage — the ones that genuinely need a human
 plus, from the second review round on and only when fixing it would widen
 the diff, an ambiguous finding REVIEW's own round-aware tiebreak deferred
 rather than fixed — one whose fix is small and stays inside what the branch
-already touches is still fixed inline, at every round. If none survived,
-skip this step; do not re-file what you just fixed or dropped.
+already touches is still fixed inline, at every round. An uncertain finding
+on a surface the branch never touched arrives here at every round instead:
+fixing it inline was never an available outcome. If none survived, skip this
+step; do not re-file what you just fixed or dropped.
 
 It is pre-provisioned via --agents; pass it the surviving findings verbatim,
 the issue number, and the branch (or PR URL, once one is open) for provenance.

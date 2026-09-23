@@ -285,15 +285,23 @@ always repeats until clear:
    not a failure to act — a tracked issue nobody will ever pick up costs
    more than the nit does. The floor is worth, not certainty: a finding
    you are merely unsure about is not dropped, it goes to item 3 below.
+   Scope is never the uncertain part — whether this branch touched a
+   surface is a fact the diff answers — so what reaches item 3 this way
+   is still out of scope, and item 3 files it rather than fixing it.
 3. Escalate — to the filer if present, else the PR body — only a finding
    that genuinely needs a human: a real design trade-off, work outside
    this issue's scope, or a change too large to fold in without derailing
-   the slice. When unsure whether a finding clears that bar: on the first
-   review round, fix it rather than file it. From the second review round
-   on, escalate it only when fixing it would widen the diff — new
-   behaviour, a new surface, or an edit large enough to need its own
-   review; an ambiguous finding whose fix is small and stays inside what
-   this branch already touches is still fixed inline, at every round.
+   the slice. Item 1's scope pin is absolute here, so the round-aware
+   tiebreak below only ever runs where fixing is available at all —
+   inside the surface this branch already touched. On a surface this
+   branch never touched there is no inline fix to weigh, so an uncertain
+   finding item 2 hands up is filed, at every round. When unsure whether
+   a finding clears that bar: on the first review round, fix it rather
+   than file it. From the second review round on,
+   escalate it only when fixing it would widen the diff — new behaviour,
+   a new surface, or an edit large enough to need its own review; an
+   ambiguous finding whose fix is small and stays inside what this branch
+   already touches is still fixed inline, at every round.
    Deferring is the safer failure mode precisely where a silently widened
    diff is the alternative, and only there: elsewhere filing is the
    costlier failure — a backlog issue nobody picks up, and a duplicate a
