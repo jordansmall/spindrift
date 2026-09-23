@@ -123,7 +123,12 @@ shared options fall through to `mkHarness`'s own defaults. `system` is neither
 a declared option nor an `mkHarness`-only argument: it's **auto-supplied** by
 flake-parts itself and passed through, so setting
 `perSystem.spindrift.system` errors the same way an `mkHarness`-only option
-would.
+would. For the options the shim does declare, the `spindrift` CLI it
+produces is byte-identical to the one from the equivalent direct
+`mkHarness` call — the shim forwards them into that same call, and two
+checks compare the two resulting store paths for the configs they
+instantiate; that guarantee covers the CLI, not every app a harness
+exposes.
 
 The table below documents `mkHarness`'s named *parameters*, plus `settings`
 — a **flake-module only** option with no `mkHarness` parameter counterpart
@@ -1028,6 +1033,20 @@ and `apps` are the versioned Consumer contract (ADR 0010).
 `mkHarness` takes the locked *nixpkgs input* (not a pre-built `pkgs`) so it can
 map a darwin `system` to its Linux twin and re-instantiate for the OCI image —
 keeping the agent's toolchain and your dev shell from one pin (ADR 0002).
+
+A harness built from `perSystem.spindrift.*` and one built by calling
+`mkHarness` directly with the same arguments are byte-identical.
+`flakemodule-equivalence` and `flakemodule-fixture` in
+`nix/checks/equivalence.nix` enforce that: the first compares this repo's own
+module config against the equivalent direct call, the second a minimal
+flake-parts consumer that imports the shim — evaluated in-repo through a
+nested `mkFlake`, so an out-of-tree consumer's own locked import of the module
+is not itself covered. Both compare the two `packages.spindrift` wrapper
+store paths, and only because those already match does the wrapper's
+`--input` run document — the direct call's own — stand in for both when the
+baked image store path is grepped out of it; the guarantee is therefore
+about what the CLI is rather than about every app a harness exposes, and the
+daemon wrapper path still has no equivalence seam (issue #3701).
 
 ### Calling the roster helpers directly
 
@@ -4763,6 +4782,28 @@ with the host binaries the launcher execs from ambient PATH — `bwrap` and
 `pasta` (issue #2666) — so
 `spindrift build && spindrift dispatch <issue> --yes` works directly, with
 no `nix run` prefix and no reliance on the default dev shell's toolchain.
+
+**The bwrap twin.** `apps.dogfood-bwrap` is the A/B twin of `apps.default`
+(issue #2672): the same tuned dogfood config through the daemonless bwrap
+runner, overriding `runtime`, `defaults.daemonApp`, and
+`defaults.daemonSelfApp`. It is built from `fixtures.dogfoodBwrapHarness`,
+which reuses `nix/fixtures.nix`'s `dogfoodHarnessArgs`. `apps.default` is not:
+it comes from `flake.nix`'s `spindrift = { ... }` module config, which
+`dogfoodHarnessArgs` mirrors as a direct call (`fixtures.harness`) for
+`flakemodule-equivalence` to compare against. A new dogfood knob therefore has
+to be wired on both sides — into the module config and into
+`dogfoodHarnessArgs`, off their shared leaf values in
+`nix/dogfood-defaults.nix`; wiring it only into `dogfoodHarnessArgs` leaves
+`apps.default` unchanged, and turns `flakemodule-equivalence` red whenever the
+knob reaches the `spindrift` CLI that check compares.
+`dogfood-bwrap-app-wiring` in `nix/checks/equivalence.nix` pins the bwrap
+side's flake wiring: `apps.dogfood-bwrap` must exist, must be a real app, and
+must carry the same `program` as `fixtures.dogfoodBwrapHarness.apps.default`,
+and the top-level `packages.agent-closure` must be that same harness's (where
+the freshness Probe resolves it). No check proves `apps.default` and
+`apps.dogfood-bwrap` identical — they deliberately are not.
+`apps.dogfood-bwrap` exists only on Linux, where
+`fixtures.dogfoodBwrapHarness`'s `packages` has an `agent-closure` to build.
 
 **Baked skills.** The dogfood Box bakes nine skills — eight pinned upstream,
 one authored in this repo — via the Consumer-configured `skills` list (see
