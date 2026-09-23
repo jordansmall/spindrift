@@ -894,3 +894,248 @@ func TestResearchSettle_ReportsFiledTally_TwoFailed(t *testing.T) {
 		t.Errorf("stdout = %q, want it to contain the all-failed filed= tally", stdout)
 	}
 }
+
+// End to end: every issue-intent in the run dedups against the open
+// backlog, so the posted verdict comment must still carry a Skipped
+// (deduplicated) section naming the matched issue -- otherwise an all-dedup
+// research run reads as a bare verdict with no trace that anything was even
+// found (issue #3811).
+func TestResearchSettle_AllDedupedAgainstBacklog_CommentCarriesSkippedSection(t *testing.T) {
+	fc := newResearchFake("42")
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding of the same bug",
+		Body:   "earlier body\n\n<!-- spindrift-dedup: race in settle -->",
+		Labels: []string{"agent-research-finding"},
+	})
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:           "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound:      true,
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a retry of the same finding","body":"new body","dedupTerms":["Race in Settle"]}`,
+		},
+	}
+
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.PostIssueCalls) != 0 {
+		t.Fatalf("PostIssueCalls = %+v, want none (the sole intent dedups)", fc.PostIssueCalls)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	body := fc.CommentCalls[0].Body
+	if !strings.Contains(body, "## Skipped (deduplicated)") {
+		t.Errorf("comment body = %q, want a Skipped (deduplicated) section", body)
+	}
+	if !strings.Contains(body, "#501") {
+		t.Errorf("comment body = %q, want it to name the matched backlog issue", body)
+	}
+	if strings.Contains(body, "## Filed issues") {
+		t.Errorf("comment body = %q, want no Filed issues section (nothing was filed)", body)
+	}
+
+	if len(fc.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdict call, got %d", len(fc.CompleteVerdictCalls))
+	}
+}
+
+// Mixed end to end: one intent files clean, a second dedups against the open
+// backlog. The posted comment must carry both sections, not just the one the
+// simpler all-filed or all-skipped fixtures exercise (issue #3811).
+func TestResearchSettle_MixedFiledAndDeduped_CommentCarriesBothSections(t *testing.T) {
+	fc := newResearchFake("42")
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding of the same bug",
+		Body:   "earlier body\n\n<!-- spindrift-dedup: race in settle -->",
+		Labels: []string{"agent-research-finding"},
+	})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:           "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound:      true,
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a genuinely new finding","body":"new body","dedupTerms":["a wholly different site"]}`,
+			`{"title":"a retry of the same finding","body":"other body","dedupTerms":["Race in Settle"]}`,
+		},
+	}
+
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (the second dedups)", fc.PostIssueCalls)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	body := fc.CommentCalls[0].Body
+	if !strings.Contains(body, "## Filed issues") || !strings.Contains(body, fc.PostIssueURL) {
+		t.Errorf("comment body = %q, want a Filed issues section linking the filed URL", body)
+	}
+	if !strings.Contains(body, "## Skipped (deduplicated)") || !strings.Contains(body, "#501") {
+		t.Errorf("comment body = %q, want a Skipped (deduplicated) section naming #501", body)
+	}
+
+	if len(fc.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdict call, got %d", len(fc.CompleteVerdictCalls))
+	}
+}
+
+// An all-skipped filed list renders only the skipped-deduplicated section,
+// naming each title and its dedup reference, never the Filed issues heading
+// (nothing was actually filed).
+func TestBuildSkippedIssuesSection_AllSkipped(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): bug", Skipped: true, DupRef: "#123"},
+		{Title: "fix(y): other bug", Skipped: true, DupRef: `this run's "fix(y): other bug"`},
+	}
+
+	got := buildSkippedIssuesSection(filed)
+
+	if !strings.Contains(got, "## Skipped (deduplicated)") {
+		t.Errorf("section = %q, want the skipped heading", got)
+	}
+	if !strings.Contains(got, "fix(x): bug") || !strings.Contains(got, "#123") {
+		t.Errorf("section = %q, want the first title and its reference", got)
+	}
+	if !strings.Contains(got, "fix(y): other bug") {
+		t.Errorf("section = %q, want the second title", got)
+	}
+	if strings.Contains(got, "## Filed issues") {
+		t.Errorf("section = %q, want no Filed issues heading", got)
+	}
+}
+
+// A mix of one filed and one skipped intent renders both sections, and the
+// skipped entry never appears in the Filed issues list (it was never
+// posted).
+func TestBuildSkippedIssuesSection_MixedWithFiled(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(a): filed bug", URL: "https://github.com/owner/repo/issues/1"},
+		{Title: "fix(b): dup bug", Skipped: true, DupRef: "#42"},
+	}
+
+	filedSection := buildFiledIssuesSection(filed)
+	skippedSection := buildSkippedIssuesSection(filed)
+
+	if !strings.Contains(filedSection, "fix(a): filed bug") {
+		t.Errorf("filedSection = %q, want the filed title", filedSection)
+	}
+	if strings.Contains(filedSection, "fix(b): dup bug") {
+		t.Errorf("filedSection = %q, want no skipped title", filedSection)
+	}
+	if !strings.Contains(skippedSection, "fix(b): dup bug") || !strings.Contains(skippedSection, "#42") {
+		t.Errorf("skippedSection = %q, want the skipped title and its reference", skippedSection)
+	}
+}
+
+// Both the title and the dedup reference are agent-chosen, untrusted text
+// (the reference can echo an intra-run title verbatim), so a bracket in
+// either renders escaped rather than breaking the Markdown bullet.
+func TestBuildSkippedIssuesSection_BracketsEscaped(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): [bad] title", Skipped: true, DupRef: `this run's "fix(y): [bad] ref"`},
+	}
+
+	got := buildSkippedIssuesSection(filed)
+
+	if !strings.Contains(got, `\[bad\]`) {
+		t.Errorf("section = %q, want brackets escaped in both title and reference", got)
+	}
+	if strings.Contains(got, "[bad]") {
+		t.Errorf("section = %q, want no unescaped bracket", got)
+	}
+}
+
+// A multi-line title renders as a single bullet: the title is agent-chosen,
+// so a heading on a later line would otherwise break out of the list and
+// forge structure in the posted comment (issue #3811 review).
+func TestBuildSkippedIssuesSection_MultiLineTitleTruncated(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): bug\n## forged heading", Skipped: true, DupRef: "#123"},
+	}
+
+	got := buildSkippedIssuesSection(filed)
+
+	if strings.Contains(got, "## forged heading") {
+		t.Errorf("section = %q, want the title truncated at its first line", got)
+	}
+	if !strings.Contains(got, "fix(x): bug") {
+		t.Errorf("section = %q, want the title's first line kept", got)
+	}
+}
+
+// A filed list with no skips renders no skipped section at all.
+func TestBuildSkippedIssuesSection_NoSkips(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(a): filed bug", URL: "https://github.com/owner/repo/issues/1"},
+	}
+
+	got := buildSkippedIssuesSection(filed)
+
+	if got != "" {
+		t.Errorf("section = %q, want empty string when nothing was skipped", got)
+	}
+}
+
+// The lead sentence must not claim an intra-run match was "an existing open
+// issue": it wasn't, it was filed moments earlier by this same run (issue
+// #3811 review).
+func TestBuildSkippedIssuesSection_LeadCoversIntraRunMatch(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(y): other bug", Skipped: true, DupRef: `this run's "fix(z): peer bug"`},
+	}
+
+	got := buildSkippedIssuesSection(filed)
+
+	if strings.Contains(got, "existing open issue") {
+		t.Errorf("section = %q, want no claim of an existing open issue for an intra-run match", got)
+	}
+	if !strings.Contains(got, "already-filed issue") {
+		t.Errorf("section = %q, want the reworded lead covering both a backlog and an intra-run match", got)
+	}
+}
+
+// buildVerdictCommentSections is the call site's joiner: filed and skipped
+// sections, in that order, blank-line separated, so both survive as one
+// appended block.
+func TestBuildVerdictCommentSections_JoinsFiledAndSkipped(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(a): filed bug", URL: "https://github.com/owner/repo/issues/1"},
+		{Title: "fix(b): dup bug", Skipped: true, DupRef: "#42"},
+	}
+
+	got := buildVerdictCommentSections(filed)
+
+	filedIdx := strings.Index(got, "## Filed issues")
+	skippedIdx := strings.Index(got, "## Skipped (deduplicated)")
+	if filedIdx == -1 || skippedIdx == -1 {
+		t.Fatalf("sections = %q, want both headings present", got)
+	}
+	if filedIdx > skippedIdx {
+		t.Errorf("sections = %q, want Filed issues before Skipped", got)
+	}
+}
+
+// Nothing filed and nothing skipped yields an empty joined string, so the
+// call site's non-empty check still skips appending altogether.
+func TestBuildVerdictCommentSections_EmptyWhenNothing(t *testing.T) {
+	if got := buildVerdictCommentSections(nil); got != "" {
+		t.Errorf("sections = %q, want empty string", got)
+	}
+}
