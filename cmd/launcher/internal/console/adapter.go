@@ -2,11 +2,6 @@ package console
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"syscall"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
@@ -47,33 +42,6 @@ func countRecoverable(caps forge.Capabilities, issues []forge.Issue) int {
 		}
 	}
 	return count
-}
-
-// dogfoodPidFile names the pid-file dogfood.sh writes at the start of its run
-// and deletes from an EXIT trap.
-const dogfoodPidFile = ".spindrift/dogfood.pid"
-
-// isProcessAlive is a package-level seam so tests can stub a dead pid without
-// racing the OS's pid allocator (#952).
-var isProcessAlive = func(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
-}
-
-// DogfoodNotice reports whether pwd holds a pid-file naming a running process.
-// It is informational, never a gate. A stale pid-file left by a crashed loop
-// whose EXIT trap never fired (#565) reports Live false, like a missing or
-// malformed one, because the signal-0 probe distinguishes a live session from
-// bare file presence.
-func DogfoodNotice(pwd string) Msg {
-	raw, err := os.ReadFile(filepath.Join(pwd, dogfoodPidFile))
-	if err != nil {
-		return DogfoodNoticeMsg{Live: false}
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil || pid <= 0 {
-		return DogfoodNoticeMsg{Live: false}
-	}
-	return DogfoodNoticeMsg{Live: isProcessAlive(pid)}
 }
 
 // PickIssue promotes num from Untriaged to Dispatchable and wraps the result

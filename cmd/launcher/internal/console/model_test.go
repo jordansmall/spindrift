@@ -373,26 +373,6 @@ func TestUpdate_QuitMsg_SetsQuitting(t *testing.T) {
 	}
 }
 
-// The message records that a competing headless loop's pid-file is present.
-// The startup notice is informational and must never block, so it stays a
-// single bit on Model that View can render.
-func TestUpdate_DogfoodNoticeMsg_SetsLive(t *testing.T) {
-	m := NewModel()
-	if m.DogfoodLive {
-		t.Error("DogfoodLive = true before any message, want false")
-	}
-
-	m = Update(m, DogfoodNoticeMsg{Live: true})
-	if !m.DogfoodLive {
-		t.Error("DogfoodLive = false after Live:true, want true")
-	}
-
-	m = Update(m, DogfoodNoticeMsg{Live: false})
-	if m.DogfoodLive {
-		t.Error("DogfoodLive = true after Live:false, want false")
-	}
-}
-
 // ActivityFeed's only per-record clock is the pass log's on-disk mtime, which
 // advances to roughly now on every refresh rather than recording when the
 // record happened, so a precise-looking HH:MM:SS prefix would mislead (#1584).

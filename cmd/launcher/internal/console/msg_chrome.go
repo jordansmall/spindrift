@@ -1,14 +1,5 @@
 package console
 
-// DogfoodNoticeMsg reports whether a live dogfood pid-file was found at startup,
-// meaning a headless loop competes for the same queue. Informational only: the
-// console never blocks or gates on it.
-type DogfoodNoticeMsg struct {
-	Live bool
-}
-
-func (DogfoodNoticeMsg) isConsoleMsg() {}
-
 // GPendingMsg reports that "g" armed the "gg" leader window (issue #1628).
 type GPendingMsg struct{}
 

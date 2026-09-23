@@ -20,9 +20,6 @@ type Model struct {
 	// Err is the last refresh error. A failed refresh leaves All untouched, so
 	// Err shows alongside the stale list rather than an empty one.
 	Err error
-	// DogfoodLive is whether a live dogfood pid-file was found at startup.
-	// Informational only, never gated on.
-	DogfoodLive bool
 	// Picks is the session's operator queue, in pick order.
 	Picks []Pick
 	// Sidebar is the open live-tail sidebar, nil when none is open. It docks
@@ -420,8 +417,6 @@ func updateLayout(m Model, msg Msg) (Model, layout) {
 	case QuitMsg:
 		m.Mode = ModeList
 		m.Quitting = true
-	case DogfoodNoticeMsg:
-		m.DogfoodLive = msg.Live
 	case PickQueuedMsg:
 		m.Picks = append(m.Picks, Pick{Number: msg.Number, Title: msg.Title, Kind: msg.Kind, State: PickQueued})
 	case PickDissolvedMsg:

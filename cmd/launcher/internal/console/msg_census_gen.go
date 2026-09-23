@@ -18,7 +18,6 @@ var msgCensus = []string{
 	"DetailModalLoadedMsg",
 	"DetailModalOpenMsg",
 	"DetailModalScrollMsg",
-	"DogfoodNoticeMsg",
 	"DrillInMsg",
 	"FilterChangedMsg",
 	"FilterEditCancelMsg",

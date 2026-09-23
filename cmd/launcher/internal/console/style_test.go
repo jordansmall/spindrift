@@ -61,7 +61,6 @@ func TestRenderHeaderWith_PlainText_MatchesStyledStripped(t *testing.T) {
 		StaleDrainSummary:  "==> drained 3 stale entries",
 	}})
 	m.OrphanRecoveryErr = "failed to adopt orphan #42: boom"
-	m.DogfoodLive = true
 
 	styled := renderHeader(m)
 	plain := renderHeaderWith(m, plainText)
