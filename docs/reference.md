@@ -3034,7 +3034,9 @@ fixes inline, in the same effort and regardless of round, every finding
 whose fix is cheap and in scope for the issue's own acceptance criteria and
 the slice as originally authored (nits, smells, dead code, doc updates for
 a surface the *original* slice touches — not whatever surface the diff has
-since grown to touch), and escalates what genuinely needs a human — a
+since grown to touch); drops, without filing, a finding that is correct but
+trivial and out of scope for the slice, where the floor is worth rather than
+certainty (issue #3610); and escalates what genuinely needs a human — a
 design trade-off, out-of-scope work, or a change too large to fold in. Only
 the tiebreak for an *ambiguous* finding is round-aware (issue #2701): on the
 first review round it still fixes inline; from the second review round on it
@@ -3047,8 +3049,8 @@ Blocking, not filer fodder — they are fixed in the current work, never
 deferred to an issue. The one exemption is a pure relocation, refactor, or
 comment/doc change whose behaviour is already covered under test: that is
 Non-blocking (issue #2696), and it goes through the same triage as any
-other Non-blocking finding above — it needs neither an inline fix nor a
-human, so it is not escalated to the filer either.
+other Non-blocking finding above — it needs neither an inline fix
+nor a human, so it is dropped rather than escalated to the filer.
 
 When enabled, after the final `APPROVE` verdict and before opening the PR,
 the main agent delegates only those escalated findings to the filer. The
