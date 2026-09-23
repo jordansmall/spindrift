@@ -759,6 +759,28 @@ rec {
         "is in scope at every round"
       ];
     }
+    {
+      # Pins the escape hatch's scope resolution across both review loops:
+      # item 2's uncertain findings that escalate to item 3 stay out of
+      # scope there too, so item 3's fix-vs-file tiebreak never runs on a
+      # surface item 1 forbids touching (issue #3816).
+      id = "triage-escape-hatch-scope";
+      branches = [
+        {
+          id = "review-loop-inline";
+          source = "fragments/review-loop-inline.md";
+        }
+        {
+          id = "review-loop-orchestrator";
+          source = "fragments/review-loop-orchestrator.md";
+        }
+      ];
+      requiredSubstrings = [
+        "Scope is never the uncertain part"
+        "Item 1's scope pin is absolute here"
+        "there is no inline fix to weigh"
+      ];
+    }
   ];
 
   # sharedObligations checked against the real on-disk content of each

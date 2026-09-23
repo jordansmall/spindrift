@@ -95,6 +95,49 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		}
 	})
 
+	t.Run("scope gate sits in item 2's span, not item 3's (issue #3816)", func(t *testing.T) {
+		// A whole-file substring check (inlineNorm, the Nix
+		// triage-escape-hatch-scope obligation) can't catch the sentence moving
+		// out of item 2 into the fragment preamble or into item 3 — it would
+		// still find the text somewhere in the file. Slicing at the "2. Drop"
+		// and "3. Escalate" markers and asserting per-span pins the gate to
+		// item 2 specifically, and item 3's own carve-out to item 3.
+		wantScopeGate := "Scope is never the uncertain part — whether this branch touched a surface is a fact the diff answers — so what reaches item 3 this way is still out of scope, and item 3 files it rather than fixing it."
+		wantItem3RoundGate := "Item 1's scope pin is absolute here, so the round-aware tiebreak below only ever runs where fixing is available at all"
+		wantItem3FiledEveryRound := "there is no inline fix to weigh, so an uncertain finding item 2 hands up is filed, at every round."
+
+		for _, tc := range []struct {
+			name      string
+			paragraph string
+		}{
+			{"inline", inlineParagraph},
+			{"orchestrator", orchestratorParagraph},
+		} {
+			item2Idx := strings.Index(tc.paragraph, "2. Drop")
+			item3Idx := strings.Index(tc.paragraph, "3. Escalate")
+			if item2Idx == -1 || item3Idx == -1 {
+				t.Fatalf("%s: non-blocking triage paragraph missing item 2 (Drop) or item 3 (Escalate)", tc.name)
+			}
+			// Both spans are cut around item3Idx, so an out-of-order item list
+			// must fail here rather than panic inside the slice below.
+			if item2Idx >= item3Idx {
+				t.Fatalf("%s: non-blocking triage items are out of order: want 2. Drop before 3. Escalate; got indices %d, %d", tc.name, item2Idx, item3Idx)
+			}
+			item2Span := tc.paragraph[item2Idx:item3Idx]
+			item3Span := tc.paragraph[item3Idx:]
+
+			if !strings.Contains(item2Span, wantScopeGate) {
+				t.Errorf("%s: item 2's span missing the verbatim scope gate: got %q, want it to contain %q", tc.name, item2Span, wantScopeGate)
+			}
+			if !strings.Contains(item3Span, wantItem3RoundGate) {
+				t.Errorf("%s: item 3's span missing the verbatim round-aware-tiebreak-only-where-fixing-available sentence: got %q, want it to contain %q", tc.name, item3Span, wantItem3RoundGate)
+			}
+			if !strings.Contains(item3Span, wantItem3FiledEveryRound) {
+				t.Errorf("%s: item 3's span missing the verbatim filed-at-every-round sentence: got %q, want it to contain %q", tc.name, item3Span, wantItem3FiledEveryRound)
+			}
+		}
+	})
+
 	t.Run("item 3 tiebreak is verbatim round-aware", func(t *testing.T) {
 		// This matches the sentences verbatim rather than on loose keywords, so an
 		// inverted default ("first round escalates, second round fixes") cannot
@@ -296,6 +339,21 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		}
 		if !strings.Contains(relaySocketRecap, want) {
 			t.Errorf("file-issues-relay-socket.md missing the round-2-on deferral category: want it to contain %q", want)
+		}
+
+		// Issue #3816: an uncertain finding on a surface the branch never
+		// touched has no inline fix available, so it is not the round-2-on
+		// deferral category above -- it arrives here at every round, not
+		// only from round 2.
+		wantUntouchedSurface := "An uncertain finding on a surface the branch never touched arrives here at every round instead"
+		if !strings.Contains(directRecap, wantUntouchedSurface) {
+			t.Errorf("file-issues-direct.md missing the untouched-surface category: want it to contain %q", wantUntouchedSurface)
+		}
+		if !strings.Contains(relayRecap, wantUntouchedSurface) {
+			t.Errorf("file-issues-relay.md missing the untouched-surface category: want it to contain %q", wantUntouchedSurface)
+		}
+		if !strings.Contains(relaySocketRecap, wantUntouchedSurface) {
+			t.Errorf("file-issues-relay-socket.md missing the untouched-surface category: want it to contain %q", wantUntouchedSurface)
 		}
 
 		const recapEndMarker = "do not re-file what you just fixed or dropped."
