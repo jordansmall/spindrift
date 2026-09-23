@@ -3166,17 +3166,31 @@ empty (`<!-- spindrift-dedup:  -->`, which reads back as no keys) when
 the intent carried no usable term: the last marker line in a body wins,
 so always writing its own is what stops a finding that quotes the marker
 format in prose from speaking for the issue's key set. Each intent's keys
-are likewise only its own normalized `dedupTerms`, never its title. A
-key hit skips the intent — it is never filed — and prints one line
-on stdout naming the existing issue it matched; the index also grows as
-the run files its own intents, so two intents in the same payload that
-collide dedup against each other too, not only against the backlog, which
-is what stops the two review axes from filing the same defect twice. The
-two direct filing paths (`gh`, Forgejo) never reach the Launcher,
-so their dedup stays entirely the Filer's own: it runs the open-issue
-search above itself, keyed on the finding's site rather than its prose,
-and appends the same marker line to the body it files, keeping the marker
-format identical across both write mechanisms.
+are likewise only its own normalized `dedupTerms`, never its title.
+
+Dedup is per site, not per intent (issue #3808): a multi-site finding
+carries one key per site, so a hit on one of them proves only that site
+is tracked. The Launcher therefore skips an intent — it is never filed —
+only when every one of its keys is already covered, and prints one line
+on stdout naming every existing issue that covers them — more than one
+when the finding's sites are spread across separate backlog issues. An
+intent only some of whose keys are covered still files, since the
+uncovered site is tracked nowhere else; that partial overlap prints its
+own line instead, naming the already-tracked keys and every issue
+covering them, and counts as `ok` in the tally below rather than
+`skipped`, since it did reach the tracker. The issue it files carries
+the already-covered keys in its own marker too, so that site is briefly
+named by two open issues and the index's last write wins; both are
+valid "already tracked" answers, and the next run sees full coverage
+and skips, so this converges rather than refiling forever.
+The index also grows as the run files its own intents, so two intents in
+the same payload that collide dedup against each other too, not only
+against the backlog, which is what stops the two review axes from filing
+the same defect twice. The two direct filing paths (`gh`, Forgejo) never
+reach the Launcher, so their dedup stays entirely the Filer's own: it
+runs the open-issue search above itself, keyed on the finding's site
+rather than its prose, and appends the same marker line to the body it
+files, keeping the marker format identical across both write mechanisms.
 
 ##### Filing volume on the status output
 
