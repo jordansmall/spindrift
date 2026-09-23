@@ -1,18 +1,22 @@
 3. Your token is read-only — you cannot file issues yourself. Instead, for
    each issue to file, run:
 
-       driver-exec signal issue-intent -title "<title>" -type bug -body-file finding.md
+       driver-exec signal issue-intent -title "<title>" -type bug -dedup "<site key>" -body-file finding.md
 
    (or pipe the body on stdin: `driver-exec signal issue-intent -title "..."
-   -type bug` with no `-body-file`). One command per issue to file, not per
-   finding — merge findings into a single issue only when they are the same
-   change (e.g. the same file/function/fix); never merge unrelated findings
-   just to reduce issue count. Both `-title` and `-type` are required: pick
-   whichever of `bug` | `enhancement` | `chore` best characterizes the
-   finding. Name a type, never a label — the launcher maps a recognized type
-   to a same-named label host-side and applies it alongside your provenance
-   label, but the mapping is closed and host-owned, not a way to pick an
-   arbitrary label.
+   -type bug -dedup "<site key>"` with no `-body-file`). One command per
+   issue to file, not per finding — merge findings into a single issue only
+   when they are the same change (e.g. the same file/function/fix); never
+   merge unrelated findings just to reduce issue count.
+   Both `-title` and `-type` are required: pick whichever of `bug` |
+   `enhancement` | `chore` best characterizes the finding. Name a type,
+   never a label — the launcher maps a recognized type to a same-named
+   label host-side and applies it alongside your provenance label, but the
+   mapping is closed and host-owned, not a way to pick an arbitrary label.
+   `-dedup` carries this finding's site key (step 2) so the launcher can
+   dedup future findings against this issue even after your title or
+   wording changes — repeat the flag, once per site the finding spans, and
+   always pass it.
 
    The command's exit code is the acceptance: a zero exit prints `signal
    issue-intent accepted: <n> bytes, <hash>, sequence <n>`, and the issue
