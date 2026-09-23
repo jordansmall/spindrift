@@ -13,7 +13,7 @@ already touches is still fixed inline, at every round. If none survived,
 skip this step; do not re-file what you just fixed or dropped.
 
 It is pre-provisioned via --agents; pass it the surviving findings verbatim,
-the issue number, and the PR URL (or branch, if not yet opened) for provenance.
+the issue number, and the branch (or PR URL, once one is open) for provenance.
 
 Best-effort: filing must never block the PR or change the outcome line.
 

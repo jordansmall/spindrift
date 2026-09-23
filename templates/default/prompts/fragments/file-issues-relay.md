@@ -13,7 +13,7 @@ already touches is still fixed inline, at every round. If none survived,
 skip this step; do not re-file what you just fixed or dropped.
 
 It is pre-provisioned via --agents; pass it the surviving findings verbatim,
-the issue number, and the PR URL (or branch, if not yet opened) for provenance.
+the issue number, and the branch (or PR URL, once one is open) for provenance.
 Your token is read-only, so the filer cannot file issues itself — it emits
 `SPINDRIFT_ISSUE_INTENT` lines instead, and the launcher files each one
 host-side once you exit, so no issue URL is known yet.
