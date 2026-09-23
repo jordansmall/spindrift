@@ -1,5 +1,161 @@
 # Changelog
 
+## [0.19.1](https://github.com/jordansmall/spindrift/compare/v0.19.0...v0.19.1) (2026-09-23)
+
+
+### Features
+
+* **caveman-default-review:** exempt the Probed receipt ([cbe4df8](https://github.com/jordansmall/spindrift/commit/cbe4df844ff423f5671168cad826eea8bd76fb8c)), closes [#3265](https://github.com/jordansmall/spindrift/issues/3265)
+* **contract:** teach the prompt contract both carriers ([c58c375](https://github.com/jordansmall/spindrift/commit/c58c375c3d1d96534f7962822a92228559742652))
+* **daemon:** build the child's env beside its argv ([5106589](https://github.com/jordansmall/spindrift/commit/5106589fc13a2a0972abf0c7b7475e366cb0cfb6))
+* **daemon:** forward each child's signals from its request ([f40d094](https://github.com/jordansmall/spindrift/commit/f40d0942a806774f429255d0449e2916aecaff85)), closes [#3626](https://github.com/jordansmall/spindrift/issues/3626)
+* **daemon:** per-slot phase under one pool lock ([e2a0c3d](https://github.com/jordansmall/spindrift/commit/e2a0c3d8bf753c95753ce8a419b9bfe8f68d1a5d)), closes [#3571](https://github.com/jordansmall/spindrift/issues/3571)
+* **daemon:** read child records off a pipe ([797a7b3](https://github.com/jordansmall/spindrift/commit/797a7b370d8e6ae359dcff4cd77c63c1233b1af9)), closes [#3627](https://github.com/jordansmall/spindrift/issues/3627)
+* **daemon:** refuse a bad signal carrier at start ([ff98e8b](https://github.com/jordansmall/spindrift/commit/ff98e8b306fac51664ac1e6493b8c280a82f7cc8)), closes [#3727](https://github.com/jordansmall/spindrift/issues/3727)
+* **daemon:** reject a host runner with no captured env ([093cf99](https://github.com/jordansmall/spindrift/commit/093cf9977cda2c1c936e513a9e2a3d813352ccb4)), closes [#3693](https://github.com/jordansmall/spindrift/issues/3693) [#3681](https://github.com/jordansmall/spindrift/issues/3681)
+* **daemon:** resolve the tuning knobs at startup ([8ac5e0b](https://github.com/jordansmall/spindrift/commit/8ac5e0b56f57b56911c1745bd5907d6952bdc017)), closes [#3619](https://github.com/jordansmall/spindrift/issues/3619)
+* **daemon:** run every child with the stripped env ([5c23caa](https://github.com/jordansmall/spindrift/commit/5c23caafcceb8f2e5955147dddedc94c54b5ad7e))
+* **daemon:** the Stop/Abort latch belongs to the pool ([b6c0843](https://github.com/jordansmall/spindrift/commit/b6c0843c8714805460d60eaaa5be887162b6b661)), closes [#3626](https://github.com/jordansmall/spindrift/issues/3626)
+* **daemon:** warn about knobs a child won't see ([eda7e7f](https://github.com/jordansmall/spindrift/commit/eda7e7fee487eca6add41ac7db2d9c0d566d2f45))
+* **dispatch:** add the BOX_SIGNAL_CARRIER knob ([a6efe1d](https://github.com/jordansmall/spindrift/commit/a6efe1d0b2c268bdb7bd821a053c3e3c58f047a3)), closes [#3725](https://github.com/jordansmall/spindrift/issues/3725)
+* **dispatch:** fill Result from the Signal socket buffer ([21ef13d](https://github.com/jordansmall/spindrift/commit/21ef13de99ec60c2d8efba820b504e0bd0a69aee)), closes [#3725](https://github.com/jordansmall/spindrift/issues/3725)
+* **dispatch:** start the Signal socket for a Dispatch ([82315d8](https://github.com/jordansmall/spindrift/commit/82315d8ad48f75406e4a9eee8ba6a0540f704646)), closes [#3725](https://github.com/jordansmall/spindrift/issues/3725)
+* **doctor:** make the report quiet by default ([80bf62d](https://github.com/jordansmall/spindrift/commit/80bf62d643047dbfba2d65698f3c522c6683dcd9)), closes [#3777](https://github.com/jordansmall/spindrift/issues/3777)
+* **doctor:** report the Signal socket's transport verdict ([18315e2](https://github.com/jordansmall/spindrift/commit/18315e2b0ce15cb7bbe4c5458b42c98ec4301657)), closes [#3728](https://github.com/jordansmall/spindrift/issues/3728)
+* **driver-exec:** add the signal verb ([057b928](https://github.com/jordansmall/spindrift/commit/057b9289f138fac14b73c21e0c9e3325c8160991))
+* **driver:** add a signal op to spindrift_op ([0519094](https://github.com/jordansmall/spindrift/commit/05190946f8dcc7332f5355c29265f35cd2863a13))
+* **launcher:** report each Box and each settle ([1d8729b](https://github.com/jordansmall/spindrift/commit/1d8729bfde753b2017289b8b76b1743aa745ef55)), closes [#3627](https://github.com/jordansmall/spindrift/issues/3627)
+* **markergate:** ask the status route under the socket carrier ([356f125](https://github.com/jordansmall/spindrift/commit/356f125d8d94ffd4b7c24ec0346c27b15b269084))
+* **prompt:** add socket variants of the signal fragments ([ecac2ee](https://github.com/jordansmall/spindrift/commit/ecac2eec43957ef7afb5e60d52dc842dd43b11c5))
+* **prompt:** gate fragments on the Signal carrier ([8d8ab35](https://github.com/jordansmall/spindrift/commit/8d8ab357cb8dd22d02153aff01b422356373dd39))
+* **report:** give the child a report channel ([18fc65d](https://github.com/jordansmall/spindrift/commit/18fc65d2945f9fd344c419e256cacaa731333592)), closes [#3627](https://github.com/jordansmall/spindrift/issues/3627)
+* **runner:** carry the Signal socket into the Box ([f37a843](https://github.com/jordansmall/spindrift/commit/f37a8434e01525285afd01bf0ec715ff668998fe)), closes [#3725](https://github.com/jordansmall/spindrift/issues/3725)
+* **schema:** add the daemon's five tuning knobs ([5ca4f9d](https://github.com/jordansmall/spindrift/commit/5ca4f9dbf9fce2aa78c9da72959a276c8519b5f0)), closes [#3619](https://github.com/jordansmall/spindrift/issues/3619)
+* **settle:** report a run's issue-filing volume ([8dd068e](https://github.com/jordansmall/spindrift/commit/8dd068e053d37f62b961cc301d95bc61796ece38)), closes [#3608](https://github.com/jordansmall/spindrift/issues/3608)
+* **settle:** report filing volume on research too ([f3a8549](https://github.com/jordansmall/spindrift/commit/f3a8549312222936676e3d4a30a8220515bee688)), closes [#3608](https://github.com/jordansmall/spindrift/issues/3608)
+* **signalsocket:** buffer the three kinds ([b2a8fe4](https://github.com/jordansmall/spindrift/commit/b2a8fe453d3465103382c9d0a6adab05c0c434e3))
+* **signalsocket:** listen on unix or tcp ([455176b](https://github.com/jordansmall/spindrift/commit/455176b7a1afade47ac2dd1023d1ebfe3e6db804))
+* **signalsocket:** serve the four routes ([0ecc412](https://github.com/jordansmall/spindrift/commit/0ecc412af391319fe86a25a3f4a6b2fb0e440e18))
+* **signalwire:** add the socket's wire contract ([d273a26](https://github.com/jordansmall/spindrift/commit/d273a26bf5e617f56439946b0d3454c435cf58a5))
+
+
+### Bug Fixes
+
+* **daemon:** give children the captured env ([5624069](https://github.com/jordansmall/spindrift/commit/562406934035e141adef758453d32c56ab86a1fd))
+* **daemon:** serialize discovery behind a baton ([157b50e](https://github.com/jordansmall/spindrift/commit/157b50ee979bc3ef5641e0455cc334dc332c94cf)), closes [#3634](https://github.com/jordansmall/spindrift/issues/3634) [#3684](https://github.com/jordansmall/spindrift/issues/3684)
+* **ecosystem:** canonicalize cargo source URLs ([db2760a](https://github.com/jordansmall/spindrift/commit/db2760ac1afaac5d20662e55a80769eb6f442e75))
+* **launcher:** exit config-invalid from research too ([93ad235](https://github.com/jordansmall/spindrift/commit/93ad235ebfd68a866872ac1b1dd830ff4705b321))
+* **outcome:** count a truncated signal line, by cause ([44f3a20](https://github.com/jordansmall/spindrift/commit/44f3a205213867efc8ede8e69b9587f34bdfa62b))
+* **outcome:** reject an empty control-signal payload ([68447b3](https://github.com/jordansmall/spindrift/commit/68447b3f363a2cf7be4fefc9082db21fdeaa97ef))
+* **prompt:** scope the caveman marker-shape rule to the carrier ([10b1e38](https://github.com/jordansmall/spindrift/commit/10b1e38f5f958f3313368b32ad81909af18c34be))
+* **prompt:** state the verdict carrier and its byte budget ([3617890](https://github.com/jordansmall/spindrift/commit/36178900e8dbf45c50d458014008b9a16f2493b4)), closes [#3669](https://github.com/jordansmall/spindrift/issues/3669)
+* **settle:** say what was wrong with a verdict comment ([365db5e](https://github.com/jordansmall/spindrift/commit/365db5e77cb86dfdd46aea629dcd3106834c840e))
+
+
+### Performance Improvements
+
+* **daemon:** coalesce the tip fetch, memoise the self-path ([9ebbc11](https://github.com/jordansmall/spindrift/commit/9ebbc1192018e9676c26a3b6d924bdb517f8f98d))
+
+
+### Documentation
+
+* add release notes for 0.19.1 ([c3bfc04](https://github.com/jordansmall/spindrift/commit/c3bfc0492d117355d3723d24f54a353ac80fe382))
+* **adr:** amend 0023 for the dropped notice ([c9fc9d7](https://github.com/jordansmall/spindrift/commit/c9fc9d717e5c47969fa27815ef0e6823d52f2595)), closes [#3798](https://github.com/jordansmall/spindrift/issues/3798)
+* **adr:** fix 0025's sixth header alert line ([3d61b8d](https://github.com/jordansmall/spindrift/commit/3d61b8dbcd7cdc7cc8d4bdf24403791ec61dafd0)), closes [#3798](https://github.com/jordansmall/spindrift/issues/3798)
+* **adr:** move mid-run signals onto a socket ([a7af5b8](https://github.com/jordansmall/spindrift/commit/a7af5b8bf615ceb750ac7d13a8c5cf7387662fc5))
+* **adr:** record the child report pipe seam ([c93b2e0](https://github.com/jordansmall/spindrift/commit/c93b2e0ba654a5809ce2de48037709efd4e6ca9e))
+* **adr:** record the narrowed cargo URL match ([14d8dc1](https://github.com/jordansmall/spindrift/commit/14d8dc12c2ef9ab9c9e7349116d2e2bf7491edb5))
+* **auto-lint:** name Nix explicitly in the linter row ([fcfcd34](https://github.com/jordansmall/spindrift/commit/fcfcd344102b3aa97ac756bafeaa99edcd755872))
+* **caps:** scope the verdict byte budget to the log carrier ([f9640f9](https://github.com/jordansmall/spindrift/commit/f9640f9ef1c00052b92b032fcc114c8f9f358fb7)), closes [#3728](https://github.com/jordansmall/spindrift/issues/3728)
+* **checks:** trim the auto-lint pin's duplicated why ([46736c5](https://github.com/jordansmall/spindrift/commit/46736c51cc29adc1a3ab159a52be13e1427cd52d))
+* **context:** name the signal carrier and socket ([63030b3](https://github.com/jordansmall/spindrift/commit/63030b3e1a50a77424aa33c15ae97acc054ca3a1))
+* correct the CHECK-section ban's prompt scope ([d08cfa2](https://github.com/jordansmall/spindrift/commit/d08cfa2fade8075fb2446eb5b32f220c2b360cb7))
+* **daemon:** drop the stale research exit-code caveat ([37eb901](https://github.com/jordansmall/spindrift/commit/37eb901bd1ec5f450f980b0fa0e11fcbee905642))
+* **daemon:** say what the startup preflight prints ([e7051d7](https://github.com/jordansmall/spindrift/commit/e7051d7a05115457c74b688324aa6be2f63de7b9))
+* **doctor:** document the quiet default and --verbose ([fa08643](https://github.com/jordansmall/spindrift/commit/fa086432f4d8b1cdbcf8c6224910942045bb629b)), closes [#3777](https://github.com/jordansmall/spindrift/issues/3777)
+* **driver-exec:** fix the body-limit test claim ([5ee3138](https://github.com/jordansmall/spindrift/commit/5ee3138161f652faecdc8c16264ec31ac3a1ee96))
+* **driver:** drop an unexported name from Kind ([3da98d5](https://github.com/jordansmall/spindrift/commit/3da98d5bced1b296878ffaabf5c137d157c186d8))
+* **reference:** correct what a Bash result past the cap records ([8ec26b1](https://github.com/jordansmall/spindrift/commit/8ec26b17b6c0f3b5cd6e35cda23f45d8f6cdb33d)), closes [#3669](https://github.com/jordansmall/spindrift/issues/3669)
+* **reference:** describe a daemon child's environment ([aacf406](https://github.com/jordansmall/spindrift/commit/aacf406f2d155e0139388a908fa2b2785a078da5))
+* **reference:** describe one fetch per turnover ([48f6a93](https://github.com/jordansmall/spindrift/commit/48f6a939f3d95bb8587376524f4e06c28479d572))
+* **reference:** describe settled and its pipe ([91caea9](https://github.com/jordansmall/spindrift/commit/91caea95ea654168f562027e6bf531f372431034)), closes [#3627](https://github.com/jordansmall/spindrift/issues/3627)
+* **reference:** describe the discovery baton ([b459a2f](https://github.com/jordansmall/spindrift/commit/b459a2f22e256861647353729cd30161da7e24cb)), closes [#3684](https://github.com/jordansmall/spindrift/issues/3684)
+* **reference:** describe the Signal carrier ([92ac5ca](https://github.com/jordansmall/spindrift/commit/92ac5ca3aaf7ec1858acc4f4535811bc1824d907)), closes [#3725](https://github.com/jordansmall/spindrift/issues/3725)
+* **reference:** describe the stray-signal behaviour ([a6d9b05](https://github.com/jordansmall/spindrift/commit/a6d9b05f56caae8f811eb16beb33244913aae84f)), closes [#3626](https://github.com/jordansmall/spindrift/issues/3626)
+* **reference:** document the filed= tally line ([604dbbe](https://github.com/jordansmall/spindrift/commit/604dbbe4772ab74de9d9307f8415324f42197c92)), closes [#3608](https://github.com/jordansmall/spindrift/issues/3608)
+* **reference:** document the Signal carrier knob and its verb ([01bda2b](https://github.com/jordansmall/spindrift/commit/01bda2b8b1f25f5a1a63a772f3946a044065f8a6)), closes [#3728](https://github.com/jordansmall/spindrift/issues/3728)
+* **reference:** document the slot phase field ([a1f8fad](https://github.com/jordansmall/spindrift/commit/a1f8fadcb59a17d04c9e22e678f4157293272a47))
+* **reference:** list the carrier as a child value ([bb3c5e8](https://github.com/jordansmall/spindrift/commit/bb3c5e8387483f144e2c0f1260565f8ecdbbfbbf)), closes [#3727](https://github.com/jordansmall/spindrift/issues/3727)
+* **reference:** name the daemon's tuning knobs ([3fc7485](https://github.com/jordansmall/spindrift/commit/3fc748500758d8d9755466e386784f8f2565179a)), closes [#3619](https://github.com/jordansmall/spindrift/issues/3619)
+* **reference:** record the Probed exemption ([62e78b1](https://github.com/jordansmall/spindrift/commit/62e78b11237de80c0940828b1df86404932c907b)), closes [#3265](https://github.com/jordansmall/spindrift/issues/3265)
+* **reference:** say the prompts now instruct the signal verb ([9565fce](https://github.com/jordansmall/spindrift/commit/9565fced45c9bcdbecff08521f559bd53cf03ed5))
+* **reference:** say what moves the daemon's build ([bc2a142](https://github.com/jordansmall/spindrift/commit/bc2a142b4c60e32490a79d080f427934d0215c96))
+* **reference:** source the daemon exit code from the halt class ([af98d4b](https://github.com/jordansmall/spindrift/commit/af98d4bb7080a30013811bdcb8f69ffcf9858572)), closes [#3622](https://github.com/jordansmall/spindrift/issues/3622)
+* **reference:** split up the Dogfood loop section ([a5265fa](https://github.com/jordansmall/spindrift/commit/a5265fa303191aa3ad531dcda0eb1b21062e5c52))
+* **reference:** state the module-vs-direct equivalence guarantee ([724cdbe](https://github.com/jordansmall/spindrift/commit/724cdbe1860a3e4fcb5136ca02b498d3b466f2ef)), closes [#3796](https://github.com/jordansmall/spindrift/issues/3796)
+* scope the no-flake/devShell rule to the prompt ([089bcb8](https://github.com/jordansmall/spindrift/commit/089bcb8ac7f1f24c137f1157ab633554301c2ed3)), closes [#3268](https://github.com/jordansmall/spindrift/issues/3268)
+* **settle:** explain the kept non-empty comment gate ([3b9b558](https://github.com/jordansmall/spindrift/commit/3b9b5582f213b5bd5d7002f99a2b2cd041a860ee))
+* **signalsocket:** correct three stale doc claims ([50e3feb](https://github.com/jordansmall/spindrift/commit/50e3feb9b83c144dbea09b1b3418cc6518e16574))
+* stop pointing contributors at dogfood.sh ([055bd76](https://github.com/jordansmall/spindrift/commit/055bd76420930c12365496bdfc9548dae3efa74e))
+
+
+### Code Refactoring
+
+* **console:** drop the competing-loop notice ([48237db](https://github.com/jordansmall/spindrift/commit/48237dbfd34471ccd983ee89d16e4c91d585f884))
+* **daemon:** drive tip_moved off the moved flag ([d5c1a56](https://github.com/jordansmall/spindrift/commit/d5c1a56609b9f638c916c3cc0c43ecd51a9e6ad9)), closes [#3579](https://github.com/jordansmall/spindrift/issues/3579)
+* **daemon:** fold the tip seam into one resolve ([55f0422](https://github.com/jordansmall/spindrift/commit/55f0422b61285f59ff62a7e6f83d7471bf9b5d1c))
+* **daemon:** make the halt reason a typed value ([580296c](https://github.com/jordansmall/spindrift/commit/580296cf2c3e717cbee4ee9279d83c42936339a0)), closes [#3622](https://github.com/jordansmall/spindrift/issues/3622)
+* **daemon:** take the baton at child start ([7f5c3f9](https://github.com/jordansmall/spindrift/commit/7f5c3f959aebfee63a48688a21622f763dceb9b5))
+* **dispatch:** hand the runner a socket list ([cb1a274](https://github.com/jordansmall/spindrift/commit/cb1a274e6541bad51283eb5b27200b64830061e3))
+* **doctor:** give the package one reporter type ([a8cd9b9](https://github.com/jordansmall/spindrift/commit/a8cd9b9f4ce61b0f81cae485b52b94bb6b10887f))
+* **doctor:** route Run's own lines through the reporter ([f958468](https://github.com/jordansmall/spindrift/commit/f958468ab09740a782b4198d67e0290fc00c5d15))
+* **doctor:** route the gate rows and token line too ([7d6b0fe](https://github.com/jordansmall/spindrift/commit/7d6b0fe3f0350b204a4180c58ec1ed81c9cc267e))
+* **image:** hoist the baked Bash output cap ([20f3040](https://github.com/jordansmall/spindrift/commit/20f3040ac9c7d8c96bcff103be2c3263121443de)), closes [#3669](https://github.com/jordansmall/spindrift/issues/3669)
+* **launcher:** one input-document reader ([1b0e09e](https://github.com/jordansmall/spindrift/commit/1b0e09e37403c42d537e7ab601ed86eb3ad771c0)), closes [#3619](https://github.com/jordansmall/spindrift/issues/3619)
+* **launcher:** share the two-stage stop relay ([851dc90](https://github.com/jordansmall/spindrift/commit/851dc906df0573c004de357e928d2cebf58b07a3))
+* **prompts:** dedupe research check bodies ([66101ae](https://github.com/jordansmall/spindrift/commit/66101ae4b6782d74fa431a9ed816fdff17bac1b4))
+* **runner:** take a list of socket mounts ([aaadf93](https://github.com/jordansmall/spindrift/commit/aaadf93ef9681d6070f8e8308a2219e5e6f2fa81))
+
+
+### Tests
+
+* **bats:** pin the skills dirs in the shared helper ([a689319](https://github.com/jordansmall/spindrift/commit/a68931936ea56491202e4493c018a7fbbb998409)), closes [#3242](https://github.com/jordansmall/spindrift/issues/3242)
+* **checks:** guard the doctor reporter seam ([b0c5ec4](https://github.com/jordansmall/spindrift/commit/b0c5ec40048e7499a103a4a9ecc957bd2c8069dd))
+* **checks:** pin the signal carrier as env-only ([30d56a3](https://github.com/jordansmall/spindrift/commit/30d56a37a2a50fcdf9247420f5bb6c1618eed019)), closes [#3727](https://github.com/jordansmall/spindrift/issues/3727)
+* **daemon:** add one event-sequence assertion ([5a86347](https://github.com/jordansmall/spindrift/commit/5a86347e939361e8d118875f654c48bbb8a41596))
+* **daemon:** add one Runner and Clock double ([6915413](https://github.com/jordansmall/spindrift/commit/6915413f1d8c4e335fbaa8b6f33381a3ae2805ca))
+* **daemon:** cover the child env through mainRun ([f3c4990](https://github.com/jordansmall/spindrift/commit/f3c499048f3ad7b5157ff89092d20cceb8909b83))
+* **daemon:** cover the discovery baton ([4524f1a](https://github.com/jordansmall/spindrift/commit/4524f1ad0bde89b864eb07dbd06de5c4035b5027)), closes [#3684](https://github.com/jordansmall/spindrift/issues/3684)
+* **daemon:** drive the status tests through Loop ([ac6169c](https://github.com/jordansmall/spindrift/commit/ac6169ca1297fa3ce3b72da611c5d089375403aa))
+* **daemon:** drop the unused per-slot scripting tier ([415e554](https://github.com/jordansmall/spindrift/commit/415e554f743fa55fcd313167eda518c46d822cf6)), closes [#3689](https://github.com/jordansmall/spindrift/issues/3689)
+* **daemon:** note why these tests pass os.Environ ([41b84f8](https://github.com/jordansmall/spindrift/commit/41b84f833fb1b9087f3fd7d9582fe74948f3b053))
+* **daemon:** pin the child's signal carrier ([59b9504](https://github.com/jordansmall/spindrift/commit/59b9504993c5a30cc6196a5e545d0ce79f31d978)), closes [#3727](https://github.com/jordansmall/spindrift/issues/3727)
+* **daemon:** pin the daemon's build inputs ([071d306](https://github.com/jordansmall/spindrift/commit/071d306d7b4353c6e124d0d989c6deb59ea29cef))
+* **daemon:** pin the preflight's quiet doctor report ([8baf505](https://github.com/jordansmall/spindrift/commit/8baf5054e9011eac49ddc5c2805c64b603b66313))
+* **daemon:** port the loop's fakes ([e98a0a5](https://github.com/jordansmall/spindrift/commit/e98a0a5e96ed9ddb19d4b669d33d7fed9521850f))
+* **daemon:** port the remaining fakes ([23165d6](https://github.com/jordansmall/spindrift/commit/23165d689a3414ed10d1cd1a6733acee033277f3))
+* **daemon:** read tuning defaults from the schema ([92206a8](https://github.com/jordansmall/spindrift/commit/92206a801cb5242a0ea7116cfc03eb9c79c0b3dd)), closes [#3619](https://github.com/jordansmall/spindrift/issues/3619)
+* **daemon:** route event compares to one helper ([46a20f1](https://github.com/jordansmall/spindrift/commit/46a20f1f99297ac60734020a9109f84d4618afa7))
+* **doctor:** pin the healthy-run report as a golden ([8bc5540](https://github.com/jordansmall/spindrift/commit/8bc5540e3970001f7a540e143c781cb80f384461))
+* **ecosystem:** cover canonical cargo URL match ([6ae31d4](https://github.com/jordansmall/spindrift/commit/6ae31d40206a33e8e0bfb4f4e0e419fbe1d789ec))
+* **orchestrator:** pin the review fragment's exemption tier ([83815ad](https://github.com/jordansmall/spindrift/commit/83815ad522cfffb1fda6be941f20d4ca6195ff6e)), closes [#3265](https://github.com/jordansmall/spindrift/issues/3265)
+* **outcome:** cover the cut verdict and the tail that hides it ([e77268c](https://github.com/jordansmall/spindrift/commit/e77268c334c0f5da0e6bd87c0448e210680ed120)), closes [#3669](https://github.com/jordansmall/spindrift/issues/3669)
+* **outcome:** cover the empty-payload masking shapes ([21413cd](https://github.com/jordansmall/spindrift/commit/21413cdd28448037606cf237a69d68b15db82f51))
+* **prompt:** pin both carrier variants in the goldens ([aedf29a](https://github.com/jordansmall/spindrift/commit/aedf29a5583b5fd2ac6752ca13d8c0f36e50ba0c))
+* **prompts:** pin the auto-lint skill's Nix mention ([1300b6f](https://github.com/jordansmall/spindrift/commit/1300b6f2bc2527dec47d7b2448f9be2bf7adbbe9))
+* **prompts:** pin the TASK slice to one copy ([a92a590](https://github.com/jordansmall/spindrift/commit/a92a5905e6bdfd0290d7109dcfe062ec2b667c7c))
+* **signalsocket:** assert no reason on a read op ([6c9e2df](https://github.com/jordansmall/spindrift/commit/6c9e2df429b4d25e523c6988166253c207f911b5))
+
+
+### Build System
+
+* **daemon:** drop docs from the daemon's source ([a5a3d75](https://github.com/jordansmall/spindrift/commit/a5a3d7547ef2a074b2235d9f93abd1000e64ea7d))
+
+
+### Miscellaneous Chores
+
+* **dogfood:** delete the dogfood loop script ([640596f](https://github.com/jordansmall/spindrift/commit/640596f1d8f89799076cc4a76267a8479d12ac53))
+
 ## [0.19.0](https://github.com/jordansmall/spindrift/compare/v0.18.1...v0.19.0) (2026-09-21)
 
 
