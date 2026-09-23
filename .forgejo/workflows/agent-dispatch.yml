@@ -1,10 +1,10 @@
 name: Agent dispatch
 
-# Adding the `agent-trigger` label to an issue fires one dogfood run against it:
-# claim the issue (swap `agent-trigger` -> `agent-in-progress` up front), build
-# the image, then drain that single issue (open PR, poll checks, rebase-merge on
-# green). The claim clears `agent-trigger` before any build work, so the label
-# self-clears and will not re-fire.
+# Adding the `agent-trigger` label to an issue fires one dispatch run against
+# it: claim the issue (swap `agent-trigger` -> `agent-in-progress` up front),
+# build the image, then drain that single issue (open PR, poll checks,
+# rebase-merge on green). The claim clears `agent-trigger` before any build
+# work, so the label self-clears and will not re-fire.
 #
 # This is the Forgejo Actions mirror of .github/workflows/agent-dispatch.yml
 # (issue #1967). Forgejo has no GitHub App model, so there is no worker-App

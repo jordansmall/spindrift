@@ -734,10 +734,10 @@ changed native links is visible instead of silent.
 Every dispatch invocation runs at most one wave (ADR 0019): `MAX_PARALLEL`
 caps the number of concurrent Boxes within a wave (default 3); `MAX_JOBS`
 caps the wave size (default 0 = uncapped). Held issues stay on the dispatch
-label and are picked up by the next invocation — a driving loop (dogfood.sh,
-CI, or a human re-running) drains a dependency graph wave by fresh wave; no
-in-process poll waits for later waves. No label-based gate serializes issues;
-ordering is purely by dispatch order and blocker edges.
+label and are picked up by the next invocation — a driving loop (the
+[[Daemon]], CI, or a human re-running) drains a dependency graph wave by
+fresh wave; no in-process poll waits for later waves. No label-based gate
+serializes issues; ordering is purely by dispatch order and blocker edges.
 _Was_: "fan-out" — the launch act and the batch carried two names; unified on
 the batch noun.
 _Avoid_: fan-out, batch (as loose prose for a wave — `waves.Batch` is a
@@ -798,7 +798,7 @@ structurally cannot: advancing the checkout, rebuilding the image, and
 deciding whether to run again. ADR 0019 makes the invocation the
 image-freshness boundary, so every driving loop exists to supply the other
 half of that boundary. Instances differ by who decides to re-run — an
-operator (Console), a script (dogfood.sh), a workflow (CI) — not by what the
+operator (Console), the [[Daemon]], a workflow (CI) — not by what the
 role is.
 _Avoid_: supervisor, runner (that is the Box sandbox seam), harness. Note
 "daemon" names one instance ([[Daemon]]), never the role itself, and never
@@ -835,7 +835,7 @@ not Pick; "pick all ready" is an explicit bulk gesture, not standing
 discovery. The issue listing is advisory and the claim authoritative: a stale
 listing can only produce a failed claim, never a wrong dispatch. The session
 queue is in-memory; durable state lives on the Issue Tracker alone. A peer of
-the headless driving loops (dogfood, CI), not a replacement for them.
+the headless driving loops (the [[Daemon]], CI), not a replacement for them.
 _Avoid_: TUI (names the rendering, not the role), dashboard (it drives, not
 merely displays), monitor.
 
