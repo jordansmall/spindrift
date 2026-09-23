@@ -3091,8 +3091,12 @@ filer:
   problem that was fixed and later regressed can still be refiled;
 - files one issue per surviving finding (merging only findings that are the
   same change), each with a conventional title, the finding's file:line refs
-  and reviewing rationale, a `Found by review during #<issue> (PR <url>)`
-  provenance line, and an acceptance-criteria checklist.
+  and reviewing rationale, a provenance line, and an acceptance-criteria
+  checklist. The branch form, `Found by review during #<issue> (branch
+  <name>)`, is the primary case — filing happens before the PR opens, and
+  `CODE_FORGE=git` / `CODE_FORGE=local` runs never open one at all. The PR
+  form, `Found by review during #<issue> (PR <url>)`, is used only when the
+  delegation actually supplied a PR URL — the filer never synthesizes one.
 
 Filed issues carry `agent-review-finding` and **never** the dispatch label
 (`LABEL` / `ready-for-agent`) — a human promotes them, the same launch-button
