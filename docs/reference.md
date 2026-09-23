@@ -5152,9 +5152,11 @@ actually run rather than the operator's possibly-stale working tree. The
 daemon passes no verbosity flag, so doctor's quiet-by-default behavior
 (`--verbose`/`-v` opts back into the full report) governs the preflight: a
 healthy start adds no doctor report at all to the daemon's own stderr, and a
-refused one adds only the failing `MISSING:` rows, the indented `remedy:`
-line under each row that carries one — a missing triage label's row does not
-— and doctor's own stderr summary. The daemon's stdout stays reserved for
+refused one adds only three things: the failing `MISSING:` rows (a missing
+triage label's row is bare; a failing check's row carries an indented
+`remedy:` line), the standalone `remedy:` line the connectivity fail-fast
+path prints under no row at all (`Run`,
+`cmd/launcher/internal/doctor/doctor.go`), and doctor's own stderr summary. The daemon's stdout stays reserved for
 the event stream. It runs non-interactively, so a missing label is a refusal,
 never a prompt. A non-zero doctor exit refuses the start outright,
 naming what failed and its remedy both on stderr and in the event stream
