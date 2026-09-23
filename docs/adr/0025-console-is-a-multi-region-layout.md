@@ -20,20 +20,24 @@ Concretely:
 - **Header**: a persistent hardcoded "spindrift" wordmark and a one-line status —
   `running L/Cap · waiting N · held N · settled N`, all derived from existing
   state. Stale-image, rebuilding-in-progress, rebuild-failed,
-  orphan-recovery-failed, branch-switch-notice, and competing-dogfood
+  orphan-recovery-failed, branch-switch-notice, and stale-drain-summary
   warnings render here as alert lines, in that fixed order, one per
-  line — any subset can be true at once. They render in the header,
-  grouped with the status line, rather than inline in the two-column
-  body or interleaved with ephemeral operator prompts (filter edit,
-  terminate confirm, quit confirm), because each names session-wide
-  state that holds for as long as the underlying condition does — a
-  stale image keeps new launches held, a rebuild keeps running — not a
-  one-off event the operator dismisses once seen. That is the line
-  between header-level and in-body/background state: a backlog or
-  work-queue row's state is scoped to that one item and scrolls with
-  the list; a header alert qualifies the status line itself and needs
-  to stay visible, with no priority ordering or dismissal among alerts,
-  for the whole time it is true (issue #854, #1241).
+  line — any subset can be true at once. (Amended by issue #3548,
+  landed in PR #3799: the sixth line was originally the
+  competing-dogfood warning; it went away with the competing-loop
+  notice ADR 0023 describes, and the stale-drain summary now holds
+  that slot.) They render in the header, grouped with the status line,
+  rather than inline in the two-column body or interleaved with
+  ephemeral operator prompts (filter edit, terminate confirm, quit
+  confirm), because each names session-wide state that holds for as
+  long as the underlying condition does — a stale image keeps new
+  launches held, a rebuild keeps running — not a one-off event the
+  operator dismisses once seen. That is the line between header-level
+  and in-body/background state: a backlog or work-queue row's state is
+  scoped to that one item and scrolls with the list; a header alert
+  qualifies the status line itself and needs to stay visible, with no
+  priority ordering or dismissal among alerts, for the whole time it
+  is true (issue #854, #1241).
   On a terminal too short to afford the banner rows, the header degrades to the
   status line alone.
 - **Two-column body**: the backlog (queueable issues) on the left keeps its
