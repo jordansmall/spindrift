@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -154,6 +155,39 @@ func TestOutcomeResult_SocketCarrierEquivalentToLogMarkerLines(t *testing.T) {
 	}
 }
 
+// TestSignalResultFromBuffer_DedupTermsRoundTrip pins that DedupTerms
+// (issue #3609) survives the socket buffer into Result.IssueIntents: the
+// marshalled string settle's parseIssueIntent later decodes still carries
+// the terms, in order.
+func TestSignalResultFromBuffer_DedupTermsRoundTrip(t *testing.T) {
+	buf := signalsocket.New(signalsocket.Config{Consumes: allKinds})
+	intent := signalwire.IssueIntent{
+		Title:      "t",
+		Body:       "b",
+		Type:       "bug",
+		DedupTerms: []string{"a.go:Foo", "b.go:Bar"},
+	}
+	if _, rej := buf.AcceptIssueIntent(intent); rej != nil {
+		t.Fatalf("AcceptIssueIntent rejected: %+v", rej)
+	}
+
+	_, _, _, _, issueIntents := signalResultFromBuffer(buf)
+	if len(issueIntents) != 1 {
+		t.Fatalf("issueIntents = %v, want 1", issueIntents)
+	}
+	if !strings.Contains(issueIntents[0], `"dedupTerms":["a.go:Foo","b.go:Bar"]`) {
+		t.Errorf("issueIntents[0] = %s, want it to contain the dedupTerms array", issueIntents[0])
+	}
+
+	var decoded signalwire.IssueIntent
+	if err := json.Unmarshal([]byte(issueIntents[0]), &decoded); err != nil {
+		t.Fatalf("decode issueIntents[0]: %v", err)
+	}
+	if !reflect.DeepEqual(decoded.DedupTerms, intent.DedupTerms) {
+		t.Errorf("decoded.DedupTerms = %v, want %v", decoded.DedupTerms, intent.DedupTerms)
+	}
+}
+
 // TestSignalResultFromBuffer_ReplaceSemantics pins that a second comment and
 // a second PR intent through the buffer leave only the last, the same
 // last-line-wins the log carrier's scanners give (issue #3725).
@@ -211,10 +245,10 @@ func TestSignalResultFromBuffer_AppendWithDedup(t *testing.T) {
 	if err := json.Unmarshal([]byte(issueIntents[1]), &gotB); err != nil {
 		t.Fatalf("decode [1]: %v", err)
 	}
-	if gotA != a {
+	if !reflect.DeepEqual(gotA, a) {
 		t.Errorf("issueIntents[0]: got %+v, want %+v", gotA, a)
 	}
-	if gotB != b {
+	if !reflect.DeepEqual(gotB, b) {
 		t.Errorf("issueIntents[1]: got %+v, want %+v", gotB, b)
 	}
 }

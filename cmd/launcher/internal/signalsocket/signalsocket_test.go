@@ -2,6 +2,7 @@ package signalsocket_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -106,7 +107,7 @@ func TestIssueIntentsAppendAndDedup(t *testing.T) {
 	r2 := mustAcceptIssue(t, b, two)
 	rDup := mustAcceptIssue(t, b, one)
 
-	if got := b.IssueIntents(); len(got) != 2 || got[0] != one || got[1] != two {
+	if got := b.IssueIntents(); len(got) != 2 || !reflect.DeepEqual(got[0], one) || !reflect.DeepEqual(got[1], two) {
 		t.Fatalf("IssueIntents() = %+v, want [%+v %+v]", got, one, two)
 	}
 	if rDup != r1 {
@@ -128,7 +129,7 @@ func TestIssueIntentsAppendAndDedup(t *testing.T) {
 	if r3.Sequence != 3 {
 		t.Fatalf("distinct intent sequence = %d, want 3 (dup did not advance the counter)", r3.Sequence)
 	}
-	if got := b.IssueIntents(); len(got) != 3 || got[2] != three {
+	if got := b.IssueIntents(); len(got) != 3 || !reflect.DeepEqual(got[2], three) {
 		t.Fatalf("IssueIntents() = %+v, want a third distinct intent appended", got)
 	}
 }
@@ -170,6 +171,58 @@ func TestBytesCountsContentFields(t *testing.T) {
 	r := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "ti", Body: "body", Type: "bug"})
 	if want := len("ti") + len("body") + len("bug"); r.Bytes != want {
 		t.Fatalf("bytes = %d, want %d", r.Bytes, want)
+	}
+}
+
+// A term-less intent must hash and count exactly as it did before DedupTerms
+// joined the hash and Bytes -- both literals below are the pre-slice values,
+// pinned so a future change to the framing can't silently drift them.
+func TestBytesAndHashUnchangedWithoutDedupTerms(t *testing.T) {
+	b := newAll(t)
+	r := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "ti", Body: "body", Type: "bug"})
+	if want := len("ti") + len("body") + len("bug"); r.Bytes != want {
+		t.Fatalf("bytes = %d, want %d", r.Bytes, want)
+	}
+	const wantHash = "sha256:d283ef3bbd4c840de967b6e793568e1c6c1c12f67c614348526099916d0f2565"
+	if r.Hash != wantHash {
+		t.Fatalf("hash = %q, want %q", r.Hash, wantHash)
+	}
+}
+
+// Distinct DedupTerms must mint distinct intents even when title/body/type
+// match, so a Box's corrected terms are not swallowed by the idempotent
+// repeat branch.
+func TestIssueIntentsDedupTermsDistinguish(t *testing.T) {
+	b := newAll(t)
+	first := signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"foo"}}
+	second := signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"bar"}}
+
+	r1 := mustAcceptIssue(t, b, first)
+	r2 := mustAcceptIssue(t, b, second)
+	if r1.Hash == r2.Hash {
+		t.Fatalf("distinct dedup terms hashed alike: %q", r1.Hash)
+	}
+	if r2.Sequence != 2 {
+		t.Fatalf("second sequence = %d, want 2 (not an idempotent repeat)", r2.Sequence)
+	}
+	got := b.IssueIntents()
+	if len(got) != 2 || !reflect.DeepEqual(got[1], second) {
+		t.Fatalf("IssueIntents() = %+v, want the second entry to carry the corrected terms %+v", got, second)
+	}
+}
+
+// A byte-identical repeat, terms included, is still idempotent.
+func TestIssueIntentsDedupTermsRepeatIsIdempotent(t *testing.T) {
+	b := newAll(t)
+	i := signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"foo", "bar"}}
+
+	r1 := mustAcceptIssue(t, b, i)
+	rDup := mustAcceptIssue(t, b, i)
+	if rDup != r1 {
+		t.Fatalf("dup receipt = %+v, want the stored receipt %+v unchanged", rDup, r1)
+	}
+	if got := b.IssueIntents(); len(got) != 1 {
+		t.Fatalf("IssueIntents() = %+v, want 1 entry (repeat did not grow the list)", got)
 	}
 }
 
@@ -252,6 +305,81 @@ func TestRejectInvalidUTF8DirectBufferCall(t *testing.T) {
 	mustReject(t, rej, "invalid_utf8", 400)
 	if !strings.HasPrefix(rej.Reason, "body ") {
 		t.Fatalf("reason = %q, want it to name body", rej.Reason)
+	}
+}
+
+func TestRejectOversizeDedupTerm(t *testing.T) {
+	big := strings.Repeat("x", signalwire.MaxBodyBytes+1)
+	b := newAll(t)
+	_, rej := b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"ok", big}})
+	mustReject(t, rej, "oversize", 413)
+	if !strings.HasPrefix(rej.Reason, "dedupTerms[1] ") {
+		t.Fatalf("reason = %q, want it to name dedupTerms[1]", rej.Reason)
+	}
+}
+
+// Reachable only through the Buffer API directly, the same way
+// TestRejectInvalidUTF8DirectBufferCall is for the other fields.
+func TestRejectInvalidUTF8DedupTermDirectBufferCall(t *testing.T) {
+	bad := string([]byte{0x41, 0xff, 0xfe})
+	b := newAll(t)
+	_, rej := b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{bad}})
+	mustReject(t, rej, "invalid_utf8", 400)
+	if !strings.HasPrefix(rej.Reason, "dedupTerms[0] ") {
+		t.Fatalf("reason = %q, want it to name dedupTerms[0]", rej.Reason)
+	}
+}
+
+// A blank dedup term must not sink the whole intent: the relay path
+// (settle/dedup.go's splitDedupTerms) drops a blank term and files normally,
+// so the two carriers must agree.
+func TestBlankDedupTermIsDroppedNotRejected(t *testing.T) {
+	b := newAll(t)
+	mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"   "}})
+	got := b.IssueIntents()
+	if len(got) != 1 {
+		t.Fatalf("IssueIntents() = %+v, want 1 entry", got)
+	}
+	if len(got[0].DedupTerms) != 0 {
+		t.Fatalf("stored DedupTerms = %+v, want none (blank term dropped)", got[0].DedupTerms)
+	}
+}
+
+// A blank term alongside a good one keeps only the good one.
+func TestBlankDedupTermDroppedAlongsideGoodTerm(t *testing.T) {
+	b := newAll(t)
+	mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"", "foo"}})
+	got := b.IssueIntents()
+	if len(got) != 1 || !reflect.DeepEqual(got[0].DedupTerms, []string{"foo"}) {
+		t.Fatalf("IssueIntents() = %+v, want DedupTerms {foo}", got)
+	}
+}
+
+// Bytes and Hash for a blank-term-only intent must equal the same intent
+// sent with no terms at all: same finding, same terms, so a resend across
+// the two forms must hit the idempotent-repeat branch.
+func TestBlankDedupTermMatchesNoTermsBytesAndHash(t *testing.T) {
+	b := newAll(t)
+	withBlank := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"   "}})
+
+	b2 := newAll(t)
+	withNone := mustAcceptIssue(t, b2, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug"})
+
+	if withBlank.Bytes != withNone.Bytes || withBlank.Hash != withNone.Hash {
+		t.Fatalf("withBlank = %+v, withNone = %+v, want equal Bytes/Hash", withBlank, withNone)
+	}
+
+	// A resend of the same intent through the other form must be the
+	// idempotent repeat, not a second entry.
+	rDup, rej := b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug"})
+	if rej != nil {
+		t.Fatalf("AcceptIssueIntent: unexpected reject %+v", *rej)
+	}
+	if rDup != withBlank {
+		t.Fatalf("rDup = %+v, want the stored receipt %+v unchanged", rDup, withBlank)
+	}
+	if got := b.IssueIntents(); len(got) != 1 {
+		t.Fatalf("IssueIntents() = %+v, want 1 entry (repeat did not grow the list)", got)
 	}
 }
 

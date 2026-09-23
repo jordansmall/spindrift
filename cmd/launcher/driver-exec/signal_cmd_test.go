@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -447,6 +450,88 @@ func TestRunSignal_ReplaceDedupAppend(t *testing.T) {
 		}
 		if got := srv.buf.IssueIntents(); len(got) != 2 {
 			t.Fatalf("issue intents = %+v, want a different intent to append", got)
+		}
+	})
+}
+
+// TestRunSignal_IssueIntentDedupTerms pins -dedup's repeatability (issue
+// #3609): each occurrence appends, and the terms arrive in the buffered
+// intent's DedupTerms in the order given.
+func TestRunSignal_IssueIntentDedupTerms(t *testing.T) {
+	forEachTransport(t, func(t *testing.T, transport string) {
+		srv := startSignalServer(t, transport, signalsocket.Config{Consumes: allKinds()})
+
+		if rc, out := runVerb(t, "one body", "issue-intent", "-title", "one", "-type", "bug", "-dedup", "a.go:Foo"); rc != 0 {
+			t.Fatalf("issue-intent exit = %d, want 0 (out=%q)", rc, out)
+		}
+		if rc, out := runVerb(t, "two body", "issue-intent", "-title", "two", "-type", "chore",
+			"-dedup", "a.go:Foo", "-dedup", "b.go:Bar"); rc != 0 {
+			t.Fatalf("issue-intent exit = %d, want 0 (out=%q)", rc, out)
+		}
+		if rc, out := runVerb(t, "none body", "issue-intent", "-title", "none", "-type", "chore"); rc != 0 {
+			t.Fatalf("issue-intent exit = %d, want 0 (out=%q)", rc, out)
+		}
+
+		got := srv.buf.IssueIntents()
+		if len(got) != 3 {
+			t.Fatalf("issue intents = %+v, want 3", got)
+		}
+		if want := []string{"a.go:Foo"}; !reflect.DeepEqual(got[0].DedupTerms, want) {
+			t.Errorf("intent[0].DedupTerms = %v, want %v", got[0].DedupTerms, want)
+		}
+		if want := []string{"a.go:Foo", "b.go:Bar"}; !reflect.DeepEqual(got[1].DedupTerms, want) {
+			t.Errorf("intent[1].DedupTerms = %v, want %v", got[1].DedupTerms, want)
+		}
+		if len(got[2].DedupTerms) != 0 {
+			t.Errorf("intent[2].DedupTerms = %v, want none", got[2].DedupTerms)
+		}
+	})
+}
+
+// TestRunSignal_IssueIntentDedupWireBody pins the wire shape directly,
+// bypassing the socket: -dedup adds a dedupTerms array with the given terms
+// in order, and its absence must leave the posted body byte-identical to
+// what it was before this field existed -- no dedupTerms key at all, not an
+// empty one.
+func TestRunSignal_IssueIntentDedupWireBody(t *testing.T) {
+	post := func(t *testing.T, args ...string) string {
+		t.Helper()
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var err error
+			captured, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read posted body: %v", err)
+			}
+			if err := json.NewEncoder(w).Encode(signalwire.Receipt{Kind: signalwire.KindIssueIntent}); err != nil {
+				t.Fatalf("encode receipt: %v", err)
+			}
+		}))
+		t.Cleanup(srv.Close)
+		t.Setenv("SIGNAL_SOCKET_ENDPOINT", srv.URL)
+		t.Setenv("SIGNAL_SOCKET_SECRET", "secret")
+		if rc, out := runVerb(t, "body", args...); rc != 0 {
+			t.Fatalf("issue-intent exit = %d, want 0 (out=%q)", rc, out)
+		}
+		return string(captured)
+	}
+
+	t.Run("no dedup", func(t *testing.T) {
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug")
+		if strings.Contains(got, "dedupTerms") {
+			t.Errorf("posted body = %s, want no dedupTerms key at all", got)
+		}
+	})
+	t.Run("one occurrence", func(t *testing.T) {
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug", "-dedup", "a.go:Foo")
+		if !strings.Contains(got, `"dedupTerms":["a.go:Foo"]`) {
+			t.Errorf("posted body = %s, want a dedupTerms array with the one term", got)
+		}
+	})
+	t.Run("two occurrences", func(t *testing.T) {
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug", "-dedup", "a.go:Foo", "-dedup", "b.go:Bar")
+		if !strings.Contains(got, `"dedupTerms":["a.go:Foo","b.go:Bar"]`) {
+			t.Errorf("posted body = %s, want a dedupTerms array with both terms in order", got)
 		}
 	})
 }

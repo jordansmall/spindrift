@@ -40,12 +40,12 @@ func signalResultFromBuffer(buf *signalsocket.Buffer) (comment string, commentFo
 		// line would have carried.
 		raw, err := json.Marshal(i)
 		if err != nil {
-			// signalwire.IssueIntent has no unmarshalable field (three plain
-			// strings), so this is unreachable outside a future field
-			// addition. Loud on stderr rather than a panic: every other
-			// scan failure in outcomeResult warns and carries on, and a
-			// panic here would take down sibling Dispatches that have
-			// nothing to do with this buffer.
+			// signalwire.IssueIntent has no unmarshalable field (plain
+			// strings and a []string), so this is unreachable outside a
+			// future field addition. Loud on stderr rather than a panic:
+			// every other scan failure in outcomeResult warns and carries
+			// on, and a panic here would take down sibling Dispatches that
+			// have nothing to do with this buffer.
 			fmt.Fprintf(os.Stderr, "    ?? signal socket: marshal issue intent: %v\n", err)
 			continue
 		}
