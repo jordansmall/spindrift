@@ -107,6 +107,8 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		title := fs.String("title", "", "issue title (required)")
 		issueType := fs.String("type", "", "issue type: bug, enhancement or chore (required)")
 		bodyFile := fs.String("body-file", "", "file holding the body; empty or - reads stdin")
+		var dedup stringSliceFlag
+		fs.Var(&dedup, "dedup", "site key for dedup, e.g. path/to/file.go:Symbol; repeat for more than one")
 		if err := fs.Parse(rest); err != nil {
 			return 1
 		}
@@ -124,7 +126,15 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		if err != nil {
 			return signalFail(stdout, err)
 		}
-		return postSignal(stdout, client, base, secret, kind, signalBody{"title": rawString(*title), "body": rawString(body), "type": rawString(*issueType)})
+		payload := signalBody{"title": rawString(*title), "body": rawString(body), "type": rawString(*issueType)}
+		// Omitted entirely rather than sent empty: -dedup is optional (issue
+		// #3609, filing is best-effort and a rejected intent loses the
+		// finding), and a term-less call's wire body must stay byte-identical
+		// to what it was before this field existed.
+		if len(dedup) > 0 {
+			payload["dedupTerms"] = rawStringSlice(dedup)
+		}
+		return postSignal(stdout, client, base, secret, kind, payload)
 
 	case "status":
 		fs := signalFlagSet(kind, stdout)
@@ -235,8 +245,10 @@ func readLimitedBody(r io.Reader, source string) (string, error) {
 
 // signalBody is one request's content fields under their wire names. The
 // socket validates the bytes on receipt (ADR 0052), so the verb carries them
-// unaltered rather than deciding anything about them itself.
-type signalBody map[string]rawString
+// unaltered rather than deciding anything about them itself. The value type
+// is json.Marshaler rather than rawString directly so a field like
+// dedupTerms, an array rather than a single string, can share the map.
+type signalBody map[string]json.Marshaler
 
 // rawString marshals byte for byte, where encoding/json's own string encoder
 // substitutes U+FFFD for invalid UTF-8. Laundering the bytes here would hand
@@ -260,6 +272,35 @@ func (s rawString) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return append(out, '"'), nil
+}
+
+// rawStringSlice marshals as a JSON array of rawString elements, so
+// dedupTerms preserves each term's bytes the same way a single rawString
+// field does.
+type rawStringSlice []string
+
+func (s rawStringSlice) MarshalJSON() ([]byte, error) {
+	elems := make([]rawString, len(s))
+	for i, v := range s {
+		elems[i] = rawString(v)
+	}
+	return json.Marshal(elems)
+}
+
+// stringSliceFlag is a repeatable flag.Value: each -flag occurrence appends
+// rather than replacing the previous one.
+type stringSliceFlag []string
+
+func (f *stringSliceFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return strings.Join(*f, ",")
+}
+
+func (f *stringSliceFlag) Set(v string) error {
+	*f = append(*f, v)
+	return nil
 }
 
 func printReject(stdout io.Writer, kind string, rej signalwire.Reject) int {

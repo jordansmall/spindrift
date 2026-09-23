@@ -53,12 +53,14 @@ type PRIntent struct {
 }
 
 // IssueIntent is an issue-intent signal's content. Type is the closed
-// doctor.FindingTypeLabels vocabulary; unlike settle's log-scanned shape it
-// carries no labels and no dedup terms, because the host picks those.
+// doctor.FindingTypeLabels vocabulary; the host still picks labels, but
+// DedupTerms is the Box's to supply (issue #3609) -- only the Box knows the
+// finding's site.
 type IssueIntent struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Type  string `json:"type"`
+	Title      string   `json:"title"`
+	Body       string   `json:"body"`
+	Type       string   `json:"type"`
+	DedupTerms []string `json:"dedupTerms,omitempty"`
 }
 
 // Receipt is an accept reply's payload.

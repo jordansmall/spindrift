@@ -133,15 +133,34 @@ func (b *Buffer) AcceptPRIntent(p signalwire.PRIntent) (signalwire.Receipt, *sig
 // with a cap it did not actually consume -- and Status() never lists a
 // sequence the repeat's caller was told about but the buffer does not have.
 func (b *Buffer) AcceptIssueIntent(i signalwire.IssueIntent) (signalwire.Receipt, *signalwire.Reject) {
+	// Filing is best-effort: a reject here loses the finding outright, while
+	// the relay path (settle/dedup.go's splitDedupTerms/buildDedupMarker)
+	// just drops a blank term and files normally. The two carriers must not
+	// disagree about whether a blank term is fatal, so drop whitespace-only
+	// terms up front -- before Bytes/Hash and before validate -- and carry
+	// only the survivors into the stored intent. A non-blank term keeps
+	// every check it has today (UTF-8, oversize).
+	i.DedupTerms = slices.DeleteFunc(slices.Clone(i.DedupTerms), func(t string) bool {
+		return strings.TrimSpace(t) == ""
+	})
+
+	total := len(i.Title) + len(i.Body) + len(i.Type)
+	for _, term := range i.DedupTerms {
+		total += len(term)
+	}
 	partial := signalwire.Receipt{
 		Kind:  signalwire.KindIssueIntent,
-		Bytes: len(i.Title) + len(i.Body) + len(i.Type),
-		Hash:  contentHash(signalwire.KindIssueIntent, i.Title, i.Body, i.Type),
+		Bytes: total,
+		Hash:  contentHash(signalwire.KindIssueIntent, append([]string{i.Title, i.Body, i.Type}, i.DedupTerms...)...),
 	}
 	if rej := b.checkKind(signalwire.KindIssueIntent); rej != nil {
 		return partial, rej
 	}
-	if rej := validate(fields{{"title", i.Title}, {"body", i.Body}, {"type", i.Type}}); rej != nil {
+	fs := fields{{"title", i.Title}, {"body", i.Body}, {"type", i.Type}}
+	for idx, term := range i.DedupTerms {
+		fs = append(fs, field{fmt.Sprintf("dedupTerms[%d]", idx), term})
+	}
+	if rej := validate(fs); rej != nil {
 		return partial, rej
 	}
 	if _, ok := doctor.FindingTypeLabels[i.Type]; !ok {
