@@ -829,6 +829,16 @@ in
       brokenInlineContent = "no round-2 calibration of any kind in this fragment";
     };
 
+  # Proves the real sharedObligations registry's "triage-escape-hatch-scope"
+  # row can go red (issue #3816). See sharedObligationDriftCheck above for
+  # what this actually swaps and asserts.
+  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-triage-escape-hatch-scope =
+    sharedObligationDriftCheck {
+      obligationId = "triage-escape-hatch-scope";
+      orchestratorFragmentFile = "review-loop-orchestrator.md";
+      brokenInlineContent = "no escape-hatch scope gate of any kind in this fragment";
+    };
+
   # Enforcing check (issue #2699): the real registry's rows must hold against
   # the on-disk fragment content every branch declares, so an edit to either
   # fragment file that drops a shared obligation the other branch still
