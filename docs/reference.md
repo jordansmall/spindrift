@@ -3044,8 +3044,12 @@ wrote, so round 2 does not simultaneously file more and fix less. It
 drops, without filing, a finding that is correct but trivial and out
 of scope for the slice, where the floor is worth rather than certainty
 (issue #3610), and escalates what genuinely needs a human — a design
-trade-off, out-of-scope work, or a change too large to fold in. Only the
-tiebreak for an *ambiguous* finding is round-aware (issue #2701): on the
+trade-off, out-of-scope work, or a change too large to fold in. Scope
+decides which outcomes are available at all: on a surface the branch
+never touched there is no inline fix to weigh, so a finding it is
+merely unsure about is filed rather than fixed, at every round
+(issue #3816). Only the tiebreak for an *ambiguous* finding inside the
+surface the branch already touched is round-aware (issue #2701): on the
 first review round it still fixes inline; from the second review round on
 it escalates only when the fix would widen the diff — new behaviour,
 a new surface, or an edit large enough to need its own review — and
