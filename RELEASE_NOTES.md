@@ -9,6 +9,71 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.19.1 — 2026-09-23
+
+Mostly a shakedown of the daemon that 0.19.0 shipped, plus a new way for a Box
+to talk back to the launcher that doesn't involve squeezing the message through
+the log.
+
+**⚠ Breaking changes** this release: `spindrift doctor` prints nothing on a
+healthy run unless you pass `--verbose`.
+
+- **A Box can send its signals over a socket instead of the log.** The three
+  mid-run channels (comment, PR intent, issue intent) used to ride nonce-guarded
+  marker lines in the Box's captured output. That output has a byte cap, so a
+  long payload got cut mid-line and a perfectly good verdict arrived as "no
+  verdict comment block", marking a green run failed. The new
+  `BOX_SIGNAL_CARRIER` knob takes `log` (the default, exactly what you have
+  today) or `socket`, which routes those channels over a launcher-owned unix or
+  TCP socket with no cap in the way. Asking for `socket` where it can't work,
+  under `NETWORK_MODE=none` for instance, is a startup error rather than a quiet
+  fall back to `log`, and `doctor` reports which transport a dispatch would
+  actually get.
+- **The log carrier got the same bug fixed where it could be.** If you stay on
+  the default you're not stuck with the old behaviour. The prompts now state the
+  byte budget a verdict has to fit in, a truncated signal line is counted and
+  reported by cause instead of vanishing, an empty payload no longer counts as a
+  valid signal (an echoed blank line used to mask the real one), and settle says
+  what was wrong with a verdict comment rather than just rejecting it.
+- **The daemon gives its children a real environment.** In 0.19.0 the daemon
+  started each child with an empty environment, so the first thing a Box did was
+  fail its credential preflight with "vault may be locked" and no hint as to
+  why. Children now run with the captured environment, minus the values they
+  shouldn't see, and a host runner that captured nothing is refused at startup
+  instead of producing that failure an hour into the night. It also warns about
+  knobs you set that a child won't receive.
+- **Two slots can no longer claim the same issue.** Discovery runs one child at
+  a time behind a baton. Before this, two slots opening in the same second could
+  both claim one issue; the loser rotated the live log out from under the
+  winner, settle read an empty file, and a Box that had done its work fine got
+  parked as `agent-failed`.
+- **Daemon tuning without a rebuild, and cheaper slot turnover.** The idle
+  backoff and circuit breaker were Go constants, so retuning them after a real
+  night meant editing code. They're schema knobs now (`DAEMON_IDLE_FLOOR`,
+  `DAEMON_IDLE_CAP`, `DAEMON_FAILURE_BACKOFF`, `DAEMON_BREAKER_THRESHOLD`,
+  `DAEMON_BREAKER_WINDOW`), with today's values as the defaults, so setting
+  nothing changes nothing. Three slots freeing at once used to cost three fetches
+  and three nix evals of the same revision; now it costs one of each, without
+  ever handing a slot a revision older than the moment it asked. Stop and abort
+  are latched on the pool and forwarded per child, and children report over a
+  pipe, so the launcher can name each Box and each settle as it happens.
+- **⚠ Breaking: `spindrift doctor` is quiet by default.** A healthy run used to
+  print 30 to 40 lines, most of them `ok: label "..." present`. It now behaves
+  like a Unix tool: silence and exit 0 when everything is fine, with only
+  `MISSING:` rows, their remedies, and the interactive label-creation prompt
+  printing without a flag. `--verbose` (or `-v`) brings the full report back byte
+  for byte. Exit codes and the stderr summary on failure are untouched, so a
+  redirected stdout loses nothing, but a wrapper that greps doctor's stdout for
+  `ok:` lines will need the flag. In the same change, an unrecognised flag or
+  argument to `doctor` is now a usage error with exit 1; it used to be silently
+  ignored.
+- **A run tells you how many issues it filed.** Settle reports a `filed=` tally
+  on work and research runs alike, so a run that quietly opened fifteen review
+  findings shows up as a number instead of a surprise in your backlog. Also on
+  the smaller side: cargo source URLs are canonicalized before matching, so a
+  private registry route stops missing crates over a spelling difference in the
+  URL.
+
 ## 0.19.0 — 2026-09-20
 
 Unattended operation stops being a shell script you write and becomes a program
