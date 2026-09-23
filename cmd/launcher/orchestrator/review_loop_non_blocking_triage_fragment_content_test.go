@@ -126,23 +126,22 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		}
 	})
 
-	t.Run("item 1 counts the branch's own earlier-round fixes as in-scope surface", func(t *testing.T) {
+	t.Run("item 1 counts the branch's own earlier-round fixes as in-scope surface (AC3)", func(t *testing.T) {
 		// Recalibration (issue #3611): scope was pinned to the slice "as
-		// originally authored", so a line this branch wrote in an earlier
+		// originally authored", so a line this branch touched in an earlier
 		// round's own absorbed fix was out of scope for a later round's item 1,
 		// pushing that finding to escalate (item 3) instead of a cheap inline
-		// fix. Item 1 now counts such lines as in-scope surface. This pins the
-		// new wording present and the deleted wording absent, in both files.
-		for _, want := range []string{
-			"Lines this branch",
-			"count as that surface",
-		} {
-			if !strings.Contains(inlineParagraph, want) {
-				t.Errorf("review-loop-inline.md non-blocking triage item 1 missing %q", want)
-			}
-			if !strings.Contains(orchestratorParagraph, want) {
-				t.Errorf("review-loop-orchestrator.md non-blocking triage item 1 missing %q", want)
-			}
+		// fix. Item 1 now counts such lines as in-scope surface. This matches
+		// the hinge sentence verbatim, the same convention as the item 3
+		// tiebreak subtest above, so a verb shift (e.g. back to "wrote
+		// itself", which excludes a line the branch only edited or deleted)
+		// cannot pass on a loose substring.
+		wantHinge := "Lines this branch itself touched in an earlier round's own absorbed fix count as that surface: they are this branch's own work, so a finding about them is in scope at every round."
+		if !strings.Contains(inlineParagraph, wantHinge) {
+			t.Errorf("review-loop-inline.md non-blocking triage item 1 missing the exact hinge sentence: got %q, want it to contain %q", inlineParagraph, wantHinge)
+		}
+		if !strings.Contains(orchestratorParagraph, wantHinge) {
+			t.Errorf("review-loop-orchestrator.md non-blocking triage item 1 missing the exact hinge sentence: got %q, want it to contain %q", orchestratorParagraph, wantHinge)
 		}
 		deleted := "not whatever surface the diff has since grown to touch"
 		if strings.Contains(inlineParagraph, deleted) {
@@ -189,7 +188,7 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		}
 	})
 
-	t.Run("orchestrator fallback rationale defers to item 3's narrowed test, not its own cost model (issue #3611)", func(t *testing.T) {
+	t.Run("orchestrator fallback rationale defers to item 3's narrowed test, not its own cost model (AC2, issue #3611)", func(t *testing.T) {
 		// The fallback is read by a run that cannot determine its own round, so a
 		// cost model of its own would override item 3's narrowed one: a stale
 		// "deferring is safer" here licenses the round-2 over-firing issue #3611
@@ -224,7 +223,7 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		}
 	})
 
-	t.Run("round-2-on escalation is gated on diff growth, not round number alone (AC5)", func(t *testing.T) {
+	t.Run("round-2-on escalation is gated on diff growth, not round number alone (AC1)", func(t *testing.T) {
 		// Recalibration (issue #3611): an ambiguous finding whose fix stays small
 		// and inside the branch's already-touched surface is still fixed inline
 		// at every round. Only a fix that would widen the diff escalates from
@@ -236,7 +235,7 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 			"Narrowing the round-2 flip to diff growth is this tiebreak's calibration, not a weakening of it.",
 		} {
 			if !strings.Contains(inlineParagraph, want) {
-				t.Errorf("non-blocking triage item 3 missing the AC5 diff-growth-gated sentence: got %q, want it to contain %q", inlineParagraph, want)
+				t.Errorf("non-blocking triage item 3 missing the AC1 diff-growth-gated sentence: got %q, want it to contain %q", inlineParagraph, want)
 			}
 		}
 	})

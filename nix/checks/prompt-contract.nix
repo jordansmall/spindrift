@@ -819,6 +819,16 @@ in
       brokenInlineContent = "no drop outcome of any kind in this fragment";
     };
 
+  # Proves the real sharedObligations registry's "triage-round-2-calibration"
+  # row can go red (issue #3611). See sharedObligationDriftCheck above for
+  # what this actually swaps and asserts.
+  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-triage-round-2-calibration =
+    sharedObligationDriftCheck {
+      obligationId = "triage-round-2-calibration";
+      orchestratorFragmentFile = "review-loop-orchestrator.md";
+      brokenInlineContent = "no round-2 calibration of any kind in this fragment";
+    };
+
   # Enforcing check (issue #2699): the real registry's rows must hold against
   # the on-disk fragment content every branch declares, so an edit to either
   # fragment file that drops a shared obligation the other branch still

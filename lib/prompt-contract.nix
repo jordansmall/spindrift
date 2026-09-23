@@ -737,6 +737,28 @@ rec {
         "The floor is worth, not certainty"
       ];
     }
+    {
+      # Pins the round-2 flip's narrowing to diff growth across both review
+      # loops, so neither fork can regress to the old unconditional round-2
+      # escalation (issue #3611).
+      id = "triage-round-2-calibration";
+      branches = [
+        {
+          id = "review-loop-inline";
+          source = "fragments/review-loop-inline.md";
+        }
+        {
+          id = "review-loop-orchestrator";
+          source = "fragments/review-loop-orchestrator.md";
+        }
+      ];
+      requiredSubstrings = [
+        "escalate it only when fixing it would widen the diff"
+        "diff growth is this tiebreak's calibration, not a weakening of it."
+        "they are this branch's own work"
+        "is in scope at every round"
+      ];
+    }
   ];
 
   # sharedObligations checked against the real on-disk content of each
