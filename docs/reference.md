@@ -3096,9 +3096,12 @@ re-derives the destination repo (implicit in its own tracker instance) and
 always applies the fixed `agent-review-finding` label itself, never the
 payload's own `labels` field (the same do-not-trust-the-agent-target
 invariant issue #1949 established for the PR-intent/comment-intent
-channels). Everything upstream of the write mechanism — dedup search,
-conventional-commit titling, merge-vs-split judgment — is unchanged; only
-how the filed issue actually reaches GitHub differs. Every other
+channels). Everything upstream of the write mechanism — the Filer's own
+site-key search, conventional-commit titling, merge-vs-split judgment — is
+unchanged; only how the filed issue actually reaches GitHub differs, plus one
+added host-side backstop described below (`dedupTerms`, issue #3609): before
+filing, the Launcher re-checks each intent against the open backlog itself
+and skips a repeat that survived the Filer's own search. Every other
 combination (`read-write` regardless of `ORCHESTRATOR_ENABLED`, or
 `read-only` with the orchestrator off) keeps the direct `gh issue create`
 path above, unchanged.
@@ -3116,25 +3119,65 @@ is itself non-fatal, the same best-effort guarantee as the rest of this
 channel. Extending the enum is a host-side-only change; the Box can never
 smuggle an arbitrary label through this field.
 
+The relayed payload may also carry an optional `dedupTerms` array — one or
+more site keys (issue #3609). Unlike `labels`, which stays host-derived,
+`dedupTerms` is Box-supplied, the same as `type`. A term is normalized
+(trimmed, internal whitespace collapsed, lowercased) and dropped if it's
+empty, contains `,` (the marker line's own field separator), or contains
+`--` (which would close the `<!-- spindrift-dedup: ... -->` HTML comment
+early) — an intent carrying no usable term after that filter has an empty
+key set and never matches, and the run warns on stderr that the intent files
+without dedup. Before filing, the Launcher builds a dedup index once per run
+— and only once some intent actually carries a usable key, since a payload
+with none can match nothing — from the open backlog: a tracker that
+implements the optional `LabeledBacklogLister` capability (GitHub
+does) is asked for open issues labeled `agent-review-finding` or
+`agent-research-finding` directly, with bodies and newest-first, up to
+a larger scan limit than plain `ListOpenIssues()` allows; a tracker
+without the capability falls back to `ListOpenIssues()` itself. Each
+backlog issue's keys are only the terms recorded in its hidden
+`<!-- spindrift-dedup: ... -->` marker line — written by the Launcher itself
+at filing time — never its title: two distinct findings can share a
+formulaic conventional-commit title, and keying on prose would merge
+them. The Launcher appends that marker line to every issue it files,
+empty (`<!-- spindrift-dedup:  -->`, which reads back as no keys) when
+the intent carried no usable term: the last marker line in a body wins,
+so always writing its own is what stops a finding that quotes the marker
+format in prose from speaking for the issue's key set. Each intent's keys
+are likewise only its own normalized `dedupTerms`, never its title. A
+key hit skips the intent — it is never filed — and prints one line
+on stdout naming the existing issue it matched; the index also grows as
+the run files its own intents, so two intents in the same payload that
+collide dedup against each other too, not only against the backlog, which
+is what stops the two review axes from filing the same defect twice. The
+two direct filing paths (`gh`, Forgejo) never reach the Launcher,
+so their dedup stays entirely the Filer's own: it runs the open-issue
+search above itself, keyed on the finding's site rather than its prose,
+and appends the same marker line to the body it files, keeping the marker
+format identical across both write mechanisms.
+
 ##### Filing volume on the status output
 
 Every settle that reaches the filing step prints one tally line on the run's
 own status output, work path and research path alike:
 
 ```
-    #1234  filed=ok:2,failed:1
+    #1234  filed=ok:2,failed:1,skipped:1
 ```
 
 `ok` counts the issues actually filed; `failed` counts the filing attempts
-that errored, so a run that tried and failed does not read as a quiet run.
-The line prints even when nothing was filed (`filed=ok:0,failed:0`), which is
-what makes "reached filing, filed nothing" distinguishable from a run that
-never got that far and prints no tally line at all. That makes the
+that errored, so a run that tried and failed does not read as a quiet run;
+`skipped` counts an intent the Launcher's own dedup index caught before it
+ever reached the tracker (issue #3609) — a duplicate that never became an
+API call, so it belongs in neither of the other two. The line prints even
+when nothing was filed (`filed=ok:0,failed:0,skipped:0`), which is what
+makes "reached filing, filed nothing" distinguishable from a run that never
+got that far and prints no tally line at all. That makes the
 findings-per-run rate readable straight off a dogfood log or a dispatch
 summary, without querying the tracker (issue #3608). The value is a
-comma-joined set of `name:count` pairs, so a later count — skipped-as-duplicate,
-say — is one more pair rather than a format change: parse it by name, never by
-position.
+comma-joined set of `name:count` pairs, parsed by name, never by position —
+which is exactly what let `skipped` slot in here as one more pair rather
+than a breaking format change, and lets the next added count do the same.
 
 ##### Research filing
 
@@ -3826,18 +3869,20 @@ been, a nonce-guarded marker line the Box prints.
 
 Each subcommand takes its body from stdin or `-body-file`, never argv —
 argv is world-readable through `/proc`, and a signal body can run to tens
-of KB. `-title` and `-type` stay flags: both are short enough that
-neither concern bites. `pr-intent` requires `-title`; `issue-intent`
-requires `-title` and `-type` (`bug`, `enhancement` or `chore`);
-`status` takes no flags. The command's exit code is the acceptance: exit
-0 prints a receipt — `signal <kind> accepted: <n> bytes, <hash>,
-sequence <n>` — and the signal is taken; a non-zero exit prints `signal
-<kind> rejected (<status>): <reason>` and the signal was NOT taken, so
-the agent can never mistake a rejection for success. The socket carries
-a body whole — no marker line, no base64 — up to a hard ceiling of 65536
-bytes per field (`title`, `body` and `type` alike); a body over that
-ceiling is refused outright, never truncated, so an oversize send costs
-a retry rather than posting a truncated verdict.
+of KB. `-title`, `-type` and `-dedup` stay flags: all are short enough
+that neither concern bites. `pr-intent` requires `-title`; `issue-intent`
+requires `-title` and `-type` (`bug`, `enhancement` or `chore`), and
+accepts a repeatable, optional `-dedup <site key>` per dedup term (issue
+#3609); `status` takes no flags. The command's exit code is the
+acceptance: exit 0 prints a receipt — `signal <kind> accepted: <n>
+bytes, <hash>, sequence <n>` — and the signal is taken; a non-zero exit
+prints `signal <kind> rejected (<status>): <reason>` and the signal was
+NOT taken, so the agent can never mistake a rejection for success. The
+socket carries a body whole — no marker line, no base64 — up to a hard
+ceiling of 65536 bytes per field (`title`, `body`, `type` and each
+`dedupTerms` entry alike); a body over that ceiling is refused outright,
+never truncated, so an oversize send costs a retry rather than posting a
+truncated verdict.
 
 The prompts instruct the verb under `socket` (issue #3726): prompt assembly
 picks each of the three signal fragments — the research verdict comment, the
