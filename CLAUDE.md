@@ -220,9 +220,11 @@ nil diagnostics path/to/file.nix
 complements, but does not replace, `checks-inbox` before finishing the task —
 `nil` catches structural mistakes early; only a real check build catches
 evaluation and build errors. If neither `checks-inbox` nor `nix flake check`
-is available (e.g. a Box built without the self-test knobs, or the bwrap
-runner, which keeps its store read-only), fall back to `nil diagnostics` and
-say so.
+is available — a Box built without the self-test knobs (`nixInBox` plus
+`nixStoreWritable`) — fall back to `nil diagnostics` and say so. The runner
+is not itself a reason: under bwrap a writable store is an ephemeral tmpfs
+overlay over the read-only host store (ADR 0042), so a bwrap Box carrying
+both knobs runs the same real checks the podman one does.
 
 The repo's Go version floor is whatever `cmd/launcher/go.mod`'s `go`
 directive says. There is no separate Nix-level Go version pin to keep in
