@@ -104,8 +104,10 @@ MIGRATING.md's legacy
 settings mapping block predates the registry and is the one deliberate
 exception, out of this migration's scope (see `lib/documented-facts.nix`).
 
-To exercise the whole loop end to end against a live repo, use `./dogfood.sh`
-(never hand-run `spindrift dispatch`) — see [`docs/reference.md`](docs/reference.md).
+To exercise the whole loop end to end against a live repo, run the daemon
+(`nix run .#daemon`, or `nix run .#dogfood-bwrap-daemon` for spindrift's own
+bwrap harness) rather than hand-running `spindrift dispatch` — see
+[`docs/reference.md`](docs/reference.md).
 
 ## Where code goes
 

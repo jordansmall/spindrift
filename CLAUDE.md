@@ -87,8 +87,10 @@ repository secrets and `agent-research.yml` mints a short-lived installation
 token per run, falling back to the main `SPINDRIFT_GH_TOKEN` when the App is
 unset — see [Research
 token](docs/reference.md#research-token-least-privilege-optional). To drive
-research through the dogfood loop instead of a one-off `spindrift research`,
-run `dogfood.sh` with `DOGFOOD_KIND=research`.
+research continuously instead of a one-off `spindrift research`, run the
+daemon (`nix run .#daemon`) with the `research` kind selector — `nix run
+.#daemon -- research` — or omit it to draw both dispatch and research off
+one pool (issue #3541).
 
 ### Comment injection trust boundary
 

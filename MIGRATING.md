@@ -44,12 +44,11 @@ orchestrate for its whole pool lifetime. See docs/reference.md's Daemon
 section for the full mechanism.
 
 If you drive spindrift with a headless loop, switch it to `nix run
-.#daemon`. `dogfood.sh` is spindrift's own in-repo loop; it still drives
-continuous dispatch and keeps working unchanged. If you have no such
-loop — you dispatch by hand, or use the Console — you are not required
-to do anything: the knob stays available for operators who want no
-daemon at all, and the Console keeps using the continuous engine as its
-own dispatch mechanism, unaffected by this deprecation.
+.#daemon`. If you have no such loop — you dispatch by hand, or use the
+Console — you are not required to do anything: the knob stays available
+for operators who want no daemon at all, and the Console keeps using the
+continuous engine as its own dispatch mechanism, unaffected by this
+deprecation.
 
 ## `spindrift doctor` now exits 2 on an undersized podman machine (issue #3544)
 
@@ -1144,10 +1143,10 @@ those two jobs unchanged. `harness.env.example` now lists secrets only; move
 any other knob you kept there to `settings.*` in your `flake.nix`, or pass it
 as a flag per invocation.
 
-`dogfood.sh` forwards its `MAX_JOBS`/`CONTINUOUS_DISPATCH` shell variables as
-`--max-jobs`/`--continuous-dispatch` flags instead of exporting them —
-`KNOB=x ./dogfood.sh` for any other knob is no longer a supported override
-idiom; set it in `flake.nix` `settings` instead.
+A driving loop should forward `MAX_JOBS`/`CONTINUOUS_DISPATCH` as
+`--max-jobs`/`--continuous-dispatch` flags rather than exporting them —
+prefixing an invocation with `KNOB=x` is no longer a supported override
+idiom for any other knob; set it in `flake.nix` `settings` instead.
 
 | Env var (deprecated as a knob channel) | Flag | Flake setting |
 |---|---|---|
@@ -1381,8 +1380,8 @@ wave and exits, so the poll/wait knobs configure nothing. Setting either in
 error naming the valid keys.
 
 `MAX_JOBS` still caps the wave size (`0` means uncapped); re-invoking
-`dispatch` (directly, via a driving loop, or via `dogfood.sh`) is how a
-dependency graph drains wave by wave.
+`dispatch` (directly, or via a driving loop) is how a dependency graph
+drains wave by wave.
 
 | Removed knob     | Replacement                             |
 |------------------|------------------------------------------|
