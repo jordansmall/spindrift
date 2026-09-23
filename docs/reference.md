@@ -5149,9 +5149,14 @@ subcommand exactly once (`startupPreflight`, `cmd/launcher/daemon/main.go`)
 — never again per iteration. It pins doctor to the same freshly fetched tip
 the first child will run at, so the preflight validates the build about to
 actually run rather than the operator's possibly-stale working tree. The
-doctor report goes to the daemon's own stderr — its stdout is reserved for
-the event stream — and it runs non-interactively, so a missing label is a
-refusal, never a prompt. A non-zero doctor exit refuses the start outright,
+daemon passes no verbosity flag, so doctor's quiet-by-default behavior
+(`--verbose`/`-v` opts back into the full report) governs the preflight: a
+healthy start adds no doctor report at all to the daemon's own stderr, and a
+refused one adds only the failing `MISSING:` rows, the indented `remedy:`
+line under each row that carries one — a missing triage label's row does not
+— and doctor's own stderr summary. The daemon's stdout stays reserved for
+the event stream. It runs non-interactively, so a missing label is a refusal,
+never a prompt. A non-zero doctor exit refuses the start outright,
 naming what failed and its remedy both on stderr and in the event stream
 (`ClassifyPreflight`, `cmd/launcher/internal/daemon/preflight.go`). The
 class this catches that nothing else does is missing triage labels: without

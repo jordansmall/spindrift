@@ -59,25 +59,28 @@ func TestRunChild_ExitCode(t *testing.T) {
 	}
 }
 
-// captureStderr redirects os.Stderr to a pipe for the caller and returns a
-// func that restores the original and hands back everything written while
-// redirected. RunChild relays a child's stdout/stderr and its own
-// malformed-record diagnostic through os.Stderr, so this is the only
-// observable route onto either from a test.
-func captureStderr(t *testing.T) func() []byte {
+// captureStream redirects *target (an os.Stdout/os.Stderr-shaped global) to
+// a pipe for the caller and returns a func that restores the original and
+// hands back everything written while redirected. Callers must not run
+// t.Parallel: two tests swapping the same global would race. One test may
+// capture two distinct globals at once, as the RunDoctor tests do, but must
+// not capture the same global twice — the read func restores unconditionally,
+// so the inner restore would hand the outer capture's writer back.
+func captureStream(t *testing.T, target **os.File) func() []byte {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("captureStderr: pipe: %v", err)
+		t.Fatalf("captureStream: pipe: %v", err)
 	}
-	orig := os.Stderr
-	os.Stderr = w
-	// Drain concurrently rather than once the caller is done: RunChild wires
-	// the child's stdout straight to this descriptor, and
-	// TestRunChild_StdoutRelayedUnchanged deliberately writes 70 KiB — past
-	// a pipe's capacity on both Linux and macOS. With nothing reading, the
-	// child blocks in write() forever, so it never exits, never closes its
-	// report descriptor, and wedges RunChild's read of the report pipe.
+	orig := *target
+	*target = w
+	// Drain concurrently rather than once the caller is done: a callee may
+	// wire a child process straight to this descriptor and write past a
+	// pipe's capacity before returning — RunChild does, and
+	// TestRunChild_StdoutRelayedUnchanged deliberately writes 70 KiB. With
+	// nothing reading, the child blocks in write() forever, so it never
+	// exits, never closes its report descriptor, and wedges RunChild's read
+	// of the report pipe.
 	type capture struct {
 		out []byte
 		err error
@@ -88,21 +91,36 @@ func captureStderr(t *testing.T) func() []byte {
 		done <- capture{out, err}
 	}()
 	t.Cleanup(func() {
-		if os.Stderr == w {
-			os.Stderr = orig
+		if *target == w {
+			*target = orig
 		}
 		_ = w.Close()
 		_ = r.Close()
 	})
 	return func() []byte {
-		os.Stderr = orig
+		*target = orig
 		_ = w.Close()
 		got := <-done
 		if got.err != nil {
-			t.Fatalf("captureStderr: read: %v", got.err)
+			t.Fatalf("captureStream: read: %v", got.err)
 		}
 		return got.out
 	}
+}
+
+// captureStderr redirects os.Stderr for the caller. RunChild relays a
+// child's stdout/stderr and its own malformed-record diagnostic through
+// os.Stderr, so this is the only observable route onto either from a test.
+func captureStderr(t *testing.T) func() []byte {
+	t.Helper()
+	return captureStream(t, &os.Stderr)
+}
+
+// captureStdout redirects os.Stdout for the caller, for tests asserting the
+// daemon keeps it clear of doctor's relayed output.
+func captureStdout(t *testing.T) func() []byte {
+	t.Helper()
+	return captureStream(t, &os.Stdout)
 }
 
 // TestRunChild_OnRecordDeliversBoxAndSettledInOrder drives a scripted child
@@ -1704,7 +1722,12 @@ func TestRunDoctor_SeamFailure(t *testing.T) {
 // asserts it is exactly what daemon.DoctorCommand builds: a pinned flakeref
 // carrying the revision, ending in "-- doctor", with no --max-jobs or
 // --max-parallel (those cap a child's dispatch wave; doctor dispatches
-// nothing to cap).
+// nothing to cap), and no --verbose or -v — the daemon relies on doctor's
+// quiet-by-default report (#3777) rather than requesting the verbose one,
+// and a reflect.DeepEqual against DoctorCommand's own argv can't catch
+// DoctorCommand itself growing a --verbose. Token-exact matching (not
+// substring) guards against a false match inside another argument, e.g. a
+// flakeref or revision.
 func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
 	orig := runnerDoctorCommand
 	t.Cleanup(func() { runnerDoctorCommand = orig })
@@ -1739,8 +1762,122 @@ func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
 	if !strings.HasSuffix(joined, "-- doctor") {
 		t.Errorf("argv %v does not end in %q", got, "-- doctor")
 	}
-	if strings.Contains(joined, "--max-jobs") || strings.Contains(joined, "--max-parallel") {
-		t.Errorf("argv %v carries a max-jobs/max-parallel flag, want neither", got)
+	for _, tok := range got {
+		switch tok {
+		case "--max-jobs", "--max-parallel", "--verbose", "-v":
+			t.Errorf("argv %v carries token %q, want none of --max-jobs, --max-parallel, --verbose, -v", got, tok)
+		}
+	}
+}
+
+// TestRunDoctor_HealthyPreflightEmitsNothing stubs the doctor seam with a
+// script that exits 0 printing nothing on either stream, mirroring what
+// quiet-by-default doctor (#3777) does on a healthy machine, and asserts the
+// daemon's own captured stderr is empty and its stdout stays reserved for
+// the event stream. RunDoctor relays both of the child's streams onto the
+// daemon's stderr and adds no framing of its own, so a silent child must
+// leave both of the daemon's streams silent too.
+func TestRunDoctor_HealthyPreflightEmitsNothing(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	readStderr := captureStderr(t)
+	readStdout := captureStdout(t)
+	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err != nil {
+		t.Fatalf("RunDoctor() unexpected error: %v", err)
+	}
+	if exit != 0 {
+		t.Errorf("exit = %d, want 0", exit)
+	}
+	if stderr := readStderr(); len(stderr) != 0 {
+		t.Errorf("stderr = %q, want empty (a healthy quiet-by-default doctor run emits nothing)", stderr)
+	}
+	if stdout := readStdout(); len(stdout) != 0 {
+		t.Errorf("stdout = %q, want empty (stdout stays reserved for the event stream)", stdout)
+	}
+}
+
+// TestRunDoctor_RefusedPreflightForwardsFindings stubs the doctor seam with
+// scripts mirroring two shapes real doctor refuses in: missing required
+// triage labels exit 4 with bare MISSING rows and no remedy line, while an
+// unprotected base branch exits 1 with a MISSING row paired with its indented
+// remedy line. Each case asserts every line the script emitted lands
+// on the daemon's captured stderr — both of the child's streams are relayed
+// to the same descriptor — and the returned exit is the child's own with no
+// error.
+func TestRunDoctor_RefusedPreflightForwardsFindings(t *testing.T) {
+	tests := []struct {
+		name       string
+		script     string
+		wantExit   int
+		wantStderr []string
+	}{
+		{
+			// doctor's checkLabelSet calls Reporter.Finding directly, so a
+			// missing label's row carries no remedy line; the stderr line is
+			// ErrRequiredLabelsMissing's own text, which doctorReport prints
+			// there. Only the four work-tier labels are Required, hence these
+			// two names.
+			name: "required labels missing",
+			script: `printf '%s\n%s\n' 'MISSING: label "ready-for-agent" missing' 'MISSING: label "agent-in-progress" missing'
+printf '%s\n' 'required triage label(s) missing or declined: ready-for-agent, agent-in-progress missing — create them in the repository' >&2
+exit 4`,
+			wantExit: 4,
+			wantStderr: []string{
+				`MISSING: label "ready-for-agent" missing`,
+				`MISSING: label "agent-in-progress" missing`,
+				"required triage label(s) missing or declined: ready-for-agent, agent-in-progress missing — create them in the repository",
+			},
+		},
+		{
+			// Reporter.Results is the only caller that pairs a row with a
+			// remedy line, and branch-protection is a Required row whose
+			// Remedy differs from its probe error, so both lines print. That
+			// error wraps no sentinel, so it lands on doctorExitCodeFor's
+			// default arm, exit 1 — the connectivity rows wrap ErrConnectivity
+			// and exit 3 instead. doctorReport prints it to stderr verbatim.
+			name: "unprotected base branch",
+			script: `printf '%s\n%s\n' 'MISSING: branch-protection: base branch "main" is not protected' '  remedy: protect main: block direct pushes and require CI status checks'
+printf '%s\n' 'base branch "main" is not protected' >&2
+exit 1`,
+			wantExit: 1,
+			wantStderr: []string{
+				`MISSING: branch-protection: base branch "main" is not protected`,
+				"  remedy: protect main: block direct pushes and require CI status checks",
+				`base branch "main" is not protected`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := runnerDoctorCommand
+			t.Cleanup(func() { runnerDoctorCommand = orig })
+			runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+				return exec.CommandContext(ctx, "/bin/sh", "-c", tt.script)
+			}
+
+			r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+			readStderr := captureStderr(t)
+			exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+			if err != nil {
+				t.Fatalf("RunDoctor() unexpected error: %v", err)
+			}
+			if exit != tt.wantExit {
+				t.Errorf("exit = %d, want %d", exit, tt.wantExit)
+			}
+			stderr := string(readStderr())
+			for _, want := range tt.wantStderr {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+				}
+			}
+		})
 	}
 }
 
