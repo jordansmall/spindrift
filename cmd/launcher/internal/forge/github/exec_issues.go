@@ -27,6 +27,65 @@ func labelNames(labels []ghLabel) []string {
 	return names
 }
 
+// ghIssueRow is the raw shape shared by every "gh issue list --json ..." call
+// in this file. Body is simply empty where the caller's --json fields don't
+// request it.
+type ghIssueRow struct {
+	Number int       `json:"number"`
+	Title  string    `json:"title"`
+	Body   string    `json:"body"`
+	Labels []ghLabel `json:"labels"`
+}
+
+// toIssue converts a raw gh row to a forge.Issue, resolving Priority from the
+// row's own labels.
+func (r ghIssueRow) toIssue() forge.Issue {
+	names := labelNames(r.Labels)
+	return forge.Issue{
+		Number:   strconv.Itoa(r.Number),
+		Title:    r.Title,
+		Body:     r.Body,
+		Labels:   names,
+		Priority: forge.ResolvePriority(names),
+	}
+}
+
+// byNumberAsc and byNumberDesc are the two number-comparator orders shared by
+// ListIssues/ListOpenIssues (ascending) and ListOpenIssuesWithLabels
+// (descending).
+func byNumberAsc(issues []forge.Issue) func(i, j int) bool {
+	return func(i, j int) bool {
+		ni, _ := strconv.Atoi(issues[i].Number)
+		nj, _ := strconv.Atoi(issues[j].Number)
+		return ni < nj
+	}
+}
+
+func byNumberDesc(issues []forge.Issue) func(i, j int) bool {
+	return func(i, j int) bool {
+		ni, _ := strconv.Atoi(issues[i].Number)
+		nj, _ := strconv.Atoi(issues[j].Number)
+		return ni > nj
+	}
+}
+
+// decodeIssueRows is the shared tail of ListIssues and ListOpenIssues, which
+// differ only in the --label filter they hand gh: decode, order and the
+// page-limit warning have to stay identical between the two.
+func decodeIssueRows(out []byte) ([]forge.Issue, error) {
+	var raw []ghIssueRow
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse gh issue list: %w", err)
+	}
+	issues := make([]forge.Issue, len(raw))
+	for i, r := range raw {
+		issues[i] = r.toIssue()
+	}
+	sort.Slice(issues, byNumberAsc(issues))
+	forge.WarnPageMayTruncateBacklog("gh issue list", len(issues))
+	return issues, nil
+}
+
 func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	label := e.labels.Label(state)
 	cmd := exec.Command("gh", "issue", "list",
@@ -41,31 +100,7 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	if err != nil {
 		return nil, ghCommandErr("gh issue list", err)
 	}
-	var raw []struct {
-		Number int       `json:"number"`
-		Title  string    `json:"title"`
-		Labels []ghLabel `json:"labels"`
-	}
-	if err := json.Unmarshal(out, &raw); err != nil {
-		return nil, fmt.Errorf("parse gh issue list: %w", err)
-	}
-	issues := make([]forge.Issue, len(raw))
-	for i, r := range raw {
-		names := labelNames(r.Labels)
-		issues[i] = forge.Issue{
-			Number:   strconv.Itoa(r.Number),
-			Title:    r.Title,
-			Labels:   names,
-			Priority: forge.ResolvePriority(names),
-		}
-	}
-	sort.Slice(issues, func(i, j int) bool {
-		ni, _ := strconv.Atoi(issues[i].Number)
-		nj, _ := strconv.Atoi(issues[j].Number)
-		return ni < nj
-	})
-	forge.WarnPageMayTruncateBacklog("gh issue list", len(issues))
-	return issues, nil
+	return decodeIssueRows(out)
 }
 
 // ListOpenIssues returns every open issue in ascending number order. Unlike
@@ -83,30 +118,67 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 	if err != nil {
 		return nil, ghCommandErr("gh issue list", err)
 	}
-	var raw []struct {
-		Number int       `json:"number"`
-		Title  string    `json:"title"`
-		Labels []ghLabel `json:"labels"`
-	}
-	if err := json.Unmarshal(out, &raw); err != nil {
-		return nil, fmt.Errorf("parse gh issue list: %w", err)
-	}
-	issues := make([]forge.Issue, len(raw))
-	for i, r := range raw {
-		names := labelNames(r.Labels)
-		issues[i] = forge.Issue{
-			Number:   strconv.Itoa(r.Number),
-			Title:    r.Title,
-			Labels:   names,
-			Priority: forge.ResolvePriority(names),
+	return decodeIssueRows(out)
+}
+
+// ListOpenIssuesWithLabels implements forge.LabeledBacklogLister (issue #3609
+// review). "gh issue list --label A --label B" ANDs the labels together, so
+// finding every issue carrying *either* one takes one query per label,
+// merged here and de-duplicated by number -- an issue carrying both labels
+// would otherwise come back twice.
+//
+// A per-label failure degrades rather than aborting the whole scan: the
+// target repo may simply lack one of the finding labels (spindrift doctor
+// treats agent-research-finding as advisory, never required), or a single
+// label's call can hit a transient 403/secondary rate limit. Either way,
+// returning nil,err here would hand backlogDedupIndex an empty index and
+// refile every open finding as a duplicate -- worse than the labels that did
+// succeed still being honored. Only a failure on every label propagates, so
+// a total outage still reaches backlogDedupIndex's own fallback.
+func (e *execClient) ListOpenIssuesWithLabels(labels []string) ([]forge.Issue, error) {
+	seen := make(map[string]bool)
+	var issues []forge.Issue
+	failures := 0
+	var lastErr error
+	for _, label := range labels {
+		cmd := exec.Command("gh", "issue", "list",
+			"--repo", e.repo,
+			"--state", "open",
+			"--label", label,
+			"--limit", strconv.Itoa(forge.DedupScanLimit),
+			"--search", "sort:created-desc",
+			"--json", "number,title,body,labels",
+		)
+		out, err := cmd.Output()
+		if err != nil {
+			lastErr = ghCommandErr("gh issue list", err)
+			fmt.Fprintf(os.Stderr, "WARNING: gh issue list --label %s failed: %v\n", label, lastErr)
+			failures++
+			continue
+		}
+		var raw []ghIssueRow
+		if err := json.Unmarshal(out, &raw); err != nil {
+			lastErr = fmt.Errorf("parse gh issue list: %w", err)
+			fmt.Fprintf(os.Stderr, "WARNING: gh issue list --label %s failed: %v\n", label, lastErr)
+			failures++
+			continue
+		}
+		forge.WarnDedupScanMayTruncate("gh issue list", label, len(raw))
+		for _, r := range raw {
+			num := strconv.Itoa(r.Number)
+			if seen[num] {
+				continue
+			}
+			seen[num] = true
+			issues = append(issues, r.toIssue())
 		}
 	}
-	sort.Slice(issues, func(i, j int) bool {
-		ni, _ := strconv.Atoi(issues[i].Number)
-		nj, _ := strconv.Atoi(issues[j].Number)
-		return ni < nj
-	})
-	forge.WarnPageMayTruncateBacklog("gh issue list", len(issues))
+	if len(labels) > 0 && failures == len(labels) {
+		return nil, fmt.Errorf("gh issue list: all %d label(s) failed: %w", len(labels), lastErr)
+	}
+	// Each per-label page arrives newest-first, but a merge of two of them
+	// does not, and the doc promises one order.
+	sort.Slice(issues, byNumberDesc(issues))
 	return issues, nil
 }
 

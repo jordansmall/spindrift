@@ -108,6 +108,24 @@ type BlockersLister interface {
 	BlocksOf(num string) ([]Dependency, error)
 }
 
+// LabeledBacklogLister is the optional IssueTracker capability for a dedup
+// scan of the finding backlog (issue #3609 review): unlike ListOpenIssues,
+// whose GitHub implementation omits body and truncates to the *oldest*
+// ResultPageLimit issues (fine for the Console's untriaged browse, useless
+// for dedup), ListOpenIssuesWithLabels returns every open issue carrying at
+// least one of labels, with Body populated, newest first -- so a truncated
+// page drops the oldest already-covered findings rather than the newest ones
+// a later run is most likely to re-file. Only github implements it; the
+// other adapters already populate Body and walk every page via
+// ListOpenIssues, so they have nothing to gain from a second method. An
+// implementation may return the labels that succeeded with a nil error,
+// failing only when every label failed.
+type LabeledBacklogLister interface {
+	// ListOpenIssuesWithLabels returns every open issue carrying at least
+	// one of labels, Body populated, newest first.
+	ListOpenIssuesWithLabels(labels []string) ([]Issue, error)
+}
+
 // HostPostedCommenter is the optional IssueTracker capability for adapters
 // whose Comment the Launcher may call host-side from its own credential
 // (issue #1914): a read-only Box holds no write token, so its comment travels

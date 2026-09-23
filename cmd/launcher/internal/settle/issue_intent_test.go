@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -12,6 +13,13 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/outcome"
 )
+
+// withEmptyMarker is the body a term-less intent actually files: the
+// launcher appends its own marker line unconditionally, empty when the
+// intent carried no usable dedup term (issue #3609 review).
+func withEmptyMarker(body string) string {
+	return body + "\n\n" + dedupMarkerPrefix + dedupMarkerSuffix
+}
 
 // filedURLs returns filed's successful entries' URLs in payload order,
 // mirroring the URL-only shape the now-deleted fileIssueIntents wrapper used
@@ -69,7 +77,7 @@ func TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels(t *testing.T) {
 	if len(fc.PostIssueCalls) != 2 {
 		t.Fatalf("PostIssueCalls = %+v, want 2", fc.PostIssueCalls)
 	}
-	want0 := forge.PostIssueCall{Title: "first bug", Body: "first body", Labels: []string{"agent-review-finding"}}
+	want0 := forge.PostIssueCall{Title: "first bug", Body: withEmptyMarker("first body"), Labels: []string{"agent-review-finding"}}
 	if fc.PostIssueCalls[0].Title != want0.Title || fc.PostIssueCalls[0].Body != want0.Body {
 		t.Errorf("PostIssueCalls[0] = %+v, want title/body %+v", fc.PostIssueCalls[0], want0)
 	}
@@ -81,7 +89,7 @@ func TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels(t *testing.T) {
 			t.Errorf("PostIssueCalls[0].Labels leaked the payload's own label: %v", fc.PostIssueCalls[0].Labels)
 		}
 	}
-	want1 := forge.PostIssueCall{Title: "second bug", Body: "second body", Labels: []string{"agent-review-finding"}}
+	want1 := forge.PostIssueCall{Title: "second bug", Body: withEmptyMarker("second body"), Labels: []string{"agent-review-finding"}}
 	if fc.PostIssueCalls[1].Title != want1.Title || fc.PostIssueCalls[1].Body != want1.Body {
 		t.Errorf("PostIssueCalls[1] = %+v, want title/body %+v", fc.PostIssueCalls[1], want1)
 	}
@@ -176,8 +184,8 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue(%s): %v", urls[0], err)
 	}
-	if iss0.Title != "first bug" || iss0.Body != "first body" {
-		t.Errorf("iss0 = %+v, want title %q body %q", iss0, "first bug", "first body")
+	if iss0.Title != "first bug" || iss0.Body != withEmptyMarker("first body") {
+		t.Errorf("iss0 = %+v, want title %q body %q", iss0, "first bug", withEmptyMarker("first body"))
 	}
 	foundLabel, leakedLabel := false, false
 	for _, l := range iss0.Labels {
@@ -199,8 +207,8 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue(%s): %v", urls[1], err)
 	}
-	if iss1.Title != "second bug" || iss1.Body != "second body" {
-		t.Errorf("iss1 = %+v, want title %q body %q", iss1, "second bug", "second body")
+	if iss1.Title != "second bug" || iss1.Body != withEmptyMarker("second body") {
+		t.Errorf("iss1 = %+v, want title %q body %q", iss1, "second bug", withEmptyMarker("second body"))
 	}
 }
 
@@ -409,15 +417,15 @@ func TestFileIssueIntentsDetailed_AppendsBacklinkToPostedBody(t *testing.T) {
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
 	}
-	want := "first body" + "\n\n" + "Filed from research on #99"
+	want := withEmptyMarker("first body" + "\n\n" + "Filed from research on #99")
 	if fc.PostIssueCalls[0].Body != want {
 		t.Errorf("PostIssueCalls[0].Body = %q, want %q", fc.PostIssueCalls[0].Body, want)
 	}
 }
 
-// An empty bodyBacklink posts the intent's body byte-for-byte with no trailing
-// separator, proving fileIssueIntents' wrapper behavior (it always passes "")
-// survived the refactor.
+// An empty bodyBacklink adds no backlink separator -- only the dedup marker
+// line every filing carries -- proving fileIssueIntents' wrapper behavior (it
+// always passes "") survived the refactor.
 func TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -434,8 +442,8 @@ func TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged(t *testing.T)
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
 	}
-	if fc.PostIssueCalls[0].Body != "first body" {
-		t.Errorf("PostIssueCalls[0].Body = %q, want %q", fc.PostIssueCalls[0].Body, "first body")
+	if fc.PostIssueCalls[0].Body != withEmptyMarker("first body") {
+		t.Errorf("PostIssueCalls[0].Body = %q, want %q", fc.PostIssueCalls[0].Body, withEmptyMarker("first body"))
 	}
 }
 
@@ -841,13 +849,13 @@ func TestSettle_ReportsFiledTally_NoIntents(t *testing.T) {
 		s.Settle(dispatch.NewFake(), issNum, 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:0\n") {
+	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:0,skipped:0\n") {
 		t.Errorf("stdout = %q, want it to contain the zero filed= tally", stdout)
 	}
 }
 
 // The work path's filed= tally line counts two successfully filed intents as
-// ok:2,failed:0 (issue #3608).
+// ok:2,failed:0,skipped:0 (issue #3608).
 func TestSettle_ReportsFiledTally_AllOK(t *testing.T) {
 	const issNum = "3608"
 	const prURL = "https://github.com/owner/repo/pull/3608"
@@ -874,13 +882,13 @@ func TestSettle_ReportsFiledTally_AllOK(t *testing.T) {
 		s.Settle(dispatch.NewFake(), issNum, 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #3608  filed=ok:2,failed:0\n") {
+	if !strings.Contains(stdout, "    #3608  filed=ok:2,failed:0,skipped:0\n") {
 		t.Errorf("stdout = %q, want it to contain the all-ok filed= tally", stdout)
 	}
 }
 
 // The work path's filed= tally line counts two failed PostIssue calls as
-// ok:0,failed:2 (issue #3608): a run that tried and failed to file must not
+// ok:0,failed:2,skipped:0 (issue #3608): a run that tried and failed to file must not
 // read as a quiet run.
 func TestSettle_ReportsFiledTally_AllFailed(t *testing.T) {
 	const issNum = "3608"
@@ -908,7 +916,7 @@ func TestSettle_ReportsFiledTally_AllFailed(t *testing.T) {
 		s.Settle(dispatch.NewFake(), issNum, 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:2\n") {
+	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:2,skipped:0\n") {
 		t.Errorf("stdout = %q, want it to contain the all-failed filed= tally", stdout)
 	}
 }
@@ -921,8 +929,8 @@ func TestTallyFiled_Zero(t *testing.T) {
 	if got != (filedTally{}) {
 		t.Errorf("tallyFiled(nil) = %+v, want zero value", got)
 	}
-	if got.String() != "ok:0,failed:0" {
-		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:0")
+	if got.String() != "ok:0,failed:0,skipped:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:0,skipped:0")
 	}
 }
 
@@ -933,8 +941,8 @@ func TestTallyFiled_AllOK(t *testing.T) {
 		{Title: "b", URL: "https://example/2"},
 	}
 	got := tallyFiled(filed)
-	if got.String() != "ok:2,failed:0" {
-		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:0")
+	if got.String() != "ok:2,failed:0,skipped:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:0,skipped:0")
 	}
 }
 
@@ -945,8 +953,8 @@ func TestTallyFiled_AllFailed(t *testing.T) {
 		{Title: "b", Failed: true, Body: "body b"},
 	}
 	got := tallyFiled(filed)
-	if got.String() != "ok:0,failed:2" {
-		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:2")
+	if got.String() != "ok:0,failed:2,skipped:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:2,skipped:0")
 	}
 }
 
@@ -958,8 +966,8 @@ func TestTallyFiled_Mixed(t *testing.T) {
 		{Title: "c", URL: "https://example/3"},
 	}
 	got := tallyFiled(filed)
-	if got.String() != "ok:2,failed:1" {
-		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:1")
+	if got.String() != "ok:2,failed:1,skipped:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:1,skipped:0")
 	}
 }
 
@@ -970,7 +978,7 @@ func TestReportFiled_ZeroTallyStillPrints(t *testing.T) {
 	stdout := captureStdout(t, func() {
 		reportFiled("42", nil)
 	})
-	want := "    #42  filed=ok:0,failed:0\n"
+	want := "    #42  filed=ok:0,failed:0,skipped:0\n"
 	if stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
@@ -987,8 +995,468 @@ func TestReportFiled_MixedTally(t *testing.T) {
 	stdout := captureStdout(t, func() {
 		reportFiled("7", filed)
 	})
-	want := "    #7  filed=ok:1,failed:1\n"
+	want := "    #7  filed=ok:1,failed:1,skipped:0\n"
 	if stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+// Two intents that share a dedup term but differ in title and body prose are
+// the same finding site described two ways (issue #3609): the first files,
+// the second is skipped rather than filed as a near-duplicate, the tally
+// counts both, and the skip line names what it matched.
+func TestFileIssueIntentsDetailed_Dedup_SameSiteDifferentProseWithinRun(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first phrasing of the bug","body":"body one","dedupTerms":["race in settle"]}`,
+			`{"title":"second phrasing of the same bug","body":"body two","dedupTerms":["Race In Settle"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	stdout := captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (the second is a dedup skip)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:1" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:1")
+	}
+	if !strings.Contains(stdout, `skipped duplicate issue-intent: "second phrasing of the same bug"`) {
+		t.Errorf("stdout = %q, want a skip line naming the second intent", stdout)
+	}
+}
+
+// An open backlog issue carrying the dedup marker for a term is an exact
+// retry of an already-filed finding, even under completely different prose
+// (issue #3609): the intent is skipped and the skip line names the matched
+// issue.
+func TestFileIssueIntentsDetailed_Dedup_ExactRetryMatchesBacklogMarker(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier, differently worded finding",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: race in settle -->",
+		Labels: []string{"agent-review-finding"},
+	})
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"A brand new title for the retry","body":"new body","dedupTerms":["Race in Settle"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	stdout := captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 0 {
+		t.Fatalf("PostIssueCalls = %+v, want none (dedup match against the backlog)", fc.PostIssueCalls)
+	}
+	if len(filed) != 1 || !filed[0].Skipped {
+		t.Fatalf("filed = %+v, want one skipped entry", filed)
+	}
+	if !strings.Contains(stdout, "already tracked: #501") {
+		t.Errorf("stdout = %q, want it to name #501", stdout)
+	}
+}
+
+// Two genuinely distinct findings that happen to share a formulaic title
+// (e.g. a conventional-commit prefix) but carry different -- or no -- dedup
+// terms both file: the title is no longer a dedup key (issue #3609 review),
+// so prose alone never merges unrelated findings, whether the match would be
+// against the open backlog or, as here, within one run.
+func TestFileIssueIntentsDetailed_Dedup_SharedTitleDifferentTermsBothFile(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "77",
+		Title:  "test: cover the error path in the settle loop",
+		Body:   "a pre-existing finding body with no marker at all",
+		Labels: []string{"agent-research-finding"},
+	})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"test: cover the error path in the settle loop","body":"new body","dedupTerms":["a different site"]}`,
+			`{"title":"test: cover the error path in the settle loop","body":"another new body"}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-research-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 2 {
+		t.Fatalf("PostIssueCalls = %+v, want 2 (title never keys dedup)", fc.PostIssueCalls)
+	}
+	if len(filed) != 2 || filed[0].Skipped || filed[1].Skipped {
+		t.Fatalf("filed = %+v, want two non-skipped entries", filed)
+	}
+}
+
+// Two genuinely distinct findings -- different dedup terms, different titles
+// -- both file, and none is suppressed (issue #3609).
+func TestFileIssueIntentsDetailed_Dedup_DistinctFindingsBothFile(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first distinct bug","body":"body one","dedupTerms":["site one"]}`,
+			`{"title":"second distinct bug","body":"body two","dedupTerms":["site two"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 2 {
+		t.Fatalf("PostIssueCalls = %+v, want 2", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0")
+	}
+}
+
+// A filed finding's body actually carries the hidden dedup marker line, and
+// the terms recovered from it via parseDedupMarker match the intent's own
+// DedupTerms, normalized (issue #3609).
+func TestFileIssueIntentsDetailed_Dedup_FiledBodyCarriesMarkerAndRoundTrips(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding with terms","body":"the body","dedupTerms":["Term One","term   two"]}`,
+		},
+	}
+
+	captureStdout(t, func() {
+		fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	body := fc.PostIssueCalls[0].Body
+	if !strings.Contains(body, "<!-- spindrift-dedup: ") {
+		t.Fatalf("body = %q, want it to carry the dedup marker line", body)
+	}
+	got := parseDedupMarker(body)
+	want := []string{"term one", "term two"}
+	if len(got) != len(want) {
+		t.Fatalf("parseDedupMarker(body) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("parseDedupMarker(body)[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// An intent whose only dedup term is unusable (a Filer comma-joining two
+// sites into one entry) files under an empty marker, and the run warns
+// naming the dropped term -- silently swallowing it would leave the next
+// run's re-file with nothing in the transcript explaining why (issue #3609
+// review).
+func TestFileIssueIntentsDetailed_Dedup_DroppedTermWarns(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding","body":"the body","dedupTerms":["a, b"]}`,
+		},
+	}
+
+	var stderr string
+	captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		})
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	body := fc.PostIssueCalls[0].Body
+	if got := parseDedupMarker(body); len(got) != 0 {
+		t.Errorf("parseDedupMarker(body) = %v, want no keys (only term was unusable)", got)
+	}
+	if !strings.Contains(stderr, "?? #1") || !strings.Contains(stderr, "a, b") {
+		t.Errorf("stderr = %q, want a warning naming issue #1 and the dropped term %q", stderr, "a, b")
+	}
+}
+
+// An intent with one good term and one unusable term keeps the good term as
+// a dedup key (the marker still carries it) and still warns about the
+// dropped one -- a partial degradation is still a degradation worth
+// surfacing.
+func TestFileIssueIntentsDetailed_Dedup_PartialDroppedTermKeepsGoodKeyAndWarns(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding","body":"the body","dedupTerms":["good term","a, b"]}`,
+		},
+	}
+
+	var stderr string
+	captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		})
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	body := fc.PostIssueCalls[0].Body
+	if !strings.Contains(body, "good term") {
+		t.Errorf("body = %q, want the good term kept in the marker", body)
+	}
+	if !strings.Contains(stderr, "?? #1") || !strings.Contains(stderr, "a, b") {
+		t.Errorf("stderr = %q, want a warning naming issue #1 and the dropped term %q", stderr, "a, b")
+	}
+}
+
+// An open issue that shares a title with a new intent but carries neither
+// finding provenance label never suppresses filing (issue #3609): dedup only
+// ever consults issues fileIssueIntentsDetailed itself filed.
+func TestFileIssueIntentsDetailed_Dedup_NonFindingIssueNeverSuppresses(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "9",
+		Title:  "Some Ordinary Backlog Title",
+		Labels: []string{"bug", "ready-for-agent"},
+		Body:   "<!-- spindrift-dedup: race in settle -->",
+	})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	// The new intent's own dedup term matches issue #9's marker term
+	// exactly -- if isFindingIssue's label check were ever bypassed, this
+	// would be suppressed as a duplicate. Filing anyway proves the label
+	// check, not an empty key set, is what let it through.
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"Some Ordinary Backlog Title","body":"new body","dedupTerms":["race in settle"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1 (non-finding issue must not suppress)", fc.PostIssueCalls)
+	}
+	if len(filed) != 1 || filed[0].Skipped {
+		t.Fatalf("filed = %+v, want one non-skipped entry", filed)
+	}
+}
+
+// combinedBacklogListerFilerStub composes a LabeledBacklogLister that always
+// fails with a HostPostedIssueFiler-capable forge.Fake, so a test can drive
+// fileIssueIntentsDetailed's full path through backlogDedupIndex's
+// list-failure branch (dedup_test.go's own list-failure test calls
+// backlogDedupIndex directly, which never reaches a filer).
+type combinedBacklogListerFilerStub struct {
+	forge.IssueTracker
+	forge.HostPostedIssueFiler
+	err   error
+	calls int
+}
+
+func (s *combinedBacklogListerFilerStub) ListOpenIssuesWithLabels(labels []string) ([]forge.Issue, error) {
+	s.calls++
+	return nil, s.err
+}
+
+// A LabeledBacklogLister list failure degrades to intra-run-only dedup
+// (empty backlog index) rather than blocking filing: the intent still files,
+// and the warning fires (issue #3609 review).
+func TestFileIssueIntentsDetailed_Dedup_ListFailureStillFiles(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+	filer := fc.AsIssueFiler()
+	stub := &combinedBacklogListerFilerStub{
+		IssueTracker:         filer,
+		HostPostedIssueFiler: filer.(forge.HostPostedIssueFiler),
+		err:                  errors.New("boom"),
+	}
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding","body":"the body","dedupTerms":["race in settle"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	var stderr string
+	captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			filed = fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+		})
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1 (list failure must not suppress filing)", fc.PostIssueCalls)
+	}
+	if len(filed) != 1 || filed[0].Skipped {
+		t.Fatalf("filed = %+v, want one non-skipped entry", filed)
+	}
+	if !strings.Contains(stderr, "?? #1") || !strings.Contains(stderr, "boom") {
+		t.Errorf("stderr = %q, want the list-failure warning", stderr)
+	}
+}
+
+// A pass whose intents carry no dedup terms never builds the backlog index:
+// the two list round trips could not match anything, so they are not paid
+// (issue #3609 review).
+func TestFileIssueIntentsDetailed_Dedup_NoTermsSkipsBacklogList(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+	filer := fc.AsIssueFiler()
+	stub := &combinedBacklogListerFilerStub{
+		IssueTracker:         filer,
+		HostPostedIssueFiler: filer.(forge.HostPostedIssueFiler),
+	}
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding","body":"the body"}`,
+			`{"title":"another finding","body":"more body"}`,
+		},
+	}
+
+	captureStdout(t, func() {
+		captureStderr(t, func() {
+			fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+		})
+	})
+
+	if stub.calls != 0 {
+		t.Errorf("ListOpenIssuesWithLabels calls = %d, want 0 (no intent carries a dedup key)", stub.calls)
+	}
+	if len(fc.PostIssueCalls) != 2 {
+		t.Fatalf("PostIssueCalls = %+v, want 2", fc.PostIssueCalls)
+	}
+}
+
+// The backlog index is built at most once even across several key-carrying
+// intents -- laziness must not turn the hoist into a per-intent round trip.
+func TestFileIssueIntentsDetailed_Dedup_BacklogListBuiltOnce(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+	filer := fc.AsIssueFiler()
+	stub := &combinedBacklogListerFilerStub{
+		IssueTracker:         filer,
+		HostPostedIssueFiler: filer.(forge.HostPostedIssueFiler),
+	}
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding","body":"the body","dedupTerms":["term one"]}`,
+			`{"title":"another finding","body":"more body","dedupTerms":["term two"]}`,
+		},
+	}
+
+	captureStdout(t, func() {
+		captureStderr(t, func() {
+			fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+		})
+	})
+
+	if stub.calls != 1 {
+		t.Errorf("ListOpenIssuesWithLabels calls = %d, want 1", stub.calls)
+	}
+}
+
+// An intent that carries no usable dedup key at all warns on stderr in the
+// same style as its dropped-term sibling, so "filed without dedup" is
+// observable host-side rather than only a prompt-compliance claim (issue
+// #3609 review).
+func TestFileIssueIntentsDetailed_Dedup_NoTermsWarns(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a term-less finding","body":"the body"}`,
+		},
+	}
+
+	var filed []filedIntent
+	var stderr string
+	captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		})
+	})
+
+	if len(filed) != 1 || filed[0].Failed || filed[0].Skipped {
+		t.Fatalf("filed = %+v, want one filed entry (no dedup term is not a filing error)", filed)
+	}
+	if !strings.Contains(stderr, "?? #1") || !strings.Contains(stderr, "a term-less finding") {
+		t.Errorf("stderr = %q, want a warning naming issue #1 and the intent title", stderr)
+	}
+}
+
+// A finding whose body quotes a marker line in prose, filed by an intent
+// with no usable dedup term of its own, indexes under zero keys: the
+// launcher appends its own (empty) marker last, so last-wins parsing reads
+// the launcher's, never the quote's (issue #3609 review).
+func TestFileIssueIntentsDetailed_Dedup_QuotedMarkerNeverIndexed(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding about the marker","body":"the format is:\n\n<!-- spindrift-dedup: quoted, placeholder -->"}`,
+		},
+	}
+
+	captureStdout(t, func() {
+		captureStderr(t, func() {
+			fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		})
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	filedBody := fc.PostIssueCalls[0].Body
+
+	backlog := forge.NewFake()
+	backlog.SetIssue(forge.Issue{Number: "7", Labels: []string{findingLabelReview}, Body: filedBody})
+	index := backlogDedupIndex(backlog, "100")
+
+	if len(index) != 0 {
+		t.Errorf("index = %v, want empty (the quoted marker must not become this issue's key set)", index)
 	}
 }

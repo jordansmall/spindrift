@@ -19,6 +19,24 @@ func WarnPageMayTruncateBacklog(source string, count int) {
 	}
 }
 
+// DedupScanLimit bounds a single LabeledBacklogLister page (issue #3609
+// review), larger than ResultPageLimit: the label filter already keeps the
+// scanned population small (only review/research finding issues, not the
+// whole backlog), and a truncated dedup scan that drops the newest finding
+// issues files the exact duplicate the scan exists to prevent -- worse than
+// ResultPageLimit's "rerun to drain" tradeoff, which just delays triage.
+const DedupScanLimit = 500
+
+// WarnDedupScanMayTruncate warns when a single label's page of dedup-scan
+// results from source hit DedupScanLimit, so older findings under label may
+// have fallen off the scan and get re-filed as duplicates.
+func WarnDedupScanMayTruncate(source, label string, count int) {
+	if count >= DedupScanLimit {
+		fmt.Fprintf(os.Stderr, "WARNING: %s returned %d %s issues (limit %d); older findings fell off the dedup scan and may be re-filed\n",
+			source, count, label, DedupScanLimit)
+	}
+}
+
 // FullyPaginated is the optional IssueTracker interface for adapters that walk
 // every page of the forge API (forgejo, jira) instead of returning one page
 // capped at ResultPageLimit. When WalksAllPages reports true, a caller such as

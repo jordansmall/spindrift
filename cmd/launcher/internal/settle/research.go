@@ -87,10 +87,6 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		if section := buildFiledIssuesSection(filed); section != "" {
 			body = strings.TrimRight(body, "\n") + "\n\n" + section
 		}
-		// Returning here after a successful filing leaves num in
-		// agent-research-in-progress with issues already filed, and a retry
-		// re-files them as duplicates because nothing consults the intents'
-		// dedupTerms. Accepted: the spec requires the file, comment, label order.
 		if err := r.it.Comment(num, body); err != nil {
 			fmt.Printf("    #%s  status=comment-post-failed  !! %v\n", num, err)
 			return
@@ -121,11 +117,13 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 // a bullet so a human notices and retries it; so does a non-http(s) URL (the
 // local tracker returns local:<slug>), which would otherwise be a dead link.
 func buildFiledIssuesSection(filed []filedIntent) string {
-	if len(filed) == 0 {
-		return ""
-	}
 	lines := make([]string, 0, len(filed))
 	for _, f := range filed {
+		// A skip has no URL and no failure Body to render -- it was never
+		// posted at all (issue #3609) -- so it renders no bullet.
+		if f.Skipped {
+			continue
+		}
 		title := escapeMarkdownLinkText(f.Title)
 		if f.Failed {
 			lines = append(lines, fmt.Sprintf("- **%s** (filing failed) — %s", title, firstLine(f.Body)))
@@ -136,6 +134,9 @@ func buildFiledIssuesSection(filed []filedIntent) string {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("- **%s** — %s", title, f.URL))
+	}
+	if len(lines) == 0 {
+		return ""
 	}
 	return "## Filed issues\n\n" + strings.Join(lines, "\n")
 }
