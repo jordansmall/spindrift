@@ -3225,11 +3225,19 @@ The Launcher files each intent first, appends a "Filed issues" section
 listing the real URLs — or, for a filing that failed, an inline
 title-and-summary bullet — right after the comment body, then posts the
 combined comment host-side in one call, so the researcher never fabricates
-an issue URL itself. Without the Filer provisioned, the filing step and its
-"plus, when the Filer is provisioned" closing reference both vanish from
-both research prompts, and the verdict comment posts directly from the Box
-as always — the filing step and the relay-comment change are both gated
-purely on Filer presence.
+an issue URL itself. An intent the host-side dedup check (dedup.go, issue
+#3609) matches against an already-open finding is never filed at all, and
+gets its own "## Skipped (deduplicated)" section instead, naming what it
+matched — the open issue's number, or the title of a peer this same run
+filed moments earlier — so a run where every finding dedups still says so
+in the posted comment, rather than appending nothing (issue #3811); the
+work path posts that same section as a standalone comment of its own,
+since gate.go has no filed-issues comment to append it to, so a dedup skip
+is visible in the tracker artifact on both paths. Without the Filer
+provisioned, the filing step and its "plus, when the Filer is provisioned"
+closing reference both vanish from both research prompts, and the verdict
+comment posts directly from the Box as always — the filing step and the
+relay-comment change are both gated purely on Filer presence.
 
 Override the filer's system prompt the same way as `scoutPrompt`/
 `reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or
