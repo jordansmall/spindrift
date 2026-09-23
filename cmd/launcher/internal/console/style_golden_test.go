@@ -8,9 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// The fixture packs a stale alert and a dogfood notice into one frame so the
-// snapshot covers enough role and glyph combinations to catch a styling
-// regression without a separate snapshot per alert.
+// The fixture combines a full set of pick states with a stale alert so the
+// snapshot covers every pick role and the ⚠ stale glyph, to catch a styling
+// regression.
 func goldenHeaderModel() Model {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 24})
@@ -22,7 +22,6 @@ func goldenHeaderModel() Model {
 		{Number: "4", State: PickFailed},
 	}
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed"}})
-	m = Update(m, DogfoodNoticeMsg{Live: true})
 	return m
 }
 

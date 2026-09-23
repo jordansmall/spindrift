@@ -126,18 +126,6 @@ func TestView_ModeList_FooterSurvivesScrollClamp(t *testing.T) {
 	}
 }
 
-func TestView_DogfoodNotice_ShownWhenLiveSilentOtherwise(t *testing.T) {
-	absent := View(NewModel())
-	if strings.Contains(absent, "dogfood") {
-		t.Errorf("View() with no dogfood notice = %q, want no mention of dogfood", absent)
-	}
-
-	live := Update(NewModel(), DogfoodNoticeMsg{Live: true})
-	if out := View(live); !strings.Contains(out, "dogfood") {
-		t.Errorf("View() with live dogfood pid-file = %q, want a dogfood notice", out)
-	}
-}
-
 // Issue #1631: the label cell counts the labels that do not fit as "+N" instead
 // of the ellipsis clip the title and other cells use.
 func TestView_Backlog_TruncatedLabelsShowPlusN(t *testing.T) {
@@ -402,21 +390,19 @@ func TestView_Header_RendersBordered(t *testing.T) {
 func TestView_Header_AlertsRenderBeforeEphemeralPrompts(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed"}})
-	m = Update(m, DogfoodNoticeMsg{Live: true})
 	m = Update(m, FilterEditStartMsg{})
 	m = Update(m, FilterChangedMsg{Filter: "bug"})
 
 	out := View(m)
 	statusIdx := strings.Index(out, "running 0/0")
 	staleIdx := strings.Index(out, "stale")
-	dogfoodIdx := strings.Index(out, "dogfood")
 	filterIdx := strings.Index(out, "/bug")
 
-	if statusIdx == -1 || staleIdx == -1 || dogfoodIdx == -1 || filterIdx == -1 {
-		t.Fatalf("View() = %q, want status/stale/dogfood/filter all present", out)
+	if statusIdx == -1 || staleIdx == -1 || filterIdx == -1 {
+		t.Fatalf("View() = %q, want status/stale/filter all present", out)
 	}
-	if !(statusIdx < staleIdx && staleIdx < dogfoodIdx && dogfoodIdx < filterIdx) {
-		t.Errorf("View() = %q, want status < stale < dogfood < filter prompt ordering", out)
+	if !(statusIdx < staleIdx && staleIdx < filterIdx) {
+		t.Errorf("View() = %q, want status < stale < filter prompt ordering", out)
 	}
 }
 
@@ -431,7 +417,7 @@ func TestView_Header_LaunchLessSession_RendersCleanly(t *testing.T) {
 			t.Errorf("View() = %q, want a clean status segment %q", out, want)
 		}
 	}
-	for _, unwanted := range []string{"stale", "dogfood", "!!", "⚠", "↻", "ℹ"} {
+	for _, unwanted := range []string{"stale", "!!", "⚠", "↻", "ℹ"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("View() = %q, want no stray %q in a launch-less header", out, unwanted)
 		}
@@ -713,38 +699,29 @@ func TestView_StaleDrainSummary_Surfaced(t *testing.T) {
 	}
 }
 
-// ADR 0031: the branch-switch and competing-dogfood notice lines carry the
-// plain-Unicode notice glyph and style by role, keeping their existing content.
-func TestView_Header_BranchSwitchAndDogfoodNotices_StyledWithGlyph(t *testing.T) {
+// ADR 0031: the branch-switch notice line carries the plain-Unicode notice
+// glyph and styles by role, keeping its existing content.
+func TestView_Header_BranchSwitchNotice_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 
 	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{BranchSwitchNotice: "switched off-branch tree from feature to main"}})
-	m = Update(m, DogfoodNoticeMsg{Live: true})
 	out := View(m)
 
-	var branchLine, dogfoodLine string
+	var branchLine string
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "switched off-branch") {
 			branchLine = line
-		}
-		if strings.Contains(line, "dogfood") {
-			dogfoodLine = line
 		}
 	}
 	if branchLine == "" {
 		t.Fatalf("View() = %q, want a branch-switch notice line", out)
 	}
-	if dogfoodLine == "" {
-		t.Fatalf("View() = %q, want a dogfood notice line", out)
+	if !strings.Contains(branchLine, "ℹ") {
+		t.Errorf("notice line = %q, want the notice glyph", branchLine)
 	}
-	for _, line := range []string{branchLine, dogfoodLine} {
-		if !strings.Contains(line, "ℹ") {
-			t.Errorf("notice line = %q, want the notice glyph", line)
-		}
-		if !strings.Contains(line, "\x1b[") {
-			t.Errorf("notice line = %q, want it styled with an ANSI escape sequence", line)
-		}
+	if !strings.Contains(branchLine, "\x1b[") {
+		t.Errorf("notice line = %q, want it styled with an ANSI escape sequence", branchLine)
 	}
 }
 
@@ -4201,7 +4178,6 @@ func TestHeaderGeometry_MirrorsRenderBoxedHeader(t *testing.T) {
 				StaleDrainSummary:  "==> drained 3",
 			},
 			OrphanRecoveryErr: "adopt failed",
-			DogfoodLive:       true,
 		}},
 		{"long-wrapping-message", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: longMsg}}},
 		{"wide-rune-message", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: wideRuneMsg}}},

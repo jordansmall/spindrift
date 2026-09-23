@@ -1,9 +1,6 @@
 package console
 
 import (
-	"os"
-	"path/filepath"
-	"strconv"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -105,101 +102,6 @@ func TestRefresh_RecoverableCount_UnmappedLabelIsZero(t *testing.T) {
 	}
 	if loaded.RecoverableCount != 0 {
 		t.Errorf("RecoverableCount = %d, want 0", loaded.RecoverableCount)
-	}
-}
-
-// The two states come from dogfood.sh: it writes .spindrift/dogfood.pid with
-// `echo $$` and removes the file again from a `trap ... EXIT`.
-func TestDogfoodNotice_PresentVsAbsent(t *testing.T) {
-	dir := t.TempDir()
-
-	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
-		t.Error("Live = true with no pid-file, want false")
-	}
-
-	pid := strconv.Itoa(os.Getpid())
-	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte(pid+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); !msg.Live {
-		t.Error("Live = false with a pid-file naming the running test process, want true")
-	}
-}
-
-// A pid-file left behind by a crashed loop (EXIT trap never fired, #565) must
-// not count as live on bare file presence. Stubbing isProcessAlive avoids the
-// flake the earlier version hit: it reaped a real process for a dead pid, and
-// the kernel could reassign that pid before the liveness probe ran (#952).
-func TestDogfoodNotice_StalePidReportsNotLive(t *testing.T) {
-	dir := t.TempDir()
-
-	const deadPid = 99999 // Arbitrary: isProcessAlive is stubbed, so this is never a real pid.
-	orig := isProcessAlive
-	isProcessAlive = func(pid int) bool {
-		if pid != deadPid {
-			t.Fatalf("isProcessAlive(%d), want %d", pid, deadPid)
-		}
-		return false
-	}
-	t.Cleanup(func() { isProcessAlive = orig })
-
-	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte(strconv.Itoa(deadPid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
-		t.Error("Live = true with a stale pid-file (process exited), want false")
-	}
-}
-
-func TestDogfoodNotice_MalformedPidReportsNotLive(t *testing.T) {
-	dir := t.TempDir()
-
-	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte("not-a-pid\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
-		t.Error("Live = true with a malformed pid-file, want false")
-	}
-}
-
-// Pid 0 targets the caller's own process group, so an unguarded kill(0, 0)
-// always succeeds inside the Box whether or not dogfood.sh is running.
-func TestDogfoodNotice_ZeroPidReportsNotLive(t *testing.T) {
-	dir := t.TempDir()
-
-	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte("0\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
-		t.Error("Live = true with a pid-file containing \"0\", want false")
-	}
-}
-
-// Pid -1 is a broadcast probe that succeeds if the caller may signal any
-// process at all, so an unguarded kill(-1, 0) is a false positive.
-func TestDogfoodNotice_NegativePidReportsNotLive(t *testing.T) {
-	dir := t.TempDir()
-
-	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte("-1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
-		t.Error("Live = true with a pid-file containing \"-1\", want false")
 	}
 }
 

@@ -800,10 +800,6 @@ func renderHeaderWith(m Model, style styleFunc) string {
 		b.WriteString(style(RoleDim, fmt.Sprintf("%s notice: %s", glyphNotice, strings.TrimPrefix(m.RebuildStatus.StaleDrainSummary, "==> "))))
 		b.WriteString("\n")
 	}
-	if m.DogfoodLive {
-		b.WriteString(style(RoleDim, glyphNotice+" notice: a live dogfood loop (.spindrift/dogfood.pid) is competing for the same queue"))
-		b.WriteString("\n")
-	}
 	return b.String()
 }
 
