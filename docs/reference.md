@@ -5143,6 +5143,15 @@ deprecation warning (`lookupKnob`, same file) — it simply never reaches a
 child. Anything a child's own wrapper re-sources from `harness.env` in its
 working directory is outside the daemon's control and stays so.
 
+Every child's stdin is `/dev/null`: it runs in its own process group (see
+**Halting** below), and a background process group that reads the tty is
+stopped with `SIGTTIN` rather than handed a prompt. A `<SECRET>_CMD` secret
+command — the preferred secret form, see [Runtime
+configuration](#runtime-configuration) — must therefore be non-interactive
+under the daemon: unlock the vault before `nix run .#daemon`, because no
+mid-loop unlock prompt can reach an operator. `dogfood.sh` used to allow
+that prompt; the daemon deliberately does not.
+
 **Startup preflight.** After the instance lock and the signal wiring, before
 any slot, claim, or Box, the daemon runs the pinned child's `doctor`
 subcommand exactly once (`startupPreflight`, `cmd/launcher/daemon/main.go`)

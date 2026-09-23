@@ -15,7 +15,7 @@ import (
 // `nix build` child gets its own process group instead of inheriting the
 // launcher's. It does not test survival past the launcher's exit, which comes
 // from the Start/wait split on freshness.Realizer. Without Setpgid,
-// dogfood.sh's Ctrl-C hard abort kills a backgrounded realize outright.
+// a driving loop's Ctrl-C hard abort kills a backgrounded realize outright.
 func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")

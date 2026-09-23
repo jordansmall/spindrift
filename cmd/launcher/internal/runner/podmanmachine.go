@@ -19,10 +19,10 @@ var podmanMachineInspectTimeout = 5 * time.Second
 // PodmanMachineMemoryMiB shells out to `podman machine inspect` and reads its
 // Resources.Memory field, which podman already reports in MiB. found is
 // false for every "no answer" case the doctor-side sizing check (issue
-// #3537, porting dogfood.sh's shell preflight) must treat as not applicable
-// rather than a shortfall: podman missing from PATH, the command failing (no
-// active machine), empty output, a payload with no Resources.Memory, or the
-// command timing out (a wedged podman VM).
+// #3537, porting the driving loop's old shell preflight) must treat as not
+// applicable rather than a shortfall: podman missing from PATH, the command
+// failing (no active machine), empty output, a payload with no
+// Resources.Memory, or the command timing out (a wedged podman VM).
 // Lives here, not in cmd/launcher, because TestNoRunnerExecOutsidePackage
 // forbids `exec.Command("podman"` outside this package.
 func PodmanMachineMemoryMiB() (mib int, found bool) {

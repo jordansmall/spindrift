@@ -51,8 +51,7 @@ func Interpret(exit int, stopClosed bool) (outcome string, action Action, halt H
 	case 4:
 		// Every child here is born from its own evaluation at a freshly
 		// resolved revision, so a stale image is answered by the next
-		// iteration's pin, not by an orchestrated rebuild — unlike
-		// dogfood.sh, which must rebuild-and-re-invoke on this code.
+		// iteration's pin, not by an orchestrated rebuild.
 		return "image-stale", Continue, HaltNone
 	case 5:
 		return "host-tainted", HaltPool, HaltChildHostTainted

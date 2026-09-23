@@ -329,6 +329,13 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	// same as RunDoctor below.
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
+	// cmd.Stdin left nil (os/exec gives the child /dev/null): the Setpgid
+	// above leaves it in a background process group, where a tty read is
+	// stopped with SIGTTIN, so forwarding the daemon's stdin would hang a
+	// slot rather than reach an operator. dogfood.sh could offer a mid-loop
+	// vault-unlock prompt only by keeping its launcher in the terminal's
+	// foreground group; under the daemon a `<SECRET>_CMD` must instead be
+	// non-interactive — unlock the vault before starting it (issue #3548).
 
 	reportRead, reportWrite, err := os.Pipe()
 	if err != nil {
