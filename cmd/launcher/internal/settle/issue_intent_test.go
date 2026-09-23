@@ -55,6 +55,24 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(captured)
 }
 
+// lineContaining returns the single line of captured output containing
+// substr, failing the test if none or more than one line matches -- so an
+// assertion can pin a claim (e.g. a key and a reference) to the one line
+// that's supposed to carry it, not the whole capture.
+func lineContaining(t *testing.T, output, substr string) string {
+	t.Helper()
+	var matches []string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, substr) {
+			matches = append(matches, line)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("lineContaining(%q) matched %d lines, want 1: %v", substr, len(matches), matches)
+	}
+	return matches[0]
+}
+
 // Pins the 1-to-many host-mediated issue-filing relay (issue #2018): every
 // decoded SPINDRIFT_ISSUE_INTENT payload is filed through the tracker's
 // HostPostedIssueFiler with the caller-supplied provenance label, never the
@@ -1179,8 +1197,9 @@ func TestFileIssueIntentsDetailed_Dedup_ExactRetryMatchesBacklogMarker(t *testin
 	if len(filed) != 1 || !filed[0].Skipped {
 		t.Fatalf("filed = %+v, want one skipped entry", filed)
 	}
-	if !strings.Contains(stdout, "already tracked: #501") {
-		t.Errorf("stdout = %q, want it to name #501", stdout)
+	line := lineContaining(t, stdout, "skipped duplicate issue-intent")
+	if !strings.Contains(line, "already tracked: #501") {
+		t.Errorf("skip line = %q, want it to name #501", line)
 	}
 }
 
@@ -1244,6 +1263,199 @@ func TestFileIssueIntentsDetailed_Dedup_DistinctFindingsBothFile(t *testing.T) {
 	}
 	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0" {
 		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0")
+	}
+}
+
+// A two-site intent must still file when only one of its sites is already
+// tracked -- the other site would otherwise never be tracked at all (issue
+// #3808). The filed body's marker carries both terms, since the finding
+// itself is still the full two-site one.
+func TestFileIssueIntentsDetailed_Dedup_PartialOverlapStillFiles(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding covering only site a",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: site a -->",
+		Labels: []string{"agent-review-finding"},
+	})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding spanning two sites","body":"new body","dedupTerms":["site a","site b"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	stdout := captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (partial overlap must still file)", fc.PostIssueCalls)
+	}
+	if len(filed) != 1 || filed[0].Skipped {
+		t.Fatalf("filed = %+v, want one non-skipped entry", filed)
+	}
+	body := fc.PostIssueCalls[0].Body
+	if !strings.Contains(body, "site a") || !strings.Contains(body, "site b") {
+		t.Errorf("filed body = %q, want the marker to carry both site a and site b", body)
+	}
+	line := lineContaining(t, stdout, "partial dedup overlap")
+	if !strings.Contains(line, `#1  filing issue-intent "a finding spanning two sites" despite partial dedup overlap`) ||
+		!strings.Contains(line, "site a") || !strings.Contains(line, "#501") {
+		t.Errorf("partial-overlap line = %q, want it naming site a and #501", line)
+	}
+}
+
+// The covered sites of a partial overlap can be tracked by two different
+// backlog issues, and the line then names every one of them -- with the
+// covered keys bracketed, so the two lists it joins stay apart (issue #3808).
+func TestFileIssueIntentsDetailed_Dedup_PartialOverlapNamesEveryCoveringIssue(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding covering site a",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: site a -->",
+		Labels: []string{"agent-review-finding"},
+	})
+	fc.SetIssue(forge.Issue{
+		Number: "502",
+		Title:  "An earlier finding covering site b",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: site b -->",
+		Labels: []string{"agent-review-finding"},
+	})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding spanning three sites","body":"new body","dedupTerms":["site a","site b","site c"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	stdout := captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (site c is tracked nowhere)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:0")
+	}
+	line := lineContaining(t, stdout, "partial dedup overlap")
+	if !strings.Contains(line, "already tracked: [site a, site b] via #501, #502") {
+		t.Errorf("partial-overlap line = %q, want it naming both covered sites and both covering issues", line)
+	}
+}
+
+// A fully-disjoint intent -- no key already tracked -- prints no
+// partial-overlap line: that line is reserved for the case where the run
+// really is filing on top of an already-covered site (issue #3808).
+func TestFileIssueIntentsDetailed_Dedup_DisjointIntentPrintsNoPartialOverlapLine(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding covering an unrelated site",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: site z -->",
+		Labels: []string{"agent-review-finding"},
+	})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a fully distinct finding","body":"new body","dedupTerms":["site a","site b"]}`,
+		},
+	}
+
+	stdout := captureStdout(t, func() {
+		fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if strings.Contains(stdout, "partial dedup overlap") {
+		t.Errorf("stdout = %q, want no partial-overlap line for a fully-disjoint intent", stdout)
+	}
+}
+
+// A two-site intent whose both sites are already tracked -- even by two
+// different backlog issues -- is skipped, since every site the finding
+// spans is already covered (issue #3808).
+func TestFileIssueIntentsDetailed_Dedup_FullOverlapAcrossAllSitesSkips(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding covering site a",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: site a -->",
+		Labels: []string{"agent-review-finding"},
+	})
+	fc.SetIssue(forge.Issue{
+		Number: "502",
+		Title:  "An earlier finding covering site b",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: site b -->",
+		Labels: []string{"agent-review-finding"},
+	})
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding spanning two sites","body":"new body","dedupTerms":["site a","site b"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	stdout := captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 0 {
+		t.Fatalf("PostIssueCalls = %+v, want none (both sites already tracked)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:0,failed:0,skipped:1" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:0,failed:0,skipped:1")
+	}
+	line := lineContaining(t, stdout, "skipped duplicate issue-intent")
+	if !strings.Contains(line, "already tracked: #501, #502") {
+		t.Errorf("skip line = %q, want it to name both #501 and #502", line)
+	}
+}
+
+// The same full skip when a single backlog issue's marker carries both of
+// the finding's sites: coverage is what decides the skip, not how many
+// issues supply it, and the skip line then names that one issue once.
+func TestFileIssueIntentsDetailed_Dedup_FullOverlapBySingleIssueSkips(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding covering both sites",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: site a, site b -->",
+		Labels: []string{"agent-review-finding"},
+	})
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding spanning two sites","body":"new body","dedupTerms":["site a","site b"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	stdout := captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 0 {
+		t.Fatalf("PostIssueCalls = %+v, want none (both sites already tracked)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:0,failed:0,skipped:1" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:0,failed:0,skipped:1")
+	}
+	line := lineContaining(t, stdout, "skipped duplicate issue-intent")
+	if !strings.Contains(line, "already tracked: #501") {
+		t.Errorf("skip line = %q, want it to name #501", line)
 	}
 }
 
