@@ -84,8 +84,8 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 	// and the else branch is the safer fallback if that invariant regresses.
 	if result.CommentFound && result.Comment != "" {
 		body := result.Comment
-		if section := buildFiledIssuesSection(filed); section != "" {
-			body = strings.TrimRight(body, "\n") + "\n\n" + section
+		if sections := buildVerdictCommentSections(filed); sections != "" {
+			body = strings.TrimRight(body, "\n") + "\n\n" + sections
 		}
 		if err := r.it.Comment(num, body); err != nil {
 			fmt.Printf("    #%s  status=comment-post-failed  !! %v\n", num, err)
@@ -141,6 +141,46 @@ func buildFiledIssuesSection(filed []filedIntent) string {
 	return "## Filed issues\n\n" + strings.Join(lines, "\n")
 }
 
+// buildSkippedIssuesSection renders filed's Skipped entries as a "## Skipped
+// (deduplicated)" Markdown list, and returns "" when none are skipped. A
+// skip is otherwise invisible in the verdict comment -- stdout gets the
+// "skipped duplicate" line, the comment does not -- so a human reading an
+// all-dedup run's comment can't tell "deduplicated" from "never filed"
+// (issue #3811). It is its own section rather than a bullet under "Filed
+// issues": nothing here was filed, so listing it there would misreport.
+func buildSkippedIssuesSection(filed []filedIntent) string {
+	lines := make([]string, 0, len(filed))
+	for _, f := range filed {
+		if !f.Skipped {
+			continue
+		}
+		title := escapeMarkdownLinkText(firstLine(f.Title))
+		ref := escapeMarkdownLinkText(f.DupRef)
+		lines = append(lines, fmt.Sprintf("- **%s** — already tracked: %s", title, ref))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	// Both DupRef kinds have to read true here: "#123" is a backlog match, but
+	// `this run's "<title>"` matched a peer no open backlog held.
+	lead := "These findings matched an already-filed issue — in the open backlog, or one this run filed itself — and were not filed again."
+	return "## Skipped (deduplicated)\n\n" + lead + "\n\n" + strings.Join(lines, "\n")
+}
+
+// buildVerdictCommentSections joins the filed and skipped renderers, in that
+// order, blank-line separated, for the verdict-comment call site to append
+// as one block. Returns "" when neither has anything to render.
+func buildVerdictCommentSections(filed []filedIntent) string {
+	sections := make([]string, 0, 2)
+	if s := buildFiledIssuesSection(filed); s != "" {
+		sections = append(sections, s)
+	}
+	if s := buildSkippedIssuesSection(filed); s != "" {
+		sections = append(sections, s)
+	}
+	return strings.Join(sections, "\n\n")
+}
+
 // firstLine truncates s at its first newline and trims a trailing carriage
 // return. A finding's Body can carry headings or fenced code, which rendered
 // whole would break out of the Markdown bullet and inject arbitrary markup.
@@ -151,7 +191,8 @@ func firstLine(s string) string {
 	return strings.TrimSuffix(s, "\r")
 }
 
-// escapeMarkdownLinkText escapes s for use as Markdown link text: f.Title is
+// escapeMarkdownLinkText escapes s for rendering inside a Markdown bullet --
+// as link text, as bold text, or as a bare dedup reference: each of those is
 // agent-chosen, and an unescaped bracket breaks the surrounding syntax.
 func escapeMarkdownLinkText(s string) string {
 	s = strings.ReplaceAll(s, "[", "\\[")

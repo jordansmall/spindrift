@@ -76,6 +76,11 @@ type filedIntent struct {
 	Failed  bool
 	Body    string
 	Skipped bool
+	// DupRef is matchDedup's reference -- "#123" for a backlog match, or
+	// this run's "<title>" for an intra-run match -- carried onto a Skipped
+	// entry so a verdict-comment renderer can name what it matched (issue
+	// #3811), rather than that reference only ever reaching stdout.
+	DupRef string
 }
 
 // fileIssueIntentsDetailed returns one filedIntent per well-formed payload in
@@ -127,7 +132,7 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 		}
 		if ref, dup := matchDedup(dedupIndex, keys); dup {
 			fmt.Printf("    #%s  skipped duplicate issue-intent: %q (already tracked: %s)\n", num, in.Title, ref)
-			out = append(out, filedIntent{Title: in.Title, Skipped: true})
+			out = append(out, filedIntent{Title: in.Title, Skipped: true, DupRef: ref})
 			continue
 		}
 		body := in.Body
@@ -205,4 +210,20 @@ func (t filedTally) String() string {
 // (no line at all).
 func reportFiled(num string, filed []filedIntent) {
 	fmt.Printf("    #%s  filed=%s\n", num, tallyFiled(filed))
+}
+
+// postSkippedComment posts a standalone "## Skipped (deduplicated)" comment
+// for num when filed carries a dedup skip, a no-op otherwise. The work path
+// (gate.go), unlike research.go, has no filed-issues verdict comment to append
+// the section to, so it posts standalone -- see buildSkippedIssuesSection for
+// why the skip needs a comment at all. Best-effort, matching postUsageComment's
+// log-but-don't-propagate contract.
+func postSkippedComment(it forge.IssueTracker, num string, filed []filedIntent) {
+	section := buildSkippedIssuesSection(filed)
+	if section == "" {
+		return
+	}
+	if err := it.Comment(num, section); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not post skipped-issues comment: %v\n", num, err)
+	}
 }

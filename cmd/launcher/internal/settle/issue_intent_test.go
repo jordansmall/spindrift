@@ -887,6 +887,89 @@ func TestSettle_ReportsFiledTally_AllOK(t *testing.T) {
 	}
 }
 
+// The work path (Settle.Settle via gate.go) posts a standalone "## Skipped
+// (deduplicated)" comment when a finding dedups against the open backlog:
+// the work path has no filed-issues comment to append it to, so a dedup skip
+// needs its own post to be visible anywhere but stdout (issue #3811).
+func TestSettle_WorkPath_AllDedupedPostsSkippedComment(t *testing.T) {
+	const issNum = "3811"
+	const prURL = "https://github.com/owner/repo/pull/3811"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding of the same bug",
+		Body:   "earlier body\n\n<!-- spindrift-dedup: race in settle -->",
+		Labels: []string{"agent-review-finding"},
+	})
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a retry of the same finding","body":"new body","dedupTerms":["Race in Settle"]}`,
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc.AsIssueFiler(), fc)
+	captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), issNum, 0, result)
+	})
+
+	var skipComment string
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "## Skipped (deduplicated)") {
+			skipComment = c.Body
+		}
+	}
+	if skipComment == "" {
+		t.Fatalf("CommentCalls = %+v, want one carrying a Skipped (deduplicated) section", fc.CommentCalls)
+	}
+	if !strings.Contains(skipComment, "#501") {
+		t.Errorf("skip comment = %q, want it to name the matched backlog issue #501", skipComment)
+	}
+}
+
+// A work-path run whose intents all file successfully posts no skipped
+// comment at all: nothing was deduplicated, so there is nothing to
+// acknowledge (issue #3811).
+func TestSettle_WorkPath_AllFiledPostsNoSkippedComment(t *testing.T) {
+	const issNum = "3811"
+	const prURL = "https://github.com/owner/repo/pull/3811"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a genuinely new finding","body":"new body"}`,
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc.AsIssueFiler(), fc)
+	captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), issNum, 0, result)
+	})
+
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "## Skipped (deduplicated)") {
+			t.Errorf("CommentCalls = %+v, want no Skipped (deduplicated) section (nothing was deduped)", fc.CommentCalls)
+		}
+	}
+}
+
 // The work path's filed= tally line counts two failed PostIssue calls as
 // ok:0,failed:2,skipped:0 (issue #3608): a run that tried and failed to file must not
 // read as a quiet run.
@@ -1030,6 +1113,38 @@ func TestFileIssueIntentsDetailed_Dedup_SameSiteDifferentProseWithinRun(t *testi
 	}
 	if !strings.Contains(stdout, `skipped duplicate issue-intent: "second phrasing of the same bug"`) {
 		t.Errorf("stdout = %q, want a skip line naming the second intent", stdout)
+	}
+}
+
+// The dedup match reference is carried on the filedIntent itself, not just
+// printed to stdout (issue #3811), so a verdict-comment renderer can name
+// what an intra-run skip matched.
+func TestFileIssueIntentsDetailed_Dedup_SkipCarriesDupRef(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first phrasing of the bug","body":"body one","dedupTerms":["race in settle"]}`,
+			`{"title":"second phrasing of the same bug","body":"body two","dedupTerms":["Race In Settle"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(filed) != 2 {
+		t.Fatalf("filed = %+v, want 2 entries", filed)
+	}
+	skip := filed[1]
+	if !skip.Skipped {
+		t.Fatalf("filed[1] = %+v, want Skipped", skip)
+	}
+	if !strings.Contains(skip.DupRef, "first phrasing of the bug") {
+		t.Errorf("DupRef = %q, want it to name the intra-run match", skip.DupRef)
 	}
 }
 
