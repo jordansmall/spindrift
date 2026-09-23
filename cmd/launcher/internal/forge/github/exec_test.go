@@ -2063,3 +2063,233 @@ func TestGhCommandErr_RateLimitedStderrWrapsErrRateLimit(t *testing.T) {
 		t.Errorf("error message should name rate limiting, got: %q", got.Error())
 	}
 }
+
+// backlogDedupIndex's capability path (issue #3609 review) needs bodies and
+// the newest issues, not ListOpenIssues's unlabelled/oldest-first page.
+func TestExecClient_ImplementsLabeledBacklogLister(t *testing.T) {
+	var _ forge.LabeledBacklogLister = NewExecClient("owner/repo", testLabels, "agent/issue-")
+}
+
+// ListOpenIssuesWithLabels must request body (dedup needs the hidden marker
+// line), sort newest-first (a truncated page must drop the oldest finding
+// issues, not the newest), and query once per label -- gh issue list ANDs
+// multiple --label flags together, so two labels need two calls, merged and
+// de-duplicated by issue number rather than double-counting an issue that
+// carries both (issue #3609 review).
+func TestExecClient_ListOpenIssuesWithLabels(t *testing.T) {
+	dir := prependFakeGH(t, `case "$*" in
+*"agent-review-finding"*)
+	printf '[{"number":5,"title":"review finding","body":"body-5","labels":[{"name":"agent-review-finding"}]}]'
+	;;
+*"agent-research-finding"*)
+	printf '[{"number":5,"title":"review finding","body":"body-5","labels":[{"name":"agent-review-finding"},{"name":"agent-research-finding"}]},{"number":9,"title":"research finding","body":"body-9","labels":[{"name":"agent-research-finding"}]}]'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	issues, err := c.ListOpenIssuesWithLabels([]string{"agent-review-finding", "agent-research-finding"})
+	if err != nil {
+		t.Fatalf("ListOpenIssuesWithLabels: %v", err)
+	}
+
+	byNum := make(map[string]forge.Issue)
+	for _, iss := range issues {
+		if _, dup := byNum[iss.Number]; dup {
+			t.Fatalf("issue #%s returned more than once: %+v", iss.Number, issues)
+		}
+		byNum[iss.Number] = iss
+	}
+	if len(byNum) != 2 {
+		t.Fatalf("want 2 distinct issues, got %+v", issues)
+	}
+	if byNum["5"].Body != "body-5" {
+		t.Errorf("issue 5 body = %q, want %q", byNum["5"].Body, "body-5")
+	}
+	if byNum["9"].Body != "body-9" {
+		t.Errorf("issue 9 body = %q, want %q", byNum["9"].Body, "body-9")
+	}
+
+	calls, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("want 2 gh invocations (one per label), got %d", len(calls))
+	}
+	for _, callPath := range calls {
+		raw, err := os.ReadFile(callPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		argv := string(raw)
+		if !strings.Contains(argv, "--json\nnumber,title,body,labels") {
+			t.Errorf("argv = %q, want body in --json fields", argv)
+		}
+		if !strings.Contains(argv, "--search\nsort:created-desc") {
+			t.Errorf("argv = %q, want sort:created-desc", argv)
+		}
+	}
+}
+
+// A per-label gh failure (e.g. the target repo lacks agent-research-finding,
+// or a transient 403 on that call) must not empty the whole dedup index --
+// the issues the succeeding label already returned still come back, with a
+// nil error (issue #3609 review).
+func TestExecClient_ListOpenIssuesWithLabels_PartialFailureReturnsSucceededLabels(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"agent-review-finding"*)
+	printf '[{"number":5,"title":"review finding","body":"body-5","labels":[{"name":"agent-review-finding"}]}]'
+	;;
+*"agent-research-finding"*)
+	echo 'HTTP 403: secondary rate limit' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	issues, err := c.ListOpenIssuesWithLabels([]string{"agent-review-finding", "agent-research-finding"})
+	if err != nil {
+		t.Fatalf("ListOpenIssuesWithLabels: want nil error on partial failure, got %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != "5" {
+		t.Fatalf("want the succeeded label's issue [5], got %+v", issues)
+	}
+}
+
+// When every label's gh call fails, the failure has to surface: it is the
+// signal backlogDedupIndex uses to fall back to intra-run-only dedup instead
+// of silently treating an empty index as "nothing to dedup against".
+func TestExecClient_ListOpenIssuesWithLabels_AllFailuresReturnsError(t *testing.T) {
+	prependFakeGH(t, `echo 'boom' >&2
+exit 1`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.ListOpenIssuesWithLabels([]string{"agent-review-finding", "agent-research-finding"})
+	if err == nil {
+		t.Fatal("ListOpenIssuesWithLabels: want error when every label fails, got nil")
+	}
+}
+
+// The merge across labels is newest-first, not the per-page created-desc
+// order coincidentally preserved by a single label.
+func TestExecClient_ListOpenIssuesWithLabels_NewestFirst(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"agent-review-finding"*)
+	printf '[{"number":3,"title":"older review","body":"","labels":[{"name":"agent-review-finding"}]}]'
+	;;
+*"agent-research-finding"*)
+	printf '[{"number":9,"title":"newer research","body":"","labels":[{"name":"agent-research-finding"}]}]'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	issues, err := c.ListOpenIssuesWithLabels([]string{"agent-review-finding", "agent-research-finding"})
+	if err != nil {
+		t.Fatalf("ListOpenIssuesWithLabels: %v", err)
+	}
+	if len(issues) != 2 || issues[0].Number != "9" || issues[1].Number != "3" {
+		t.Fatalf("want newest-first [9 3], got %+v", issues)
+	}
+}
+
+// Empty labels is the doctor-advisory-label-missing edge folded to zero
+// inputs: no gh call, no failure, an empty result.
+func TestExecClient_ListOpenIssuesWithLabels_NoLabelsReturnsEmpty(t *testing.T) {
+	prependFakeGH(t, `exit 1`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	issues, err := c.ListOpenIssuesWithLabels(nil)
+	if err != nil {
+		t.Fatalf("ListOpenIssuesWithLabels(nil): %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("want empty result, got %+v", issues)
+	}
+}
+
+// ListIssues shares its decode/sort/warn tail with ListOpenIssues; the fixture
+// is out of order because the result must come back ascending by number.
+func TestExecClient_ListIssues_AscendingWithLabels(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue list"*)
+	printf '[{"number":7,"title":"later","labels":[{"name":"ready-for-agent"},{"name":"P1"}]},{"number":2,"title":"earlier","labels":[{"name":"ready-for-agent"}]}]'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	issues, err := c.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(issues) != 2 || issues[0].Number != "2" || issues[1].Number != "7" {
+		t.Fatalf("want ascending [2 7], got %+v", issues)
+	}
+	if issues[1].Title != "later" {
+		t.Errorf("issue 7 title = %q, want %q", issues[1].Title, "later")
+	}
+	if len(issues[1].Labels) != 2 || issues[1].Labels[0] != "ready-for-agent" {
+		t.Errorf("issue 7 labels = %v, want [ready-for-agent P1]", issues[1].Labels)
+	}
+}
+
+// Malformed JSON must name the source in both list calls, not surface a bare
+// json decode error.
+func TestExecClient_ListIssues_ParseErrorNamesSource(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue list"*)
+	printf 'not json'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if _, err := c.ListIssues(forge.Dispatchable); err == nil {
+		t.Fatal("ListIssues: want error on malformed JSON, got nil")
+	} else if !strings.Contains(err.Error(), "parse gh issue list") {
+		t.Fatalf("ListIssues error = %q, want it to mention parse gh issue list", err.Error())
+	}
+	if _, err := c.ListOpenIssues(); err == nil {
+		t.Fatal("ListOpenIssues: want error on malformed JSON, got nil")
+	} else if !strings.Contains(err.Error(), "parse gh issue list") {
+		t.Fatalf("ListOpenIssues error = %q, want it to mention parse gh issue list", err.Error())
+	}
+}
+
+// A full page means the backlog may be larger than what came back, so both
+// list calls warn (issue #3609 review: the two share one decode tail).
+func TestExecClient_ListCalls_FullPageWarns(t *testing.T) {
+	rows := make([]string, forge.ResultPageLimit)
+	for i := range rows {
+		rows[i] = fmt.Sprintf(`{"number":%d,"title":"t","labels":[]}`, i+1)
+	}
+	prependFakeGH(t, `case "$*" in
+*"issue list"*)
+	cat <<'JSON'
+[`+strings.Join(rows, ",")+`]
+JSON
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	for _, tc := range []struct {
+		name string
+		list func() ([]forge.Issue, error)
+	}{
+		{"ListIssues", func() ([]forge.Issue, error) { return c.ListIssues(forge.Dispatchable) }},
+		{"ListOpenIssues", c.ListOpenIssues},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var issues []forge.Issue
+			var err error
+			out := testutil.CaptureStderr(t, func() { issues, err = tc.list() })
+			if err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if len(issues) != forge.ResultPageLimit {
+				t.Fatalf("%s returned %d issues, want %d", tc.name, len(issues), forge.ResultPageLimit)
+			}
+			if !strings.Contains(out, "gh issue list") || !strings.Contains(out, "backlog may be larger") {
+				t.Errorf("%s at the page limit printed %q, want the truncation warning", tc.name, out)
+			}
+		})
+	}
+}

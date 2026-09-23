@@ -28,7 +28,7 @@ func newResearchFake(num string) *forge.Fake {
 // (AsNoLandingRecorder) assumes the Box already posted the comment in-box.
 //
 // This is also the research path's no-intents filed= tally fixture (issue
-// #3608): a run that never filed anything still prints "filed=ok:0,failed:0",
+// #3608): a run that never filed anything still prints "filed=ok:0,failed:0,skipped:0",
 // so it reads as "reached filing" rather than leaving no trace at all.
 func TestResearchSettle_Recommend(t *testing.T) {
 	fc := newResearchFake("42")
@@ -55,7 +55,7 @@ func TestResearchSettle_Recommend(t *testing.T) {
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("verdict path must not call TransitionState; got %+v", fc.TransitionStateCalls)
 	}
-	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:0\n") {
+	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:0,skipped:0\n") {
 		t.Errorf("stdout = %q, want it to contain the zero filed= tally", stdout)
 	}
 }
@@ -833,7 +833,7 @@ func TestBuildFiledIssuesSection_NonHTTPURLDegradesToPlainBullet(t *testing.T) {
 }
 
 // The research path's filed= tally line counts two successfully filed
-// intents as ok:2,failed:0 (issue #3608), same shape as the work path's
+// intents as ok:2,failed:0,skipped:0 (issue #3608), same shape as the work path's
 // tally.
 func TestResearchSettle_ReportsFiledTally_TwoOK(t *testing.T) {
 	fc := newResearchFake("42")
@@ -858,13 +858,13 @@ func TestResearchSettle_ReportsFiledTally_TwoOK(t *testing.T) {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #42  filed=ok:2,failed:0\n") {
+	if !strings.Contains(stdout, "    #42  filed=ok:2,failed:0,skipped:0\n") {
 		t.Errorf("stdout = %q, want it to contain the all-ok filed= tally", stdout)
 	}
 }
 
 // The research path's filed= tally line counts two failed PostIssue calls as
-// ok:0,failed:2 (issue #3608): the tally must print even though both
+// ok:0,failed:2,skipped:0 (issue #3608): the tally must print even though both
 // filings failed and the run still goes on to post the comment and apply
 // the verdict label.
 func TestResearchSettle_ReportsFiledTally_TwoFailed(t *testing.T) {
@@ -890,7 +890,7 @@ func TestResearchSettle_ReportsFiledTally_TwoFailed(t *testing.T) {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:2\n") {
+	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:2,skipped:0\n") {
 		t.Errorf("stdout = %q, want it to contain the all-failed filed= tally", stdout)
 	}
 }
