@@ -329,6 +329,27 @@ let
     else
       builtins.elemAt tailBytesMatch 0;
 
+  # dedupMarkerPrefix/dedupMarkerSuffix, parsed out of the Go source that
+  # defines them (issue #3609) rather than retyped, the same builtins.match
+  # idiom as bakedCap and nonceHexWidth above: the two direct-mode filer
+  # fragments below build this marker line themselves (their own token never
+  # round-trips through the launcher, so dedup.go can't build it for them),
+  # and a rename here that isn't echoed in the fragments would leave them
+  # emitting a marker parseDedupMarker can never recognize.
+  dedupMarkerGoSrc = builtins.readFile ../../cmd/launcher/internal/settle/dedup.go;
+  dedupMarkerPrefixMatch = builtins.match ".*dedupMarkerPrefix = \"([^\"]*)\".*" dedupMarkerGoSrc;
+  dedupMarkerPrefixInGo =
+    if dedupMarkerPrefixMatch == null then
+      throw "dedup marker check: no dedupMarkerPrefix const found in cmd/launcher/internal/settle/dedup.go -- update the match in nix/checks/prompts.nix alongside the const"
+    else
+      builtins.elemAt dedupMarkerPrefixMatch 0;
+  dedupMarkerSuffixMatch = builtins.match ".*dedupMarkerSuffix = \"([^\"]*)\".*" dedupMarkerGoSrc;
+  dedupMarkerSuffixInGo =
+    if dedupMarkerSuffixMatch == null then
+      throw "dedup marker check: no dedupMarkerSuffix const found in cmd/launcher/internal/settle/dedup.go -- update the match in nix/checks/prompts.nix alongside the const"
+    else
+      builtins.elemAt dedupMarkerSuffixMatch 0;
+
   # Shared by the two research-prompt advise-only enumeration dedup checks
   # below (issue #3227, #3270): research-prompt.md and its self-contained
   # sub-mode sibling carry the identical trailer/TASK contract, so one
@@ -1663,6 +1684,29 @@ in
         grep -q '/api/v1/repos' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
         grep -q 'agent-review-finding' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
         ! grep -q 'gh label create' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
+        touch $out
+      '';
+
+  # The direct-mode fragments hand-build the dedup marker line themselves
+  # (issue #3609 review finding): pin them to dedupMarkerPrefixInGo, parsed
+  # out of dedup.go above, so a rename of the const there fails this check
+  # instead of leaving the fragments emitting a marker dedup.go's own parser
+  # never recognizes. normalized_grep because the marker sits inside prose
+  # that can rewrap.
+  filer-direct-fragments-dedup-marker-matches-go =
+    pkgs.runCommand "filer-direct-fragments-dedup-marker-matches-go" { }
+      ''
+        ${normalizedGrep}
+        for f in ${../../templates/default/prompts/fragments/filer-file-direct.md} ${../../templates/default/prompts/fragments/filer-file-direct-forgejo.md}; do
+          normalized_grep "$f" ${pkgs.lib.escapeShellArg dedupMarkerPrefixInGo} || {
+            echo "$f: expected the dedup marker prefix '${dedupMarkerPrefixInGo}' (dedup.go's dedupMarkerPrefix const) verbatim" >&2
+            exit 1
+          }
+          normalized_grep "$f" ${pkgs.lib.escapeShellArg dedupMarkerSuffixInGo} || {
+            echo "$f: expected the dedup marker suffix '${dedupMarkerSuffixInGo}' (dedup.go's dedupMarkerSuffix const) verbatim" >&2
+            exit 1
+          }
+        done
         touch $out
       '';
 

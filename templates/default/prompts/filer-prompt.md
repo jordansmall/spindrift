@@ -15,6 +15,15 @@ the issue number alone — research never opens a PR.
 Steps:
 
 ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
+   - Every finding's dedup key is its *site*, not its prose:
+     `path/to/file.go:Symbol` where the finding names a symbol, else
+     `path/to/file.go:<line>`. The Standards and Spec review axes word the
+     same defect differently, so only the site is stable across them — never
+     key on wording. One key per finding; add a second only when a finding
+     genuinely spans two sites.
+   - Search for the site key over open issues first — the most reliable
+     check, since it matches the stable key rather than prose:
+       gh issue list --state open --search '"<site key>" in:body'
    - Search ALL open issues, regardless of label — an open issue describing
      the same problem means it's already tracked, whether human-filed,
      `ready-for-agent`, filed via `/to-tickets`, or from a prior Filer run:
@@ -28,8 +37,8 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_
    - A plain closed issue carrying none of these labels does NOT suppress
      filing — a problem that was fixed and later regressed can still be
      refiled.
-   Skip any finding that matches an existing issue in any search by
-   subject.
+   Skip any finding that matches an existing issue in any search, by site
+   key or by subject.
 
 ${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}${FILER_FILE_RELAY_SOCKET_STEP}4. Each filed issue:
    - Title: a conventional-commit-style title scoped to the fix itself (e.g.
