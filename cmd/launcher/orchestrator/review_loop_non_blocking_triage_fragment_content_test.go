@@ -10,7 +10,7 @@ import (
 // both fragment files' shared item list ends on. Anchoring extraction to this
 // literal text rather than to the next blank line means a blank line inside the
 // item list can never truncate the extraction early.
-const nonBlockingTriageItemListEndMarker = "not a regression."
+const nonBlockingTriageItemListEndMarker = "not a weakening of it."
 
 // nonBlockingTriageParagraph extracts the shared non-blocking triage item list,
 // from the "1. Fix inline" item through nonBlockingTriageItemListEndMarker, out
@@ -96,13 +96,17 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 	})
 
 	t.Run("item 3 tiebreak is verbatim round-aware", func(t *testing.T) {
-		// This matches the sentence verbatim rather than on loose keywords, so an
+		// This matches the sentences verbatim rather than on loose keywords, so an
 		// inverted default ("first round escalates, second round fixes") cannot
 		// pass. It checks only inlineParagraph, because the shared-item-list
 		// subtest above already catches an inversion identical in both files.
-		wantTiebreak := "When unsure whether a finding clears that bar: on the first review round, fix it rather than file it; from the second review round on, escalate it instead."
+		wantTiebreak := "When unsure whether a finding clears that bar: on the first review round, fix it rather than file it."
 		if !strings.Contains(inlineParagraph, wantTiebreak) {
 			t.Errorf("non-blocking triage item 3 missing the exact round-aware tiebreak sentence: got %q, want it to contain %q", inlineParagraph, wantTiebreak)
+		}
+		wantDiffGrowthGate := "From the second review round on, escalate it only when fixing it would widen the diff"
+		if !strings.Contains(inlineParagraph, wantDiffGrowthGate) {
+			t.Errorf("non-blocking triage item 3 missing the exact diff-growth-gated escalation sentence: got %q, want it to contain %q", inlineParagraph, wantDiffGrowthGate)
 		}
 	})
 
@@ -119,6 +123,33 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		item1Only := inlineParagraph[:item2Idx]
 		if strings.Contains(item1Only, "review round") {
 			t.Errorf("non-blocking triage item 1 must stay unconditional across every review round, not gated by round: %q", item1Only)
+		}
+	})
+
+	t.Run("item 1 counts the branch's own earlier-round fixes as in-scope surface", func(t *testing.T) {
+		// Recalibration (issue #3611): scope was pinned to the slice "as
+		// originally authored", so a line this branch wrote in an earlier
+		// round's own absorbed fix was out of scope for a later round's item 1,
+		// pushing that finding to escalate (item 3) instead of a cheap inline
+		// fix. Item 1 now counts such lines as in-scope surface. This pins the
+		// new wording present and the deleted wording absent, in both files.
+		for _, want := range []string{
+			"Lines this branch",
+			"count as that surface",
+		} {
+			if !strings.Contains(inlineParagraph, want) {
+				t.Errorf("review-loop-inline.md non-blocking triage item 1 missing %q", want)
+			}
+			if !strings.Contains(orchestratorParagraph, want) {
+				t.Errorf("review-loop-orchestrator.md non-blocking triage item 1 missing %q", want)
+			}
+		}
+		deleted := "not whatever surface the diff has since grown to touch"
+		if strings.Contains(inlineParagraph, deleted) {
+			t.Errorf("review-loop-inline.md non-blocking triage item 1 still contains the deleted scope-pin wording %q", deleted)
+		}
+		if strings.Contains(orchestratorParagraph, deleted) {
+			t.Errorf("review-loop-orchestrator.md non-blocking triage item 1 still contains the deleted scope-pin wording %q", deleted)
 		}
 	})
 
@@ -158,6 +189,26 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		}
 	})
 
+	t.Run("orchestrator fallback rationale defers to item 3's narrowed test, not its own cost model (issue #3611)", func(t *testing.T) {
+		// The fallback is read by a run that cannot determine its own round, so a
+		// cost model of its own would override item 3's narrowed one: a stale
+		// "deferring is safer" here licenses the round-2 over-firing issue #3611
+		// removes, on the ambiguous small in-scope finding item 3 keeps inline.
+		stale := []string{
+			"deferring only costs an extra filed issue",
+			"not a silently widened diff, so it's the safer failure mode here",
+		}
+		for _, dead := range stale {
+			if strings.Contains(orchestratorNorm, dead) {
+				t.Errorf("review-loop-orchestrator.md fallback rationale still contains the stale cost model %q", dead)
+			}
+		}
+		wantDefer := "under item 3 below that default is not a blanket deferral but the narrower diff-growth test"
+		if !strings.Contains(orchestratorNorm, wantDefer) {
+			t.Errorf("review-loop-orchestrator.md fallback rationale missing the deferral to item 3's narrowed test: want it to contain %q", wantDefer)
+		}
+	})
+
 	t.Run("opening framing is reconciled with the round-aware default (AC4)", func(t *testing.T) {
 		// AC4 requires reconciling the older unqualified "the default" wording
 		// against the round-aware tiebreak. "Regardless of round", not "on every
@@ -173,10 +224,20 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		}
 	})
 
-	t.Run("rise in filing volume is stated as the intended effect (AC5)", func(t *testing.T) {
-		want := "is the intended effect of this round-awareness, not a regression"
-		if !strings.Contains(inlineParagraph, want) {
-			t.Errorf("non-blocking triage item 3 missing the AC5 intended-effect sentence: got %q, want it to contain %q", inlineParagraph, want)
+	t.Run("round-2-on escalation is gated on diff growth, not round number alone (AC5)", func(t *testing.T) {
+		// Recalibration (issue #3611): an ambiguous finding whose fix stays small
+		// and inside the branch's already-touched surface is still fixed inline
+		// at every round. Only a fix that would widen the diff escalates from
+		// round 2 on. Both sentences pin the narrowed condition; losing either
+		// would silently widen what round 2 escalates back toward the old
+		// blanket flip.
+		for _, want := range []string{
+			"is still fixed inline, at every round",
+			"Narrowing the round-2 flip to diff growth is this tiebreak's calibration, not a weakening of it.",
+		} {
+			if !strings.Contains(inlineParagraph, want) {
+				t.Errorf("non-blocking triage item 3 missing the AC5 diff-growth-gated sentence: got %q, want it to contain %q", inlineParagraph, want)
+			}
 		}
 	})
 
