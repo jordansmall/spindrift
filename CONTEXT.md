@@ -94,8 +94,10 @@ effort, and only design trade-offs, out-of-scope work, or too-large changes
 reach the Filer — and a [[Research dispatch]] hands it the run's [[Research
 finding]]s. One issue per surviving finding, merging only findings that are
 the same change, after a dedup search over previously filed findings in any
-state (a closed finding is a human triage decision, never refiled). Its
-issues carry a provenance label naming the caller — `agent-review-finding`
+state (a closed finding is a human triage decision, never refiled); on the
+relay path the Launcher backstops this again, host-side, by site key against
+the open backlog before filing. Its issues carry a provenance label naming
+the caller — `agent-review-finding`
 from the work loop, `agent-research-finding` from research — and are never
 dispatchable by its own hand: a human promotes them, preserving the rule
 that a human is the launch button. Filing is best-effort: a Filer failure
