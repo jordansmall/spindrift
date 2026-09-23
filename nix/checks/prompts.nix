@@ -1339,17 +1339,30 @@ in
         touch $out
       '';
 
-  # Grep pin (issue #3226 slice 3): the filer's issue-authoring obligations
-  # (work-path backlink shape, no provenance line on a research-path issue,
-  # never the dispatch label) are contract, not coaching. Each grep anchors on
-  # the literal sentence, so an edit that keeps "provenance" but drops the
-  # rule still fails. Rule 2's sentence wraps, so grep needs two lines for it.
+  # Grep pin (issue #3226 slice 3, extended by issue #3652): the filer's
+  # issue-authoring obligations are contract, not coaching -- the work-path
+  # backlink shape (PR form, and since #3652 the now-primary branch form,
+  # since the filer runs before a PR exists), no provenance line on a
+  # research-path issue, never the dispatch label, and never synthesizing a
+  # URL like the observed 404 `pull/DRAFT`. Each grep anchors on a
+  # distinguishing literal fragment of the prompt's own wording -- a backlink
+  # template, or a clause carrying the obligation itself -- so an edit that
+  # keeps a keyword like "provenance" but drops or inverts the rule still
+  # fails. The branch form's grep spans its `is the primary` clause for that
+  # reason: without it a reword could rank the PR form first again while every
+  # other literal stayed put. Rule 2's sentence wraps across two lines in the
+  # prompt, so it needs two greps to pin both halves.
   filer-prompt-issue-authoring-obligations =
     pkgs.runCommand "filer-prompt-issue-authoring-obligations" { }
       ''
         grep -qF -- 'Found by review during #<issue> (PR <url>)' \
           ${../../templates/default/prompts/filer-prompt.md} || {
           echo "expected the work-path provenance line's exact text 'Found by review during #<issue> (PR <url>)' in filer-prompt.md" >&2
+          exit 1
+        }
+        grep -qF -- 'Found by review during #<issue> (branch <name>)`, is the primary' \
+          ${../../templates/default/prompts/filer-prompt.md} || {
+          echo "expected the work-path provenance line's branch form 'Found by review during #<issue> (branch <name>)' ranked as the primary case in filer-prompt.md" >&2
           exit 1
         }
         grep -qF -- 'For a research delegation, add no provenance' \
@@ -1365,6 +1378,16 @@ in
         grep -qF -- 'NEVER the dispatch label' \
           ${../../templates/default/prompts/filer-prompt.md} || {
           echo "expected the never-the-dispatch-label rule in filer-prompt.md" >&2
+          exit 1
+        }
+        grep -qF -- "Never synthesize a URL you weren't given" \
+          ${../../templates/default/prompts/filer-prompt.md} || {
+          echo "expected the never-synthesize-a-URL clause 'Never synthesize a URL you weren't given' in filer-prompt.md" >&2
+          exit 1
+        }
+        grep -qF -- 'a fabricated `pull/DRAFT` link that 404s' \
+          ${../../templates/default/prompts/filer-prompt.md} || {
+          echo "expected the named observed failure clause 'a fabricated \`pull/DRAFT\` link that 404s' in filer-prompt.md" >&2
           exit 1
         }
         touch $out
