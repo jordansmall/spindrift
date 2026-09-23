@@ -72,8 +72,8 @@ let
 
   # Issue #2751. The env vars below stay hand-listed instead of building on
   # `batsEnv // { ... }`: merging batsEnv wholesale would pull unrelated
-  # harnesses (skillsHarness, opencodeHarness, promptHarness, DOGFOOD_SH and
-  # the rest) into this derivation's closure for vars its suites never read.
+  # harnesses (skillsHarness, opencodeHarness, promptHarness and the rest)
+  # into this derivation's closure for vars its suites never read.
   outcomeBatsChecks = pkgs.lib.mapAttrs' (
     name: entry:
     pkgs.lib.nameValuePair "bats-outcome-${name}" (
@@ -124,8 +124,6 @@ let
     pkgs.gnused
     pkgs.jq
     pkgs.socat
-    # `ps` for the dogfood Ctrl-C test's process-group assertions.
-    pkgs.procps
   ];
 
   batsEnv = {
@@ -146,7 +144,6 @@ let
     # (issue #1988), same reasoning.
     BASH_OUTPUT_TEE_SCRIPT = ../../agent/bash-output-tee.sh;
     BASH_OUTPUT_SUMMARY_SCRIPT = ../../agent/bash-output-summary.sh;
-    DOGFOOD_SH = ../../dogfood.sh;
     # Issue #2057. tests/ is copied into the sandbox but its parent
     # ab-orchestrator.sh is not, so tests/ab-orchestrator.bats resolves the
     # script through this var rather than $BATS_TEST_DIRNAME/../.
@@ -323,7 +320,6 @@ in
         # nix-rendered preamble), so they are shellcheck'd by
         # writeShellApplication at build time, not standalone here.
         shellcheck --shell=bash \
-          ${../../dogfood.sh} \
           ${../../agent/entrypoint.sh} \
           ${../../agent/format-transcript.sh} \
           ${../../agent/reject-background-bash.sh} \

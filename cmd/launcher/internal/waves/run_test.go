@@ -153,7 +153,7 @@ func TestRun_Discovered_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 
 // Once the colliding in-progress issue leaves InProgress, a fresh Run
 // invocation dispatches the previously-deferred candidate. The two calls are
-// the sequence a real driving loop (dogfood.sh, CI, or an operator re-running
+// the sequence a real driving loop (the daemon, CI, or an operator re-running
 // dispatch) performs across process invocations.
 func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testing.T) {
 	c := baseConfig()

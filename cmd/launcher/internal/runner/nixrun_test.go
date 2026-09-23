@@ -12,7 +12,7 @@ import (
 
 // The Console's in-session rebuild action (issue #652) needs a fresh nix
 // invocation rather than a call into EnsureReady, because IMAGE_DRV and
-// IMAGE_TAG are fixed at process start. The argv matches what dogfood.sh
+// IMAGE_TAG are fixed at process start. The argv matches what an operator
 // runs after a pull, and Dir is pwd so the build reads the updated tree.
 func TestRunNixBuild_InvokesNixRunBuildInPwd(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0, stdout: ""})

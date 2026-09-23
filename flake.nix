@@ -187,10 +187,11 @@
               };
             }
             # dogfood-bwrap is the apps.default CLI built off
-            # fixtures.dogfoodBwrapHarness (issue #2672), so dogfood.sh can drive
-            # a bwrap Box without touching apps.default or the podman module
-            # config. Without the guard it resolves on aarch64-darwin and fails
-            # opaquely once the launcher realizes agent-closure, not up front.
+            # fixtures.dogfoodBwrapHarness (issue #2672), so DAEMON_APP /
+            # dogfood-bwrap-daemon can drive a bwrap Box without touching
+            # apps.default or the podman module config. Without the guard it
+            # resolves on aarch64-darwin and fails opaquely once the launcher
+            # realizes agent-closure, not up front.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               dogfood-bwrap = fixtures.dogfoodBwrapHarness.apps.default;
               # Its daemon counterpart (issue #3538): dogfoodBwrapHarness's own
@@ -219,15 +220,6 @@
                   pkgs.bubblewrap
                   pkgs.passt
                 ];
-                # `dogfood-stop` signals a running ./dogfood.sh to wind down
-                # gracefully, instead of Ctrl-C, which would abort the wave
-                # mid-flight. What that costs depends on state the alias cannot
-                # see (in-flight launcher or not, continuous dispatch or not),
-                # so it reports only the signal it sent and leaves the
-                # consequence to the loop's own output.
-                shellHook = ''
-                  alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.spindrift/dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: stop requested (loop pid $pid) — the loop prints what it does next" || echo "dogfood: no running loop (.spindrift/dogfood.pid not found)"'
-                '';
               };
             }
             # For driving the bwrap dogfood harness directly: the bwrap-baked CLI

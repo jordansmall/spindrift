@@ -1149,7 +1149,7 @@ func checkBwrapOverlayGate(c config) error {
 
 // errQueueEmpty means discoverIssues found no open dispatchable issues. It and
 // its sibling sentinels each map to a distinct exit code so a driving loop
-// like dogfood.sh can tell terminations apart without a separate gh probe; see
+// like the daemon can tell terminations apart without a separate gh probe; see
 // exitCodeFor and bootstrapExitCode for the full mapping.
 var errQueueEmpty = errors.New("queue empty")
 
@@ -1172,11 +1172,11 @@ const exitConfigInvalid = 6
 
 // exitSignalledStop is the exit code for waves.ErrSignalledStop (issue
 // #3520; see its doc for why a stop wins over a stale-image or empty-queue
-// verdict in the same drain). A driving loop like dogfood.sh must stop on
-// this code rather than rebuild-and-re-invoke the way it does on exit 4. It
-// collides with no other dispatch exit code above; doctor's own exit-code
-// table is a separate space where the same integers mean unrelated things,
-// so this constant must never be read as doctor's.
+// verdict in the same drain). The daemon, the only driving loop left, must
+// stop on this code rather than continue into the next iteration the way
+// it does on exit 4. It collides with no other dispatch exit code above;
+// doctor's own exit-code table is a separate space where the same integers
+// mean unrelated things, so this constant must never be read as doctor's.
 const exitSignalledStop = 7
 
 func containsLabel(labels []string, target string) bool {

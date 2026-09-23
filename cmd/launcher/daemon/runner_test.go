@@ -520,6 +520,32 @@ func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
 	<-done
 }
 
+// TestRunChild_StdinIsDevNull pins RunChild's deliberate choice not to set
+// cmd.Stdin: the child's own process group (Setpgid, issue #3538) makes a
+// tty read a SIGTTIN stop, so dogfood.sh's mid-loop vault-unlock prompt has
+// no home under the daemon (issue #3548), and nothing may silently hand a
+// child the daemon's terminal. Capturing the seam's *exec.Cmd is race-free
+// here, unlike reading cmd.Process: RunChild writes Stdin, if at all,
+// before cmd.Start() and never after.
+func TestRunChild_StdinIsDevNull(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+	var captured *exec.Cmd
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		captured = exec.Command("/bin/sh", "-c", "true")
+		return captured
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+
+	if captured.Stdin != nil {
+		t.Errorf("cmd.Stdin = %v, want nil (default /dev/null)", captured.Stdin)
+	}
+}
+
 func gitRunT(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

@@ -1,5 +1,15 @@
 # Migration Guide
 
+## The `dogfood-stop` devShell alias is gone along with `dogfood.sh` (issue #3548)
+
+`./dogfood.sh` is deleted — the daemon (`nix run .#daemon`) is the only
+headless driving loop left, and it takes its own stop signal directly
+rather than through a devShell alias. The `dogfood-stop` alias that
+`nix develop` used to print, which sent `SIGUSR1` to a running
+`dogfood.sh`'s recorded pid, is gone with it. There is no replacement
+alias: stop a `nix run .#daemon` run the same way you stop any other
+foreground process (Ctrl-C, or `kill` its pid).
+
 ## `spindrift doctor` is quiet by default; `--verbose`/`-v` restores the old report (issue #3777)
 
 A healthy `spindrift doctor` run used to print roughly 35 `ok:`/`advisory:`

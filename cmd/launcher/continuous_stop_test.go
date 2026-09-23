@@ -109,7 +109,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverAllBlocked(t *test
 // exitSignalledStop the same as a pre-closed stop alone: RunContinuous's
 // observeAbort reclaims in-flight issues and returns the same
 // waves.ErrSignalledStop a graceful drain does, so a driving loop like
-// dogfood.sh sees one exit code for "the operator asked to stop" regardless
+// the daemon sees one exit code for "the operator asked to stop" regardless
 // of which escalation level actually fired.
 func TestRunExitCode_ContinuousDispatch_SignalledAbort_ExitsSameCodeAsStop(t *testing.T) {
 	withClosedAbortSignal(t)

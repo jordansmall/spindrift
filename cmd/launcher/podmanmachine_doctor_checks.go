@@ -14,7 +14,7 @@ import (
 const podmanMachineMemoryCheckName = "podman-machine-memory"
 
 // vmOverheadMiB is the RAM the machine's own OS and daemon compete for
-// alongside the containers it runs, matching dogfood.sh's VM_OVERHEAD_MIB.
+// alongside the containers it runs.
 const vmOverheadMiB = 512
 
 // podmanMachineMemoryFn is a seam so a test can substitute a distinguishable
@@ -63,13 +63,13 @@ func podmanMachineMemoryRemedy(memoryLimit string, maxParallel int) string {
 }
 
 // podmanMachineMemoryCheck builds the "podman-machine-memory" row (issue
-// #3537), porting dogfood.sh's shell preflight (#580, parallelism-aware per
-// #712) into doctor's own report. On macOS/Windows podman runs containers in
-// a VM with fixed RAM, so when MAX_PARALLEL containers together want more
-// than the machine has, the VM's OOM-killer fires before any single
-// container's --memory cap ever bites (#565 killed an in-box `nix build`;
-// #712 took down the whole VM). A bwrap harness runs no podman machine at
-// all, so the row never appears there.
+// #3537), porting the driving loop's old shell preflight (#580,
+// parallelism-aware per #712) into doctor's own report. On macOS/Windows
+// podman runs containers in a VM with fixed RAM, so when MAX_PARALLEL
+// containers together want more than the machine has, the VM's OOM-killer
+// fires before any single container's --memory cap ever bites (#565 killed
+// an in-box `nix build`; #712 took down the whole VM). A bwrap harness runs
+// no podman machine at all, so the row never appears there.
 func podmanMachineMemoryCheck(c config) []doctor.Check {
 	if c.runnerKind == freshness.KindBwrap {
 		return nil
