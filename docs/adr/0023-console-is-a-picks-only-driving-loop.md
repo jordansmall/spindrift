@@ -34,7 +34,15 @@ The Console is a peer of the headless loops, not their replacement:
 dogfood.sh and CI keep draining the label queue AFK, `dispatch <nums>` stays
 the scriptable one-shot, and coexistence is already safe because claims are
 atomic label swaps — the Console just surfaces a live `.spindrift/dogfood.pid` at
-startup so a competing drain loop is visible. Quit drains by default
+startup so a competing drain loop is visible. (Amended by issue #3548, landed
+in PR #3799: `dogfood.sh` is deleted and the daemon
+([ADR 0051](0051-the-driving-loop-is-a-shipped-app-above-the-invocation-boundary.md))
+is the headless peer loop the Console now coexists with, and the Console
+surfaces no competing-loop notice at all. The notice was never a gate — the
+atomic label swap above is unchanged — and repointing it at the daemon's
+checkout lock would force `console` to import `internal/daemon`, which
+`launcherCurrencyFileset` deliberately subtracts. A daemon holds an exclusive
+flock, so only one runs per checkout regardless.) Quit drains by default
 (terminate-all is an explicit escalation); a hard death leaves orphans to the
 existing recover path, offered on next start.
 
