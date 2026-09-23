@@ -123,8 +123,10 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 			clause: "Surface every finding — they don't gate the merge",
 		},
 		{
-			name:   "#3226 Non-blocking: work loop fixes cheap findings in place, escalates only what needs a human",
-			clause: "the work loop fixes cheap, in-scope ones and escalates only what needs a human",
+			// #3610 widened this clause from the binary fix/escalate pair to
+			// the triage's three outcomes, so the pin tracks the new wording.
+			name:   "#3226/#3610 Non-blocking: fix, drop, or escalate as the three outcomes",
+			clause: "the work loop fixes cheap, in-scope ones, drops a correct but trivial, out-of-scope one without filing it, and escalates only what genuinely needs a human",
 		},
 		{
 			name:   "#3226 Non-blocking: don't dress a cheap fix up as Blocking",

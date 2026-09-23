@@ -283,11 +283,14 @@ directly in your own output this turn, so the claim is auditable from
 this log. A failure you cannot prove this way is a failure this branch
 caused: fix it, do not wave it off.
 
-Non-blocking triage — do NOT reflexively file every finding. Filing every
-finding spawns more issues than the work ever closes, so resolving a cheap,
-in-scope finding here stays the default regardless of round (item 1 below,
-unchanged by round). Only the tiebreak for an ambiguous finding is
-round-aware (item 2 below): read the highest N among the top-level
+Non-blocking triage — do NOT reflexively file every finding. There are
+three outcomes: fix inline, drop, or escalate. Filing every finding spawns
+more issues than the work ever closes, so resolving a cheap, in-scope
+finding here stays the default regardless of round (item 1 below,
+unchanged by round), and dropping a correct-but-trivial, out-of-scope
+finding (item 2 below) is also unchanged by
+round. Only the tiebreak for an ambiguous finding headed for escalation is
+round-aware (item 3 below): read the highest N among the top-level
 "## Round N (verdict: ...)" section headers in the Findings log file the
 handoff's own Findings log bullet points to — not the Decisions record's own
 "## Round N" headers shown separately above (those number by pass, not by
@@ -308,7 +311,16 @@ non-blocking triage below, not the blocking-verdict handling above:
    amended into the commit each logically belongs to unless it is a
    reasonably separate scope, which earns its own commit. They never
    become issues.
-2. Escalate — to the filer if present, else the PR body — only a finding
+2. Drop a finding that is correct but trivial and out of scope for
+   this slice — the fix would be cheap, but the surface is one this
+   slice never touched, and nobody would ever prioritise it as a tracked
+   issue. Two examples: swapping a bare commit SHA for an issue reference
+   in a test comment, and preferring a numeric sort over a lexical one
+   in one line of list output. Dropping is a legitimate third outcome,
+   not a failure to act — a tracked issue nobody will ever pick up costs
+   more than the nit does. The floor is worth, not certainty: a finding
+   you are merely unsure about is not dropped, it goes to item 3 below.
+3. Escalate — to the filer if present, else the PR body — only a finding
    that genuinely needs a human: a real design trade-off, work outside
    this issue's scope, or a change too large to fold in without derailing
    the slice. When unsure whether a finding clears that bar: on the first
@@ -416,13 +428,15 @@ the first run did not.
 
 # FILE ISSUES
 
-REVIEW's triage already fixed inline every non-blocking finding that was
-cheap and in scope. Delegate to the filer subagent only the findings that
-survived that triage — the ones that genuinely need a human (a design
-trade-off, out-of-scope work, or a change too large to fold in), plus, from
-the second review round on, an ambiguous finding REVIEW's own round-aware
-tiebreak deferred rather than fixed. If none survived, skip this step;
-do not re-file what you just fixed.
+REVIEW's triage has three outcomes, and two of them are already settled
+by the time the filer runs: what was cheap and in scope was fixed inline,
+and what was trivial and out of scope was dropped without filing. Escalation
+is the third, and it is this step. Delegate to the filer subagent only the
+findings that survived that triage — the ones that genuinely need a human
+(a design trade-off, out-of-scope work, or a change too large to fold in),
+plus, from the second review round on, an ambiguous finding REVIEW's own
+round-aware tiebreak deferred rather than fixed. If none survived, skip
+this step; do not re-file what you just fixed or dropped.
 
 It is pre-provisioned via --agents; pass it the surviving findings verbatim,
 the issue number, and the PR URL (or branch, if not yet opened) for provenance.
