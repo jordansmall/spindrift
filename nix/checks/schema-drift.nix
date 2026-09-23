@@ -737,8 +737,9 @@ checkedMerge {
 
   # continuousDispatch's doc string is the single source rendered onto --help,
   # the man page, and docs/flake-options.md, so a stale pointer is stale
-  # everywhere. It must name docs/reference.md's Dogfood loop section, not the
-  # nonexistent README exit-code table it once cited (issue #1879).
+  # everywhere. It must name docs/reference.md's Dispatch exit codes section, not
+  # the nonexistent README exit-code table it once cited (issue #1879), and it
+  # must not point at the deleted Dogfood loop section either (issue #3548).
   continuous-dispatch-doc-reference =
     let
       schema = import ../../lib/env-schema.nix;
@@ -746,11 +747,13 @@ checkedMerge {
       doc = schema.continuousDispatch.doc;
     in
     assert assertMsg (!hasInfix "README" doc)
-      "lib/env-schema.nix: continuousDispatch.doc must not point at README for the exit-code table (issue #1879) — it lives in docs/reference.md's Dogfood loop section, got: ${doc}";
+      "lib/env-schema.nix: continuousDispatch.doc must not point at README for the exit-code table (issue #1879) — it lives in docs/reference.md's Dispatch exit codes section, got: ${doc}";
     assert assertMsg (hasInfix "docs/reference.md" doc)
       "lib/env-schema.nix: continuousDispatch.doc must point at docs/reference.md's exit-code table (issue #1879), got: ${doc}";
-    assert assertMsg (hasInfix "Dogfood loop" doc)
-      "lib/env-schema.nix: continuousDispatch.doc must name docs/reference.md's Dogfood loop section, not just the file (issue #1879), got: ${doc}";
+    assert assertMsg (hasInfix "Dispatch exit codes" doc)
+      "lib/env-schema.nix: continuousDispatch.doc must name docs/reference.md's Dispatch exit codes section, not just the file (issue #1879), got: ${doc}";
+    assert assertMsg (!hasInfix "Dogfood loop" doc)
+      "lib/env-schema.nix: continuousDispatch.doc must not point at the deleted Dogfood loop section (issue #3548), got: ${doc}";
     # The deprecation notice rides this one doc string, which is what renders
     # it onto --help, the man page, and docs/flake-options.md (issue #3547).
     assert assertMsg (hasInfix "DEPRECATED" doc)

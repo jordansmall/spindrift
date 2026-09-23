@@ -64,8 +64,9 @@ failure carries no exit-code sentinel of its own, so today it lands on exit 1
 dedicated code:
 
 These codes are scoped to `doctor` alone and deliberately disagree with the
-numbers `dispatch`'s own loop uses for its unrelated exit 2/3/4 (queue empty,
-none dispatchable, image stale) — the two vocabularies are never compared to
+numbers `dispatch`'s own exit codes use for its unrelated exit 2/3/4 (queue
+empty, none dispatchable, image stale; see [Dispatch exit
+codes](#dispatch-exit-codes)) — the two vocabularies are never compared to
 each other, so the collision is not a conflict to resolve.
 
 | exit | meaning |
@@ -1328,7 +1329,7 @@ the authoritative list.
 | var                    | default | `settings` section | meaning                                                |
 | ---------------------- | ------- | ------------------ | ------------------------------------------------------ |
 | `MAX_JOBS`             | `0`     | `concurrency`      | caps the wave size (`0` = uncapped) |
-| `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | **deprecated**, superseded by [Daemon](#daemon) (issue #3547) — opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the freshness probe before every launch; exits with a new documented code when the probe finds the loaded image or the loaded host launcher stale (see the [exit-code table](#dogfood-loop)) |
+| `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | **deprecated**, superseded by [Daemon](#daemon) (issue #3547) — opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the freshness probe before every launch; exits with a new documented code when the probe finds the loaded image or the loaded host launcher stale (see the [exit-code table](#dispatch-exit-codes)) |
 | `DAEMON_APP`           | `.#`    | — (post-freeze; no legacy alias — set `dispatch.daemonApp`) | flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision — the Consumer's own CLI app, e.g. `.#` or `.#dogfood-bwrap`; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
 | `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host — see [Daemon](#daemon) |
 | `DAEMON_SELF_APP`      | `.#daemon` | — (post-freeze; no legacy alias — set `dispatch.daemonSelfApp`) | flake app attribute of the daemon itself, evaluated at each fetched tip to notice its own build changed and halt — distinct from `DAEMON_APP`, the child Dispatch app; a Consumer that re-exports the daemon under another top-level attribute (e.g. spindrift's own `.#dogfood-bwrap-daemon`) must set this to match, or the check would evaluate a different harness's daemon and report a permanent, spurious change; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
@@ -4242,10 +4243,11 @@ path is the exception: `main.go` can exit on `ErrImageStale` within seconds
 of a multi-minute realize starting, in `waves/continuous.go`, putting a
 later Ctrl-C in the ordinary post-exit case instead.)
 
-**The accepted cost: Ctrl-C.** The [dogfood loop](#dogfood-loop)'s Ctrl-C
-hard-abort — the escape hatch `dogfood.sh`'s graceful-stop trap comment
-describes, which points back at this section — sends SIGINT to the whole
-foreground process group. Because
+**The accepted cost: Ctrl-C.** A bare Ctrl-C at a terminal running the
+launcher directly — as opposed to the two-stage signalled-stop latch a
+driving loop or the daemon relies on (see [Dispatch exit
+codes](#dispatch-exit-codes)) — is a hard abort: the shell's own job
+control sends SIGINT to the whole foreground process group. Because
 Setpgid already detached the `nix build` child from that group at fork
 time, the SIGINT does not reach it: the child survives orphaned, still
 holding the single-user nix store lock, rather than dying alongside the
@@ -4573,74 +4575,29 @@ the same corruption-tolerant idiom the freshness-guard state file uses. A
 probe that itself fails is never cached, either: a transient infrastructure
 hiccup is not a verdict, and remembering one would make it permanent.
 
-## Dogfood loop
+## Dispatch exit codes
 
-`dogfood.sh` drives spindrift building itself, with `CONTINUOUS_DISPATCH=1`
-on by default: instead of draining one bounded batch and returning, the
-launcher runs a long-lived slot-refill loop — as each Box finishes, it
-re-discovers the queue and refills the freed slot immediately, re-applying
-blocker readiness and the Touches overlap gate — gated by the
-image-freshness probe before every launch. An operator can still
-set `CONTINUOUS_DISPATCH=` (empty) in `harness.env` to fall back to the older
-one-wave-and-exit shape.
+`spindrift dispatch`'s own exit codes are what both continuous dispatch
+(below) and the daemon (see [Daemon](#daemon)) interpret to decide what
+happens next:
 
-The freshness boundary is no longer every iteration: a refill launches
-straight onto the already-loaded image so long as it's still fresh, and
-`dogfood.sh` only pulls and rebuilds when the launcher reports the image has
-actually gone stale (build is a no-op unless the merged diff changed the
-image hash).
+| exit | meaning |
+|------|---------|
+| 0    | dispatched work |
+| 2    | queue empty (no open issues with the dispatch label) |
+| 3    | open issues exist but none are dispatchable |
+| 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found the loaded host launcher is stale relative to the flake's launcher-currency attr (or, under the OCI runtime, that the loaded image would also be rebuilt against the current base-branch tip); in-flight Boxes finished, no new ones launched |
+| 5    | the loaded image is stale in a way no rebuild converges (host-tainted: a host-system derivation reached the image graph, so the same base tip stays stale after a rebuild against it) |
+| 6    | bootstrap rejected the config (the launcher's `exitConfigInvalid`) — e.g. a missing required setting, or flags that cannot combine |
+| 7    | an operator asked the run to stop — the one-shot dispatch wave, selective dispatch, research, and the `recover` gate all share this same two-stage latch, not just `CONTINUOUS_DISPATCH` mode. On one signal the launcher stopped claiming new issues, let in-flight Boxes finish and settle, ran its normal teardown, and exited; on a second signal it instead reaped every in-flight Box and released their issues back to the dispatchable pool before exiting. Both are the same code deliberately — each means "you asked me to stop" |
 
-**Deprecated.** Continuous dispatch is superseded by the daemon
-(`apps.daemon`, `nix run .#daemon` — see [Daemon](#daemon)), which holds the
-pool a different way: one single-Box launcher invocation per slot, each
-pinned to its own fetched revision, rather than one long-lived launcher
-process doing all the pool-holding itself. Freshness therefore stops being
-something one process must orchestrate across its whole pool lifetime —
-the very job the image-freshness probe, the hot-swap, and the stale-drain
-exit documented further down this section exist to do. It is **not
-removed**: the knob still works, it stays available for operators who want
-no daemon at all, and it remains the Console's engine unchanged (see
-[docs/console.md](console.md)). See issue #3547.
-
-**Parallel by default.** `MAX_JOBS` defaults to `MAX_PARALLEL` (default 3),
-so the slot pool holds that many Boxes at once. Set `MAX_JOBS` explicitly to
-run a larger or unbounded pool.
-
-**Podman machine RAM.** Under `DOGFOOD_RUNTIME=podman` (default), `dogfood.sh`
-refuses to start against a podman machine whose RAM is smaller than
-`MEMORY_LIMIT` × `MAX_PARALLEL` (plus a fixed 512MiB VM overhead): that
-mismatch lets the VM's own OOM-killer kill an in-box build — or, once enough
-boxes run concurrently, the whole VM — before any single container's
-`--memory` cap ever bites. `DOGFOOD_RUNTIME=bwrap` skips this preflight
-outright — bwrap is daemonless and has no VM for the check to inspect. The
-check reads `podman machine
-inspect`, compares its `Resources.Memory` (MiB) against the required total,
-and on shortfall prints the machine RAM, the required RAM, and a fix
-(`podman machine set --memory <N>`, lower `MAX_PARALLEL`, or lower
-`MEMORY_LIMIT`) before exiting 1 — no box is dispatched. It's a no-op with
-adequate machine RAM, and skips cleanly when there's no active podman machine
-(native Linux, or a non-podman runtime). With the defaults (`MEMORY_LIMIT=5g`,
-`MAX_PARALLEL=3`) the computed minimum is 15872MiB, and that's the exact
-`--memory` value the fix-hint prints — copy it verbatim rather than a rounded
-16384 (16GiB): a custom `MEMORY_LIMIT`/`MAX_PARALLEL` computes a different
-minimum than the shipped defaults, so only the fix-hint's own number is
-guaranteed correct for your config. `spindrift doctor` reports the same
-check as its `podman-machine-memory` row, so an operator who never runs the
-dogfood loop still learns about the shortfall; the loop keeps its own copy of
-the arithmetic because it must gate before any launcher binary is built
-(issue #3537).
-
-**Termination.** The loop is driven entirely by the launcher's exit code:
-
-| exit | meaning | loop action |
-|------|---------|-------------|
-| 0    | dispatched work | pull + rebuild, then continue |
-| 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
-| 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
-| 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found the loaded host launcher is stale relative to the flake's launcher-currency attr (or, under the OCI runtime, that the loaded image would also be rebuilt against the current base-branch tip); in-flight Boxes finished, no new ones launched | pull + rebuild, then re-invoke — the same boundary exit 0 runs; on an image-stale verdict the rebuild is often already pre-warmed by a background `nix build` the launcher kicked off during the drain, so the driving loop's rebuild is frequently a cache hit — a launcher-only-stale verdict does not trigger that background prebuild, so the rebuild there always runs cold |
-| 5    | the loaded image is stale in a way no rebuild converges (host-tainted: a host-system derivation reached the image graph, so the same base tip stays stale after a rebuild against it) | halt — print the non-converging divergence and stop; re-invoking cannot fix it |
-| 6    | bootstrap rejected the config (the launcher's `exitConfigInvalid`) — e.g. a missing required setting, or flags that cannot combine | no branch of its own: falls into the catch-all `launcher failed (exit 6)` message on stderr, and the loop exits 1 |
-| 7    | an operator asked the run to stop — the one-shot dispatch wave, selective dispatch, research, and the `recover` gate all share this same two-stage latch, not just `CONTINUOUS_DISPATCH` mode. On one signal the launcher stopped claiming new issues, let in-flight Boxes finish and settle, ran its normal teardown, and exited; on a second signal it instead reaped every in-flight Box and released their issues back to the dispatchable pool before exiting. Both are the same code deliberately — each means "you asked me to stop" | stop — do not pull, rebuild, or re-invoke; the operator asked the run to stop, which is exactly what distinguishes 7 from 4 |
+Exit 4's own rebuild cost differs by which dimension is stale. When the image
+dimension is stale, the launcher has already kicked a background `nix build`
+of the stale tip (`freshness.RealizeTip`) during the drain itself, so
+whatever builds that tip next — the daemon's following iteration, or an
+operator re-running the dispatch — is usually a cache hit off that build. A
+launcher-only-stale verdict has no tip to realize, since the launcher cannot
+rebuild itself in place, so that build is always cold.
 
 Under the bwrap runtime, a verdict where only the agent-closure image
 dimension is stale no longer reaches exit 4 at all: the launcher
@@ -4736,50 +4693,74 @@ outlives the abort abandons at its next checkpoint rather than driving the
 issue to a terminal state behind it. `SIGKILL` remains uncatchable and abrupt
 — the last resort no code path can intercept.
 
-`CONTINUOUS_DISPATCH` is deprecated — a new driving loop should reach for
-the daemon instead (see [Daemon](#daemon)). Set `CONTINUOUS_DISPATCH=1` to
-opt into the slot-refill dispatch mode in a driving loop other than
-`dogfood.sh`; see `lib/env-schema.nix`'s `continuousDispatch` entry for the
-full behavior. On the command line `--continuous-dispatch` is a boolean
+## Continuous dispatch
+
+Setting `CONTINUOUS_DISPATCH=1` turns dispatch into a long-lived slot-refill
+loop: instead of draining one bounded batch and returning, the launcher
+keeps running — as each Box finishes, it re-discovers the queue and refills
+the freed slot immediately, re-applying blocker readiness and the Touches
+overlap gate — gated by the image-freshness probe before every launch.
+Leave `CONTINUOUS_DISPATCH=` (empty, the default) for the older
+one-wave-and-exit shape.
+
+The freshness boundary is no longer every iteration: a refill launches
+straight onto the already-loaded image so long as it's still fresh, and a
+driving loop only needs to pull and rebuild when the launcher reports the
+image has actually gone stale (build is a no-op unless the merged diff
+changed the image hash) — see exit 4 in [Dispatch exit
+codes](#dispatch-exit-codes) above.
+
+**Deprecated.** Continuous dispatch is superseded by the daemon
+(`apps.daemon`, `nix run .#daemon` — see [Daemon](#daemon)), which holds the
+pool a different way: one single-Box launcher invocation per slot, each
+pinned to its own fetched revision, rather than one long-lived launcher
+process doing all the pool-holding itself. Freshness therefore stops being
+something one process must orchestrate across its whole pool lifetime —
+the very job the image-freshness probe, the hot-swap, and the stale-drain
+exit documented in [Dispatch exit codes](#dispatch-exit-codes) above exist
+to do. It is **not removed**: the knob still works, it stays available for
+operators who want no daemon at all, and it remains the Console's engine
+unchanged (see [docs/console.md](console.md)). See issue #3547.
+
+See `lib/env-schema.nix`'s `continuousDispatch` entry for the full
+behavior. On the command line `--continuous-dispatch` is a boolean
 flag: bare `--continuous-dispatch` — or its `--continuous` alias — turns
 the loop on, and `--continuous-dispatch=0` turns it off; both `spindrift
 dispatch` and `spindrift research` accept either form.
+
+## Podman machine RAM
+
+`spindrift doctor`'s `podman-machine-memory` check (Required tier, reported
+for every non-bwrap runner kind) fails when the active podman machine's RAM
+is smaller than `MEMORY_LIMIT` × `MAX_PARALLEL` (plus a fixed 512MiB VM
+overhead): that mismatch lets the VM's own OOM-killer kill an in-box build
+— or, once enough boxes run concurrently, the whole VM — before any single
+container's `--memory` cap ever bites. The check reads `podman machine
+inspect`, compares its `Resources.Memory` (MiB) against the required total,
+and on shortfall prints the machine RAM, the required RAM, and a fix
+(`podman machine set --memory <N>`, lower `MAX_PARALLEL`, or lower
+`MEMORY_LIMIT`). It's a no-op with adequate machine RAM, and reports `not
+applicable` rather than a failure for a non-podman runtime, an empty
+`MEMORY_LIMIT` (the schema's deliberate opt-out), or no active podman
+machine — native Linux, or bwrap, which is daemonless and has no VM for the
+check to inspect. With the defaults (`MEMORY_LIMIT=5g`, `MAX_PARALLEL=3`)
+the computed minimum is 15872MiB, and that's the exact `--memory` value the
+fix-hint prints — copy it verbatim rather than a rounded 16384 (16GiB): a
+custom `MEMORY_LIMIT`/`MAX_PARALLEL` computes a different minimum than the
+shipped defaults, so only the fix-hint's own number is guaranteed correct
+for your config (issue #3537, issue #3544).
+
+## Dogfood Consumer config
 
 **Subagent roster.** The dogfood Consumer config's subagent models and
 efforts, and its orchestrator review effort, are all set via `roster` in
 `nix/dogfood-defaults.nix` — see [Subagent roster](#subagent-roster) for the
 mechanism and dogfood's specific values.
 
-**Research.** `dogfood.sh` drives `spindrift dispatch` (the work kind) by
-default; set `DOGFOOD_KIND=research` to drive `spindrift research` instead —
-the same slot-refill loop, `MAX_JOBS`, and exit-code contract apply
-unchanged, since both kinds share `cmdDispatch`'s exit codes (ADR 0022). Kinds
-are homogeneous per invocation (`research` and `dispatch` never mix issues in
-one run) — run `dogfood.sh` twice, once per kind, to drive both queues.
-
-**Runtime.** `dogfood.sh` drives `apps.default` (the podman runner) by
-default; set `DOGFOOD_RUNTIME=bwrap` to route the same loop through
-`apps.dogfood-bwrap` instead. `apps.default` is built from flake.nix's
-`spindrift = { ... }` module config, and `apps.dogfood-bwrap` from a direct
-`mkHarness` call (`dogfoodHarnessArgs` in `nix/fixtures.nix`) with only
-`runtime` swapped to `"bwrap"` — the equivalence check proves the two paths
-are instantiated from the exact same tuned dogfood values
-(`nix/dogfood-defaults.nix`, plus `revision` and the baked skills from
-`nix/dogfood-skills.nix`), so only the runner differs. An invalid value exits
-1 with a clear error, same as `DOGFOOD_KIND` above. `DOGFOOD_RUNTIME=bwrap`
-additionally requires Linux — bubblewrap has no macOS build — and exits 1
-with a clear message on any other host, before the loop's first `nix run`.
-Runtimes are homogeneous per invocation the same way kinds are: both
-loops share one working tree, `.spindrift/dogfood.pid`, and per-issue logs,
-so running them concurrently against the same queue races on all three —
-run `dogfood.sh` twice, sequentially, once per `DOGFOOD_RUNTIME` value, to
-compare the two runners head-to-head under identical roster/skill/policy
-settings.
-
-For one-shot bwrap runs outside the loop, `nix develop .#bwrap` (Linux-only,
-same guard as `apps.dogfood-bwrap`) puts the bwrap-baked `spindrift` CLI on
-PATH together with the host binaries the launcher execs from ambient PATH —
-`bwrap` and `pasta` (issue #2666) — so
+For one-shot bwrap runs, `nix develop .#bwrap` (Linux-only, same guard as
+`apps.dogfood-bwrap`) puts the bwrap-baked `spindrift` CLI on PATH together
+with the host binaries the launcher execs from ambient PATH — `bwrap` and
+`pasta` (issue #2666) — so
 `spindrift build && spindrift dispatch <issue> --yes` works directly, with
 no `nix run` prefix and no reliance on the default dev shell's toolchain.
 
@@ -4891,12 +4872,11 @@ operator who has not created the research labels runs the daemon, work-only,
 exactly as before this ticket. The default flipped to both because an
 operator no longer has to choose between advancing the queue and enriching
 the backlog for later — a daemon left running just does both. Unlike a
-single `spindrift dispatch`/`research` invocation or `dogfood.sh`'s bounded
-batch, the daemon keeps working the queue after it drains, so work labelled
-later is picked up without a restart. It supersedes continuous dispatch as
-the way to hold a pool of Boxes, which is deprecated in its favour but not
-removed (issue #3547) — see **Deprecated** under
-[Dogfood loop](#dogfood-loop).
+single `spindrift dispatch`/`research` invocation, the daemon keeps working
+the queue after it drains, so work labelled later is picked up without a
+restart. It supersedes continuous dispatch as the way to hold a pool of
+Boxes, which is deprecated in its favour but not removed (issue #3547) —
+see **Deprecated** under [Continuous dispatch](#continuous-dispatch).
 
 The daemon is a separate binary (`cmd/launcher/daemon`), built from the same
 source tree and vendor hash as the launcher, and it's the only component
@@ -5378,10 +5358,10 @@ each fetched tip to notice its own build changed — see the
 `DAEMON_SELF_APP` row in the same table and **Self-change halt** below.
 
 Each child's exit code is interpreted the same way `spindrift`'s own exit
-codes are (see the [exit-code table](#dogfood-loop) in Dogfood loop above,
-which this table's meanings link back to) — but the daemon's *action* on
-each code is its own, distinct from dogfood.sh's pull-and-rebuild loop.
-The wait below is no longer a fixed interval: it is an idle backoff, one
+codes are (see the [exit-code table](#dispatch-exit-codes) in Dispatch exit
+codes above, which this table's meanings link back to) — but the daemon's
+*action* on each code is its own. The wait below is no longer a fixed
+interval: it is an idle backoff, one
 per configured Dispatch kind (`kindBackoff`,
 `cmd/launcher/internal/daemon/backoff.go`) rather than one pool-wide timer
 (issue #3541 split it: an empty work queue must not slow research down,
@@ -5424,7 +5404,7 @@ in-place wait.
 | 0    | dispatched work | go again at once; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
 | 2    | queue empty | record it against this kind's own backoff (emit `idle`), then loop back around: switch to the other configured kind at once if it is still runnable, or sleep — via the shared `idleSleep` — only if every kind is now gated. A queue-empty gate is never itself polled mid-wait: a merge cannot create work in an empty queue, so polling for one would only spend a query for nothing |
 | 3    | none dispatchable | with any sibling slot `resolving`, `running` or `backing_off` — doing anything at all but waiting for its own turn — routine: record it against this kind's backoff (emit `idle`) the same as exit 2. Only once every sibling is `idle` or `awaiting_window` is it recorded as a jam instead (emit `jam`), same routing (a single-slot daemon has no siblings at all and so reports every exit 3 as a jam). Either way the slot switches to the other configured kind at once if that kind is still runnable; only once every kind is gated, *and* at least one of them is jammed, does the shared `idleSleep` sleep in `IdleFloor`-sized slices, since a merge here *can* unblock the jam — there is no separate poll: the slot sleeps one slice, and the next round's own resolution, made before it picks a kind, is what finds out, so a jammed wait costs one fetch per slice, not one for a poll and another for the round it unblocks. The first no-work wait for a kind is exactly one `IdleFloor` slice and so still resolves nothing extra, with the next round's own resolution asked for only once that kind's backoff has grown past the floor; if that resolution reports the tip moved (`Tip.Moved`), the slot emits `tip_moved` once and resets *every currently-jammed kind's* backoff to `IdleFloor` (the observed change is evidence for all of them, not just the kind this slot was running), and goes again at once instead of riding out the rest of the wait. A mid-wait resolution that fails is treated as no change observed — it never feeds the breaker, since the iteration's own post-`pickKind` resolution is what reports a broken fetch |
-| 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
+| 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
 | 5    | host-tainted | halt the pool |
 | 6    | config-invalid | halt the pool |
 | 7    | signalled stop | halt the pool once the operator's Stop latch is already closed; while Stop is still open, an unrecognised operator-external signal instead backs this slot off (see **Failures** below) |
@@ -5578,8 +5558,8 @@ sibling asleep in its idle wait or blocked in a fetch stops promptly. Every
 running child's own `forwardSignals` goroutine
 (`cmd/launcher/daemon/runner.go`), started once per child by `RunChild`,
 sends it a `SIGTERM` at that same close — the drain request, the same
-gesture as `dogfood.sh`'s `request_stop` and the launcher's own relay. It
-never kills a child that is already running its Boxes: the child chooses to
+gesture as the launcher's own relay. It never kills a child that is
+already running its Boxes: the child chooses to
 drain, and a pool halt is the same courtesy at pool scale — any child
 already running is always waited out and always gets its `child_finish`
 before the process exits, never abandoned mid-run. The daemon implements no
@@ -5670,8 +5650,8 @@ not the Box runtime alone and not the Box runtime plus a single
 windows — seven of them, about seven hours of polling, or eight with the
 stale-base preflight enabled — plus the runtimes of up to three fix Boxes
 and up to three conflict-resolve Boxes, or four with that same preflight;
-see the signalled-stop drain under [Dogfood loop](#dogfood-loop) for the
-breakdown. systemd's own default `TimeoutStopSec` is `90` seconds, far
+see the signalled-stop drain under [Dispatch exit codes](#dispatch-exit-codes)
+for the breakdown. systemd's own default `TimeoutStopSec` is `90` seconds, far
 below even the floor, so leaving it at the default means `SIGKILL` lands
 mid-drain — the exact stranding (orphaned Boxes, a leaked registry-proxy
 socket, an issue stuck on the in-progress label) this whole drain exists
@@ -5982,7 +5962,7 @@ extra descriptor (`exec.Cmd.ExtraFiles`' first entry, which always lands at
 fd 3), and names that same descriptor in the child's environment as
 `SPINDRIFT_REPORT_FD` (`cmd/launcher/internal/report`). This is daemon-to-child
 plumbing, not a knob: no operator sets it, it appears in no knob table above,
-and a launcher run by hand or driven by `dogfood.sh` sees it unset and writes
+and a launcher run by hand sees it unset and writes
 nothing — the reporting package is silent unless a daemon put a pipe there
 first. The child checks by `fstat` that the descriptor really does name a
 pipe and refuses — one line to stderr, no crash — if it names anything
@@ -6031,11 +6011,7 @@ Continuous dispatch (`CONTINUOUS_DISPATCH`, above) is deprecated in the
 daemon's favour — the daemon is its replacement as the way to hold a pool
 of Boxes — but not removed: the knob still works for an operator who wants
 no daemon at all, and it remains the Console's engine unchanged, see
-**Deprecated** under [Dogfood loop](#dogfood-loop). `dogfood.sh` is itself
-a continuous-dispatch driver — it defaults `CONTINUOUS_DISPATCH` on (see
-[Dogfood loop](#dogfood-loop)) — and what this ticket leaves unchanged
-about it is exactly that: it keeps driving the deprecated engine, and
-porting it to the daemon is not part of this change.
+**Deprecated** under [Continuous dispatch](#continuous-dispatch).
 
 ## Shell completion
 
