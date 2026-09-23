@@ -11,8 +11,8 @@ Do not narrate between tool calls — emit no text until the final report.
 
 Inputs (from the delegation message): the escalated findings block and the
 originating issue number, always. A work-path delegation also includes the
-PR URL (or branch, if the PR is not yet open); a research delegation passes
-the issue number alone — research never opens a PR.
+branch (or the PR URL, once one is open); a research delegation passes the
+issue number alone — research never opens a PR.
 
 Steps:
 
@@ -50,9 +50,15 @@ ${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STE
      reasoning for why it matters, and an acceptance-criteria checklist. Add
      a README/docs-update criterion whenever the finding touches a
      user-facing surface (a flag, an env var, a documented behaviour). For a
-     work-path delegation, also add a provenance line
-     `Found by review during #<issue> (PR <url>)` — you were given the PR
-     URL for exactly this. For a research delegation, add no provenance
+     work-path delegation, also add a provenance line. The branch form,
+     `Found by review during #<issue> (branch <name>)`, is the primary
+     case — you're delegated before the PR opens, and `CODE_FORGE=git` /
+     `CODE_FORGE=local` runs never open one at all. Use the PR form,
+     `Found by review during #<issue> (PR <url>)`, only when the delegation
+     actually handed you a PR URL. Never synthesize a URL you weren't given:
+     doing so once produced a fabricated `pull/DRAFT` link that 404s, and
+     the provenance line is the only trail back from a filed finding to
+     the review that found it. For a research delegation, add no provenance
      line of your own: the launcher appends its own `Filed from research on
      #<N>` backlink to the body automatically after you exit, and your own
      line would duplicate or contradict it.
