@@ -3029,28 +3029,44 @@ older, **deprecated** opt-in — it still works but is superseded by `roster`.
 Either way, when neither is set, that's zero behavior change and zero prompt
 residue in the rendered issue prompt.
 
-The work loop triages Non-blocking findings before the filer ever runs. It
-fixes inline, in the same effort and regardless of round, every finding
-whose fix is cheap and in scope for the issue's own acceptance criteria and
-the slice as originally authored (nits, smells, dead code, doc updates for
-a surface the *original* slice touches — not whatever surface the diff has
-since grown to touch); drops, without filing, a finding that is correct but
-trivial and out of scope for the slice, where the floor is worth rather than
-certainty (issue #3610); and escalates what genuinely needs a human — a
-design trade-off, out-of-scope work, or a change too large to fold in. Only
-the tiebreak for an *ambiguous* finding is round-aware (issue #2701): on the
-first review round it still fixes inline; from the second review round on it
-defaults to escalating instead, so the loop stops feeding itself an
-ever-growing "in scope" surface. This keeps the filer from turning every nit
-into churn: one issue closed should not spawn five more, but a rise in
-filing volume from round 2 on is the intended effect of the round-aware
-tiebreak, not a regression. Missing or inadequate tests for new logic are
+The work loop triages Non-blocking findings before the filer ever
+runs. It fixes inline, in the same effort and regardless of round, every
+finding whose fix is cheap and in scope for the issue's own acceptance
+criteria and the slice as originally authored — nits, smells, dead
+code, misleading names, and doc updates for a surface the *original*
+slice touches. Lines this branch itself touched in an earlier round's
+own absorbed fix count as that surface: they are this branch's own work,
+so a finding about them is in scope at every round. What stays out of
+scope is surface this branch never touched at all — that pin, not the
+round number, is what bounds where the in-scope surface can grow: it
+widens with this branch's own fixes, never onto code this branch never
+wrote, so round 2 does not simultaneously file more and fix less. It
+drops, without filing, a finding that is correct but trivial and out
+of scope for the slice, where the floor is worth rather than certainty
+(issue #3610), and escalates what genuinely needs a human — a design
+trade-off, out-of-scope work, or a change too large to fold in. Only the
+tiebreak for an *ambiguous* finding is round-aware (issue #2701): on the
+first review round it still fixes inline; from the second review round on
+it escalates only when the fix would widen the diff — new behaviour,
+a new surface, or an edit large enough to need its own review — and
+keeps fixing inline an ambiguous finding whose fix is small and stays
+inside what the branch already touches (issue #3611). Deferring is the
+safer failure mode where a silently widened diff is the alternative,
+and only there; elsewhere filing costs more than the nit does. This
+keeps the filer from turning every nit into churn: one issue closed
+should not spawn five more. Missing or inadequate tests for new logic are
 Blocking, not filer fodder — they are fixed in the current work, never
-deferred to an issue. The one exemption is a pure relocation, refactor, or
-comment/doc change whose behaviour is already covered under test: that is
-Non-blocking (issue #2696), and it goes through the same triage as any
-other Non-blocking finding above — it needs neither an inline fix
-nor a human, so it is dropped rather than escalated to the filer.
+deferred to an issue. The one exemption is a pure relocation, refactor,
+or comment/doc change whose behaviour is already covered under test:
+that is Non-blocking (issue #2696), and it goes through the same triage
+as any other Non-blocking finding above — it needs neither an inline
+fix nor a human, so it is dropped rather than escalated to the filer.
+
+The round-2 tiebreak's narrowing (issue #3611) was calibrated against
+measurement, not intuition; the before/after record, and the re-check
+that closes the loop once runs have dispatched under it, live in
+[issue #3611's round-2 escalation flip
+recalibration](measurements/3611-round-2-escalation-flip.md).
 
 When enabled, after the final `APPROVE` verdict and before opening the PR,
 the main agent delegates only those escalated findings to the filer. The
@@ -4340,7 +4356,9 @@ deliberate, currently-unmitigated cost, not one that's impossible to avoid.
 
 [`docs/measurements/`](measurements/) holds before/after writeups for
 changes that calibrate the reviewer's own rubric, e.g. [issue #2696's
-coverage-severity calibration](measurements/2696-coverage-severity.md).
+coverage-severity calibration](measurements/2696-coverage-severity.md)
+and [issue #3611's round-2 escalation flip
+recalibration](measurements/3611-round-2-escalation-flip.md).
 
 ---
 
