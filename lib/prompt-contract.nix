@@ -715,6 +715,28 @@ rec {
         "force-pushes"
       ];
     }
+    {
+      # Pins the third triage outcome -- drop -- across both review loops, so
+      # neither fork can regress to the old binary fix/escalate choice
+      # (issue #3610).
+      id = "triage-drop-arm";
+      branches = [
+        {
+          id = "review-loop-inline";
+          source = "fragments/review-loop-inline.md";
+        }
+        {
+          id = "review-loop-orchestrator";
+          source = "fragments/review-loop-orchestrator.md";
+        }
+      ];
+      requiredSubstrings = [
+        "three outcomes: fix inline, drop, or escalate."
+        "Drop a finding that is correct but trivial"
+        "legitimate third outcome"
+        "The floor is worth, not certainty"
+      ];
+    }
   ];
 
   # sharedObligations checked against the real on-disk content of each

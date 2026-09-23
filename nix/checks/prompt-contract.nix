@@ -33,6 +33,35 @@ let
       requiredSubstrings = [ "fold your commits" ];
     }
   ];
+  # Shared helper for the prompt-contract-shared-obligations-detects-drift-*
+  # checks below (issues #2699, #3610): each proves a real sharedObligations
+  # registry row can go red by swapping the inline branch's content for one
+  # carrying none of the declared substrings, while the named orchestrator-side
+  # branch keeps its real on-disk content. Filtering to the given obligationId
+  # keeps a later, unrelated obligation from failing the check on an extra.
+  sharedObligationDriftCheck =
+    {
+      obligationId,
+      orchestratorFragmentFile,
+      brokenInlineContent,
+    }:
+    let
+      checkName = "prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-${obligationId}";
+      orchestratorSource = "fragments/${orchestratorFragmentFile}";
+      realOrchestratorContent = builtins.readFile (
+        ../../templates/default/prompts/fragments/${orchestratorFragmentFile}
+      );
+      out = promptContract.sharedObligationViolationsFor promptContract.sharedObligations {
+        "fragments/review-loop-inline.md" = brokenInlineContent;
+        "${orchestratorSource}" = realOrchestratorContent;
+      };
+      violations = builtins.filter (v: v.obligationId == obligationId) out;
+    in
+    assert assertMsg (builtins.length violations == 1)
+      "sharedObligationViolationsFor must report exactly one ${obligationId} violation when the real sharedObligations registry's inline branch content is swapped for content missing the declared obligation, got ${toString (builtins.length violations)}";
+    assert assertMsg ((builtins.head violations).branchId == "review-loop-inline")
+      "sharedObligationViolationsFor must name the offending branch's id ('review-loop-inline'), got '${(builtins.head violations).branchId}'";
+    pkgs.runCommand checkName { } "touch $out";
 in
 {
   prompt-contract-canonical-text-outcome-matches-live-slice =
@@ -771,27 +800,24 @@ in
       "touch $out";
 
   # Proves the real sharedObligations registry's "commit-folding" row can go
-  # red (issue #2699): this swaps the inline branch's content for a string
-  # carrying none of the declared substrings while the orchestrator branch
-  # keeps its on-disk content. Filtering to the commit-folding violations
-  # keeps a later, unrelated obligation from failing this test on an extra.
-  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-folding =
-    let
+  # red (issue #2699). See sharedObligationDriftCheck above for what this
+  # actually swaps and asserts.
+  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-commit-folding =
+    sharedObligationDriftCheck {
+      obligationId = "commit-folding";
+      orchestratorFragmentFile = "commit-rework-orchestrator.md";
       brokenInlineContent = "no folding instruction of any kind in this fragment";
-      realOrchestratorContent = builtins.readFile ../../templates/default/prompts/fragments/commit-rework-orchestrator.md;
-      out = promptContract.sharedObligationViolationsFor promptContract.sharedObligations {
-        "fragments/review-loop-inline.md" = brokenInlineContent;
-        "fragments/commit-rework-orchestrator.md" = realOrchestratorContent;
-      };
-      commitFoldingViolations = builtins.filter (v: v.obligationId == "commit-folding") out;
-    in
-    assert assertMsg (builtins.length commitFoldingViolations == 1)
-      "sharedObligationViolationsFor must report exactly one commit-folding violation when the real sharedObligations registry's inline branch content is swapped for content missing the declared obligation, got ${toString (builtins.length commitFoldingViolations)}";
-    assert assertMsg ((builtins.head commitFoldingViolations).branchId == "review-loop-inline")
-      "sharedObligationViolationsFor must name the offending branch's id ('review-loop-inline'), got '${(builtins.head commitFoldingViolations).branchId}'";
-    pkgs.runCommand "prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-folding"
-      { }
-      "touch $out";
+    };
+
+  # Proves the real sharedObligations registry's "triage-drop-arm" row can go
+  # red (issue #3610). See sharedObligationDriftCheck above for what this
+  # actually swaps and asserts.
+  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-triage-drop-arm =
+    sharedObligationDriftCheck {
+      obligationId = "triage-drop-arm";
+      orchestratorFragmentFile = "review-loop-orchestrator.md";
+      brokenInlineContent = "no drop outcome of any kind in this fragment";
+    };
 
   # Enforcing check (issue #2699): the real registry's rows must hold against
   # the on-disk fragment content every branch declares, so an edit to either
