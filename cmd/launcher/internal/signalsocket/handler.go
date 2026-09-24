@@ -102,10 +102,10 @@ func NewHandler(b *Buffer, logw io.Writer) *Handler {
 	return &Handler{Handler: h.mirror(http.HandlerFunc(h.routes))}
 }
 
-// NewGatedHandler returns a Handler for the loopback TCP fallback, which has
-// no filesystem permissions of its own: every request must present secret
-// via signalwire.SecretHeader before it reaches a route. An empty secret
-// would match an absent header, so it fails closed here rather than at
+// NewGatedHandler returns a Handler for the every-interface TCP fallback,
+// which has no filesystem permissions of its own: every request must present
+// secret via signalwire.SecretHeader before it reaches a route. An empty
+// secret would match an absent header, so it fails closed here rather than at
 // listen time. The gate sits inside the mirror (gate wraps routes, mirror
 // wraps gate), so a rejected request still emits its one spindrift_op event.
 func NewGatedHandler(b *Buffer, logw io.Writer, secret string) (*Handler, error) {
