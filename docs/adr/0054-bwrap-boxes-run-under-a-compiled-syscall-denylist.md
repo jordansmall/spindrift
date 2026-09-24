@@ -1,5 +1,11 @@
 # bwrap Boxes run under a compiled syscall denylist
 
+> **Renumbered from ADR 0045 (issue #3631).** Two unrelated ADRs had both
+> been filed as 0045; `0045` now names only [ADR
+> 0045](0045-registry-routes-declared-table-protocol-aware-mirror.md), the
+> registry-routes decision. Any pre-#3631 reference to "ADR 0045" may mean
+> either this document or that one.
+
 Namespace and mount isolation (ADR 0042) bound what a bwrap Box can *see* and
 *mount*, not what syscalls it can *issue*. bwrap on its own applies no
 seccomp filter at all: a Box's uid-1000 process can call `ptrace`, `mount`,
