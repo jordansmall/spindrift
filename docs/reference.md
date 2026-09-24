@@ -1557,11 +1557,19 @@ mechanism.
 
 Unlike every knob above, `BASH_MAX_OUTPUT_LENGTH` and `MAX_MCP_OUTPUT_TOKENS`
 are fixed constants baked straight into the image's `config.Env` by
-`lib/image.nix`, from the `lib/output-caps.nix` attrset — Claude Code's own
-output-cap knobs, not a spindrift `settings.*` surface: there is no
-spindrift `--flag` for either, only the container runtime's own `-e`/`--env`
-override of a baked `config.Env` entry, same as any other OCI image env var
-(issue #1987).
+`lib/image.nix` — Claude Code's own output-cap knobs, not a spindrift
+`settings.*` surface: there is no spindrift `--flag` for either, only the
+container runtime's own `-e`/`--env` override of a baked `config.Env` entry,
+same as any other OCI image env var (issue #1987).
+
+Only `BASH_MAX_OUTPUT_LENGTH` is derived, from `lib/output-caps.nix`'s single
+`bashMaxOutputLength` attribute: the research-verdict prompt budget reads it,
+`nix/checks/image.nix` reads it to cross-check its own hand-typed pin, and the
+docs check below greps this section's prose against it — and a second reader
+is what earns a constant the hoist (issue #3669). `MAX_MCP_OUTPUT_TOKENS` has
+no second reader, so despite the plural file name it stays hand-typed as a
+literal beside the derived line in `lib/image.nix`, and that is the file to
+edit to change it.
 
 Cost of a dispatch run is ~99% cache-read, and cache-read scales with
 context size times turn count: every token in the conversation is re-read on
