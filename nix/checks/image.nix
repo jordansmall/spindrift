@@ -41,6 +41,22 @@ let
   # extend to the model literals nearby (issue #2435 AC2); see that fixture.
   rosterDefaults =
     (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
+  # output-cap-env-marker's bashMaxOutputLength pin is cross-checked here
+  # against lib/output-caps.nix's single source, so drift throws at eval
+  # time instead of the check silently passing on a stale number (issue
+  # #3679). maxMcpOutputTokens below has no single source to cross-check
+  # against -- it's hand-typed only in lib/image.nix (issue #3707 tracks
+  # the doc claiming otherwise).
+  outputCaps = import ../../lib/output-caps.nix;
+  pinnedBashMaxOutputLength =
+    let
+      pin = 8192;
+    in
+    if pin != outputCaps.bashMaxOutputLength then
+      throw "output-cap-env-marker: nix/checks/image.nix's pinnedBashMaxOutputLength (${toString pin}) has drifted from lib/output-caps.nix's bashMaxOutputLength (${toString outputCaps.bashMaxOutputLength}) -- update nix/checks/image.nix's pinnedBashMaxOutputLength to match"
+    else
+      pin;
+  pinnedMaxMcpOutputTokens = 2000;
 in
 {
   # The baked entrypoint must carry a store-path shebang, not the source's
@@ -799,20 +815,27 @@ in
       '';
 
   # See "Claude Code output caps" in docs/reference.md for these values and
-  # why they are set (issue #1987).
+  # why they are set (issue #1987). The literals below are a deliberate
+  # independent pin on the *built* image, not derived from lib/output-caps.nix
+  # (issue #3679) -- changing a cap means editing lib/output-caps.nix *and*
+  # this check.
   output-cap-env-marker =
     pkgs.runCommand "output-cap-env-marker" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
         mkdir off && tar -xf ${nonRustHarness.image} -C off
         cfg=$(jq -r '.[0].Config' off/manifest.json)
-        jq -e '.config.Env | any(. == "BASH_MAX_OUTPUT_LENGTH=8192")' "off/$cfg" >/dev/null || {
-          echo "default harness must bake BASH_MAX_OUTPUT_LENGTH=8192" >&2
-          exit 1
+        assert_baked_env() {
+          local name=$1 expected=$2 hint=$3 found
+          found=$(jq -r --arg n "$name" '(.config.Env // []) | map(select(startswith($n + "="))) | .[0] // "(not set)"' "off/$cfg")
+          [ "$found" = "$name=$expected" ] || {
+            echo "default harness must bake $name=$expected, found $found -- $hint" >&2
+            exit 1
+          }
         }
-        jq -e '.config.Env | any(. == "MAX_MCP_OUTPUT_TOKENS=2000")' "off/$cfg" >/dev/null || {
-          echo "default harness must bake MAX_MCP_OUTPUT_TOKENS=2000" >&2
-          exit 1
-        }
+        assert_baked_env BASH_MAX_OUTPUT_LENGTH ${toString pinnedBashMaxOutputLength} \
+          "update lib/output-caps.nix and nix/checks/image.nix's pinnedBashMaxOutputLength together"
+        assert_baked_env MAX_MCP_OUTPUT_TOKENS ${toString pinnedMaxMcpOutputTokens} \
+          "update lib/image.nix and nix/checks/image.nix's pinnedMaxMcpOutputTokens together"
         touch $out
       '';
 
