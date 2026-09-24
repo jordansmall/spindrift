@@ -135,7 +135,7 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 		t.Fatalf("bundle created for an empty range, want none")
 	}
 
-	// ADR 0039, issue #2274: the outcome scan no longer gates on a nonce, so
+	// ADR 0055, issue #2274: the outcome scan no longer gates on a nonce, so
 	// Resolve must find the corrective line without one.
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, "")
 	if err != nil {

@@ -1511,7 +1511,7 @@ Provider selection implies silently.
 #### Syscall filter
 
 Every bwrap Box runs under a compiled BPF seccomp filter attached via
-bwrap's own `--seccomp FD` flag ([ADR 0045](adr/0045-bwrap-boxes-run-under-a-compiled-syscall-denylist.md),
+bwrap's own `--seccomp FD` flag ([ADR 0054](adr/0054-bwrap-boxes-run-under-a-compiled-syscall-denylist.md),
 issue #2670). It is unconditional — no `settings` toggle, no env knob — and
 built at nix eval time from `lib/seccomp.nix`.
 
@@ -4301,7 +4301,7 @@ of a Dockerfile. The trade-offs:
 - **Reproducible toolchain by construction** via the pinned flake, rather than a
   floating language-runtime base image.
 
-See [`docs/adr/`](adr/) for the full architectural decision records (0001–0012),
+See [`docs/adr/`](adr/) for the full architectural decision records (0001–0055),
 including the Go launcher ([ADR 0007](adr/0007-runtime-logic-is-a-nix-built-go-binary.md)),
 the pluggable OCI/bwrap runner ([ADR 0006](adr/0006-box-isolation-is-a-pluggable-runner.md)),
 and nix-in-the-box ([ADR 0008](adr/0008-nix-is-a-first-class-default-in-the-box.md)).

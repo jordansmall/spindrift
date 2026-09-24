@@ -156,7 +156,7 @@ func logIsEmpty(logPath string) bool {
 
 // successResult parses logPath's outcome line after a zero-exit dispatch,
 // falling back to a best-effort classification when no line parses. The scan is
-// not nonce-gated (ADR 0039): the freshness boundary is structural, since the
+// not nonce-gated (ADR 0055): the freshness boundary is structural, since the
 // in-box extractor guarantees the line leads the box's log.
 func (d *Dispatch) successResult(logPath string) Result {
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
@@ -231,7 +231,7 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 // NON-ZERO exit, so a run that finished its work and died after emitting its
 // verdict (issue #2075) settles on it instead of re-spending the tokens a resume
 // preserved. ok=false when none parses, and the caller classifies instead. Not
-// nonce-gated (ADR 0039), same leading-line boundary as successResult.
+// nonce-gated (ADR 0055), same leading-line boundary as successResult.
 func (d *Dispatch) settledOutcome(logPath string) (Result, bool) {
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
 	if err != nil || !resolved.Found || !resolved.IsGenuineOrSynthetic() {

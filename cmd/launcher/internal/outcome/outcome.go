@@ -228,7 +228,7 @@ func ParseAnywhere(line string) (Outcome, bool) {
 // with the SPINDRIFT_OUTCOME token, so a mid-JSON echo of the token (e.g. a
 // tool_result of issue text) is never a candidate. A missing file is not found
 // rather than an error; err satisfies IsNearMiss when the chosen line fails to
-// parse. No nonce gate (ADR 0039, issue #2274): the Box has exited by this read.
+// parse. No nonce gate (ADR 0055, issue #2274): the Box has exited by this read.
 func lastInLog(path string) (o Outcome, found bool, err error) {
 	var lastLeading string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
@@ -256,7 +256,7 @@ func lastInLog(path string) (o Outcome, found bool, err error) {
 // SelfReport is the driver's own last non-synthetic leading-token
 // SPINDRIFT_OUTCOME line, kept distinct from the resolved outcome so a
 // synthetic backstop line (ADR 0036) can never shadow it via last-line-wins
-// (issue #2223). It is unauthenticated and ungated (ADR 0039, issue #2274), so
+// (issue #2223). It is unauthenticated and ungated (ADR 0055, issue #2274), so
 // a consumer that acts on it owns weighing that trust.
 type SelfReport struct {
 	Raw     string  // the raw driver-authored leading-token line

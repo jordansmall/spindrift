@@ -607,7 +607,7 @@ rec {
   # The 5 marker channels a Box's output can carry (issue #2974, parent
   # #2972), rendered into Go by lib/renderers.nix's renderMarkerChannelsGo.
   # `defense` is what stops a corpus echoing a token back: a structurally
-  # scoped extractor (ADR 0039, issue #2980) or RUN_NONCE. `fieldShape` reads
+  # scoped extractor (ADR 0055, issue #2980) or RUN_NONCE. `fieldShape` reads
   # as prose, but markergate.substituteFieldShape parses its key=value layout.
   # `carrier`/`defense` describe the `log` Signal carrier (a marker line in
   # the mid-run log or final message); the three signal rows (comment,
