@@ -756,7 +756,7 @@ type closer interface {
 }
 
 // Proxy serves an http.Handler over a unix domain socket or, via
-// ListenAndServeTCP, a secret-gated loopback TCP port.
+// ListenAndServeTCP, a secret-gated TCP port bound on every interface.
 type Proxy struct {
 	// Handler is the http.Handler to serve, typically built with New.
 	Handler http.Handler
@@ -792,8 +792,11 @@ func (p *Proxy) ListenAndServe(socketPath string) error {
 	return nil
 }
 
-// ListenAndServeTCP serves Handler on addr in the background, gated by secret:
-// a loopback TCP port has no filesystem permissions of its own, so every
+// ListenAndServeTCP serves Handler on addr in the background. The caller owns
+// addr and nothing here narrows it: loopback ("127.0.0.1:0") is the safe
+// default, but the launcher deliberately binds every interface ("0.0.0.0:0")
+// because a Box on a docker bridge reaches the host at the bridge IP, not at
+// loopback. A TCP port has no filesystem permissions of its own, so every
 // request must present secret via registrymanifest.TCPSecretHeader before it
 // reaches Handler at all. An empty secret would match an absent header, so it
 // fails closed. Call Addr to learn an ephemeral port's bound address.

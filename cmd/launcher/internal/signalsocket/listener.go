@@ -35,11 +35,11 @@ const (
 	maxConns = 8
 )
 
-// NewSecret mints a fresh per-run secret gating the signal socket's loopback
-// TCP fallback (signalwire.SecretHeader): 16 crypto/rand bytes, hex-encoded.
-// It must never share a value with the per-run nonce (issue #1937) or with
-// the registry proxy's TCP secret, each of which has a different security
-// role. rand.Read fails only on a broken entropy source.
+// NewSecret mints a fresh per-run secret gating the signal socket's
+// every-interface TCP fallback (signalwire.SecretHeader): 16 crypto/rand
+// bytes, hex-encoded. It must never share a value with the per-run nonce
+// (issue #1937) or with the registry proxy's TCP secret, each of which has a
+// different security role. rand.Read fails only on a broken entropy source.
 func NewSecret() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -49,9 +49,9 @@ func NewSecret() (string, error) {
 }
 
 // Listener serves an http.Handler over a unix domain socket or, via
-// ListenAndServeTCP, a secret-gated loopback TCP port. It is a listener of
-// its own rather than a route on the registry proxy: that proxy is
-// GET/HEAD-only, host-rooted (ADR 0047) and starts only when routes are
+// ListenAndServeTCP, a secret-gated TCP port bound on every interface. It is
+// a listener of its own rather than a route on the registry proxy: that proxy
+// is GET/HEAD-only, host-rooted (ADR 0047) and starts only when routes are
 // configured, none of which holds here (ADR 0052).
 type Listener struct {
 	// Handler is the Handler to serve, built with NewHandler for the unix

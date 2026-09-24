@@ -469,7 +469,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 }
 
 // newRegistryProxyTCPSecret mints a fresh per-run secret (issue #3111) gating
-// the registry proxy's loopback TCP fallback
+// the registry proxy's every-interface TCP fallback
 // (registrymanifest.TCPSecretHeader): 16 crypto/rand bytes, hex-encoded. It
 // must never share a value with newNonce (factory.go, issue #1937), which has
 // a different security role. rand.Read fails only on a broken entropy source.
