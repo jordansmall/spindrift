@@ -212,9 +212,9 @@ A few invariants worth calling out:
 ## Decisions & the public contract
 
 Architectural decisions that would otherwise live only in a PR description get an
-ADR under [`docs/adr/`](docs/adr/), numbered `NNNN-slug.md` (we're at 0014). A
-change to a seam — a new Issue Tracker or Code Forge adapter, a new Driver, a new
-runner — should reference or add an ADR.
+ADR under [`docs/adr/`](docs/adr/), numbered `NNNN-slug.md`, one above the highest
+number already there. A change to a seam — a new Issue Tracker or Code Forge
+adapter, a new Driver, a new runner — should reference or add an ADR.
 
 Some surfaces are a **versioned contract**: CLI verbs and flags, the flake option
 surface, `SPINDRIFT_*` variable names, and the label lifecycle names. Breaking
