@@ -55,6 +55,34 @@ func TestWarnAmbientKnobEnv_NoSettingsPath_FlagOnly(t *testing.T) {
 	}
 }
 
+// A launcherIgnores knob's flag is inert (see flagEntry), so the warning must
+// name only the settings path (issue #3698).
+func TestWarnAmbientKnobEnv_LauncherIgnores_SettingsPathOnly(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("DAEMON_IDLE_FLOOR") })
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = []flagEntry{
+		{env: "DAEMON_IDLE_FLOOR", flag: "daemon-idle-floor", settingsPath: "dispatch.daemonIdleFloor", launcherIgnores: true},
+	}
+	os.Setenv("DAEMON_IDLE_FLOOR", "99h")
+
+	var buf bytes.Buffer
+	warnAmbientKnobEnv(&buf)
+
+	out := buf.String()
+	for _, want := range []string{"DAEMON_IDLE_FLOOR", "dispatch.daemonIdleFloor"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("warning = %q, want it to mention %q", out, want)
+		}
+	}
+	if strings.Contains(out, "--daemon-idle-floor") {
+		t.Errorf("warning = %q, want no flag suggestion for a launcher-ignored knob", out)
+	}
+	if strings.Contains(out, " or ") {
+		t.Errorf("warning = %q, want just the settings path (no flag alternative)", out)
+	}
+}
+
 func TestWarnAmbientKnobEnv_UnsetKnob_NoWarning(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("MAX_PARALLEL") })
 	os.Unsetenv("MAX_PARALLEL")
