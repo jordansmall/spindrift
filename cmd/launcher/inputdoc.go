@@ -85,9 +85,16 @@ func warnAmbientKnobEnv(w io.Writer) {
 		if v == "" {
 			continue
 		}
-		equiv := "--" + e.flag
-		if e.settingsPath != "" {
-			equiv += " or " + e.settingsPath
+		// A launcherIgnores knob's flag is inert (see flagEntry), so its
+		// settings path is the only real migration target;
+		// nix/checks/schema-drift.nix pins flakeOption = true on every such
+		// knob, which lib/renderers.nix turns into a settings path (#3698).
+		equiv := e.settingsPath
+		if !e.launcherIgnores {
+			equiv = "--" + e.flag
+			if e.settingsPath != "" {
+				equiv += " or " + e.settingsPath
+			}
 		}
 		fmt.Fprintf(w, "%s=%s set in environment — knob env overrides are deprecated; use %s\n", e.env, v, equiv)
 	}
