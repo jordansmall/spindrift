@@ -1034,6 +1034,9 @@ rec {
       # settings path is that path. Empty for a knob with no flake-settings
       # surface, such as ISSUE_NUMBER or SPINDRIFT_PROMPT_DIR.
       flagSettingsPath = key: e: if e.flakeOption or false then resolveNixPath key e else "";
+      # Mirrors flagEntry.launcherIgnores in cmd/launcher/flags.go, where the
+      # axis is documented (issue #3698).
+      flagLauncherIgnores = e: if e.launcherIgnores or false then ", launcherIgnores: true" else "";
       # Every non-secret knob must declare a group so the full reference can file
       # it under a heading. A missing group is a schema error, not a silent "".
       ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
@@ -1044,7 +1047,7 @@ rec {
           concatStrings (
             mapAttrsToList (
               key: e:
-              "\t{env: \"${e.env}\", flag: \"${flagName e}\", group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"${flagChoices e}},\n"
+              "\t{env: \"${e.env}\", flag: \"${flagName e}\", group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"${flagLauncherIgnores e}${flagChoices e}},\n"
             ) nonSecretSchema
           );
       secretRows = concatStrings (
