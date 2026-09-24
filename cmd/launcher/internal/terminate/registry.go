@@ -1,7 +1,11 @@
-// Package terminate carries the signal an operator's Terminate gesture (ADR
-// 0024, issue #649) sends to an in-flight Dispatch/Settle loop. Reclaim reaps,
-// moves the tracker, and comments (issue #3519); Registry only stops a
-// surviving goroutine from corrupting the issue's state afterwards.
+// Package terminate carries the signal that ends a claimed Dispatch/Settle
+// loop by hand (ADR 0024, issue #649). Three triggers send it: an operator's
+// Console Terminate gesture, the launcher's stage-two signalled abort on a
+// second SIGTERM/SIGINT, or the shutdown gate declining, once a stop or
+// abort has arrived, to launch an issue the launcher claimed but never
+// launched. Reclaim reaps any running Box, moves the tracker, and comments
+// (issue #3519); Registry only stops a surviving goroutine from corrupting
+// the issue's state afterwards.
 package terminate
 
 import "sync"
