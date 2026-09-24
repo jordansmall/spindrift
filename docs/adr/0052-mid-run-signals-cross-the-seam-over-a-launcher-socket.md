@@ -43,7 +43,7 @@ second Launcher-owned listener, the signal socket, selected per Dispatch by
 a new knob `BOX_SIGNAL_CARRIER` whose default keeps today's log carrier.**
 The outcome line stays on the log: it is a few dozen bytes, it is the last
 thing a Box says, the entrypoint already re-emits it as a bare leading line
-outside the driver stream, and [ADR 0039](0039-structural-scoping-is-the-outcome-freshness-boundary-nonce-is-only-for-mid-run-signals.md)
+outside the driver stream, and [ADR 0055](0055-structural-scoping-is-the-outcome-freshness-boundary-nonce-is-only-for-mid-run-signals.md)
 built host-decided disposition around it. The review verdict marker is
 orchestrator-internal, pass to pass, and is not a host write; it is out of
 scope.
@@ -228,7 +228,7 @@ log carrier as a third mechanism the eventual socket would then tear out.
   and a defense value for the socket, and the eval-time contract check
   asserts both fragment variants, so the invariant that every required
   signal has a prompt instruction holds in both modes.
-- ADR 0032's stdout rationale, ADR 0034's PR-intent line, ADR 0039's
+- ADR 0032's stdout rationale, ADR 0034's PR-intent line, ADR 0055's
   nonce-as-sole-defense for mid-run signals, ADR 0041's log-buffered intents
   and ADR 0044's "opens no host TCP port" are each partially superseded by
   this ADR for the three channels it moves; each keeps governing the

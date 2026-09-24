@@ -1,5 +1,12 @@
 # Structural scoping is `SPINDRIFT_OUTCOME`'s freshness boundary; the nonce is retained only for the mid-run signal channels
 
+> **Renumbered from ADR 0039 (issue #3631).** Two unrelated ADRs had both
+> been filed as 0039; `0039` now names only [ADR
+> 0039](0039-the-run-terminal-outcome-is-host-decided-from-evidence.md),
+> "the run's terminal outcome is host-decided from evidence." `CHANGELOG.md`'s
+> historical "ADR 0039" release-note lines predate this split and are left as
+> shipped.
+
 > **Narrowed by [ADR 0052](0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md).**
 > "The nonce is the sole replay defense for the mid-run signal channels"
 > holds only on the `log` carrier. On the `socket` carrier those channels are
