@@ -135,6 +135,10 @@ type flagEntry struct {
 	settingsPath    string // derived flake path, e.g. git.merge.policy; empty for a non-flakeOption knob
 	deprecatedAlias string // empty unless the canonical flag was renamed (ADR 0037 Pass 2)
 	choices         []string
+	// launcherIgnores marks a knob the launcher generates a flag for (1:1
+	// flake-option/flag parity, #3567) but never itself reads; only
+	// cmd/launcher/daemon consumes it, via the input document (#3698).
+	launcherIgnores bool
 }
 
 // secretKnob is a knob the schema marks secret = true, so it gets no inline

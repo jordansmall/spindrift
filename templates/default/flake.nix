@@ -115,7 +115,7 @@
             #   };
             #   # flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision -- the Consumer's own CLI app, e.g. .# or .#dogfood-bwrap; read by the daemon only, the launcher itself ignores it
             #   daemonApp = ".#";
-            #   # daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host
+            #   # daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host; read by the daemon only, the launcher itself ignores it
             #   daemonAwakeWindow = "";
             #   # pool-wide unclassified failures within DAEMON_BREAKER_WINDOW that trip the circuit breaker and halt the whole daemon; a positive integer, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it
             #   daemonBreakerThreshold = 5;
@@ -139,7 +139,7 @@
             #   };
             #   # declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check)
             #   overlapGate = "defer";
-            #   # how many of the daemon's MAX_PARALLEL slots prefer research Dispatches over work -- a floor, not a ceiling: those slots take research only while research has queued work, and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope
+            #   # how many of the daemon's MAX_PARALLEL slots prefer research Dispatches over work -- a floor, not a ceiling: those slots take research only while research has queued work, and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only, the launcher itself ignores it, and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope
             #   researchReservation = 1;
             #   retry = {
             #     # jitter seconds added to 429 hold duration to spread re-dispatch

@@ -635,6 +635,7 @@ in
     default = ".#";
     doc = "flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision -- the Consumer's own CLI app, e.g. .# or .#dogfood-bwrap; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
+    launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.
     legacySettingsExempt = true;
@@ -644,8 +645,9 @@ in
     env = "DAEMON_AWAKE_WINDOW";
     group = "dispatch";
     default = "";
-    doc = "daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host";
+    doc = "daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
+    launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.
     legacySettingsExempt = true;
@@ -657,6 +659,7 @@ in
     default = ".#daemon";
     doc = "flake app attribute of the daemon itself, which the daemon evaluates at each fetched tip to notice its own build changed and halt -- distinct from DAEMON_APP, the child Dispatch app; a Consumer that re-exports the daemon under another attribute name (e.g. .#dogfood-bwrap-daemon) must set this to match; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
+    launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.
     legacySettingsExempt = true;
@@ -668,6 +671,7 @@ in
     default = "5m";
     doc = "wait before the daemon's first no-work check against a kind, and the poll slice size while riding out a jammed kind's backoff -- each further consecutive no-work check against that kind doubles the wait up to DAEMON_IDLE_CAP; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
+    launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.
     legacySettingsExempt = true;
@@ -679,6 +683,7 @@ in
     default = "30m";
     doc = "ceiling the daemon's per-kind idle backoff doubles up to, starting from DAEMON_IDLE_FLOOR; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
+    launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.
     legacySettingsExempt = true;
@@ -690,6 +695,7 @@ in
     default = "1m";
     doc = "wait a slot backs off for after an unclassified child failure before refilling itself; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
+    launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.
     legacySettingsExempt = true;
@@ -701,6 +707,7 @@ in
     default = 5;
     doc = "pool-wide unclassified failures within DAEMON_BREAKER_WINDOW that trip the circuit breaker and halt the whole daemon; a positive integer, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
+    launcherIgnores = true;
     intKind = "positive";
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.
@@ -713,6 +720,7 @@ in
     default = "15m";
     doc = "trailing window the circuit breaker counts DAEMON_BREAKER_THRESHOLD unclassified failures within; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
+    launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.
     legacySettingsExempt = true;
@@ -722,8 +730,9 @@ in
     env = "RESEARCH_RESERVATION";
     group = "dispatch";
     default = 1;
-    doc = "how many of the daemon's MAX_PARALLEL slots prefer research Dispatches over work -- a floor, not a ceiling: those slots take research only while research has queued work, and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope";
+    doc = "how many of the daemon's MAX_PARALLEL slots prefer research Dispatches over work -- a floor, not a ceiling: those slots take research only while research has queued work, and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only, the launcher itself ignores it, and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope";
     flakeOption = true;
+    launcherIgnores = true;
     intKind = "nonneg";
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.

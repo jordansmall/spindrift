@@ -764,6 +764,46 @@ checkedMerge {
       "lib/env-schema.nix: continuousDispatch.doc must say plainly it is not removed — it stays for no-daemon operators and remains the Console's engine (issue #3547), got: ${doc}";
     pkgs.runCommand "continuous-dispatch-doc-reference" { } "touch $out";
 
+  # A knob's launcherIgnores = true axis and its doc string's "the launcher
+  # itself ignores it" clause must agree exactly, in both directions: a
+  # daemon-only knob whose doc states the fact but forgot the axis, or an
+  # axis-bearing knob whose doc no longer states it, would desync the
+  # generated flag table (cmd/launcher/flagtable_gen.go) from the prose it is
+  # meant to source (issue #3698). A third assert covers a separate invariant
+  # the same axis implies: a launcherIgnores knob must also set flakeOption,
+  # since its settings path is all warnAmbientKnobEnv has left to suggest.
+  launcher-ignores-doc-consistency =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib)
+        assertMsg
+        hasInfix
+        filter
+        attrNames
+        sort
+        concatStringsSep
+        ;
+      clause = "the launcher itself ignores it";
+      axisSet = n: schema.${n}.launcherIgnores or false;
+      docSet = n: hasInfix clause schema.${n}.doc;
+      names = attrNames schema;
+      missingAxis = sort builtins.lessThan (filter (n: docSet n && !axisSet n) names);
+      staleAxis = sort builtins.lessThan (filter (n: axisSet n && !docSet n) names);
+      # warnAmbientKnobEnv points a launcherIgnores knob at its settings path
+      # alone, so a knob without a flake option would leave it with nothing to
+      # suggest (cmd/launcher/inputdoc.go).
+      noFlakeOption = sort builtins.lessThan (
+        filter (n: axisSet n && !(schema.${n}.flakeOption or false)) names
+      );
+    in
+    assert assertMsg (missingAxis == [ ])
+      "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " missingAxis} ] doc says \"${clause}\" but do not set launcherIgnores = true (issue #3698)";
+    assert assertMsg (staleAxis == [ ])
+      "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " staleAxis} ] set launcherIgnores = true but their doc no longer says \"${clause}\" (issue #3698)";
+    assert assertMsg (noFlakeOption == [ ])
+      "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " noFlakeOption} ] set launcherIgnores = true without flakeOption = true, leaving warnAmbientKnobEnv no settings path to suggest in place of the inert flag (issue #3698)";
+    pkgs.runCommand "launcher-ignores-doc-consistency" { } "touch $out";
+
   # A knob's `choices` must be a non-empty list of strings and its `default` a
   # member, or tab-completion would offer values the knob can never hold
   # (issue #554). The per-knob asserts below pin each exact value set, and the
