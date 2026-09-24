@@ -1404,7 +1404,7 @@ func TestResolve(t *testing.T) {
 			wantKind:       "work",
 		},
 		{
-			// ADR 0039 / issue #2274: the outcome path no longer gates on a nonce,
+			// ADR 0055 / issue #2274: the outcome path no longer gates on a nonce,
 			// so any nonce= value, even one that would once have failed the gate,
 			// is accepted as genuine.
 			name: "genuine line with any nonce value is accepted (no gate)",
@@ -1546,7 +1546,7 @@ func TestResolved_IsGenuineOrSynthetic(t *testing.T) {
 }
 
 // This pins the post-#2274 behavior for a bare-word leading line. Before the
-// nonce gate was retired (ADR 0039), a nonce-less line like this was excluded
+// nonce gate was retired (ADR 0055), a nonce-less line like this was excluded
 // from the genuine tier ahead of Parse, letting Resolve fall through to the
 // self-report tier. Now lastInLog reaches Parse and the line is a near-miss,
 // which Resolve propagates as an error rather than a fabricated outcome.

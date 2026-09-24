@@ -1003,7 +1003,7 @@ jq-scopes to the agent's own final message (claude
 **bare, leading** line; host-side, `lastInLog` treats only a leading-token
 line as a candidate. Untrusted corpus reaches the log only as a
 `tool_result` (wrong event type) or buried mid-JSON in the raw transcript
-(non-leading), so it cannot win regardless of any nonce. ADR 0039 records the
+(non-leading), so it cannot win regardless of any nonce. ADR 0055 records the
 decision to retire the nonce here — structural scoping is the freshness
 boundary — while keeping it as the _sole_ replay defense for the mid-run
 signal channels (`SPINDRIFT_COMMENT` / `SPINDRIFT_PR_INTENT` /
@@ -1088,7 +1088,7 @@ ordered pass logs once, choosing among three tiers in strict precedence — a
 genuine driver-authored outcome line, the outcome backstop's synthetic line
 (ADR 0036), and, only when neither turns up anywhere, the driver's
 unauthenticated self-report fallback (structurally scoped, never nonce-gated —
-ADR 0039) — and names which tier won on `Resolved.Provenance` (`ProvenanceGenuine` /
+ADR 0055) — and names which tier won on `Resolved.Provenance` (`ProvenanceGenuine` /
 `ProvenanceSynthetic` / `ProvenanceSelfReport`). The per-log scanners the
 tiers walk (`lastInLog`, `lastSelfReportInLog`) are unexported now, reachable
 only through Resolve; the one door left open beside it is the exported

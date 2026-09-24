@@ -597,7 +597,7 @@ setup() {
 # since the Box never opens the PR and never learns a URL; ISSUE_NUMBER=7 and
 # BRANCH_PREFIX=agent/issue- fix BRANCH at agent/issue-7. RUN_NONCE is still
 # set because the same prompt carries SPINDRIFT_PR_INTENT, which keeps its
-# nonce gate; SPINDRIFT_OUTCOME's own was retired (issue #2274/ADR 0039).
+# nonce gate; SPINDRIFT_OUTCOME's own was retired (issue #2274/ADR 0055).
 @test "OUTCOME landing step: read-write keeps the pr-url placeholder unchanged" {
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-write"
@@ -605,7 +605,7 @@ setup() {
   [ "$status" -eq 0 ]
   grep -qF 'landing=<pr-url> status=ready' "$DRIVER_PROMPT_FILE"
   # End-anchored: the OUTCOME line must terminate at note=, with no trailing
-  # nonce= field (issue #2274/ADR 0039). A bare -F substring match would still
+  # nonce= field (issue #2274/ADR 0055). A bare -F substring match would still
   # pass if the retired nonce crept back onto the line.
   grep -qE 'status=ready note=<short reason>$' "$DRIVER_PROMPT_FILE"
 }
@@ -618,7 +618,7 @@ setup() {
   [ "$status" -eq 0 ]
   grep -qF 'landing=agent/issue-7 status=ready' "$DRIVER_PROMPT_FILE"
   # End-anchored: the OUTCOME line must terminate at note=, with no trailing
-  # nonce= field (issue #2274/ADR 0039). A bare -F substring match would still
+  # nonce= field (issue #2274/ADR 0055). A bare -F substring match would still
   # pass if the retired nonce crept back onto the line.
   grep -qE 'status=ready note=<short reason>$' "$DRIVER_PROMPT_FILE"
 

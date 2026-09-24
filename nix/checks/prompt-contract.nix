@@ -729,7 +729,7 @@ in
   # Cross-registry drift guard, so one marker spelling cannot diverge from the
   # other: markerChannels' `token` and validateMarkers' `marker` name the same
   # literal for every channel except "outcome", which validateMarkers never
-  # scans for because the outcome contract is validated structurally (ADR 0039).
+  # scans for because the outcome contract is validated structurally (ADR 0055).
   prompt-contract-marker-channels-token-matches-validate-markers =
     let
       bad = builtins.filter (

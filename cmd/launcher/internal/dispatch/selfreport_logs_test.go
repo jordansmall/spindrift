@@ -76,7 +76,7 @@ func TestResolveFromLogsNoLogs(t *testing.T) {
 	}
 }
 
-// ADR 0039 retired the nonce gate, so a near-miss leading-token line that
+// ADR 0055 retired the nonce gate, so a near-miss leading-token line that
 // does not parse the full grammar is Resolve's own error, not a fallback to
 // the self-report tier.
 func TestResolveFromLogsNearMissPropagatesError(t *testing.T) {
