@@ -82,7 +82,8 @@ let
     // (import ./roster.nix common)
     // (import ./promptassembly.nix common)
     // (import ./baked-skills.nix common)
-    // (import ./seccomp.nix common);
+    // (import ./seccomp.nix common)
+    // (import ./adr-numbers.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
