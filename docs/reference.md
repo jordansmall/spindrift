@@ -4298,6 +4298,20 @@ including the Go launcher ([ADR 0007](adr/0007-runtime-logic-is-a-nix-built-go-b
 the pluggable OCI/bwrap runner ([ADR 0006](adr/0006-box-isolation-is-a-pluggable-runner.md)),
 and nix-in-the-box ([ADR 0008](adr/0008-nix-is-a-first-class-default-in-the-box.md)).
 
+An ADR's four-digit number is its identity: no two files under
+`docs/adr/` may share one, so "ADR 0045" resolves to exactly one document
+and a bare citation in code or prose needs no grep to follow.
+`nix/checks/adr-numbers.nix` enforces it at Nix evaluation time —
+`adr-numbers-unique` fails on a shared prefix and
+`adr-numbers-well-formed` fails on an entry that is not a regular file
+named `NNNN-<slug>.md`, without which a badly named ADR would be skipped
+by the uniqueness pin's grouping rather than caught by it. Both reach the
+gate through `sourceChecks`, so `nix build .#checks-inbox` and `nix flake
+check` both carry them. Renumbering an ADR leaves a header note naming its
+old number: `CHANGELOG.md` is release-please-generated and is left as
+shipped, so its release notes keep citing whatever number the ADR was
+published under.
+
 ---
 
 ## Background realize process isolation
