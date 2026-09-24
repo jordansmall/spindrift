@@ -1616,6 +1616,12 @@ from `lib/output-caps.nix`, so neither can drift from the baked cap.
 Both are asserted directly on the built image's `config.Env` by
 `nix/checks/image.nix`'s `output-cap-env-marker` check, the same
 way `nix-store-writable-env-marker` verifies `NIX_STORE_WRITABLE` above.
+That check pins both values by hand: it does not read
+`BASH_MAX_OUTPUT_LENGTH` from `lib/output-caps.nix`, so it stays an
+independent assertion about the *built* image rather than a restatement
+of `lib/image.nix`'s own import. That pin is instead cross-checked
+against `lib/output-caps.nix` at eval time, so drift throws instead of
+the check passing on a stale number.
 
 Under the `log` Signal carrier, the `-e` override above is a runtime knob
 only: it changes what the Box's Bash tool cuts, not what the fragments
@@ -1625,7 +1631,9 @@ length that *is* a multiple of four, where a truncated payload decodes
 cleanly and half a verdict posts as though it were whole. Changing
 the cap therefore means editing `lib/output-caps.nix` and rebuilding,
 which re-derives the numbers above and re-asserts that invariant in
-`nix/checks/prompts.nix`.
+`nix/checks/prompts.nix` — and also updating `output-cap-env-marker`'s
+hand-typed pin in `nix/checks/image.nix` to match, which the eval-time
+throw above forces rather than leaving to be remembered.
 
 ### Bash command-output interceptor
 
