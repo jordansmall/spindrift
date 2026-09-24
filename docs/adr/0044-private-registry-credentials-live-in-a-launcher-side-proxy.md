@@ -748,7 +748,7 @@ was not measured. It is rejected regardless: it trades native virtualization for
 emulation on every dispatch, and it would stake the feature on a configuration
 chosen for no other reason, still without resolving whether connect succeeds.
 
-## Amendment (issue #3111): a loopback-TCP fallback when the socket cannot cross
+## Amendment (issue #3111): a TCP fallback when the socket cannot cross
 
 The Decision above treats "reach the proxy over a per-Box unix socket" as a
 constant. It is not: the socket is a host path bind-mounted into the guest,
@@ -852,14 +852,22 @@ including for the remote-context case: there the sub-probe's own container
 fails to dial back, so the Dispatch errors loudly before any Box starts,
 rather than silently falling through to the public registry.
 
-**A loopback port needs its own gate, because a socket's came for free.** A
-unix socket's access control is filesystem permissions on its path — nothing
-else on the host can open it without also being able to read that path. A
-loopback TCP port has no equivalent: any local process can connect to it,
-which is exactly the vector this ADR already treats as adversarial (`agent/
-env-credential-scrub.sh`'s framing, "an Agent Box with arbitrary code
-execution as its own uid"). So the TCP transport carries a per-run secret,
-minted fresh by `newRegistryProxyTCPSecret` (`dispatch/box.go`, 16
+**An every-interface port needs its own gate, because a socket's came for
+free.** A unix socket's access control is filesystem permissions on its path
+— nothing else on the host can open it without also being able to read that
+path. The TCP fallback has no equivalent, and it binds every interface rather
+than loopback (`dispatch/box.go`): the Box dials the host by name, resolved
+either by the runtime itself or by `--add-host <host>:host-gateway` —
+`probeRegistryTCPReachable` decides which (`runner/oci.go`) — and on a plain
+Linux docker bridge that name resolves to the bridge IP (e.g. `172.17.0.1`),
+so a loopback-only bind would leave nothing on the address the Box dials.
+That widens what the gate has to cover, from any local process on the host to
+anything that can route to it — the same vector this ADR already treats as
+adversarial (`agent/env-credential-scrub.sh`'s framing, "an Agent Box with
+arbitrary code execution as its own uid"), reached from further away.
+Narrowing the bind to the bridge-gateway address instead of merely gating it
+is open follow-up work (issue #3772). So the TCP transport carries a per-run
+secret, minted fresh by `newRegistryProxyTCPSecret` (`dispatch/box.go`, 16
 `crypto/rand` bytes, hex-encoded) and required on every request via the
 `registryproxy.TCPSecretHeader` header. `ListenAndServeTCP` checks it with
 `crypto/subtle.ConstantTimeCompare`, not `!=` — a short-circuiting equality
@@ -888,12 +896,12 @@ than from a literal argv assignment.
 ### The three original claims, corrected
 
 - **"Opens no host TCP port."** No longer unconditionally true. The launcher
-  opens a loopback-only TCP port, gated by the per-run secret above, but only
-  when the live probe finds the configured runtime cannot carry the socket
-  across, and only for that one Dispatch. A runtime the probe finds capable —
-  which includes every bwrap run, and every OCI run against a local daemon
-  with a working bind mount — still gets the unix socket exactly as
-  originally decided, and no port is opened at all.
+  opens a TCP port bound on every interface (`0.0.0.0:0`), gated by the
+  per-run secret above, but only when the live probe finds the configured
+  runtime cannot carry the socket across, and only for that one Dispatch. A
+  runtime the probe finds capable — which includes every bwrap run, and every
+  OCI run against a local daemon with a working bind mount — still gets the
+  unix socket exactly as originally decided, and no port is opened at all.
 
 - **"Behaves identically under bwrap and every OCI runtime."** No longer
   true, and no longer the goal. Transport selection is now a per-run,
