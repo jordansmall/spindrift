@@ -6,352 +6,261 @@
 
 *A nix-based agent automation harness, consumed as a flake.*
 
-Run headless coding agents in **disposable, nix-built containers** — one per
-issue. spindrift is **imported by your flake**, not cloned. Two ideas carry it
-(see [`CONTEXT.md`](CONTEXT.md) for the full vocabulary):
+Label an issue `ready-for-agent`, run `spindrift dispatch`, and a headless
+coding agent works it inside a **disposable, nix-built Box** — a fresh clone,
+a scoped token, no host access — then opens a pull request. The host-side
+launcher watches CI and decides whether it merges.
 
-1. **The container is the isolation boundary.** Each issue runs in its own
-   throwaway container with a fresh clone, a scoped token, and no host access.
-   That is what makes running the agent with permission prompts skipped safe:
-   the agent can do anything it likes, but only inside the box.
-2. **The toolchain is a nix image.** The image is built with `dockerTools` from
-   the *same* pinned nixpkgs your dev shell uses, so the agent's environment and
-   yours can never drift. One source of truth, no hand-maintained Dockerfile.
+Two ideas carry it (see [`CONTEXT.md`](CONTEXT.md) for the full vocabulary):
 
-Everything around those two ideas is a seam you pick at build time, so spindrift
-is not tied to one vendor's CLI or one vendor's tracker:
+1. **The Box is the isolation boundary.** The agent runs with permission
+   prompts skipped, which is safe because everything it can touch is
+   throwaway. What bounds the blast radius is the token you hand it.
+2. **The toolchain is a nix image.** The Box is built from the *same* pinned
+   nixpkgs as your dev shell, so the agent's environment and yours never
+   drift. No hand-maintained Dockerfile.
 
-- **Driver** — the agent CLI baked into the Box:
-  [Claude Code](https://claude.com/claude-code) or
-  [opencode](https://opencode.ai), the latter pointed at any Provider it
-  supports (e.g. GitHub Copilot).
-- **Issue Tracker** — where the work comes from: GitHub, Jira, Forgejo
-  (Codeberg), or a purely local, offline tracker.
-- **Code Forge** — where the work goes: GitHub, Forgejo, a plain git remote, or
-  a host-mediated local bundle with no remote at all.
-- **Runtime** — what actually confines the Box: podman, docker, Rancher Desktop
-  (`nerdctl`), or daemonless bubblewrap on Linux.
-- **Dispatch kind** — what the agent is asked to do: `work` (implement the
-  issue, open a pull request, drive it through a merge gate) or `research`
-  (advise only — post one structured verdict comment and stop).
+spindrift is **imported by your flake** (the *Consumer flake*), not cloned.
+Everything around the two ideas is a seam you pick at build time:
+
+| seam | choices |
+| ---- | ------- |
+| **Driver** — the agent CLI | [Claude Code](https://claude.com/claude-code) (default), [opencode](https://opencode.ai) with any Provider it supports (e.g. GitHub Copilot) |
+| **Issue Tracker** — where work comes from | GitHub (default), Forgejo/Codeberg, Jira, local offline files |
+| **Code Forge** — where work lands | GitHub (default), Forgejo/Codeberg, a plain git remote, a host-local bundle |
+| **Runtime** — what confines the Box | podman (default), docker, Rancher Desktop (`rancher`), bubblewrap (`bwrap`, Linux, daemonless) |
 
 ## Prerequisites
 
 - **nix** with flakes enabled.
-- **podman** (or set `infra.runtime = "docker"`; `infra.runtime = "rancher"`
-  for Rancher Desktop in containerd mode, driven via `nerdctl`; or
-  `infra.runtime = "bwrap"` for the daemonless bubblewrap sandbox on Linux,
-  which needs no container runtime).
-  On macOS/Windows, podman runs containers inside a VM with its own fixed RAM —
-  size it to at least `MEMORY_LIMIT` × `MAX_PARALLEL` plus VM overhead. See
-  [Podman machine RAM](docs/reference.md#podman-machine-ram).
-- A **fine-grained single-repo GitHub PAT** — scoped to the Target repo only
-  (see [Before you deploy](#before-you-deploy)).
-- **Claude Code auth**: run `claude setup-token` on the host, or an API key.
-- Using the **opencode** Driver's `github-copilot` Provider instead: run
-  `opencode auth login -p github-copilot` on the host (one-time device flow),
-  export the resulting auth slice into `OPENCODE_AUTH_CONTENT`, and set
-  `MODEL=github-copilot/<model>` — see [opencode Driver: github-copilot Provider
-  credential](docs/reference.md#opencode-driver-github-copilot-provider-credential)
-  for the exact `jq` recipe.
+- **A container runtime** — podman by default; docker, Rancher Desktop, or (on
+  Linux) bubblewrap also work. On macOS/Windows, give the podman VM enough RAM
+  for your parallel Boxes — see [Podman machine RAM](docs/reference.md#podman-machine-ram).
+- **A GitHub credential scoped to the one Target repo** — a fine-grained PAT
+  (Issues RW, Contents RW, Pull requests RW, Metadata R), or a
+  [GitHub App installation token](docs/reference.md#github-app-installation-token-recommended)
+  (recommended for CI).
+- **Agent auth** — `claude setup-token` (gives `CLAUDE_CODE_OAUTH_TOKEN`) or an
+  `ANTHROPIC_API_KEY`. For opencode + GitHub Copilot instead, see
+  [opencode github-copilot credential](docs/reference.md#opencode-driver-github-copilot-provider-credential).
+- **Branch protection on the Target repo's base branch** — see
+  [Before you deploy](#before-you-deploy). Do not skip this.
 
 ## Quick start
 
-Try the CLI with no clone and no dev shell — `nix run` builds it from this
-flake's own pinned toolchain and runs it:
+### 1. Scaffold a Consumer flake
 
-```sh
-nix run github:jordansmall/spindrift -- --help
-nix run github:jordansmall/spindrift -- --version
-```
-
-The fastest path from zero to a dispatching setup is the **Quickstart
-wizard** — an interactive nix app that scaffolds, validates, and builds a
-Consumer flake in one command:
+In an empty directory, run the Quickstart wizard:
 
 ```sh
 mkdir my-agents && cd my-agents
 nix run github:jordansmall/spindrift#quickstart
 ```
 
-It detects what it can (container runtime, git identity, repo slug from `git
-remote`, an ambient token) and asks only for the rest — a GitHub token
-(audited for over-broad scopes) and Claude auth. Quickstart always
-provisions **GitHub** as the Issue Tracker; it never asks. The `jira` and
-`local` trackers are experimental and reachable only by hand-editing
-`ISSUE_TRACKER` in the generated `flake.nix` — see [Issue Tracker
-backends](docs/reference.md#issue-tracker-backends). Pair `ISSUE_TRACKER=local`
-with `CODE_FORGE=local` for a fully private, fully offline breakdown loop — see
-[Local code forge](docs/reference.md#local-code-forge-code_forgelocal). It
-then writes a minimal `flake.nix`, a secrets-only `harness.env`, a
-`.gitignore` protecting it, and an `.envrc`; runs the doctor checks (offering
-to create missing labels); and kicks off the first image build — leaving
-`spindrift dispatch` as the only remaining step. Refuses to clobber an
-existing flake without `--force`.
+It detects what it can — runtime, git identity, repo slug from `git remote` —
+and asks for the rest: your token (audited for over-broad scopes) and agent
+auth. Then it:
 
-Prefer a fully-commented scaffold you edit by hand instead? Use the bundled
-template:
+- writes `flake.nix`, a secrets-only `harness.env` (mode 0600), `.gitignore`,
+  and `.envrc`;
+- runs `spindrift doctor`, offering to create any missing labels;
+- builds the agent image (slow the first time).
+
+It refuses to overwrite an existing `flake.nix` or `harness.env` without
+`--force`. A `codeberg.org` remote selects the Forgejo backend automatically.
+
+<details>
+<summary>Prefer a hand-edited, fully commented scaffold?</summary>
 
 ```sh
 mkdir my-agents && cd my-agents
 nix flake init -t github:jordansmall/spindrift
+$EDITOR flake.nix                    # uncomment forge = { repoSlug = "owner/repo"; }; set your toolchain
+$EDITOR prompts/issue-prompt.md      # optional: tune the agent's workflow
+cp harness.env.example harness.env   # fill in GH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN
+nix develop -c spindrift doctor      # verify, and create the labels
+nix develop -c spindrift build       # realize the image
 ```
 
-That drops a ready-to-edit starter: a `flake.nix` importing the harness (with
-fully-commented `agents`/`dispatch`/`forge`/`git`/`infra`/`issues` blocks you
-uncomment as needed — at minimum, `forge = { ... };` to set `repoSlug`), a
-`prompts/` directory, a `skills/` directory with `auto-format`, `auto-lint`,
-and `check-hygiene` `SKILL.md` dirs (reference copies of the same
-harness-owned skills baked into every image regardless of the Consumer's own
-`skills` option — inert until you wire them into `agents.skills` yourself,
-since this template's `flake.nix` doesn't reference `./skills`), a
-`harness.env.example` (secrets only — see [Runtime
-configuration](docs/reference.md#runtime-configuration)), an `.envrc` (a
-`use flake` direnv file), and a `.gitignore` covering the Nix build output
-(`result`/`result-*`), `harness.env`, `.spindrift/`, `.direnv/`, the
-container-fallback build artifacts (`.spindrift-image.tar`,
-`.spindrift-image-path`), and `.DS_Store`. Then:
+The template also ships `skills/` with reference copies of the harness-owned
+skills (`auto-format`, `auto-lint`, `check-hygiene`, `code-comments`) that are
+baked into every image anyway.
+
+</details>
+
+### 2. Queue an issue and dispatch
+
+Add the `ready-for-agent` label to an issue in the Target repo, then from the
+Consumer flake's directory:
 
 ```sh
-$EDITOR flake.nix                        # uncomment forge = { ... }; and set repoSlug; tune toolchain/packages
-$EDITOR prompts/issue-prompt.md          # tune the agent's workflow
-cp harness.env.example harness.env       # fill in GH_TOKEN, Claude auth (secrets only)
-
-nix run github:jordansmall/spindrift -- build      # realize the image, then load it  (slow first time)
-nix run github:jordansmall/spindrift -- dispatch   # one container per ready-for-agent issue
-nix run github:jordansmall/spindrift -- research   # advise-only: one container per agent-research issue
+nix develop            # or `direnv allow` — puts your Consumer's spindrift on PATH
+spindrift preview      # dry run: what would dispatch pick up?
+spindrift dispatch     # one Box per ready-for-agent issue
 ```
 
-Every verb is a `nix run github:jordansmall/spindrift -- <verb>` away: the
-binary comes from this flake, while the Consumer flake, `harness.env`, and
-per-issue `.spindrift/logs/` are read from `$PWD`. The unpinned `github:` ref
-tracks `main`; pin spindrift in your own `flake.lock` (see [Adding spindrift to
-your flake](#adding-spindrift-to-your-flake)) for a fixed, reproducible version.
+Per-issue logs land in `.spindrift/logs/issue-<n>.log`. When the agent's PR
+goes green, the issue is labelled `agent-complete`, and **by default the PR is
+left open for you to merge** (`git.merge.policy = "manual"`). See
+[Configure](#configure) to have the launcher merge it.
 
-Prefer a persistent shell with `spindrift` on `PATH`? `nix develop` puts it
-there, along with tab-completion:
+> **Run your Consumer's CLI, not upstream's.** `nix run
+> github:jordansmall/spindrift -- dispatch` runs a binary built from
+> spindrift's *own* configuration, not yours — your `repoSlug`, toolchain, and
+> prompt would be ignored. Use `nix develop` (as above) or `nix run . --
+> <verb>`. The upstream ref is fine for `--help`, `--version`, and
+> `#quickstart`.
 
-```sh
-nix develop                              # enter the dev shell — puts spindrift on PATH
-spindrift build                          # the same verbs, now as a bare command
-spindrift dispatch
+## How a run works
+
+```
+spindrift dispatch  ─▶  find ready-for-agent issues (blockers resolved first)
+                          └─ one Box per issue, up to dispatch.maxParallel
+                               clone → agent implements → commit → push → open PR
+
+launcher (host)     ─▶  merge gate per PR
+                          poll CI → green → merge guard → git.merge.policy → agent-complete
+                                  → red   → fix Boxes (up to dispatch.retry.maxFix) → re-gate
+                                  → exhausted → agent-failed (triage, re-label to retry)
 ```
 
-Run commands **from your Consumer flake's directory**: `spindrift build` reads
-the flake from `$PWD` for its container fallback, and `spindrift dispatch` reads
-`harness.env` from `$PWD` for secrets. Per-issue logs land in
-`.spindrift/logs/issue-<n>.log`.
+The Box implements; the launcher owns the CI verdict and the merge. Labels move
+`ready-for-agent` → `agent-in-progress` → `agent-complete` or `agent-failed`.
+See [How a run works](docs/reference.md#how-a-run-works) for the full picture.
 
-`spindrift` ships bash, fish, and zsh tab-completion — subcommands, every flag,
-`--*-file` path arguments, and enumerable flag values — generated from the same
-schema as `--help`. See [Shell completion](docs/reference.md#shell-completion)
-to enable it in your shell.
+## Configure
 
-## Adding spindrift to your flake
+Two places, split by sensitivity:
 
-If you prefer to wire it by hand rather than `nix flake init`, add spindrift to
-your inputs and import the flake-parts module:
+- **`flake.nix`** — every non-secret knob, under `perSystem.spindrift.<domain>`
+  (`agents`, `dispatch`, `forge`, `git`, `infra`, `issues`). Baked in at build
+  time; any knob can be overridden for one run with its `--flag` (see
+  `spindrift --help --all`).
+- **`harness.env`** — secrets only (`GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, …).
+  Prefer a vault: `GH_TOKEN_CMD="rbw get spindrift-gh-token"` (or `op`, `pass`,
+  `vault`) fetches at run time and never writes the value to disk. See
+  [Runtime configuration](docs/reference.md#runtime-configuration).
+
+The knobs most people touch first:
 
 ```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-parts.url = "github:hercules-ci/flake-parts";
-    spindrift.url = "github:jordansmall/spindrift";
+perSystem = { config, pkgs, ... }: {
+  spindrift = {
+    forge.repoSlug = "owner/repo";                 # the Target repo
+    infra.image.packages = p: [ p.go p.gnumake ];  # toolchain baked into the Box
+    infra.image.prefetch = "go mod download || true";
+    agents.prompt = builtins.readFile ./prompts/issue-prompt.md;
+
+    git.merge.policy = "immediate";   # manual (default) | immediate | auto
+    dispatch.maxParallel = 3;         # Boxes at once
+    infra.runtime = "podman";         # podman | docker | rancher | bwrap
+    # agents.driver = "opencode";     # default: claude
   };
 
-  outputs = inputs@{ flake-parts, spindrift, ... }:
-    flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = [ "aarch64-darwin" "aarch64-linux" "x86_64-linux" ];
-      imports = [ spindrift.flakeModules.default ];
-      perSystem = { config, pkgs, ... }: {
-        spindrift = {
-          # The Target repo's devShell is used by default — no packages
-          # needed for a pure devShell setup. Add packages here only as
-          # a speed optimization to pre-bake toolchain closures into the
-          # image (see docs/reference.md for the full rationale).
-          infra.image.packages = p: [ p.go p.gnumake ];
-          agents.prompt = builtins.readFile ./prompts/issue-prompt.md;
-        };
-
-        # Put the spindrift CLI on PATH: `nix develop` → `spindrift dispatch`.
-        devShells.default = pkgs.mkShell {
-          packages = [ config.packages.spindrift ];
-        };
-      };
-    };
-}
+  devShells.default = pkgs.mkShell {
+    packages = [ config.packages.spindrift ];  # `nix develop` → `spindrift`
+  };
+};
 ```
 
-This yields the **`spindrift` CLI** as `packages.<system>.spindrift` and as
-`apps.<system>.default`, plus the Linux-only `agent-image` (OCI runtimes) and
-`agent-closure` (bwrap runtime, issue #2667). It also exposes
-`packages.<system>.launcher-currency` — a sibling build of the launcher
-binary, never invoked, whose store hash tracks the launcher's own source
-independent of the commit revision (issue #2677); nothing consumes it for
-a freshness verdict yet. The bare form (`nix run .`) prints help and exits;
-drain the queue with `nix run . -- dispatch`. See
-[`docs/reference.md`](docs/reference.md) for the `mkHarness`-direct variant
-and the devShell-targeting pattern (one image, many differently-toolchained
-Target repos).
+If the Target repo has its own `devShells`, the Box enters it, so
+`infra.image.packages` is only a speed optimization; point it at a leaner shell
+with `infra.devShell.name = "ci"`. See
+[devShell targeting](docs/reference.md#targeting-repos-that-define-their-own-devshell-toolchain).
 
-**Lean CI shell.** If the Target repo exposes a `devShells.ci` with only the
-tools the agent needs (no LSP, no GUI tooling), set `DEV_SHELL_NAME=ci` — or
-bake it as the Consumer default:
-
-```nix
-spindrift.infra.devShell.name = "ci";
-```
-
-The Box enters that shell instead of `devShells.default`, giving the agent a
-smaller closure and a faster probe. See
-[devShell targeting](docs/reference.md#how-a-run-works) for the probe flow
-and baked-toolchain fallback.
+Every option, with type and default, is in
+[`docs/flake-options.md`](docs/flake-options.md). To wire spindrift into an
+existing flake by hand, add `spindrift.url = "github:jordansmall/spindrift";`
+to your inputs and `imports = [ spindrift.flakeModules.default ];` to your
+flake-parts config — the template's [`flake.nix`](templates/default/flake.nix)
+is a complete example. Pin the input in `flake.lock` for reproducible runs.
 
 ## Before you deploy
 
-Three non-negotiables before pointing the harness at a live repo:
+1. **Branch protection is required.** The token that pushes `agent/issue-N`
+   branches can also push to the base branch. Block direct pushes and require
+   CI status checks. Don't require an approving review: a bot can't approve its
+   own PR. Without this, **the harness is not safe to deploy**.
+2. **Scope the token to one repo.** A broad token gives a prompt-injected agent
+   write access to everything it reaches. See
+   [GitHub token permissions](docs/reference.md#github-token-permissions).
+3. **Issue bodies and comments are attacker-writable prompt input.** The trust
+   boundary is who can apply the label, not who wrote the text.
 
-1. **Branch protection is required.** The token has Contents RW to push
-   `agent/issue-N` branches — that same scope allows pushing directly to the base
-   branch. Without branch protection **the harness is not safe to deploy**. Block
-   direct pushes; require CI status checks; do not require an external approving
-   review (a bot cannot approve its own PR). See the full rationale in
-   [Security → Threat model](docs/reference.md#threat-model).
-2. **Use a fine-grained single-repo PAT.** A broadly-scoped token gives an
-   injected agent write access to every repo it reaches. Restrict to one Target
-   repo (Issues RW, Contents RW, Pull requests RW, Metadata R). See the
-   [token permission table](docs/reference.md#github-token-permissions).
-3. **Issue body and every comment are attacker-writable prompt input.** The
-   trust boundary is the label, not the issue or comment author. What bounds
-   the blast radius is what the token allows and nothing more.
+`spindrift doctor` checks configuration, credentials, connectivity, and labels,
+exiting non-zero on anything fatal — use it as a CI preflight. It is silent
+when healthy; pass `-v` for the full report. See the
+[threat model](docs/reference.md#threat-model).
 
-Run `spindrift doctor` as a preflight: it checks forge connectivity, token
-validity, and label presence across all fifteen labels — the four triage
-labels (fatal if missing) plus eleven advisory labels (the seven
-`agent-research*` labels, the three `agent-priority-*` labels, and
-`agent-ambiguous-spec`). Run interactively, it offers to create missing
-labels; in CI it exits non-zero when a triage label is missing or the
-configuration is invalid — see [exit codes](docs/reference.md#spindrift-doctor-exit-codes-issue-2569)
-for the full vocabulary. The report is quiet by default: a healthy run prints
-nothing and exits 0, and without the flag only `MISSING:` rows and their
-`remedy:` lines, the interactive create-label prompt, and its
-`created:`/still-missing lines reach stdout. Pass `--verbose`/`-v` for the full
-report, including the read-only token gates' own `WARNING:` lines for an
-uninspectable Box token.
+## Commands
 
-## Basic flow
+Run `spindrift --help` for the full list; the common ones:
 
-```
-spindrift dispatch  ─▶  find ready-for-agent issues
-                          └─ one container per issue (up to MAX_PARALLEL)
-                               clone repo → run claude → commit → push → open PR
-                               └─ SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
+| command | what it does |
+| ------- | ------------ |
+| `spindrift doctor` | Preflight: config, credentials, connectivity, labels |
+| `spindrift build` | Realize the agent image without dispatching |
+| `spindrift preview` | Dry run — what `dispatch` would pick up, in order |
+| `spindrift dispatch [N…]` | Work every `ready-for-agent` issue (or exactly issues `N…`) |
+| `spindrift research [N…]` | Advise-only: review each `agent-research` issue and post one verdict comment |
+| `spindrift console` | Interactive backlog: pick issues to dispatch, tail and manage live Boxes |
+| `spindrift recover N` | Re-run the merge gate for one issue |
+| `nix run .#daemon` | Keep working both queues unattended, picking up newly labelled issues |
 
-host launcher  ─▶  merge gate per issue
-                    poll CI → green → merge guard → apply MERGE_MODE → agent-complete
-                           → red   → fix boxes (up to MAX_FIX_ATTEMPTS) → re-gate
-                           → exhausted → agent-failed (human triage, re-label to retry)
-```
+Shell completion for bash, fish, and zsh is included — see
+[Shell completion](docs/reference.md#shell-completion).
 
-The Box implements; the launcher owns the CI-green decision and the merge. By
-contract the Box does not merge its own PR; two-actor separation (below) makes
-that a repository-enforced guarantee rather than a contract. See
-[How a run works](docs/reference.md#how-a-run-works) for the full diagram and
-label lifecycle.
+- **Research** never edits code or opens a PR: it posts a
+  `recommend`/`reject`/`unclear` verdict under its own `agent-research*` label
+  family, and a human acts on it. See [Research dispatch](docs/reference.md#research-dispatch).
+- **Console** — see [`docs/console.md`](docs/console.md).
+- **Daemon** — see [Daemon](docs/reference.md#daemon).
 
-Optional behaviors, each off unless noted (see [`docs/reference.md`](docs/reference.md)
-for configuration):
+## Optional behaviors
 
-- **Merge guard.** A green PR whose diff touches a guarded path (`.github/**`,
-  `.forgejo/**`, `**/CLAUDE.md`, `**/AGENTS.md`, `.claude/**`, `.opencode/**`
-  by default) is
-  downgraded to manual regardless of `MERGE_MODE` — see
-  [Merge guard](docs/reference.md#merge-guard).
-- **Two-actor separation.** Set `BOX_GH_TOKEN` to a second machine user's PAT
-  and bar that user from the base branch with a repository ruleset — the
-  opt-in hard mode where the Box genuinely cannot merge its own PR, not just
-  by contract. See [Two-actor
-  separation](docs/reference.md#two-actor-separation-opt-in-hard-mode).
-- **Read-only Box.** Set `BOX_FORGE_AND_ISSUE_ACCESS=read-only` to hand the
-  Box a read-only token instead: it cannot push, open a PR, or comment at
-  all, and the launcher relays its branch, opens its draft PR, and posts its
-  comment host-side — a second, alternative route to the guarantee two-actor
-  separation provides, without a second GitHub user. See [Read-only
-  Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).
-- **Filer.** Set `FILER_MODEL` (deprecated), or opt in via the `roster` option
-  covered next, to file the non-blocking review findings the work loop
-  escalates into `agent-review-finding`-labelled issues for human triage —
-  see [Filer](docs/reference.md#filer).
-- **Subagent roster.** The scout/reviewer/filer/worker subagents (tiered above by
-  `SCOUT_MODEL`/`REVIEW_MODEL`/`FILER_MODEL`/`WORKER_MODEL`, now deprecated), plus
-  the `review-axis` agent (no env knob of its own — see
-  [ADR 0049](docs/adr/0049-role-capability-profiles-are-provider-neutral.md)), are
-  driven by `roster`, a structural flakeModule option
-  (`perSystem.spindrift.agents.models.roster`) also forwarded as a `mkHarness`
-  argument, that accepts an arbitrary list of subagents, including custom ones
-  beyond the historical four — see [Subagent roster](docs/reference.md#subagent-roster).
-- **Auto-format / auto-lint.** Set `AUTO_FORMAT=1` / `AUTO_LINT=1` to format or
-  lint changed files before each commit; the tool is detected automatically.
-- **Blockers.** An issue's blockers gate its dispatch until each reaches
-  `agent-complete`, resolved from the tracker's native dependency relationships
-  first and body-text refs (`depends on #N`) as a fallback — see
-  [Issue Tracker backends](docs/reference.md#issue-tracker-backends).
-- **Touch-set overlap.** An issue's `## Touches` section defers dispatch while
-  its paths overlap an in-progress issue's, retrying once the collider completes
-  — see [Declared touch-set overlap](docs/reference.md#declared-touch-set-overlap).
+Each is off by default; details in [`docs/reference.md`](docs/reference.md).
 
-## Research dispatch
-
-`spindrift research` (and the selective `research <nums>` form) is a second,
-advise-only Dispatch kind: each container reviews one `agent-research` issue
-from inside a fresh clone of the Target repo, then posts a single structured
-verdict comment. It never edits the issue body, closes it, or promotes it to
-`ready-for-agent` — a human always acts on the verdict.
-
-```
-spindrift research  ─▶  find agent-research issues
-                          └─ one container per issue
-                               clone repo → review issue → post verdict comment
-                               └─ SPINDRIFT_OUTCOME issue=N landing=<comment-url> status=recommend|reject|unclear|blocked
-```
-
-Research maps the launcher's four Dispatch states to its own disjoint
-`agent-research*` label family, so an issue can wear a work label and a research
-label at once. On GitHub, `.github/workflows/agent-research.yml` fires one
-research dispatch per `agent-research` application. See
-[Research dispatch](docs/reference.md#research-dispatch) for the label table,
-the workflow, and the optional least-privilege research token.
-
-## Console
-
-`spindrift console` opens the interactive Console: an in-terminal loop that
-lists every open issue from the Issue Tracker — number, title, labels,
-oldest-first — and lets you Pick issues to launch as Dispatches.
-
-```sh
-spindrift console
-```
-
-Picks launch through the same continuous engine the headless loops use, up to a
-live parallelism cap you can resize in-session. You can filter the backlog,
-open a Backlog row's ticket-detail modal or a running Dispatch's live-tail
-sidebar, terminate a live Dispatch by hand, rebuild a stale image without
-leaving the session, and adopt orphaned containers left by a crash. See
-[`docs/console.md`](docs/console.md) for the full command table and behavior.
+- **Merge guard** *(on)* — a PR touching `.github/**`, `.forgejo/**`,
+  `**/CLAUDE.md`, `**/AGENTS.md`, `.claude/**`, or `.opencode/**` is never
+  auto-merged. See [Merge guard](docs/reference.md#merge-guard).
+- **Read-only Box** — `forge.boxAccess = "read-only"`: the Box gets a read-only
+  token and the launcher pushes, opens the PR, and comments on its behalf, so
+  the agent structurally cannot merge. See
+  [Read-only Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).
+- **Two-actor separation** — give the Box a second machine user's token
+  (`BOX_GH_TOKEN`) barred from the base branch by a ruleset. See
+  [Two-actor separation](docs/reference.md#two-actor-separation-opt-in-hard-mode).
+- **Auto-format / auto-lint** — `agents.format.enable` / `agents.lint.enable`
+  format or lint changed files before each commit, tool auto-detected.
+- **Subagent roster** — tune the model and effort of the scout, reviewer,
+  worker, and filer subagents, or add your own, via `agents.models.roster`.
+  Enabling the filer turns non-blocking review findings into
+  `agent-review-finding` issues. See
+  [Subagent roster](docs/reference.md#subagent-roster) and
+  [Filer](docs/reference.md#filer).
+- **Blockers** *(on)* — an issue waits until its blockers reach
+  `agent-complete`, using the tracker's native dependencies or `depends on #N`
+  prose. See [Issue Tracker backends](docs/reference.md#issue-tracker-backends).
+- **Touch-set overlap** *(on)* — an issue's `## Touches` path list defers it
+  while it overlaps an in-progress issue. See
+  [Declared touch-set overlap](docs/reference.md#declared-touch-set-overlap).
+- **Fully offline** — `issues.tracker = "local"` plus `forge.backend = "local"`
+  runs a private loop off Markdown issue files with no network. See
+  [Local code forge](docs/reference.md#local-code-forge-code_forgelocal).
 
 ## Documentation
 
 | document | what's in it |
 | -------- | ------------ |
-| [`docs/reference.md`](docs/reference.md) | Full CLI table, all configuration options, runtime env vars, how a run works, label lifecycle, research dispatch, the daemon, continuous dispatch, shell completion, security model, macOS build notes, design notes |
-| [`docs/console.md`](docs/console.md) | The interactive Console — every command and its behavior |
-| [`docs/flake-options.md`](docs/flake-options.md) | Generated reference for every schema-generated flake option, grouped by domain (ADR 0037), plus a Structural options section for the hand-declared structural knobs (`roster`, `skills`, `driver`, ...) — attr path, env var/type, default, description; regenerated by `nix flake check` |
-| [`CONTEXT.md`](CONTEXT.md) | Vocabulary — Harness, Consumer flake, Target repo, Box, Forge, and the three roles |
-| [`MIGRATING.md`](MIGRATING.md) | Deprecated commands and breaking changes by version |
-| [`VERSIONING.md`](VERSIONING.md) | Semver policy and the stability guarantees for each surface |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Dev workflow (`nix flake check`, the scoped in-box `checks-inbox` target, `nix run .#regen`), where code goes, ADRs, commit/release conventions |
-| [`SECURITY.md`](SECURITY.md) | How to report a vulnerability privately, plus the deployment threat model |
+| [`docs/reference.md`](docs/reference.md) | The full manual: CLI, configuration, runtime env, how a run works, labels, backends, research, daemon, security, macOS notes |
+| [`docs/flake-options.md`](docs/flake-options.md) | Every flake option — path, type, default, description (generated) |
+| [`docs/console.md`](docs/console.md) | The interactive Console |
+| [`CONTEXT.md`](CONTEXT.md) | Vocabulary: Harness, Consumer flake, Target repo, Box, Driver, Issue Tracker, Code Forge |
+| [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability; deployment threat model |
+| [`MIGRATING.md`](MIGRATING.md) | Deprecations and breaking changes |
+| [`VERSIONING.md`](VERSIONING.md) | Semver policy and what each surface guarantees |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Working on spindrift itself |
+| [`docs/adr/`](docs/adr/) | Architecture decision records |
 
 ## Credits
 
