@@ -459,20 +459,20 @@ rec {
         | `system`    | — | **auto-supplied** | string                   | perSystem's system | your host system; mapped to its Linux twin for the image; see the note above (`lib/flakeModule.nix`) |
         | `overlays`  | `${path "overlays" structuralPaths}` | shared         | list                        | `[]`               | overlays applied to the instantiated nixpkgs                         |
         | `config`    | `${path "config" structuralPaths}` | shared         | attrs                       | `{ allowUnfree = true; }` | nixpkgs config attrs                                          |
-        | `packages`  | `${path "packages" structuralPaths}` | shared         | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
+        | `packages`  | `${path "packages" structuralPaths}` | shared         | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain)        |
         | `prefetch`  | `${path "prefetch" structuralPaths}` | shared         | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
-        | `prompt`    | `${path "prompt" structuralPaths}` | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
-        | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | — | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
-        | `skills`    | `${path "skills" structuralPaths}` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
-        | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
+        | `prompt`    | `${path "prompt" structuralPaths}` | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent, so a prompt that already has it is left untouched) |
+        | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | — | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*`; override them at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
+        | `skills`    | `${path "skills" structuralPaths}` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers; it ignores a flat `<name>.md`) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` instead of copied from a pre-built host derivation, which keeps the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
+        | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compatibility shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (it forwards with an eval warning), but new config should use the domain paths directly |
         | `runtime`   | `${path "runtime" structuralPaths}` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
         | `driver`    | `${path "driver" structuralPaths}` | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide |
         | `nixInBox`  | `${path "nixInBox" structuralPaths}` | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off, `cores = 4`-bounded config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
-        | `nixStoreWritable` | `${path "nixStoreWritable" structuralPaths}` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |
+        | `nixStoreWritable` | `${path "nixStoreWritable" structuralPaths}` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic, so the entrypoint prints a `==> WARNING`. Both runners support it (ADR 0042); bwrap overlays an ephemeral tmpfs upper on the store instead |
         | `extraClosures` | `${path "extraClosures" structuralPaths}` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
-        | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"${nixBuilderImage}"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
+        | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"${nixBuilderImage}"` (pinned reference; the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
         | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
-        | `byName`    | `${path "byName" byNamePaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" byNamePaths}`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+        | `byName`    | `${path "byName" byNamePaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" byNamePaths}`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias; see [Subagent roster](#subagent-roster) |
       '';
       # Row names are read back off `table` itself, not a hand-kept side list, so
       # a wrong name breaks the render everyone reads (issue #2950 review
@@ -1278,11 +1278,11 @@ rec {
         "| `perSystem.spindrift.${pathFor name}` | ${escapeCell entry.docType} | ${escapeCell entry.docDefault} | ${escapeCell (oneLine entry.doc)} |\n";
     in
     "## Structural options (`perSystem.spindrift`)\n\n"
-    + "Hand-declared structural knobs (ADR 0037; issue #2572) — build-time\n"
-    + "or otherwise non-schema-derived surfaces such as the Driver, roster,\n"
-    + "and image contents. Same table shape as the sections above, but a\n"
-    + "type column in place of env var: attr path, type, default, and\n"
-    + "description.\n"
+    + "Hand-declared structural knobs (ADR 0037; issue #2572). These are\n"
+    + "build-time or otherwise not derived from the schema, such as the\n"
+    + "Driver, roster, and image contents. The table matches the sections\n"
+    + "above, with a type column in place of env var: attr path, type,\n"
+    + "default, and description.\n"
     + "\n"
     + "| attr path | type | default | description |\n"
     + "|---|---|---|---|\n"
@@ -1330,10 +1330,11 @@ rec {
     + "Consumer-tunable knobs live under `perSystem.spindrift.*`, grouped by\n"
     + "domain (ADR 0037); domains with no consumer-tunable knobs are omitted.\n"
     + "\n"
-    + "Precedence at runtime: CLI flag > flake setting (via the Launcher input\n"
-    + "document, ADR 0020) > baked default. A knob env var still wins over the\n"
-    + "flake setting this release, but is deprecated and warns; env configures\n"
-    + "only secrets and internal plumbing going forward.\n"
+    + "At runtime a CLI flag wins over a flake setting (passed via the Launcher\n"
+    + "input document, ADR 0020), which wins over the baked default. A knob env\n"
+    + "var still wins over the flake setting in this release, but it is\n"
+    + "deprecated and prints a warning. Going forward, env configures only\n"
+    + "secrets and internal plumbing.\n"
     + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
     + "\n"
     + concatStrings (map renderSection domainOrder)
