@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.19.2](https://github.com/jordansmall/spindrift/compare/v0.19.1...v0.19.2) (2026-09-26)
+
+
+### Features
+
+* **prompts:** add drop as a third triage outcome ([1a8c26a](https://github.com/jordansmall/spindrift/commit/1a8c26a097503208cc2383f9c9f5716c47dac737)), closes [#3610](https://github.com/jordansmall/spindrift/issues/3610)
+* **prompts:** have the filer emit a site dedup key ([dd0fdeb](https://github.com/jordansmall/spindrift/commit/dd0fdeba9c269d18cc4347820cfb1200d6e00ad3)), closes [#3609](https://github.com/jordansmall/spindrift/issues/3609)
+* **schema:** declare which knobs the launcher ignores ([b052feb](https://github.com/jordansmall/spindrift/commit/b052feb77a5798f37fb7ac3b4533fc384dec63d8)), closes [#3698](https://github.com/jordansmall/spindrift/issues/3698)
+* **signal:** carry dedup terms over the socket ([c51fda6](https://github.com/jordansmall/spindrift/commit/c51fda6cec6618985531fc86947ab0fce1051383)), closes [#3609](https://github.com/jordansmall/spindrift/issues/3609)
+
+
+### Bug Fixes
+
+* **checks:** pin the output caps against their source ([806695d](https://github.com/jordansmall/spindrift/commit/806695d957d8556fa3771f116dd2e6c50cb71b5c)), closes [#3679](https://github.com/jordansmall/spindrift/issues/3679)
+* **launcher:** stop suggesting an inert flag in the env warning ([434ca84](https://github.com/jordansmall/spindrift/commit/434ca84b45b3e3c0aeabf147e30473f4d04baa38)), closes [#3698](https://github.com/jordansmall/spindrift/issues/3698)
+* **prompts:** file an uncertain out-of-scope finding ([6d25bdb](https://github.com/jordansmall/spindrift/commit/6d25bdbedd483f92e6f7e3fdc59249cec9b98468)), closes [#3816](https://github.com/jordansmall/spindrift/issues/3816)
+* **prompts:** gate the round-2 flip on diff growth ([dbca42a](https://github.com/jordansmall/spindrift/commit/dbca42a0c53c71a76a5b261022fb598860eab28b)), closes [#3611](https://github.com/jordansmall/spindrift/issues/3611)
+* **prompts:** rank the branch form first in provenance ([8c30ab5](https://github.com/jordansmall/spindrift/commit/8c30ab5269149f3f5be1027d47a7c0c3b4f62a31))
+* **settle:** dedup issue intents per site ([1c90725](https://github.com/jordansmall/spindrift/commit/1c9072571aa86f528ca2dd6d177fc298326f717c)), closes [#3808](https://github.com/jordansmall/spindrift/issues/3808)
+* **settle:** show dedup skips in settle comments ([7c2c434](https://github.com/jordansmall/spindrift/commit/7c2c434adafe21d4b733577f8efd9bb6786c79ce)), closes [#3811](https://github.com/jordansmall/spindrift/issues/3811)
+* **settle:** skip issue intents already filed ([c2816b4](https://github.com/jordansmall/spindrift/commit/c2816b4d6a2c841281e7cfcc2b486f61f96387c2)), closes [#3609](https://github.com/jordansmall/spindrift/issues/3609)
+
+
+### Documentation
+
+* **adr:** correct ADR 0009's shipped-state claims ([810af6f](https://github.com/jordansmall/spindrift/commit/810af6fe35e344feed43d64fc25fc464c83efb9c)), closes [#3490](https://github.com/jordansmall/spindrift/issues/3490)
+* **adr:** name all three Reclaim triggers ([e73a4bd](https://github.com/jordansmall/spindrift/commit/e73a4bde20e413468c8b414002fb98ca0309f8d0)), closes [#3644](https://github.com/jordansmall/spindrift/issues/3644)
+* **adr:** reconcile ADR 0044 with the real bind ([0c6bd85](https://github.com/jordansmall/spindrift/commit/0c6bd8504b76cec0db8d41e333e17610cdc5b47b)), closes [#3764](https://github.com/jordansmall/spindrift/issues/3764)
+* **adr:** renumber the ADRs colliding on 0045 and 0039 ([b383d45](https://github.com/jordansmall/spindrift/commit/b383d4594878adc11874efa8cbc8ca6cb1ae6325))
+* **contributing:** stop hard-coding the ADR count ([a8d37b9](https://github.com/jordansmall/spindrift/commit/a8d37b91bfd7527ba386299e121902005f52435e)), closes [#3650](https://github.com/jordansmall/spindrift/issues/3650)
+* correct bwrap store claim in nix lore ([ac30a0e](https://github.com/jordansmall/spindrift/commit/ac30a0e32fc707445bc194cdfbc63b70206ed742))
+* document the filer's dedup key and skip ([5bb3b2b](https://github.com/jordansmall/spindrift/commit/5bb3b2bc4c142dce6e867191d9df59902c5abc9f)), closes [#3609](https://github.com/jordansmall/spindrift/issues/3609)
+* fix stale and inconsistent claims across docs ([a0a3fba](https://github.com/jordansmall/spindrift/commit/a0a3fba00410e864e0b32ec06bc24328e5ab5dda))
+* **launcher:** correct the TCP bind wording ([58f1014](https://github.com/jordansmall/spindrift/commit/58f1014aa801b8b81af4e5f59372ac75c9d1513a)), closes [#3764](https://github.com/jordansmall/spindrift/issues/3764)
+* **readme:** plain-language pass over the rewrite ([f85372d](https://github.com/jordansmall/spindrift/commit/f85372dbbcede672a29c61a35e1462f7f22f723f))
+* **readme:** rewrite as a fast path to first dispatch ([7677686](https://github.com/jordansmall/spindrift/commit/7677686cf43f4428e3b140101b5f6e091f05b84c))
+* record the round-2 recalibration ([b9a6a5e](https://github.com/jordansmall/spindrift/commit/b9a6a5e5837a18dd0af7dbd78c31545479a244df)), closes [#3611](https://github.com/jordansmall/spindrift/issues/3611)
+* **reference:** correct the Advanced tuning --flag claim ([d87d8cd](https://github.com/jordansmall/spindrift/commit/d87d8cd7655c1aac8ed08601d0927a9ffc626917)), closes [#3698](https://github.com/jordansmall/spindrift/issues/3698)
+* **reference:** describe per-site issue dedup ([9ded92e](https://github.com/jordansmall/spindrift/commit/9ded92e874cd59577de1bf8dd198bbefeb20fe91))
+* **reference:** describe the ADR numbering invariant ([491c024](https://github.com/jordansmall/spindrift/commit/491c024951fcaf81b5892e91ef5a79044b0a2569))
+* **reference:** describe the deduplicated section ([10b0486](https://github.com/jordansmall/spindrift/commit/10b04868a9ca528baad52003c8cff974549c2630)), closes [#3811](https://github.com/jordansmall/spindrift/issues/3811)
+* **reference:** describe the output-cap pin ([62115d6](https://github.com/jordansmall/spindrift/commit/62115d66d1e5593e1ba7a408aaa28b2126c9e1e8)), closes [#3679](https://github.com/jordansmall/spindrift/issues/3679)
+* **reference:** describe the scope gate on triage ([e404f88](https://github.com/jordansmall/spindrift/commit/e404f88bf996650257a63d511e845e303177f7ee)), closes [#3816](https://github.com/jordansmall/spindrift/issues/3816)
+* **reference:** describe the triage drop outcome ([b2ca1f0](https://github.com/jordansmall/spindrift/commit/b2ca1f09cd1e5e1e15aeca270f8392d9db2cedf6)), closes [#3610](https://github.com/jordansmall/spindrift/issues/3610)
+* **reference:** document the branch-first provenance ([46a11bd](https://github.com/jordansmall/spindrift/commit/46a11bd0593062702ae6c0f5cf8af5af351993b4))
+* **reference:** drop kind from the awake events ([eaeae39](https://github.com/jordansmall/spindrift/commit/eaeae397bc9065ed392cd4f96ac15bfe700ce9ef))
+* **reference:** narrow the output-caps derivation claim ([4622ec4](https://github.com/jordansmall/spindrift/commit/4622ec4f55fa9bab7180af9355bec43212102561)), closes [#3707](https://github.com/jordansmall/spindrift/issues/3707)
+* repoint citations at the renumbered ADRs ([69235e0](https://github.com/jordansmall/spindrift/commit/69235e03885b796e933cfa3f2867008a65b8860a))
+* **terminate:** widen the package doc ([5b0e605](https://github.com/jordansmall/spindrift/commit/5b0e60524f40587fa342f3090d25c721b22b3efe)), closes [#3644](https://github.com/jordansmall/spindrift/issues/3644)
+
+
+### Tests
+
+* **checks:** pin the branch-first provenance wording ([885e471](https://github.com/jordansmall/spindrift/commit/885e471f02f34bfa85fa971a838c8a2d524eeaea))
+* **checks:** pin the drop arm against silent revert ([7264d74](https://github.com/jordansmall/spindrift/commit/7264d7404ef1c3358a0cc582572f4ccbc7df6413)), closes [#3610](https://github.com/jordansmall/spindrift/issues/3610)
+* **checks:** pin the escape hatch's scope gate ([ba6af3c](https://github.com/jordansmall/spindrift/commit/ba6af3cde65becdd51f6a855c05fa770c6804b4b)), closes [#3816](https://github.com/jordansmall/spindrift/issues/3816)
+* **checks:** pin the round-2 calibration ([6238de5](https://github.com/jordansmall/spindrift/commit/6238de56e8266d463f9563cea4bf9a5070739b4d)), closes [#3611](https://github.com/jordansmall/spindrift/issues/3611)
+* **checks:** pin unique ADR number prefixes ([3da3394](https://github.com/jordansmall/spindrift/commit/3da3394d652607ed763f8f6c88a370e8e7f113e6))
+
+
+### Miscellaneous Chores
+
+* bump flake.lock ([74fe5c4](https://github.com/jordansmall/spindrift/commit/74fe5c41570c8a3f8a147915e5f0df27fcbd861f))
+
 ## [0.19.1](https://github.com/jordansmall/spindrift/compare/v0.19.0...v0.19.1) (2026-09-23)
 
 
