@@ -113,5 +113,5 @@ release (`## [x.y.z](...)`), `###` always marks one of the sections above
 even one that happens to read `[Unreleased]`.
 
 The map, and the requirement that each heading is documented in this table, are
-pinned by the `release-please-changelog` flake check (`nix/checks.nix`) — edit
+pinned by the `release-please-changelog` flake check (`nix/checks/changelog.nix`) — edit
 the map in one place and the check fails until the config and this table agree.

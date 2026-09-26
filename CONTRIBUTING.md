@@ -43,13 +43,12 @@ nix build .#checks-inbox -L   # source-level checks only: go, shellcheck,
 ```
 
 `checks-inbox` excludes the checks that build/inspect the OCI image
-(`dockerTools.buildLayeredImage`, `lib/image.nix:198`) or assert facts about
+(`dockerTools.buildLayeredImage`, `lib/image.nix`) or assert facts about
 the box's own baked toolchain — the box working the issue is already built
 from that image, so re-baking it in-box is redundant and the nested build is
 heavy/unreliable in a Box (issue #565 saw one killed with `EXIT:137`). Those
 checks still run in CI's full `nix flake check` below, so coverage isn't
-lost — just moved out of the box. Both are OCI-runner only; the bwrap runner
-keeps its store read-only.
+lost — just moved out of the box.
 
 For faster, store-free per-file iteration (or as a fallback on a Box built
 without the self-test knobs), use `nil diagnostics path/to/file.nix` for
@@ -73,7 +72,7 @@ After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
 `docs/flake-options.md`, `tests/box_env_gen.bash`,
 `cmd/launcher/internal/doctor/labelmeta_gen.go`, and the generated section of
 `templates/default/flake.nix`'s commented-out `settings` example — instead of
-hand-editing them until the drift-guard checks (`nix/checks.nix`) go quiet:
+hand-editing them until the drift-guard checks (`nix/checks/schema-drift.nix`) go quiet:
 
 ```sh
 nix run .#regen
@@ -127,7 +126,7 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
   `cmd/launcher/internal/doctor/labelmeta_gen.go` by `renderers.nix`'s
   `renderLabelRegistryGo`, drift-guarded by `nix/checks/schema-drift.nix`'s
   `label-registry-gen` check), and `renderers.nix` (the schema → artifact
-  render functions shared by the `nix/checks.nix` drift guards and
+  render functions shared by the `nix/checks/schema-drift.nix` drift guards and
   `nix run .#regen`). No language-specific tooling belongs here — the core
   is language-agnostic ([ADR 0003](docs/adr/0003-language-agnostic-core.md)).
 - **`cmd/launcher/`** — the Go host-side launcher (its own module). Public

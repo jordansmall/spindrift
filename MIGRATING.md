@@ -954,7 +954,7 @@ ambiguous-spec labels, container runtime not ready, etc. — are allowed and
 reported informationally), `1` reserved for internal/unclassified errors,
 `2` configuration invalid, `3` auth or connectivity, `4` required checks
 failed or declined. See [`spindrift doctor` exit
-codes](docs/reference.md#spindrift-doctor-exit-codes-issue-2569) for the full
+codes](docs/reference.md#spindrift-doctor-exit-codes) for the full
 table.
 
 A script that only distinguishes `$? -eq 0` (success) from anything else is
