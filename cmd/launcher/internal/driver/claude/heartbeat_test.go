@@ -873,6 +873,19 @@ func TestFormatSpindriftOpDecision(t *testing.T) {
 	}
 }
 
+// A usage-decision signal op renders its own reason rather than falling
+// through to the default arm's accept rendering, which would drop the
+// client's usage error entirely (issue #3867). It spells the line the same
+// way the driver-exec verb's own printed line does -- "rejected (usage):" --
+// so the host log and the agent-visible line never drift apart.
+func TestFormatSpindriftOpSignalUsage(t *testing.T) {
+	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "signal", Kind: "pr-intent", Decision: "usage", Reason: "flag provided but not defined: -nonce"})
+	want := "signal pr-intent rejected (usage): flag provided but not defined: -nonce"
+	if !strings.Contains(got, want) {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, want)
+	}
+}
+
 // A delta_review_trigger op renders its own Decision and Reason on both the
 // fire and skip cases, rather than falling through to the default arm's bare
 // op-name rendering (issue #3246).

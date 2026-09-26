@@ -240,11 +240,130 @@ func TestHandlerAcceptsMaxSizeBody(t *testing.T) {
 	}
 }
 
+// A usage report is a client-side usage failure (bad flag, missing required
+// flag) that never reached a real route at all. The handler mirrors it as
+// one spindrift_op with decision "usage" and leaves the buffer -- and
+// therefore settle -- untouched (ADR 0052, issue #3867).
+func TestHandlerMirrorsUsageReportWithoutTouchingTheBuffer(t *testing.T) {
+	for _, tc := range []struct {
+		path, wantKind string
+	}{
+		{"/comment/usage", "comment"},
+		{"/pr-intent/usage", "pr-intent"},
+		{"/issue-intent/usage", "issue-intent"},
+		{"/status/usage", "status"},
+		{"/usage", "unknown"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			var log strings.Builder
+			b := newAll(t)
+			h := signalsocket.NewHandler(b, &log)
+
+			w := do(t, h, http.MethodPost, tc.path, `{"reason":"flag provided but not defined: -nonce"}`)
+			if w.Code != http.StatusNoContent {
+				t.Fatalf("POST %s = %d (%s), want 204", tc.path, w.Code, w.Body.String())
+			}
+
+			ops := mirroredOps(t, log.String())
+			if len(ops) != 1 {
+				t.Fatalf("mirrored %d ops, want one per request (1): %+v", len(ops), ops)
+			}
+			if ops[0].Kind != tc.wantKind || ops[0].Decision != "usage" || ops[0].Reason != "flag provided but not defined: -nonce" {
+				t.Fatalf("mirrored %+v, want kind %q decision usage with the reason", ops[0], tc.wantKind)
+			}
+			if ops[0].Size != 0 || ops[0].Hash != "" {
+				t.Errorf("mirrored %+v, want no size or hash -- nothing was buffered", ops[0])
+			}
+
+			if c, ok := b.Comment(); ok {
+				t.Errorf("buffered comment = %+v, want none after a usage report", c)
+			}
+			if p, ok := b.PRIntent(); ok {
+				t.Errorf("buffered pr intent = %+v, want none after a usage report", p)
+			}
+			if got := b.IssueIntents(); len(got) != 0 {
+				t.Errorf("buffered issue intents = %+v, want none after a usage report", got)
+			}
+			st := b.Status()
+			if st.Comment != nil || st.PRIntent != nil || len(st.IssueIntents) != 0 {
+				t.Errorf("status = %+v, want an untouched buffer after a usage report", st)
+			}
+		})
+	}
+}
+
+// An oversized, malformed, or wrong-method usage report is refused like
+// every other request -- mirrored once as a reject, buffer untouched.
+func TestHandlerRejectsBadUsageReports(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path, body, wantStatus string
+		wantCode                             int
+	}{
+		{"oversize reason", http.MethodPost, "/comment/usage", `{"reason":"` + strings.Repeat("x", signalwire.MaxUsageReasonBytes+1) + `"}`, "oversize", http.StatusRequestEntityTooLarge},
+		{"oversize request", http.MethodPost, "/comment/usage", `{"reason":"` + strings.Repeat("x", signalwire.MaxRequestBytes+1) + `"}`, "oversize", http.StatusRequestEntityTooLarge},
+		{"malformed json", http.MethodPost, "/comment/usage", `{`, "malformed_json", http.StatusBadRequest},
+		{"unknown field", http.MethodPost, "/comment/usage", `{"reason":"x","kind":"comment"}`, "malformed_json", http.StatusBadRequest},
+		{"empty reason", http.MethodPost, "/comment/usage", `{"reason":""}`, "malformed_json", http.StatusBadRequest},
+		{"wrong method", http.MethodGet, "/comment/usage", "", "method_not_allowed", http.StatusMethodNotAllowed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var log strings.Builder
+			b := newAll(t)
+			h := signalsocket.NewHandler(b, &log)
+
+			w := do(t, h, tc.method, tc.path, tc.body)
+			wantReject(t, w, tc.wantStatus, tc.wantCode)
+
+			ops := mirroredOps(t, log.String())
+			if len(ops) != 1 {
+				t.Fatalf("mirrored %d ops, want one per request (1): %+v", len(ops), ops)
+			}
+			if ops[0].Kind != "comment" || ops[0].Decision != "reject" {
+				t.Fatalf("mirrored %+v, want a comment reject", ops[0])
+			}
+
+			st := b.Status()
+			if st.Comment != nil || st.PRIntent != nil || len(st.IssueIntents) != 0 {
+				t.Errorf("status = %+v, want an untouched buffer after a refused usage report", st)
+			}
+		})
+	}
+}
+
 func TestHandlerRejectsKindNotConsumed(t *testing.T) {
 	b := signalsocket.New(signalsocket.Config{Consumes: []signalwire.Kind{signalwire.KindComment}})
 	h := signalsocket.NewHandler(b, nil)
 	w := do(t, h, http.MethodPost, "/pr-intent", `{"title":"t","body":"x"}`)
 	wantReject(t, w, "kind_not_consumed", http.StatusConflict)
+}
+
+// A usage report for a kind the run's Consumes list omits is still accepted:
+// the Consumes gate lives in the buffer's Accept* methods (checkKind), and
+// usageReport never calls into the buffer at all -- it takes no *Buffer
+// receiver -- so a kind's own consumption never gates the diagnostics-only
+// route it shares no code path with.
+func TestHandlerAcceptsUsageReportForAKindNotConsumed(t *testing.T) {
+	var log strings.Builder
+	b := signalsocket.New(signalsocket.Config{Consumes: []signalwire.Kind{signalwire.KindComment}})
+	h := signalsocket.NewHandler(b, &log)
+
+	w := do(t, h, http.MethodPost, "/pr-intent/usage", `{"reason":"-title is required"}`)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("POST /pr-intent/usage = %d (%s), want 204 even though pr-intent is not consumed", w.Code, w.Body.String())
+	}
+
+	ops := mirroredOps(t, log.String())
+	if len(ops) != 1 {
+		t.Fatalf("mirrored %d ops, want one per request (1): %+v", len(ops), ops)
+	}
+	if ops[0].Kind != "pr-intent" || ops[0].Decision != "usage" || ops[0].Reason != "-title is required" {
+		t.Fatalf("mirrored %+v, want a pr-intent usage report despite the unconsumed kind", ops[0])
+	}
+
+	st := b.Status()
+	if st.Comment != nil || st.PRIntent != nil || len(st.IssueIntents) != 0 {
+		t.Errorf("status = %+v, want an untouched buffer after a usage report", st)
+	}
 }
 
 func mirroredOps(t *testing.T, log string) []claude.SpindriftOp {
