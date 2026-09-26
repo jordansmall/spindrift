@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -31,6 +32,17 @@ type SelfEvalError struct{ Err error }
 func (e *SelfEvalError) Error() string { return e.Err.Error() }
 func (e *SelfEvalError) Unwrap() error { return e.Err }
 
+// FeatureBranchGoneError is what Runner.ResolveTip returns on a definitive
+// "absent" answer from the remote for the daemon's --feature-branch: the
+// branch used to exist and now doesn't, not a fetch that merely failed to
+// reach the remote — see HaltFeatureBranchGone for why that distinction
+// matters.
+type FeatureBranchGoneError struct{ Remote, Branch string }
+
+func (e *FeatureBranchGoneError) Error() string {
+	return fmt.Sprintf("feature branch %q no longer exists on %s — likely merged and deleted (or never pushed); restart the daemon without --feature-branch, or with a new branch", e.Branch, e.Remote)
+}
+
 // Runner is the daemon's one seam onto the outside world: resolve the
 // current tip (the revision to pin the next child to, and what the
 // daemon's own build would be at that revision) and run a child of a given
@@ -46,7 +58,9 @@ type Runner interface {
 	// ResolveTip fetches the base branch's current tip. An error that
 	// unwraps to *SelfEvalError means the fetch itself succeeded (the
 	// returned Tip.Revision is valid) but evaluating the daemon's own
-	// build at that revision failed; any other error means the fetch
+	// build at that revision failed; every other error — including one
+	// that unwraps to *FeatureBranchGoneError, the remote's definitive
+	// "absent" answer for --feature-branch — means the fetch itself
 	// failed and the returned Tip is the zero value.
 	ResolveTip(ctx context.Context) (Tip, error)
 	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
@@ -412,6 +426,23 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// both this call and the opportunistic one above go through.
 			t, err := p.resolveTip(ctx, slot)
 			if err != nil {
+				// A gone feature branch halts outright rather than
+				// following the breaker/backoff path (see
+				// HaltFeatureBranchGone) — and does so before any claim is
+				// taken (claims only happen after startChild/RunChild
+				// below).
+				var gone *FeatureBranchGoneError
+				if errors.As(err, &gone) {
+					// p.halt directly, bypassing haltIfStopping: this
+					// definitive answer deliberately wins over an operator
+					// stop already in flight, same as HaltSelfChanged below.
+					p.halt(Halt{
+						Class:  HaltFeatureBranchGone,
+						Detail: gone.Error(),
+						Kind:   kind,
+					})
+					return
+				}
 				// A failed fetch and a failed self-eval are both the
 				// transient blip the breaker exists for, but resolveFailure
 				// keeps them under separate halt classes; backoffOrHalt's

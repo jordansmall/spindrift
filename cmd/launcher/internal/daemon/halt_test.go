@@ -34,6 +34,7 @@ func TestHaltString_MatchesDocumentedGrammar(t *testing.T) {
 		{"invalid-config", Halt{Class: HaltInvalidConfig, Detail: "missing Kinds"}, "config-invalid: missing Kinds"},
 		{"preflight", Halt{Class: HaltPreflight, Detail: "doctor exit 4: required triage labels are missing"}, "preflight: doctor exit 4: required triage labels are missing"},
 		{"instance-lock", Halt{Class: HaltInstanceLock, Detail: "held by pid 123"}, "instance-lock: held by pid 123"},
+		{"feature-branch-gone", Halt{Class: HaltFeatureBranchGone, Detail: "feature branch \"feature-x\" no longer exists on origin"}, "feature-branch-gone: feature branch \"feature-x\" no longer exists on origin"},
 	}
 	for _, tc := range cases {
 		if got := tc.h.String(); got != tc.want {
@@ -62,6 +63,7 @@ func TestHaltExitCode_PinsWireNumbers(t *testing.T) {
 		{HaltInvalidConfig, 1},
 		{HaltPreflight, 11},
 		{HaltInstanceLock, 1},
+		{HaltFeatureBranchGone, 12},
 	}
 	for _, tc := range cases {
 		h := Halt{Class: tc.class}
@@ -74,6 +76,9 @@ func TestHaltExitCode_PinsWireNumbers(t *testing.T) {
 	}
 	if ExitPreflightFailed != 11 {
 		t.Errorf("ExitPreflightFailed = %d, want 11", ExitPreflightFailed)
+	}
+	if ExitFeatureBranchGone != 12 {
+		t.Errorf("ExitFeatureBranchGone = %d, want 12", ExitFeatureBranchGone)
 	}
 }
 

@@ -35,6 +35,14 @@ const (
 	// a checkout another daemon already holds — see
 	// cmd/launcher/daemon/main.go's mainRun.
 	HaltInstanceLock
+	// HaltFeatureBranchGone: Runner.ResolveTip came back with a definitive
+	// answer that the daemon's --feature-branch no longer exists on the
+	// remote (see FeatureBranchGoneError) — the campaign the branch stood
+	// for is over, not a blip a retry could still fix, so the pool halts
+	// instead of backing off and retrying a branch that will never come
+	// back. The operator's own fix is to restart the daemon without
+	// --feature-branch, or with a new one.
+	HaltFeatureBranchGone
 
 	// haltClassCount sits after every real class so a class added above it
 	// (and only above it) is covered by the completeness check on
@@ -72,6 +80,7 @@ var haltRenderings = map[HaltClass]haltRendering{
 	HaltInvalidConfig:      {name: "HaltInvalidConfig", reason: "config-invalid", detailed: true, exit: 1},
 	HaltPreflight:          {name: "HaltPreflight", reason: "preflight", detailed: true, exit: ExitPreflightFailed},
 	HaltInstanceLock:       {name: "HaltInstanceLock", reason: "instance-lock", detailed: true, exit: 1},
+	HaltFeatureBranchGone:  {name: "HaltFeatureBranchGone", reason: "feature-branch-gone", detailed: true, exit: ExitFeatureBranchGone},
 }
 
 // String returns c's Go identifier name (e.g. "HaltSelfChanged") — not the
@@ -152,3 +161,10 @@ const ExitSelfChanged = 10
 // clear this one: nothing the daemon does fixes a missing label or an
 // undersized VM, so a supervisor must not treat this code as retryable.
 const ExitPreflightFailed = 11
+
+// ExitFeatureBranchGone is the daemon's own exit code for a --feature-branch
+// that no longer exists on origin (see FeatureBranchGoneError and
+// HaltFeatureBranchGone for the rationale). Distinct from ExitSelfChanged
+// (10) so a restart wrapper can tell the two apart; like ExitPreflightFailed,
+// not one a plain restart clears.
+const ExitFeatureBranchGone = 12
