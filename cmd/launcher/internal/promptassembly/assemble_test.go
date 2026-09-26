@@ -1753,7 +1753,7 @@ func TestAssembleWorkPromptCarrierSelectsLogOrSocketPRIntentFragment(t *testing.
 	// caveman-default.md also names the bare `driver-exec signal pr-intent`
 	// verb unconditionally in its exemption paragraph, so anchor on the
 	// socket fragments' own flag-bearing command line, not the bare verb.
-	if strings.Contains(logResult.Prompt, `driver-exec signal pr-intent -title "<conventional title>"`) {
+	if strings.Contains(logResult.Prompt, `driver-exec signal pr-intent -title '<conventional title>'`) {
 		t.Errorf("SignalCarrier=log prompt contains the socket fragments' driver-exec command line, want absent: %q", logResult.Prompt)
 	}
 
@@ -1763,7 +1763,7 @@ func TestAssembleWorkPromptCarrierSelectsLogOrSocketPRIntentFragment(t *testing.
 	if err != nil {
 		t.Fatalf("Assemble(socket): %v", err)
 	}
-	if !strings.Contains(socketResult.Prompt, `driver-exec signal pr-intent -title "<conventional title>"`) {
+	if !strings.Contains(socketResult.Prompt, `driver-exec signal pr-intent -title '<conventional title>'`) {
 		t.Errorf("SignalCarrier=socket prompt missing the socket fragments' driver-exec command line: %q", socketResult.Prompt)
 	}
 	if strings.Contains(socketResult.Prompt, "SPINDRIFT_PR_INTENT run-nonce-abc123") {
