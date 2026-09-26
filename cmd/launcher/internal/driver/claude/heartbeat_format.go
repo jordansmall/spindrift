@@ -193,6 +193,8 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 			fmt.Fprintf(&sb, "signal %s rejected: %s", sanitizeRole(op.Kind), sanitizeRole(op.Reason))
 		case "read":
 			fmt.Fprintf(&sb, "signal %s read", sanitizeRole(op.Kind))
+		case "usage":
+			fmt.Fprintf(&sb, "signal %s rejected (usage): %s", sanitizeRole(op.Kind), sanitizeRole(op.Reason))
 		default:
 			fmt.Fprintf(&sb, "signal %s accepted \xc2\xb7 %d bytes \xc2\xb7 %s", sanitizeRole(op.Kind), op.Size, sanitizeRole(op.Hash))
 		}

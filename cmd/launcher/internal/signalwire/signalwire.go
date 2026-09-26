@@ -20,6 +20,37 @@ const (
 	KindIssueIntent Kind = "issue-intent"
 )
 
+// UsageRoute is the diagnostics-only path segment a client-side usage
+// failure (a bad flag, a missing required one) posts to: "/K/usage" for a
+// kind K the client named, or "/usage" when it could not name one at all
+// (missing or unrecognised kind word). The route buffers nothing and is
+// never consumed at settle -- it exists only to be logged (ADR 0052).
+const UsageRoute = "usage"
+
+// UsagePath returns the diagnostics-only usage route for kind, or the
+// kindless "/usage" route when kind is empty. Both the Box client and the
+// host handler call this so the two ends never drift on the path shape.
+func UsagePath(kind string) string {
+	if kind == "" {
+		return "/" + UsageRoute
+	}
+	return "/" + kind + "/" + UsageRoute
+}
+
+// MaxUsageReasonBytes bounds a usage report's Reason. A flag package error
+// line is well under this; the limit exists so the diagnostics-only route
+// stays bounded like every other request (ADR 0052).
+const MaxUsageReasonBytes = 1024
+
+// UsageReport is a client-side usage failure's content -- a `driver-exec
+// signal` CLI/flag usage failure (unknown flag, missing required flag),
+// never a token-usage figure; that is dispatch.UsageReport / internal/usage,
+// an unrelated concept sharing only the word. The kind is the route, never a
+// request field, so this carries only the reason.
+type UsageReport struct {
+	Reason string `json:"reason"`
+}
+
 // MaxBodyBytes bounds a signal's body. This package owns the limit
 // deliberately: internal/forge's text bound governs the opposite
 // direction (text carried into the Box through execve), so coupling the

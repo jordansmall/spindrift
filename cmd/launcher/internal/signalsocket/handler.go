@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -20,10 +21,11 @@ import (
 // ever buffered under it.
 const statusKind = "status"
 
-// unknownKind tags a request outside the four routes. It is a fixed token,
-// never the requested path -- the path is Box-controlled and the mirror is a
-// log line, so echoing the path back would let a caller write its own text
-// into the launcher's log.
+// unknownKind tags a request outside the four routes, and a usage report
+// whose kind the client could not name (bare "/usage"). It is a fixed
+// token, never the requested path -- the path is Box-controlled and the
+// mirror is a log line, so echoing the path back would let a caller write
+// its own text into the launcher's log.
 const unknownKind = "unknown"
 
 type handler struct {
@@ -46,6 +48,7 @@ type opRecordKey struct{}
 // once the inner handler returns.
 type opRecord struct {
 	kind     string
+	usage    bool
 	size     int
 	hash     string
 	decision string
@@ -78,7 +81,12 @@ type Handler struct {
 // "kind is the route" exact-match-or-nothing, with no cleaning step in
 // between.
 func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
-	switch recordFrom(r).kind {
+	rec := recordFrom(r)
+	if rec.usage {
+		usageReport(w, r)
+		return
+	}
+	switch rec.kind {
 	case string(signalwire.KindComment):
 		serve(w, r, h.buf.AcceptComment)
 	case string(signalwire.KindPRIntent):
@@ -93,10 +101,10 @@ func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 }
 
 // NewHandler returns the signal socket's Handler, serving b's four routes
-// and mirroring one spindrift_op event per request to logw (ADR 0052, issue
-// #3724). A nil logw discards the mirror. The unix transport is the only
-// caller: it has the socket file's permissions as its own gate, so this
-// Handler carries none.
+// plus the diagnostics-only usage route (ADR 0052) and mirroring one
+// spindrift_op event per request to logw (issue #3724). A nil logw discards
+// the mirror. The unix transport is the only caller: it has the socket
+// file's permissions as its own gate, so this Handler carries none.
 func NewHandler(b *Buffer, logw io.Writer) *Handler {
 	h := &handler{buf: b, logw: logw}
 	return &Handler{Handler: h.mirror(http.HandlerFunc(h.routes))}
@@ -145,19 +153,31 @@ func gate(secret string, next http.Handler) http.Handler {
 
 // kindForPath derives a request's mirror kind from its path alone, ahead of
 // routing, so every request -- known route, wrong method, or no route at all
-// -- gets a kind before the inner handler runs.
-func kindForPath(path string) string {
+// -- gets a kind (and whether it landed on the diagnostics-only usage route)
+// before the inner handler runs.
+// The bare "/usage" route is checked first: stripping its suffix leaves "",
+// which the switch would treat as no route at all.
+func kindForPath(path string) (kind string, isUsage bool) {
+	if path == signalwire.UsagePath("") {
+		return unknownKind, true
+	}
+	if rest, ok := strings.CutSuffix(path, "/"+signalwire.UsageRoute); ok {
+		path, isUsage = rest, true
+	}
 	switch path {
 	case "/comment":
-		return string(signalwire.KindComment)
+		return string(signalwire.KindComment), isUsage
 	case "/pr-intent":
-		return string(signalwire.KindPRIntent)
+		return string(signalwire.KindPRIntent), isUsage
 	case "/issue-intent":
-		return string(signalwire.KindIssueIntent)
+		return string(signalwire.KindIssueIntent), isUsage
 	case "/status":
-		return statusKind
+		return statusKind, isUsage
 	default:
-		return unknownKind
+		// A usage-suffixed path whose prefix names no known kind (e.g.
+		// "/comments-typo-xyz/usage") is unknown outright, same as a bare
+		// unknown path -- never a usage report for a kind that isn't real.
+		return unknownKind, false
 	}
 }
 
@@ -171,7 +191,8 @@ func (h *handler) mirror(next http.Handler) http.Handler {
 		// decision starts "reject", not "": FormatSpindriftOp renders an
 		// unrecognised decision, "" included, through its accept arm, so a
 		// record no route arm touches must never render as one.
-		rec := &opRecord{kind: kindForPath(r.URL.Path), decision: "reject"}
+		kind, usage := kindForPath(r.URL.Path)
+		rec := &opRecord{kind: kind, usage: usage, decision: "reject"}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), opRecordKey{}, rec)))
 		h.emit(claude.SpindriftOp{
 			Op:       "signal",
@@ -236,6 +257,41 @@ func (h *handler) status(w http.ResponseWriter, r *http.Request) {
 	// reusing "accept" for a request the buffer never mediated.
 	rec.decision = "read"
 	writeJSON(w, http.StatusOK, h.buf.Status())
+}
+
+// usageReport answers the diagnostics-only usage route (ADR 0052): a
+// client-side usage failure (unknown flag, missing required flag) that never
+// reached a real route at all. It never touches h.buf -- the route buffers
+// nothing, is never consumed at settle, and never changes the run's outcome,
+// so it takes no *Buffer receiver, unlike serve and status. On success it
+// writes no body: the caller has nothing to read back, only a signal that
+// the report landed.
+func usageReport(w http.ResponseWriter, r *http.Request) {
+	rec := recordFrom(r)
+	if r.Method != http.MethodPost {
+		reject(w, rec, methodReject())
+		return
+	}
+	var report signalwire.UsageReport
+	if rej := decode(w, r, &report); rej != nil {
+		reject(w, rec, rej)
+		return
+	}
+	if report.Reason == "" {
+		reject(w, rec, malformed())
+		return
+	}
+	if len(report.Reason) > signalwire.MaxUsageReasonBytes {
+		reject(w, rec, &signalwire.Reject{
+			Status: "oversize",
+			Reason: fmt.Sprintf("reason exceeds the %d-byte limit", signalwire.MaxUsageReasonBytes),
+			Code:   http.StatusRequestEntityTooLarge,
+		})
+		return
+	}
+	rec.decision = "usage"
+	rec.reason = report.Reason
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // unknownRoute answers any path outside the four routes. It never learns a

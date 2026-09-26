@@ -91,10 +91,13 @@ type SpindriftOp struct {
 	Hash string `json:"hash,omitempty"`
 	// Decision is "continue" or "stop" on a "decision" op, "fire" or
 	// "skip" on a "delta_review_trigger" op (issue #3246), or "accept",
-	// "reject", or "read" on a "signal" op (issue #3724) -- "read" for the
-	// status route, which never accepts or rejects content and so carries
-	// no Reason. The op kinds share the field because each names a small,
-	// fixed set of outcomes, normally paired with a Reason.
+	// "reject", "read", or "usage" on a "signal" op (issue #3724, #3867)
+	// -- "read" for the status route, which never accepts or rejects
+	// content and so carries no Reason; "usage" for the diagnostics-only
+	// route a Box-side client usage failure reports on, Reason carrying
+	// the client's error, never buffered. The op kinds share the field
+	// because each names a small, fixed set of outcomes, normally paired
+	// with a Reason.
 	Decision string `json:"decision,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Phase    string `json:"phase,omitempty"` // "read", "write", "findings_log", "dispositions_log", "dispositions_budget", "decisions_log", or "decisions_budget", for run_state_error
