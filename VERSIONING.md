@@ -1,37 +1,37 @@
 # Versioning
 
-spindrift uses [Semantic Versioning 2.0.0](https://semver.org/). Releases are
-managed by [release-please](https://github.com/googleapis/release-please) in
-manifest mode, driven by the [Conventional Commits](https://www.conventionalcommits.org/)
+spindrift uses [Semantic Versioning 2.0.0](https://semver.org/).
+[release-please](https://github.com/googleapis/release-please) manages releases
+in manifest mode, driven by the [Conventional Commits](https://www.conventionalcommits.org/)
 already in use on this repository. The authoritative version is the root entry in
 `.release-please-manifest.json`; Nix reads that value to stamp the two
 `buildGoModule` derivations in `lib/mkHarness.nix`.
 
 ## Public contract
 
-The following surfaces are part of the versioned contract. Breaking changes here
-require a version bump per the policy below.
+The following interfaces are part of the versioned contract. Breaking changes
+here require a version bump per the policy below.
 
 | Surface | What is versioned |
 |---|---|
-| **CLI verbs** | `spindrift dispatch`, `spindrift build`, `spindrift preview`, `spindrift doctor` — verb names, flag names, exit codes |
+| **CLI verbs** | `spindrift dispatch`, `spindrift build`, `spindrift preview`, `spindrift doctor`: verb names, flag names, exit codes |
 | **Flake options** | `perSystem.spindrift.*` and all named parameters of `mkHarness` |
-| **Lib exports** | `spindrift.lib.mkHarness` (the function itself, not its `internals`-scoped return-value fields — see the `mkHarness` return-value carve-out below) and `spindrift.lib.rosterLib` (issue #2560), whose `{ normalizeRoster; dropOptedOut; defaultRoster; }` return value carries no `internals` field and is versioned in full |
+| **Lib exports** | `spindrift.lib.mkHarness` (the function itself, not its `internals`-scoped return-value fields; see the `mkHarness` return-value carve-out below) and `spindrift.lib.rosterLib` (issue #2560), whose `{ normalizeRoster; dropOptedOut; defaultRoster; }` return value carries no `internals` field and is versioned in full |
 | **`env-schema.nix` variable names** | Every `SPINDRIFT_*` environment variable name listed in `lib/env-schema.nix` |
 | **Label lifecycle names** | Triage: `ready-for-agent`, `agent-in-progress`, `agent-complete`, `agent-failed`. Research: `agent-research`, `agent-research-in-progress`, `agent-research-recommend`, `agent-research-reject`, `agent-research-unclear`, `agent-research-failed`. Priority: `agent-priority-critical`, `agent-priority-high`, `agent-priority-low`. Ambiguous-spec: `agent-ambiguous-spec`. |
 
 "Flake options" covers `mkHarness`'s named *parameters* only, not the shape of
-its return value beyond `{ image, spindrift, packages, apps }`: the
-`internals` attrset (every check-only output) is excluded, mirroring the
+its return value beyond `{ image, spindrift, packages, apps }`. The
+`internals` attrset (every check-only output) is excluded, like the
 `cmd/launcher/internal/*` carve-out below.
 
-"Label lifecycle names" excludes `agent-trigger`: it's an internal
-CI-dispatch-workflow label the `agent-dispatch.yml` workflow swaps away the
+"Label lifecycle names" excludes `agent-trigger`. It's an internal
+CI-dispatch-workflow label that the `agent-dispatch.yml` workflow swaps away the
 moment it claims an issue, not a durable state like the four triage names
 above.
 
 Everything else is internal and may change without a version bump:
-`cmd/launcher/internal/*`, prompt wording (the whole prompt template — see
+`cmd/launcher/internal/*`, prompt wording (the whole prompt template; see
 below), log formatting, image layer layout, and any unexported Nix helpers.
 
 ### Prompt templates are internal, but owe a migration note
@@ -39,29 +39,29 @@ below), log formatting, image layer layout, and any unexported Nix helpers.
 "Prompt wording" covers the whole prompt template, not just its prose. The
 template variable names an override prompt substitutes (`${TDD_BAKED_STEP}`,
 `${COMMIT_BAKED_STEP}`, ...) and the `fragments/*.md` paths it copies or
-references are internal on the same terms: renaming or removing either breaks
+references are internal on the same terms. Renaming or removing either breaks
 an override prompt directory supplied via `--prompt-dir` /
 `SPINDRIFT_PROMPT_DIR` / `perSystem.spindrift.agents.promptDir`, and that is
-still not a breaking change under this policy. The versioned surface is the
+still not a breaking change under this policy. The versioned part is the
 option that points at a prompt directory, not the template that directory
-overrides — overriding the prompt is opting into an internal surface.
+overrides. Overriding the prompt opts into an internal interface.
 Such a commit takes no `!` marker and no `BREAKING CHANGE:` footer.
 
 What it does owe is a migration note: a commit that renames or removes a
 template variable or a fragment file adds a "What breaks in an override prompt
 directory" entry to MIGRATING.md naming the replacement. Issues #3219 and #3222
-set that precedent; this makes it the rule.
+set that precedent; this section makes it the rule.
 
 ## Pre-1.0 policy
 
 spindrift is pre-1.0. While the major version is `0`:
 
-- A **MINOR** bump (`0.y` → `0.y+1`) **may break** the public contract.
+- A **MINOR** bump (`0.y` to `0.y+1`) **may break** the public contract.
   `feat!:` and `fix!:` commits (breaking-change footer) trigger a minor bump,
   not a major one (`bump-minor-pre-major: true`).
-- A **PATCH** bump (`0.y.z` → `0.y.z+1`) is **fixes only** — no contract
-  changes. `fix:` commits trigger a patch bump; `feat:` commits also land as
-  patch while pre-major (`bump-patch-for-minor-pre-major: true`).
+- A **PATCH** bump (`0.y.z` to `0.y.z+1`) is **fixes only**, with no
+  contract changes. `fix:` commits trigger a patch bump; `feat:` commits also
+  land as patch while pre-major (`bump-patch-for-minor-pre-major: true`).
 
 The first `1.0.0` release freezes the contract under full semver guarantees.
 
@@ -69,8 +69,8 @@ The first `1.0.0` release freezes the contract under full semver guarantees.
 
 Release-please opens a release PR whenever qualifying commits land on `main`.
 That PR updates `CHANGELOG.md` and `.release-please-manifest.json`. Merging it
-is the human gate — on merge, release-please tags `vX.Y.Z` and creates the
-GitHub Release automatically. No manual tag or `gh release create` is needed.
+is the human gate. On merge, release-please tags `vX.Y.Z` and creates the
+GitHub Release. No manual tag or `gh release create` is needed.
 
 Consumers upgrade by moving their flake input to the new tag:
 
@@ -82,9 +82,10 @@ github:jordansmall/spindrift/v0.2.0
 
 `CHANGELOG.md` is generated from the [Conventional Commits](https://www.conventionalcommits.org/)
 on `main`. The `changelog-sections` map in `.release-please-config.json` is
-explicit rather than relying on release-please's defaults — the defaults hide
-`security` and every type below `perf`, which would drop most of spindrift's
-history from the notes. Every type spindrift uses gets its own heading:
+explicit rather than relying on release-please's defaults, which hide
+`security` and every type below `perf`. Those defaults would drop most of
+spindrift's history from the notes. Every type spindrift uses gets its own
+heading:
 
 | Commit type | CHANGELOG section |
 |---|---|
@@ -102,16 +103,16 @@ history from the notes. Every type spindrift uses gets its own heading:
 | `style` | Styles |
 | `deps` | Dependencies |
 
-Sections render in this order. Nothing is hidden — the changelog is a full
-record, not a curated highlight reel. This is independent of version bumping:
-which type triggers a MINOR vs PATCH bump is governed by the [pre-1.0
-policy](#pre-10-policy) above, not by where the commit appears here.
+Sections render in this order. Nothing is hidden: the changelog is a full
+record, not a curated selection. Section placement is independent of version
+bumping. The [pre-1.0 policy](#pre-10-policy) above decides which type
+triggers a MINOR or PATCH bump, not where the commit appears here.
 
 Heading levels distinguish releases from sections: `##` always marks a
-release (`## [x.y.z](...)`), `###` always marks one of the sections above
+release (`## [x.y.z](...)`), and `###` always marks one of the sections above
 (`### Features`, `### Bug Fixes`, ...). A `###` heading is never a release,
-even one that happens to read `[Unreleased]`.
+even one that reads `[Unreleased]`.
 
-The map, and the requirement that each heading is documented in this table, are
-pinned by the `release-please-changelog` flake check (`nix/checks/changelog.nix`) — edit
-the map in one place and the check fails until the config and this table agree.
+The `release-please-changelog` flake check (`nix/checks/changelog.nix`) pins
+the map and the requirement that this table documents each heading. Edit the
+map in one place and the check fails until the config and this table agree.

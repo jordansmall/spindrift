@@ -43,16 +43,16 @@ No breaking changes.
   small in-scope fixes still land inline instead of becoming issues. An unsure
   finding on code the branch never touched now gets filed rather than fixed out
   of scope.
-- **No more made-up PR links in filed issues.** The Filer was told it had a PR
-  URL for its "Found by review" line when usually no PR existed yet, so it
+- **No more made-up PR links in filed issues.** The Filer's prompt said it had a
+  PR URL for its "Found by review" line when usually no PR existed yet, so it
   sometimes invented one (`pull/DRAFT`, a 404). It now uses the branch form by
   default and only links a PR it was actually given.
 - **Socket signals are harder to get wrong.** The prompts now show a single
   heredoc call for sending a verdict, PR intent, or issue intent over the
   socket, with the full flag list, instead of writing a file first. Research
   runs were spending about an eighth of their API calls on that. When an agent
-  does pass a bad flag, the error now reads like a normal rejection and is
-  reported to the host log, rather than scrolling off inside a usage dump.
+  does pass a bad flag, the error now reads like a normal rejection and goes to
+  the host log, instead of getting buried in a full usage dump.
 - **Smaller fixes.** The launcher's warning about an exported daemon knob (like
   `DAEMON_IDLE_FLOOR`) no longer suggests a `--daemon-idle-floor` flag that the
   launcher accepts and silently ignores. It points you at the settings path
@@ -60,21 +60,20 @@ No breaking changes.
 
 ## 0.19.1 — 2026-09-23
 
-Mostly a shakedown of the daemon that 0.19.0 shipped, plus a new way for a Box
-to talk back to the launcher that doesn't involve squeezing the message through
-the log.
+Mostly fixes to the daemon that 0.19.0 shipped, plus a new way for a Box to
+send signals to the launcher without passing them through its log.
 
 **⚠ Breaking changes** this release: `spindrift doctor` prints nothing on a
 healthy run unless you pass `--verbose`.
 
 - **A Box can send its signals over a socket instead of the log.** The three
-  mid-run channels (comment, PR intent, issue intent) used to ride nonce-guarded
-  marker lines in the Box's captured output. That output has a byte cap, so a
-  long payload got cut mid-line and a perfectly good verdict arrived as "no
+  mid-run channels (comment, PR intent, issue intent) used to travel as
+  nonce-guarded marker lines in the Box's captured output. That output has a
+  byte cap, so a long payload got cut mid-line and a valid verdict arrived as "no
   verdict comment block", marking a green run failed. The new
-  `BOX_SIGNAL_CARRIER` knob takes `log` (the default, exactly what you have
-  today) or `socket`, which routes those channels over a launcher-owned unix or
-  TCP socket with no cap in the way. Asking for `socket` where it can't work,
+  `BOX_SIGNAL_CARRIER` knob takes `log` (the default, the current behaviour)
+  or `socket`, which routes those channels over a launcher-owned unix or TCP
+  socket with no byte cap. Asking for `socket` where it can't work,
   under `NETWORK_MODE=none` for instance, is a startup error rather than a quiet
   fall back to `log`, and `doctor` reports which transport a dispatch would
   actually get.
@@ -97,11 +96,11 @@ healthy run unless you pass `--verbose`.
   winner, settle read an empty file, and a Box that had done its work fine got
   parked as `agent-failed`.
 - **Daemon tuning without a rebuild, and cheaper slot turnover.** The idle
-  backoff and circuit breaker were Go constants, so retuning them after a real
-  night meant editing code. They're schema knobs now (`DAEMON_IDLE_FLOOR`,
+  backoff and circuit breaker were Go constants, so retuning them after a night
+  of real use meant editing code. They're schema knobs now (`DAEMON_IDLE_FLOOR`,
   `DAEMON_IDLE_CAP`, `DAEMON_FAILURE_BACKOFF`, `DAEMON_BREAKER_THRESHOLD`,
-  `DAEMON_BREAKER_WINDOW`), with today's values as the defaults, so setting
-  nothing changes nothing. Three slots freeing at once used to cost three fetches
+  `DAEMON_BREAKER_WINDOW`), with today's values as the defaults, so leaving
+  them unset changes nothing. Three slots freeing at once used to cost three fetches
   and three nix evals of the same revision; now it costs one of each, without
   ever handing a slot a revision older than the moment it asked. Stop and abort
   are latched on the pool and forwarded per child, and children report over a
@@ -110,7 +109,7 @@ healthy run unless you pass `--verbose`.
   print 30 to 40 lines, most of them `ok: label "..." present`. It now behaves
   like a Unix tool: silence and exit 0 when everything is fine, with only
   `MISSING:` rows, their remedies, and the interactive label-creation prompt
-  printing without a flag. `--verbose` (or `-v`) brings the full report back byte
+  printing without a flag. `--verbose` (or `-v`) restores the full report byte
   for byte. Exit codes and the stderr summary on failure are untouched, so a
   redirected stdout loses nothing, but a wrapper that greps doctor's stdout for
   `ok:` lines will need the flag. In the same change, an unrecognised flag or
@@ -118,10 +117,9 @@ healthy run unless you pass `--verbose`.
   ignored.
 - **A run tells you how many issues it filed.** Settle reports a `filed=` tally
   on work and research runs alike, so a run that quietly opened fifteen review
-  findings shows up as a number instead of a surprise in your backlog. Also on
-  the smaller side: cargo source URLs are canonicalized before matching, so a
-  private registry route stops missing crates over a spelling difference in the
-  URL.
+  findings reports that count at settle. Separately, cargo source URLs are
+  canonicalized before matching, so a private registry route no longer misses
+  crates over a spelling difference in the URL.
 
 ## 0.19.0 — 2026-09-20
 
@@ -138,18 +136,18 @@ podman machine too small for the concurrency you configured.
   your base branch, pins each child to an exact revision so an evaluation can
   never straddle a commit that landed mid-build, holds `MAX_PARALLEL` slots
   with one Box per child, and keeps going through a bad child instead of ending
-  the night. This is the loop spindrift now builds itself with, and it is not a
-  spindrift-only script: every Consumer gets the same daemon out of the same
+  the night. spindrift now builds itself with this loop. It is not a
+  spindrift-only script; every Consumer gets the same daemon out of the same
   `mkHarness`. `CONTINUOUS_DISPATCH` (and `--continuous-dispatch`, and
   `dispatch.continuous.enable`) is deprecated in favor of it. Nothing is
   removed and nothing breaks today; see `MIGRATING.md`. Treat the daemon as
-  **beta**: the shape is settled and it is under real use here, but it is new,
+  **beta**: the design is settled and spindrift runs on it, but it is new,
   so watch your first few nights with it.
 - **Work and research run at the same time, out of one pool.** The daemon
   spawns children of either dispatch kind from the same `MAX_PARALLEL` slots,
   so you stop choosing between advancing the queue and enriching the backlog.
   `RESEARCH_RESERVATION` (default 1) is how many slots prefer research; it is a
-  floor, not a ceiling, so either kind bursts into the whole pool once the other
+  floor, not a ceiling, so either kind can take the whole pool once the other
   has nothing queued. Each kind keeps its own idle timer, so an empty work queue
   doesn't stall research. Discovery skips an issue the other family already has
   in flight, so a researcher and a worker never land on the same ticket. On the
@@ -159,10 +157,10 @@ podman machine too small for the concurrency you configured.
   `DAEMON_AWAKE_WINDOW` ("22:00-06:00 America/New_York", wrapping past midnight)
   gates starting a Box, never stopping one: a Box running when the window closes
   finishes, settle and all. With nothing to do, the idle wait grows instead of
-  polling your tracker every five minutes forever. A queue that is full but
-  blocked gets treated differently: that wait is sliced, and the daemon
-  rechecks the tip between slices, so a blocker merging gets picked up within
-  one slice instead of riding out the rest of a long backoff.
+  polling your tracker every five minutes forever. The daemon treats a queue
+  that is full but blocked differently. It slices that wait and rechecks the
+  tip between slices, so it picks up a merged blocker within one slice instead
+  of waiting out the rest of a long backoff.
 - **One signal drains, two reap, on every launcher path.** A first SIGTERM or
   SIGINT stops claiming new issues and lets the Boxes in flight finish; a second
   reaps them and releases their issues back to dispatchable. Either way the
@@ -178,7 +176,7 @@ podman machine too small for the concurrency you configured.
   claiming nothing. A per-checkout lock means a second daemon on the same
   checkout says "already running" instead of quietly doubling your concurrency.
   And when a newer daemon merges, the running one halts at a slot boundary
-  rather than orchestrating Boxes under code nobody loaded. **⚠ Breaking:**
+  rather than orchestrating Boxes on stale code. **⚠ Breaking:**
   `spindrift doctor` used to print a MISSING line and exit 0 when the podman
   machine had less RAM than `MEMORY_LIMIT` x `MAX_PARALLEL` needs. It exits 2
   now. If you drive doctor from CI or a wrapper script, that host will start
@@ -201,7 +199,7 @@ podman machine too small for the concurrency you configured.
   of marking it failed, and continuous refill skips an in-flight issue rather
   than failing it. Separately, delta review of the land pass now fires on the
   lines a reviewer actually read rather than the files it happened to name, so
-  prose added late in a run stops slipping through unreviewed.
+  prose added late in a run no longer lands unreviewed.
 
 ## 0.18.1 — 2026-09-19
 
@@ -222,7 +220,7 @@ No breaking changes.
   and issue text doesn't show up in a process listing. The `/issues` mount is
   retired. If you maintain your own prompt templates and they point at
   `/issues`, that path is gone.
-- **Linked issues come along for the ride.** For a local issue, the launcher
+- **Linked issues are included too.** For a local issue, the launcher
   walks the blocked-by and parent chain and renders it into that same injected
   text, under a size budget, so an agent working a ticket can see the spec
   above it without going to look.
@@ -238,8 +236,8 @@ No breaking changes.
   than in a single pass.
 - **You can see what went into a prompt.** Prompts render as attributed
   segments, and each pass emits a composition report saying what it included
-  and where each piece came from. That is the thing you want when a prompt is
-  too long, or when something you expected to be in it isn't.
+  and where each piece came from. Use it when a prompt is too long, or when
+  something you expected in it is missing.
 - **Cheaper turns, and less comment noise in the diff.** The orchestrator
   appends a pass's seeded block instead of prepending it, which keeps the
   cached prefix stable across passes. Agents also write fewer throwaway code
@@ -250,7 +248,7 @@ No breaking changes.
 ## 0.18.0 — 2026-09-07
 
 Per-ecosystem registry declarations collapse into one grammar, npm
-downloads stay on the credentialed path, and the worker prompt sheds what
+downloads stay on the credentialed path, and the worker prompt drops what
 the role never used.
 
 **⚠ Breaking changes** this release: the three per-ecosystem routes file
@@ -264,8 +262,8 @@ keys are retired in favor of one block.
   today). A file still using a retired key is refused at the launch gate,
   and the error names the route, names every retired key it found, and
   prints the equivalent block stanza built from that route's own remaining
-  keys, so migrating is a paste. One thing to know: `spindrift registry
-  discover --force` will not write a `[routes.ecosystems.<name>]` block
+  keys, so migrating means pasting that block in. Note that `spindrift
+  registry discover --force` will not write a `[routes.ecosystems.<name>]` block
   back for you, since Gradle and Go name no registry host in the repo for
   discovery to read a path out of, so a hand-declared block has to be
   re-added by hand after a regenerate. `MIGRATING.md` has the before/after.
@@ -278,9 +276,9 @@ keys are retired in favor of one block.
   route's own host is re-pointed at the Forwarder with the route prefix put
   back, and each rewritten path joins that route's enforced set the way
   cargo's download base already does. A tarball pointing at some other
-  host, a CDN say, is left exactly as the registry wrote it and logged as a
+  host, such as a CDN, is left exactly as the registry wrote it and logged as a
   skip.
-- **Workers replay a lot less on every turn.** Five trims to what a worker
+- **Workers replay a lot less on every turn.** Five changes trim what a worker
   carries. It writes a group's changes into one patch file and applies them
   in a single command instead of taking a round trip per hunk (a recent run
   spent 185 full-context round trips applying one run's edits). It treats
@@ -296,10 +294,10 @@ keys are retired in favor of one block.
   and each pay it themselves.
 - **Every default role documents the capability profile behind its model
   and effort tier.** Why a role runs at the tier it does, and what it
-  actually needs from a model, was folklore. It is written down per role
+  actually needs from a model, was undocumented. It is written down per role
   now in provider-neutral terms, with a check that stops a default roster
-  entry shipping without one. That is the thing you need if you are
-  pointing spindrift at a non-Anthropic driver.
+  entry shipping without one. That matters if you point spindrift at a
+  non-Anthropic driver.
 - **A broad ticket is no longer one of its own seams.** In the local loop, a
   broad ticket that is itself an issue in the local tracker resolved to the
   same group key its seams do, joined their group, and read as a seam
@@ -324,7 +322,7 @@ No breaking changes.
   the resolved filename is the id itself. Relatedly, waves used to swallow
   the error when a blocker slug wouldn't resolve, so a bad dep looked
   identical to an ordinary unready one and printed nothing; both call sites
-  print the dep and the error now. Readiness is unchanged, an unfetchable
+  print the dep and the error now. Readiness is unchanged; an unfetchable
   blocker still holds the wave.
 - **A Box being launched can't be reaped out from under itself.** The
   per-Box cgroup directory exists from the moment it is provisioned, but
@@ -372,8 +370,9 @@ retired, and allowlist enforcement is no longer optional.
   credential, and the Forwarder serves that whole host under the route's
   prefix. A file still declaring either key is rejected at parse time with an
   error that names the route and prints the replacement stanza, so migrating
-  is a paste. The bigger change is posture: the old default logged and
-  relayed a path outside the allowlist, and there is no such mode any more.
+  means pasting that stanza in. The bigger change is enforcement. The old
+  default logged and relayed a path outside the allowlist, and that mode no
+  longer exists.
   Every request is checked against the path-set the launcher derives from
   the Target repo's committed registry config, and anything outside it gets a
   403 before any upstream is dialed, with no credential attached. The 403
@@ -394,8 +393,8 @@ retired, and allowlist enforcement is no longer optional.
   guessing, so both the Artifactory shape (download path beside the index)
   and the Gitea shape (nested under it) reach upstream while anything
   unnamed is still refused. npm, yarn, pnpm, gradle, and go bind to their real
-  per-registry paths instead of the bare route root. Two bugs from the field
-  went with it: over loopback TCP the Forwarder was rewriting the Host header
+  per-registry paths instead of the bare route root. It also fixes two bugs
+  users reported. Over loopback TCP the Forwarder was rewriting the Host header
   so cargo dialed the launcher's listener directly and got a 401 on every
   crate, and the inbound Authorization header (cargo's placeholder token) was
   leaking through to the registry and producing a misleading 401 of its own.
@@ -428,7 +427,7 @@ retired, and allowlist enforcement is no longer optional.
   remedy text only ever reached you through the full report; a dispatch that
   aborted in validation, or a `spindrift doctor` exiting 2, printed the bare
   probe error. Both paths now carry the remedy. An unprotected base branch
-  used to stop doctor cold, before the label rows and the interactive
+  used to stop doctor outright, before the label rows and the interactive
   create-labels offer, which is exactly the first-time-setup case it exists
   to catch; connectivity failures still fail fast, but configuration failures
   are held to the end so the rest of the report runs. Missing research and
@@ -449,8 +448,8 @@ retired, and allowlist enforcement is no longer optional.
 
 ## 0.16.0 — 2026-09-04
 
-Cargo binding stops poisoning lockfiles, the prompts shed weight into skills,
-and edits made while landing no longer skip review.
+Cargo binding stops writing proxy addresses into lockfiles, the prompts move
+guidance into skills, and edits made while landing no longer skip review.
 
 No breaking changes.
 
@@ -503,9 +502,9 @@ No breaking changes.
   `MIGRATING.md` before upgrading: `${TDD_STEP}`, `${COMMIT_STEP}`, and
   `${CODE_REVIEW_STEP}` no longer exist, and a stale copy of a template can
   silently lose a skill anchor rather than failing loudly.
-- **Reviews hunt deep before they hunt wide.** Nothing in the review prompt
+- **Reviews trace correctness and security before anything else.** Nothing in the review prompt
   controlled the order of the hunt, so how deep a review went was left to the
-  model, and load-bearing bugs surfaced a round later at the cost of an extra
+  model, and serious bugs surfaced a round later at the cost of an extra
   fix and review cycle. Correctness and security are now hunted to completion
   before any standards or smells finding may be recorded, four diff shapes carry
   an explicit trace obligation (a rename or mass replacement gets a tree-wide
@@ -515,7 +514,7 @@ No breaking changes.
   failure scenario or it isn't blocking. The review pass also stopped
   materializing the whole branch diff into its own context, reading it by
   `--stat` and targeted hunks out of a file instead.
-- **Edits made while landing get one more look.** The land pass treated every
+- **Edits made while landing get a scoped review.** The land pass treated every
   edit the same, so something the check gate turned up looked exactly like a
   fold of a reviewer finding and could land unreviewed. Work the gate discovers
   now defaults to file, don't fix, and an inline fix owes a declaration naming
@@ -547,9 +546,8 @@ and the flake options and CLI flags generated from them are gone.
   `REGISTRY_PROXY_UPSTREAM_URL` and its four credential companions are retired,
   along with the `perSystem.spindrift.infra.registryProxyCredential*` flake
   options and the `--registry-proxy-*` flags. `REGISTRY_PROXY_ROUTES_FILE` is
-  the only declaration surface now (unset still means no proxy). If you set the
-  retired knobs as env vars you get a soft landing: the launch gate names every
-  one you still have and prints a ready-to-paste `[[routes]]` stanza built from
+  the only way to declare a proxy now (unset still means no proxy). If you set
+  the retired knobs as env vars, the launch gate names every one you still have and prints a ready-to-paste `[[routes]]` stanza built from
   your own values. A flake still setting a removed option fails during nix eval
   before the launcher runs, so that one you fix by hand. `MIGRATING.md` has the
   full mapping table.
@@ -574,8 +572,8 @@ and the flake options and CLI flags generated from them are gone.
 - **The registry proxy works where unix sockets don't.** spindrift probes what
   the container runtime can actually do and, when a socket mount isn't
   available, serves the proxy over loopback TCP instead, gated on a per-run
-  secret so the port isn't open to anything else on the host. That also unsticks
-  the macOS failure where a long `TMPDIR` under `nix develop` blew past the
+  secret so the port isn't open to anything else on the host. That also fixes
+  the macOS failure where a long `TMPDIR` under `nix develop` exceeded the
   104-byte socket path limit and surfaced as a confusing registry auth error.
 - **doctor explains your registry setup.** New rows show each route's upstream
   and where its credential comes from, plus an advisory drift row that re-runs
@@ -587,7 +585,7 @@ and the flake options and CLI flags generated from them are gone.
   codebase one at a time, and each delegation quotes the relevant excerpt
   inline. Worker runs are bounded: the coordinator states a turn budget, and a
   worker nearing it stops cleanly and hands back a checkpoint for a fresh worker
-  to pick up rather than dragging a 150K-token context along. Every pass now
+  to pick up rather than carrying a 150K-token context forward. Every pass now
   reports what it spent, broken down per agent and sorted costliest first.
 
 ## 0.14.0 — 2026-08-31
@@ -611,8 +609,8 @@ No breaking changes.
   of flags, and the bash that scanned agent output with regexes for PR intent
   and run status is gone: a `driver-exec` verb reads the driver log and hands
   back the decision. Env plumbing is generated from the settings schema rather
-  than restated by hand in three places. Nothing you'd notice day to day, minus
-  a class of parsing bugs.
+  than restated by hand in three places. You won't notice it day to day, except
+  that a class of parsing bugs is gone.
 - **You can see which pass a run is on.** The orchestrator writes a manifest as
   each pass ends (which pass, what kind, the verdict, whether an outcome showed
   up, tokens spent). The console renders it live on a running row, and when a
@@ -643,12 +641,12 @@ No breaking changes.
   config dispatch would then refuse (a read-only capability mismatch, a bad
   network mode). It now walks the same gate list dispatch enforces, in the same
   order. Separately, Forgejo backends can use the outbox mount and relay that
-  read-only Boxes need, which had been GitHub-only for no reason left standing.
+  read-only Boxes need, which had been GitHub-only for no remaining reason.
 
 ## 0.13.0 — 2026-08-30
 
-The bwrap runner grows up: isolated networking, a syscall filter, resource
-limits, a writable store, and rebuilds that no longer stall the run.
+The bwrap runner gets isolated networking, a syscall filter, resource limits,
+a writable store, and rebuilds that no longer stall the run.
 
 **⚠ Breaking changes** this release: bwrap Boxes get their own network
 namespace by default and the launcher now requires `pasta` for it.
@@ -660,7 +658,7 @@ namespace by default and the launcher now requires `pasta` for it.
   refuses to start if `pasta` isn't on PATH; `networkMode = "host"` is the
   documented opt-out back to the old shared posture, and `"none"` still means
   fully offline.
-- **A real sandbox, not just a chroot.** bwrap Boxes now run behind a seccomp
+- **bwrap Boxes are sandboxed, not only chrooted.** bwrap Boxes now run behind a seccomp
   syscall filter compiled from a denylist (verified by a test that actually
   runs denied syscalls in a sandbox), enforce the same `PIDS_LIMIT` and
   `MEMORY_LIMIT` knobs as podman via per-Box cgroups, and get killed when the
@@ -706,11 +704,11 @@ No breaking changes.
 - **`gh` failures finally say why.** Stderr from failed `gh` calls surfaces in
   error messages instead of vanishing, and rate-limited failures are recognized
   as their own kind rather than a generic error.
-- **Rate limits bend the run instead of breaking it.** Continuous mode retries
+- **Rate limits slow a run down instead of failing it.** Continuous mode retries
   a rate-limited issue re-discover instead of giving up, with retry knobs to
   tune it. Console backlog polls, continuous refill polls, and the merge poll
-  defaults all slowed down, so long runs put far less pressure on the API in
-  the first place.
+  defaults all slowed down, so long runs make far fewer API calls to begin
+  with.
 - **Agents write fewer comments.** A code-comments rule (minimal, only the
   non-obvious why) now reaches the fix, worker, conflict-resolve, and
   coordinator prompts, and the reviewer can block a change whose comments are
@@ -760,7 +758,7 @@ validation, and `REVIEW_EFFORT` moving into the baked image.
   pass can file findings as issues through a host-side relay and link them back
   in its verdict comment, tagged `agent-research-finding`. Read-only guards are
   rendered and installed inside the Box at runtime, git hooks in extra repo dirs
-  included, rather than leaving it to the prompt to ask nicely.
+  included, rather than relying on the prompt's instructions.
 - **Stale runs get caught before they start.** The launcher spots when the host
   launcher or the image is behind, realizes the fresh tip, and the console
   banner reports what the drain cost.
@@ -834,7 +832,7 @@ inherits a default model instead of staying blank.
 
 A consistency release. The same six-domain taxonomy (agents, git, issues, forge,
 dispatch, infra) now shapes the CLI flags, the `--help` output, and the Nix
-flake surface, so a knob's flag, help section, and flake path finally line up.
+flake options, so a knob's flag, help section, and flake path finally line up.
 Along the way, boolean flags became presence-style and two hard-coded merge
 steps became knobs.
 
@@ -854,19 +852,20 @@ no longer works for the converted boolean flags.
 - **CLI flags group and read by domain.** `--help`, the man page, and shell
   completions now group flags under the six domains (`agents`, `git`, `issues`,
   `forge`, `dispatch`, `infra`), and several flags were renamed to their domain
-  leaf: `--issue-tracker` → `--tracker`, `--code-forge` → `--forge-backend`,
-  `--code-forge-remote-url` → `--remote-url`,
-  `--code-forge-accumulation-repo-dir` → `--accumulation-repo-dir`,
-  `--box-forge-and-issue-access` → `--box-access`, `--merge-mode` →
-  `--merge-policy`, `--git-user-name` → `--user-name`, `--git-user-email` →
-  `--user-email`, `--label` → `--dispatch-label`, `--local-issues-dir` →
-  `--local-dir`, `--local-issue-reference` → `--local-reference`,
-  `--orchestrator-enabled` → `--orchestrator`, `--spindrift-prompt-dir` →
-  `--prompt-dir`, and `--spindrift-skills-dir` → `--skills-dir`. Every old name
+  leaf. `--issue-tracker` became `--tracker`, `--code-forge` became
+  `--forge-backend`, `--code-forge-remote-url` became `--remote-url`,
+  `--code-forge-accumulation-repo-dir` became `--accumulation-repo-dir`,
+  `--box-forge-and-issue-access` became `--box-access`, `--merge-mode` became
+  `--merge-policy`, `--git-user-name` became `--user-name`, `--git-user-email`
+  became `--user-email`, `--label` became `--dispatch-label`,
+  `--local-issues-dir` became `--local-dir`, `--local-issue-reference` became
+  `--local-reference`, `--orchestrator-enabled` became `--orchestrator`,
+  `--spindrift-prompt-dir` became `--prompt-dir`, and `--spindrift-skills-dir`
+  became `--skills-dir`. Every old name
   keeps working as a deprecated alias (marked `(deprecated)` in `--help --all`)
   and is removed at 1.0, so no dispatch script breaks today. Env-var names are
   unchanged.
-- **The Nix flake surface is a domain tree too.** `perSystem.spindrift.*` is
+- **The Nix flake options form a domain tree too.** `perSystem.spindrift.*` is
   regrouped into the same six domains, so you configure a knob at its domain path
   (e.g. `git.merge.policy`, `agents.models.filer`, `infra.image.packages`). Every
   old `settings.<section>.<knob>` path still works, forwarded with a deprecation
@@ -912,14 +911,14 @@ No breaking changes.
   inferred by the model, and the review pass is attributed to a reviewer role.
   The harness also takes over steps the agent used to run from its prompt: it
   owns the read-only git bundle and derives the merged-outcome verify ref
-  host-side. Less of the run rides on the model doing the right thing.
+  host-side. Less of the run depends on the model doing the right thing.
 - **Per-model token usage.** Run usage now breaks tokens down by exact model id
   instead of one lump, with cache-creation split out by TTL, so a run that spans
   a coordinator and a cheaper worker shows where the tokens went. The old dollar
   cost estimate is dropped in favor of that per-model table.
 - **Roster of subagents.** Define an N-agent roster and spindrift renders each
-  one into the Box, replacing the single-subagent knobs (now deprecated). Lets a
-  run stand up several named, differently-tuned subagents instead of one.
+  one into the Box, replacing the single-subagent knobs (now deprecated). A run
+  can now stand up several named, differently-tuned subagents instead of one.
 - **Sturdier run recovery.** When an agent finishes just short of declaring its
   outcome, the recovery nudge now recognizes that near-miss instead of treating
   it as a clean miss, and the host's outcome-backstop push retries with bounded
@@ -949,16 +948,16 @@ No breaking changes.
   existing single-pass behavior is unchanged.
 - **Coordinator and worker models.** The orchestrator runs the coordinator on
   Opus 4.8 by default and lets you point the worker at a different model with
-  `WORKER_MODEL`, so you can spend the big model where the planning happens and a
-  cheaper one on the grind.
+  `WORKER_MODEL`, so you can use the large model for planning and a cheaper one for
+  the implementation work.
 - **Code-owned review pass.** The orchestrator can run a review pass over the
   agent's own work and feed the findings back into the next fix pass, driven by
   the harness rather than left to the agent to remember.
 - **Spend cap per run (`MAX_BUDGET_TOKENS` / `MAX_BUDGET_USD`).** Set a token or
   dollar ceiling and fix passes stop once the run hits it. Usage is summed across
   a run's own passes, and the check is skipped entirely when no cap is set.
-- **Read-only Box can file issues now.** Closing the gap from 0.7.0's read-only
-  mode: an agent with no write access emits its issue-filing requests as
+- **Read-only Box can file issues now.** This closes a gap in 0.7.0's read-only
+  mode. An agent with no write access emits its issue-filing requests as
   tamper-checked log lines and the host files them on GitHub, the same relay
   pattern already used for comments and PRs.
 - **Read-only runs get nudged to declare their PR.** If a read-only agent
@@ -996,7 +995,7 @@ No breaking changes.
   it can write.
 - **Secrets from an external command (`--secret-cmd`).** Instead of passing
   tokens as flags or environment variables, point spindrift at a command that
-  prints the secret (a keychain or password-manager lookup, say). It only runs
+  prints the secret (such as a keychain or password-manager lookup). It only runs
   when attached to a terminal, gives an unlock hint when the command fails, and
   has a per-secret templated fallback.
 - **Credentials kept out of the agent's reach.** Two new pre-tool hooks: one
@@ -1052,9 +1051,9 @@ changed.
 - **⚠ Breaking: Console navigation and keys changed.** Drilling into a run opens
   a docked sidebar now, only going fullscreen when the terminal is too narrow,
   instead of always taking over. The body shows one section at a time (`H`/`L`,
-  or `1`–`5` to jump) rather than two columns. Terminate moved from `k` to `X`,
+  or `1` through `5` to jump) rather than two columns. Terminate moved from `k` to `X`,
   `Tab` and the pane-mode key are gone, and `t` cycles Activity, Transcript, raw
-  JSONL. If you drive it interactively, retrain your fingers.
+  JSONL. If you drive it interactively, relearn the keys.
 - **Live-tailing session view.** The sidebar advances a running agent on its own
   and opens at the newest output. `G`/`End` re-attach follow mode and `z` zooms
   to fullscreen. Vim-style scrolling works across panes.
@@ -1066,10 +1065,11 @@ changed.
   mergeable.
 - **Git calls can't hang.** Clone, merge, rebase, `ls-remote`, and force-push all
   have timeouts now, so a stuck network call won't freeze a run.
-- **Smaller wins:** issue-number tab completion, a "resume once" recovery when
-  the agent quits without an outcome, Quickstart locked to GitHub-only with
-  validated input and no echoed secrets, and OAuth session-limit messages treated
-  as rate limits so runs back off instead of failing.
+- **Smaller wins.** This release adds issue-number tab completion and a "resume
+  once" recovery when the agent quits without an outcome. Quickstart is locked
+  to GitHub-only, with validated input and no echoed secrets. OAuth
+  session-limit messages count as rate limits, so runs back off instead of
+  failing.
 
 ---
 
@@ -1080,8 +1080,8 @@ credentials, and dependency handling.
 
 No breaking changes.
 
-- **New `quickstart` wizard.** Takes you from nothing to a working setup: finds
-  your container runtime (Docker, Podman, or Rancher/nerdctl), grabs your git
+- **New `quickstart` wizard.** It takes you from nothing to a working setup. It
+  finds your container runtime (Docker, Podman, or Rancher/nerdctl), grabs your git
   identity and repo, captures and audits your GitHub token, captures Claude auth,
   then runs doctor and a build and prints a summary. This is the path new users
   should start on.
@@ -1090,17 +1090,18 @@ No breaking changes.
 - **Credentials scrubbed from errors.** URL credentials get redacted in clone,
   probe, merge, and force-push error messages, so a token baked into a git remote
   won't show up in logs.
-- **Console feels more solid.** Quit-confirmation and orphaned-run recovery are
+- **Console fixes.** Quit-confirmation and orphaned-run recovery are
   back, a rebuild-output pane surfaces build failures, a chord indicator shows
   when you're mid-gesture, and actions that used to fail silently now say
-  something. Plus a pile of sizing and wrapping fixes for narrow windows and
+  something. Many sizing and wrapping fixes cover narrow windows and
   wide/emoji characters.
 - **Better dependency handling in wave dispatch.** A picked issue is held rather
   than failed when a dependency check hits a transient error, blocked issues name
   their blockers in the skip message, and an issue counts as unblocked once its
   blocker's PR merges.
 - **Review findings triaged inline.** Non-blocking findings get handled in place,
-  and only real judgment calls get filed as their own issue. Less tracker noise.
+  and only real judgment calls get filed as their own issue, so the tracker
+  gets less noise.
 - **Safer merge preflight.** The stale-base rebase preflight is opt-in and off by
   default now, since it could thrash without a merge queue.
 
@@ -1109,7 +1110,7 @@ No breaking changes.
 ## 0.5.0 — 2026-07-16
 
 The interactive Console lands: a full-screen dashboard for watching and steering
-runs. Also a new advise-only research mode.
+runs. It also adds an advise-only research mode.
 
 **⚠ Breaking changes** this release: the `run`/`build` app aliases were removed
 and the outcome line's `pr=` field became `landing=`.
@@ -1142,8 +1143,8 @@ and the outcome line's `pr=` field became `landing=`.
 
 ## 0.4.2 — 2026-07-14
 
-Small one: turned the Filer on for spindrift's own dogfood loop, so non-blocking
-review findings get auto-filed as `agent-review-finding` issues (a human promotes
+A small release. It turns the Filer on for spindrift's own dogfood loop, so
+non-blocking review findings get auto-filed as `agent-review-finding` issues (a human promotes
 them before an agent picks them up).
 
 No breaking changes.
@@ -1157,8 +1158,8 @@ target.
 
 No breaking changes.
 
-- **Tab completion** for bash, zsh, and fish, built in at image time, with
-  per-flag descriptions on zsh.
+- **Tab completion.** Completions for bash, zsh, and fish are built at image
+  time, with per-flag descriptions on zsh.
 - **Lighter in-Box checks.** The new `checks-inbox` target runs just the
   source-level checks (Go test/vet/fmt, shellcheck, and so on) and skips the
   heavy OCI image builds, so an agent can validate its work without re-baking the
@@ -1173,7 +1174,7 @@ No breaking changes.
   checks is now told apart from a real conflict.
 - **Memory preflight for dogfood.** The loop bails early when the podman machine
   has less RAM than `MEMORY_LIMIT` needs.
-- A bare or unknown subcommand prints help instead of failing on you.
+- A bare or unknown subcommand prints help instead of failing.
 
 ---
 
@@ -1197,7 +1198,7 @@ settings were removed.
   (`DEPS_POLL_SECS`/`DEPS_WAIT_SECS`) settings are gone. Draining is wave-based
   now and `MAX_JOBS` caps the wave size (0 means uncapped). Set either old key
   and you get an unknown-key error.
-- **Merge guard:** `MERGE_MODE=auto` is now blocked on a push-only forge that
+- **Merge guard.** `MERGE_MODE=auto` is now blocked on a push-only forge that
   can't actually merge.
 
 ---
@@ -1247,9 +1248,9 @@ No breaking changes.
 - **Overlap guard.** `OVERLAP_GATE` / `MERGE_GUARD_PATHS` spot when two in-flight
   issues touch the same files, from a declared `## Touches` section or the files
   in their open PRs, and serialize them so they don't clobber each other.
-- **Optional Filer.** An opt-in step that files follow-up issues for things it
-  turns up during a run.
-- **Security hardening.** The Git forge rejects flag-like refs (an RCE vector)
+- **Optional Filer.** An opt-in step files follow-up issues for problems it
+  finds during a run.
+- **Security hardening.** The Git forge rejects flag-like refs (a remote code execution risk)
   and sets git identity local to the repo instead of globally.
 - **Fix passes resume instead of restarting.** The Claude driver pins and resumes
   its session across a fix pass so it keeps its context.
@@ -1258,8 +1259,8 @@ No breaking changes.
 
 ## 0.2.0 — 2026-07-09
 
-Settling the config surface and CLI names before wider use: grouped settings, a
-tougher reviewer, and a newer default model.
+This release settles the config layout and CLI names before wider use, with
+grouped settings, a tougher reviewer, and a newer default model.
 
 **⚠ Breaking changes** this release: the `engage` command was removed (use
 `recover`).
@@ -1268,7 +1269,7 @@ tougher reviewer, and a newer default model.
   `spindrift recover <issue>`.
 - **Newer default model.** The implementor agent defaults to `claude-sonnet-5`.
 - **Config is grouped and discoverable.** Consumer config moved to a structured
-  `settings.<section>` surface, 13 more knobs became operator-tunable, and a
+  `settings.<section>` layout, 13 more knobs became operator-tunable, and a
   generated (drift-guarded) reference documents them.
 - **Tougher reviewer.** The reviewer subagent was retuned to dig harder for
   problems.
@@ -1323,13 +1324,13 @@ No breaking changes.
 
 ## 0.1.1 — 2026-07-07
 
-The foundational release. Basically the whole engine shows up here: the
+The foundational release. Most of the engine arrives here: the
 containerized Box, the Go launcher, dependency-aware dispatch, the merge gate,
 the subagent pipeline, and the sandbox.
 
 No breaking changes (first release).
 
-- **The dispatch engine.** A Go launcher runs the show: it claims issues, builds
+- **The dispatch engine.** A Go launcher claims issues, builds
   and runs the Box on demand, dispatches a single issue or a whole queue, and
   orders work into dependency waves (reading `## Blocked by` edges) so dependents
   wait on their blockers.
@@ -1341,7 +1342,7 @@ No breaking changes (first release).
   conflict to an agent to resolve. Pushes use `--force-with-lease`.
 - **Multi-agent pipeline.** A scout plus reviewer pipeline, per-role model
   tiering (cheaper models for cheaper roles), and a reviewer you can't skip.
-- **Self-healing red pipelines.** A capped fix-agent takes a shot at repairing a
+- **Self-healing red pipelines.** A capped fix-agent tries to repair a
   failing pipeline before giving up.
 - **Live view and cost tracking.** The transcript streams into a readable
   heartbeat of milestones and phases, and a usage comment (tokens and cost, split
@@ -1350,5 +1351,6 @@ No breaking changes (first release).
   egress, PID and memory limits, secrets kept off the command line, and the Nix
   builder image pinned by digest.
 - **Ready to consume.** Ships a `templates.default` starter, an MIT license,
-  schema-derived CLI flags (flag beats env beats default), and a
+  schema-derived CLI flags (a flag overrides the env var, which overrides the
+  default), and a
   language-agnostic core with Nix baked in as the default.

@@ -1,18 +1,18 @@
 # The interactive Console
 
-`spindrift console` opens the interactive Console (ADR 0023, 0025, 0030): an
-in-terminal loop that lists every open issue from the Issue Tracker under
-columns headed `issue`/`title`/`labels` (the Backlog) or
-`issue`/`title`/`state`/`age` (a work Section's queue) — oldest-first per
+`spindrift console` opens the interactive Console (ADR 0023, 0025, 0030), an
+in-terminal loop that lists every open issue from the Issue Tracker and lets
+you Pick issues to launch as Dispatches. Issues appear oldest-first per
 dispatch order, grouped into Sections (Backlog, Running, Held, Settled,
-Failed) — and lets you Pick issues to launch as Dispatches.
+Failed). The Backlog's columns are headed `issue`/`title`/`labels`, and a
+work Section's queue uses `issue`/`title`/`state`/`age`.
 
 ```sh
 spindrift console
 ```
 
-There is no command line to type into. Every action is a single keypress —
-vim-style — dispatched against whichever of three views has focus: the main
+There is no command line to type into. Every action is a single vim-style
+keypress, dispatched against whichever of three views has focus: the main
 list, a ticket's detail modal, or a live-tail sidebar. `?` (from the main
 list) toggles a help overlay listing every binding across every view.
 
@@ -26,7 +26,7 @@ list) toggles a help overlay listing every binding across every view.
 | `H`/`L` | switch to the previous/next Section (from the sidebar, also closes it) |
 | `1`-`5` | jump straight to a Section (Backlog, Running, Held, Settled, Failed) |
 | `ctrl+f`/`ctrl+b`, `pgup`/`pgdown` | jump a full page of the active Section's live rendered rows without moving the cursor; the page size tracks terminal resizes |
-| `ctrl+d`/`ctrl+u` | jump a half page of the active Section's live rendered rows without moving the cursor — half of the `ctrl+f`/`ctrl+b` page above |
+| `ctrl+d`/`ctrl+u` | jump a half page of the active Section's live rendered rows without moving the cursor, half of the `ctrl+f`/`ctrl+b` page above |
 | `/` | filter the Backlog by label substring |
 | `enter` | apply filter (while filter-editing); otherwise: open the highlighted row's ticket detail (Backlog Section), or open the highlighted pick's live-tail sidebar (a work Section, only when it has run) |
 | `h`/`l`, `left`/`right` | move focus between the list and the sidebar (while a sidebar is open) |
@@ -46,11 +46,11 @@ list) toggles a help overlay listing every binding across every view.
 
 ## Ticket detail modal
 
-`enter` on a highlighted Backlog row opens its ticket detail modal: the
-issue's full body plus its Blocked-by and Blocks lists, each resolved
-directly from the issue's own dependency edge. On a `local` tracker the
-Blocks list is always empty — only GitHub and Jira expose a native,
-bidirectional blocked/blocking relationship (`forge.BlockersLister`); a
+`enter` on a highlighted Backlog row opens its ticket detail modal. The modal
+shows the issue's full body plus its Blocked-by and Blocks lists, each
+resolved directly from the issue's own dependency edge. On a `local` tracker
+the Blocks list is always empty. Only GitHub and Jira expose a native,
+bidirectional blocked/blocking relationship (`forge.BlockersLister`). A
 `local` issue's only blocker concept is one-directional body-text parsing,
 with no reverse edge to query.
 
@@ -68,18 +68,18 @@ with no reverse edge to query.
 
 ## Live-tail sidebar
 
-`enter` on a highlighted work-Section row that has actually run opens its
-live-tail sidebar: an activity feed by default, with the Dispatch's rendered
-transcript and raw JSONL log one keystroke away. `enter` on an
+`enter` on a highlighted work-Section row that has run opens its live-tail
+sidebar. It shows an activity feed by default, and the Dispatch's rendered
+transcript and raw JSONL log are one keystroke away. `enter` on an
 orphan-flagged Backlog row also opens the sidebar (instead of the ticket
 detail modal), showing a "no local logs for this dispatch" notice until logs
 appear on disk.
 
 | key | effect |
 |-----|--------|
-| `t` | cycle the sidebar's activity feed -> transcript -> raw JSONL -> activity feed (while the sidebar has focus) |
+| `t` | cycle the sidebar through activity feed, transcript, and raw JSONL, then back to activity feed (while the sidebar has focus) |
 | `z` | toggle the sidebar's fullscreen zoom (while it has focus) |
-| `h`/`left` | move focus back to the list (while the sidebar has focus and isn't zoomed — a zoomed sidebar has no list to return to) |
+| `h`/`left` | move focus back to the list (while the sidebar has focus and isn't zoomed; a zoomed sidebar has no list to return to) |
 | `l`/`right` | move focus to the sidebar (from the list, while a sidebar is open) |
 | `x`/`esc` | close the sidebar (while it has focus) |
 | `j`/`k`, `ctrl+f`/`ctrl+b`, `pgup`/`pgdown` | scroll the sidebar (while it has focus); its page jump is fixed, unlike the ticket detail modal's live-viewport-derived one; scrolling up detaches the running Activity feed's live follow |
@@ -89,169 +89,170 @@ appear on disk.
 | `H`/`L` | switch to the previous/next Section (also closes the sidebar) |
 
 The activity feed and rendered transcript strip ANSI/control sequences
-before they ever reach the terminal, since the underlying log is untrusted
-model/tool output. The raw JSONL view intentionally does not, so a Dispatch
-log carrying crafted escape sequences can still move the cursor, clear the
-screen, or rewrite the terminal title once `t` cycles to it — treat the raw
-view as a trusted-log-only debugging tool, not something to point at an
+before they reach the terminal, since the underlying log is untrusted
+model/tool output. The raw JSONL view intentionally does not. A Dispatch log
+carrying crafted escape sequences can still move the cursor, clear the
+screen, or rewrite the terminal title once `t` cycles to it. Treat the raw
+view as a debugging tool for trusted logs only, and don't point it at an
 unreviewed transcript.
 
 ## Pick
 
-**Pick** is the launch button. An unlabeled issue is promoted through the
-normal `Dispatchable` transition first — recorded durably on the tracker —
-then queued; an already-`Dispatchable` issue queues directly. The pick
-launches through the same continuous engine the headless loops use, up to
-the session's live parallelism cap at once (starting at `MAX_PARALLEL`, the
-same knob `dispatch`'s waves honor, and resizable in-session with `+`/`-`):
-its queue row tracks `queued` → `claiming` → `running` → `settled`, and as
-each running pick settles, the next queued pick fills the slot it freed — the
-session's queue drains continuously without re-invocation. Queued-but-
-unlaunched picks hold at `Dispatchable` on the tracker, never `InProgress` —
-the claim to `InProgress` only happens when the pick's turn to launch
-actually arrives. If that claim races (another loop, the issue closed, a
+**Pick** is the launch button. The Console first promotes an unlabeled issue
+through the normal `Dispatchable` transition, which it records durably on the
+tracker, and then queues it. An already-`Dispatchable` issue queues directly.
+The pick launches through the same continuous engine the headless loops use,
+up to the session's live parallelism cap at once. That cap starts at
+`MAX_PARALLEL`, the same knob `dispatch`'s waves honor, and you can resize it
+in-session with `+`/`-`. A pick's queue row tracks
+`queued`, then `claiming`, `running`, and `settled`. As
+each running pick settles, the next queued pick fills the slot it freed, so
+the session's queue drains continuously without re-invocation. Queued-but-
+unlaunched picks hold at `Dispatchable` on the tracker, never `InProgress`.
+The claim to `InProgress` happens only when the pick's turn to launch
+arrives. If that claim races (another loop, the issue closed, a
 relabel), the pick dissolves and its row shows why, instead of launching a
 Box for a stale listing.
 
-The engine behind every pick is continuous dispatch, which is deprecated as
-an operator's own driving loop and superseded by the daemon (issue #3547) —
-a deprecation that stops at the Console, whose picks have no other engine
-and keep using it.
+The engine behind every pick is continuous dispatch. Continuous dispatch is
+deprecated as an operator's own driving loop and superseded by the daemon
+(issue #3547). The deprecation stops at the Console: its picks have no other
+engine and keep using it.
 
-**Held picks**: picking an issue whose blockers are still open does not
-dissolve it — the row goes `held` with a "held by #N" badge naming the
+**Held picks.** Picking an issue whose blockers are still open does not
+dissolve it. The row goes `held` with a "held by #N" badge naming the
 unmet blockers, and stays `Dispatchable` on the tracker the whole time it
-sits held. Blocker resolution reuses the same edge machinery the headless
-waves use (no second dependency parser); a held row re-evaluates on every
+is held. Blocker resolution reuses the same edge logic the headless
+waves use (no second dependency parser). A held row re-evaluates on every
 refill and launches with no operator action the moment every blocker reaches
-`Complete`. If a blocker instead lands `Failed`, the row surfaces it
-(`blocker #N failed`) but stays held — the Console never auto-unpicks;
+`Complete`. If a blocker instead lands `Failed`, the row shows it
+(`blocker #N failed`) but stays held. The Console never auto-unpicks.
 `u` still works on a held row exactly as it does on a queued one, so the
 operator decides whether to wait or give up on it.
 
 **Pick all ready** (`P`) picks exactly the issues currently `Dispatchable`
-on the tracker, in one snapshot query — an explicit action, never standing
-discovery: an issue that becomes `Dispatchable` after `P` returns is not
-picked until the operator asks again. Each issue queues through the same
+on the tracker, in one snapshot query. It is an explicit action, never
+standing discovery: an issue that becomes `Dispatchable` after `P` returns is
+not picked until the operator asks again. Each issue queues through the same
 Pick path a single `p` uses.
 
-**Unpick** removes a queued-but-unlaunched pick — including a held one — from
-the session with zero Issue Tracker calls — it only ever un-does the
-in-session queue entry, never the durable promotion a pick already recorded.
+**Unpick** removes a queued-but-unlaunched pick, including a held one, from
+the session with zero Issue Tracker calls. It only undoes the in-session
+queue entry, never the durable promotion a pick already recorded.
 `u` works the same way from the main list (on the highlighted row) and from
 the ticket detail modal (on the displayed issue).
 
-`p`/`P` queue a `work` Dispatch; `r` queues a `research` Dispatch instead —
-advise-only, posting a single verdict comment rather than opening a
-branch/PR — for the highlighted Backlog row. Both kinds ride the same Pick
-record and queue machinery, distinguished only by the kind field.
+`p`/`P` queue a `work` Dispatch for the highlighted Backlog row. `r` queues a
+`research` Dispatch instead, which is advise-only and posts a single verdict
+comment rather than opening a branch/PR. Both kinds use the same Pick record
+and queue logic, and differ only in the kind field.
 
 ## Live parallelism cap
 
 `+`/`-` raise or lower the session's parallelism cap by one, and the current
 `cap: <live>/<cap>` is always visible above the queue. Raising takes effect
-immediately — a held or queued pick launches into the freed slot right away,
+immediately. A held or queued pick launches into the freed slot right away,
 without waiting for a running Dispatch to settle or for the background poll.
-Lowering never terminates anything: it only gates new launches until the live
-count sinks under the new cap on its own, as running Dispatches settle — `X`
-remains the only way a running Dispatch dies by hand. `MAX_JOBS` gets no
-Console control — it caps headless wave size, and in a picks-only session
+Lowering never terminates anything. It only gates new launches until the live
+count drops under the new cap on its own, as running Dispatches settle. `X`
+remains the only way to end a running Dispatch by hand. `MAX_JOBS` gets no
+Console control. It caps headless wave size, and in a picks-only session
 the operator is already the cap.
 
 ## Backlog freshness
 
 The Console keeps the backlog fresh without spending the shared rate-limit
-window: `R` re-queries on demand, the backlog auto-refreshes whenever the
-session itself writes to the tracker — a claim, a settle, or a promotion —
-and a slow background poll re-queries on a fixed cadence (3 minutes) even on an
+window. `R` re-queries on demand. The backlog auto-refreshes whenever the
+session itself writes to the tracker (a claim, a settle, or a promotion). A
+slow background poll re-queries on a fixed cadence (3 minutes) even on an
 otherwise idle session. Nothing refreshes faster than that poll; only the
 session's own writes and the operator's own `R` trigger a refresh in between.
-The same poll also re-evaluates a held pick, so a blocker that clears
+The same poll also re-evaluates a held pick. So a blocker that clears
 out-of-band (another agent or a human merge, with no sibling Dispatch in
 this session to trigger a refill) launches within one poll interval even
 without an operator keypress.
 
-A running pick's queue row also shows its latest heartbeat — phase, turn
-count, last tool — reusing the same heartbeat parser the live dispatch's own
-terminal output already uses, replayed against the pick's on-disk log. It
-updates on every render, since it is a local log read with no Issue Tracker
-call behind it.
+A running pick's queue row also shows its latest heartbeat: phase, turn
+count, and last tool. The row reuses the heartbeat parser that the live
+dispatch's own terminal output uses, replayed against the pick's on-disk log.
+It updates on every render, since it is a local log read with no Issue
+Tracker call behind it.
 
-A queue row's field order is conditional, not fixed: title sits right after
-the state tag — the operator's primary identifier for the row — whenever
-that natural order fits the terminal's available width. Only when the
-natural-order row would actually be clipped does it fall back to
-blocker/reason/heartbeat before title, so the operator-critical blocker
-signal survives truncation instead of the title eating the row's budget
-first (issue #1256, following up on issue #858).
+A queue row's field order is conditional, not fixed. Title sits right after
+the state tag, which is the operator's primary identifier for the row,
+whenever that natural order fits the terminal's available width. Only when
+the natural-order row would be clipped does it fall back to
+blocker/reason/heartbeat before title. That way the blocker signal the
+operator needs survives truncation, instead of the title using up the row's
+width first (issue #1256, following up on issue #858).
 
 ## Terminate
 
 **Terminate** (`X`, on the main list's highlighted live Dispatch) ends a
-live Dispatch by hand (ADR 0024) — valid anywhere from claim to verdict: a
-running Box, the CI watch, a fix pass, or the merge gate. It always requires
+live Dispatch by hand (ADR 0024). It is valid anywhere from claim to verdict:
+a running Box, the CI watch, a fix pass, or the merge gate. It always requires
 an explicit `y`/`N` confirm before acting; anything but `y`/`yes` cancels
 with no effect, and `q`/`ctrl+c` declines and arms the quit confirm instead.
 Once confirmed, Terminate reaps any running Box, abandons the settle
-wherever it stands, and returns the issue to `Dispatchable` — never `Failed`,
-since the operator decided and there is nothing to triage, and never a new
-tracker state. It never un-lands work: no branch deletion, no PR close, no
-force-push. The ending is recorded outside the state machine — a terminal
-line appended to the Box log, and a comment on the issue naming the terminate
-and linking any dangling branch/PR — so a terminated Dispatch with an open PR
-is never silently orphaned. Re-picking a terminated issue later dispatches a
-fresh Box and, through the existing settle adoption path, picks up the
-dangling PR instead of duplicating it — terminate-then-repick is a clean
-reclaim loop, not a collision.
+wherever it stands, and returns the issue to `Dispatchable`. It never returns
+it to `Failed`, since the operator decided and there is nothing to triage,
+and it never adds a new tracker state. It never un-lands work: no branch
+deletion, no PR close, no force-push. The Console records the ending outside
+the state machine, as a terminal line appended to the Box log and a comment
+on the issue naming the terminate and linking any dangling branch/PR. So a
+terminated Dispatch with an open PR is never silently orphaned. Re-picking a
+terminated issue later dispatches a fresh Box and, through the existing
+settle adoption path, picks up the dangling PR instead of duplicating it.
+Terminate-then-repick reclaims the issue cleanly, without a collision.
 
 ## Stale image
 
 When the freshness probe finds the loaded image would be rebuilt against the
 current base branch tip, the Console prints
 `!! image stale: <reason> — new launches held; press [b] to rebuild` and
-holds every new launch — a queued pick stays at `queued` instead of claiming.
-A Box already running rides out the stale window on its original image
-untouched; staleness only gates a slot *refill*, never an in-flight Dispatch.
+holds every new launch. A queued pick stays at `queued` instead of claiming.
+A Box already running finishes on its original image, untouched; staleness
+only gates a slot *refill*, never an in-flight Dispatch.
 
-`b` fires the rebuild without leaving the session or needing a confirm: it
+`b` fires the rebuild without leaving the session or needing a confirm. It
 checks out the base branch, pulls it, and re-realizes the image in the
 background while the session stays responsive, with `==> rebuilding
 image...` shown until it finishes. That checkout runs on the operator's own
-working directory — it refuses to run when the directory is on some other
-branch with a dirty working tree (uncommitted changes or untracked files),
-since a plain `git checkout` only blocks on a *conflicting* file and would
-otherwise carry a non-conflicting uncommitted change or untracked file onto
-the base branch in silence. Outside that case (already on the base branch,
+working directory. It refuses to run when the directory is on some other
+branch with a dirty working tree (uncommitted changes or untracked files).
+A plain `git checkout` only blocks on a *conflicting* file, so it would
+otherwise silently carry a non-conflicting uncommitted change or untracked
+file onto the base branch. Outside that case (already on the base branch,
 or any branch with a clean tree) the checkout is a safe no-op or a plain
 branch switch, so it proceeds. A successful rebuild clears the banner and
-resumes every held pick exactly where it queued — no re-pick needed. A
-failed rebuild — including a refused checkout — prints `!! rebuild failed:
-<reason>` and leaves launches held, so the operator can retry `b` once the
+resumes every held pick exactly where it queued, with no re-pick needed. A
+failed rebuild, including a refused checkout, prints `!! rebuild failed:
+<reason>` and leaves launches held. The operator can then retry `b` once the
 underlying problem (a dirty working tree on the wrong branch, a merge
 conflict on pull, a broken derivation) is fixed. `o` opens a pane showing the
 rebuild's own output once one has run.
 
 ## Quit
 
-**Quit** (`q`/`ctrl+c`): with no live Dispatches, quit exits immediately —
-no dialog. With one or more live Dispatches, it instead offers a choice:
+**Quit** (`q`/`ctrl+c`) exits immediately, with no dialog, when there are no
+live Dispatches. With one or more live Dispatches, it instead offers a choice:
 `drain (d, default) / terminate-all (t) / stay (s)`. Drain launches nothing
-new — every queued-but-unlaunched pick is dropped (it was already
-`Dispatchable` on the tracker, so dropping is a pure session-queue edit with
-no tracker call, exactly like Unpick) — and Run doesn't return until every
-still-running Dispatch settles on its own. Terminate-all additionally applies
+new and drops every queued-but-unlaunched pick. Each was already
+`Dispatchable` on the tracker, so dropping it is a pure session-queue edit
+with no tracker call, exactly like Unpick. Run then doesn't return until every
+still-running Dispatch settles on its own. Terminate-all also applies
 Terminate (above) to every live Dispatch before exiting. Anything else,
 including a bare "stay", cancels the pending quit and keeps the session running.
 
 ## Orphan recovery
 
-A hard death — a crash, a dropped SSH session — leaves its containers running
-with nothing left to track them. On its next start, the Console detects any
-sandbox still running under the deterministic `agent-issue-<N>` naming scheme
-and flags its Backlog row as an orphan; nothing is asked at startup, and the
-Console never blocks on it. `A` on a highlighted orphan-flagged row adopts it
+A hard death, such as a crash or a dropped SSH session, leaves its containers
+running with nothing left to track them. On its next start, the Console
+detects any sandbox still running under the deterministic `agent-issue-<N>`
+naming scheme and flags its Backlog row as an orphan. It asks nothing at
+startup and never blocks on it. `A` on a highlighted orphan-flagged row adopts it
 through the existing recover path (the same adoption `spindrift recover <n>`
 and a re-pick after Terminate both use), reporting why and changing nothing
 if the orphan has no open PR to adopt. `enter` on an orphan row
 opens its live-tail sidebar instead of the ticket detail modal, so an
-ungraceful end is a speed bump, not a cleanup chore.
+ungraceful end needs no manual cleanup.

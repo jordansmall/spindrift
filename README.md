@@ -12,7 +12,7 @@ token scoped to that one repo, and opens a pull request. The Box has no access
 to the host. A launcher on the host watches CI and decides whether the PR
 merges.
 
-The design rests on two choices. [`CONTEXT.md`](CONTEXT.md) defines the terms
+The design makes two choices. [`CONTEXT.md`](CONTEXT.md) defines the terms
 used below.
 
 1. **The Box is the isolation boundary.** The agent runs with permission
