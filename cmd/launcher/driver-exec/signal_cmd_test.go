@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/signalsocket"
@@ -691,6 +692,223 @@ func TestRunSignal_NothingListening(t *testing.T) {
 	}
 	if lines := strings.Count(strings.TrimSpace(out), "\n") + 1; lines != 1 {
 		t.Fatalf("output = %q, want exactly one line", out)
+	}
+}
+
+// lastNonEmptyLine returns s's final line with trailing whitespace ignored --
+// a report's own line, if any, is printed before the rejected line
+// (signalUsageFailure's contract), so this is what a `| tail -1` consumer
+// would see too.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return lines[i]
+		}
+	}
+	return ""
+}
+
+// TestRunSignal_UsageFailureRejectedLine pins issue #3867's client-side
+// contract: every usage failure's last line is "signal <kind> rejected
+// (usage): <reason>", in the same shape as a server rejection, whatever kind
+// word (or none, or an unrecognised one) the agent gave.
+func TestRunSignal_UsageFailureRejectedLine(t *testing.T) {
+	startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "comment unknown flag",
+			args: []string{"comment", "-nonce", "x"},
+			want: "signal comment rejected (usage): flag provided but not defined: -nonce",
+		},
+		{
+			name: "pr-intent unknown flag",
+			args: []string{"pr-intent", "-nonce", "x"},
+			want: "signal pr-intent rejected (usage): flag provided but not defined: -nonce",
+		},
+		{
+			name: "issue-intent unknown flag",
+			args: []string{"issue-intent", "-nonce", "x"},
+			want: "signal issue-intent rejected (usage): flag provided but not defined: -nonce",
+		},
+		{
+			name: "status unknown flag",
+			args: []string{"status", "-nonce", "x"},
+			want: "signal status rejected (usage): flag provided but not defined: -nonce",
+		},
+		{
+			name: "pr-intent missing title",
+			args: []string{"pr-intent"},
+			want: "signal pr-intent rejected (usage): -title is required",
+		},
+		{
+			name: "issue-intent missing type",
+			args: []string{"issue-intent", "-title", "t"},
+			want: "signal issue-intent rejected (usage): -type is required",
+		},
+		{
+			name: "no args",
+			args: nil,
+			want: "signal rejected (usage): want one of comment, pr-intent, issue-intent, status",
+		},
+		{
+			name: "unrecognised kind",
+			args: []string{"nope"},
+			want: "signal rejected (usage): unknown signal kind; want one of comment, pr-intent, issue-intent, status",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rc, out := runVerb(t, "a body", tc.args...)
+			if rc == 0 {
+				t.Fatalf("exit = 0, want non-zero (out=%q)", out)
+			}
+			if got := lastNonEmptyLine(out); got != tc.want {
+				t.Fatalf("last line = %q, want %q (full out=%q)", got, tc.want, out)
+			}
+		})
+	}
+}
+
+// TestRunSignal_UsageFailureReportsOverSocket asserts the report itself: it
+// lands on the kind's usage route with the reason as its body and the TCP
+// secret header, and an unrecognised kind word never reaches the wire -- it
+// reports to the kindless route instead.
+func TestRunSignal_UsageFailureReportsOverSocket(t *testing.T) {
+	forEachTransport(t, func(t *testing.T, transport string) {
+		srv := startSignalServer(t, transport, signalsocket.Config{Consumes: allKinds()})
+
+		if rc, _ := runVerb(t, "", "comment", "-nonce", "x"); rc == 0 {
+			t.Fatal("exit = 0, want non-zero")
+		}
+		if rc, _ := runVerb(t, "", "nope"); rc == 0 {
+			t.Fatal("exit = 0, want non-zero")
+		}
+
+		var ops []claude.SpindriftOp
+		for _, line := range strings.Split(strings.TrimSpace(srv.log.String()), "\n") {
+			var ev claude.Event
+			if err := json.Unmarshal([]byte(line), &ev); err != nil {
+				t.Fatalf("mirror line %q is not an event: %v", line, err)
+			}
+			if ev.Type != "spindrift_op" || ev.SpindriftOp == nil {
+				t.Fatalf("mirror line %q is not a spindrift_op", line)
+			}
+			ops = append(ops, *ev.SpindriftOp)
+		}
+		if len(ops) != 2 {
+			t.Fatalf("mirrored %d ops, want one per usage report: %+v", len(ops), ops)
+		}
+		if ops[0].Decision != "usage" || ops[0].Kind != "comment" || !strings.Contains(ops[0].Reason, "-nonce") {
+			t.Fatalf("comment usage op = %+v, want kind comment and the flag error as reason", ops[0])
+		}
+		// "unknown" is the mirror's own sentinel for the kindless route
+		// (kindForPath), never the agent's unrecognised word "nope" --
+		// which is what this case is really pinning: the word must not
+		// reach the wire at all.
+		if ops[1].Decision != "usage" || ops[1].Kind != "unknown" {
+			t.Fatalf("unrecognised-kind usage op = %+v, want the kindless route, never the agent's word", ops[1])
+		}
+	})
+}
+
+// TestRunSignal_UsageReportTruncatesOversizeReason exercises the real
+// client's truncation branch (reportSignalUsage): an unknown flag whose own
+// name is long enough that "flag provided but not defined: -<name>" clears
+// signalwire.MaxUsageReasonBytes. The cut lands mid multi-byte rune on
+// purpose -- the flag name is built of a 3-byte character at a length that
+// puts the byte-1024 cut one byte into a rune -- so this pins
+// strings.ToValidUTF8 actually running on the truncated copy, not just on
+// an already-clean prefix. The printed line, unlike the wire copy, keeps the
+// reason whole.
+func TestRunSignal_UsageReportTruncatesOversizeReason(t *testing.T) {
+	srv := startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
+
+	longFlag := "-" + strings.Repeat("日", 400) // 1200 bytes, well past the 1024 cap
+	rc, out := runVerb(t, "", "comment", longFlag, "x")
+	if rc == 0 {
+		t.Fatalf("exit = 0, want non-zero (out=%q)", out)
+	}
+	if got := lastNonEmptyLine(out); !strings.Contains(got, longFlag) {
+		t.Fatalf("printed line = %q, want the full untruncated flag name", got)
+	}
+
+	var ops []claude.SpindriftOp
+	for _, line := range strings.Split(strings.TrimSpace(srv.log.String()), "\n") {
+		var ev claude.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("mirror line %q is not an event: %v", line, err)
+		}
+		ops = append(ops, *ev.SpindriftOp)
+	}
+	if len(ops) != 1 {
+		t.Fatalf("mirrored %d ops, want one usage report: %+v", len(ops), ops)
+	}
+	op := ops[0]
+	if op.Decision != "usage" || op.Kind != "comment" {
+		t.Fatalf("mirrored %+v, want an accepted comment usage report", op)
+	}
+	if len(op.Reason) > signalwire.MaxUsageReasonBytes {
+		t.Fatalf("reason is %d bytes, want at most the %d-byte cap", len(op.Reason), signalwire.MaxUsageReasonBytes)
+	}
+	if !utf8.ValidString(op.Reason) {
+		t.Fatalf("reason %q is not valid utf-8", op.Reason)
+	}
+}
+
+// TestRunSignal_UsageFailureReportNeverMasksTheError asserts the issue's
+// third requirement directly: whether the report lands (a live socket) or
+// cannot even be attempted (no socket at all), the usage error's own output
+// and exit code are unaffected -- a failed report leaves nothing behind for
+// the rejected line to follow.
+func TestRunSignal_UsageFailureReportNeverMasksTheError(t *testing.T) {
+	args := []string{"comment", "-nonce", "x"}
+
+	t.Run("socket unreachable", func(t *testing.T) {
+		t.Setenv("SIGNAL_SOCKET_ENDPOINT", "unix://"+filepath.Join(testSocketDir(t), "absent.sock"))
+		t.Setenv("SIGNAL_SOCKET_SECRET", "")
+		rc, out := runVerb(t, "", args...)
+		if rc != 1 {
+			t.Fatalf("exit = %d, want 1 (out=%q)", rc, out)
+		}
+		if got, want := lastNonEmptyLine(out), "signal comment rejected (usage): flag provided but not defined: -nonce"; got != want {
+			t.Fatalf("last line = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("endpoint unset", func(t *testing.T) {
+		t.Setenv("SIGNAL_SOCKET_ENDPOINT", "")
+		t.Setenv("SIGNAL_SOCKET_SECRET", "")
+		rc, out := runVerb(t, "", args...)
+		if rc != 1 {
+			t.Fatalf("exit = %d, want 1 (out=%q)", rc, out)
+		}
+		if got, want := lastNonEmptyLine(out), "signal comment rejected (usage): flag provided but not defined: -nonce"; got != want {
+			t.Fatalf("last line = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestRunSignal_HelpIsNotAUsageFailure pins the -h/-help exception: it is an
+// explicit request, not a failure, so it keeps the flag package's own dump
+// and exit 1 with no rejected line and no report.
+func TestRunSignal_HelpIsNotAUsageFailure(t *testing.T) {
+	srv := startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
+
+	rc, out := runVerb(t, "", "comment", "-h")
+	if rc != 1 {
+		t.Fatalf("exit = %d, want 1 (out=%q)", rc, out)
+	}
+	if strings.Contains(out, "rejected") {
+		t.Fatalf("output = %q, want no rejected line for -h", out)
+	}
+	if srv.log.String() != "" {
+		t.Fatalf("mirror = %q, want nothing: -h must not report", srv.log.String())
 	}
 }
 
