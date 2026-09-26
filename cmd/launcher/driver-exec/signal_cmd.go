@@ -39,6 +39,11 @@ const (
 	// socket rather than a slow signal.
 	signalTimeout = 30 * time.Second
 
+	// signalUsageReportTimeout bounds a usage report. The invocation has
+	// already failed, so a wedged socket must not hold it for the full
+	// signalTimeout before the caller sees its rejected line.
+	signalUsageReportTimeout = 5 * time.Second
+
 	// signalMaxReplyBytes bounds the reply read. Every reply is a receipt, a
 	// reject or a status summary, all tiny.
 	signalMaxReplyBytes = 1 << 20
@@ -61,7 +66,7 @@ func isSignalInvocation(args []string) bool {
 // -title and -type are short closed-vocabulary fields and stay flags.
 func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 	if len(args) == 0 {
-		return signalUsage(stdout)
+		return signalUsageFailure(stdout, "", "want one of comment, pr-intent, issue-intent, status")
 	}
 	kind, rest := args[0], args[1:]
 
@@ -69,7 +74,7 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 	case "comment":
 		fs := signalFlagSet(kind, stdout)
 		bodyFile := fs.String("body-file", "", "file holding the body; empty or - reads stdin")
-		if err := fs.Parse(rest); err != nil {
+		if !parseSignalFlags(fs, rest, kind, stdout) {
 			return 1
 		}
 		client, base, secret, err := signalTarget()
@@ -86,11 +91,11 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		fs := signalFlagSet(kind, stdout)
 		title := fs.String("title", "", "pull-request title (required)")
 		bodyFile := fs.String("body-file", "", "file holding the body; empty or - reads stdin")
-		if err := fs.Parse(rest); err != nil {
+		if !parseSignalFlags(fs, rest, kind, stdout) {
 			return 1
 		}
 		if *title == "" {
-			return signalFail(stdout, errors.New("pr-intent: -title is required"))
+			return signalUsageFailure(stdout, kind, "-title is required")
 		}
 		client, base, secret, err := signalTarget()
 		if err != nil {
@@ -109,14 +114,14 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		bodyFile := fs.String("body-file", "", "file holding the body; empty or - reads stdin")
 		var dedup stringSliceFlag
 		fs.Var(&dedup, "dedup", "site key for dedup, e.g. path/to/file.go:Symbol; repeat for more than one")
-		if err := fs.Parse(rest); err != nil {
+		if !parseSignalFlags(fs, rest, kind, stdout) {
 			return 1
 		}
 		if *title == "" {
-			return signalFail(stdout, errors.New("issue-intent: -title is required"))
+			return signalUsageFailure(stdout, kind, "-title is required")
 		}
 		if *issueType == "" {
-			return signalFail(stdout, errors.New("issue-intent: -type is required"))
+			return signalUsageFailure(stdout, kind, "-type is required")
 		}
 		client, base, secret, err := signalTarget()
 		if err != nil {
@@ -138,7 +143,7 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 
 	case "status":
 		fs := signalFlagSet(kind, stdout)
-		if err := fs.Parse(rest); err != nil {
+		if !parseSignalFlags(fs, rest, kind, stdout) {
 			return 1
 		}
 		client, base, secret, err := signalTarget()
@@ -148,7 +153,24 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		return getSignalStatus(stdout, client, base, secret)
 	}
 
-	return signalUsage(stdout)
+	return signalUsageFailure(stdout, "", "unknown signal kind; want one of comment, pr-intent, issue-intent, status")
+}
+
+// parseSignalFlags parses rest with fs and routes a parse failure through the
+// usage-failure path (report + final rejected line) -- except an explicit
+// -h/-help, which is a request, not a failure, so it keeps the plain dump and
+// exit 1 with no report. On ok=false the caller must return 1 immediately;
+// fs has already written its own error and usage dump to stdout before either
+// path adds anything further.
+func parseSignalFlags(fs *flag.FlagSet, rest []string, kind string, stdout io.Writer) (ok bool) {
+	if err := fs.Parse(rest); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return false
+		}
+		signalUsageFailure(stdout, kind, err.Error())
+		return false
+	}
+	return true
 }
 
 func signalFlagSet(kind string, stdout io.Writer) *flag.FlagSet {
@@ -157,9 +179,55 @@ func signalFlagSet(kind string, stdout io.Writer) *flag.FlagSet {
 	return fs
 }
 
-func signalUsage(stdout io.Writer) int {
-	fmt.Fprintln(stdout, "driver-exec signal: want one of comment, pr-intent, issue-intent, status")
-	return 1
+// signalUsageFailure handles a client-side usage failure (issue #3867): it
+// reports the failure to the launcher over the socket's diagnostics-only
+// route -- best-effort, silently discarding any error -- and only then prints
+// the final "signal ... rejected (usage): reason" line, so the report always
+// runs before the line a caller may be tailing rather than after it.
+//
+// kind is both the socket path and what the printed line names: "" means
+// kindless (route /usage, line "signal rejected (usage): reason"), and
+// anything else routes /<kind>/usage with line "signal <kind> rejected
+// (usage): reason". An unrecognised kind word always calls this with "" --
+// safe to name in the fixed reason text, but never sent over the wire or
+// echoed in the line.
+func signalUsageFailure(stdout io.Writer, kind, reason string) int {
+	reportSignalUsage(kind, reason)
+	if kind == "" {
+		fmt.Fprintf(stdout, "signal rejected (usage): %s\n", reason)
+		return 1
+	}
+	return printReject(stdout, kind, signalwire.Reject{Status: "usage", Reason: reason})
+}
+
+// reportSignalUsage posts a client-side usage failure to the socket's
+// diagnostics-only route. It is best-effort and silent on every failure: a
+// report must never mask the original usage error or change its exit code.
+func reportSignalUsage(kind, reason string) {
+	client, base, secret, err := signalTarget()
+	if err != nil {
+		return
+	}
+	// The invocation has already failed, so a wedged socket must not hold it
+	// for the full signalTimeout.
+	reportClient := *client
+	reportClient.Timeout = signalUsageReportTimeout
+
+	// The host refuses an over-limit or invalid-UTF-8 reason outright, so the
+	// wire copy is cut to fit; the printed line keeps the reason in full.
+	if len(reason) > signalwire.MaxUsageReasonBytes {
+		reason = reason[:signalwire.MaxUsageReasonBytes]
+	}
+	body, err := json.Marshal(signalwire.UsageReport{Reason: strings.ToValidUTF8(reason, "")})
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequest(http.MethodPost, base+signalwire.UsagePath(kind), bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	_, _, _ = doSignal(&reportClient, req, secret)
 }
 
 func signalFail(stdout io.Writer, err error) int {
