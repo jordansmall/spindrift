@@ -1596,6 +1596,38 @@ func TestStartupPreflight_FetchRevisionFailure(t *testing.T) {
 	}
 }
 
+// TestStartupPreflight_FeatureBranchGone pins that a confirmed-gone
+// --feature-branch refuses startup the same way as any other resolve
+// failure (issue #3883): Class stays HaltPreflight — HaltFeatureBranchGone
+// is Loop's class, reached only once the pool is already running, never
+// startup's — its rendered String() names both the branch and the remote,
+// RunDoctor is never called, and the "preflight" event's outcome gets its
+// own label distinct from an ordinary seam error.
+func TestStartupPreflight_FeatureBranchGone(t *testing.T) {
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &fakePreflightRunner{fetchErr: &daemon.FeatureBranchGoneError{Remote: "origin", Branch: "feature-x"}}
+
+	h := startupPreflight(context.Background(), r, em)
+	if h.Class != daemon.HaltPreflight {
+		t.Fatalf("startupPreflight().Class = %v, want %v", h.Class, daemon.HaltPreflight)
+	}
+	if !strings.Contains(h.String(), "feature-x") || !strings.Contains(h.String(), "origin") {
+		t.Errorf("startupPreflight().String() = %q, want it to name the branch and the remote", h.String())
+	}
+	if r.calls() != 0 {
+		t.Errorf("RunDoctor called %d times, want 0 (never reached)", r.calls())
+	}
+
+	events := decodePreflightEvents(t, &buf)
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want exactly one preflight event", events)
+	}
+	if events[0].Event != "preflight" || events[0].Outcome != "doctor-feature-branch-gone" {
+		t.Errorf("events[0] = %+v, want preflight/doctor-feature-branch-gone", events[0])
+	}
+}
+
 // TestStartupPreflight_NeverEvaluatesSelfPath is the regression pinned by
 // the #3625 review finding: startupPreflight only needs a revision to pin
 // doctor to, and must never reach ResolveTip's self `nix eval` half even
@@ -2072,18 +2104,20 @@ func capturedEnvFixtureT(t *testing.T, extra map[string]string) string {
 // halts it, while an unset flag leaves both byte-for-byte absent.
 func TestMainRun_FeatureBranchPrintsStartupLineAndReachesDoctor(t *testing.T) {
 	tests := []struct {
-		name          string
-		args          []string
-		wantLine      string
-		wantArgvHas   string
-		wantNoLine    bool
-		wantArgvEmpty bool
+		name              string
+		args              []string
+		wantLine          string
+		wantArgvHas       string
+		wantNoLine        bool
+		wantArgvEmpty     bool
+		pushFeatureBranch bool
 	}{
 		{
-			name:        "feature branch set",
-			args:        []string{"--feature-branch", "feature-x", "dispatch"},
-			wantLine:    "daemon: tracking main; children target feature-x",
-			wantArgvHas: "--base-branch feature-x",
+			name:              "feature branch set",
+			args:              []string{"--feature-branch", "feature-x", "dispatch"},
+			wantLine:          "daemon: tracking main; children target feature-x",
+			wantArgvHas:       "--base-branch feature-x",
+			pushFeatureBranch: true,
 		},
 		{
 			name:          "feature branch unset",
@@ -2095,6 +2129,16 @@ func TestMainRun_FeatureBranchPrintsStartupLineAndReachesDoctor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := capturedEnvFixtureT(t, nil)
+			if tt.pushFeatureBranch {
+				// fetchRevision now confirms --feature-branch exists on
+				// origin (issue #3883) before this test ever reaches
+				// RunDoctor; push the branch here so the preflight still
+				// gets past that check to the doctor argv this test is
+				// actually about.
+				gitRunT(t, "", "checkout", "-b", "feature-x")
+				gitRunT(t, "", "push", "-u", "origin", "feature-x")
+				gitRunT(t, "", "checkout", "main")
+			}
 
 			origDoctor := runnerDoctorCommand
 			t.Cleanup(func() { runnerDoctorCommand = origDoctor })

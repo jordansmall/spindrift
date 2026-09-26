@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -474,6 +475,12 @@ func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter
 		return refuseCancelled()
 	}
 	if err != nil {
+		// Its own outcome label, so the event stream tells a gone branch
+		// apart from a seam failure; the class stays HaltPreflight here.
+		var gone *daemon.FeatureBranchGoneError
+		if errors.As(err, &gone) {
+			return preflightRefusal(em, revision, "doctor-feature-branch-gone", daemon.Halt{Class: daemon.HaltPreflight, Detail: "resolve-revision: " + err.Error()})
+		}
 		return preflightRefusal(em, revision, "doctor-seam-error", daemon.Halt{Class: daemon.HaltPreflight, Detail: "resolve-revision: " + err.Error()})
 	}
 
