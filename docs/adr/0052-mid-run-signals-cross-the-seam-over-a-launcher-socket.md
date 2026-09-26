@@ -233,3 +233,24 @@ log carrier as a third mechanism the eventual socket would then tear out.
   and ADR 0044's "opens no host TCP port" are each partially superseded by
   this ADR for the three channels it moves; each keeps governing the
   outcome line and the `log` carrier until removal.
+
+## Amendment (issue #3867): a diagnostics-only usage route
+
+A `driver-exec signal` usage failure — an unknown flag, a missing
+`-title` — dies in the Box before any request is made, so the
+one-event-per-request mirror never saw it, and an agent piping the send
+through `tail` often never saw it either. The verb now ends every such
+failure with a line in the reject shape, `signal <kind> rejected (usage):
+<reason>`, and first reports it on one more route: `POST /<kind>/usage`,
+or `/usage` when the agent named no known kind. The body is `{reason}`,
+capped at 1 KiB. The route is still the kind and the content still names
+no destination; a well-formed report is mirrored as a `spindrift_op`
+signal event with a `usage` decision and the reason, and an oversized or
+malformed one is refused and mirrored like any other request. It buffers
+nothing, settle never reads it, and it never changes the run's outcome —
+it exists only to be logged. The report is best-effort: an unreachable
+socket leaves the usage error and its exit code as they were. An explicit
+`-h`/`-help` is a help request, not a usage failure, so it exits 1 with no
+rejected line and no report; with no kind at all (no args, or an
+unrecognised kind word) the line is the kindless `signal rejected (usage):
+<reason>`, reported on the kindless `/usage` route.
