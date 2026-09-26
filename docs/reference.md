@@ -5088,6 +5088,46 @@ landing mid-evaluation can't produce a build of a tree that never existed
 as a commit, and a child started an hour into the night is still pinned to
 the tip as it was when that slot came free, not the tip at daemon startup.
 
+**Feature branch.** `--feature-branch <branch>` retargets every child
+the daemon starts without moving the daemon's own tracking branch:
+the daemon still fetches, pins, and self-checks its own `BASE_BRANCH`
+exactly as before, but appends `--base-branch <branch>` to every child
+Dispatch argv (a launcher flag that beats the child's baked run-input
+document, so seed branch, rebase target, PR base, and merge target all
+move together) and to the startup preflight's doctor invocation (**Startup
+preflight** below), so its branch-protection row checks the branch children
+actually merge into. It prints one line to stderr before the preflight
+runs, e.g. `daemon: tracking main; children target feature-x`. Usage:
+`nix run .#daemon -- --feature-branch feature-x` — the flag sits
+beside the kind selector in either order, e.g. `nix run .#daemon --
+research --feature-branch feature-x`. Research children get the same
+`--base-branch <branch>` as dispatch children, so a feature-branch
+campaign's research advises against the branch its work merges into. It
+is a CLI flag only, with no env-schema entry, flake option,
+or settings key, so it isn't subject to the child-env knob strip or the
+ambient-env deprecation path, and the override lasts one invocation, so a
+temporary branch name never has to be committed to the Consumer's flake
+config on the base branch.
+
+The intended use is running the daemon on `main` while pointing children
+at a feature branch under active development. Pointing the daemon's own
+`BASE_BRANCH` at the feature branch instead works too, but every feature
+merge that touches the daemon's own closure (**Self-change halt** below)
+then halts it self-changed, so an operator restarts it repeatedly over the
+course of the campaign. `--feature-branch` keeps the daemon itself pinned
+to `main` so only the children move.
+
+Three limits follow from what actually changes. Children still run the base
+branch's code — launcher, Box image, prompts — at the pinned revision;
+work merged into the feature branch is visible to agents as source, but
+doesn't change runner behavior until it reaches the daemon's own base
+branch. The daemon has one queue, so every issue it picks up targets
+the feature branch, unrelated ones included. And the branch name itself is
+never validated at startup: a missing or deleted feature branch is not
+caught by the daemon, so a typo surfaces only once a child actually tries
+to use it — tightening that is a follow-up ticket, not something this flag
+does today.
+
 **Pool.** `MAX_PARALLEL` is the daemon's own pool size (`Config.Slots`,
 `cmd/launcher/internal/daemon/loop.go`): `Loop` runs that many slot
 goroutines, each independently resolving and driving its own children
@@ -5321,7 +5361,9 @@ any slot, claim, or Box, the daemon runs the pinned child's `doctor`
 subcommand exactly once (`startupPreflight`, `cmd/launcher/daemon/main.go`)
 — never again per iteration. It pins doctor to the same freshly fetched tip
 the first child will run at, so the preflight validates the build about to
-actually run rather than the operator's possibly-stale working tree. The
+actually run rather than the operator's possibly-stale working tree. When
+`--feature-branch` is set (**Feature branch** above), doctor's own argv
+gets the same `--base-branch` flag every child does. The
 daemon passes no verbosity flag, so doctor's quiet-by-default behavior
 (`--verbose`/`-v` opts back into the full report) governs the preflight: a
 healthy start adds no doctor report at all to the daemon's own stderr, and a
@@ -5631,18 +5673,20 @@ than halting anything.
 
 **Self-change halt.** At each slot's iteration boundary — after that
 iteration's own resolution finds the tip, before any child is launched —
-the daemon evaluates its own app attribute at that revision and compares
-the resulting program store path against its own, a field comparison in
-`runSlot` (`cmd/launcher/internal/daemon/loop.go`) against the self-path
-`ResolveTip` already returned. The evaluation is memoised by revision, so
-one `nix eval` covers a given tip however many slots ask about it, and a
-new tip is what triggers a fresh evaluation. A failed evaluation is never
-memoised — the memo is left untouched so it can't serve a later caller at
-that same revision a path it never actually got. The attribute is
+the daemon evaluates its own app attribute at that revision and compares the
+resulting program store path against its own, a field comparison in `runSlot`
+(`cmd/launcher/internal/daemon/loop.go`) against the self-path `ResolveTip`
+already returned. This is always the daemon's own `BASE_BRANCH` tip, never a
+`--feature-branch` target (**Feature branch** above), so a feature-branch
+merge alone never trips the halt. The evaluation is memoised by revision,
+so one `nix eval` covers a given tip however many slots ask about it,
+and a new tip is what triggers a fresh evaluation. A failed evaluation is
+never memoised — the memo is left untouched so it can't serve a later
+caller at that same revision a path it never actually got. The attribute is
 `DAEMON_SELF_APP` (default `.#daemon`), the daemon's own app, distinct from
-`DAEMON_APP`, the child Dispatch app the slot is about to launch — see the
-`DAEMON_APP` note above. A Consumer that re-exports the daemon under a
-different top-level name must set it to match; spindrift's own bwrap
+`DAEMON_APP`, the child Dispatch app the slot is about to launch — see
+the `DAEMON_APP` note above. A Consumer that re-exports the daemon under
+a different top-level name must set it to match; spindrift's own bwrap
 harness does exactly that (`.#dogfood-bwrap-daemon`, `nix/fixtures.nix`),
 and without it the check would evaluate a different harness's daemon
 entirely and report a permanent, spurious change on every iteration.
