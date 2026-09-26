@@ -32,22 +32,25 @@ var installStopSignal = stopsignal.Notify
 
 // parsedArgs is the result of parsing argv: `--input <path>` plus an
 // optional positional kind-set selector (dispatch|research, default both —
-// see parseArgs).
+// see parseArgs) and an optional `--feature-branch <branch>`.
 type parsedArgs struct {
-	InputPath string
-	Kinds     []daemon.Kind
+	InputPath     string
+	Kinds         []daemon.Kind
+	FeatureBranch string // empty when --feature-branch is absent; see hostRunner.featureBranch
 }
 
-// parseArgs parses `daemon --input <path> [dispatch|research]`. With no
-// positional verb the daemon draws from both kinds off one pool (issue
-// #3541) — an operator stops having to choose between advancing work and
-// enriching the backlog. `dispatch` alone keeps work-only operation, which
-// is how an operator who has not created the research labels on their
-// target repo runs the daemon; `research` alone restricts it to advise-only
-// research.
+// parseArgs parses `daemon --input <path> [--feature-branch <branch>]
+// [dispatch|research]` — --feature-branch may appear before or after the
+// positional kind selector. With no positional
+// verb the daemon draws from both kinds off one pool (issue #3541) — an
+// operator stops having to choose between advancing work and enriching the
+// backlog. `dispatch` alone keeps work-only operation, which is how an
+// operator who has not created the research labels on their target repo
+// runs the daemon; `research` alone restricts it to advise-only research.
 func parseArgs(args []string) (parsedArgs, error) {
 	var inputPath string
 	var havePath bool
+	var featureBranch string
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--input" {
@@ -56,6 +59,20 @@ func parseArgs(args []string) (parsedArgs, error) {
 			}
 			inputPath = args[i+1]
 			havePath = true
+			i++
+			continue
+		}
+		if args[i] == "--feature-branch" {
+			if i+1 >= len(args) || args[i+1] == "" {
+				return parsedArgs{}, fmt.Errorf("flag --feature-branch requires a non-empty value")
+			}
+			v := args[i+1]
+			// A forgotten value must not swallow the kind selector or the
+			// next flag as the branch name.
+			if v == string(daemon.KindDispatch) || v == string(daemon.KindResearch) || strings.HasPrefix(v, "-") {
+				return parsedArgs{}, fmt.Errorf("flag --feature-branch requires a branch name, got %q", v)
+			}
+			featureBranch = v
 			i++
 			continue
 		}
@@ -75,7 +92,7 @@ func parseArgs(args []string) (parsedArgs, error) {
 	if err != nil {
 		return parsedArgs{}, err
 	}
-	return parsedArgs{InputPath: inputPath, Kinds: kinds}, nil
+	return parsedArgs{InputPath: inputPath, Kinds: kinds, FeatureBranch: featureBranch}, nil
 }
 
 // settingsKeys returns doc's settings keys, sorted, so the warning loop and
@@ -714,11 +731,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	statusWriter := daemon.NewStatusWriter(gitDirPath, clk.Now)
 
 	r, err := newHostRunner(hostRunnerConfig{
-		repoPath:   repoPath,
-		appAttr:    appAttr,
-		baseBranch: baseBranch,
-		selfAttr:   selfAttr,
-		nixSystem:  nixSystem,
+		repoPath:      repoPath,
+		appAttr:       appAttr,
+		baseBranch:    baseBranch,
+		featureBranch: args.FeatureBranch,
+		selfAttr:      selfAttr,
+		nixSystem:     nixSystem,
 		// Snapshotted once here, not per-child: nothing between mainRun's
 		// entry and this line calls os.Setenv, so it's still a startup capture.
 		env:   os.Environ(),
@@ -726,6 +744,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	})
 	if err != nil {
 		return fail(stderr, err)
+	}
+
+	// Before startupPreflight, so the split is visible even if it halts.
+	if args.FeatureBranch != "" {
+		fmt.Fprintf(stderr, "daemon: tracking %s; children target %s\n", baseBranch, args.FeatureBranch)
 	}
 
 	// preflightCtx exists only for startupPreflight, which runs before the

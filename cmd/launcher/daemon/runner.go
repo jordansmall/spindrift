@@ -23,10 +23,14 @@ type hostRunner struct {
 	repoPath   string
 	appAttr    string
 	baseBranch string
-	selfAttr   string
-	nixSystem  string
-	env        []string // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
-	knobs      []string // keys of the Launcher input document's settings map, stripped from env before a child sees it
+	// featureBranch goes to children and the doctor preflight as
+	// --base-branch; empty means off. It never replaces baseBranch:
+	// ResolveTip still fetches, pins to, and self-checks baseBranch's tip.
+	featureBranch string
+	selfAttr      string
+	nixSystem     string
+	env           []string // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
+	knobs         []string // keys of the Launcher input document's settings map, stripped from env before a child sees it
 
 	// flightMu guards flight below, plus the Moved baseline and the
 	// self-path memo fields further down: resolveTipOnce is the sole leader
@@ -72,13 +76,14 @@ type tipFlight struct {
 // the call site: a transposed pair of same-typed fields — appAttr for
 // selfAttr, say — is visible there instead of compiling silently.
 type hostRunnerConfig struct {
-	repoPath   string
-	appAttr    string
-	baseBranch string
-	selfAttr   string
-	nixSystem  string
-	env        []string
-	knobs      []string
+	repoPath      string
+	appAttr       string
+	baseBranch    string
+	featureBranch string
+	selfAttr      string
+	nixSystem     string
+	env           []string
+	knobs         []string
 }
 
 // newHostRunner rejects a nil cfg.env. childEnv
@@ -91,13 +96,14 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 		return nil, errors.New("host runner: no captured environment (hostRunnerConfig.env is nil) — children would exec with no PATH; pass os.Environ()")
 	}
 	return &hostRunner{
-		repoPath:   cfg.repoPath,
-		appAttr:    cfg.appAttr,
-		baseBranch: cfg.baseBranch,
-		selfAttr:   cfg.selfAttr,
-		nixSystem:  cfg.nixSystem,
-		env:        cfg.env,
-		knobs:      cfg.knobs,
+		repoPath:      cfg.repoPath,
+		appAttr:       cfg.appAttr,
+		baseBranch:    cfg.baseBranch,
+		featureBranch: cfg.featureBranch,
+		selfAttr:      cfg.selfAttr,
+		nixSystem:     cfg.nixSystem,
+		env:           cfg.env,
+		knobs:         cfg.knobs,
 	}, nil
 }
 
@@ -298,12 +304,13 @@ func (r *hostRunner) resolveTipOnce(ctx context.Context) (daemon.Tip, error) {
 
 func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
 	childCmd, err := daemon.ChildCommand(daemon.ChildSpec{
-		RepoPath: r.repoPath,
-		AppAttr:  r.appAttr,
-		Revision: req.Revision,
-		Kind:     req.Kind,
-		Env:      r.env,
-		Knobs:    r.knobs,
+		RepoPath:      r.repoPath,
+		AppAttr:       r.appAttr,
+		Revision:      req.Revision,
+		Kind:          req.Kind,
+		Env:           r.env,
+		Knobs:         r.knobs,
+		FeatureBranch: r.featureBranch,
 	})
 	if err != nil {
 		return daemon.ChildResult{}, err
@@ -457,7 +464,7 @@ var runnerDoctorCommand = exec.CommandContext
 // running) tears the child down instead of hanging until SIGKILL — same
 // reasoning as evalSelfPath/fetchRevision above.
 func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error) {
-	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs})
+	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs, FeatureBranch: r.featureBranch})
 	if err != nil {
 		return 0, err
 	}

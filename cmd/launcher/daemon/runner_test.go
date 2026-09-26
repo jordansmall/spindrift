@@ -2005,3 +2005,122 @@ func TestNewHostRunner_AcceptsEmptyEnv(t *testing.T) {
 		t.Fatal("newHostRunner() = nil runner, nil error")
 	}
 }
+
+// TestRunChild_FeatureBranchAppendsBaseBranchArg pins issue #3882's
+// wiring: a non-empty featureBranch reaches the child argv as
+// --base-branch (daemon.ChildSpec's own field already does the appending;
+// this is the runner actually passing it through).
+// TestRunChild_FeatureBranchAppendsBaseBranchArg pins both halves of issue
+// #3882's argv wiring in one table, flag-set and flag-unset, matching
+// TestParseArgs's style: an unset featureBranch must leave the child argv
+// byte-for-byte today — no --base-branch anywhere.
+func TestRunChild_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
+	tests := []struct {
+		name          string
+		featureBranch string
+		wantSubstr    string
+		wantAbsent    bool
+	}{
+		{name: "feature branch set", featureBranch: "feature-x", wantSubstr: "--base-branch feature-x"},
+		{name: "feature branch unset", wantAbsent: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := runnerExecCommand
+			t.Cleanup(func() { runnerExecCommand = orig })
+
+			var gotArgv []string
+			runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+				gotArgv = append([]string{name}, args...)
+				return exec.Command("/bin/sh", "-c", "exit 0")
+			}
+
+			r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: tt.featureBranch, selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+			if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+				t.Fatalf("RunChild() unexpected error: %v", err)
+			}
+
+			joined := strings.Join(gotArgv, " ")
+			if tt.wantAbsent {
+				if strings.Contains(joined, "--base-branch") {
+					t.Errorf("argv %v carries --base-branch, want none (featureBranch unset)", gotArgv)
+				}
+				return
+			}
+			if !strings.Contains(joined, tt.wantSubstr) {
+				t.Errorf("argv %v does not carry %q", gotArgv, tt.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestRunDoctor_FeatureBranchAppendsBaseBranchArg is the doctor preflight's
+// sibling of TestRunChild_FeatureBranchAppendsBaseBranchArg above.
+func TestRunDoctor_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+
+	var gotArgv []string
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		gotArgv = append([]string{name}, args...)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", nixSystem: "x86_64-linux", env: os.Environ()})
+	if _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"); err != nil {
+		t.Fatalf("RunDoctor() unexpected error: %v", err)
+	}
+
+	if !strings.Contains(strings.Join(gotArgv, " "), "--base-branch feature-x") {
+		t.Errorf("argv %v does not carry --base-branch feature-x", gotArgv)
+	}
+}
+
+// TestResolveTip_FetchesBaseBranchNotFeatureBranch pins the invariant that
+// ResolveTip's fetch and self-path eval both always track baseBranch, never
+// featureBranch: a merge to the feature branch alone must never halt the
+// daemon self-changed (issue #3882) — only RunChild/RunDoctor ever see
+// featureBranch. selfAttr is set here (unlike an eval-skipping spec) so the
+// self-change eval path in evalSelfPath actually runs, with runnerEvalCommand
+// stubbed the same way TestResolveTip_SelfPathHappyPath stubs it.
+func TestResolveTip_FetchesBaseBranchNotFeatureBranch(t *testing.T) {
+	origFetch := runnerFetchCommand
+	t.Cleanup(func() { runnerFetchCommand = origFetch })
+	origEval := runnerEvalCommand
+	t.Cleanup(func() { runnerEvalCommand = origEval })
+
+	var gotFetchArgs []string
+	runnerFetchCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if len(args) >= 3 && args[2] == "fetch" {
+			gotFetchArgs = append([]string(nil), args...)
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+		}
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "printf 'deadbeef\\n'")
+	}
+	var gotEvalArgs []string
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		gotEvalArgs = append([]string{name}, args...)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf '/nix/store/abc-daemon\n'`)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	if _, err := r.ResolveTip(context.Background()); err != nil {
+		t.Fatalf("ResolveTip() unexpected error: %v", err)
+	}
+
+	joined := strings.Join(gotFetchArgs, " ")
+	if !strings.Contains(joined, "main") {
+		t.Errorf("fetch args = %v, want it to name baseBranch %q", gotFetchArgs, "main")
+	}
+	if strings.Contains(joined, "feature-x") {
+		t.Errorf("fetch args = %v, want no featureBranch %q", gotFetchArgs, "feature-x")
+	}
+
+	evalJoined := strings.Join(gotEvalArgs, " ")
+	if !strings.Contains(evalJoined, "rev=deadbeef") {
+		t.Errorf("eval args = %v, want the self-path eval pinned to the base-branch revision %q", gotEvalArgs, "deadbeef")
+	}
+	if strings.Contains(evalJoined, "feature-x") {
+		t.Errorf("eval args = %v, want nothing tied to featureBranch %q", gotEvalArgs, "feature-x")
+	}
+}
