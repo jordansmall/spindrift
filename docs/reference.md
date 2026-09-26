@@ -5117,16 +5117,23 @@ then halts it self-changed, so an operator restarts it repeatedly over the
 course of the campaign. `--feature-branch` keeps the daemon itself pinned
 to `main` so only the children move.
 
-Three limits follow from what actually changes. Children still run the base
+Two limits follow from what actually changes. Children still run the base
 branch's code — launcher, Box image, prompts — at the pinned revision;
 work merged into the feature branch is visible to agents as source, but
 doesn't change runner behavior until it reaches the daemon's own base
-branch. The daemon has one queue, so every issue it picks up targets
-the feature branch, unrelated ones included. And the branch name itself is
-never validated at startup: a missing or deleted feature branch is not
-caught by the daemon, so a typo surfaces only once a child actually tries
-to use it — tightening that is a follow-up ticket, not something this flag
-does today.
+branch. And the daemon has one queue, so every issue it picks up targets
+the feature branch, unrelated ones included.
+
+The branch name itself is checked, not trusted: every tip fetch —
+startup's and each slot's — also asks origin whether the branch still
+exists (`git ls-remote --exit-code`, riding the same single flight as the
+fetch itself), so a typo or a since-merged-and-deleted branch is caught
+rather than silently surfacing later inside a child. A missing branch at
+startup refuses the start before doctor even runs (**Startup preflight**
+below, outcome `doctor-feature-branch-gone`); one gone mid-run halts the
+pool outright, exit 12 in the daemon's own exit-code table below — either
+way the fix is an operator restart without `--feature-branch`, or with a
+new one, since nothing the daemon does brings a deleted branch back.
 
 **Pool.** `MAX_PARALLEL` is the daemon's own pool size (`Config.Slots`,
 `cmd/launcher/internal/daemon/loop.go`): `Loop` runs that many slot
@@ -5389,10 +5396,14 @@ own exit-code table is a separate contract from the child's: the daemon
 reads it through `ClassifyPreflight`, not the `Interpret` mapping the
 child-dispatch table above uses, which is why every `preflight` event's
 `outcome` is `doctor-`-prefixed and can never be confused with a
-`child_finish` outcome (below) — including the two labels that come from
+`child_finish` outcome (below) — including the three labels that come from
 the daemon rather than from `ClassifyPreflight`'s table,
 `doctor-seam-error` (the tip could not be resolved, or doctor could not be
-run at all) and `doctor-cancelled`. A Ctrl-C during the preflight is a
+run at all), `doctor-feature-branch-gone` (`--feature-branch` is set and
+origin has no such branch — the same definitive `git ls-remote
+--exit-code` answer that halts the pool mid-run, but caught here before
+the daemon ever starts, see **Feature branch** above), and
+`doctor-cancelled`. A Ctrl-C during the preflight is a
 clean stop — exit 0, the same as any other operator-requested stop — not a
 refusal: a doctor child killed by the signal has no exit code at all, so the
 daemon reads the cancelled context rather than trying to classify the dead
@@ -5754,22 +5765,26 @@ the same log:
 | 0    | a clean stop — an operator signal, or a child that drained and reported a signalled stop |
 | 10   | the daemon's own build changed at the fetched tip and it halted at an iteration boundary |
 | 11   | the startup preflight refused the start — a Required-tier `doctor` failure (missing triage labels, invalid config) or a seam failure resolving the tip/running doctor at all |
+| 12   | `--feature-branch` disappeared from origin mid-run — the pool stopped claiming and halted once in-flight children finished (**Feature branch** above); a branch already missing at startup exits 11 instead |
 | 1    | anything else: a startup failure (including a refused instance lock), or any other halt — the event stream carries the specific reason |
 
-10 and 11 both sit deliberately outside the 0–7 band the *child*
+10, 11, and 12 all sit deliberately outside the 0–7 band the *child*
 launcher's exit codes occupy, so neither taxonomy can be confused with the
 other when both appear in one log (`ExitSelfChanged`,
-`ExitPreflightFailed`, `cmd/launcher/internal/daemon/halt.go`, where
+`ExitPreflightFailed`, `ExitFeatureBranchGone`,
+`cmd/launcher/internal/daemon/halt.go`, where
 `Halt.ExitCode` derives every code in the table above from the halting
-class alone — nothing re-reads the reason string). The two read very
+class alone — nothing re-reads the reason string). The three read very
 differently to an operator composing a restart policy, though: 10 is the
 one code this daemon deliberately invites a supervisor to compose with
 `Restart=on-failure` (**Self-change halt** above), since restarting clears
 it by loading whatever just merged — for a unit that also advances the
-checkout before each start (**Self-update by choice** below). 11 is not
-retryable that way — nothing a restart does fixes a missing label or an
-undersized podman machine, so a supervisor must treat 11 as a standing
-refusal to fix by hand, not a transient fault to bounce past.
+checkout before each start (**Self-update by choice** below). 11 and 12
+are not retryable that way — nothing a restart does fixes a missing
+label, an undersized podman machine, or a deleted feature branch, so a
+supervisor must treat either as a standing refusal to fix by hand, not a
+transient fault to bounce past; 12's own fix is an operator restart
+without `--feature-branch`, or with a new one (**Feature branch** above).
 
 **Halting.** A `SIGINT` or `SIGTERM` to the daemon is the first of two
 signals it consumes, through the same shared relay the launcher itself uses
@@ -5934,7 +5949,7 @@ KillMode=mixed
 TimeoutStopSec=infinity
 Restart=on-failure
 RestartSec=30s
-RestartPreventExitStatus=10 11
+RestartPreventExitStatus=10 11 12
 
 [Install]
 WantedBy=default.target
@@ -6006,10 +6021,11 @@ means:
 | 0    | stop — a clean stop is never worth restarting |
 | 10   | stop — self-update is opt-in, see below to turn it on |
 | 11   | stop — a refusal no restart can clear |
+| 12   | stop — the feature branch is gone; no restart clears it either |
 | 1    | restart, rate-limited |
 
-`Restart=on-failure` restarts every non-zero exit; the two codes in
-`RestartPreventExitStatus=` carve 10 and 11 back out of it, which leaves
+`Restart=on-failure` restarts every non-zero exit; the three codes in
+`RestartPreventExitStatus=` carve 10, 11, and 12 back out of it, which leaves
 exit 1 as the only code the unit actually bounces. Exit 1 covers both the
 transient (the pool-wide breaker tripping after an outage failed one
 iteration boundary's fetch after another) and the permanently
@@ -6039,11 +6055,11 @@ checkout before each start.
 
 ```
 ExecStartPre=/absolute/path/to/git pull --ff-only origin main
-RestartPreventExitStatus=11
+RestartPreventExitStatus=11 12
 ```
 
-`RestartPreventExitStatus=11` above must *replace* the unit's existing
-`RestartPreventExitStatus=10 11` line, not sit alongside it: systemd merges
+`RestartPreventExitStatus=11 12` above must *replace* the unit's existing
+`RestartPreventExitStatus=10 11 12` line, not sit alongside it: systemd merges
 repeated assignments of this directive rather than replacing them, so a
 pasted second line leaves `10` still exempted and self-update silently
 never happens (an empty `RestartPreventExitStatus=` assignment is what
@@ -6178,7 +6194,7 @@ which runs outside every slot's own goroutine.
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |
-| `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`, never started; `reason` is prefixed by cause, now including `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal instead carries the same `context-cancelled: …` reason a context cancellation anywhere else in the loop does), and `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above) alongside a halt-mapped child outcome, a context cancellation, a tripped breaker, or an invalid startup config |
+| `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`, never started; `reason` is prefixed by cause, now including `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal instead carries the same `context-cancelled: …` reason a context cancellation anywhere else in the loop does), `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above), and `feature-branch-gone: …` (`--feature-branch` no longer exists on origin, see **Feature branch** above) alongside a halt-mapped child outcome, a context cancellation, a tripped breaker, or an invalid startup config |
 
 **How `box` and `settled` reach the stream.** The child (a Launcher process,
 whether dispatch or research) does not write these two events to its own
