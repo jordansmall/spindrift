@@ -41,9 +41,9 @@
             # point at a local directory for zero-rebuild iteration.
             agents.prompt = builtins.readFile ./prompts/issue-prompt.md;
 
-            # Non-secret run defaults, grouped by domain (ADR 0037); a matching
-            # env var still wins at runtime. Secrets and the target (REPO_SLUG,
-            # GH_TOKEN, auth) are runtime env, see harness.env.example.
+            # Non-secret run defaults, grouped by domain (ADR 0037); a --flag
+            # overrides one for a single run. Secrets (GH_TOKEN, agent auth)
+            # are runtime env, see harness.env.example.
             # Full reference: docs/flake-options.md
             # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT
             # agents = {
@@ -262,8 +262,9 @@
           };
 
           # `nix develop` (or `direnv allow` with .envrc) puts the spindrift CLI
-          # on PATH. Copy harness.env.example to harness.env and fill in
-          # REPO_SLUG and GH_TOKEN before the first dispatch.
+          # on PATH. Set forge.repoSlug above, then copy harness.env.example to
+          # harness.env and fill in GH_TOKEN and agent auth before the first
+          # dispatch.
           devShells.default = pkgs.mkShell {
             packages = [ config.packages.spindrift ];
           };

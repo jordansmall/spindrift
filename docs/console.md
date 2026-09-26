@@ -103,7 +103,7 @@ normal `Dispatchable` transition first — recorded durably on the tracker —
 then queued; an already-`Dispatchable` issue queues directly. The pick
 launches through the same continuous engine the headless loops use, up to
 the session's live parallelism cap at once (starting at `MAX_PARALLEL`, the
-same knob `run`'s wave dispatch honors, and resizable in-session with `+`/`-`):
+same knob `dispatch`'s waves honor, and resizable in-session with `+`/`-`):
 its queue row tracks `queued` → `claiming` → `running` → `settled`, and as
 each running pick settles, the next queued pick fills the slot it freed — the
 session's queue drains continuously without re-invocation. Queued-but-
