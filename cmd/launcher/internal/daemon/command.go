@@ -25,6 +25,9 @@ type ChildSpec struct {
 	Kind     Kind
 	Env      []string // the daemon's own environment, os.Environ() "KEY=VALUE" shape
 	Knobs    []string // keys of the Launcher input document's settings map
+	// FeatureBranch is the branch children target via --base-branch; see
+	// appendFeatureBranch.
+	FeatureBranch string
 }
 
 // Command is the argv and environment for one pinned invocation, returned
@@ -36,6 +39,17 @@ type ChildSpec struct {
 type Command struct {
 	Argv []string
 	Env  []string
+}
+
+// appendFeatureBranch appends "--base-branch <featureBranch>" to argv when
+// featureBranch is non-empty, for both ChildCommand (every kind, including
+// research) and DoctorCommand: empty means no flag, so the invocation keeps
+// its baked BASE_BRANCH.
+func appendFeatureBranch(argv []string, featureBranch string) []string {
+	if featureBranch == "" {
+		return argv
+	}
+	return append(argv, "--base-branch", featureBranch)
 }
 
 // ChildCommand builds the Command for one pinned child launcher invocation.
@@ -64,18 +78,21 @@ func ChildCommand(s ChildSpec) (Command, error) {
 		return Command{}, err
 	}
 
+	argv := []string{
+		"nix", "run", flakeref, "--",
+		string(kind),
+		// The pool cap now lives in the daemon (one slot, one child), so
+		// each child must itself be exactly one Box: --max-jobs 1 caps the
+		// wave to a single issue and --max-parallel 1 caps concurrency
+		// within it. Pinning both means the guarantee does not depend on
+		// which of the two knobs a given dispatch path happens to honour.
+		"--max-jobs", "1",
+		"--max-parallel", "1",
+	}
+	argv = appendFeatureBranch(argv, s.FeatureBranch)
+
 	return Command{
-		Argv: []string{
-			"nix", "run", flakeref, "--",
-			string(kind),
-			// The pool cap now lives in the daemon (one slot, one child), so
-			// each child must itself be exactly one Box: --max-jobs 1 caps the
-			// wave to a single issue and --max-parallel 1 caps concurrency
-			// within it. Pinning both means the guarantee does not depend on
-			// which of the two knobs a given dispatch path happens to honour.
-			"--max-jobs", "1",
-			"--max-parallel", "1",
-		},
+		Argv: argv,
 		// SPINDRIFT_REPORT_FD is appended after stripping the knobs and then
 		// re-run through withoutKeys with just that one key, so an ambient
 		// SPINDRIFT_REPORT_FD already in the daemon's own environment (a
@@ -224,6 +241,9 @@ type DoctorSpec struct {
 	Revision string   // full git rev the preflight is pinned to
 	Env      []string // the daemon's own environment, os.Environ() "KEY=VALUE" shape
 	Knobs    []string // keys of the Launcher input document's settings map
+	// FeatureBranch is the branch the preflight targets via --base-branch;
+	// see appendFeatureBranch.
+	FeatureBranch string
 }
 
 // DoctorCommand builds the Command for the daemon's own startup preflight:
@@ -244,5 +264,6 @@ func DoctorCommand(s DoctorSpec) (Command, error) {
 	if err != nil {
 		return Command{}, err
 	}
-	return Command{Argv: []string{"nix", "run", flakeref, "--", "doctor"}, Env: withoutKeys(withoutKeys(s.Env, s.Knobs), []string{reportFDEnv})}, nil
+	argv := appendFeatureBranch([]string{"nix", "run", flakeref, "--", "doctor"}, s.FeatureBranch)
+	return Command{Argv: argv, Env: withoutKeys(withoutKeys(s.Env, s.Knobs), []string{reportFDEnv})}, nil
 }

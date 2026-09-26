@@ -96,6 +96,18 @@ func TestChildCommand(t *testing.T) {
 			wantErr:       true,
 			wantErrSubstr: "revision must not be empty",
 		},
+		{
+			name: "feature branch appends base-branch after max-parallel",
+			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch, FeatureBranch: "feat/thing"},
+			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "dispatch", "--max-jobs", "1", "--max-parallel", "1", "--base-branch", "feat/thing"},
+		},
+		{
+			// Research children get --base-branch too: ChildCommand appends
+			// it for every kind, not just dispatch.
+			name: "feature branch appends base-branch for research kind too",
+			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindResearch, FeatureBranch: "feat/thing"},
+			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "research", "--max-jobs", "1", "--max-parallel", "1", "--base-branch", "feat/thing"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -272,6 +284,11 @@ func TestDoctorCommand(t *testing.T) {
 			name:    "repo path with ampersand",
 			spec:    DoctorSpec{RepoPath: "/home/op/re&po", AppAttr: ".#", Revision: "abc123"},
 			wantErr: true,
+		},
+		{
+			name: "feature branch appends base-branch",
+			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", FeatureBranch: "feat/thing"},
+			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor", "--base-branch", "feat/thing"},
 		},
 	}
 	for _, tc := range cases {
