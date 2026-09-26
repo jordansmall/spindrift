@@ -3949,7 +3949,17 @@ accepts a repeatable, optional `-dedup <site key>` per dedup term (issue
 acceptance: exit 0 prints a receipt — `signal <kind> accepted: <n>
 bytes, <hash>, sequence <n>` — and the signal is taken; a non-zero exit
 prints `signal <kind> rejected (<status>): <reason>` and the signal was
-NOT taken, so the agent can never mistake a rejection for success. The
+NOT taken, so the agent can never mistake a rejection for success. A
+usage failure the verb catches itself — an unknown flag, a missing
+`-title` or `-type` — ends on that same shape, `signal <kind> rejected
+(usage): <reason>`, after any usage dump, so it survives a truncating
+pipe; the verb also reports it on the socket's diagnostics-only
+`/<kind>/usage` route, which the host only mirrors into the driver log
+as a `usage` signal event (issue #3867). An explicit `-h`/`-help` is a
+help request, not a usage failure, so it skips both the rejected line and
+the report; with no kind at all — no args, or an unrecognised kind word —
+the line drops the kind, `signal rejected (usage): <reason>`, and reports
+on the kindless `/usage` route instead. The
 socket carries a body whole — no marker line, no base64 — up to a hard
 ceiling of 65536 bytes per field (`title`, `body`, `type` and each
 `dedupTerms` entry alike); a body over that ceiling is refused outright,
