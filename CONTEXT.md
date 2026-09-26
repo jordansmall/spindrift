@@ -640,6 +640,28 @@ _Avoid_: research issue (ambiguous with the issue being researched),
 side-effect issue, enrichment (that is the comment's context, not a new
 issue).
 
+**Butler**:
+A proposed third Dispatch kind (ADR 0056, working name) that keeps a Target
+repo tidy on its own initiative: one read-only Box scans one [[Chore]] and
+files what it finds through the [[Filer]]. Keyed by chore, not by issue —
+nothing labels it into being; the [[Daemon]] runs it only when no dispatch
+or research work is waiting. Advise-only for code; an opt-in, host-gated
+subset of its findings may be filed already dispatchable.
+_Avoid_: sweep, patrol, scheduler, cron, audit.
+
+**Chore**:
+One standing topic of upkeep a [[Butler]] works — bugs, refactors,
+documentation drift — with its own interval and the classes of finding it
+may promote. Working name.
+_Avoid_: lens, task, job.
+
+**Ledger**:
+A [[Chore]]'s durable record in the Target repo: the history of every
+Butler run on it — how far it has swept, where it is in the tree, what it
+filed and spent — and the claim that stops two runs working the same chore
+at once.
+_Avoid_: state file, log (the Box log), report.
+
 **Dispatch lifecycle**:
 The canonical dispatch states the launcher reasons in, independent of how any
 one Issue Tracker stores them: `Dispatchable` (a human marked the issue ready —
