@@ -115,6 +115,12 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 // on the leader actually being in flight, rather than sleeping and hoping.
 var runnerFetchCommand = exec.CommandContext
 
+// lsRemoteNoMatchExit is the exit status `git ls-remote --exit-code` returns
+// when the given ref does not exist on the remote (its "no matching refs"
+// case), distinct from any other failure (auth, network) that ls-remote
+// reports with a different code.
+const lsRemoteNoMatchExit = 2
+
 // fetchRevision shells out to git fetch + rev-parse via runnerFetchCommand
 // (context-aware), so a cancelled ctx (SIGINT/SIGTERM with no child yet to
 // forward to) tears the fetch down instead of hanging the daemon until
@@ -123,6 +129,10 @@ var runnerFetchCommand = exec.CommandContext
 // starts, and once Loop is running the single flight in ResolveTip is the
 // only caller — that ordering is what keeps two fetches from ever racing on
 // FETCH_HEAD (issue #3539).
+//
+// When r.featureBranch is set, it also confirms that branch still exists on
+// the remote (issue #3883); living here gives startupPreflight and
+// ResolveTip's single flight the same one check.
 func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 	const remote = "origin" // nothing varies this yet; inline until a caller needs it (issue #3538 review)
 	fetch := runnerFetchCommand(ctx, "git", "-C", r.repoPath, "fetch", remote, r.baseBranch)
@@ -138,7 +148,25 @@ func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse FETCH_HEAD: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	revision := strings.TrimSpace(string(out))
+
+	if r.featureBranch != "" {
+		ref := "refs/heads/" + r.featureBranch
+		lsRemote := runnerFetchCommand(ctx, "git", "-C", r.repoPath, "ls-remote", "--exit-code", remote, ref)
+		var lsStderr bytes.Buffer
+		lsRemote.Stderr = &lsStderr
+		if err := lsRemote.Run(); err != nil {
+			// Any failure but a definitive "no matching ref" stays an
+			// ordinary error for the breaker.
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == lsRemoteNoMatchExit {
+				return "", &daemon.FeatureBranchGoneError{Remote: remote, Branch: r.featureBranch}
+			}
+			return "", fmt.Errorf("git ls-remote %s %s: %w: %s", remote, ref, err, strings.TrimSpace(lsStderr.String()))
+		}
+	}
+
+	return revision, nil
 }
 
 // runnerExecCommand is the exec seam: a test overrides it to skip nix and

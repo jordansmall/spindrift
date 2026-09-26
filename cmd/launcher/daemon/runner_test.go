@@ -2124,3 +2124,215 @@ func TestResolveTip_FetchesBaseBranchNotFeatureBranch(t *testing.T) {
 		t.Errorf("eval args = %v, want nothing tied to featureBranch %q", gotEvalArgs, "feature-x")
 	}
 }
+
+// scriptedFeatureBranchSeamT is scriptedFetchSeamT's sibling for the
+// --feature-branch existence check (issue #3883): "fetch" always succeeds,
+// "rev-parse" (the default case) echoes revision(), and "ls-remote" runs
+// onLsRemote (a hook a test can use to count calls or block the leader) and
+// exits lsRemoteExit — 0 (branch exists), 2 (ls-remote's "no matching ref"),
+// or any other code (a remote error) a test wants to script.
+func scriptedFeatureBranchSeamT(t *testing.T, revision func() string, lsRemoteExit int, onLsRemote func()) func(ctx context.Context, name string, args ...string) *exec.Cmd {
+	t.Helper()
+	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if len(args) < 3 {
+			t.Errorf("runnerFetchCommand args = %v, want at least 3", args)
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+		}
+		switch args[2] {
+		case "fetch":
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+		case "ls-remote":
+			if onLsRemote != nil {
+				onLsRemote()
+			}
+			return exec.CommandContext(ctx, "/bin/sh", "-c", fmt.Sprintf("exit %d", lsRemoteExit))
+		default:
+			return exec.CommandContext(ctx, "/bin/sh", "-c", fmt.Sprintf("printf '%s\\n'", revision()))
+		}
+	}
+}
+
+// TestFetchRevision_FeatureBranchGoneReturnsTypedError pins ls-remote's exit
+// 2 ("no matching ref") turning into the typed *daemon.FeatureBranchGoneError
+// the loop halts the pool on, carrying the configured branch and remote
+// through untouched.
+func TestFetchRevision_FeatureBranchGoneReturnsTypedError(t *testing.T) {
+	orig := runnerFetchCommand
+	t.Cleanup(func() { runnerFetchCommand = orig })
+	runnerFetchCommand = scriptedFeatureBranchSeamT(t, func() string { return "deadbeef" }, 2, nil)
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	_, err := r.fetchRevision(context.Background())
+	if err == nil {
+		t.Fatal("fetchRevision() error = nil, want a FeatureBranchGoneError")
+	}
+	var gone *daemon.FeatureBranchGoneError
+	if !errors.As(err, &gone) {
+		t.Fatalf("fetchRevision() error = %v, want errors.As *daemon.FeatureBranchGoneError", err)
+	}
+	if gone.Branch != "feature-x" {
+		t.Errorf("gone.Branch = %q, want %q", gone.Branch, "feature-x")
+	}
+	if gone.Remote != "origin" {
+		t.Errorf("gone.Remote = %q, want %q", gone.Remote, "origin")
+	}
+}
+
+// TestFetchRevision_FeatureBranchRemoteErrorIsOrdinary pins the other side of
+// the same branch: an ls-remote exit that is neither 0 nor 2 (128, here — a
+// stand-in for a real auth/network failure) must stay an ordinary error, not
+// the typed absence signal — a network blip must never halt the campaign
+// outright.
+func TestFetchRevision_FeatureBranchRemoteErrorIsOrdinary(t *testing.T) {
+	orig := runnerFetchCommand
+	t.Cleanup(func() { runnerFetchCommand = orig })
+	runnerFetchCommand = scriptedFeatureBranchSeamT(t, func() string { return "deadbeef" }, 128, nil)
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	_, err := r.fetchRevision(context.Background())
+	if err == nil {
+		t.Fatal("fetchRevision() error = nil, want an ordinary ls-remote error")
+	}
+	var gone *daemon.FeatureBranchGoneError
+	if errors.As(err, &gone) {
+		t.Fatalf("fetchRevision() error = %v, want NOT errors.As *daemon.FeatureBranchGoneError (exit 128 is a remote error, not a confirmed absence)", err)
+	}
+}
+
+// TestFetchRevision_FeatureBranchExistsSucceeds pins the happy path: exit 0
+// from ls-remote lets fetchRevision return the resolved revision same as if
+// --feature-branch were never set.
+func TestFetchRevision_FeatureBranchExistsSucceeds(t *testing.T) {
+	orig := runnerFetchCommand
+	t.Cleanup(func() { runnerFetchCommand = orig })
+	var lsRemoteCalls int32
+	runnerFetchCommand = scriptedFeatureBranchSeamT(t, func() string { return "deadbeef" }, 0, func() { atomic.AddInt32(&lsRemoteCalls, 1) })
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	revision, err := r.fetchRevision(context.Background())
+	if err != nil {
+		t.Fatalf("fetchRevision() unexpected error: %v", err)
+	}
+	if revision != "deadbeef" {
+		t.Errorf("fetchRevision() = %q, want %q", revision, "deadbeef")
+	}
+	if got := atomic.LoadInt32(&lsRemoteCalls); got != 1 {
+		t.Errorf("ls-remote calls = %d, want 1", got)
+	}
+}
+
+// TestFetchRevision_NoFeatureBranchSkipsLsRemote pins that the existence
+// check only ever runs when --feature-branch is set: with it empty, no
+// ls-remote invocation happens at all.
+func TestFetchRevision_NoFeatureBranchSkipsLsRemote(t *testing.T) {
+	orig := runnerFetchCommand
+	t.Cleanup(func() { runnerFetchCommand = orig })
+	var lsRemoteCalls int32
+	runnerFetchCommand = scriptedFeatureBranchSeamT(t, func() string { return "deadbeef" }, 0, func() { atomic.AddInt32(&lsRemoteCalls, 1) })
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	if _, err := r.fetchRevision(context.Background()); err != nil {
+		t.Fatalf("fetchRevision() unexpected error: %v", err)
+	}
+	if got := atomic.LoadInt32(&lsRemoteCalls); got != 0 {
+		t.Errorf("ls-remote calls = %d, want 0 (featureBranch unset)", got)
+	}
+}
+
+// TestFetchRevision_RealGitMissingFeatureBranchReturnsTypedError pins real
+// `git ls-remote --exit-code` behaviour on a missing ref; the other
+// feature-branch tests script its exit code through runnerFetchCommand.
+func TestFetchRevision_RealGitMissingFeatureBranchReturnsTypedError(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	root := t.TempDir()
+	bare := filepath.Join(root, "origin.git")
+	dirConsumer := filepath.Join(root, "consumer")
+
+	gitRunT(t, "", "init", "--bare", bare)
+
+	gitRunT(t, "", "clone", bare, dirConsumer)
+	gitRunT(t, dirConsumer, "checkout", "-B", "main")
+	gitRunT(t, dirConsumer, "config", "user.email", "consumer@example.com")
+	gitRunT(t, dirConsumer, "config", "user.name", "Consumer")
+	writeFileT(t, filepath.Join(dirConsumer, "a.txt"), "a\n")
+	gitRunT(t, dirConsumer, "add", "a.txt")
+	gitRunT(t, dirConsumer, "commit", "-m", "base")
+	gitRunT(t, dirConsumer, "push", "-u", "origin", "main")
+	// No feature-x branch is ever created or pushed: origin only ever knows
+	// about main, so ls-remote's "no matching ref" case is genuine, not
+	// stubbed.
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	_, err := r.fetchRevision(context.Background())
+	if err == nil {
+		t.Fatal("fetchRevision() error = nil, want a FeatureBranchGoneError")
+	}
+	var gone *daemon.FeatureBranchGoneError
+	if !errors.As(err, &gone) {
+		t.Fatalf("fetchRevision() error = %v, want errors.As *daemon.FeatureBranchGoneError", err)
+	}
+	if gone.Branch != "feature-x" {
+		t.Errorf("gone.Branch = %q, want %q", gone.Branch, "feature-x")
+	}
+	if gone.Remote != "origin" {
+		t.Errorf("gone.Remote = %q, want %q", gone.Remote, "origin")
+	}
+}
+
+// TestResolveTip_FeatureBranchConcurrentCallersShareSingleLsRemote mirrors
+// TestResolveTip_ConcurrentCallersCoalesceIntoOneFetchAndOneEval, but for the
+// existence check: three concurrent ResolveTip callers with --feature-branch
+// set must still cost exactly one ls-remote invocation, since it rides the
+// same single flight as the fetch it follows.
+func TestResolveTip_FeatureBranchConcurrentCallersShareSingleLsRemote(t *testing.T) {
+	origFetch, origJoined := runnerFetchCommand, runnerFlightJoined
+	t.Cleanup(func() { runnerFetchCommand, runnerFlightJoined = origFetch, origJoined })
+
+	var lsRemoteCalls int32
+	gate := make(chan struct{})
+	leaderBlocked := make(chan struct{})
+	joins := make(chan struct{}, 2)
+
+	runnerFetchCommand = scriptedFeatureBranchSeamT(t, func() string { return "deadbeef" }, 0, func() {
+		atomic.AddInt32(&lsRemoteCalls, 1)
+		close(leaderBlocked)
+		<-gate
+	})
+	runnerFlightJoined = func() { joins <- struct{}{} }
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	const n = 3
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = r.ResolveTip(context.Background())
+		}(i)
+	}
+
+	<-leaderBlocked
+	<-joins
+	<-joins
+	close(gate)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&lsRemoteCalls); got != 1 {
+		t.Errorf("ls-remote calls = %d, want 1", got)
+	}
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("caller %d: ResolveTip() error: %v", i, err)
+		}
+	}
+}
