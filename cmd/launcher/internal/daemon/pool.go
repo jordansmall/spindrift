@@ -887,6 +887,9 @@ func (p *pool) resolveTip(ctx context.Context, slot int) (Tip, error) {
 func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 	tip, err := p.resolveTip(ctx, slot)
 	if err != nil {
+		// Includes *FeatureBranchGoneError: no claim is possible from this
+		// opportunistic call, so swallowing it here only delays the halt to
+		// runSlot's next real resolve, plus one extra ls-remote.
 		p.setPhase(slot, PhaseIdle)
 		return Tip{}, false
 	}

@@ -52,6 +52,16 @@ func eventNames(events []Event) []string {
 	return names
 }
 
+func countEvents(names []string, name string) int {
+	n := 0
+	for _, got := range names {
+		if got == name {
+			n++
+		}
+	}
+	return n
+}
+
 // testIdleCap is intentionally far above testIdleFloor: it lets tests that
 // only ever hit one no-work check still see the undoubled floor, while
 // tests that chain several consecutive no-work checks (and want to see
@@ -1538,6 +1548,194 @@ func TestLoopResolveTipErrorClassification(t *testing.T) {
 				t.Errorf("backoff revision = %q, want %q", backoff.Revision, tt.wantRevision)
 			}
 		})
+	}
+}
+
+// TestLoopFeatureBranchGoneHaltsOutright asserts a *FeatureBranchGoneError
+// from ResolveTip halts the pool with HaltFeatureBranchGone instead of
+// following the breaker/backoff path: the remote gave a definitive answer,
+// so no retry will ever change it, and no child (hence no claim) may start.
+func TestLoopFeatureBranchGoneHaltsOutright(t *testing.T) {
+	r := &scriptedRunner{
+		resolveAt:  1,
+		resolveErr: &FeatureBranchGoneError{Remote: "origin", Branch: "feature-x"},
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+
+	h := Loop(context.Background(), cfg, r, em, clk)
+
+	if h.Class != HaltFeatureBranchGone {
+		t.Fatalf("halt class = %v, want %v", h.Class, HaltFeatureBranchGone)
+	}
+	if !strings.HasPrefix(h.String(), "feature-branch-gone: ") {
+		t.Errorf("Halt.String() = %q, want prefix %q", h.String(), "feature-branch-gone: ")
+	}
+	if !strings.Contains(h.String(), "feature-x") {
+		t.Errorf("Halt.String() = %q, want it to name the branch %q", h.String(), "feature-x")
+	}
+	if h.ExitCode() != 12 {
+		t.Errorf("ExitCode() = %d, want 12", h.ExitCode())
+	}
+	if r.runCount() != 0 {
+		t.Fatalf("run calls = %d, want 0: no child may start, hence no claim", r.runCount())
+	}
+
+	wantEvents(t, &buf, []string{"halt"}, "exactly one halt event, no child_start")
+}
+
+// TestLoopFeatureBranchGoneMidRunHaltsOutright pins the mid-run half of the
+// acceptance criterion TestLoopFeatureBranchGoneHaltsOutright's resolveAt: 1
+// leaves untested: the gone answer arriving after a child has already run
+// and completed, not on the very first resolve. The halt must still land
+// before the next claim, with no further RunChild call.
+func TestLoopFeatureBranchGoneMidRunHaltsOutright(t *testing.T) {
+	r := &scriptedRunner{
+		revisions:  []string{"rev1"},
+		results:    []ChildResult{{Exit: 0}},
+		resolveAt:  2,
+		resolveErr: &FeatureBranchGoneError{Remote: "origin", Branch: "feature-x"},
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+
+	h := Loop(context.Background(), cfg, r, em, clk)
+
+	if h.Class != HaltFeatureBranchGone {
+		t.Fatalf("halt class = %v, want %v", h.Class, HaltFeatureBranchGone)
+	}
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1: the one completed child before the gone answer, no claim after", r.runCount())
+	}
+
+	names := eventNames(decodeEvents(t, &buf))
+	if n := countEvents(names, "halt"); n != 1 {
+		t.Fatalf("halt events = %d, want exactly 1: events = %v", n, names)
+	}
+	if countEvents(names, "backoff")+countEvents(names, "breaker") != 0 {
+		t.Fatalf("events = %v, want no backoff/breaker: a gone answer halts outright", names)
+	}
+}
+
+// TestLoopFeatureBranchGoneDrainsRunningSibling is
+// TestLoopSelfChangeDrainsRunningChild's counterpart for the gone-branch
+// halt: the sibling's resolve (global call 2) only reports gone once the
+// lead's child is confirmed running, so the halt genuinely races an
+// in-flight sibling rather than an imagined one, and that sibling must
+// still finish (child_finish) instead of being abandoned.
+func TestLoopFeatureBranchGoneDrainsRunningSibling(t *testing.T) {
+	leadEntered := make(chan struct{}) // closed once the lead's resolve (call 1) is under way
+	started := make(chan struct{})     // closed by onStart the moment the lead's child starts
+	release := make(chan struct{})     // closed by the test to let RunChild return
+	var startOnce sync.Once
+	var leadEnteredOnce sync.Once
+
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 0}},
+		// onResolve, not resolveAt/resolveErr, so the gone answer also
+		// covers any resolve past call 2 — resolveAt only matches its
+		// exact index once, which would let a lead that races ahead of
+		// the halt succeed on a later resolve and start a second child.
+		onResolve: func(ctx context.Context, call int) error {
+			if call == 1 {
+				leadEnteredOnce.Do(func() { close(leadEntered) })
+				return nil
+			}
+			<-started
+			return &FeatureBranchGoneError{Remote: "origin", Branch: "feature-x"}
+		},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			startOnce.Do(func() { close(started) })
+			<-release
+			return nil
+		},
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(2)
+
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, leadSlot, cfg, p)
+	}()
+	<-leadEntered
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, siblingSlot, cfg, p)
+	}()
+
+	<-started      // the sibling's gone answer is confirmed to race a running child
+	close(release) // let it finish now that it is known to have been running
+
+	wg.Wait()
+	h := p.haltReason()
+
+	if h.Class != HaltFeatureBranchGone {
+		t.Fatalf("halt class = %v, want %v", h.Class, HaltFeatureBranchGone)
+	}
+	if r.runCount() != 1 {
+		t.Fatalf("run calls = %d, want 1: only the already-running child ever runs", r.runCount())
+	}
+
+	names := eventNames(decodeEvents(t, &buf))
+	if n := countEvents(names, "halt"); n != 1 {
+		t.Fatalf("halt events = %d, want exactly 1: events = %v", n, names)
+	}
+	if countEvents(names, "child_finish") == 0 {
+		t.Fatalf("events = %v, want a child_finish for the drained sibling", names)
+	}
+}
+
+// TestLoopPlainResolveTipErrorBacksOffNotFeatureBranchGone asserts a plain
+// (non-FeatureBranchGoneError) ResolveTip error still follows the ordinary
+// breaker/backoff path — a network blip must not be mistaken for a
+// definitive "branch is gone" answer.
+func TestLoopPlainResolveTipErrorBacksOffNotFeatureBranchGone(t *testing.T) {
+	r := &scriptedRunner{
+		revisions:  []string{"rev1"},
+		results:    []ChildResult{{Exit: 5}},
+		resolveAt:  1,
+		resolveErr: errors.New("dial tcp: connection refused"),
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.FailureBackoff = 5 * time.Millisecond
+
+	h := Loop(context.Background(), cfg, r, em, clk)
+
+	if h.Class == HaltFeatureBranchGone {
+		t.Fatalf("halt class = %v, want no feature-branch-gone halt from a plain error", h.Class)
+	}
+
+	events := decodeEvents(t, &buf)
+	found := false
+	for _, ev := range events {
+		if ev.Event == "backoff" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("events = %v, want a backoff event", eventNames(events))
 	}
 }
 
