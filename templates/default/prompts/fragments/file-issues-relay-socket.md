@@ -21,6 +21,15 @@ each one over the Signal socket via `driver-exec signal issue-intent`
 instead, and the launcher files each one host-side once you exit, so no
 issue URL is known yet.
 
+The filer sends each in one call, the body on stdin through a quoted
+`SPINDRIFT_SIGNAL_EOF` heredoc (`-body-file` only as a fallback for a body
+already in a file). The flags are exactly `-title`, `-type`, `-dedup`
+(repeatable), and `-body-file` — there is no `-body` flag. `-type`
+is exactly one of `bug`, `enhancement`, `chore`. A title with backticks
+needs single quotes, not double. A title containing a single quote needs
+`'\''` in its place. The filer runs the command bare — never through
+`tail`, `head`, or `2>&1 |` — because the exit code is the acceptance.
+
 Best-effort: filing must never block the PR or change the outcome line.
 
 - On success (the filer reports `QUEUED`), just note in the PR body that the

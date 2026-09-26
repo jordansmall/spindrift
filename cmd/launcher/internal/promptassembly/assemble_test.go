@@ -1813,7 +1813,7 @@ func TestAssembleWorkPromptCarrierSelectsLogOrSocketIssueIntentFragment(t *testi
 	// filer-prompt.md's own report-format prose also names the bare verb
 	// unconditionally (its QUEUED-report line), so anchor on
 	// filer-file-relay-socket.md's own flag-bearing command line.
-	if strings.Contains(logFilerPrompt, `driver-exec signal issue-intent -title "<title>" -type bug`) {
+	if strings.Contains(logFilerPrompt, `driver-exec signal issue-intent -title '<title>' -type bug`) {
 		t.Errorf("SignalCarrier=log filer prompt contains filer-file-relay-socket.md's driver-exec command line, want absent: %q", logFilerPrompt)
 	}
 
@@ -1834,7 +1834,7 @@ func TestAssembleWorkPromptCarrierSelectsLogOrSocketIssueIntentFragment(t *testi
 	// line), so assert filer-file-relay-socket.md's own flag-bearing command
 	// line rather than bare-marker or bare-verb absence.
 	socketFilerPrompt := agentPromptFromJSON(t, socketResult.AgentsJSON, "filer")
-	if !strings.Contains(socketFilerPrompt, `driver-exec signal issue-intent -title "<title>" -type bug`) {
+	if !strings.Contains(socketFilerPrompt, `driver-exec signal issue-intent -title '<title>' -type bug`) {
 		t.Errorf("SignalCarrier=socket filer prompt missing filer-file-relay-socket.md's driver-exec command line: %q", socketFilerPrompt)
 	}
 	if strings.Contains(socketFilerPrompt, "print\n   one `SPINDRIFT_ISSUE_INTENT run-nonce-abc123") {
