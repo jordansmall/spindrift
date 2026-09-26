@@ -183,11 +183,12 @@ func TestParseSlots(t *testing.T) {
 
 func TestParseArgs(t *testing.T) {
 	tests := []struct {
-		name      string
-		args      []string
-		wantPath  string
-		wantKinds []daemon.Kind
-		wantErr   bool
+		name              string
+		args              []string
+		wantPath          string
+		wantKinds         []daemon.Kind
+		wantFeatureBranch string
+		wantErr           bool
 	}{
 		{
 			// No positional verb draws from both kinds off one pool (issue
@@ -224,6 +225,57 @@ func TestParseArgs(t *testing.T) {
 			args:    []string{"--input"},
 			wantErr: true,
 		},
+		{
+			name:              "feature branch alone",
+			args:              []string{"--input", "/tmp/in.json", "--feature-branch", "feature-x"},
+			wantPath:          "/tmp/in.json",
+			wantKinds:         []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			wantFeatureBranch: "feature-x",
+		},
+		{
+			// The flag can precede the kind selector...
+			name:              "feature branch before kind selector",
+			args:              []string{"--input", "/tmp/in.json", "--feature-branch", "feature-x", "dispatch"},
+			wantPath:          "/tmp/in.json",
+			wantKinds:         []daemon.Kind{daemon.KindDispatch},
+			wantFeatureBranch: "feature-x",
+		},
+		{
+			// ...or follow it: parseArgs scans every arg regardless of order,
+			// so only --input's position relative to its own value matters.
+			name:              "feature branch after kind selector",
+			args:              []string{"--input", "/tmp/in.json", "dispatch", "--feature-branch", "feature-x"},
+			wantPath:          "/tmp/in.json",
+			wantKinds:         []daemon.Kind{daemon.KindDispatch},
+			wantFeatureBranch: "feature-x",
+		},
+		{
+			name:    "--feature-branch with no value",
+			args:    []string{"--input", "/tmp/in.json", "--feature-branch"},
+			wantErr: true,
+		},
+		{
+			name:    "--feature-branch with empty value",
+			args:    []string{"--input", "/tmp/in.json", "--feature-branch", ""},
+			wantErr: true,
+		},
+		{
+			// A dropped value ("daemon --input p --feature-branch dispatch")
+			// must not silently consume the kind selector as the branch name.
+			name:    "--feature-branch value equal to dispatch selector rejected",
+			args:    []string{"--input", "/tmp/in.json", "--feature-branch", "dispatch"},
+			wantErr: true,
+		},
+		{
+			name:    "--feature-branch value equal to research selector rejected",
+			args:    []string{"--input", "/tmp/in.json", "--feature-branch", "research"},
+			wantErr: true,
+		},
+		{
+			name:    "--feature-branch value that looks like a flag rejected",
+			args:    []string{"--input", "/tmp/in.json", "--feature-branch", "--base-branch"},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -237,8 +289,8 @@ func TestParseArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseArgs(%v) unexpected error: %v", tt.args, err)
 			}
-			if got.InputPath != tt.wantPath || !slices.Equal(got.Kinds, tt.wantKinds) {
-				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kinds:%v}", tt.args, got, tt.wantPath, tt.wantKinds)
+			if got.InputPath != tt.wantPath || !slices.Equal(got.Kinds, tt.wantKinds) || got.FeatureBranch != tt.wantFeatureBranch {
+				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kinds:%v FeatureBranch:%q}", tt.args, got, tt.wantPath, tt.wantKinds, tt.wantFeatureBranch)
 			}
 		})
 	}
@@ -2010,6 +2062,71 @@ func capturedEnvFixtureT(t *testing.T, extra map[string]string) string {
 
 	t.Chdir(dirConsumer)
 	return path
+}
+
+// TestMainRun_FeatureBranchPrintsStartupLineAndReachesDoctor pins issue
+// #3882 end to end in one table, flag-set and flag-unset, matching
+// TestParseArgs's style: --feature-branch wired from argv reaches the
+// doctor preflight's argv as --base-branch and mainRun prints the one
+// startup line naming both branches before the (stubbed, failing) preflight
+// halts it, while an unset flag leaves both byte-for-byte absent.
+func TestMainRun_FeatureBranchPrintsStartupLineAndReachesDoctor(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		wantLine      string
+		wantArgvHas   string
+		wantNoLine    bool
+		wantArgvEmpty bool
+	}{
+		{
+			name:        "feature branch set",
+			args:        []string{"--feature-branch", "feature-x", "dispatch"},
+			wantLine:    "daemon: tracking main; children target feature-x",
+			wantArgvHas: "--base-branch feature-x",
+		},
+		{
+			name:          "feature branch unset",
+			args:          []string{"dispatch"},
+			wantNoLine:    true,
+			wantArgvEmpty: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := capturedEnvFixtureT(t, nil)
+
+			origDoctor := runnerDoctorCommand
+			t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+			var gotArgv []string
+			runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+				gotArgv = append([]string{name}, args...)
+				return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+			}
+
+			var stdout, stderr bytes.Buffer
+			got := mainRun(append([]string{"--input", path}, tt.args...), &stdout, &stderr)
+			if got != daemon.ExitPreflightFailed {
+				t.Fatalf("mainRun() = %d, want %d (daemon.ExitPreflightFailed); stderr = %q", got, daemon.ExitPreflightFailed, stderr.String())
+			}
+
+			joined := strings.Join(gotArgv, " ")
+			if tt.wantNoLine {
+				if strings.Contains(stderr.String(), "daemon: tracking") {
+					t.Errorf("stderr = %q, want no startup line (no --feature-branch)", stderr.String())
+				}
+			} else if !strings.Contains(stderr.String(), tt.wantLine) {
+				t.Errorf("stderr = %q, want the startup line naming both branches", stderr.String())
+			}
+			if tt.wantArgvEmpty {
+				if strings.Contains(joined, "--base-branch") {
+					t.Errorf("doctor argv %v carries --base-branch, want none", gotArgv)
+				}
+			} else if !strings.Contains(joined, tt.wantArgvHas) {
+				t.Errorf("doctor argv %v does not carry %q", gotArgv, tt.wantArgvHas)
+			}
+		})
+	}
 }
 
 // TestMainRun_DoctorChildGetsCapturedEnv is the regression test for the bug
