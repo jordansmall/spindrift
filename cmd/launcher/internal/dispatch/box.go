@@ -66,6 +66,12 @@ type Dispatch struct {
 	// attemptLog is the identity of the log the current attempt created, so
 	// reclaimAttemptLog can find it after a mid-run rename (issue #3886).
 	attemptLog os.FileInfo
+
+	// chore is non-nil only for a Factory.NewChore Dispatch (ADR 0056, issue
+	// #3875): it carries the one-shot butler run's Chore name, target branch,
+	// and scan Scope, which buildBoxEnv forwards as CHORE_*/BASE_BRANCH in
+	// place of the issue-keyed ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT trio.
+	chore *Chore
 }
 
 var _ Dispatcher = (*Dispatch)(nil)
@@ -181,7 +187,7 @@ func (d *Dispatch) Run() Result {
 				return quarantineErr{err: fmt.Errorf("mark run lineage: %w", err)}
 			}
 		}
-		env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
+		env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce, d.chore)
 		if err != nil {
 			return err
 		}
@@ -199,7 +205,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		d.announce(report.PhaseFixPass(pass))
-		env, err := buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce)
+		env, err := buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce, d.chore)
 		if err != nil {
 			return err
 		}
@@ -214,7 +220,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 // without the main agent prompt, so it needs neither retry nor driver cache.
 func (d *Dispatch) ResolveConflict(pr string) error {
 	d.announce(report.PhaseConflictResolve)
-	env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
+	env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce, d.chore)
 	if err != nil {
 		return err
 	}
