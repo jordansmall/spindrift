@@ -115,6 +115,15 @@ func (w *Window) Open(now time.Time) bool {
 	return minutes >= w.start || minutes < w.end
 }
 
+// Location returns the Window's zone. A nil Window has none configured, so
+// it gives UTC rather than inheriting the host's zone.
+func (w *Window) Location() *time.Location {
+	if w == nil {
+		return time.UTC
+	}
+	return w.loc
+}
+
 func minutesSinceMidnight(t time.Time) int {
 	h, m, _ := t.Clock()
 	return h*60 + m

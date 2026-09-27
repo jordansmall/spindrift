@@ -5,6 +5,8 @@
 # consumers: lib/renderers.nix, lib/nixpath.nix, nix/checks/schema-drift.nix.
 let
   backends = import ./backends/default.nix;
+  # Shared by the three butler daily budget knobs below (ADR 0056).
+  butlerBudgetGateClause = "gates only starting a run, never stopping one; totals are walked from today's Ledger commits across every Chore enabled in BUTLER_CHORES (a Chore dropped from the list stops counting), over a day that runs midnight to midnight in DAEMON_AWAKE_WINDOW's zone (UTC when unset)";
 in
 {
   label = {
@@ -420,6 +422,50 @@ in
     nixSubPath = "butler.claimTimeout";
     boxEnv = false;
   };
+  butlerMaxSweepsPerDay = {
+    env = "BUTLER_MAX_SWEEPS_PER_DAY";
+    group = "dispatch";
+    default = 8;
+    doc = "caps butler runs started per day (ADR 0056); ${butlerBudgetGateClause}; 0 means no limit";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "nonneg";
+    nixSubPath = "butler.maxSweepsPerDay";
+    boxEnv = false;
+  };
+  butlerMaxFindingsPerDay = {
+    env = "BUTLER_MAX_FINDINGS_PER_DAY";
+    group = "dispatch";
+    default = 10;
+    doc = "caps butler findings filed per day (ADR 0056); ${butlerBudgetGateClause}; 0 means no limit";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "nonneg";
+    nixSubPath = "butler.maxFindingsPerDay";
+    boxEnv = false;
+  };
+  butlerMaxFindingsPerSweep = {
+    env = "BUTLER_MAX_FINDINGS_PER_SWEEP";
+    group = "dispatch";
+    default = 5;
+    doc = "caps findings one butler run may file (ADR 0056): findings a run relays past it are dropped at settle and recorded as `dropped` in the Ledger, and a run does not start while fewer than this many remain in the day's BUTLER_MAX_FINDINGS_PER_DAY budget; 0 means no limit; this headroom gate only applies when BUTLER_MAX_FINDINGS_PER_DAY is non-zero, and this value must not exceed it (rejected at preflight)";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "nonneg";
+    nixSubPath = "butler.maxFindingsPerSweep";
+    boxEnv = false;
+  };
+  butlerDailyTokenCeiling = {
+    env = "BUTLER_DAILY_TOKEN_CEILING";
+    group = "dispatch";
+    default = 0;
+    doc = "caps the tokens (input, output, cache-read and cache-creation) completed butler runs spend per day, as a backstop (ADR 0056); ${butlerBudgetGateClause}; 0 means no limit";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "nonneg";
+    nixSubPath = "butler.dailyTokenCeiling";
+    boxEnv = false;
+  };
   repoSlug = {
     env = "REPO_SLUG";
     group = "forge";
@@ -685,9 +731,8 @@ in
     env = "DAEMON_AWAKE_WINDOW";
     group = "dispatch";
     default = "";
-    doc = "daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host; read by the daemon only, the launcher itself ignores it";
+    doc = "daily local-time span the daemon is allowed to start a new Box, as 'HH:MM-HH:MM IANA-zone', e.g. '22:00-06:00 Europe/London'; an end before the start wraps past midnight; empty (default) means always awake; gates only starting a Box -- one already running finishes regardless; the zone is explicit and never inherited from the host; `spindrift butler` also reads its zone, to decide the local day its own budget knobs (e.g. BUTLER_MAX_SWEEPS_PER_DAY) reset in";
     flakeOption = true;
-    launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
     # alias to preserve, so no lib/legacy-settings-section.nix row.
     legacySettingsExempt = true;

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
@@ -24,6 +25,19 @@ const testClaimTimeout = 6 * time.Hour
 // chore has interval zero, so IntervalNotElapsed never blocks a due check --
 // the shape most tests want when the interval itself isn't what's under test.
 var noEvery = butlerEveryConfig{}
+
+// testButlerPolicy builds a butlerPolicy for tests that don't exercise
+// budgets or the day zone: testClaimTimeout, an unlimited (zero) Budgets,
+// UTC, and enabled set to chores -- everything but budget/zone tests, which
+// build their own butlerPolicy explicitly.
+func testButlerPolicy(every butlerEveryConfig, chores ...string) butlerPolicy {
+	return butlerPolicy{
+		every:        every,
+		claimTimeout: testClaimTimeout,
+		zone:         time.UTC,
+		enabled:      chores,
+	}
+}
 
 // newButlerTestRepo builds a bare repo with one commit on "main" holding one
 // tracked file, the fixture every runButler test claims and sweeps against
@@ -210,7 +224,7 @@ func TestRunButler_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 			}
 
 			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{chore}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
+			err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{chore}, testButlerPolicy(noEvery, chore), newDispatcher, func() time.Time { return now })
 			if err != nil {
 				t.Fatalf("runButler: %v", err)
 			}
@@ -251,7 +265,7 @@ func TestRunButler_CrashedRunLeavesClaimStanding(t *testing.T) {
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return crashedDispatcher() }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if err == nil {
 		t.Fatal("runButler: got nil error, want one reporting the crashed run")
 	}
@@ -283,7 +297,7 @@ func TestRunButler_ClaimStartIsDueCheckInstant(t *testing.T) {
 		calls++
 		return first.Add(time.Duration(calls-1) * time.Hour)
 	}
-	_ = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, now)
+	_ = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, now)
 
 	tip, err := backend.Read("bugs")
 	if err != nil {
@@ -313,7 +327,7 @@ func TestRunButler_LiveClaimReportsNoWork(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now.Add(time.Minute) })
+	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now.Add(time.Minute) })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -351,7 +365,7 @@ func TestRunButler_StaleClaimIsTakenOver(t *testing.T) {
 	}
 
 	now := start.Add(testClaimTimeout + time.Minute)
-	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
@@ -407,7 +421,7 @@ func TestRunButler_StaleClaimTakeoverEndToEnd(t *testing.T) {
 	}
 
 	now := deadStart.Add(testClaimTimeout + time.Minute)
-	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
@@ -464,7 +478,7 @@ func TestRunButler_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 	}
 
 	now := start.Add(testClaimTimeout - time.Minute)
-	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -495,7 +509,7 @@ func TestRunButler_ClaimLostRaceReportsNoWork(t *testing.T) {
 	}
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -531,7 +545,7 @@ func TestRunButler_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
 		t.Fatalf("parseButlerEvery: %v", everr)
 	}
 	now := doneAt.Add(time.Hour) // well inside the 6h interval
-	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, every, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(every, "bugs"), newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -557,7 +571,7 @@ func TestRunButler_NamedChoreNothingToScanReportsWhy(t *testing.T) {
 	fc := forge.NewFake()
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now }); err != nil {
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("seed clean run: %v", err)
 	}
 
@@ -574,7 +588,7 @@ func TestRunButler_NamedChoreNothingToScanReportsWhy(t *testing.T) {
 		dispatched = true
 		return dispatch.NewFake()
 	}
-	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher2, func() time.Time { return now.Add(time.Hour) })
+	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher2, func() time.Time { return now.Add(time.Hour) })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -615,7 +629,7 @@ func TestRunButler_NoChorePicksFirstDueCandidate(t *testing.T) {
 		t.Fatalf("parseButlerEvery: %v", everr)
 	}
 	now := doneAt.Add(time.Hour)
-	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs", "refactor"}, every, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs", "refactor"}, testButlerPolicy(every, "bugs", "refactor"), newDispatcher, func() time.Time { return now })
 	if err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
@@ -664,7 +678,7 @@ func TestRunButler_NoChoreNoneDueReportsEachReason(t *testing.T) {
 		t.Fatalf("parseButlerEvery: %v", everr)
 	}
 	now := doneAt.Add(time.Hour)
-	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs", "refactor"}, every, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs", "refactor"}, testButlerPolicy(every, "bugs", "refactor"), newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -683,7 +697,7 @@ func TestRunButler_NoChoresIsError(t *testing.T) {
 	repo, _ := newButlerTestRepo(t)
 	backend := ledger.Local{Repo: repo}
 
-	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), nil, noEvery, testClaimTimeout, nil, func() time.Time { return time.Time{} })
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), nil, testButlerPolicy(noEvery), nil, func() time.Time { return time.Time{} })
 	if err == nil || errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want a plain error, not errQueueEmpty", err)
 	}
@@ -767,31 +781,38 @@ func TestButlerPreflight(t *testing.T) {
 		codeForge          string
 		butlerChores       string
 		butlerChoreClasses string
+		butlerMaxPerSweep  int
+		butlerMaxPerDay    int
 		chore              string
 		filerEnabled       bool
 		wantErr            string // substring of the error, checked in guard order; "" means no error
 	}{
-		{"all clear", "local", "bugs", "bugs=error-handling", "bugs", true, ""},
-		{"github clear", "github", "bugs", "", "bugs", true, ""},
-		{"forgejo clear", "forgejo", "bugs", "", "bugs", true, ""},
-		{"forge with no ledger rejected", "git", "bugs", "", "bugs", true, "cannot host a butler Ledger (supported: github, forgejo, local)"},
-		{"chore not enabled", "local", "other-chore", "", "bugs", true, "is not enabled"},
-		{"malformed classes rejected", "local", "bugs", "bugs", "bugs", true, "BUTLER_CHORE_CLASSES"},
-		{"filer not provisioned", "local", "bugs", "", "bugs", false, "needs a provisioned Filer"},
-		{"forge checked before chore", "git", "other-chore", "", "bugs", false, "cannot host a butler Ledger"},
-		{"chore checked before filer", "local", "other-chore", "", "bugs", false, "is not enabled"},
-		{"classes checked before filer", "local", "bugs", "bugs", "bugs", false, "BUTLER_CHORE_CLASSES"},
-		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", "tidy-deps", true, ""},
-		{"no chore: all clear with chores enabled", "local", "bugs", "", "", true, ""},
-		{"no chore: empty BUTLER_CHORES rejected", "local", "", "", "", true, "BUTLER_CHORES is empty"},
-		{"no chore: filer checked after empty-chores guard", "local", "", "", "", false, "BUTLER_CHORES is empty"},
+		{"all clear", "local", "bugs", "bugs=error-handling", 0, 0, "bugs", true, ""},
+		{"github clear", "github", "bugs", "", 0, 0, "bugs", true, ""},
+		{"forgejo clear", "forgejo", "bugs", "", 0, 0, "bugs", true, ""},
+		{"forge with no ledger rejected", "git", "bugs", "", 0, 0, "bugs", true, "cannot host a butler Ledger (supported: github, forgejo, local)"},
+		{"chore not enabled", "local", "other-chore", "", 0, 0, "bugs", true, "is not enabled"},
+		{"malformed classes rejected", "local", "bugs", "bugs", 0, 0, "bugs", true, "BUTLER_CHORE_CLASSES"},
+		{"filer not provisioned", "local", "bugs", "", 0, 0, "bugs", false, "needs a provisioned Filer"},
+		{"forge checked before chore", "git", "other-chore", "", 0, 0, "bugs", false, "cannot host a butler Ledger"},
+		{"chore checked before filer", "local", "other-chore", "", 0, 0, "bugs", false, "is not enabled"},
+		{"classes checked before filer", "local", "bugs", "bugs", 0, 0, "bugs", false, "BUTLER_CHORE_CLASSES"},
+		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", 0, 0, "tidy-deps", true, ""},
+		{"no chore: all clear with chores enabled", "local", "bugs", "", 0, 0, "", true, ""},
+		{"no chore: empty BUTLER_CHORES rejected", "local", "", "", 0, 0, "", true, "BUTLER_CHORES is empty"},
+		{"no chore: filer checked after empty-chores guard", "local", "", "", 0, 0, "", false, "BUTLER_CHORES is empty"},
+		{"sweep exceeds day rejected", "local", "bugs", "", 6, 5, "bugs", true, "BUTLER_MAX_FINDINGS_PER_SWEEP (6) exceeds BUTLER_MAX_FINDINGS_PER_DAY (5); no run could ever start"},
+		{"sweep equals day ok", "local", "bugs", "", 5, 5, "bugs", true, ""},
+		{"day zero with sweep set ok", "local", "bugs", "", 5, 0, "bugs", true, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := config{schemaConfig: schemaConfig{
-				codeForge:          tc.codeForge,
-				butlerChores:       tc.butlerChores,
-				butlerChoreClasses: tc.butlerChoreClasses,
+				codeForge:                 tc.codeForge,
+				butlerChores:              tc.butlerChores,
+				butlerChoreClasses:        tc.butlerChoreClasses,
+				butlerMaxFindingsPerSweep: tc.butlerMaxPerSweep,
+				butlerMaxFindingsPerDay:   tc.butlerMaxPerDay,
 			}}
 			err := butlerPreflight(cfg, tc.chore, tc.filerEnabled)
 			if tc.wantErr == "" {
@@ -983,5 +1004,149 @@ func TestChoreEnabled(t *testing.T) {
 				t.Errorf("choreEnabled(%q, %q) = %v, want %v", tc.list, tc.chore, got, tc.want)
 			}
 		})
+	}
+}
+
+// (j) Budgets are global across every enabled Chore, not per Chore (ADR
+// 0056): a sweep already claimed today on one enabled Chore spends the
+// shared day's sweep budget, so a distinct due candidate on another enabled
+// Chore reports the budget spent rather than running.
+func TestRunButler_BudgetSpentByAnotherEnabledChore(t *testing.T) {
+	repo, _ := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	// A Claimed commit on "refactor" -- a run already under way -- counts
+	// toward today's cross-Chore Claims regardless of which Chore it is on.
+	if _, err := ledger.Claim(backend, "refactor", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: now}); err != nil {
+		t.Fatalf("seed Claim: %v", err)
+	}
+
+	dispatched := false
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+		dispatched = true
+		return dispatch.NewFake()
+	}
+
+	policy := testButlerPolicy(noEvery, "bugs", "refactor")
+	policy.budgets = butler.Budgets{MaxSweepsPerDay: 1}
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now })
+	if !errors.Is(err, errQueueEmpty) {
+		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
+	}
+	if !strings.Contains(err.Error(), "daily sweep budget spent") {
+		t.Errorf("runButler err = %q, want it to say daily sweep budget spent", err)
+	}
+	if dispatched {
+		t.Error("newDispatcher was called; want no Box dispatched once the shared sweep budget is spent")
+	}
+}
+
+// (k) The day a budget resets in runs against policy.zone, not UTC or the
+// host's own zone: a Claimed+Done run at 23:30 America/New_York on one date
+// is 04:30 UTC the *next* date, so this instant lands on different calendar
+// dates depending which zone decides the boundary. Reading at 23:50 the same
+// NY evening still finds the budget spent; reading at 00:10 the following NY
+// morning finds a fresh day and runs.
+func TestRunButler_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
+	repo, head := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation: %v", err)
+	}
+	seedAt := time.Date(2026, 1, 10, 23, 30, 0, 0, loc) // 2026-01-11 04:30 UTC
+	claim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: seedAt})
+	if err != nil {
+		t.Fatalf("seed Claim: %v", err)
+	}
+	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head}, seedAt); err != nil {
+		t.Fatalf("seed Finish: %v", err)
+	}
+	// Something new since the seeded run, so the only thing left to block a
+	// later due check is the budget itself.
+	addButlerCommit(t, repo, "newfile.go", "package a\n")
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9099"
+	dispatched := false
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+		dispatched = true
+		return readyDispatcher()
+	}
+
+	policy := testButlerPolicy(noEvery, "bugs")
+	policy.budgets = butler.Budgets{MaxSweepsPerDay: 1}
+	policy.zone = loc
+
+	t.Run("same NY day: budget still spent", func(t *testing.T) {
+		dispatched = false
+		now := time.Date(2026, 1, 10, 23, 50, 0, 0, loc)
+		err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now })
+		if !errors.Is(err, errQueueEmpty) {
+			t.Fatalf("runButler err = %v, want errQueueEmpty", err)
+		}
+		if !strings.Contains(err.Error(), "daily sweep budget spent") {
+			t.Errorf("runButler err = %q, want daily sweep budget spent", err)
+		}
+		if dispatched {
+			t.Error("newDispatcher was called; want no Box dispatched while still inside the spent NY day")
+		}
+	})
+
+	t.Run("next NY day: due again", func(t *testing.T) {
+		dispatched = false
+		now := time.Date(2026, 1, 11, 0, 10, 0, 0, loc)
+		if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+			t.Fatalf("runButler: %v", err)
+		}
+		if !dispatched {
+			t.Error("newDispatcher was not called; want a Box dispatched once the NY day rolled over and the budget reset")
+		}
+	})
+}
+
+// (l) MaxFindingsPerSweep reaches settle.NewButlerSettle through
+// runOneButlerChore: a run that relays more findings than the cap gets the
+// overflow dropped, and the Ledger done commit records it (Dropped).
+func TestRunButler_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
+	repo, _ := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9100"
+
+	d := dispatch.NewFake()
+	d.RunResult = dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"bug one","body":"repro","dedupTerms":["a.go:One"]}`,
+			`{"title":"bug two","body":"repro","dedupTerms":["a.go:Two"]}`,
+		},
+	}
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return d }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	policy := testButlerPolicy(noEvery, "bugs")
+	policy.budgets = butler.Budgets{MaxFindingsPerSweep: 1}
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+		t.Fatalf("runButler: %v", err)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.Dropped != 1 {
+		t.Errorf("Dropped = %d, want 1", tip.State.Dropped)
+	}
+	if len(tip.State.Filed) != 1 {
+		t.Errorf("len(Filed) = %d, want 1", len(tip.State.Filed))
 	}
 }
