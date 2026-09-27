@@ -81,7 +81,7 @@ func TestButlerSettle_FilesFindingsWithProvenanceLabelAndBacklink(t *testing.T) 
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now })
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
 
 	result := readyResult(
 		`{"title":"bug in a.go","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -124,7 +124,7 @@ func TestButlerSettle_DoneCommitContents(t *testing.T) {
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now })
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -176,7 +176,7 @@ func TestButlerSettle_PartialFilingFailure_RecordsOnlyWhatFiled(t *testing.T) {
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now })
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -194,6 +194,124 @@ func TestButlerSettle_PartialFilingFailure_RecordsOnlyWhatFiled(t *testing.T) {
 	}
 	if len(tip.State.Filed) != 1 || tip.State.Filed[0] != fc.PostIssueURL {
 		t.Errorf("Filed = %v, want exactly [%s]", tip.State.Filed, fc.PostIssueURL)
+	}
+}
+
+// (c2) A cap below the well-formed intent count files only the first
+// maxFindingsPerSweep of them and records the overflow in the done commit's
+// Dropped field and the settled note.
+func TestButlerSettle_CapDropsOverflowAndRecordsDropped(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/501"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 2)
+
+	result := readyResult(
+		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
+		`{"title":"second finding","body":"repro2","dedupTerms":["b.go:Bar"]}`,
+		`{"title":"third finding","body":"repro3","dedupTerms":["c.go:Baz"]}`,
+	)
+
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if len(fc.PostIssueCalls) != 2 {
+		t.Fatalf("want 2 PostIssue calls (capped), got %d: %+v", len(fc.PostIssueCalls), fc.PostIssueCalls)
+	}
+	for _, call := range fc.PostIssueCalls {
+		if call.Title == "third finding" {
+			t.Errorf("PostIssue called for %q, want it dropped by the cap", call.Title)
+		}
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.Dropped != 1 {
+		t.Errorf("Dropped = %d, want 1", tip.State.Dropped)
+	}
+	if len(tip.State.Filed) != 2 {
+		t.Errorf("Filed = %v, want 2 entries", tip.State.Filed)
+	}
+}
+
+// (c3) A cap of 0 (the default) is no cap at all: every well-formed intent
+// files and Dropped stays 0.
+func TestButlerSettle_ZeroCapFilesEverything(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/501"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
+
+	result := readyResult(
+		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
+		`{"title":"second finding","body":"repro2","dedupTerms":["b.go:Bar"]}`,
+	)
+
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if len(fc.PostIssueCalls) != 2 {
+		t.Fatalf("want 2 PostIssue calls, got %d", len(fc.PostIssueCalls))
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.Dropped != 0 {
+		t.Errorf("Dropped = %d, want 0", tip.State.Dropped)
+	}
+}
+
+// (c4) A malformed payload never counts toward the cap -- it is skipped by
+// fileIssueIntentsDetailedFunc's own malformed check regardless of where it
+// falls, and the cap still admits exactly maxFindingsPerSweep well-formed
+// intents around it.
+func TestButlerSettle_MalformedPayloadDoesNotCountTowardCap(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/501"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 1)
+
+	result := readyResult(
+		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
+		`not valid json`,
+		`{"title":"second finding","body":"repro2","dedupTerms":["b.go:Bar"]}`,
+	)
+
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("want 1 PostIssue call (cap=1, malformed uncounted), got %d: %+v", len(fc.PostIssueCalls), fc.PostIssueCalls)
+	}
+	if fc.PostIssueCalls[0].Title != "first finding" {
+		t.Errorf("PostIssue title = %q, want %q", fc.PostIssueCalls[0].Title, "first finding")
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.Dropped != 1 {
+		t.Errorf("Dropped = %d, want 1 (second finding dropped by the cap)", tip.State.Dropped)
 	}
 }
 
@@ -242,7 +360,7 @@ func TestButlerSettle_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
 			fc := forge.NewFake()
 			scope := butler.Scope{Head: "newhead", NextCursor: "newcursor"}
 			now := start.Add(3 * time.Minute)
-			s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now })
+			s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
 
 			s.Settle(dispatch.NewFake(), "butler-bugs", 0, tc.result)
 

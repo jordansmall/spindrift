@@ -20,12 +20,13 @@ import (
 // label transition -- the butler carries no tracker issue of its own, only
 // a Ledger Chore.
 type ButlerSettle struct {
-	it     forge.IssueTracker
-	ledger ledger.Backend
-	chore  string
-	claim  ledger.Tip
-	scope  butler.Scope
-	now    func() time.Time
+	it                  forge.IssueTracker
+	ledger              ledger.Backend
+	chore               string
+	claim               ledger.Tip
+	scope               butler.Scope
+	now                 func() time.Time
+	maxFindingsPerSweep int
 }
 
 var _ Settler = (*ButlerSettle)(nil)
@@ -34,9 +35,10 @@ var _ Settler = (*ButlerSettle)(nil)
 // Ledger tip Claim produced at the start of this run (ledger.Finish's
 // compare-and-swap parent); scope is the run's computed Scope
 // (internal/butler.NextScope), whose Head/NextCursor become the done
-// commit's lastSwept/cursor on success.
-func NewButlerSettle(it forge.IssueTracker, backend ledger.Backend, chore string, claim ledger.Tip, scope butler.Scope, now func() time.Time) *ButlerSettle {
-	return &ButlerSettle{it: it, ledger: backend, chore: chore, claim: claim, scope: scope, now: now}
+// commit's lastSwept/cursor on success. maxFindingsPerSweep caps how many
+// well-formed findings Settle will file in one sweep; 0 means no cap.
+func NewButlerSettle(it forge.IssueTracker, backend ledger.Backend, chore string, claim ledger.Tip, scope butler.Scope, now func() time.Time, maxFindingsPerSweep int) *ButlerSettle {
+	return &ButlerSettle{it: it, ledger: backend, chore: chore, claim: claim, scope: scope, now: now, maxFindingsPerSweep: maxFindingsPerSweep}
 }
 
 // Settle files result's findings, if any, then writes the Chore's done
@@ -60,10 +62,17 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 		return
 	}
 
-	filed := fileIssueIntentsDetailedFunc(b.it, num, result, "agent-butler-finding", func(in issueIntent) string {
+	kept, dropped := capIntents(result.IssueIntents, b.maxFindingsPerSweep)
+	capped := result
+	capped.IssueIntents = kept
+
+	filed := fileIssueIntentsDetailedFunc(b.it, num, capped, "agent-butler-finding", func(in issueIntent) string {
 		return butlerBacklink(b.chore, in.DedupTerms)
 	})
 	reportFiled(num, filed)
+	if dropped > 0 {
+		fmt.Printf("    #%s  dropped %d finding(s) beyond the %d-per-sweep cap\n", num, dropped, b.maxFindingsPerSweep)
+	}
 
 	var urls []string
 	for _, f := range filed {
@@ -83,6 +92,7 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 		Cursor:    b.scope.NextCursor,
 		Filed:     urls,
 		Usage:     d.CumulativeUsage(),
+		Dropped:   dropped,
 	}
 	if _, err := ledger.Finish(b.ledger, b.chore, b.claim, state, b.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
@@ -91,6 +101,9 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	}
 
 	note := fmt.Sprintf("%d filed", len(urls))
+	if dropped > 0 {
+		note = fmt.Sprintf("%d filed, %d dropped", len(urls), dropped)
+	}
 	report.Settled(num, forge.Complete.String(), note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
 }
@@ -132,6 +145,34 @@ func butlerFiles(dedupTerms []string) []string {
 		files = append(files, path)
 	}
 	return files
+}
+
+// capIntents keeps at most n of raw's well-formed issue-intent payloads, in
+// order, dropping the rest; n<=0 means no cap, and raw is returned itself
+// (the same backing array, aliased) rather than a copy. A malformed payload
+// (parseIssueIntent rejects it) is neither capped nor counted as dropped --
+// it always passes through kept, since fileIssueIntentsDetailedFunc's own
+// malformed-payload skip, not this cap, is what decides its fate. n>0
+// allocates and returns a fresh slice.
+func capIntents(raw []string, n int) (kept []string, dropped int) {
+	if n <= 0 {
+		return raw, 0
+	}
+	kept = make([]string, 0, len(raw))
+	wellFormed := 0
+	for _, r := range raw {
+		if _, ok := parseIssueIntent(r); !ok {
+			kept = append(kept, r)
+			continue
+		}
+		wellFormed++
+		if wellFormed > n {
+			dropped++
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept, dropped
 }
 
 // fail prints a status=failed line and reports the run failed. It applies no
