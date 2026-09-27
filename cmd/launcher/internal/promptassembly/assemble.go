@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // ErrUnsupportedCell marks an Env combination Assemble cannot render: an
@@ -102,15 +104,24 @@ type Handoff struct {
 	Caps         Caps
 }
 
-// checkCoveredCell validates that e sits in a covered Env cell. Only
-// DispatchKind is checked: it is set programmatically at runtime with no
-// schema entry to guard it, while IssueTracker and CodeForge are validated by
-// lib/mkHarness.nix's choicesCheckOk assert and main.go's validate() (issue
-// #2540). No combination of the other axes is rejected (issue #2354).
+// checkCoveredCell validates that e sits in a covered Env cell: DispatchKind,
+// plus SelfContained against the resolved kind's Prompts. DispatchKind is set
+// programmatically at runtime with no schema entry to guard it, while
+// IssueTracker and CodeForge are validated by lib/mkHarness.nix's
+// choicesCheckOk assert and main.go's validate() (issue #2540). No
+// combination of the other axes is rejected (issue #2354).
 func checkCoveredCell(e Env) error {
-	kind := e.kind()
-	if kind != defaultDispatchKind && kind != "research" {
+	d, ok := dispatchkind.ByName(e.kind())
+	if !ok {
 		return fmt.Errorf("dispatch kind %q: %w", e.DispatchKind, ErrUnsupportedCell)
+	}
+
+	// A kind with its own base prompt but no SelfContainedBase has nothing to
+	// render under SelfContained=true; main.go's validate() rejects this
+	// combination on the CLI path, but the entrypoint env path calls Assemble
+	// directly, so it needs its own gate here too.
+	if e.SelfContained && d.Prompts.Base != "" && d.Prompts.SelfContainedBase == "" {
+		return fmt.Errorf("dispatch kind %q: self-contained not supported: %w", d.Name, ErrUnsupportedCell)
 	}
 
 	return nil
@@ -217,7 +228,7 @@ type promptBodies struct {
 	sessionMode string
 	allowlist   map[string]string
 	gates       map[string]bool
-	kind        string
+	kind        *dispatchkind.Descriptor
 }
 
 // assemblePromptBodies performs Assemble's prompt path in attributed segment
@@ -320,15 +331,15 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	// first regardless of FixPass, then a warm fix pass, then the default
 	// work cell. Result.Prompt must carry no trailing newline, because the
 	// writer prints it raw and nothing re-adds one downstream.
-	kind := e.kind()
+	d := e.descriptor()
 
 	var baseName, sessionMode string
 	switch {
-	case kind == "research":
+	case d.Prompts.Base != "":
 		if e.SelfContained {
-			baseName = "research-self-contained-prompt.md"
+			baseName = d.Prompts.SelfContainedBase
 		} else {
-			baseName = "research-prompt.md"
+			baseName = d.Prompts.Base
 		}
 		sessionMode = "initial"
 	case e.FixPass > 0:
@@ -355,7 +366,8 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	// already-contains-marker guard always fires. The code-comments policy is
 	// inlined verbatim in the templates themselves (issue #3505), so it is
 	// not part of this injection list.
-	if kind == "research" {
+	if d.Settle == dispatchkind.SettleVerdict {
+		// The verdict contract is the prompt half of the verdict settle.
 		base, err = injectSharedBlockSegments(base, e.ResearchOutcomeContractFile, vars)
 		if err != nil {
 			return promptBodies{}, err
@@ -378,11 +390,11 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	}
 
 	// The review prompt is populated only on the fresh-work path with the
-	// orchestrator on: a research dispatch never reviews (ADR 0022), and a
+	// orchestrator on: an advise-only dispatch never reviews (ADR 0022), and a
 	// warm FixPass box has its own review-less flow.
 	var review body
 	var reviewName string
-	if gates["ORCHESTRATOR"] && kind == defaultDispatchKind && e.FixPass == 0 {
+	if gates["ORCHESTRATOR"] && !d.AdviseOnly && e.FixPass == 0 {
 		reviewName = "review-prompt.md"
 		reviewPromptPath := filepath.Join(e.PromptsDir, reviewName)
 		reviewSource := Source{Kind: SourceTemplate, Name: reviewName}
@@ -407,7 +419,7 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		sessionMode: sessionMode,
 		allowlist:   allowlist,
 		gates:       gates,
-		kind:        kind,
+		kind:        d,
 	}, nil
 }
 

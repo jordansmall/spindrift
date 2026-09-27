@@ -22,8 +22,7 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	// regardless of BOX_WRITE_ENABLED. Env forwards DispatchKind as the empty
 	// string by default, so the comparison has to resolve that default the
 	// same way every other reader of the field does.
-	kind := e.kind()
-	researchForceRelay := kind == "research" && e.FilerEnabled
+	researchForceRelay := e.descriptor().AdviseOnly && e.FilerEnabled
 
 	// Exactly one of these three ever fires.
 	g["ISSUE_TRACKER_GITHUB"] = itRead == "GITHUB"
