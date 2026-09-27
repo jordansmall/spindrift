@@ -1,9 +1,9 @@
 // Package ledger holds a Chore's Ledger (ADR 0056): one ref under
 // refs/spindrift/butler/ pointing at a chain of commits on no branch. Each
 // commit's tree holds one state.json document; its parent is the previous
-// state commit. The chain records claim/done handoffs (and, in a later
-// slice, a stale-claim check and a day's usage/filing totals) without ever
-// touching refs/heads/.
+// state commit. The chain records claim/done handoffs, detects a claim left
+// stale by a crashed run, and totals a local day's usage and filings by
+// walking the chain — without ever touching refs/heads/.
 package ledger
 
 import (
@@ -46,10 +46,26 @@ type State struct {
 	Usage     usage.Usage `json:"usage"`
 }
 
+// StaleClaim reports whether s is a claim old enough that the worker holding
+// it likely crashed, so the next reader should take it over rather than wait.
+// A claim is stale only strictly past timeout, never at exactly timeout; a
+// Done state is never stale.
+func (s State) StaleClaim(now time.Time, timeout time.Duration) bool {
+	return s.Phase == Claimed && s.ClaimedBy != nil && now.Sub(s.ClaimedBy.Start) > timeout
+}
+
 // Tip is a Ledger's current head: a state commit's sha and its decoded
 // State. Commit == "" means the Ledger is empty (no commit yet).
 type Tip struct {
 	Commit string
+	State  State
+}
+
+// Entry is one state commit in a Chore's Ledger chain, as returned by
+// Backend.History.
+type Entry struct {
+	Commit string
+	At     time.Time
 	State  State
 }
 
@@ -72,6 +88,10 @@ type Backend interface {
 	// becomes the commit's author and committer date. Returns ErrLostRace
 	// (wrapped or bare; test with errors.Is) if the compare-and-swap loses.
 	Append(chore, old string, s State, at time.Time) (string, error)
+	// History returns every state commit in chore's chain whose commit date
+	// is at or after since, newest first. Returns (nil, nil) if the Ledger
+	// has no commit yet.
+	History(chore string, since time.Time) ([]Entry, error)
 }
 
 // Claim appends a Claimed state on top of tip, conditional on tip being
@@ -104,4 +124,68 @@ func Finish(b Backend, chore string, claim Tip, s State, at time.Time) (Tip, err
 		return Tip{}, err
 	}
 	return Tip{Commit: commit, State: s}, nil
+}
+
+// Totals sums a Chore's Ledger activity over a local day: budgets (ADR 0056
+// "Budgets") gate starting only, so Claims — runs started — is what they
+// check against, while Filed/Promoted/Dropped/Usage are the day's completed
+// work.
+type Totals struct {
+	Claims   int
+	Filed    int
+	Promoted int
+	Dropped  int
+	Usage    usage.Usage
+}
+
+// DayTotals totals chore's Ledger over the local day containing now —
+// midnight to midnight in now.Location(), not a rolling 24h window, so a DST
+// transition doesn't shift the boundary. There is no second store: it walks
+// History rather than keeping a running total. A run that spans midnight is
+// split across its two commits: it counts toward Claims on the day its
+// Claimed commit was made, and toward Filed/Promoted/Dropped/Usage on the
+// (possibly later) day its Done commit lands.
+func DayTotals(b Backend, chore string, now time.Time) (Totals, error) {
+	loc := now.Location()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	next := midnight.AddDate(0, 0, 1)
+
+	// History's since is only a fetch bound; the [midnight, next) window is
+	// owned here.
+	entries, err := b.History(chore, midnight)
+	if err != nil {
+		return Totals{}, err
+	}
+
+	var t Totals
+	for _, e := range entries {
+		if e.At.Before(midnight) || !e.At.Before(next) {
+			continue
+		}
+		switch e.State.Phase {
+		case Claimed:
+			t.Claims++
+		case Done:
+			t.Filed += len(e.State.Filed)
+			t.Promoted += len(e.State.Promoted)
+			t.Dropped += e.State.Dropped
+			t.Usage = addUsage(t.Usage, e.State.Usage)
+		}
+	}
+	return t, nil
+}
+
+// addUsage sums two Usage snapshots field-by-field, for DayTotals folding a
+// day's Done commits into one running total.
+func addUsage(a, b usage.Usage) usage.Usage {
+	return usage.Usage{
+		InputTokens:              a.InputTokens + b.InputTokens,
+		OutputTokens:             a.OutputTokens + b.OutputTokens,
+		CacheReadInputTokens:     a.CacheReadInputTokens + b.CacheReadInputTokens,
+		CacheCreationInputTokens: a.CacheCreationInputTokens + b.CacheCreationInputTokens,
+		TotalCostUSD:             a.TotalCostUSD + b.TotalCostUSD,
+		DurationMs:               a.DurationMs + b.DurationMs,
+		DurationApiMs:            a.DurationApiMs + b.DurationApiMs,
+		NumTurns:                 a.NumTurns + b.NumTurns,
+	}
 }
