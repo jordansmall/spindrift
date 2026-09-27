@@ -178,7 +178,7 @@ func TestButlerSettle_ReportsChoreSettledNotIssue(t *testing.T) {
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
 	s.Settle(dispatch.NewFake(), "butler-bugs", 0, readyResult())
 
