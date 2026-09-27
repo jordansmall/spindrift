@@ -3,6 +3,7 @@ package dispatch
 import (
 	"testing"
 
+	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -168,5 +169,61 @@ func TestDispatch_KeepsAgentGenerationSnapshotFromNewDespiteLaterSwap(t *testing
 	}
 	if got := fr.RunCalls[1].ClosureGeneration; got != &gen {
 		t.Errorf("d2 Box.ClosureGeneration: want %p, got %p", &gen, got)
+	}
+}
+
+// Issue #3875 (ADR 0056): NewChore keys the Dispatch "butler-"+Name, distinct
+// from any tracker issue number New() could be called with, so its log path
+// carries the same key.
+func TestFactory_NewChore_KeysLogPathButlerPrefixed(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.NewChore(Chore{Name: "lint-sweep", Branch: "butler/lint-sweep"})
+	want := logPathFor(dir, "butler-lint-sweep")
+	if got := d.logPath(); got != want {
+		t.Errorf("NewChore logPath: got %q, want %q", got, want)
+	}
+}
+
+// NewChore's Run() forwards the Chore straight through to buildBoxEnv, on the
+// same seam Run() already uses for an issue-keyed Dispatch.
+func TestFactory_NewChore_RunForwardsChoreEnv(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.NewChore(Chore{
+		Name:   "lint-sweep",
+		Branch: "butler/lint-sweep",
+		Scope:  butler.Scope{Head: "deadbeef"},
+	})
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: want 1, got %d", len(fr.RunCalls))
+	}
+	env := fr.RunCalls[0].Env
+	if got := env["CHORE_NAME"]; got != "lint-sweep" {
+		t.Errorf("CHORE_NAME: got %q, want %q", got, "lint-sweep")
+	}
+	if got := env["BASE_BRANCH"]; got != "butler/lint-sweep" {
+		t.Errorf("BASE_BRANCH: got %q, want %q", got, "butler/lint-sweep")
+	}
+	if _, ok := env["ISSUE_NUMBER"]; ok {
+		t.Error("ISSUE_NUMBER should be absent for a chore Dispatch's Run()")
 	}
 }

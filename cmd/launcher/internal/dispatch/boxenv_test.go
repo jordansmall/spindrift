@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/butler"
 )
 
 // Issue #3445 made an IssueTextFor error fatal to the dispatch. Callers of
@@ -13,7 +14,7 @@ import (
 // here means buildBoxEnv itself broke, not the thing under test.
 func mustBuildBoxEnv(t *testing.T, cfg Config, number, title string, fixPass int, ciFailureSummary, nonce string) map[string]string {
 	t.Helper()
-	env, err := buildBoxEnv(cfg, number, title, fixPass, ciFailureSummary, nonce)
+	env, err := buildBoxEnv(cfg, number, title, fixPass, ciFailureSummary, nonce, nil)
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -298,7 +299,7 @@ func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
 // a Box launched without it has no recourse. An unreadable subject issue
 // fails the dispatch outright, with no retry (see buildBoxEnv's doc).
 func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
-	env, err := buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	env, err := buildBoxEnv(Config{}, "3", "T", 0, "", "", nil)
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -308,7 +309,7 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 
 	env, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "the issue body", nil },
-	}, "3", "T", 0, "", "")
+	}, "3", "T", 0, "", "", nil)
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -321,7 +322,7 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 	// dispatch never produces.
 	env, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "", nil },
-	}, "3", "T", 0, "", "")
+	}, "3", "T", 0, "", "", nil)
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -331,7 +332,7 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 
 	_, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "", errors.New("boom") },
-	}, "3", "T", 0, "", "")
+	}, "3", "T", 0, "", "", nil)
 	if err == nil {
 		t.Fatal("buildBoxEnv: want a non-nil error when Config.IssueTextFor errors")
 	}
@@ -352,5 +353,96 @@ func TestBuildBoxEnvForwardsScoutProvisioned(t *testing.T) {
 	env = mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")
 	if _, ok := env["BOX_SCOUT_PROVISIONED"]; ok {
 		t.Error("BOX_SCOUT_PROVISIONED should be absent when Config.ScoutProvisioned is false")
+	}
+}
+
+// Issue #3875 (ADR 0056): a chore Dispatch forwards CHORE_* and BASE_BRANCH
+// straight from the Chore, and never the issue-keyed trio, since a chore key
+// names no tracker issue.
+func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
+	var resolveEnvCalls []string
+	cfg := Config{
+		BoxEnvVars: "BASE_BRANCH MODEL",
+		ResolveEnv: func(_, name string) string {
+			resolveEnvCalls = append(resolveEnvCalls, name)
+			if name == "MODEL" {
+				return "from-resolver"
+			}
+			return ""
+		},
+		IssueTextFor: func(number string) (string, error) {
+			t.Fatalf("IssueTextFor must not be called for a chore Dispatch, got number=%q", number)
+			return "", nil
+		},
+	}
+	chore := &Chore{
+		Name:   "lint-sweep",
+		Branch: "butler/lint-sweep",
+		Scope: butler.Scope{
+			Head:      "deadbeef",
+			DiffRange: "cafe..deadbeef",
+			Slice:     []string{"a.go", "b.go"},
+		},
+	}
+	env, err := buildBoxEnv(cfg, "butler-lint-sweep", "unused title", 0, "", "the-nonce", chore)
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+
+	if got := env["CHORE_NAME"]; got != "lint-sweep" {
+		t.Errorf("CHORE_NAME: got %q, want %q", got, "lint-sweep")
+	}
+	if got := env["CHORE_HEAD"]; got != "deadbeef" {
+		t.Errorf("CHORE_HEAD: got %q, want %q", got, "deadbeef")
+	}
+	if got := env["CHORE_DIFF_RANGE"]; got != "cafe..deadbeef" {
+		t.Errorf("CHORE_DIFF_RANGE: got %q, want %q", got, "cafe..deadbeef")
+	}
+	if got := env["CHORE_SLICE"]; got != "a.go\nb.go" {
+		t.Errorf("CHORE_SLICE: got %q, want %q", got, "a.go\nb.go")
+	}
+	if got := env["BASE_BRANCH"]; got != "butler/lint-sweep" {
+		t.Errorf("BASE_BRANCH: got %q, want %q", got, "butler/lint-sweep")
+	}
+	for _, unwanted := range []string{"ISSUE_NUMBER", "ISSUE_TITLE", "ISSUE_TEXT"} {
+		if v, ok := env[unwanted]; ok {
+			t.Errorf("%s should be absent for a chore Dispatch, got %q", unwanted, v)
+		}
+	}
+
+	for _, name := range resolveEnvCalls {
+		if name == "BASE_BRANCH" {
+			t.Error("ResolveEnv must not be called with BASE_BRANCH for a chore Dispatch")
+		}
+	}
+	if got := env["MODEL"]; got != "from-resolver" {
+		t.Errorf("MODEL: got %q, want %q (other BoxEnvVars still resolve normally)", got, "from-resolver")
+	}
+}
+
+// ADVISE_ONLY still comes from the kind descriptor, unaffected by the chore
+// attachment (dispatch.go's kind block runs after the chore/issue split).
+func TestBuildBoxEnv_ChoreAdviseOnlyFromKind(t *testing.T) {
+	env, err := buildBoxEnv(Config{Kind: "butler"}, "butler-lint-sweep", "T", 0, "", "", &Chore{Name: "lint-sweep"})
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	if got := env["ADVISE_ONLY"]; got != "1" {
+		t.Errorf("ADVISE_ONLY with Config.Kind=butler: got %q, want %q", got, "1")
+	}
+}
+
+// A chore whose Scope carries no Head/DiffRange/Slice (the first run over an
+// empty tree, in principle) forwards none of CHORE_HEAD/CHORE_DIFF_RANGE/
+// CHORE_SLICE, matching every other optional field's absent-when-empty shape.
+func TestBuildBoxEnv_ChoreOmitsEmptyScopeFields(t *testing.T) {
+	env, err := buildBoxEnv(Config{}, "butler-empty", "T", 0, "", "", &Chore{Name: "empty", Branch: "b"})
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	for _, name := range []string{"CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE"} {
+		if v, ok := env[name]; ok {
+			t.Errorf("%s should be absent for an empty Scope, got %q", name, v)
+		}
 	}
 }

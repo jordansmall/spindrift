@@ -80,6 +80,20 @@ func (f *Factory) New(number, title string) *Dispatch {
 	}
 }
 
+// ChoreKey is a Chore Dispatch's log/lock/cache/BoxName key, namespaced away
+// from any tracker issue number so a chore Dispatch can never collide with an
+// issue-keyed one sharing the same pwd (ADR 0056).
+func ChoreKey(name string) string { return "butler-" + name }
+
+// NewChore constructs a Dispatch for one one-shot butler run, keyed by
+// ChoreKey rather than a tracker issue number; buildBoxEnv reads the attached
+// Chore to skip the issue-keyed env entirely.
+func (f *Factory) NewChore(c Chore) *Dispatch {
+	d := f.New(ChoreKey(c.Name), "butler: "+c.Name)
+	d.chore = &c
+	return d
+}
+
 // newNonce mints an unpredictable per-run nonce (issue #1937) that lets the
 // host tell a control-signal line produced by this run's own Box from one an
 // untrusted issue or comment author echoed into the log; a predictable or

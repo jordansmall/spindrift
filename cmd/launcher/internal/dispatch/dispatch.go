@@ -12,10 +12,29 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
 )
+
+// Chore is a one-shot butler run's key (ADR 0056, issue #3875), Factory.NewChore's
+// argument: unlike an issue-keyed Dispatch, it carries no tracker number or
+// issue text, only the Ledger Chore's name, its target branch, and the scan
+// Scope internal/butler computed for this run.
+type Chore struct {
+	// Name is the Chore's name, forwarded as CHORE_NAME and folded into the
+	// Dispatch's log/lock/cache key as "butler-"+Name (Factory.NewChore).
+	Name string
+	// Branch is the branch this run's Box clones and scans, forwarded as
+	// BASE_BRANCH directly rather than through Config.ResolveEnv: a chore has
+	// no issue number for the local-forge BASE_BRANCH resolver to key off.
+	Branch string
+	// Scope is this run's scan scope (internal/butler.NextScope): Head,
+	// DiffRange, and Slice forward as CHORE_HEAD, CHORE_DIFF_RANGE, and
+	// CHORE_SLICE.
+	Scope butler.Scope
+}
 
 // Config carries the subset of launcher config a Dispatch needs to build a
 // Box's env and drive its retry policy.
@@ -138,24 +157,49 @@ func (c Config) signalCarrierSocket() bool {
 // fails the dispatch rather than being dropped (issue #3445): the prompt
 // templates promise the Box an injected ISSUE_TEXT section. It fires before any
 // box runs, so the empty-log check surfaces it on Result.Err (issue #3119).
-func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string, nonce string) (map[string]string, error) {
+//
+// chore is non-nil only for a Factory.NewChore Dispatch (ADR 0056): number is
+// then "butler-"+chore.Name, not a tracker issue number, so this skips
+// ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT and the BASE_BRANCH entry of the
+// ResolveEnv loop entirely (CODE_FORGE=local's localBaseBranchResolver, the
+// only ResolveEnv caller that keys off number, would otherwise run an
+// issue-tracker lookup against a chore key that names no issue) and forwards
+// CHORE_* plus BASE_BRANCH from chore directly instead.
+func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string, nonce string, chore *Chore) (map[string]string, error) {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
 		resolve = func(_, name string) string { return os.Getenv(name) }
 	}
 	env := make(map[string]string)
 	for _, name := range strings.Fields(cfg.BoxEnvVars) {
+		if chore != nil && name == "BASE_BRANCH" {
+			continue
+		}
 		env[name] = resolve(number, name)
 	}
-	env["ISSUE_NUMBER"] = number
-	env["ISSUE_TITLE"] = title
-	if cfg.IssueTextFor != nil {
-		text, err := cfg.IssueTextFor(number)
-		if err != nil {
-			return nil, fmt.Errorf("issue text for #%s: %w", number, err)
+	if chore != nil {
+		env["CHORE_NAME"] = chore.Name
+		env["BASE_BRANCH"] = chore.Branch
+		if chore.Scope.Head != "" {
+			env["CHORE_HEAD"] = chore.Scope.Head
 		}
-		if text != "" {
-			env["ISSUE_TEXT"] = text
+		if chore.Scope.DiffRange != "" {
+			env["CHORE_DIFF_RANGE"] = chore.Scope.DiffRange
+		}
+		if len(chore.Scope.Slice) > 0 {
+			env["CHORE_SLICE"] = strings.Join(chore.Scope.Slice, "\n")
+		}
+	} else {
+		env["ISSUE_NUMBER"] = number
+		env["ISSUE_TITLE"] = title
+		if cfg.IssueTextFor != nil {
+			text, err := cfg.IssueTextFor(number)
+			if err != nil {
+				return nil, fmt.Errorf("issue text for #%s: %w", number, err)
+			}
+			if text != "" {
+				env["ISSUE_TEXT"] = text
+			}
 		}
 	}
 	kind := cfg.Kind
