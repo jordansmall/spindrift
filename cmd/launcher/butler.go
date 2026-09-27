@@ -151,6 +151,55 @@ type butlerPolicy struct {
 	// enabled is every BUTLER_CHORES entry, not just this pass's candidates:
 	// budgets are summed across all of them, even under --chore.
 	enabled []string
+	// choreClasses is BUTLER_CHORE_CLASSES parsed once (butler.ParseClasses),
+	// not per run: cmdButler's preflight already validated it, so re-parsing
+	// inside the sweep loop would only repeat work with the same answer.
+	choreClasses map[string][]string
+	// promotionMaxFiles is BUTLER_PROMOTION_MAX_FILES, the host limit on how
+	// many files an auto-promoted finding may touch (issue #3880).
+	promotionMaxFiles int
+	// maxPromotionsPerDay is BUTLER_MAX_PROMOTIONS_PER_DAY; 0 (the default)
+	// means promotion is off regardless of choreClasses (issue #3880).
+	maxPromotionsPerDay int
+	// label is the Consumer's configured work dispatch label (LABEL),
+	// captured before applyDispatchKind swapped it out for the butler
+	// kind's own (label-less) family -- the label a promoted finding must
+	// carry for the work path to pick it up (issue #3880).
+	label string
+}
+
+// promotionPolicy builds chore's settle.PromotionPolicy (issue #3880):
+// Classes and MaxFiles come straight from p, and Room -- when promotion is
+// on at all -- re-walks today's Ledger at settle time (backend, p.enabled,
+// now().In(p.zone)), the same call runButler makes at run start, so a
+// promotion whose done commit already landed is counted here. Like ADR
+// 0056's other budgets this is a soft cap, not a hard one: two runs settling
+// at the same moment can each read the same total and both spend it. A
+// DayTotalsAll error fails closed (0 room, a warning to stderr) rather than
+// promoting on a total it could not compute.
+func (p butlerPolicy) promotionPolicy(backend ledger.Backend, chore string, now func() time.Time) settle.PromotionPolicy {
+	pp := settle.PromotionPolicy{
+		Classes:  p.choreClasses[chore],
+		MaxFiles: p.promotionMaxFiles,
+		Label:    p.label,
+	}
+	if p.maxPromotionsPerDay <= 0 {
+		return pp
+	}
+	perDay := p.maxPromotionsPerDay
+	pp.Room = func() int {
+		totals, err := ledger.DayTotalsAll(backend, p.enabled, now().In(p.zone))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "butler: promotion room: %s\n", err)
+			return 0
+		}
+		remaining := perDay - totals.Promoted
+		if remaining < 0 {
+			remaining = 0
+		}
+		return remaining
+	}
+	return pp
 }
 
 // choreEnabled reports whether chore appears in list, BUTLER_CHORES's
@@ -232,7 +281,8 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", chore, verdict))
 			continue
 		}
-		return runOneButlerChore(backend, it, id, chore, tip, head, policy.budgets.MaxFindingsPerSweep, newDispatcher, whenNow, now)
+		promo := policy.promotionPolicy(backend, chore, now)
+		return runOneButlerChore(backend, it, id, chore, tip, head, policy.budgets.MaxFindingsPerSweep, promo, newDispatcher, whenNow, now)
 	}
 
 	return fmt.Errorf("butler: %s: %w", strings.Join(reasons, "; "), errQueueEmpty)
@@ -246,7 +296,8 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 // *dispatch.Factory.NewChore in production, dispatch.Fake in tests).
 // claimedAt is runButler's whenNow, reused for ClaimedBy.Start so the claim
 // is stamped at the same instant its due decision was made; now is called
-// fresh at settle time instead.
+// fresh at settle time instead. promo is chore's settle.PromotionPolicy
+// (issue #3880), built by the caller since it needs backend and now too.
 //
 // Returns errQueueEmpty if Claim loses the race -- another worker claimed
 // chore between runButler's Read and this Claim -- the same "nothing to do
@@ -255,7 +306,7 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 // Settle actually wrote the done commit (Box success) or left the claim
 // standing (Box crash, ADR 0056) is read back off the Ledger tip rather than
 // threaded out of Settle, since a crashed run's Settle writes nothing at all.
-func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chore string, tip ledger.Tip, head string, maxFindingsPerSweep int, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, claimedAt time.Time, now func() time.Time) error {
+func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chore string, tip ledger.Tip, head string, maxFindingsPerSweep int, promo settle.PromotionPolicy, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, claimedAt time.Time, now func() time.Time) error {
 	files, err := butler.TrackedFiles(id.repo, head)
 	if err != nil {
 		return err
@@ -277,10 +328,7 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 	defer d.Close()
 	result := d.Run()
 
-	// PromotionPolicy{} (Classes nil, Room nil) never promotes: wiring the
-	// real host-side allow-list/limits/budget into this call is issue
-	// #3880's next slice.
-	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now, maxFindingsPerSweep, settle.PromotionPolicy{})
+	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now, maxFindingsPerSweep, promo)
 	s.Settle(d, dispatch.ChoreKey(chore), butlerSlot, result)
 
 	final, err := backend.Read(chore)
@@ -328,10 +376,12 @@ func butlerPreflight(cfg config, chore string, filerEnabled bool) error {
 }
 
 // cmdButler is the `butler [--chore <name>]` subcommand (ADR 0056, issue
-// #3875, #3877): it sweeps the first due Chore among the one named on
+// #3875, #3877, #3880): it sweeps the first due Chore among the one named on
 // --chore, or else every BUTLER_CHORES entry in order, and reports "no work"
-// with each candidate's reason if none is due. Deliberately out of scope
-// here: promotion.
+// with each candidate's reason if none is due. Each swept Chore's finding is
+// auto-promoted to ready-for-agent when it clears every host-side gate
+// (allow-listed class, file limit, reviewer concurrence, and daily
+// promotion room); BUTLER_MAX_PROMOTIONS_PER_DAY defaults to 0, off.
 func cmdButler(lc *launchContext, chore string) int {
 	defer lc.cleanup()
 
@@ -393,12 +443,25 @@ func cmdButler(lc *launchContext, chore string) int {
 		chores = enabled
 	}
 
+	// butlerPreflight already validated BUTLER_CHORE_CLASSES; parsing again
+	// here (once, not per Chore run) turns the validated string into the
+	// map runOneButlerChore's promotionPolicy indexes by chore.
+	choreClasses, err := butler.ParseClasses(lc.config.butlerChoreClasses)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
 	policy := butlerPolicy{
-		every:        every,
-		claimTimeout: claimTimeout,
-		budgets:      budgets,
-		zone:         window.Location(),
-		enabled:      enabled,
+		every:               every,
+		claimTimeout:        claimTimeout,
+		budgets:             budgets,
+		zone:                window.Location(),
+		enabled:             enabled,
+		choreClasses:        choreClasses,
+		promotionMaxFiles:   lc.config.butlerPromotionMaxFiles,
+		maxPromotionsPerDay: lc.config.butlerMaxPromotionsPerDay,
+		label:               lc.config.configuredWorkLabel,
 	}
 
 	id := butlerRun{repo: repo, branch: lc.config.baseBranch, host: host}

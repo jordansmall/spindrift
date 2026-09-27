@@ -110,7 +110,7 @@
             #     usd = "0.000000";
             #   };
             #   butler = {
-            #     # space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); validated for syntax here but inert until auto-promotion consumes it (issue #3880); the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes
+            #     # space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); the auto-promotion trust gate (issue #3880) -- still only acts when BUTLER_MAX_PROMOTIONS_PER_DAY > 0; the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes
             #     choreClasses = "bugs=error-handling,resource-leak refactor=dead-code docs-drift=stale-reference";
             #     # space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs`, `refactor`, and `docs-drift` (templates/default/prompts/chores/). `spindrift butler --chore <name>` refuses a name not listed here
             #     chores = "";
@@ -124,8 +124,12 @@
             #     maxFindingsPerDay = 10;
             #     # caps findings one butler run may file (ADR 0056): findings a run relays past it are dropped at settle and recorded as `dropped` in the Ledger, and a run does not start while fewer than this many remain in the day's BUTLER_MAX_FINDINGS_PER_DAY budget; 0 means no limit; this headroom gate only applies when BUTLER_MAX_FINDINGS_PER_DAY is non-zero, and this value must not exceed it (rejected at preflight)
             #     maxFindingsPerSweep = 5;
+            #     # caps butler findings auto-promoted to ready-for-agent per day (ADR 0056); unlike the other budgets above, 0 means promotion is off (the default), so enabling a Chore alone never promotes; a finding is promoted only when its class is on BUTLER_CHORE_CLASSES for its Chore, it touches no more than BUTLER_PROMOTION_MAX_FILES files, the in-Box reviewer agreed, and this budget has room; any other finding is filed unlabelled; not a start gate -- a spent promotion budget still lets sweeps run and file
+            #     maxPromotionsPerDay = 0;
             #     # caps butler runs started per day (ADR 0056); gates only starting a run, never stopping one; totals are walked from today's Ledger commits across every Chore enabled in BUTLER_CHORES (a Chore dropped from the list stops counting), over a day that runs midnight to midnight in DAEMON_AWAKE_WINDOW's zone (UTC when unset); 0 means no limit
             #     maxSweepsPerDay = 8;
+            #     # host limit on the files (paths named by its dedup/site keys) an auto-promoted butler finding may touch; a finding over it, or naming none, is filed unlabelled even when its class is allow-listed
+            #     promotionMaxFiles = 3;
             #   };
             #   continuous = {
             #     # when enabled, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see the exit-code table in docs/reference.md's Dispatch exit codes section). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it. DEPRECATED: superseded by the daemon (apps.daemon, nix run .#daemon), which holds the pool as one single-Box launcher invocation per slot, each pinned to its own fetched revision, instead of one long-lived launcher process doing all the pool-holding itself (#3547); not removed — it stays available for operators who want no daemon at all, and it remains the Console's engine
