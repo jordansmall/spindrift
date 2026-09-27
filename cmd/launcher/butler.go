@@ -209,7 +209,10 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 		if err != nil {
 			return fmt.Errorf("butler: read %s ledger history: %w", chore, err)
 		}
-		verdict := butler.Check(tip, recent, head, whenNow, butler.DueConfig{Every: interval, ClaimTimeout: claimTimeout})
+		// TODO(#3879 follow-up): wire real cross-Chore ledger.Totals here
+		// once the coordinator sums them; the zero value leaves every
+		// Budgets check disabled (zero means unlimited) for this slice.
+		verdict := butler.Check(tip, recent, head, whenNow, ledger.Totals{}, butler.DueConfig{Every: interval, ClaimTimeout: claimTimeout})
 		if verdict != butler.Due {
 			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", chore, verdict))
 			continue
