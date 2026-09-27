@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // The real templates/default/prompts tree, resolved relative to this
@@ -1091,6 +1093,39 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 				t.Errorf("Assemble error = %v, want it to wrap ErrUnsupportedCell", err)
 			}
 		})
+	}
+}
+
+// A kind with its own Prompts.Base but no SelfContainedBase (no real kind
+// today; a synthetic Descriptor stands in for a future one) run with
+// SelfContained=true must be rejected up front rather than falling through
+// to an empty baseName that then reads PromptsDir itself.
+func TestAssembleSelfContainedRequiresSubMode(t *testing.T) {
+	synth := &dispatchkind.Descriptor{
+		Name:   "synthetic-no-self-contained",
+		Verb:   "synthetic",
+		Keying: dispatchkind.ByIssue,
+		Labels: dispatchkind.LabelsConfigured,
+		Prompts: dispatchkind.Prompts{
+			Base: "issue-prompt.md",
+		},
+	}
+	dispatchkind.All = append(dispatchkind.All, synth)
+	t.Cleanup(func() {
+		dispatchkind.All = dispatchkind.All[:len(dispatchkind.All)-1]
+	})
+
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.DispatchKind = synth.Name
+	env.SelfContained = true
+
+	_, err := Assemble(env, reg)
+	if err == nil {
+		t.Fatal("Assemble: got nil error, want ErrUnsupportedCell")
+	}
+	if !errors.Is(err, ErrUnsupportedCell) {
+		t.Errorf("Assemble error = %v, want it to wrap ErrUnsupportedCell", err)
 	}
 }
 

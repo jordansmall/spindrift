@@ -61,14 +61,15 @@ func Gates(e Env) map[string]bool {
 
 	g["SCOUT_ABSENT"] = !e.ScoutProvisioned
 
-	// Both brief gates exclude research: a research dispatch is scout-less by
-	// construction (research-prompt.md never delegates one), so either gate
-	// would dangle a "read the brief" instruction on a file research never
-	// writes. The fragment registry allows one gate per row, so both
-	// conjunctions are computed here rather than nested inside their fragments.
-	kind := e.kind()
-	g["COORDINATOR_SCOUT_BRIEF"] = e.WorkerProvisioned && e.ScoutProvisioned && kind == defaultDispatchKind
-	g["WORKER_SCOUT_BRIEF"] = e.ScoutProvisioned && kind == defaultDispatchKind
+	// Both brief gates exclude every advise-only kind (research today): an
+	// advise-only dispatch is scout-less by construction (research-prompt.md
+	// never delegates one), so either gate would dangle a "read the brief"
+	// instruction on a file that kind never writes. The fragment registry
+	// allows one gate per row, so both conjunctions are computed here rather
+	// than nested inside their fragments.
+	landsCode := !e.descriptor().AdviseOnly
+	g["COORDINATOR_SCOUT_BRIEF"] = e.WorkerProvisioned && e.ScoutProvisioned && landsCode
+	g["WORKER_SCOUT_BRIEF"] = e.ScoutProvisioned && landsCode
 
 	for k, v := range trackerGates(e, orchestrator) {
 		g[k] = v
