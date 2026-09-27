@@ -34,6 +34,14 @@ type Chore struct {
 	// DiffRange, and Slice forward as CHORE_HEAD, CHORE_DIFF_RANGE, and
 	// CHORE_SLICE.
 	Scope butler.Scope
+	// Classes is the promotion-candidate class allow-list forwarded as
+	// CHORE_CLASSES (issue #3880), informational only: the Box never reads
+	// it back into a promotion decision, since the host re-checks a
+	// finding's class against its own allow-list at settle regardless of
+	// what the Box was told. butler.go leaves this empty whenever promotion
+	// is off (maxPromotionsPerDay == 0), so the Box never spends reviewer
+	// turns on candidates nothing can promote.
+	Classes []string
 }
 
 // Config carries the subset of launcher config a Dispatch needs to build a
@@ -188,6 +196,9 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 		}
 		if len(chore.Scope.Slice) > 0 {
 			env["CHORE_SLICE"] = strings.Join(chore.Scope.Slice, "\n")
+		}
+		if len(chore.Classes) > 0 {
+			env["CHORE_CLASSES"] = strings.Join(chore.Classes, " ")
 		}
 	} else {
 		env["ISSUE_NUMBER"] = number

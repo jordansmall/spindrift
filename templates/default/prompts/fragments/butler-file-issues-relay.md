@@ -4,7 +4,9 @@ pre-provisioned via --agents; pass it each finding verbatim. This dispatch
 carries no tracker issue number for provenance — instead, give the filer the
 finding's dedup/site key (`path/to/file.go:Symbol`, or `path/to/file.go:<line>`
 when it names no symbol) naming the file(s) the finding concerns, so the
-launcher can derive that from the filed issue-intent.
+launcher can derive that from the filed issue-intent. Also give the filer the
+finding's class, and, only when the `reviewer` agreed on it (see PROMOTION
+CANDIDATES above), the reviewer's one-line concurrence.
 
 The butler never writes to the Issue Tracker itself — the filer is
 relay-only here. It emits `SPINDRIFT_ISSUE_INTENT` lines instead of filing

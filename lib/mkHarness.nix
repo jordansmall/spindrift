@@ -61,6 +61,11 @@
   # owned contract injection of its own: its OUTCOME section is self-
   # contained in the template.
   butlerPrompt ? builtins.readFile ../templates/default/prompts/butler-prompt.md,
+  # The butler's own in-Box reviewer prompt (ADR 0056, issue #3880): a butler
+  # candidate's finding lives only in the delegation message, never a branch
+  # diff, so its `reviewer` subagent renders from this file instead of
+  # reviewPrompt above.
+  butlerReviewPrompt ? builtins.readFile ../templates/default/prompts/butler-review-prompt.md,
   # The named-Chore prompt directory ${CHORE_PROMPT} resolves into (ADR
   # 0056): copied whole into the image, like fragmentsDir below, so a new
   # Chore needs no mkHarness plumbing, only a new file under it.
@@ -850,6 +855,7 @@ let
       fragmentsSourceDir
       fragmentRegistryPreamble
       butlerPrompt
+      butlerReviewPrompt
       choresSourceDir
       ;
     # Carries the verdict contract rendered from RESEARCH_VERDICTS (#2201).
@@ -941,6 +947,7 @@ let
     cp ${hostPkgs.writeText "research-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchPrompt)} $out/research-prompt.md
     cp ${hostPkgs.writeText "research-self-contained-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchSelfContainedPrompt)} $out/research-self-contained-prompt.md
     cp ${hostPkgs.writeText "butler-prompt.md" imagePrompts.butlerPrompt} $out/butler-prompt.md
+    cp ${hostPkgs.writeText "butler-review-prompt.md" imagePrompts.butlerReviewPrompt} $out/butler-review-prompt.md
     cp -r ${imagePrompts.fragmentsSourceDir} $out/fragments
     cp -r ${imagePrompts.choresSourceDir} $out/chores
   '';

@@ -1184,7 +1184,11 @@ func TestRunButler_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9200"
-	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+	var gotChore dispatch.Chore
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+		gotChore = c
+		return promotableDispatcher("error-handling")
+	}
 
 	policy := testButlerPolicy(noEvery, "bugs")
 	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
@@ -1198,6 +1202,12 @@ func TestRunButler_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 
 	if len(fc.PostIssueCalls) != 1 || slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
 		t.Fatalf("PostIssueCalls = %+v, want one call with no ready-for-agent label", fc.PostIssueCalls)
+	}
+	// Promotion off (maxPromotionsPerDay is 0): the Box must not be told a
+	// class list even though BUTLER_CHORE_CLASSES has one, since nothing it
+	// could hand back would ever promote (issue #3880).
+	if len(gotChore.Classes) != 0 {
+		t.Errorf("dispatch.Chore.Classes = %v, want none with promotion off", gotChore.Classes)
 	}
 	tip, err := backend.Read("bugs")
 	if err != nil {
@@ -1217,7 +1227,11 @@ func TestRunButler_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9201"
-	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+	var gotChore dispatch.Chore
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+		gotChore = c
+		return promotableDispatcher("error-handling")
+	}
 
 	policy := testButlerPolicy(noEvery, "bugs")
 	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
@@ -1231,6 +1245,11 @@ func TestRunButler_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
 
 	if len(fc.PostIssueCalls) != 1 || !slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
 		t.Fatalf("PostIssueCalls = %+v, want one call carrying ready-for-agent", fc.PostIssueCalls)
+	}
+	// Promotion on: the Box is told its own Chore's host allow-list, so it
+	// knows which findings are worth a reviewer's turn (issue #3880).
+	if want := []string{"error-handling"}; !slices.Equal(gotChore.Classes, want) {
+		t.Errorf("dispatch.Chore.Classes = %v, want %v", gotChore.Classes, want)
 	}
 	tip, err := backend.Read("bugs")
 	if err != nil {

@@ -49,6 +49,10 @@ const (
 type Prompts struct {
 	Base              string // "" = work's pass-dependent issue-prompt.md / fix-prompt.md selection
 	SelfContainedBase string // "" = kind has no --self-contained sub-mode
+	// Reviewer is "" for the roster's own reviewer prompt (review-prompt.md),
+	// dropped when the orchestrator's review pass replaces it; else the
+	// kind's own in-Box reviewer prompt, kept under the orchestrator.
+	Reviewer string
 }
 
 // Descriptor is everything that used to be a separate switch on a kind
@@ -100,7 +104,8 @@ var (
 		Keying: ByChore,
 		Labels: LabelsNone,
 		Prompts: Prompts{
-			Base: "butler-prompt.md",
+			Base:     "butler-prompt.md",
+			Reviewer: "butler-review-prompt.md",
 		},
 		Settle:         SettleLedger,
 		AdviseOnly:     true,
