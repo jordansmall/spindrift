@@ -40,7 +40,7 @@ type DaemonPriority int
 const (
 	PriorityNormal   DaemonPriority = iota // preferred on every unreserved slot
 	PriorityReserved                       // preferred only on the RESEARCH_RESERVATION slots, last elsewhere
-	PriorityUndriven                       // the daemon does not drive this kind yet (butler, ADR 0056; daemon support is a later ticket of spec #3870)
+	PriorityIdle                           // tried only after every other kind on every slot (butler, ADR 0056: a slot picks it only when nothing else has work)
 )
 
 // Prompts names the kind's prompt templates. A zero value means "defer to
@@ -90,8 +90,10 @@ var (
 	// Ledger Chore (ByChore), never a tracker issue, and files findings the
 	// same advise-only way research does, so it never lands code either. It
 	// has no lifecycle labels of its own (LabelsNone) — its only
-	// doctor-visible label is the agent-butler-finding provenance one, and it
-	// is PriorityUndriven because the daemon does not dispatch it yet.
+	// doctor-visible label is the agent-butler-finding provenance one. Its
+	// PriorityIdle means a slot picks it only once dispatch and research have
+	// both reported no work (the awake-window rule: gate starting, never
+	// stopping — a running butler child is never preempted once picked).
 	Butler = &Descriptor{
 		Name:   "butler",
 		Verb:   "butler",
@@ -102,7 +104,7 @@ var (
 		},
 		Settle:         SettleLedger,
 		AdviseOnly:     true,
-		DaemonPriority: PriorityUndriven,
+		DaemonPriority: PriorityIdle,
 	}
 )
 
