@@ -1010,6 +1010,9 @@ func TestBuildSkippedIssuesSection_AllSkipped(t *testing.T) {
 	if !strings.Contains(got, "## Skipped (deduplicated)") {
 		t.Errorf("section = %q, want the skipped heading", got)
 	}
+	if !strings.Contains(got, "open, closed, or one this run filed itself") {
+		t.Errorf("section = %q, want the closed-finding-covered lead text", got)
+	}
 	if !strings.Contains(got, "fix(x): bug") || !strings.Contains(got, "#123") {
 		t.Errorf("section = %q, want the first title and its reference", got)
 	}
