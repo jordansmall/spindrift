@@ -2023,6 +2023,67 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 	}
 }
 
+// TestLoopButlerBoxSettledCarryChoreNotIssue is
+// TestLoopBoxSettledAndUnknownRecords' butler counterpart (issue #3878): a
+// Chore-keyed record must carry Chore straight through box, settled, and
+// child_finish, with Issue left empty throughout, and the live status
+// file's Issues list — which names tracker issues — must never gain the
+// Chore.
+func TestLoopButlerBoxSettledCarryChoreNotIssue(t *testing.T) {
+	dir := t.TempDir()
+	clk := &testClock{}
+	sw := NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
+
+	var statusReport StatusReport
+	var probeErr error
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 5}}, // host-tainted: Loop halts promptly after this call
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			req.OnRecord(Record{Event: reportpkg.EventBox, Chore: "bugs", Phase: "initial"})
+			statusReport, probeErr = ReadStatus(dir)
+			req.OnRecord(Record{Event: reportpkg.EventSettled, Chore: "bugs", State: "complete", Note: "2 filed"})
+			return nil
+		},
+	}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Kinds = []Kind{KindButler}
+	cfg.Status = sw
+
+	reason := Loop(context.Background(), cfg, r, em, clk).String()
+	if !strings.Contains(reason, "host-tainted") {
+		t.Fatalf("halt reason = %q, want it to name host-tainted", reason)
+	}
+
+	if probeErr != nil {
+		t.Fatalf("ReadStatus during RunChild: %v", probeErr)
+	}
+	if statusReport.Status == nil {
+		t.Fatalf("status was nil while the child was still running")
+	}
+	if len(statusReport.Status.Slots[0].Issues) != 0 {
+		t.Fatalf("in-flight issues = %v, want none: a Chore must never appear in SlotStatus.Issues", statusReport.Status.Slots[0].Issues)
+	}
+
+	events := wantEvents(t, &buf, []string{"child_start", "box", "settled", "child_finish", "halt"}, "")
+
+	box := events[1]
+	if box.Chore != "bugs" || box.Issue != "" || box.Phase != "initial" {
+		t.Errorf("box event = %+v, want chore bugs issue \"\" phase initial", box)
+	}
+	settled := events[2]
+	if settled.Chore != "bugs" || settled.Issue != "" || settled.State != "complete" || settled.Note != "2 filed" {
+		t.Errorf("settled event = %+v, want chore bugs issue \"\" state complete note %q", settled, "2 filed")
+	}
+	finish := events[3]
+	if finish.Chore != "bugs" || finish.Issue != "" {
+		t.Errorf("child_finish event = %+v, want chore bugs issue \"\"", finish)
+	}
+}
+
 // TestLoopNilStatusPublishesNothing pins Config.Status == nil as the
 // deliberate opt-out: Loop must run to completion without panicking and
 // must never create a status file. The check against dir would be vacuous
