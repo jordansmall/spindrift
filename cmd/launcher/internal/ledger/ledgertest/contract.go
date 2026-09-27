@@ -1,7 +1,7 @@
 // Package ledgertest is the executable contract for ledger.Backend: every
-// backend (the local forge's Local, and a future push-to-remote backend)
-// runs this one suite against its own harness, so drift between backends
-// fails CI.
+// backend (the local forge's Local, and the hosted-forge push backend
+// Remote) runs this one suite against its own harness, so drift between
+// backends fails CI.
 package ledgertest
 
 import (
@@ -20,8 +20,8 @@ type Harness interface {
 	// Backend returns the handle under test.
 	Backend() ledger.Backend
 	// Rival returns a second, independent handle on the same Ledger store
-	// (for Local, another Local over the same repo; for a future
-	// push-to-remote backend, a second clone), so a test can simulate two
+	// (for Local, another Local over the same repo; for Remote, a second
+	// scratch clone against the same remote), so a test can simulate two
 	// workers racing to claim the same Chore.
 	Rival() ledger.Backend
 	// Branches snapshots every refs/heads/* in the underlying store, sha
