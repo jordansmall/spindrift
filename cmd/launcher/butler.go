@@ -262,7 +262,7 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 	defer d.Close()
 	result := d.Run()
 
-	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now)
+	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now, 0)
 	s.Settle(d, dispatch.ChoreKey(chore), butlerSlot, result)
 
 	final, err := backend.Read(chore)
