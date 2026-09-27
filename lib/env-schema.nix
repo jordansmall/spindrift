@@ -384,7 +384,7 @@ in
     env = "BUTLER_CHORES";
     group = "dispatch";
     default = "";
-    doc = "space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs` (templates/default/prompts/chores/bugs.md). `spindrift butler --chore <name>` refuses a name not listed here";
+    doc = "space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs`, `refactor`, and `docs-drift` (templates/default/prompts/chores/). `spindrift butler --chore <name>` refuses a name not listed here";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "butler.chores";
