@@ -184,4 +184,24 @@
     env = "BOX_REVIEW_EFFORT_OVERRIDE";
     kind = "string";
   }
+  {
+    field = "ChoreName";
+    env = "CHORE_NAME";
+    kind = "string";
+  }
+  {
+    field = "ChoreHead";
+    env = "CHORE_HEAD";
+    kind = "string";
+  }
+  {
+    field = "ChoreDiffRange";
+    env = "CHORE_DIFF_RANGE";
+    kind = "string";
+  }
+  {
+    field = "ChoreSlice";
+    env = "CHORE_SLICE";
+    kind = "string";
+  }
 ]

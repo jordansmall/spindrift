@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // The When values Validate compares a row's When field against. Using named
@@ -93,7 +95,12 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 
 		switch row.When {
 		case whenReadOnlyResearch:
-			gateActive = d.AdviseOnly && (gates["BOX_ACCESS_READ_ONLY"] || gates["FILER_FILE_RELAY"])
+			// Settle == SettleVerdict, not the broader AdviseOnly: this row
+			// demands a posted SPINDRIFT_COMMENT verdict comment, a research-only
+			// concept the butler (also AdviseOnly, ADR 0056) never shares -- it
+			// files findings and writes the Ledger's done commit, posting no
+			// comment on any issue at all.
+			gateActive = d.Settle == dispatchkind.SettleVerdict && (gates["BOX_ACCESS_READ_ONLY"] || gates["FILER_FILE_RELAY"])
 			haystack = result.Prompt
 		case whenOrchestratorEnabled:
 			// ReviewPromptText, not Handoff.ReviewPromptFile: the latter became

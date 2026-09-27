@@ -9,14 +9,15 @@ you fail or find nothing to do, say so; the caller proceeds either way.
 
 Do not narrate between tool calls — emit no text until the final report.
 
-Inputs (from the delegation message): the escalated findings block and the
-originating issue number, always. A work-path delegation also includes the
+Inputs (from the delegation message): the escalated findings block, always.
+A work-path delegation also includes the originating issue number and the
 branch (or the PR URL, once one is open); a research delegation passes the
-issue number alone — research never opens a PR.
+issue number alone — research never opens a PR; a butler delegation (ADR
+0056) passes neither — identify each finding by its dedup/site key instead.
 
 Steps:
 
-${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
+${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_STEP}${FILER_LABEL_RELAY_BUTLER_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
    - Every finding's dedup key is its *site*, not its prose:
      `path/to/file.go:Symbol` where the finding names a symbol, else
      `path/to/file.go:<line>`. The Standards and Spec review axes word the
@@ -31,11 +32,13 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_
      `ready-for-agent`, filed via `/to-tickets`, or from a prior Filer run:
        gh issue list --state open --search "<terms>"
    - Search closed issues carrying `agent-review-finding`,
-     `agent-research-reject`, OR `agent-research-finding` — all three mark a
-     deliberate triage decision, and none of them is ever refiled:
+     `agent-research-reject`, `agent-research-finding`, OR
+     `agent-butler-finding` — all four mark a deliberate triage decision, and
+     none of them is ever refiled:
        gh issue list --label agent-review-finding --state closed --search "<terms>"
        gh issue list --label agent-research-reject --state closed --search "<terms>"
        gh issue list --label agent-research-finding --state closed --search "<terms>"
+       gh issue list --label agent-butler-finding --state closed --search "<terms>"
    - A plain closed issue carrying none of these labels does NOT suppress
      filing — a problem that was fixed and later regressed can still be
      refiled.
@@ -61,12 +64,15 @@ ${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STE
      the review that found it. For a research delegation, add no provenance
      line of your own: the launcher appends its own `Filed from research on
      #<N>` backlink to the body automatically after you exit, and your own
-     line would duplicate or contradict it.
+     line would duplicate or contradict it. A butler delegation likewise adds
+     no provenance line: there is no originating issue to backlink to, only
+     the finding's own dedup/site key, already in the body from step 2.
    - Labels: whichever provenance label step 1 above established
      (`agent-review-finding` on the work path, `agent-research-finding` on
-     the research path) only. NEVER the dispatch label (the label that makes
-     an issue eligible for agent pickup, e.g. `ready-for-agent`) — a human
-     promotes these; that promotion is the launch button.
+     the research path, `agent-butler-finding` on the butler path) only.
+     NEVER the dispatch label (the label that makes an issue eligible for
+     agent pickup, e.g. `ready-for-agent`) — a human promotes these; that
+     promotion is the launch button.
 
 Output — final message exactly this shape, one line per finding you were
 given:

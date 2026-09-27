@@ -23,7 +23,15 @@ if [ "${SELF_CONTAINED:-}" = 1 ] && [ -n "${BOX_IN_BOX_UNREACHABLE_TRACKER:-}" ]
   no_repo=true
 fi
 [ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${GH_TOKEN:?GH_TOKEN is required}"
-: "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
+# The butler (ADR 0056, issue #3875) carries one Ledger Chore, never a
+# tracker issue: DISPATCH_KIND=butler requires CHORE_NAME in ISSUE_NUMBER's
+# place. Compared directly against DISPATCH_KIND rather than through a
+# helper function: this runs before any function below is defined.
+if [ "${DISPATCH_KIND:-}" = "butler" ]; then
+  : "${CHORE_NAME:?CHORE_NAME is required}"
+else
+  : "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
+fi
 [ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
 : "${GIT_USER_NAME:?GIT_USER_NAME is required}"
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
@@ -48,7 +56,14 @@ configure_env() {
   # come from the nix-rendered defaults preamble (env-schema.nix) prepended at
   # image-build time; AGENTS_JSON_TEMPLATE rides that preamble as a derived
   # value, not a schema knob. The :- expansions keep set -u and the linter happy.
-  export BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
+  # A butler Box never checks this branch out (advise-only, ADR 0022) or
+  # pushes it, so the value only has to be legal and stable across a rerun,
+  # matching dispatch.go's own "butler-"+Name Dispatch-key convention.
+  if _is_butler; then
+    export BRANCH="${BRANCH_PREFIX:-}butler-${CHORE_NAME}"
+  else
+    export BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
+  fi
 
   # Overridable only so the harness can be exercised on the host without a
   # container. WORK_DIR/REPO_MOUNT_DIR/OUTBOX_DIR are true runtime mount points,
@@ -574,6 +589,28 @@ _is_self_contained() {
   [ "${SELF_CONTAINED:-}" = "1" ]
 }
 
+# _is_butler reports whether this is the butler dispatch kind (ADR 0056,
+# issue #3875): a one-shot, advise-only sweep of one Ledger Chore, never a
+# tracker issue. Compared directly against DISPATCH_KIND, like
+# _is_self_contained above, rather than derived from a generic descriptor
+# flag: unlike ADVISE_ONLY (shared with research), requiring CHORE_NAME in
+# place of ISSUE_NUMBER is genuinely butler-specific.
+_is_butler() {
+  [ "${DISPATCH_KIND:-}" = "butler" ]
+}
+
+# _issue_ref echoes this run's outcome-line "issue=" identifier and the
+# id used in status/log messages: the tracker issue number for every other
+# kind, or "butler-$CHORE_NAME" for the butler, which carries no tracker
+# issue at all (ADR 0056).
+_issue_ref() {
+  if _is_butler; then
+    printf 'butler-%s' "$CHORE_NAME"
+  else
+    printf '%s' "$ISSUE_NUMBER"
+  fi
+}
+
 # _is_readonly_outbox_relay reports whether this Box is read-only (no
 # push-capable token was ever issued, so a force-push can only 403) and its
 # backend is outbox-relay-capable per lib/backends/default.nix, forwarded as
@@ -856,7 +893,7 @@ _write_env_handoff() {
     --model "${MODEL:-}" \
     --effort "${EFFORT:-}" \
     "${_devshell_args[@]}" \
-    --issue "$ISSUE_NUMBER" \
+    --issue "${ISSUE_NUMBER:-}" \
     --heartbeat-log "${HEARTBEAT_LOG:-}" \
     --argv-prompt-style "$DRIVER_ARGV_PROMPT_STYLE" \
     --argv-prompt-flag "${DRIVER_ARGV_PROMPT_FLAG:-}" \
@@ -996,7 +1033,7 @@ emit_outcome_backstop() {
   # the backstop's own graceful degrade (issue #2459).
   driver-exec outcome-backstop \
     --repo "$WORK_DIR" \
-    --issue "$ISSUE_NUMBER" \
+    --issue "$(_issue_ref)" \
     --branch "$BRANCH" \
     --base "origin/${BASE_BRANCH:-}" \
     --dispatch-kind "${DISPATCH_KIND:-work}" \
@@ -1081,7 +1118,9 @@ main() {
   phase_conflict_resolve
   phase_prompt_assembly
 
-  if _is_advise_only; then
+  if _is_butler; then
+    echo "==> claude sweeping chore $CHORE_NAME"
+  elif _is_advise_only; then
     echo "==> claude researching issue #$ISSUE_NUMBER"
   else
     echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
@@ -1234,7 +1273,7 @@ main() {
       --prior-outcome-line "$_last_outcome_line"
   fi
 
-  echo "==> entrypoint complete for issue #$ISSUE_NUMBER"
+  echo "==> entrypoint complete for $(_issue_ref)"
   exit "$claude_rc"
 }
 
