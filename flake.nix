@@ -140,6 +140,8 @@
               agents.format.enable = dogfoodDefaults.defaults.autoFormat;
               agents.lint.enable = dogfoodDefaults.defaults.autoLint;
               agents.models.roster = dogfoodDefaults.roster;
+              dispatch.butler.chores = dogfoodDefaults.defaults.butlerChores;
+              dispatch.butler.maxPromotionsPerDay = dogfoodDefaults.defaults.butlerMaxPromotionsPerDay;
             };
 
             checks = checksResult.checks;
