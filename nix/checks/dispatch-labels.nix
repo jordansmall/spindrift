@@ -146,12 +146,14 @@ let
       ++ labels.ambiguous
       ++ labels.recoverable
       ++ labels.reviewFinding
+      ++ labels.butlerFinding
     )
     ++ labels.triggerOnly;
   # The surfaces that write or create a label literal outside the
-  # registry-derived TriageLabelMeta path (issues #2528, #2749). A fifth,
-  # settle/research.go's hard-coded "agent-research-finding" argument, is known
-  # and still uncovered. Each extract pulls the literal from its own known
+  # registry-derived TriageLabelMeta path (issues #2528, #2749). Two more,
+  # settle/research.go's hard-coded "agent-research-finding" argument and
+  # settle/butler.go's "agent-butler-finding" one, are known and still
+  # uncovered. Each extract pulls the literal from its own known
   # syntactic position, span-scanned so a reformat cannot hide it.
   harnessSurfaces = {
     "cmd/launcher/internal/settle/gate.go" = {
@@ -272,8 +274,12 @@ let
   extractResearchLabelNamesLiteral = labelLiteralAfterMarker ''append(names, "'';
   # doctor.go's AmbiguousLabelNames() literal (issue #2817). A separate
   # extractor because the two Go shapes differ and so need distinct markers.
-  # This marker is the only `return []string{` span in doctor.go, so it cannot
-  # cross-match ResearchLabelNames().
+  # This marker matches every `return []string{"..."}` span in doctor.go —
+  # AmbiguousLabelNames() and ButlerLabelNames() (ADR 0056) both share the
+  # shape — so it cannot cross-match ResearchLabelNames()'s different
+  # `append(names, "...")` shape, but does pick up both single-item literals;
+  # both are registered (labels.ambiguous, labels.butlerFinding), so the extra
+  # match is harmless.
   extractAmbiguousLabelNamesLiteral = labelLiteralAfterMarker ''return []string{"'';
   # extractLabelCreateTokens and extractNameFieldTokens scan line by line, so a
   # shell `\`-continued `gh label create` would leave the marker and its
@@ -593,8 +599,11 @@ in
         registryLabels = allRegistryLabels;
       });
     in
-    assert assertMsg (extractedLabels == [ "agent-unregistered-label" ])
-      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractAmbiguousLabelNamesLiteral to find [ \"agent-unregistered-label\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
+    # The shared `return []string{"` marker also matches ButlerLabelNames()'s
+    # untouched "agent-butler-finding" literal (ADR 0056), so the doctored
+    # source yields both, in file order.
+    assert assertMsg (extractedLabels == [ "agent-unregistered-label" "agent-butler-finding" ])
+      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractAmbiguousLabelNamesLiteral to find [ \"agent-unregistered-label\" \"agent-butler-finding\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with AmbiguousLabelNames()'s agent-ambiguous-spec literal renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-ambiguous-label-drift-regression" { } "touch $out";

@@ -752,9 +752,9 @@ func TestRun_RecoverableIssuesRequiredFailure_PrecedesLaterListLabelsError(t *te
 }
 
 // mixedMissingLabelsFake returns a forge.Fake missing two work-tier labels
-// and one label from each of the research, priority, and ambiguous-spec
-// tiers, so a single fixture exercises the recap across every tier at once
-// (issue #3777 AC5).
+// and one label from each of the research, priority, ambiguous-spec, and
+// butler tiers, so a single fixture exercises the recap across every tier at
+// once (issue #3777 AC5; butler tier added ADR 0056).
 func mixedMissingLabelsFake() (f *forge.Fake, workMissing, advisoryMissing []string) {
 	f = forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -762,6 +762,7 @@ func mixedMissingLabelsFake() (f *forge.Fake, workMissing, advisoryMissing []str
 	research := ResearchLabelNames()
 	priority := PriorityLabelNames()
 	ambiguous := AmbiguousLabelNames()
+	butler := ButlerLabelNames()
 
 	present := []string{"ready-for-agent", "agent-in-progress"} // agent-failed, agent-complete missing
 	present = append(present, research[:len(research)-1]...)
@@ -769,11 +770,11 @@ func mixedMissingLabelsFake() (f *forge.Fake, workMissing, advisoryMissing []str
 	f.Labels = present
 
 	workMissing = []string{"agent-failed", "agent-complete"}
-	advisoryMissing = []string{research[len(research)-1], priority[len(priority)-1], ambiguous[0]}
+	advisoryMissing = []string{research[len(research)-1], priority[len(priority)-1], ambiguous[0], butler[0]}
 
 	// A second ListLabels read — only reached if the prompt is accepted —
 	// reports every label present, as if CreateLabel had just succeeded for
-	// all five (the fake's CreateLabel is a no-op recorder and never mutates
+	// all six (the fake's CreateLabel is a no-op recorder and never mutates
 	// Labels itself).
 	allPresent := append(append(append([]string{}, present...), workMissing...), advisoryMissing...)
 	f.LabelsSeq = [][]string{present, allPresent}
@@ -842,7 +843,7 @@ func TestRun_Quiet_Interactive_NoAdvisoryMissing_NoRecap(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	f.Labels = append([]string{"ready-for-agent"},
-		append(append(ResearchLabelNames(), PriorityLabelNames()...), AmbiguousLabelNames()...)...)
+		append(append(append(ResearchLabelNames(), PriorityLabelNames()...), AmbiguousLabelNames()...), ButlerLabelNames()...)...)
 	// agent-in-progress, agent-failed, agent-complete missing; every advisory
 	// label present.
 

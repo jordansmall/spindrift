@@ -3372,6 +3372,20 @@ manually:
 gh label create agent-ambiguous-spec --repo owner/repo --color e0cffc --description "An internally-contradictory issue; needs a human decision — not a crash"
 ```
 
+#### Create the butler-finding label on the Target repo
+
+The `agent-butler-finding` label (ADR 0056) is a single fixed,
+non-configurable provenance label the one-shot butler run's Filer applies to
+every Chore finding it files — the butler kind's counterpart to
+`agent-research-finding`. `spindrift doctor` checks and, in interactive mode,
+offers to create it too, but treats it as advisory: like the labels above, a
+missing `agent-butler-finding` label never fails the check. To create it
+manually:
+
+```sh
+gh label create agent-butler-finding --repo owner/repo --color f9d0c4 --description "Filed from a butler Chore finding"
+```
+
 #### Configuring the research verdict vocabulary (`RESEARCH_VERDICTS`)
 
 By default the research kind's verdict terminals are the fixed three above:

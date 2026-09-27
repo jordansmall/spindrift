@@ -10,7 +10,8 @@ import (
 // TestFamilyLabels verifies the single label-family switch (issue #3872):
 // LabelsConfigured passes the caller's configured labels through unchanged,
 // LabelsResearch always returns the fixed research family regardless of what
-// configured carries.
+// configured carries, and LabelsNone (the butler, ADR 0056) always returns
+// the zero DispatchLabels -- it carries no lifecycle labels of its own.
 func TestFamilyLabels(t *testing.T) {
 	configured := forge.DispatchLabels{
 		Dispatchable: "ready-for-agent",
@@ -24,6 +25,9 @@ func TestFamilyLabels(t *testing.T) {
 	want := forge.ResearchDispatchLabels()
 	if got := forge.FamilyLabels(dispatchkind.LabelsResearch, configured); got != want {
 		t.Errorf("FamilyLabels(LabelsResearch, %+v) = %+v, want %+v", configured, got, want)
+	}
+	if got := forge.FamilyLabels(dispatchkind.LabelsNone, configured); got != (forge.DispatchLabels{}) {
+		t.Errorf("FamilyLabels(LabelsNone, %+v) = %+v, want the zero value", configured, got)
 	}
 }
 
