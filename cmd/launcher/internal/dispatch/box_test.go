@@ -236,6 +236,14 @@ func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
 		t.Fatalf("seed stale prior-run log: %v", err)
 	}
 
+	// Pre-create the claim lock file so Run's ClaimIssue only needs to open
+	// an EXISTING file (needs no write permission on the directory) rather
+	// than create a new one, leaving the read-only chmod below free to
+	// isolate quarantine's own rename failure (issue #3885).
+	if err := os.WriteFile(issueClaimPath(d.pwd, d.number), nil, 0o644); err != nil {
+		t.Fatalf("pre-create claim lock file: %v", err)
+	}
+
 	logDir := HostLogDirFor(d.pwd)
 	if err := os.Chmod(logDir, 0o555); err != nil {
 		t.Fatalf("chmod log dir read-only: %v", err)
@@ -270,6 +278,13 @@ func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
 	clock := fakeClock(time.Now(), &sleeps)
 
 	d := newTestDispatch(t, retryConfig(3, 5, 0), fr, fakeDriver{}, clock)
+
+	// See the matching comment in TestRun_QuarantineFailureDoesNotSettleOnStaleLog:
+	// pre-creating the lock file keeps Run's ClaimIssue from needing write
+	// permission on the directory, isolating quarantine's own failure below.
+	if err := os.WriteFile(issueClaimPath(d.pwd, d.number), nil, 0o644); err != nil {
+		t.Fatalf("pre-create claim lock file: %v", err)
+	}
 
 	logDir := HostLogDirFor(d.pwd)
 	if err := os.Chmod(logDir, 0o555); err != nil {
@@ -545,8 +560,11 @@ func TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log dir: %v", err)
 	}
-	if len(entries) != 1 {
-		t.Errorf("expected no rotated .N sibling from the skipped attempt; got entries=%v", entries)
+	// The seeded log plus Run's own claim lock file (issue #3885) -- taken
+	// unconditionally before this IsRunning guard is ever reached -- and
+	// nothing else: no rotated .N sibling from the skipped attempt.
+	if len(entries) != 2 {
+		t.Errorf("expected only the seeded log and the claim lock file, no rotated .N sibling; got entries=%v", entries)
 	}
 }
 
