@@ -1982,14 +1982,14 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.startChild(0, KindDispatch, "rev1")
-	p.noteBox(0, KindDispatch, "rev1", "42", "")
+	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Issue: "42"})
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
 		t.Fatalf("issues = %v, want [42]", snap.Slots[0].Issues)
 	}
 
-	p.noteBox(0, KindDispatch, "rev1", "99", "") // mutate the pool's copy after snapshotting
+	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Issue: "99"}) // mutate the pool's copy after snapshotting
 
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
 		t.Fatalf("snapshot issues changed after mutating pool state: got %v, want [42]", snap.Slots[0].Issues)
@@ -2011,8 +2011,8 @@ func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.startChild(0, KindDispatch, "rev1")
-	p.noteBox(0, KindDispatch, "rev1", "123", "initial")
-	p.noteBox(0, KindDispatch, "rev1", "123", "fix-pass-1")
+	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Issue: "123", Phase: "initial"})
+	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Issue: "123", Phase: "fix-pass-1"})
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"123"}) {
@@ -2027,8 +2027,8 @@ func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 		t.Errorf("second box event = %+v, want issue 123 phase fix-pass-1", events[2])
 	}
 
-	if got := p.flightIssue(0); got != "123" {
-		t.Errorf("flightIssue(0) = %q, want %q (the most recently boxed issue)", got, "123")
+	if got, _ := p.flightClaim(0); got != "123" {
+		t.Errorf("flightClaim(0) issue = %q, want %q (the most recently boxed issue)", got, "123")
 	}
 }
 

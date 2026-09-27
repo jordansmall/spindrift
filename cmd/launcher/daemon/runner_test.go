@@ -234,6 +234,43 @@ func TestRunChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
 	}
 }
 
+// TestRunChild_KindMismatchReportedPastMalformedLine drives a butler child
+// that writes a malformed line, then two issue-keyed records it may never
+// send: the malformed line's once-only diagnostic must not swallow the
+// mismatch, which gets exactly one diagnostic of its own, and no mismatched
+// record reaches OnRecord.
+func TestRunChild_KindMismatchReportedPastMalformedLine(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	script := `printf '%s\n%s\n%s\n%s\n' 'not json' '{"event":"box","issue":"7"}' '{"event":"box","issue":"8"}' '{"event":"box","chore":"bugs","phase":"initial"}' >&3; exit 0`
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", script)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	readStderr := captureStderr(t)
+	var got []daemon.Record
+	req := daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindButler, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
+	}
+	if _, err := r.RunChild(context.Background(), req); err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	want := []daemon.Record{{Event: "box", Chore: "bugs", Phase: "initial"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("OnRecord calls = %+v, want %+v", got, want)
+	}
+	stderr := string(readStderr())
+	if n := strings.Count(stderr, "daemon: read child report:"); n != 2 {
+		t.Errorf("stderr diagnostic count = %d, want exactly 2 (got stderr: %q)", n, stderr)
+	}
+	if n := strings.Count(stderr, "issue-keyed record"); n != 1 {
+		t.Errorf("mismatch diagnostic count = %d, want exactly 1 (got stderr: %q)", n, stderr)
+	}
+}
+
 // TestRunChild_OverLongLineDiscardedThenValidArrives drives a child that
 // writes one unterminated line well past report.MaxLine, then a valid record:
 // readReports must neither buffer the over-long run without limit nor wedge
