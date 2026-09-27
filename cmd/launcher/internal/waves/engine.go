@@ -105,7 +105,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 				return
 			}
 			if err := claimer.Claim(iss.Number); err != nil {
-				fmt.Printf("    ~~ #%s claim failed; skipping (%v)\n", iss.Number, err)
+				fmt.Print(claimSkipLine(iss.Number, err))
 				return
 			}
 			gate.Hold(iss.Number)
