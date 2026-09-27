@@ -277,34 +277,55 @@ func TestIsFindingIssue(t *testing.T) {
 	}
 }
 
-// labeledBacklogListerStub wraps forge.IssueTrackerFake with
-// forge.LabeledBacklogLister so backlogDedupIndex's capability-preferred path
-// (issue #3609 review) has something to prefer, recording the labels it was
-// asked for and returning a scripted, already-labelled slice -- unlike the
-// fake's own ListOpenIssues, which forces isFindingIssue to filter.
-type labeledBacklogListerStub struct {
-	*forge.IssueTrackerFake
-	calls  [][]string
-	issues []forge.Issue
-	err    error
+// backlogListerCall records one ListIssuesWithLabels invocation:
+// labeledBacklogListerStub keeps one per call so a test can assert both the
+// state and the labels asked for.
+type backlogListerCall struct {
+	state  forge.IssueState
+	labels []string
 }
 
-func (s *labeledBacklogListerStub) ListOpenIssuesWithLabels(labels []string) ([]forge.Issue, error) {
-	s.calls = append(s.calls, labels)
-	if s.err != nil {
-		return nil, s.err
+// labeledBacklogListerStub wraps forge.IssueTrackerFake with
+// forge.LabeledBacklogLister so backlogDedupIndex's capability-preferred path
+// (issue #3609 review; closed lookup added issue #3873) has something to
+// prefer. issues and errs are keyed by state so a test can script the open
+// and closed lookups independently -- unlike the fake's own ListOpenIssues,
+// which forces isFindingIssue to filter.
+type labeledBacklogListerStub struct {
+	*forge.IssueTrackerFake
+	calls  []backlogListerCall
+	issues map[forge.IssueState][]forge.Issue
+	errs   map[forge.IssueState]error
+}
+
+func (s *labeledBacklogListerStub) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
+	s.calls = append(s.calls, backlogListerCall{state: state, labels: labels})
+	if err := s.errs[state]; err != nil {
+		return nil, err
 	}
-	return s.issues, nil
+	return s.issues[state], nil
+}
+
+// callFor returns the recorded call for state, or nil if none was made.
+func (s *labeledBacklogListerStub) callFor(state forge.IssueState) *backlogListerCall {
+	for i := range s.calls {
+		if s.calls[i].state == state {
+			return &s.calls[i]
+		}
+	}
+	return nil
 }
 
 // backlogDedupIndex prefers forge.LabeledBacklogLister when the tracker
-// implements it, passing both provenance labels, and never falls through to
-// ListOpenIssues.
+// implements it, calling it once per state (closed, then open), each scoped
+// to both provenance labels, and never falls through to ListOpenIssues.
 func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 	stub := &labeledBacklogListerStub{
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
-		issues: []forge.Issue{
-			{Number: "9", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: race in settle -->"},
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueOpen: {
+				{Number: "9", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: race in settle -->"},
+			},
 		},
 	}
 	// A ListOpenIssues call would return this instead; its absence from the
@@ -313,13 +334,18 @@ func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 
 	index := backlogDedupIndex(stub, "100")
 
-	if len(stub.calls) != 1 {
-		t.Fatalf("ListOpenIssuesWithLabels calls = %d, want 1", len(stub.calls))
+	if len(stub.calls) != 2 {
+		t.Fatalf("ListIssuesWithLabels calls = %d, want 2 (one per state)", len(stub.calls))
 	}
-	got := stub.calls[0]
 	want := []string{findingLabelReview, findingLabelResearch}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("ListOpenIssuesWithLabels labels = %v, want %v", got, want)
+	for _, state := range []forge.IssueState{forge.IssueOpen, forge.IssueClosed} {
+		call := stub.callFor(state)
+		if call == nil {
+			t.Fatalf("no ListIssuesWithLabels call for state %v", state)
+		}
+		if len(call.labels) != len(want) || call.labels[0] != want[0] || call.labels[1] != want[1] {
+			t.Errorf("ListIssuesWithLabels(%v) labels = %v, want %v", state, call.labels, want)
+		}
 	}
 	if index["race in settle"] != "#9" {
 		t.Errorf("index[race in settle] = %q, want #9", index["race in settle"])
@@ -346,14 +372,17 @@ func TestBacklogDedupIndex_FallsBackToListOpenIssues(t *testing.T) {
 	}
 }
 
-// A LabeledBacklogLister list failure is non-fatal: backlogDedupIndex warns
-// in the same "?? #<num>" style as the sibling degradations in this package
-// and falls back to an empty index rather than erroring the whole filing
-// pass (issue #3609 review).
+// Both LabeledBacklogLister lookups failing is non-fatal: backlogDedupIndex
+// warns twice, in the same "?? #<num>" style as the sibling degradations in
+// this package, and falls back to an empty index rather than erroring the
+// whole filing pass (issue #3609 review).
 func TestBacklogDedupIndex_ListFailureWarnsAndReturnsEmpty(t *testing.T) {
 	stub := &labeledBacklogListerStub{
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
-		err:              errors.New("boom"),
+		errs: map[forge.IssueState]error{
+			forge.IssueOpen:   errors.New("boom"),
+			forge.IssueClosed: errors.New("boom"),
+		},
 	}
 
 	var index map[string]string
@@ -366,5 +395,124 @@ func TestBacklogDedupIndex_ListFailureWarnsAndReturnsEmpty(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "?? #100") || !strings.Contains(stderr, "boom") {
 		t.Errorf("stderr = %q, want a warning naming issue #100 and the underlying error", stderr)
+	}
+}
+
+// A closed finding-labelled issue is indexed alongside open ones (issue
+// #3873): a closed finding was already filed once and must never be refiled
+// just because it was since closed.
+func TestBacklogDedupIndex_IndexesClosedFindingIssue(t *testing.T) {
+	stub := &labeledBacklogListerStub{
+		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueClosed: {
+				{Number: "5", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: closed site -->"},
+			},
+		},
+	}
+
+	index := backlogDedupIndex(stub, "100")
+
+	if index["closed site"] != "#5" {
+		t.Errorf("index[closed site] = %q, want #5", index["closed site"])
+	}
+}
+
+// A closed issue lacking a finding label never suppresses a filing, same as
+// the open case (isFindingIssue filters both lookups' results identically).
+func TestBacklogDedupIndex_ClosedNonFindingIssueNotIndexed(t *testing.T) {
+	stub := &labeledBacklogListerStub{
+		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueClosed: {
+				{Number: "5", Labels: []string{"bug"}, Body: "<!-- spindrift-dedup: not a finding -->"},
+			},
+		},
+	}
+
+	index := backlogDedupIndex(stub, "100")
+
+	if _, ok := index["not a finding"]; ok {
+		t.Error("index carries a key from a closed issue lacking a finding label")
+	}
+}
+
+// When the same dedup key is covered by both a closed and an open finding
+// issue, the open issue's ref wins: it is indexed second, and the actively
+// tracked issue is the more useful pointer to surface (issue #3873).
+func TestBacklogDedupIndex_OpenRefWinsOverClosedForSharedKey(t *testing.T) {
+	stub := &labeledBacklogListerStub{
+		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueClosed: {
+				{Number: "5", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: shared site -->"},
+			},
+			forge.IssueOpen: {
+				{Number: "9", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: shared site -->"},
+			},
+		},
+	}
+
+	index := backlogDedupIndex(stub, "100")
+
+	if index["shared site"] != "#9" {
+		t.Errorf("index[shared site] = %q, want #9 (open ref wins)", index["shared site"])
+	}
+}
+
+// A closed-lookup failure warns naming "closed" and still indexes whatever
+// the open lookup returned -- the two lookups degrade independently (issue
+// #3873).
+func TestBacklogDedupIndex_ClosedFailureWarnsAndKeepsOpenKeys(t *testing.T) {
+	stub := &labeledBacklogListerStub{
+		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueOpen: {
+				{Number: "9", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: open site -->"},
+			},
+		},
+		errs: map[forge.IssueState]error{
+			forge.IssueClosed: errors.New("boom"),
+		},
+	}
+
+	var index map[string]string
+	stderr := captureStderr(t, func() {
+		index = backlogDedupIndex(stub, "100")
+	})
+
+	if index["open site"] != "#9" {
+		t.Errorf("index[open site] = %q, want #9 (open lookup unaffected by closed failure)", index["open site"])
+	}
+	if !strings.Contains(stderr, "?? #100") || !strings.Contains(stderr, "closed") || !strings.Contains(stderr, "boom") {
+		t.Errorf("stderr = %q, want a warning naming issue #100, \"closed\", and the underlying error", stderr)
+	}
+}
+
+// An open-lookup failure warns naming "open" and still indexes whatever the
+// closed lookup returned -- the mirror of the case above.
+func TestBacklogDedupIndex_OpenFailureWarnsAndKeepsClosedKeys(t *testing.T) {
+	stub := &labeledBacklogListerStub{
+		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueClosed: {
+				{Number: "5", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: closed site -->"},
+			},
+		},
+		errs: map[forge.IssueState]error{
+			forge.IssueOpen: errors.New("boom"),
+		},
+	}
+
+	var index map[string]string
+	stderr := captureStderr(t, func() {
+		index = backlogDedupIndex(stub, "100")
+	})
+
+	if index["closed site"] != "#5" {
+		t.Errorf("index[closed site] = %q, want #5 (closed lookup unaffected by open failure)", index["closed site"])
+	}
+	if !strings.Contains(stderr, "?? #100") || !strings.Contains(stderr, "open") || !strings.Contains(stderr, "boom") {
+		t.Errorf("stderr = %q, want a warning naming issue #100, \"open\", and the underlying error", stderr)
 	}
 }

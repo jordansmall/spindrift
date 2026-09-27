@@ -161,9 +161,10 @@ func buildSkippedIssuesSection(filed []filedIntent) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	// Both DupRef kinds have to read true here: "#123" is a backlog match, but
-	// `this run's "<title>"` matched a peer no open backlog held.
-	lead := "These findings matched an already-filed issue — in the open backlog, or one this run filed itself — and were not filed again."
+	// "#123" can now be an open or a closed finding issue (issue #3873), and
+	// `this run's "<title>"` matched a peer no backlog issue held at all --
+	// the lead must read true for all three.
+	lead := "These findings matched an already-filed issue — open, closed, or one this run filed itself — and were not filed again."
 	return "## Skipped (deduplicated)\n\n" + lead + "\n\n" + strings.Join(lines, "\n")
 }
 
