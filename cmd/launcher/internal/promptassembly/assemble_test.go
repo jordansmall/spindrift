@@ -245,12 +245,17 @@ func TestAssembleCIFailureSummaryGate(t *testing.T) {
 	}
 }
 
-// Builds a PromptsDir that symlinks the real tree except for one omitted
-// fragment. That on-disk shape lets a caller observe the fragment loop's
-// missing-file handling without hand-building a whole prompts fixture.
-func promptsDirMissingFragment(t *testing.T, omit string) string {
+// promptsDirExceptSubdir builds a PromptsDir that symlinks the real tree
+// except for one top-level entry named omit, leaving the caller to populate
+// it. Shared by promptsDirMissingFragment (which then partially repopulates
+// "fragments" itself) and promptsDirWithChore (which replaces "chores"
+// wholesale) -- both need the same "mirror everything but one subdir" shape.
+// Returns the new dir plus realDir's absolute path, so a caller drilling
+// into the omitted subdir's real contents (as promptsDirMissingFragment
+// does) need not re-resolve promptsDir itself.
+func promptsDirExceptSubdir(t *testing.T, omit string) (dir, realDir string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir = t.TempDir()
 	realDir, err := filepath.Abs(promptsDir)
 	if err != nil {
 		t.Fatalf("Abs: %v", err)
@@ -261,13 +266,22 @@ func promptsDirMissingFragment(t *testing.T, omit string) string {
 		t.Fatalf("ReadDir(%s): %v", realDir, err)
 	}
 	for _, entry := range entries {
-		if entry.Name() == "fragments" {
+		if entry.Name() == omit {
 			continue
 		}
 		if err := os.Symlink(filepath.Join(realDir, entry.Name()), filepath.Join(dir, entry.Name())); err != nil {
 			t.Fatalf("Symlink(%s): %v", entry.Name(), err)
 		}
 	}
+	return dir, realDir
+}
+
+// Builds a PromptsDir that symlinks the real tree except for one omitted
+// fragment. That on-disk shape lets a caller observe the fragment loop's
+// missing-file handling without hand-building a whole prompts fixture.
+func promptsDirMissingFragment(t *testing.T, omit string) string {
+	t.Helper()
+	dir, realDir := promptsDirExceptSubdir(t, "fragments")
 
 	realFragments := filepath.Join(realDir, "fragments")
 	fragmentsDir := filepath.Join(dir, "fragments")
@@ -3450,6 +3464,88 @@ func TestAssembleButlerPathTraversalChoreNameFails(t *testing.T) {
 		if err == nil {
 			t.Errorf("Assemble: expected an error for CHORE_NAME %q, got nil", name)
 		}
+	}
+}
+
+// Each built-in Chore's own prompt file renders under ${CHORE_PROMPT}.
+func TestAssembleButlerRendersEachBuiltinChorePrompt(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	for _, name := range []string{"bugs", "refactor", "docs-drift"} {
+		t.Run(name, func(t *testing.T) {
+			want, err := os.ReadFile(filepath.Join(promptsDir, "chores", name+".md"))
+			if err != nil {
+				t.Fatalf("read chore prompt %s: %v", name, err)
+			}
+
+			env := butlerEnv()
+			env.ChoreName = name
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			if !strings.Contains(result.Prompt, strings.TrimRight(string(want), "\n")) {
+				t.Errorf("Prompt missing chore %s's own prompt text:\n%s", name, result.Prompt)
+			}
+		})
+	}
+}
+
+// promptsDirWithChore builds a PromptsDir shaped like a Consumer's
+// SPINDRIFT_PROMPT_DIR override: the real tree, except that chores/ holds
+// only the one given Chore prompt file.
+func promptsDirWithChore(t *testing.T, name, content string) string {
+	t.Helper()
+	dir, _ := promptsDirExceptSubdir(t, "chores")
+	if err := os.Mkdir(filepath.Join(dir, "chores"), 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "chores", name+".md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", name, err)
+	}
+	return dir
+}
+
+// A prompt-dir override (mkHarness choresDir / SPINDRIFT_PROMPT_DIR) can
+// replace a built-in Chore's prompt file entirely: the override's own text
+// renders, and the shipped default's text is gone.
+func TestAssembleButlerPromptDirOverridesBuiltinChore(t *testing.T) {
+	reg := loadTestRegistry(t)
+	builtin, err := os.ReadFile(filepath.Join(promptsDir, "chores", "bugs.md"))
+	if err != nil {
+		t.Fatalf("read chore prompt bugs: %v", err)
+	}
+	env := butlerEnv()
+	env.PromptsDir = promptsDirWithChore(t, "bugs", "Sentinel override text for the bugs chore.\n")
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if !strings.Contains(result.Prompt, "Sentinel override text for the bugs chore.") {
+		t.Errorf("Prompt missing prompt-dir override text:\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, strings.TrimRight(string(builtin), "\n")) {
+		t.Errorf("Prompt still contains the built-in bugs.md text despite the override:\n%s", result.Prompt)
+	}
+}
+
+// A Consumer declares its own Chore -- one outside the built-in catalog --
+// by shipping chores/<name>.md in its prompt-dir override; no launcher
+// change is needed (lib/mkHarness.nix's choresDir contract).
+func TestAssembleButlerRendersConsumerDeclaredChore(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := butlerEnv()
+	env.ChoreName = "tidy-deps"
+	env.PromptsDir = promptsDirWithChore(t, "tidy-deps", "Look for stale dependency pins.\n")
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if !strings.Contains(result.Prompt, "Look for stale dependency pins.") {
+		t.Errorf("Prompt missing Consumer-declared chore text:\n%s", result.Prompt)
 	}
 }
 
