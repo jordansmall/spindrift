@@ -137,8 +137,9 @@ func runButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun,
 // Filer: without one it would still report ready, and settling would advance
 // lastSwept and the cursor past findings nobody filed.
 func butlerPreflight(codeForge, butlerChores, chore string, filerEnabled bool) error {
-	if codeForge != "local" {
-		return fmt.Errorf("butler: hosted forges are not supported yet (CODE_FORGE must be local)")
+	row, ok := backendByName(codeForge)
+	if !ok || row.newLedger == nil {
+		return fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", codeForge, strings.Join(ledgerCapableNames(), ", "))
 	}
 	if !choreEnabled(butlerChores, chore) {
 		return fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", chore, butlerChores)
@@ -171,10 +172,18 @@ func cmdButler(lc *launchContext, chore string) int {
 		fmt.Fprintf(os.Stderr, "butler: hostname: %v\n", err)
 		return 1
 	}
-	backend := ledger.Local{Repo: lc.config.codeForgeAccumulationRepoDir}
+	// butlerPreflight already checked row.newLedger != nil for this CODE_FORGE.
+	row, _ := backendByName(lc.config.codeForge)
+	backend, repo, ledgerCleanup, err := row.newLedger(lc.config)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "butler: %v\n", err)
+		return 1
+	}
+	defer ledgerCleanup()
+
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return lc.factory.NewChore(c) }
 
-	id := butlerRun{repo: lc.config.codeForgeAccumulationRepoDir, branch: lc.config.baseBranch, chore: chore, host: host}
+	id := butlerRun{repo: repo, branch: lc.config.baseBranch, chore: chore, host: host}
 	err = runButlerChore(backend, lc.issueTracker, id, newDispatcher, time.Now)
 	code := exitCodeFor(err)
 	switch {
