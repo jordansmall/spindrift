@@ -93,8 +93,9 @@ unset — see [Research
 token](docs/reference.md#research-token-least-privilege-optional). To drive
 research continuously instead of a one-off `spindrift research`, run the
 daemon (`nix run .#daemon`) with the `research` kind selector — `nix run
-.#daemon -- research` — or omit it to draw both dispatch and research off
-one pool (issue #3541).
+.#daemon -- research` — or omit the selector to draw from every configured
+kind (dispatch, research, and, once `BUTLER_CHORES` enables one, the
+butler) off one pool (issue #3541, #3878).
 
 ### Comment injection trust boundary
 
