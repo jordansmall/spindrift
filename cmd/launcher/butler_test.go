@@ -130,51 +130,59 @@ func testButlerRun(repo string) butlerRun {
 // (a) A clean run claims, dispatches, files its one finding, and writes a
 // done commit carrying lastSwept=head and the filed URL -- visible in the
 // Accumulation repo's refs/spindrift/butler/<chore> ref, the issue's own
-// acceptance criterion (`git log refs/spindrift/butler/bugs`).
+// acceptance criterion (`git log refs/spindrift/butler/bugs`). A
+// Consumer-declared Chore ("tidy-deps") runs exactly like a built-in one.
 func TestRunButlerChore_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
-	repo, head := newButlerTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	for _, chore := range []string{"bugs", "tidy-deps"} {
+		t.Run(chore, func(t *testing.T) {
+			repo, head := newButlerTestRepo(t)
+			backend := ledger.Local{Repo: repo}
 
-	fc := forge.NewFake()
-	fc.PostIssueURL = "https://example.com/issues/9001"
+			fc := forge.NewFake()
+			fc.PostIssueURL = "https://example.com/issues/9001"
 
-	d := readyDispatcher()
-	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
-		if c.Name != "bugs" || c.Branch != "main" {
-			t.Fatalf("newDispatcher chore = %+v, want Name=bugs Branch=main", c)
-		}
-		if c.Scope.Head != head {
-			t.Fatalf("newDispatcher scope.Head = %q, want %q", c.Scope.Head, head)
-		}
-		return d
-	}
+			d := readyDispatcher()
+			newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+				if c.Name != chore || c.Branch != "main" {
+					t.Fatalf("newDispatcher chore = %+v, want Name=%s Branch=main", c, chore)
+				}
+				if c.Scope.Head != head {
+					t.Fatalf("newDispatcher scope.Head = %q, want %q", c.Scope.Head, head)
+				}
+				return d
+			}
 
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	err := runButlerChore(backend, fc.AsIssueFiler(), testButlerRun(repo), newDispatcher, func() time.Time { return now })
-	if err != nil {
-		t.Fatalf("runButlerChore: %v", err)
-	}
+			br := testButlerRun(repo)
+			br.chore = chore
 
-	subjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
-	if len(subjects) != 2 || subjects[0] != "bugs: done" || subjects[1] != "bugs: claimed" {
-		t.Fatalf("git log subjects = %v, want [bugs: done, bugs: claimed]", subjects)
-	}
+			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			err := runButlerChore(backend, fc.AsIssueFiler(), br, newDispatcher, func() time.Time { return now })
+			if err != nil {
+				t.Fatalf("runButlerChore: %v", err)
+			}
 
-	tip, err := backend.Read("bugs")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if tip.State.Phase != ledger.Done {
-		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
-	}
-	if tip.State.LastSwept != head {
-		t.Errorf("LastSwept = %q, want %q", tip.State.LastSwept, head)
-	}
-	if len(tip.State.Filed) != 1 || tip.State.Filed[0] != fc.PostIssueURL {
-		t.Errorf("Filed = %v, want [%s]", tip.State.Filed, fc.PostIssueURL)
-	}
-	if d.CloseCalls != 1 {
-		t.Errorf("CloseCalls = %d, want 1", d.CloseCalls)
+			subjects := gitLogSubjects(t, repo, ledger.RefPrefix+chore)
+			if len(subjects) != 2 || subjects[0] != chore+": done" || subjects[1] != chore+": claimed" {
+				t.Fatalf("git log subjects = %v, want [%s: done, %s: claimed]", subjects, chore, chore)
+			}
+
+			tip, err := backend.Read(chore)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if tip.State.Phase != ledger.Done {
+				t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
+			}
+			if tip.State.LastSwept != head {
+				t.Errorf("LastSwept = %q, want %q", tip.State.LastSwept, head)
+			}
+			if len(tip.State.Filed) != 1 || tip.State.Filed[0] != fc.PostIssueURL {
+				t.Errorf("Filed = %v, want [%s]", tip.State.Filed, fc.PostIssueURL)
+			}
+			if d.CloseCalls != 1 {
+				t.Errorf("CloseCalls = %d, want 1", d.CloseCalls)
+			}
+		})
 	}
 }
 
@@ -365,6 +373,28 @@ func TestCmdButler_RejectsForgeWithNoLedger(t *testing.T) {
 	}
 }
 
+// (h2) A fresh Consumer -- BUTLER_CHORES left at its schema default, "" --
+// never starts a butler run for any built-in Chore: cmdButler must refuse
+// before ever touching lc.factory (left nil here), since a nil factory would
+// panic on NewChore.
+func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
+	if def := schemaDefault("BUTLER_CHORES"); def != "" {
+		t.Fatalf("schemaDefault(BUTLER_CHORES) = %q, want \"\" (test assumes opt-in-only default)", def)
+	}
+	for _, chore := range []string{"bugs", "refactor", "docs-drift"} {
+		t.Run(chore, func(t *testing.T) {
+			lc := &launchContext{
+				config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: schemaDefault("BUTLER_CHORES")}},
+				cleanup: func() {},
+			}
+			code := cmdButler(lc, chore)
+			if code != 1 {
+				t.Errorf("cmdButler(%q) code = %d, want 1", chore, code)
+			}
+		})
+	}
+}
+
 // (i) butlerPreflight guards codeForge, BUTLER_CHORES membership, and the
 // Filer gate in that order, before cmdButler ever claims a Ledger -- in
 // particular a chore run with no provisioned Filer (DRIVER=opencode, or
@@ -372,25 +402,34 @@ func TestCmdButler_RejectsForgeWithNoLedger(t *testing.T) {
 // drop findings.
 func TestButlerPreflight(t *testing.T) {
 	cases := []struct {
-		name         string
-		codeForge    string
-		butlerChores string
-		chore        string
-		filerEnabled bool
-		wantErr      string // substring of the error, checked in guard order; "" means no error
+		name               string
+		codeForge          string
+		butlerChores       string
+		butlerChoreClasses string
+		chore              string
+		filerEnabled       bool
+		wantErr            string // substring of the error, checked in guard order; "" means no error
 	}{
-		{"all clear", "local", "bugs", "bugs", true, ""},
-		{"github clear", "github", "bugs", "bugs", true, ""},
-		{"forgejo clear", "forgejo", "bugs", "bugs", true, ""},
-		{"forge with no ledger rejected", "git", "bugs", "bugs", true, "cannot host a butler Ledger (supported: github, forgejo, local)"},
-		{"chore not enabled", "local", "other-chore", "bugs", true, "is not enabled"},
-		{"filer not provisioned", "local", "bugs", "bugs", false, "needs a provisioned Filer"},
-		{"forge checked before chore", "git", "other-chore", "bugs", false, "cannot host a butler Ledger"},
-		{"chore checked before filer", "local", "other-chore", "bugs", false, "is not enabled"},
+		{"all clear", "local", "bugs", "bugs=error-handling", "bugs", true, ""},
+		{"github clear", "github", "bugs", "", "bugs", true, ""},
+		{"forgejo clear", "forgejo", "bugs", "", "bugs", true, ""},
+		{"forge with no ledger rejected", "git", "bugs", "", "bugs", true, "cannot host a butler Ledger (supported: github, forgejo, local)"},
+		{"chore not enabled", "local", "other-chore", "", "bugs", true, "is not enabled"},
+		{"malformed classes rejected", "local", "bugs", "bugs", "bugs", true, "BUTLER_CHORE_CLASSES"},
+		{"filer not provisioned", "local", "bugs", "", "bugs", false, "needs a provisioned Filer"},
+		{"forge checked before chore", "git", "other-chore", "", "bugs", false, "cannot host a butler Ledger"},
+		{"chore checked before filer", "local", "other-chore", "", "bugs", false, "is not enabled"},
+		{"classes checked before filer", "local", "bugs", "bugs", "bugs", false, "BUTLER_CHORE_CLASSES"},
+		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", "tidy-deps", true, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := butlerPreflight(tc.codeForge, tc.butlerChores, tc.chore, tc.filerEnabled)
+			cfg := config{schemaConfig: schemaConfig{
+				codeForge:          tc.codeForge,
+				butlerChores:       tc.butlerChores,
+				butlerChoreClasses: tc.butlerChoreClasses,
+			}}
+			err := butlerPreflight(cfg, tc.chore, tc.filerEnabled)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("butlerPreflight(%+v): %v", tc, err)
