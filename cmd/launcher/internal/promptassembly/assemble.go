@@ -274,6 +274,28 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	allowlist["ISSUE_TEXT"] = issueSection
 	vars["ISSUE_TEXT"] = varBody("ISSUE_TEXT", issueSection)
 
+	// CHORE_PROMPT (ADR 0056, issue #3875) is the butler's ${CHORE_PROMPT}
+	// substitution: the named Chore's own prompt file, embedded into
+	// butler-prompt.md's body rather than appended like ISSUE_TEXT, since the
+	// Chore prompt is host-authored template text, not untrusted issue prose.
+	// A ByChore kind with no matching chores/<name>.md fails assembly outright
+	// (choreSection), unlike ISSUE_TEXT's silent-empty default.
+	chorePrompt, err := choreSection(e)
+	if err != nil {
+		return promptBodies{}, err
+	}
+	allowlist["CHORE_PROMPT"] = chorePrompt
+	vars["CHORE_PROMPT"] = varBody("CHORE_PROMPT", chorePrompt)
+
+	scalars["CHORE_NAME"] = e.ChoreName
+	scalars["CHORE_HEAD"] = e.ChoreHead
+	scalars["CHORE_DIFF_RANGE"] = e.ChoreDiffRange
+	scalars["CHORE_SLICE"] = e.ChoreSlice
+	for _, k := range []string{"CHORE_NAME", "CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE"} {
+		allowlist[k] = scalars[k]
+		vars[k] = varBody(k, scalars[k])
+	}
+
 	// extraSubstVars raw sources. CI_FAILURE_SUMMARY's field also drives its
 	// own gate, since its presence is the gate (issue #2354).
 	// REVIEW_FANOUT_AGENT is resolved from the run's provisioned agents
@@ -360,19 +382,25 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		return promptBodies{}, fmt.Errorf("read %s: %w", baseName, err)
 	}
 
-	// Research injects only research-verdict; every other cell injects comms,
-	// then check, then outcome, in that order. For issue-prompt.md this is a
+	// Research injects only research-verdict; the butler injects nothing at
+	// all (its OUTCOME section is self-contained in butler-prompt.md, and the
+	// work-shaped comms/check blocks below assume a landing branch/PR the
+	// butler never cuts, ADR 0056); every other cell injects comms, then
+	// check, then outcome, in that order. For issue-prompt.md this is a
 	// no-op: those markers are sliced from issue-prompt.md itself, so the
 	// already-contains-marker guard always fires. The code-comments policy is
 	// inlined verbatim in the templates themselves (issue #3505), so it is
 	// not part of this injection list.
-	if d.Settle == dispatchkind.SettleVerdict {
+	switch {
+	case d.Settle == dispatchkind.SettleVerdict:
 		// The verdict contract is the prompt half of the verdict settle.
 		base, err = injectSharedBlockSegments(base, e.ResearchOutcomeContractFile, vars)
 		if err != nil {
 			return promptBodies{}, err
 		}
-	} else {
+	case d.Settle == dispatchkind.SettleLedger:
+		// No shared-block injection for the butler (ADR 0056): nothing to do.
+	default:
 		for _, contractFile := range []string{e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile} {
 			base, err = injectSharedBlockSegments(base, contractFile, vars)
 			if err != nil {

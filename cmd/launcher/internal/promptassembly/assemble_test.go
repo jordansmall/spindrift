@@ -3369,3 +3369,159 @@ func TestAssembleSegmentAttributionMatchesResult(t *testing.T) {
 		assertBodyMatches(t, bodies.review, result.ReviewPromptText)
 	})
 }
+
+// butlerEnv is a fixture Env sitting in Assemble's covered ByChore cell
+// (ADR 0056, issue #3875): no ISSUE_NUMBER/ISSUE_TITLE at all, in place of
+// which CHORE_NAME/CHORE_HEAD/CHORE_DIFF_RANGE/CHORE_SLICE carry the Chore
+// key dispatch.go's buildBoxEnv forwards for a Factory.NewChore Dispatch.
+func butlerEnv() Env {
+	env := coveredEnv()
+	env.DispatchKind = "butler"
+	env.IssueNumber = ""
+	env.IssueTitle = ""
+	env.Branch = "agent/butler-bugs"
+	env.ChoreName = "bugs"
+	env.ChoreHead = "deadbeef"
+	env.ChoreDiffRange = "cafef00d..deadbeef"
+	env.ChoreSlice = "cmd/launcher/main.go\ncmd/launcher/internal/dispatch/dispatch.go"
+	return env
+}
+
+// The butler cell renders butler-prompt.md, substitutes every CHORE_* var,
+// and needs no ISSUE_NUMBER at all (the acceptance criteria driving this
+// slice): the rendered prompt must carry none of the ISSUE_NUMBER-shaped
+// text research-prompt.md would.
+func TestAssembleButlerKindRendersButlerPrompt(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := butlerEnv()
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	for _, want := range []string{
+		"bugs",
+		"deadbeef",
+		"cafef00d..deadbeef",
+		"cmd/launcher/main.go",
+		"Look for latent bugs",
+	} {
+		if !strings.Contains(result.Prompt, want) {
+			t.Errorf("Prompt missing %q:\n%s", want, result.Prompt)
+		}
+	}
+	for _, unwanted := range []string{"${CHORE_", "Research GitHub issue"} {
+		if strings.Contains(result.Prompt, unwanted) {
+			t.Errorf("Prompt contains %q, want absent:\n%s", unwanted, result.Prompt)
+		}
+	}
+	if result.Handoff.SessionMode != "initial" {
+		t.Errorf("Handoff.SessionMode = %q, want %q", result.Handoff.SessionMode, "initial")
+	}
+}
+
+// A ByChore kind with an unresolvable CHORE_NAME fails assembly outright
+// (choreSection), unlike ISSUE_TEXT's silent-empty default.
+func TestAssembleButlerUnknownChoreFails(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := butlerEnv()
+	env.ChoreName = "no-such-chore"
+
+	_, err := Assemble(env, reg)
+	if err == nil {
+		t.Fatal("Assemble: expected an error for an unknown chore, got nil")
+	}
+	if !strings.Contains(err.Error(), "no-such-chore") {
+		t.Errorf("Assemble error = %v, want it to name the unresolved chore", err)
+	}
+}
+
+// CHORE_NAME must be validated as a simple name before it ever reaches
+// filepath.Join, so a path separator or ".." cannot escape prompts/chores/.
+func TestAssembleButlerPathTraversalChoreNameFails(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	for _, name := range []string{"../../etc/passwd", "bugs/../../x", "bugs/x", ""} {
+		env := butlerEnv()
+		env.ChoreName = name
+
+		_, err := Assemble(env, reg)
+		if err == nil {
+			t.Errorf("Assemble: expected an error for CHORE_NAME %q, got nil", name)
+		}
+	}
+}
+
+// Issue #3875 (ADR 0056): with the Filer provisioned, the butler's own FILE
+// FINDINGS section renders, carries SPINDRIFT_ISSUE_INTENT, and names the
+// agent-butler-finding label the launcher applies host-side -- never the
+// agent-research-finding label the same base gate produces for research.
+func TestAssembleButlerFileFindingsRelay(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("filer enabled", func(t *testing.T) {
+		env := butlerEnv()
+		env.FilerEnabled = true
+		env.OrchestratorEnabled = false
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if !strings.Contains(result.Prompt, "**File findings.**") {
+			t.Errorf("Prompt missing the FILE FINDINGS section: %q", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "SPINDRIFT_ISSUE_INTENT") {
+			t.Errorf("Prompt missing SPINDRIFT_ISSUE_INTENT from butler-file-issues-relay.md: %q", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "agent-butler-finding") {
+			t.Errorf("Prompt missing the agent-butler-finding label mention: %q", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "agent-research-finding") {
+			t.Errorf("Prompt wrongly carries the research-only agent-research-finding label mention: %q", result.Prompt)
+		}
+	})
+
+	t.Run("filer not enabled", func(t *testing.T) {
+		env := butlerEnv()
+		env.FilerEnabled = false
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if strings.Contains(result.Prompt, "**File findings.**") {
+			t.Errorf("Prompt unexpectedly contains the FILE FINDINGS section: %q", result.Prompt)
+		}
+	})
+}
+
+// FILER_FILE_RELAY_RESEARCH and FILER_FILE_RELAY_BUTLER are exactly the
+// same shape of gate (AdviseOnly && FilerEnabled) split further on Settle,
+// so a research Env must never trip the butler gate and vice versa
+// (gates_tracker.go).
+func TestGatesFilerFileRelayResearchAndButlerAreDisjoint(t *testing.T) {
+	research := coveredEnv()
+	research.DispatchKind = "research"
+	research.FilerEnabled = true
+	rg := Gates(research)
+	if !rg["FILER_FILE_RELAY_RESEARCH"] {
+		t.Error("FILER_FILE_RELAY_RESEARCH = false for a research Env with the Filer enabled, want true")
+	}
+	if rg["FILER_FILE_RELAY_BUTLER"] {
+		t.Error("FILER_FILE_RELAY_BUTLER = true for a research Env, want false")
+	}
+
+	butler := butlerEnv()
+	butler.FilerEnabled = true
+	bg := Gates(butler)
+	if bg["FILER_FILE_RELAY_RESEARCH"] {
+		t.Error("FILER_FILE_RELAY_RESEARCH = true for a butler Env, want false")
+	}
+	if !bg["FILER_FILE_RELAY_BUTLER"] {
+		t.Error("FILER_FILE_RELAY_BUTLER = false for a butler Env with the Filer enabled, want true")
+	}
+}

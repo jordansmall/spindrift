@@ -168,6 +168,11 @@
     "var": "FILER_LABEL_RELAY_RESEARCH_STEP"
   },
   {
+    "gate": "FILER_FILE_RELAY_BUTLER",
+    "fragment": "filer-label-relay-butler.md",
+    "var": "FILER_LABEL_RELAY_BUTLER_STEP"
+  },
+  {
     "gate": "FILER_FILE_DIRECT_GH",
     "fragment": "filer-file-direct.md",
     "var": "FILER_FILE_DIRECT_STEP"
@@ -199,6 +204,18 @@
     "gate": "FILER_FILE_RELAY_SOCKET",
     "fragment": "research-file-issues-relay-socket.md",
     "var": "RESEARCH_FILE_ISSUES_RELAY_SOCKET_STEP",
+    "signalChannel": "issue-intent"
+  },
+  {
+    "gate": "FILER_FILE_RELAY_LOG",
+    "fragment": "butler-file-issues-relay.md",
+    "var": "BUTLER_FILE_ISSUES_RELAY_STEP",
+    "signalChannel": "issue-intent"
+  },
+  {
+    "gate": "FILER_FILE_RELAY_SOCKET",
+    "fragment": "butler-file-issues-relay-socket.md",
+    "var": "BUTLER_FILE_ISSUES_RELAY_SOCKET_STEP",
     "signalChannel": "issue-intent"
   },
   {

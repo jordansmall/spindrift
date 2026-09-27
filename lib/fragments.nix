@@ -288,6 +288,15 @@ let
       fragment = "filer-label-relay-research.md";
       var = "FILER_LABEL_RELAY_RESEARCH_STEP";
     }
+    # The butler's own label fork (ADR 0056, issue #3875): same relay
+    # mechanism as work/research, but the launcher applies
+    # agent-butler-finding, not agent-review-finding or
+    # agent-research-finding, so this needs its own prose row too.
+    {
+      gate = "FILER_FILE_RELAY_BUTLER";
+      fragment = "filer-label-relay-butler.md";
+      var = "FILER_LABEL_RELAY_BUTLER_STEP";
+    }
     {
       gate = "FILER_FILE_DIRECT_GH";
       fragment = "filer-file-direct.md";
@@ -325,6 +334,23 @@ let
       gate = "FILER_FILE_RELAY_SOCKET";
       fragment = "research-file-issues-relay-socket.md";
       var = "RESEARCH_FILE_ISSUES_RELAY_SOCKET_STEP";
+      signalChannel = "issue-intent";
+    }
+    # The butler's own file-findings step (ADR 0056, issue #3875): reuses the
+    # same FILER_FILE_RELAY_LOG/_SOCKET gates as the research rows above (the
+    # butler is advise-only too), but its own var/fragment, since it names a
+    # Chore rather than an issue number and has no verdict comment to fold
+    # the finding into.
+    {
+      gate = "FILER_FILE_RELAY_LOG";
+      fragment = "butler-file-issues-relay.md";
+      var = "BUTLER_FILE_ISSUES_RELAY_STEP";
+      signalChannel = "issue-intent";
+    }
+    {
+      gate = "FILER_FILE_RELAY_SOCKET";
+      fragment = "butler-file-issues-relay-socket.md";
+      var = "BUTLER_FILE_ISSUES_RELAY_SOCKET_STEP";
       signalChannel = "issue-intent";
     }
     {
