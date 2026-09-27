@@ -36,12 +36,17 @@ type HostMediationFake struct {
 
 	// PostIssueURL is the URL a successful PostIssue returns (issue #2018).
 	// Only AsIssueFiler() reaches it.
-	PostIssueURL        string
-	PostIssueErr        error
-	PostIssueCalls      []PostIssueCall
-	LandingRefValue     string
-	LandingRefErr       error
-	LandingRefCallCount int
+	PostIssueURL   string
+	PostIssueErr   error
+	PostIssueCalls []PostIssueCall
+	// PostIssueErrForTitle fails only the PostIssue call whose title is a key
+	// here, checked before the blanket PostIssueErr; a partial-filing-failure
+	// test scripts one intent among several to fail while its siblings still
+	// succeed (issue #3875), which PostIssueErr alone cannot express.
+	PostIssueErrForTitle map[string]error
+	LandingRefValue      string
+	LandingRefErr        error
+	LandingRefCallCount  int
 
 	// landingContainedResults scripts LandingContained per (landing, parent)
 	// pair. Only AsLocal() reaches it.
@@ -187,6 +192,9 @@ func (hm *HostMediationFake) postIssue(title, body string, labels []string) (str
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 	hm.PostIssueCalls = append(hm.PostIssueCalls, PostIssueCall{Title: title, Body: body, Labels: labels})
+	if err, ok := hm.PostIssueErrForTitle[title]; ok {
+		return "", err
+	}
 	if hm.PostIssueErr != nil {
 		return "", hm.PostIssueErr
 	}
