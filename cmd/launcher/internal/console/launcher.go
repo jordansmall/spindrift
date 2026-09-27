@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/settle"
@@ -149,11 +150,12 @@ func (l *Launcher) Pick(tracker forge.IssueTracker, num, title string, kind Kind
 	return msg, l.Land(msg)
 }
 
-// trackerFor returns l.ResearchTracker for a KindResearch pick when one is
-// wired, so a research promotion or claim lands its TransitionState call on the
-// tracker instance carrying the matching label family (issue #1708).
+// trackerFor returns l.ResearchTracker for a pick whose kind carries the
+// research label family, when one is wired, so a research promotion or claim
+// lands its TransitionState call on the tracker instance carrying that same
+// family (issue #1708).
 func (l *Launcher) trackerFor(kind Kind, workTracker forge.IssueTracker) forge.IssueTracker {
-	if kind == KindResearch && l.ResearchTracker != nil {
+	if kind.Labels == dispatchkind.LabelsResearch && l.ResearchTracker != nil {
 		return l.ResearchTracker
 	}
 	return workTracker

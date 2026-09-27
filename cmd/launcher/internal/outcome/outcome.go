@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/logscan"
 )
 
@@ -386,7 +387,7 @@ func (r Resolved) IsGenuineOrSynthetic() bool {
 // self-report fills only Outcome.Status, so a caller must not assume the rest.
 func Resolve(logs []PassLog, kind string) (Resolved, error) {
 	if kind == "" {
-		kind = "work"
+		kind = dispatchkind.Work.Name
 	}
 
 	var (

@@ -19,6 +19,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -960,11 +961,11 @@ func TestNewIssueTracker_Forgejo(t *testing.T) {
 // research family, leaving completeLabel blank because research's Complete
 // transition carries a verdict instead of a single label.
 func TestApplyDispatchKind_Research_SetsResearchLabelFamily(t *testing.T) {
-	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	rl := forge.ResearchDispatchLabels()
 
-	if c.dispatchKind != dispatchKindResearch {
-		t.Errorf("dispatchKind = %q, want %q", c.dispatchKind, dispatchKindResearch)
+	if c.dispatchKind != dispatchkind.Research {
+		t.Errorf("dispatchKind = %v, want %v", c.dispatchKind, dispatchkind.Research)
 	}
 	if c.label != rl.Dispatchable {
 		t.Errorf("label = %q, want %q", c.label, rl.Dispatchable)
@@ -986,10 +987,10 @@ func TestApplyDispatchKind_Work_LeavesConfiguredLabelsAlone(t *testing.T) {
 	c := minimalValidConfig()
 	c.label, c.inProgressLabel, c.completeLabel, c.failedLabel = "custom-ready", "custom-wip", "custom-done", "custom-broken"
 
-	got := applyDispatchKind(c, dispatchKindWork)
+	got := applyDispatchKind(c, dispatchkind.Work)
 
-	if got.dispatchKind != dispatchKindWork {
-		t.Errorf("dispatchKind = %q, want %q", got.dispatchKind, dispatchKindWork)
+	if got.dispatchKind != dispatchkind.Work {
+		t.Errorf("dispatchKind = %v, want %v", got.dispatchKind, dispatchkind.Work)
 	}
 	if got.label != "custom-ready" || got.inProgressLabel != "custom-wip" || got.completeLabel != "custom-done" || got.failedLabel != "custom-broken" {
 		t.Errorf("applyDispatchKind(work) mutated configured labels: %+v", got)
@@ -1008,7 +1009,7 @@ func TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal(t *testing.T) {
 	}}
 	origCopy := orig
 
-	got := applyDispatchKind(orig, dispatchKindResearch)
+	got := applyDispatchKind(orig, dispatchkind.Research)
 	rl := forge.ResearchDispatchLabels()
 
 	if !reflect.DeepEqual(orig, origCopy) {
@@ -1040,7 +1041,7 @@ body
 	c := minimalValidConfig()
 	c.issueTracker = "local"
 	c.localIssuesDir = dir
-	c = applyDispatchKind(c, dispatchKindResearch)
+	c = applyDispatchKind(c, dispatchkind.Research)
 
 	it := newIssueTracker(c)
 	if err := it.CompleteVerdict("42", forge.Recommend); err != nil {
@@ -1076,7 +1077,7 @@ body
 	c := minimalValidConfig()
 	c.issueTracker = "local"
 	c.localIssuesDir = dir
-	c = applyDispatchKind(c, dispatchKindResearch)
+	c = applyDispatchKind(c, dispatchkind.Research)
 	c.researchVerdicts = `[{"verdict":"approve","label":"agent-research-approve","description":"looks good"}]`
 
 	it := newIssueTracker(c)
@@ -2393,7 +2394,7 @@ func TestValidate_RegistryProxyRoutesRetirementErrorPrecedesBoxForgeAndIssueAcce
 // research dispatch with a local issue tracker (issue #2202): the Box clones
 // no repo and the local tracker supplies the issue content directly.
 func TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken(t *testing.T) {
-	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	c.selfContained = true
 	c.issueTracker = "local"
 	c.repoSlug = ""
@@ -2407,7 +2408,7 @@ func TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken(t *testing.T) {
 // (issue #2202): reading the issue and posting the verdict still need
 // REPO_SLUG and GH_TOKEN.
 func TestValidate_ResearchSelfContainedGithubTrackerStillRequiresRepoSlug(t *testing.T) {
-	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	c.selfContained = true
 	c.repoSlug = ""
 	err := validate(c)
@@ -2436,7 +2437,7 @@ func TestValidate_SelfContainedRejectedOutsideResearch(t *testing.T) {
 // Guards against over-relaxing the REPO_SLUG gate: a research dispatch
 // without --self-contained still requires it like any other kind.
 func TestValidate_ResearchWithoutSelfContainedStillRequiresRepoSlug(t *testing.T) {
-	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	c.repoSlug = ""
 	if err := validate(c); err == nil {
 		t.Error("validate() must still require REPO_SLUG for research without --self-contained")
@@ -3739,7 +3740,7 @@ func TestRetryPolicy_ConvertsSecondsToDuration(t *testing.T) {
 // read-only mode rather than the tracker's shape (issue #1917).
 func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 	c := minimalValidConfig()
-	c.dispatchKind = dispatchKindResearch
+	c.dispatchKind = dispatchkind.Research
 	c.boxForgeAndIssueAccess = "read-only"
 
 	fc := forge.NewFake(forge.ResearchDispatchLabels())
@@ -3827,7 +3828,7 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 func TestSettleConfig_CapabilitiesThreadsFromReadContext(t *testing.T) {
 	setFullyLocalEnv(t)
 
-	rc := newReadContext(dispatchKindWork, false)
+	rc := newReadContext(dispatchkind.Work, false)
 	if rc.capabilities.LandingRecorder == nil {
 		t.Fatal("rc.capabilities.LandingRecorder = nil, want non-nil for a local IssueTracker (precondition)")
 	}

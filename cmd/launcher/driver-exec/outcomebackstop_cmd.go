@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -41,7 +42,7 @@ func newOutcomeBackstopFlagSet() (*flag.FlagSet, *outcomeBackstopFlags) {
 		issue:              fs.String("issue", "", "issue number, carried into the emitted outcome line"),
 		branch:             fs.String("branch", "", "agent branch name, e.g. agent/issue-42 (required)"),
 		base:               fs.String("base", "", "full base ref, e.g. origin/main (required)"),
-		kind:               fs.String("dispatch-kind", "work", "dispatch kind: work | research | ..."),
+		kind:               fs.String("dispatch-kind", dispatchkind.Work.Name, "dispatch kind: work | research | ..."),
 		hostMediatedRemote: fs.String("host-mediated-remote", "", "non-empty when the active CODE_FORGE has no writable remote at all (presence flag)"),
 		outboxRelayCapable: fs.String("outbox-relay-capable", "", "non-empty when the active CODE_FORGE backend gets outbox-relay treatment under read-only (presence flag)"),
 		boxWrite:           fs.String("box-write-enabled", "", "non-empty when BOX_WRITE_ENABLED was set (presence flag)"),

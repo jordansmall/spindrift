@@ -116,8 +116,8 @@ func printPlan(w io.Writer, plan waves.Plan) {
 
 func preview(issueNums []string) error {
 	// Preview never dispatches, so it carries no dispatch kind at all rather
-	// than dispatchKindWork, matching doctor and reconcile (issue #2944).
-	gc, err := newGatedContext(os.Stdout, "", false)
+	// than dispatchkind.Work, matching doctor and reconcile (issue #2944).
+	gc, err := newGatedContext(os.Stdout, nil, false)
 	if err != nil {
 		return err
 	}

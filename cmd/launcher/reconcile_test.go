@@ -22,7 +22,7 @@ func reconcileConfig() config {
 }
 
 // The assertion to settle.WorkSettler always succeeds because every
-// recoverByNumber test in this file goes through dispatchKindWork.
+// recoverByNumber test in this file goes through dispatchkind.Work.
 func newWorkSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.WorkSettler {
 	return testNewSettle(c, it, lw, cf).(settle.WorkSettler)
 }

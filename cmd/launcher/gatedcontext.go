@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 )
 
@@ -18,7 +19,7 @@ type gatedContext struct {
 // and Network halves rather than appending them after, so preview and real
 // dispatch stop at the same first failure and the token gates' live network
 // calls never run ahead of a bwrap failure.
-func newGatedContext(w io.Writer, kind string, selfContained bool) (gatedContext, error) {
+func newGatedContext(w io.Writer, kind *dispatchkind.Descriptor, selfContained bool) (gatedContext, error) {
 	rc := newReadContext(kind, selfContained)
 	if err := validate(rc.config); err != nil {
 		return gatedContext{}, err

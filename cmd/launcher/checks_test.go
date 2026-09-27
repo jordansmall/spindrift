@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/freshness"
 )
@@ -121,7 +122,7 @@ func TestLauncherChecks_RepoSlug_FullyLocalExempt(t *testing.T) {
 
 // Mirrors TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken.
 func TestLauncherChecks_RepoSlug_SelfContainedResearchExempt(t *testing.T) {
-	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	c.selfContained = true
 	c.issueTracker = "local"
 	c.repoSlug = ""
@@ -135,7 +136,7 @@ func TestLauncherChecks_RepoSlug_SelfContainedResearchExempt(t *testing.T) {
 // The self-contained exemption does not fire for a github issue tracker.
 // Mirrors TestValidate_ResearchSelfContainedGithubTrackerStillRequiresRepoSlug.
 func TestLauncherChecks_RepoSlug_SelfContainedResearchGithubTrackerStillFails(t *testing.T) {
-	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
 	c.selfContained = true
 	c.repoSlug = ""
 	ch := checkByName(t, launcherChecks(c), "repo-slug")

@@ -3139,6 +3139,11 @@ func TestView_BacklogSection_Compact_SeparatorBetweenAdjacentIssues(t *testing.T
 	}
 }
 
+// testResearchMarker pins the "[research]" tag kindMarker renders for a
+// non-work Pick (see pick.go) as a literal, independent of kindMarker, so a
+// change to the rendered tag fails here.
+const testResearchMarker = "[research]"
+
 // Issue #1710: the console needs a way to tell an operator at a glance which queued or
 // in-flight picks are research-only rather than real work, driven off Pick.Kind.
 func TestView_ResearchPick_ShowsMarker(t *testing.T) {
@@ -3149,8 +3154,8 @@ func TestView_ResearchPick_ShowsMarker(t *testing.T) {
 	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
-	if !strings.Contains(out, researchMarker) {
-		t.Errorf("View() = %q, want the research pick's row to carry %q", out, researchMarker)
+	if !strings.Contains(out, testResearchMarker) {
+		t.Errorf("View() = %q, want the research pick's row to carry %q", out, testResearchMarker)
 	}
 }
 
@@ -3163,7 +3168,7 @@ func TestView_WorkPick_HasNoResearchMarker(t *testing.T) {
 	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
-	if strings.Contains(out, researchMarker) {
+	if strings.Contains(out, testResearchMarker) {
 		t.Errorf("View() = %q, want no research marker on a work pick's row", out)
 	}
 }

@@ -68,12 +68,6 @@ const (
 	glyphNotice     = "ℹ"
 )
 
-// researchMarker distinguishes a research pick's row from a work pick's, which
-// carries no marker (issue #1710). It stays unstyled like the rest of a row's
-// extras: renderWorkSection measures and clips them as one plain string, so a
-// Role-styled marker's ANSI escape bytes would count as display columns.
-const researchMarker = "[research]"
-
 // renderers caches one lipgloss.Renderer per termenv.Profile, so a header
 // doesn't re-detect a renderer per styled segment per frame. Keyed by profile
 // rather than built once because colorProfile() changes value when a test sets
