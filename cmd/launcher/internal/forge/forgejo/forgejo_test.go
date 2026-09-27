@@ -776,7 +776,7 @@ func TestDoctorRun_Forgejo_CreatesTriageAndResearchLabels(t *testing.T) {
 		}
 	}
 
-	if got := buf.String(); !strings.Contains(got, "ok: all triage, research, priority, and ambiguous-spec labels present") {
+	if got := buf.String(); !strings.Contains(got, "ok: all triage, research, priority, ambiguous-spec, and butler labels present") {
 		t.Errorf("output missing final success line, got:\n%s", got)
 	}
 }

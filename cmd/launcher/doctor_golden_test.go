@@ -136,6 +136,7 @@ func healthyGoldenFixture() (*forge.Fake, config) {
 		doctor.ResearchLabelNames()...)
 	f.Labels = append(f.Labels, doctor.PriorityLabelNames()...)
 	f.Labels = append(f.Labels, doctor.AmbiguousLabelNames()...)
+	f.Labels = append(f.Labels, doctor.ButlerLabelNames()...)
 
 	return f, c
 }

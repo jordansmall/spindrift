@@ -11,7 +11,7 @@ type Keying int
 
 const (
 	ByIssue Keying = iota // a Dispatch carries one tracker issue
-	ByChore               // reserved for the butler (#3870); nothing reads it yet
+	ByChore               // the butler (ADR 0056, #3870) carries one Ledger Chore
 )
 
 // LabelFamily is the set of triage labels a kind's lifecycle moves through.
@@ -22,6 +22,7 @@ type LabelFamily int
 const (
 	LabelsConfigured LabelFamily = iota + 1 // operator-configured LABEL/IN_PROGRESS_LABEL/... (work)
 	LabelsResearch                          // fixed agent-research family, forge.ResearchDispatchLabels (ADR 0022)
+	LabelsNone                              // no lifecycle labels: the butler's claims live in the Ledger, not the tracker (ADR 0056)
 )
 
 // Settle is how a finished Box's outcome gets settled against the tracker.
@@ -30,6 +31,7 @@ type Settle int
 const (
 	SettleMerge   Settle = iota // work's full merge gate, settle.New
 	SettleVerdict               // research's one-shot verdict comment, settle.NewResearchSettle*
+	SettleLedger                // butler's one-shot run: files findings, writes the Ledger's done commit (ADR 0056)
 )
 
 // DaemonPriority is a kind's standing in the daemon's slotOrder preference.
@@ -38,6 +40,7 @@ type DaemonPriority int
 const (
 	PriorityNormal   DaemonPriority = iota // preferred on every unreserved slot
 	PriorityReserved                       // preferred only on the RESEARCH_RESERVATION slots, last elsewhere
+	PriorityUndriven                       // the daemon does not drive this kind yet (butler, ADR 0056; daemon support is a later ticket of spec #3870)
 )
 
 // Prompts names the kind's prompt templates. A zero value means "defer to
@@ -83,11 +86,29 @@ var (
 		AdviseOnly:     true,
 		DaemonPriority: PriorityReserved,
 	}
+	// Butler is the one-shot butler run (ADR 0056, #3870): it carries one
+	// Ledger Chore (ByChore), never a tracker issue, and files findings the
+	// same advise-only way research does, so it never lands code either. It
+	// has no lifecycle labels of its own (LabelsNone) — its only
+	// doctor-visible label is the agent-butler-finding provenance one, and it
+	// is PriorityUndriven because the daemon does not dispatch it yet.
+	Butler = &Descriptor{
+		Name:   "butler",
+		Verb:   "butler",
+		Keying: ByChore,
+		Labels: LabelsNone,
+		Prompts: Prompts{
+			Base: "butler-prompt.md",
+		},
+		Settle:         SettleLedger,
+		AdviseOnly:     true,
+		DaemonPriority: PriorityUndriven,
+	}
 )
 
 // All lists every kind in declaration order; that order is the daemon's
 // default pool order.
-var All = []*Descriptor{Work, Research}
+var All = []*Descriptor{Work, Research, Butler}
 
 // ByName looks up a kind by its Name. "" is not special here — callers that
 // default "" to work do so explicitly via Work.Name.

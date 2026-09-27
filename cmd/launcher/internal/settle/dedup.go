@@ -10,22 +10,24 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// findingLabelReview and findingLabelResearch are the two provenance labels
-// fileIssueIntentsDetailed's callers pass (gate.go's work path and
-// research.go's research path), named here for isFindingIssue to match the
-// backlog against. The two call sites keep their own string literals
-// rather than using these: nix/checks/dispatch-labels.nix extracts the label
-// straight out of gate.go's call as source text, and a constant there
-// extracts as nothing.
+// findingLabelReview, findingLabelResearch, and findingLabelButler are the
+// provenance labels fileIssueIntentsDetailed's callers pass (gate.go's work
+// path, research.go's research path, and the butler's own filer, ADR 0056),
+// named here for isFindingIssue to match the backlog against. The call sites
+// keep their own string literals rather than using these: nix/checks/
+// dispatch-labels.nix extracts the label straight out of gate.go's call as
+// source text, and a constant there extracts as nothing.
 const (
 	findingLabelReview   = "agent-review-finding"
 	findingLabelResearch = "agent-research-finding"
+	findingLabelButler   = "agent-butler-finding"
 )
 
 // findingLabels is the finding-label set isFindingIssue and
-// backlogDedupIndex both match against, so a third provenance label lands
-// in one place rather than two.
-var findingLabels = []string{findingLabelReview, findingLabelResearch}
+// backlogDedupIndex both match against, so a new provenance label lands in
+// one place rather than several (ADR 0056: "Host dedup covers closed
+// findings, for every finding kind").
+var findingLabels = []string{findingLabelReview, findingLabelResearch, findingLabelButler}
 
 // dedupMarkerPrefix and dedupMarkerSuffix delimit the hidden marker line
 // buildDedupMarker appends to a filed finding's body (issue #3609): carrying

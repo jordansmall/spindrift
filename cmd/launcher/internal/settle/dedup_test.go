@@ -262,15 +262,18 @@ func TestMatchDedup_DeterministicRefsAcrossManyCoveredKeys(t *testing.T) {
 	}
 }
 
-// isFindingIssue recognizes both provenance labels and rejects an issue
-// carrying neither -- the gate that keeps an ordinary backlog issue from ever
-// suppressing a filing.
+// isFindingIssue recognizes every provenance label and rejects an issue
+// carrying none of them -- the gate that keeps an ordinary backlog issue from
+// ever suppressing a filing.
 func TestIsFindingIssue(t *testing.T) {
 	if !isFindingIssue([]string{"bug", findingLabelReview}) {
 		t.Error("isFindingIssue false for a review-finding-labeled issue")
 	}
 	if !isFindingIssue([]string{findingLabelResearch}) {
 		t.Error("isFindingIssue false for a research-finding-labeled issue")
+	}
+	if !isFindingIssue([]string{findingLabelButler}) {
+		t.Error("isFindingIssue false for a butler-finding-labeled issue (ADR 0056)")
 	}
 	if isFindingIssue([]string{"bug", "ready-for-agent"}) {
 		t.Error("isFindingIssue true for an issue carrying neither finding label")
@@ -318,7 +321,7 @@ func (s *labeledBacklogListerStub) callFor(state forge.IssueState) *backlogListe
 
 // backlogDedupIndex prefers forge.LabeledBacklogLister when the tracker
 // implements it, calling it once per state (closed, then open), each scoped
-// to both provenance labels, and never falls through to ListOpenIssues.
+// to every provenance label, and never falls through to ListOpenIssues.
 func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 	stub := &labeledBacklogListerStub{
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
@@ -337,14 +340,19 @@ func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 	if len(stub.calls) != 2 {
 		t.Fatalf("ListIssuesWithLabels calls = %d, want 2 (one per state)", len(stub.calls))
 	}
-	want := []string{findingLabelReview, findingLabelResearch}
+	want := []string{findingLabelReview, findingLabelResearch, findingLabelButler}
 	for _, state := range []forge.IssueState{forge.IssueOpen, forge.IssueClosed} {
 		call := stub.callFor(state)
 		if call == nil {
 			t.Fatalf("no ListIssuesWithLabels call for state %v", state)
 		}
-		if len(call.labels) != len(want) || call.labels[0] != want[0] || call.labels[1] != want[1] {
-			t.Errorf("ListIssuesWithLabels(%v) labels = %v, want %v", state, call.labels, want)
+		if len(call.labels) != len(want) {
+			t.Fatalf("ListIssuesWithLabels(%v) labels = %v, want %v", state, call.labels, want)
+		}
+		for i := range want {
+			if call.labels[i] != want[i] {
+				t.Errorf("ListIssuesWithLabels(%v) labels = %v, want %v", state, call.labels, want)
+			}
 		}
 	}
 	if index["race in settle"] != "#9" {
@@ -415,6 +423,26 @@ func TestBacklogDedupIndex_IndexesClosedFindingIssue(t *testing.T) {
 
 	if index["closed site"] != "#5" {
 		t.Errorf("index[closed site] = %q, want #5", index["closed site"])
+	}
+}
+
+// Closed dedup coverage extends to a butler-labelled finding too (ADR 0056:
+// "Host dedup covers closed findings, for every finding kind"), not just the
+// review/research labels the two tests above already cover.
+func TestBacklogDedupIndex_IndexesClosedButlerFindingIssue(t *testing.T) {
+	stub := &labeledBacklogListerStub{
+		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueClosed: {
+				{Number: "7", Labels: []string{findingLabelButler}, Body: "<!-- spindrift-dedup: closed butler site -->"},
+			},
+		},
+	}
+
+	index := backlogDedupIndex(stub, "100")
+
+	if index["closed butler site"] != "#7" {
+		t.Errorf("index[closed butler site] = %q, want #7", index["closed butler site"])
 	}
 }
 

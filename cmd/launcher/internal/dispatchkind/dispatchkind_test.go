@@ -11,6 +11,7 @@ func TestByName(t *testing.T) {
 	}{
 		{"work", "work", Work, false},
 		{"research", "research", Research, false},
+		{"butler", "butler", Butler, false},
 		{"unknown", "bogus", nil, true},
 		{"empty is not special", "", nil, true},
 	}
@@ -42,6 +43,7 @@ func TestByVerb(t *testing.T) {
 	}{
 		{"dispatch", "dispatch", Work, false},
 		{"research", "research", Research, false},
+		{"butler", "butler", Butler, false},
 		{"unknown", "bogus", nil, true},
 		{"empty is not special", "", nil, true},
 	}
@@ -65,10 +67,10 @@ func TestByVerb(t *testing.T) {
 }
 
 // TestAllOrder pins the daemon's default pool order (issue #3541): work
-// before research.
+// before research before butler.
 func TestAllOrder(t *testing.T) {
-	if len(All) != 2 || All[0] != Work || All[1] != Research {
-		t.Fatalf("All = %v, want [Work, Research]", All)
+	if len(All) != 3 || All[0] != Work || All[1] != Research || All[2] != Butler {
+		t.Fatalf("All = %v, want [Work, Research, Butler]", All)
 	}
 }
 
