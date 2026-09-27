@@ -5,14 +5,16 @@
 // checks arrive on Env pre-resolved, stat'd at the CLI boundary.
 package promptassembly
 
+import "spindrift.dev/launcher/internal/dispatchkind"
+
 // These are the defaults entrypoint.sh's "${VAR:-default}" expansion applies
-// when the Env field arrives empty, named once so checkCoveredCell
-// (assemble.go) and Gates resolve the same literal. Issue #2533 moved every
-// other gate-family default upstream into nix, carried pre-resolved on Env.
-const (
-	defaultIssueTracker = "github"
-	defaultDispatchKind = "work"
-)
+// when the Env field arrives empty. Issue #2533 moved every other
+// gate-family default upstream into nix, carried pre-resolved on Env.
+const defaultIssueTracker = "github"
+
+// defaultDispatchKind is a var only because a const can't read
+// dispatchkind.Work.Name. Only Env.kind() reads it outside tests.
+var defaultDispatchKind = dispatchkind.Work.Name
 
 // Env is the full set of raw inputs agent/entrypoint.sh's
 // phase_prompt_assembly reads. Only a subset feeds Gates's computed booleans;
@@ -175,4 +177,15 @@ func (e Env) kind() string {
 		return defaultDispatchKind
 	}
 	return e.DispatchKind
+}
+
+// descriptor resolves e.kind() against dispatchkind.ByName, so call sites
+// read a property off the descriptor instead of comparing kind strings.
+// checkCoveredCell already rejects an unknown name before any other reader
+// runs, so the Work fallback here only guards a caller that skips that gate.
+func (e Env) descriptor() *dispatchkind.Descriptor {
+	if d, ok := dispatchkind.ByName(e.kind()); ok {
+		return d
+	}
+	return dispatchkind.Work
 }

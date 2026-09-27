@@ -110,8 +110,8 @@ func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
 
 	var defs []passDef
 	switch {
-	case bodies.kind == "research":
-		defs = []passDef{{name: "research", body: bodies.base, template: bodies.baseName}}
+	case bodies.kind.Prompts.Base != "":
+		defs = []passDef{{name: bodies.kind.Name, body: bodies.base, template: bodies.baseName}}
 	case orchestratorOnFreshWork:
 		defs = []passDef{
 			{name: passmachine.KindImplement.ManifestKind(), body: bodies.base, template: bodies.baseName},

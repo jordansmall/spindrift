@@ -80,7 +80,7 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 // gating Assemble used, and dispatches on row data rather than id (#2318).
 func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string, err error) {
 	gates := Gates(e)
-	kind := e.kind()
+	d := e.descriptor()
 	// SIGNAL_CARRIER_SOCKET picks the verb (SocketMarker) over the marker for
 	// any row that has one; a row with no SocketMarker (reviewer-verdict,
 	// which never crosses the Signal socket) is carrier-blind and always
@@ -93,7 +93,7 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 
 		switch row.When {
 		case whenReadOnlyResearch:
-			gateActive = kind == "research" && (gates["BOX_ACCESS_READ_ONLY"] || gates["FILER_FILE_RELAY"])
+			gateActive = d.AdviseOnly && (gates["BOX_ACCESS_READ_ONLY"] || gates["FILER_FILE_RELAY"])
 			haystack = result.Prompt
 		case whenOrchestratorEnabled:
 			// ReviewPromptText, not Handoff.ReviewPromptFile: the latter became
@@ -101,13 +101,13 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 			gateActive = gates["ORCHESTRATOR"] && result.ReviewPromptText != ""
 			haystack = result.ReviewPromptText
 		case whenBoxAccessReadOnly:
-			gateActive = gates["BOX_ACCESS_READ_ONLY"] && kind != "research"
+			gateActive = gates["BOX_ACCESS_READ_ONLY"] && !d.AdviseOnly
 			haystack = result.Prompt
 		case whenFilerFileRelay:
 			gateActive = gates["FILER_FILE_RELAY"]
 			haystack = filerPromptFrom(result.AgentsJSON)
 		case whenResearchFileRelay:
-			gateActive = kind == "research" && gates["FILER_FILE_RELAY"]
+			gateActive = d.AdviseOnly && gates["FILER_FILE_RELAY"]
 			haystack = result.Prompt
 		default:
 			return warnings, fmt.Errorf("promptassembly: validate: no known gate for when %q (row %q)", row.When, row.ID)
