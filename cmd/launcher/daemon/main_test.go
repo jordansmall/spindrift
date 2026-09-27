@@ -183,32 +183,43 @@ func TestParseSlots(t *testing.T) {
 
 func TestParseArgs(t *testing.T) {
 	tests := []struct {
-		name              string
-		args              []string
-		wantPath          string
-		wantKinds         []daemon.Kind
-		wantFeatureBranch string
-		wantErr           bool
+		name                 string
+		args                 []string
+		wantPath             string
+		wantKinds            []daemon.Kind
+		wantExplicitSelector bool
+		wantFeatureBranch    string
+		wantErr              bool
 	}{
 		{
-			// No positional verb draws from both kinds off one pool (issue
-			// #3541) — the headline behaviour change of this slice.
-			name:      "no positional verb defaults to both kinds",
+			// No positional verb draws from every kind off one pool (issue
+			// #3541, #3878) — parseArgs' own default; run's gateButlerKind is
+			// what later drops butler when BUTLER_CHORES is empty.
+			name:      "no positional verb defaults to every kind",
 			args:      []string{"--input", "/tmp/in.json"},
 			wantPath:  "/tmp/in.json",
-			wantKinds: []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			wantKinds: []daemon.Kind{daemon.KindDispatch, daemon.KindResearch, daemon.KindButler},
 		},
 		{
-			name:      "explicit dispatch is work-only",
-			args:      []string{"--input", "/tmp/in.json", "dispatch"},
-			wantPath:  "/tmp/in.json",
-			wantKinds: []daemon.Kind{daemon.KindDispatch},
+			name:                 "explicit dispatch is work-only",
+			args:                 []string{"--input", "/tmp/in.json", "dispatch"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindDispatch},
+			wantExplicitSelector: true,
 		},
 		{
-			name:      "explicit research",
-			args:      []string{"--input", "/tmp/in.json", "research"},
-			wantPath:  "/tmp/in.json",
-			wantKinds: []daemon.Kind{daemon.KindResearch},
+			name:                 "explicit research",
+			args:                 []string{"--input", "/tmp/in.json", "research"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindResearch},
+			wantExplicitSelector: true,
+		},
+		{
+			name:                 "explicit butler",
+			args:                 []string{"--input", "/tmp/in.json", "butler"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindButler},
+			wantExplicitSelector: true,
 		},
 		{
 			name:    "unknown kind rejected",
@@ -229,25 +240,27 @@ func TestParseArgs(t *testing.T) {
 			name:              "feature branch alone",
 			args:              []string{"--input", "/tmp/in.json", "--feature-branch", "feature-x"},
 			wantPath:          "/tmp/in.json",
-			wantKinds:         []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			wantKinds:         []daemon.Kind{daemon.KindDispatch, daemon.KindResearch, daemon.KindButler},
 			wantFeatureBranch: "feature-x",
 		},
 		{
 			// The flag can precede the kind selector...
-			name:              "feature branch before kind selector",
-			args:              []string{"--input", "/tmp/in.json", "--feature-branch", "feature-x", "dispatch"},
-			wantPath:          "/tmp/in.json",
-			wantKinds:         []daemon.Kind{daemon.KindDispatch},
-			wantFeatureBranch: "feature-x",
+			name:                 "feature branch before kind selector",
+			args:                 []string{"--input", "/tmp/in.json", "--feature-branch", "feature-x", "dispatch"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindDispatch},
+			wantExplicitSelector: true,
+			wantFeatureBranch:    "feature-x",
 		},
 		{
 			// ...or follow it: parseArgs scans every arg regardless of order,
 			// so only --input's position relative to its own value matters.
-			name:              "feature branch after kind selector",
-			args:              []string{"--input", "/tmp/in.json", "dispatch", "--feature-branch", "feature-x"},
-			wantPath:          "/tmp/in.json",
-			wantKinds:         []daemon.Kind{daemon.KindDispatch},
-			wantFeatureBranch: "feature-x",
+			name:                 "feature branch after kind selector",
+			args:                 []string{"--input", "/tmp/in.json", "dispatch", "--feature-branch", "feature-x"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindDispatch},
+			wantExplicitSelector: true,
+			wantFeatureBranch:    "feature-x",
 		},
 		{
 			name:    "--feature-branch with no value",
@@ -289,8 +302,79 @@ func TestParseArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseArgs(%v) unexpected error: %v", tt.args, err)
 			}
-			if got.InputPath != tt.wantPath || !slices.Equal(got.Kinds, tt.wantKinds) || got.FeatureBranch != tt.wantFeatureBranch {
-				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kinds:%v FeatureBranch:%q}", tt.args, got, tt.wantPath, tt.wantKinds, tt.wantFeatureBranch)
+			if got.InputPath != tt.wantPath || !slices.Equal(got.Kinds, tt.wantKinds) || got.ExplicitSelector != tt.wantExplicitSelector || got.FeatureBranch != tt.wantFeatureBranch {
+				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kinds:%v ExplicitSelector:%v FeatureBranch:%q}", tt.args, got, tt.wantPath, tt.wantKinds, tt.wantExplicitSelector, tt.wantFeatureBranch)
+			}
+		})
+	}
+}
+
+// TestGateButlerKind pins the bare-default gating decision (ADR 0056, issue
+// #3878): butler drops out of a bare "every kind" default when
+// BUTLER_CHORES is empty, survives when it isn't, an explicit butler
+// selector with no chores enabled fails instead of dropping silently, and a
+// kind set that never had butler in it is untouched either way.
+func TestGateButlerKind(t *testing.T) {
+	every := []daemon.Kind{daemon.KindDispatch, daemon.KindResearch, daemon.KindButler}
+	tests := []struct {
+		name             string
+		kinds            []daemon.Kind
+		explicitSelector bool
+		butlerChores     string
+		want             []daemon.Kind
+		wantErr          bool
+	}{
+		{
+			name:  "bare default with no chores drops butler",
+			kinds: every,
+			want:  []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+		},
+		{
+			name:         "bare default with whitespace-only chores drops butler",
+			kinds:        every,
+			butlerChores: "  ",
+			want:         []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+		},
+		{
+			name:         "bare default with chores enabled keeps butler",
+			kinds:        every,
+			butlerChores: "bugs",
+			want:         every,
+		},
+		{
+			name:             "explicit butler with no chores fails",
+			kinds:            []daemon.Kind{daemon.KindButler},
+			explicitSelector: true,
+			wantErr:          true,
+		},
+		{
+			name:             "explicit butler with chores enabled keeps it",
+			kinds:            []daemon.Kind{daemon.KindButler},
+			explicitSelector: true,
+			butlerChores:     "bugs",
+			want:             []daemon.Kind{daemon.KindButler},
+		},
+		{
+			name:             "kind set without butler is untouched",
+			kinds:            []daemon.Kind{daemon.KindDispatch},
+			explicitSelector: true,
+			want:             []daemon.Kind{daemon.KindDispatch},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := gateButlerKind(tt.kinds, tt.explicitSelector, tt.butlerChores)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("gateButlerKind(%v, %v, %q) = %v, nil; want an error", tt.kinds, tt.explicitSelector, tt.butlerChores, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("gateButlerKind(%v, %v, %q) unexpected error: %v", tt.kinds, tt.explicitSelector, tt.butlerChores, err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("gateButlerKind(%v, %v, %q) = %v, want %v", tt.kinds, tt.explicitSelector, tt.butlerChores, got, tt.want)
 			}
 		})
 	}
@@ -916,9 +1000,10 @@ func TestMainRun_WorkOnlyIgnoresExcessiveReservation(t *testing.T) {
 }
 
 // TestMainRun_BothKindsValidatesReservation is the both-kinds counterpart:
-// with no positional verb the daemon draws from both kinds (parseArgs'
-// default), so the same RESEARCH_RESERVATION=5/MAX_PARALLEL=1 document must
-// now fail startup at the reservation check, before ever reaching
+// with no positional verb and no BUTLER_CHORES, gateButlerKind drops butler
+// from parseArgs' every-kind default, leaving dispatch and research, so the
+// same RESEARCH_RESERVATION=5/MAX_PARALLEL=1 document must now fail startup
+// at the reservation check, before ever reaching
 // repoRoot — this is the seam the brief's "input document's
 // RESEARCH_RESERVATION reaches daemon.Config" requirement is covered at,
 // since mainRun has no seam to observe the daemon.Config value itself.

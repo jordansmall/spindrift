@@ -16,10 +16,12 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -33,22 +35,26 @@ import (
 var installStopSignal = stopsignal.Notify
 
 // parsedArgs is the result of parsing argv: `--input <path>` plus an
-// optional positional kind-set selector (dispatch|research, default both —
-// see parseArgs) and an optional `--feature-branch <branch>`.
+// optional positional kind-set selector (dispatch|research|butler, default
+// every kind — see parseArgs) and an optional `--feature-branch <branch>`.
 type parsedArgs struct {
-	InputPath     string
-	Kinds         []daemon.Kind
-	FeatureBranch string // empty when --feature-branch is absent; see hostRunner.featureBranch
+	InputPath        string
+	Kinds            []daemon.Kind
+	ExplicitSelector bool   // true when argv named a kind selector; false for the bare "every kind" default (see gateButlerKind)
+	FeatureBranch    string // empty when --feature-branch is absent; see hostRunner.featureBranch
 }
 
 // parseArgs parses `daemon --input <path> [--feature-branch <branch>]
-// [dispatch|research]` — --feature-branch may appear before or after the
-// positional kind selector. With no positional
-// verb the daemon draws from both kinds off one pool (issue #3541) — an
-// operator stops having to choose between advancing work and enriching the
-// backlog. `dispatch` alone keeps work-only operation, which is how an
+// [dispatch|research|butler]` — --feature-branch may appear before or after
+// the positional kind selector. With no positional verb the daemon draws
+// from every kind off one pool (issue #3541, #3878) — an operator stops
+// having to choose between advancing work, enriching the backlog, and
+// butler upkeep. `dispatch` alone keeps work-only operation, which is how an
 // operator who has not created the research labels on their target repo
-// runs the daemon; `research` alone restricts it to advise-only research.
+// runs the daemon; `research` alone restricts it to advise-only research;
+// `butler` alone restricts it to the butler. The bare default's butler is
+// provisional until gateButlerKind, since parseArgs has no document to
+// resolve BUTLER_CHORES against.
 func parseArgs(args []string) (parsedArgs, error) {
 	var inputPath string
 	var havePath bool
@@ -87,14 +93,30 @@ func parseArgs(args []string) (parsedArgs, error) {
 		return parsedArgs{}, fmt.Errorf("unexpected extra arguments: %v", positional[1:])
 	}
 	var kindArg string
-	if len(positional) == 1 {
+	explicitSelector := len(positional) == 1
+	if explicitSelector {
 		kindArg = positional[0]
 	}
 	kinds, err := daemon.ParseKinds(kindArg)
 	if err != nil {
 		return parsedArgs{}, err
 	}
-	return parsedArgs{InputPath: inputPath, Kinds: kinds, FeatureBranch: featureBranch}, nil
+	return parsedArgs{InputPath: inputPath, Kinds: kinds, ExplicitSelector: explicitSelector, FeatureBranch: featureBranch}, nil
+}
+
+// gateButlerKind drops the butler from a bare invocation's kinds when
+// BUTLER_CHORES enables no Chore: the butler child (butlerPreflight,
+// cmd/launcher/butler.go) exits 1 then, which would trip the failure breaker
+// on every idle moment. A `butler` selector named explicitly fails startup
+// instead of running nothing.
+func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, butlerChores string) ([]daemon.Kind, error) {
+	if len(butler.Chores(butlerChores)) > 0 || !slices.Contains(kinds, daemon.KindButler) {
+		return kinds, nil
+	}
+	if explicitSelector {
+		return nil, fmt.Errorf("daemon: butler selected but %w", butler.ErrNoChores)
+	}
+	return slices.DeleteFunc(slices.Clone(kinds), func(k daemon.Kind) bool { return k == daemon.KindButler }), nil
 }
 
 // settingsKeys returns doc's settings keys, sorted, so the warning loop and
@@ -678,12 +700,21 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// ResolveOptional, like DAEMON_AWAKE_WINDOW: an empty BUTLER_CHORES is the
+	// default, not a configuration error.
+	butlerChores := doc.ResolveOptional("BUTLER_CHORES", stderr)
+	gatedKinds, err := gateButlerKind(args.Kinds, args.ExplicitSelector, butlerChores)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	args.Kinds = gatedKinds
+
 	// RESEARCH_RESERVATION is inert for a single-kind daemon (both the
 	// schema doc and daemon.Config say so), so it is resolved and validated
-	// only when the positional verb actually put both kinds in play. A
-	// work-only operator (no research labels created yet) must not be
-	// failed at startup by a reservation value that happens to exceed their
-	// MAX_PARALLEL — the knob simply does not apply to their run.
+	// only when the positional verb actually put more than one kind in
+	// play. A work-only operator (no research labels created yet) must not
+	// be failed at startup by a reservation value that happens to exceed
+	// their MAX_PARALLEL — the knob simply does not apply to their run.
 	var reservation int
 	if len(args.Kinds) > 1 {
 		researchReservationRaw, err := doc.Resolve("RESEARCH_RESERVATION", stderr)

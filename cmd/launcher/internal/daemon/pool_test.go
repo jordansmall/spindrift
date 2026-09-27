@@ -1509,6 +1509,58 @@ func TestSlotOrderDerivesFromKinds(t *testing.T) {
 	}
 }
 
+// TestSlotOrderIdleTierAlwaysLast pins the three-tier ordering issue #3878
+// adds: the butler (dispatchkind.PriorityIdle) is tried last on every slot,
+// reservation or not, and never trades places with the reserved kind —
+// only reserved-vs-normal moves with the reservation, exactly as it did
+// before the idle tier existed.
+func TestSlotOrderIdleTierAlwaysLast(t *testing.T) {
+	tests := []struct {
+		name        string
+		kinds       []Kind
+		reservation int
+		slot        int
+		want        []Kind
+	}{
+		{
+			name:        "below reservation: reserved, normal, idle",
+			kinds:       []Kind{KindDispatch, KindResearch, KindButler},
+			reservation: 1,
+			slot:        0,
+			want:        []Kind{KindResearch, KindDispatch, KindButler},
+		},
+		{
+			name:        "at/above reservation: normal, reserved, idle",
+			kinds:       []Kind{KindDispatch, KindResearch, KindButler},
+			reservation: 1,
+			slot:        1,
+			want:        []Kind{KindDispatch, KindResearch, KindButler},
+		},
+		{
+			name:        "no reservation at all: normal, idle",
+			kinds:       []Kind{KindDispatch, KindButler},
+			reservation: 0,
+			slot:        0,
+			want:        []Kind{KindDispatch, KindButler},
+		},
+		{
+			name:        "idle given first in config keeps tier, not position",
+			kinds:       []Kind{KindButler, KindResearch, KindDispatch},
+			reservation: 1,
+			slot:        0,
+			want:        []Kind{KindResearch, KindDispatch, KindButler},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := slotOrder(tc.kinds, tc.reservation, tc.slot)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("slotOrder(%v, %d, %d) = %v, want %v", tc.kinds, tc.reservation, tc.slot, got, tc.want)
+			}
+		})
+	}
+}
+
 // shutWindow builds an Awake window guaranteed shut at now: opening two
 // hours out and closing three, so a test can drive State off a real window
 // rather than poking the edge-triggered awakeShut flag directly.

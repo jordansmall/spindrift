@@ -12,8 +12,8 @@ func TestParseKind(t *testing.T) {
 		{"empty defaults to dispatch", "", KindDispatch, false},
 		{"dispatch", "dispatch", KindDispatch, false},
 		{"research", "research", KindResearch, false},
+		{"butler", "butler", KindButler, false},
 		{"unknown", "bogus", "", true},
-		{"butler is undriven, rejected like unknown", "butler", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,11 +41,11 @@ func TestParseKinds(t *testing.T) {
 		want    []Kind
 		wantErr bool
 	}{
-		{"empty defaults to both driven kinds", "", []Kind{KindDispatch, KindResearch}, false},
+		{"empty defaults to every kind", "", []Kind{KindDispatch, KindResearch, KindButler}, false},
 		{"dispatch", "dispatch", []Kind{KindDispatch}, false},
 		{"research", "research", []Kind{KindResearch}, false},
+		{"butler", "butler", []Kind{KindButler}, false},
 		{"unknown", "bogus", nil, true},
-		{"butler is undriven, rejected like unknown", "butler", nil, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
