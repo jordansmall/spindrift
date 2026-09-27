@@ -146,15 +146,11 @@ func (l Local) History(chore string, since time.Time) ([]Entry, error) {
 	return entries, nil
 }
 
-// Append commits s as chore's new tip, parented on old (root commit if old ==
-// ""), and moves the Ledger ref from old to the new commit only if it still
-// equals old.
-func (l Local) Append(chore, old string, s State, at time.Time) (string, error) {
-	ref, err := l.ref(chore)
-	if err != nil {
-		return "", err
-	}
-
+// commit writes s as a new state commit in l.Repo, parented on old (root
+// commit if old == ""), without touching any ref. Both Append and Remote's
+// push-based Append share this plumbing so the commit shape can't drift
+// between backends.
+func (l Local) commit(chore, old string, s State, at time.Time) (string, error) {
 	body, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("ledger: marshal state: %w", err)
@@ -187,7 +183,22 @@ func (l Local) Append(chore, old string, s State, at time.Time) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("ledger: commit-tree: %w: %s", err, commitOut)
 	}
-	newCommit := strings.TrimSpace(string(commitOut))
+	return strings.TrimSpace(string(commitOut)), nil
+}
+
+// Append commits s as chore's new tip, parented on old (root commit if old ==
+// ""), and moves the Ledger ref from old to the new commit only if it still
+// equals old.
+func (l Local) Append(chore, old string, s State, at time.Time) (string, error) {
+	ref, err := l.ref(chore)
+	if err != nil {
+		return "", err
+	}
+
+	newCommit, err := l.commit(chore, old, s, at)
+	if err != nil {
+		return "", err
+	}
 
 	updateOut, err := exec.Command("git", "-C", l.Repo, "update-ref", ref, newCommit, old).CombinedOutput()
 	if err != nil {
