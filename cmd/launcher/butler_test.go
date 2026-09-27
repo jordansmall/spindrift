@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,6 +38,7 @@ func testButlerPolicy(every butlerEveryConfig, chores ...string) butlerPolicy {
 		claimTimeout: testClaimTimeout,
 		zone:         time.UTC,
 		enabled:      chores,
+		label:        "ready-for-agent",
 	}
 }
 
@@ -1148,5 +1151,242 @@ func TestRunButler_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 	}
 	if len(tip.State.Filed) != 1 {
 		t.Errorf("len(Filed) = %d, want 1", len(tip.State.Filed))
+	}
+}
+
+// promotableDispatcher builds a dispatch.Fake whose one relayed finding
+// carries class, one file, and a reviewer concurrence -- the shape that
+// clears every settle-side promotion gate whenever the host policy allows
+// class (issue #3880). Mirrors readyDispatcher's outcome shape.
+func promotableDispatcher(class string) *dispatch.Fake {
+	d := dispatch.NewFake()
+	d.RunResult = dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			fmt.Sprintf(`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"],"class":%q,"concurrence":"agreed"}`, class),
+		},
+	}
+	return d
+}
+
+// (m) BUTLER_MAX_PROMOTIONS_PER_DAY defaults to 0, so wiring the class
+// allow-list alone (BUTLER_CHORE_CLASSES) never promotes anything -- a
+// Consumer has to opt in to promotion itself, not just to a Chore (issue
+// #3880).
+func TestRunButler_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
+	repo, _ := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9200"
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+
+	policy := testButlerPolicy(noEvery, "bugs")
+	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
+	policy.promotionMaxFiles = 3
+	// maxPromotionsPerDay left at its zero value -- the default -- on purpose.
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+		t.Fatalf("runButler: %v", err)
+	}
+
+	if len(fc.PostIssueCalls) != 1 || slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
+		t.Fatalf("PostIssueCalls = %+v, want one call with no ready-for-agent label", fc.PostIssueCalls)
+	}
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Promoted) != 0 {
+		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+	}
+}
+
+// (n) With BUTLER_MAX_PROMOTIONS_PER_DAY > 0, an allow-listed finding that
+// clears every other gate is filed carrying ready-for-agent, and the
+// Ledger done commit records its URL in Promoted (issue #3880).
+func TestRunButler_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
+	repo, _ := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9201"
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+
+	policy := testButlerPolicy(noEvery, "bugs")
+	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
+	policy.promotionMaxFiles = 3
+	policy.maxPromotionsPerDay = 1
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+		t.Fatalf("runButler: %v", err)
+	}
+
+	if len(fc.PostIssueCalls) != 1 || !slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
+		t.Fatalf("PostIssueCalls = %+v, want one call carrying ready-for-agent", fc.PostIssueCalls)
+	}
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want [%s]", tip.State.Promoted, fc.PostIssueURL)
+	}
+}
+
+// (n2) A Consumer-configured non-default work LABEL (agent-go, not
+// ready-for-agent) is the label a promoted finding actually carries end to
+// end through runButler -> promotionPolicy -> ButlerSettle (issue #3880).
+func TestRunButler_PromotionUsesConfiguredWorkLabel(t *testing.T) {
+	repo, _ := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9204"
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+
+	policy := testButlerPolicy(noEvery, "bugs")
+	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
+	policy.promotionMaxFiles = 3
+	policy.maxPromotionsPerDay = 1
+	policy.label = "agent-go"
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+		t.Fatalf("runButler: %v", err)
+	}
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	got := fc.PostIssueCalls[0].Labels
+	if !slices.Contains(got, "agent-go") || slices.Contains(got, "ready-for-agent") {
+		t.Errorf("labels = %v, want agent-go and not the ready-for-agent default", got)
+	}
+}
+
+// (o) A day whose Ledger already holds BUTLER_MAX_PROMOTIONS_PER_DAY
+// promotions leaves no room: the next otherwise-eligible finding still
+// files, just unlabelled (issue #3880). Room is walked fresh at settle
+// time (ledger.DayTotalsAll), so a promotion recorded earlier the same
+// local day is what spends the budget here.
+func TestRunButler_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
+	repo, head := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	claim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: now})
+	if err != nil {
+		t.Fatalf("seed Claim: %v", err)
+	}
+	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head, Promoted: []string{"https://example.com/issues/seed"}}, now); err != nil {
+		t.Fatalf("seed Finish: %v", err)
+	}
+	// Something new since the seeded run, so NothingToScan never blocks
+	// this run's due check.
+	addButlerCommit(t, repo, "newfile.go", "package a\n")
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9202"
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+
+	policy := testButlerPolicy(noEvery, "bugs")
+	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
+	policy.promotionMaxFiles = 3
+	policy.maxPromotionsPerDay = 1
+
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+		t.Fatalf("runButler: %v", err)
+	}
+
+	if len(fc.PostIssueCalls) != 1 || slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
+		t.Fatalf("PostIssueCalls = %+v, want one call with no ready-for-agent label (budget spent)", fc.PostIssueCalls)
+	}
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Promoted) != 0 {
+		t.Errorf("Promoted = %v, want none (this run promoted nothing)", tip.State.Promoted)
+	}
+}
+
+// (p) A class allow-listed only for a different Chore never promotes: the
+// allow-list is per Chore, so a Box relaying a class that is only on
+// another Chore's entry stays unlabelled (issue #3880).
+func TestRunButler_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T) {
+	repo, _ := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9203"
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+
+	policy := testButlerPolicy(noEvery, "bugs")
+	// error-handling is allow-listed for "refactor", not "bugs" -- the
+	// Chore this run actually sweeps.
+	policy.choreClasses = map[string][]string{"refactor": {"error-handling"}}
+	policy.promotionMaxFiles = 3
+	policy.maxPromotionsPerDay = 1
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+		t.Fatalf("runButler: %v", err)
+	}
+
+	if len(fc.PostIssueCalls) != 1 || slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
+		t.Fatalf("PostIssueCalls = %+v, want one call with no ready-for-agent label", fc.PostIssueCalls)
+	}
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Promoted) != 0 {
+		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+	}
+}
+
+// The two host promotion knobs (BUTLER_MAX_PROMOTIONS_PER_DAY,
+// BUTLER_PROMOTION_MAX_FILES) resolve through the generated schemaFlags
+// table and loadSchemaConfig, the same wiring every other schema knob uses
+// (issue #3880).
+func TestButlerPromotionKnobsParseFromSchema(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		dflt string
+	}{
+		{"BUTLER_MAX_PROMOTIONS_PER_DAY", "0"},
+		{"BUTLER_PROMOTION_MAX_FILES", "3"},
+	} {
+		found := false
+		for _, f := range schemaFlags {
+			if f.env != tc.env {
+				continue
+			}
+			found = true
+			if f.dflt != tc.dflt {
+				t.Errorf("%s default = %q, want %q", tc.env, f.dflt, tc.dflt)
+			}
+		}
+		if !found {
+			t.Errorf("%s missing from schemaFlags", tc.env)
+		}
+	}
+
+	t.Setenv("BUTLER_MAX_PROMOTIONS_PER_DAY", "7")
+	t.Setenv("BUTLER_PROMOTION_MAX_FILES", "9")
+	cfg := loadSchemaConfig()
+	if cfg.butlerMaxPromotionsPerDay != 7 {
+		t.Errorf("butlerMaxPromotionsPerDay = %d, want 7", cfg.butlerMaxPromotionsPerDay)
+	}
+	if cfg.butlerPromotionMaxFiles != 9 {
+		t.Errorf("butlerPromotionMaxFiles = %d, want 9", cfg.butlerPromotionMaxFiles)
 	}
 }
