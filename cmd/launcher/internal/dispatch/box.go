@@ -233,9 +233,16 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 // the report vocabulary spelled once in report.PhaseInitial,
 // report.PhaseConflictResolve, and report.PhaseFixPass; humanPhase maps it
 // onto announceLine's own vocabulary here rather than at the two call sites,
-// so a phase name only needs to be spelled once per caller.
+// so a phase name only needs to be spelled once per caller. d.chore non-nil
+// (a Factory.NewChore Dispatch, ADR 0056) reports the Chore-keyed record
+// instead: d.number is "butler-"+Name, not a tracker issue, and the report
+// wire shape must never carry that key as an Issue (issue #3878).
 func (d *Dispatch) announce(phase string) {
 	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.title))
+	if d.chore != nil {
+		report.ChoreBox(d.chore.Name, phase)
+		return
+	}
 	report.Box(d.number, phase)
 }
 

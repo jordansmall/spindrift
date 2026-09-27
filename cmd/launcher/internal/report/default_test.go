@@ -46,4 +46,6 @@ func TestInstallDefault_ForwardsAndRestores(t *testing.T) {
 
 	// Package-level Settled/Box on a nil default must not panic.
 	Settled("1", "merged", "")
+	ChoreBox("bugs", "initial")
+	ChoreSettled("bugs", "complete", "")
 }
