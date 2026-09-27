@@ -19,12 +19,14 @@ func WarnPageMayTruncateBacklog(source string, count int) {
 	}
 }
 
-// DedupScanLimit bounds a single LabeledBacklogLister page (issue #3609
-// review), larger than ResultPageLimit: the label filter already keeps the
-// scanned population small (only review/research finding issues, not the
-// whole backlog), and a truncated dedup scan that drops the newest finding
-// issues files the exact duplicate the scan exists to prevent -- worse than
-// ResultPageLimit's "rerun to drain" tradeoff, which just delays triage.
+// DedupScanLimit bounds the github adapter's per-label LabeledBacklogLister
+// page (issue #3609 review); forgejo, jira and local paginate uncapped
+// instead. It is larger than ResultPageLimit: the label filter already
+// keeps the scanned population small (only review/research finding issues,
+// not the whole backlog), and a truncated dedup scan that drops the newest
+// finding issues files the exact duplicate the scan exists to prevent --
+// worse than ResultPageLimit's "rerun to drain" tradeoff, which just delays
+// triage.
 const DedupScanLimit = 500
 
 // WarnDedupScanMayTruncate warns when a single label's page of dedup-scan

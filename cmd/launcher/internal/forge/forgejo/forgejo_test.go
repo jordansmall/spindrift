@@ -33,6 +33,14 @@ func TestForgejoClient_ImplementsBlockersLister(t *testing.T) {
 	}
 }
 
+// backlogDedupIndex's capability path (issue #3873) needs a state-scoped,
+// newest-first, body-populated scan, not ListOpenIssues's open-only page.
+func TestForgejoClient_ImplementsLabeledBacklogLister(t *testing.T) {
+	if _, ok := forgejo.NewForgejoClient(forgejo.ForgejoConfig{}).(forge.LabeledBacklogLister); !ok {
+		t.Error("forgejoClient does not satisfy forge.LabeledBacklogLister, want it implemented")
+	}
+}
+
 // Forgejo's whole DispatchState space reduces to one DispatchLabels value (no
 // status-mapping blend like jira), so PickIssue's double-box guard (#1742) can
 // shortcut it.
@@ -448,6 +456,162 @@ func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
 	}
 	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
 		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
+	}
+}
+
+// ListIssuesWithLabels(IssueClosed, ...) must send state=closed, not the
+// open-only state ListOpenIssues and ListIssues hardcode (issue #3873): a
+// closed finding is a durable triage decision the host must not refile.
+func TestForgejoClient_ListIssuesWithLabels_ClosedStateAndLabelQuery(t *testing.T) {
+	var gotState, gotLabels string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		gotState = q.Get("state")
+		gotLabels = q.Get("labels")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"number":5,"title":"t","body":"b","state":"closed","labels":[{"name":"agent-review-finding"}]}]`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	issues, err := fc.ListIssuesWithLabels(forge.IssueClosed, []string{"agent-review-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	if gotState != "closed" {
+		t.Errorf("state query param = %q, want closed", gotState)
+	}
+	if gotLabels != "agent-review-finding" {
+		t.Errorf("labels query param = %q, want agent-review-finding", gotLabels)
+	}
+	if len(issues) != 1 || issues[0].Number != "5" || issues[0].Body != "b" {
+		t.Fatalf("issues = %+v", issues)
+	}
+}
+
+// Two labels ANDed by a single "labels" filter would miss an issue carrying
+// only one of them, so Forgejo's comma-separated semantics are not
+// reliably "any of" (issue #3873 review) -- one query per label, merged and
+// de-duplicated by number.
+func TestForgejoClient_ListIssuesWithLabels_MergesAndDedupsAcrossLabels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Query().Get("labels") {
+		case "agent-review-finding":
+			w.Write([]byte(`[{"number":5,"title":"t","body":"","state":"open","labels":[{"name":"agent-review-finding"}]},` +
+				`{"number":3,"title":"t","body":"","state":"open","labels":[{"name":"agent-review-finding"}]}]`))
+		case "agent-research-finding":
+			w.Write([]byte(`[{"number":5,"title":"t","body":"","state":"open","labels":[{"name":"agent-review-finding"},{"name":"agent-research-finding"}]},` +
+				`{"number":9,"title":"t","body":"","state":"open","labels":[{"name":"agent-research-finding"}]}]`))
+		default:
+			t.Errorf("unexpected labels query param: %q", r.URL.Query().Get("labels"))
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	issues, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+
+	byNum := make(map[string]bool)
+	for _, iss := range issues {
+		if byNum[iss.Number] {
+			t.Fatalf("issue #%s returned more than once: %+v", iss.Number, issues)
+		}
+		byNum[iss.Number] = true
+	}
+	if len(byNum) != 3 {
+		t.Fatalf("want 3 distinct issues, got %+v", issues)
+	}
+	// The merge is newest-first, not the per-label page order.
+	if issues[0].Number != "9" || issues[1].Number != "5" || issues[2].Number != "3" {
+		t.Fatalf("issues = %+v, want newest-first [9, 5, 3]", issues)
+	}
+}
+
+// A per-label failure (e.g. the target repo lacks one finding label) must not
+// empty the whole dedup index -- the issues the succeeding label returned
+// still come back, with a nil error, mirroring the github adapter.
+func TestForgejoClient_ListIssuesWithLabels_PartialFailureReturnsSucceededLabels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("labels") {
+		case "agent-review-finding":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`[{"number":5,"title":"t","body":"","state":"open","labels":[{"name":"agent-review-finding"}]}]`))
+		case "agent-research-finding":
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	issues, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: want nil error on partial failure, got %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != "5" {
+		t.Fatalf("want the succeeded label's issue [5], got %+v", issues)
+	}
+}
+
+// When every label's call fails, the failure has to surface: it is the
+// signal backlogDedupIndex uses to fall back to intra-run-only dedup.
+func TestForgejoClient_ListIssuesWithLabels_AllFailuresReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	_, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
+	if err == nil {
+		t.Fatal("ListIssuesWithLabels: want error when every label fails, got nil")
+	}
+}
+
+// A state that isn't OPEN or CLOSED must error before any request runs.
+func TestForgejoClient_ListIssuesWithLabels_UnsupportedStateErrorsWithoutRequest(t *testing.T) {
+	requested := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	_, err := fc.ListIssuesWithLabels(forge.IssueMerged, []string{"agent-review-finding"})
+	if err == nil {
+		t.Fatal("ListIssuesWithLabels(IssueMerged): want error, got nil")
+	}
+	if requested {
+		t.Error("ListIssuesWithLabels(IssueMerged): want no request, got one")
+	}
+}
+
+// Empty labels is the doctor-advisory-label-missing edge folded to zero
+// inputs: no request, no failure, an empty result.
+func TestForgejoClient_ListIssuesWithLabels_NoLabelsReturnsEmptyWithoutRequest(t *testing.T) {
+	requested := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	issues, err := fc.ListIssuesWithLabels(forge.IssueOpen, nil)
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels(nil): %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("want empty result, got %+v", issues)
+	}
+	if requested {
+		t.Error("ListIssuesWithLabels(nil): want no request, got one")
 	}
 }
 

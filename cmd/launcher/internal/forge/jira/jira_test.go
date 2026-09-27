@@ -1043,6 +1043,112 @@ func TestJiraClient_ListIssues_WalksAllPages(t *testing.T) {
 	}
 }
 
+func TestJiraClient_ImplementsLabeledBacklogLister(t *testing.T) {
+	if _, ok := jira.NewJiraClient(jira.JiraConfig{}).(forge.LabeledBacklogLister); !ok {
+		t.Error("jiraClient does not satisfy forge.LabeledBacklogLister, want it implemented")
+	}
+}
+
+// ListIssuesWithLabels covers every label in one "labels in (...)" JQL clause,
+// unlike github's and forgejo's per-label calls (issue #3873).
+func TestJiraClient_ListIssuesWithLabels_JQLAndOrder(t *testing.T) {
+	var gotJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotJQL = r.URL.Query().Get("jql")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issues": [
+			{"key": "PROJ-9", "fields": {"summary": "newer", "status": {"name": "Done"}, "labels": ["agent-research-finding"]}},
+			{"key": "PROJ-5", "fields": {"summary": "older", "status": {"name": "Done"}, "labels": ["agent-review-finding"]}}
+		]}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels}).(forge.LabeledBacklogLister)
+	issues, err := jc.ListIssuesWithLabels(forge.IssueClosed, []string{"agent-review-finding", "agent-research-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	if len(issues) != 2 || issues[0].Number != "PROJ-9" || issues[1].Number != "PROJ-5" {
+		t.Fatalf("issues = %+v, want fetch order [PROJ-9, PROJ-5]", issues)
+	}
+	if !strings.Contains(gotJQL, `project = "PROJ"`) {
+		t.Errorf("jql = %q, want project scope", gotJQL)
+	}
+	if !strings.Contains(gotJQL, `labels in ("agent-review-finding", "agent-research-finding")`) {
+		t.Errorf("jql = %q, want a labels-in clause covering both labels", gotJQL)
+	}
+	if !strings.Contains(gotJQL, "statusCategory = Done") {
+		t.Errorf("jql = %q, want a Done statusCategory clause for IssueClosed", gotJQL)
+	}
+	if !strings.Contains(gotJQL, "order by created desc") {
+		t.Errorf("jql = %q, want newest-first order", gotJQL)
+	}
+}
+
+// forge.IssueOpen must exclude Done issues, the open half of the dedup scan
+// (issue #3873).
+func TestJiraClient_ListIssuesWithLabels_OpenStateExcludesDone(t *testing.T) {
+	var gotJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotJQL = r.URL.Query().Get("jql")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issues": []}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels}).(forge.LabeledBacklogLister)
+	if _, err := jc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding"}); err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	if !strings.Contains(gotJQL, "statusCategory != Done") {
+		t.Errorf("jql = %q, want statusCategory != Done for IssueOpen", gotJQL)
+	}
+}
+
+// A state outside forge.IssueOpen/forge.IssueClosed must error before any
+// search request runs.
+func TestJiraClient_ListIssuesWithLabels_UnsupportedStateErrorsWithoutRequest(t *testing.T) {
+	requested := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issues": []}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels}).(forge.LabeledBacklogLister)
+	if _, err := jc.ListIssuesWithLabels(forge.IssueMerged, []string{"agent-review-finding"}); err == nil {
+		t.Fatal("ListIssuesWithLabels(IssueMerged): want error, got nil")
+	}
+	if requested {
+		t.Error("ListIssuesWithLabels(IssueMerged): want no search request, got one")
+	}
+}
+
+// No labels is the doctor-advisory-label-missing edge folded to zero inputs:
+// no search request, no failure, an empty result.
+func TestJiraClient_ListIssuesWithLabels_NoLabelsReturnsEmptyWithoutRequest(t *testing.T) {
+	requested := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issues": []}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels}).(forge.LabeledBacklogLister)
+	issues, err := jc.ListIssuesWithLabels(forge.IssueOpen, nil)
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels(nil): %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("want empty result, got %+v", issues)
+	}
+	if requested {
+		t.Error("ListIssuesWithLabels(nil): want no search request, got one")
+	}
+}
+
 func TestJiraClient_ListLabels_ReturnsSiteLabels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/api/2/label" {
