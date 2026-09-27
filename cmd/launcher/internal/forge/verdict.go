@@ -111,6 +111,8 @@ func FamilyLabels(f dispatchkind.LabelFamily, configured DispatchLabels) Dispatc
 		return ResearchDispatchLabels()
 	case dispatchkind.LabelsConfigured:
 		return configured
+	case dispatchkind.LabelsNone:
+		return DispatchLabels{}
 	default:
 		panic(fmt.Sprintf("forge: unknown label family %v", f))
 	}

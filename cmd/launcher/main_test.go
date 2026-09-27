@@ -4329,7 +4329,8 @@ func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
 	ambiguous := doctor.AmbiguousLabelNames()
-	f.Labels = append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...)
+	butler := doctor.ButlerLabelNames()
+	f.Labels = append(append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...), butler...)
 
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
@@ -4338,7 +4339,7 @@ func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
+	if !strings.Contains(out, "ok: all triage, research, priority, ambiguous-spec, and butler labels present") {
 		t.Errorf("want success confirmation, got:\n%s", out)
 	}
 }
@@ -4458,10 +4459,11 @@ func TestDoctor_TTY_Decline_PromptShowsTierBreakdown(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	priority := doctor.PriorityLabelNames()
 	ambiguous := doctor.AmbiguousLabelNames()
+	butler := doctor.ButlerLabelNames()
 	// Two work labels missing (agent-failed, agent-complete) and all seven
-	// research labels missing; priority and ambiguous-spec present so the
-	// advisory count is scoped to research alone.
-	f.Labels = append(append([]string{"ready-for-agent", "agent-in-progress"}, priority...), ambiguous...)
+	// research labels missing; priority, ambiguous-spec, and butler present so
+	// the advisory count is scoped to research alone.
+	f.Labels = append(append(append([]string{"ready-for-agent", "agent-in-progress"}, priority...), ambiguous...), butler...)
 
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
@@ -4523,15 +4525,16 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
 	ambiguous := doctor.AmbiguousLabelNames()
+	butler := doctor.ButlerLabelNames()
 	// Two work labels missing: agent-failed and agent-complete. Research,
-	// priority, and ambiguous-spec labels are all present throughout, so
-	// this test stays scoped to work label creation.
-	f.Labels = append(append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...), ambiguous...)
+	// priority, ambiguous-spec, and butler labels are all present throughout,
+	// so this test stays scoped to work label creation.
+	f.Labels = append(append(append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...), ambiguous...), butler...)
 	// After creation the fake doesn't auto-add to Labels, so script the
 	// second ListLabels call (re-verify) to return all four work labels.
 	f.LabelsSeq = [][]string{
-		append(append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...), ambiguous...),                                   // first check
-		append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...), // re-verify
+		append(append(append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...), ambiguous...), butler...),                                   // first check
+		append(append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...), butler...), // re-verify
 	}
 
 	var buf bytes.Buffer
@@ -4554,7 +4557,7 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 		}
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
+	if !strings.Contains(out, "ok: all triage, research, priority, ambiguous-spec, and butler labels present") {
 		t.Errorf("want success message after creation, got:\n%s", out)
 	}
 }
@@ -4570,13 +4573,14 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
 	ambiguous := doctor.AmbiguousLabelNames()
-	// All work, priority, and ambiguous-spec labels present; all seven
-	// research labels missing, so this test stays scoped to research label
-	// creation.
-	f.Labels = append(append(append([]string{}, work...), priority...), ambiguous...)
+	butler := doctor.ButlerLabelNames()
+	// All work, priority, ambiguous-spec, and butler labels present; all
+	// seven research labels missing, so this test stays scoped to research
+	// label creation.
+	f.Labels = append(append(append(append([]string{}, work...), priority...), ambiguous...), butler...)
 	f.LabelsSeq = [][]string{
-		append(append(append([]string{}, work...), priority...), ambiguous...),
-		append(append(append(append([]string{}, work...), priority...), ambiguous...), research...), // re-verify: research now created too
+		append(append(append(append([]string{}, work...), priority...), ambiguous...), butler...),
+		append(append(append(append(append([]string{}, work...), priority...), ambiguous...), butler...), research...), // re-verify: research now created too
 	}
 
 	var buf bytes.Buffer
@@ -4653,7 +4657,8 @@ func TestDoctor_TTY_Confirm_RenamedLifecycleLabel_UsesCorrectMeta(t *testing.T) 
 			research := doctor.ResearchLabelNames()
 			priority := doctor.PriorityLabelNames()
 			ambiguous := doctor.AmbiguousLabelNames()
-			present := append(append(append(append([]string{}, tt.otherLive...), research...), priority...), ambiguous...)
+			butler := doctor.ButlerLabelNames()
+			present := append(append(append(append(append([]string{}, tt.otherLive...), research...), priority...), ambiguous...), butler...)
 			f.Labels = present
 			f.LabelsSeq = [][]string{
 				present,
@@ -4767,13 +4772,14 @@ func TestDoctor_TTY_Confirm_PriorityLabels(t *testing.T) {
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
 	ambiguous := doctor.AmbiguousLabelNames()
-	// All work, research, and ambiguous-spec labels present; all three
-	// priority labels missing, so this test stays scoped to priority label
-	// creation.
-	f.Labels = append(append(append([]string{}, work...), research...), ambiguous...)
+	butler := doctor.ButlerLabelNames()
+	// All work, research, ambiguous-spec, and butler labels present; all
+	// three priority labels missing, so this test stays scoped to priority
+	// label creation.
+	f.Labels = append(append(append(append([]string{}, work...), research...), ambiguous...), butler...)
 	f.LabelsSeq = [][]string{
-		append(append(append([]string{}, work...), research...), ambiguous...),
-		append(append(append(append([]string{}, work...), research...), ambiguous...), priority...), // re-verify: priority now created too
+		append(append(append(append([]string{}, work...), research...), ambiguous...), butler...),
+		append(append(append(append(append([]string{}, work...), research...), ambiguous...), butler...), priority...), // re-verify: priority now created too
 	}
 
 	var buf bytes.Buffer
@@ -4883,13 +4889,14 @@ func TestDoctor_TTY_Confirm_AmbiguousLabel(t *testing.T) {
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
 	ambiguous := doctor.AmbiguousLabelNames()
-	// All work, research, and priority labels present; the ambiguous-spec
-	// label missing, so this test stays scoped to ambiguous-spec label
-	// creation.
-	f.Labels = append(append(append([]string{}, work...), research...), priority...)
+	butler := doctor.ButlerLabelNames()
+	// All work, research, priority, and butler labels present; the
+	// ambiguous-spec label missing, so this test stays scoped to
+	// ambiguous-spec label creation.
+	f.Labels = append(append(append(append([]string{}, work...), research...), priority...), butler...)
 	f.LabelsSeq = [][]string{
-		append(append(append([]string{}, work...), research...), priority...),
-		append(append(append(append([]string{}, work...), research...), priority...), ambiguous...), // re-verify: ambiguous-spec now created too
+		append(append(append(append([]string{}, work...), research...), priority...), butler...),
+		append(append(append(append(append([]string{}, work...), research...), priority...), butler...), ambiguous...), // re-verify: ambiguous-spec now created too
 	}
 
 	var buf bytes.Buffer

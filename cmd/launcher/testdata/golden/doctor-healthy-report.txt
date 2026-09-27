@@ -18,7 +18,8 @@ ok: label "agent-priority-critical" present
 ok: label "agent-priority-high" present
 ok: label "agent-priority-low" present
 ok: label "agent-ambiguous-spec" present
-ok: all triage, research, priority, and ambiguous-spec labels present
+ok: label "agent-butler-finding" present
+ok: all triage, research, priority, ambiguous-spec, and butler labels present
 ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op
 ok: read-only-capability
 ok: network-mode-runtime

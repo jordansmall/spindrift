@@ -1889,15 +1889,16 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
 	ambiguous := doctor.AmbiguousLabelNames()
+	butler := doctor.ButlerLabelNames()
 	f := forge.NewFake()
 	f.ProbeRepo = "jordansmall/spindrift"
 	f.SetBranchProtected(defaultBaseBranch, true)
-	// Three work labels are missing; the research, priority, and
-	// ambiguous-spec labels are all present.
-	f.Labels = append(append(append([]string{"ready-for-agent"}, research...), priority...), ambiguous...)
+	// Three work labels are missing; the research, priority, ambiguous-spec,
+	// and butler labels are all present.
+	f.Labels = append(append(append(append([]string{"ready-for-agent"}, research...), priority...), ambiguous...), butler...)
 	f.LabelsSeq = [][]string{
-		append(append(append([]string{"ready-for-agent"}, research...), priority...), ambiguous...),
-		append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...),
+		append(append(append(append([]string{"ready-for-agent"}, research...), priority...), ambiguous...), butler...),
+		append(append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...), butler...),
 	}
 	runner := &fakeCommandRunner{}
 

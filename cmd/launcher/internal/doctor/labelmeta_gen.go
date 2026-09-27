@@ -30,6 +30,8 @@ var TriageLabelMeta = map[string]LabelMeta{
 	"agent-ambiguous-spec": LabelMeta{Description: "An internally-contradictory issue; needs a human decision — not a crash", Color: "e0cffc"},
 
 	"agent-research-finding": LabelMeta{Description: "Filed from a research finding", Color: "c5def5"},
+
+	"agent-butler-finding": LabelMeta{Description: "Filed from a butler Chore finding", Color: "f9d0c4"},
 }
 
 // FindingTypeLabels is the closed bug/enhancement/chore issue-intent

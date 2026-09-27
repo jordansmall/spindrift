@@ -144,6 +144,20 @@ in
     }
   ];
 
+  # Butler-finding provenance (ADR 0056): the label a one-shot butler run's
+  # Filer applies to every Chore finding it files. Like researchFinding, this
+  # one does render into TriageLabelMeta, so doctor probes and offers to
+  # create it, still advisory. Its color must stay distinct from every other
+  # TriageLabelMeta color or TestTriageLabelMeta_ColorsAreDistinct trips.
+  butlerFinding = [
+    {
+      role = "ButlerFinding";
+      name = "agent-butler-finding";
+      color = "f9d0c4";
+      description = "Filed from a butler Chore finding";
+    }
+  ];
+
   # A local-only frontmatter marker, never a real created GitHub/Forgejo label:
   # forge.DispatchLabels.AllLabels() (cmd/launcher/internal/forge/dispatch.go)
   # excludes it, and the Go renderer must not emit it into TriageLabelMeta or
