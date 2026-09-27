@@ -381,3 +381,30 @@ func TestReadOnlyCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.T) {
 		t.Errorf("refs/heads/%s = %s, want %s (the retried bundle's tip)", branch, got, wantSHA)
 	}
 }
+
+// TestGitRemote_FollowsGHHost pins that the Ledger remote follows GH_HOST
+// (issue #3876 review) instead of always hitting github.com, which would
+// strand a GitHub Enterprise Consumer's Ledger on the wrong host.
+func TestGitRemote_FollowsGHHost(t *testing.T) {
+	wantArgs := []string{"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"}
+	cases := []struct {
+		name    string
+		ghHost  string
+		wantURL string
+	}{
+		{"unset falls back to github.com", "", "https://github.com/owner/repo.git"},
+		{"GHE host", "ghe.example.com", "https://ghe.example.com/owner/repo.git"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GH_HOST", tc.ghHost)
+			url, gitArgs := GitRemote("owner/repo")
+			if url != tc.wantURL {
+				t.Errorf("url = %q, want %q", url, tc.wantURL)
+			}
+			if strings.Join(gitArgs, "|") != strings.Join(wantArgs, "|") {
+				t.Errorf("gitArgs = %v, want %v", gitArgs, wantArgs)
+			}
+		})
+	}
+}

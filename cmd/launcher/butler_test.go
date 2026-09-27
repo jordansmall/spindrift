@@ -352,10 +352,11 @@ func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 	}
 }
 
-// (h) cmdButler rejects any CODE_FORGE other than local.
-func TestCmdButler_RejectsHostedForge(t *testing.T) {
+// (h) cmdButler rejects a CODE_FORGE with no butler Ledger backend (issue
+// #3876: only local, github, and forgejo have one).
+func TestCmdButler_RejectsForgeWithNoLedger(t *testing.T) {
 	lc := &launchContext{
-		config:  config{schemaConfig: schemaConfig{codeForge: "github", butlerChores: "bugs"}},
+		config:  config{schemaConfig: schemaConfig{codeForge: "git", butlerChores: "bugs"}},
 		cleanup: func() {},
 	}
 	code := cmdButler(lc, "bugs")
@@ -379,10 +380,12 @@ func TestButlerPreflight(t *testing.T) {
 		wantErr      string // substring of the error, checked in guard order; "" means no error
 	}{
 		{"all clear", "local", "bugs", "bugs", true, ""},
-		{"hosted forge rejected", "github", "bugs", "bugs", true, "hosted forges are not supported"},
+		{"github clear", "github", "bugs", "bugs", true, ""},
+		{"forgejo clear", "forgejo", "bugs", "bugs", true, ""},
+		{"forge with no ledger rejected", "git", "bugs", "bugs", true, "cannot host a butler Ledger (supported: github, forgejo, local)"},
 		{"chore not enabled", "local", "other-chore", "bugs", true, "is not enabled"},
 		{"filer not provisioned", "local", "bugs", "bugs", false, "needs a provisioned Filer"},
-		{"forge checked before chore", "github", "other-chore", "bugs", false, "hosted forges are not supported"},
+		{"forge checked before chore", "git", "other-chore", "bugs", false, "cannot host a butler Ledger"},
 		{"chore checked before filer", "local", "other-chore", "bugs", false, "is not enabled"},
 	}
 	for _, tc := range cases {

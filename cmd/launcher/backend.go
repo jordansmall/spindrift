@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
@@ -10,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/ledger"
 )
 
 // backendRow is one registry entry for a named backend: axis validity and
@@ -30,9 +32,38 @@ type backendRow struct {
 	newCodeForge         func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge
 	newReadOnlyCodeForge func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge
 
+	// newLedger returns this CODE_FORGE's butler Ledger backend (issue #3876),
+	// the local repo path holding the base branch (for butler.Head /
+	// TrackedFiles), and a cleanup func to run once the run is over. nil means
+	// this forge cannot host a butler Ledger yet (git).
+	newLedger func(c config) (ledger.Backend, string, func(), error)
+
 	// boxTokenEnvVar is the ADR 0016 Box-side token override name; empty when
 	// the backend carries no bearer token (git, local).
 	boxTokenEnvVar string
+}
+
+// remoteLedger builds a Ledger against a hosted forge: a fresh scratch repo
+// (ledger.NewRemote), fetched forward to c.baseBranch so the returned repo
+// path also satisfies butler.Head/TrackedFiles. Shared by the github and
+// forgejo rows, which differ only in url and gitArgs.
+func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, string, func(), error) {
+	dir, err := os.MkdirTemp("", "spindrift-ledger-*")
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("butler: create ledger scratch dir: %w", err)
+	}
+	cleanup := func() { os.RemoveAll(dir) }
+
+	r, err := ledger.NewRemote(dir, url, gitArgs...)
+	if err != nil {
+		cleanup()
+		return nil, "", nil, err
+	}
+	if err := r.FetchBranch(c.baseBranch); err != nil {
+		cleanup()
+		return nil, "", nil, err
+	}
+	return r, dir, cleanup, nil
 }
 
 func forgejoCodeForgeConfig(c config) forgejo.ForgejoCodeForgeConfig {
@@ -66,6 +97,10 @@ var backendRows = []backendRow{
 		newReadOnlyCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
 			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod))
 		},
+		newLedger: func(c config) (ledger.Backend, string, func(), error) {
+			url, gitArgs := github.GitRemote(c.repoSlug)
+			return remoteLedger(c, url, gitArgs...)
+		},
 
 		boxTokenEnvVar: "BOX_GH_TOKEN",
 	},
@@ -93,6 +128,9 @@ var backendRows = []backendRow{
 		},
 		newReadOnlyCodeForge: func(c config, _ local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
 			return forgejo.NewReadOnlyForgejoCodeForge(forgejoCodeForgeConfig(c), it)
+		},
+		newLedger: func(c config) (ledger.Backend, string, func(), error) {
+			return remoteLedger(c, forgejo.GitRemoteURL(c.forgejoBaseURL, c.repoSlug, c.forgejoToken))
 		},
 
 		boxTokenEnvVar: "BOX_FORGEJO_TOKEN",
@@ -141,6 +179,9 @@ var backendRows = []backendRow{
 		},
 		newCodeForge: func(c config, parent local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
 			return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
+		},
+		newLedger: func(c config) (ledger.Backend, string, func(), error) {
+			return ledger.Local{Repo: c.codeForgeAccumulationRepoDir}, c.codeForgeAccumulationRepoDir, func() {}, nil
 		},
 	},
 	{
@@ -191,6 +232,18 @@ func validCodeForgeNames() []string {
 	var names []string
 	for _, r := range backendRows {
 		if r.ValidAsCodeForge {
+			names = append(names, r.Name)
+		}
+	}
+	return names
+}
+
+// ledgerCapableNames returns every backendRows name with newLedger != nil, in
+// registry order, for butlerPreflight's "supported" list.
+func ledgerCapableNames() []string {
+	var names []string
+	for _, r := range backendRows {
+		if r.newLedger != nil {
 			names = append(names, r.Name)
 		}
 	}
