@@ -32,6 +32,10 @@ type Event struct {
 	// whichever kind Kind would have named.
 	Kinds []Kind `json:"kinds,omitempty"`
 	Issue string `json:"issue,omitempty"`
+	// Chore is Issue's Chore-keyed counterpart (ADR 0056, issue #3878): a
+	// butler child's box/settled/child_finish events carry it instead of
+	// Issue, since a butler run has no tracker issue to name.
+	Chore string `json:"chore,omitempty"`
 	// Phase is the box event's own field — "initial", "fix-pass-N" or
 	// "conflict-resolve" — carried straight from the child's report.Record
 	// (issue #3627); no other event sets it.

@@ -401,7 +401,7 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	// exits) before Wait, right here rather than on a separate goroutine —
 	// there is no stdout goroutine any more, and this read is the only
 	// thing standing between the child exiting and Wait returning.
-	readReports(reportRead, req.OnRecord)
+	readReports(reportRead, req.Kind, req.OnRecord)
 	// Close the read end before Wait, not after: a child still writing past
 	// this point (there shouldn't be any, since readReports just hit EOF)
 	// gets EPIPE instead of wedging the daemon on a pipe nobody drains.
@@ -432,16 +432,22 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 // is reported, on os.Stderr, so a hostile or buggy child spamming bad lines
 // can't spam the daemon's own log; every malformed line (first and later,
 // including an over-long one) is otherwise skipped and parsing continues.
+// A kind-mismatched record (daemon.ErrKindMismatch) gets its own once-only
+// report, so an earlier malformed line can't hide an emitter regression.
 // report.MaxLine — rather than a local literal — is shared with the writer
 // side (report.emit), so a legitimate child's line can never itself be over
 // this cap; the over-long path below stays as the defence against a
 // hostile/buggy child (issue #3627's review finding).
-func readReports(r *os.File, onRecord func(daemon.Record)) {
+func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record)) {
 	reader := bufio.NewReaderSize(r, report.MaxLine)
-	reportedBad := false
+	reportedBad, reportedMismatch := false, false
 	reportOnce := func(err error) {
-		if !reportedBad {
-			reportedBad = true
+		reported := &reportedBad
+		if errors.Is(err, daemon.ErrKindMismatch) {
+			reported = &reportedMismatch
+		}
+		if !*reported {
+			*reported = true
 			fmt.Fprintf(os.Stderr, "daemon: read child report: %s\n", err)
 		}
 	}
@@ -463,7 +469,7 @@ func readReports(r *os.File, onRecord func(daemon.Record)) {
 		}
 		line = bytes.TrimSuffix(line, []byte("\n"))
 		if len(line) != 0 {
-			rec, ok, parseErr := daemon.ParseRecord(string(line))
+			rec, ok, parseErr := daemon.ParseRecord(string(line), kind)
 			switch {
 			case parseErr != nil:
 				reportOnce(parseErr)

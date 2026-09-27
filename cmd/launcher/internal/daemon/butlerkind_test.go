@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/report"
 )
 
 // triKindConfig is dualKindConfig's three-kind sibling (issue #3878): all
@@ -127,6 +129,90 @@ func TestPoolRunningButlerChildIsNeverPreempted(t *testing.T) {
 
 	r.releaseSlot(t, 0, ChildResult{Exit: 5}) // host-tainted: halts the pool cleanly
 	awaitWG(t, r, &wg)
+}
+
+// TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots extends
+// TestPoolRunningButlerChildIsNeverPreempted to two slots (issue #3878's
+// review): slot 0's butler child staying in flight must survive not only
+// its own kind regaining work but a *sibling* slot picking that regained
+// kind up and running it to completion — the awake-window rule ("gate
+// starting, never stopping", ADR 0056) is pool-wide, not just "this slot's
+// own next pick".
+func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
+	cfg := triKindConfig(2, 0)
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(2)
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	p, pctx := newPool(context.Background(), cfg, r, em, clk)
+	defer p.cancel()
+	// Same forcing as the single-slot test: dispatch and research both
+	// backed off before slot 0 ever picks, so its first pick lands on the
+	// idle tier.
+	p.markNoWork(KindDispatch, clk.Now(), false)
+	p.markNoWork(KindResearch, clk.Now(), false)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, 0, cfg, p)
+	}()
+
+	if slot := r.awaitStart(t); slot != 0 {
+		t.Fatalf("started slot = %d, want 0", slot)
+	}
+	if calls := r.calls(); len(calls) != 1 || calls[0].Kind != KindButler {
+		t.Fatalf("first call = %v, want exactly one butler call", calls)
+	}
+
+	// "Work appears" while slot 0's butler child is still in flight.
+	p.resetKind(KindDispatch)
+	if pctx.Err() != nil {
+		t.Fatalf("pool ctx = %v, want nil: a running butler child must never be cancelled by another kind regaining work", pctx.Err())
+	}
+
+	// Slot 0 is the pre-assigned initial baton holder and has not passed it
+	// yet (its held child has reported no box record), so slot 1 would park
+	// in awaitBaton forever without this: a live box record is the only
+	// thing that passes the baton before a child exits.
+	r.fireOnRecord(t, 0, Record{Event: report.EventBox, Chore: "bugs"})
+
+	// A sibling slot picks up and starts the regained kind, not the butler.
+	go func() {
+		defer wg.Done()
+		runSlot(pctx, 1, cfg, p)
+	}()
+	if slot := r.awaitStart(t); slot != 1 {
+		t.Fatalf("started slot = %d, want 1", slot)
+	}
+	if calls := r.calls(); len(calls) != 2 || calls[1].Kind != KindDispatch {
+		t.Fatalf("second call = %v, want dispatch on slot 1", calls)
+	}
+	if pctx.Err() != nil {
+		t.Fatalf("pool ctx = %v, want nil: a sibling starting dispatch must never touch slot 0's running butler child", pctx.Err())
+	}
+
+	// The sibling's own child exits host-tainted, halting the pool. Even
+	// that must not reach into slot 0: its butler child is still running
+	// and releases below with its own result, not because cancellation
+	// unwound RunChild out from under it.
+	r.releaseSlot(t, 1, ChildResult{Exit: 5})
+	// Wait for the halt to land before releasing slot 0, or slot 0 can
+	// race it and start a third child.
+	select {
+	case <-pctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("pool did not halt within 5s of slot 1's host-tainted exit")
+	}
+	r.releaseSlot(t, 0, ChildResult{Exit: 0})
+	awaitWG(t, r, &wg)
+
+	if calls := r.calls(); len(calls) != 2 {
+		t.Fatalf("run calls = %v, want exactly 2 (the halt must not start a third)", calls)
+	}
 }
 
 // TestPoolButlerBackoffGrowsIndependently pins the idle tier onto the same

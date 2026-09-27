@@ -514,12 +514,12 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			OnRecord: func(rec Record) {
 				switch rec.Event {
 				case report.EventBox:
-					p.noteBox(slot, kind, revision, rec.Issue, rec.Phase)
+					p.noteBox(slot, kind, revision, rec)
 					// A claim settles discovery the moment it happens, live,
 					// rather than waiting for this child to exit.
 					p.passBaton(slot, batonPassClaimed)
 				case report.EventSettled:
-					p.noteSettled(slot, kind, revision, rec.Issue, rec.State, rec.Note)
+					p.noteSettled(slot, kind, revision, rec)
 				}
 				// No default clause: an event this switch hasn't been
 				// taught yet is silently ignored. ParseRecord already
@@ -530,9 +530,9 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		}
 		result, err := p.r.RunChild(ctx, req)
 		// Read under the pool lock, and before finishChild zeroes the
-		// slot's flight: this is the only place the issue the child
-		// claimed is still available at all.
-		issue := p.flightIssue(slot)
+		// slot's flight: this is the only place the issue (or Chore) the
+		// child claimed is still available at all.
+		issue, chore := p.flightClaim(slot)
 		p.finishChild(slot)
 		// One site covers every post-child exit without a claim at once:
 		// queue empty, none dispatchable, an unrecognised exit, or a
@@ -547,7 +547,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// without the other. Every box/settled record the child
 			// reported before this failure already reached the stream live
 			// through OnRecord, so there is nothing left to replay here.
-			p.emit(Event{Event: "child_finish", Kind: kind, Issue: issue, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
+			p.emit(Event{Event: "child_finish", Kind: kind, Issue: issue, Chore: chore, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
 			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err)) {
 				return
 			}
@@ -559,7 +559,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		// was already closed when the child exited; read the latch once,
 		// here, rather than let a later close race Interpret's answer.
 		outcome, action, haltClass := Interpret(exit, p.stopClosed())
-		p.emit(Event{Event: "child_finish", Kind: kind, Issue: issue, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
+		p.emit(Event{Event: "child_finish", Kind: kind, Issue: issue, Chore: chore, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
 
 		switch action {
 		case Continue:
