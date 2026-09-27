@@ -489,6 +489,41 @@ func TestRunSignal_IssueIntentDedupTerms(t *testing.T) {
 	})
 }
 
+// TestRunSignal_IssueIntentClassAndConcurrence pins -class/-concurrence
+// (issue #3880): both are optional, and each lands in the buffered intent's
+// matching field unaltered.
+func TestRunSignal_IssueIntentClassAndConcurrence(t *testing.T) {
+	forEachTransport(t, func(t *testing.T, transport string) {
+		srv := startSignalServer(t, transport, signalsocket.Config{Consumes: allKinds()})
+
+		if rc, out := runVerb(t, "one body", "issue-intent", "-title", "one", "-type", "bug"); rc != 0 {
+			t.Fatalf("issue-intent exit = %d, want 0 (out=%q)", rc, out)
+		}
+		if rc, out := runVerb(t, "two body", "issue-intent", "-title", "two", "-type", "chore",
+			"-class", "flaky-test"); rc != 0 {
+			t.Fatalf("issue-intent exit = %d, want 0 (out=%q)", rc, out)
+		}
+		if rc, out := runVerb(t, "three body", "issue-intent", "-title", "three", "-type", "chore",
+			"-class", "flaky-test", "-concurrence", "confirmed by the reviewer"); rc != 0 {
+			t.Fatalf("issue-intent exit = %d, want 0 (out=%q)", rc, out)
+		}
+
+		got := srv.buf.IssueIntents()
+		if len(got) != 3 {
+			t.Fatalf("issue intents = %+v, want 3", got)
+		}
+		if got[0].Class != "" || got[0].Concurrence != "" {
+			t.Errorf("intent[0] = %+v, want no class or concurrence", got[0])
+		}
+		if got[1].Class != "flaky-test" || got[1].Concurrence != "" {
+			t.Errorf("intent[1] = %+v, want class flaky-test and no concurrence", got[1])
+		}
+		if got[2].Class != "flaky-test" || got[2].Concurrence != "confirmed by the reviewer" {
+			t.Errorf("intent[2] = %+v, want class flaky-test and the concurrence", got[2])
+		}
+	})
+}
+
 // TestRunSignal_IssueIntentDedupWireBody pins the wire shape directly,
 // bypassing the socket: -dedup adds a dedupTerms array with the given terms
 // in order, and its absence must leave the posted body byte-identical to
@@ -533,6 +568,30 @@ func TestRunSignal_IssueIntentDedupWireBody(t *testing.T) {
 		got := post(t, "issue-intent", "-title", "t", "-type", "bug", "-dedup", "a.go:Foo", "-dedup", "b.go:Bar")
 		if !strings.Contains(got, `"dedupTerms":["a.go:Foo","b.go:Bar"]`) {
 			t.Errorf("posted body = %s, want a dedupTerms array with both terms in order", got)
+		}
+	})
+	t.Run("no class or concurrence", func(t *testing.T) {
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug")
+		if strings.Contains(got, "class") || strings.Contains(got, "concurrence") {
+			t.Errorf("posted body = %s, want no class or concurrence key at all", got)
+		}
+	})
+	t.Run("class only", func(t *testing.T) {
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug", "-class", "flaky-test")
+		if !strings.Contains(got, `"class":"flaky-test"`) {
+			t.Errorf("posted body = %s, want a class field", got)
+		}
+		if strings.Contains(got, "concurrence") {
+			t.Errorf("posted body = %s, want no concurrence key without -concurrence", got)
+		}
+	})
+	t.Run("class and concurrence", func(t *testing.T) {
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug", "-class", "flaky-test", "-concurrence", "confirmed")
+		if !strings.Contains(got, `"class":"flaky-test"`) {
+			t.Errorf("posted body = %s, want a class field", got)
+		}
+		if !strings.Contains(got, `"concurrence":"confirmed"`) {
+			t.Errorf("posted body = %s, want a concurrence field", got)
 		}
 	})
 }

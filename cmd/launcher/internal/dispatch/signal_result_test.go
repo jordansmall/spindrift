@@ -188,6 +188,39 @@ func TestSignalResultFromBuffer_DedupTermsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSignalResultFromBuffer_ClassAndConcurrenceRoundTrip pins that Class and
+// Concurrence (issue #3880) survive the socket buffer into
+// Result.IssueIntents the same way DedupTerms does above.
+func TestSignalResultFromBuffer_ClassAndConcurrenceRoundTrip(t *testing.T) {
+	buf := signalsocket.New(signalsocket.Config{Consumes: allKinds})
+	intent := signalwire.IssueIntent{
+		Title:       "t",
+		Body:        "b",
+		Type:        "bug",
+		Class:       "flaky-test",
+		Concurrence: "confirmed by the reviewer",
+	}
+	if _, rej := buf.AcceptIssueIntent(intent); rej != nil {
+		t.Fatalf("AcceptIssueIntent rejected: %+v", rej)
+	}
+
+	_, _, _, _, issueIntents := signalResultFromBuffer(buf)
+	if len(issueIntents) != 1 {
+		t.Fatalf("issueIntents = %v, want 1", issueIntents)
+	}
+
+	var decoded signalwire.IssueIntent
+	if err := json.Unmarshal([]byte(issueIntents[0]), &decoded); err != nil {
+		t.Fatalf("decode issueIntents[0]: %v", err)
+	}
+	if decoded.Class != intent.Class {
+		t.Errorf("decoded.Class = %q, want %q", decoded.Class, intent.Class)
+	}
+	if decoded.Concurrence != intent.Concurrence {
+		t.Errorf("decoded.Concurrence = %q, want %q", decoded.Concurrence, intent.Concurrence)
+	}
+}
+
 // TestSignalResultFromBuffer_ReplaceSemantics pins that a second comment and
 // a second PR intent through the buffer leave only the last, the same
 // last-line-wins the log carrier's scanners give (issue #3725).

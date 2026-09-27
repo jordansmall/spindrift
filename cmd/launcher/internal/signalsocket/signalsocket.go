@@ -144,14 +144,14 @@ func (b *Buffer) AcceptIssueIntent(i signalwire.IssueIntent) (signalwire.Receipt
 		return strings.TrimSpace(t) == ""
 	})
 
-	total := len(i.Title) + len(i.Body) + len(i.Type)
+	total := len(i.Title) + len(i.Body) + len(i.Type) + len(i.Class) + len(i.Concurrence)
 	for _, term := range i.DedupTerms {
 		total += len(term)
 	}
 	partial := signalwire.Receipt{
 		Kind:  signalwire.KindIssueIntent,
 		Bytes: total,
-		Hash:  contentHash(signalwire.KindIssueIntent, append([]string{i.Title, i.Body, i.Type}, i.DedupTerms...)...),
+		Hash:  contentHash(signalwire.KindIssueIntent, append([]string{i.Title, i.Body, i.Type, i.Class, i.Concurrence}, i.DedupTerms...)...),
 	}
 	if rej := b.checkKind(signalwire.KindIssueIntent); rej != nil {
 		return partial, rej
@@ -159,6 +159,15 @@ func (b *Buffer) AcceptIssueIntent(i signalwire.IssueIntent) (signalwire.Receipt
 	fs := fields{{"title", i.Title}, {"body", i.Body}, {"type", i.Type}}
 	for idx, term := range i.DedupTerms {
 		fs = append(fs, field{fmt.Sprintf("dedupTerms[%d]", idx), term})
+	}
+	// Class and Concurrence are optional (issue #3880): validate's first
+	// pass rejects an empty field outright, so an unset one is left out of
+	// fs entirely rather than validated as present-but-blank.
+	if i.Class != "" {
+		fs = append(fs, field{"class", i.Class})
+	}
+	if i.Concurrence != "" {
+		fs = append(fs, field{"concurrence", i.Concurrence})
 	}
 	if rej := validate(fs); rej != nil {
 		return partial, rej
