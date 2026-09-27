@@ -222,6 +222,31 @@ func TestQueue_Discover_RacedClaim_DissolvesAndTriesNext(t *testing.T) {
 	}
 }
 
+// A claim that fails specifically because the issue is already InProgress
+// (ErrAlreadyClaimed, #3887 -- another claimant won the race between this
+// pick's readiness check and its claim) dissolves with a distinct
+// "skipped: already claimed" reason, not the raw wrapped error the previous
+// test pins for every other claim failure.
+func TestQueue_Discover_AlreadyClaimed_DissolvesWithSkipReason(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "already claimed", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-in-progress"}})
+
+	batch, err := q.Discover(f, f, "", KindWork)
+
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(batch.Issues) != 0 {
+		t.Errorf("issues = %+v, want none (the only queued pick lost the claim race)", batch.Issues)
+	}
+	snap := q.Snapshot()
+	if snap[0].State != PickDissolved || snap[0].Reason != "skipped: already claimed" {
+		t.Errorf("pick #42 = %+v, want dissolved with reason %q", snap[0], "skipped: already claimed")
+	}
+}
+
 // When two picks share an issue number (a PickTerminated row ADR 0024's
 // Terminate left behind, plus a fresh re-pick queued after it), the claim
 // must update the newest row, or it corrupts an already-finished row and

@@ -444,7 +444,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			return false
 		}
 		if err := queue.Claim(iss.Number); err != nil {
-			fmt.Printf("    ~~ #%s claim failed; skipping (%v)\n", iss.Number, err)
+			fmt.Print(claimSkipLine(iss.Number, err))
 			return false
 		}
 		dispatchedAny = true
