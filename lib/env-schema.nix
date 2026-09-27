@@ -400,6 +400,26 @@ in
     nixSubPath = "butler.choreClasses";
     boxEnv = false;
   };
+  butlerEvery = {
+    env = "BUTLER_EVERY";
+    group = "dispatch";
+    default = "6h";
+    doc = "space-separated tokens controlling how often each enabled butler Chore is due: a bare Go time.ParseDuration string sets the default interval for every enabled Chore not otherwise overridden, and a `<chore>=<duration>` token overrides that interval for one Chore, e.g. BUTLER_EVERY=6h docs-drift=168h. The interval is measured from the Chore's last done Ledger commit; 0 means no interval (due whenever there is something to scan). With no bare default token, the default interval is 6h. An override naming a Chore not in BUTLER_CHORES is rejected. Validated by the launcher at `spindrift butler` time";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    nixSubPath = "butler.every";
+    boxEnv = false;
+  };
+  butlerClaimTimeout = {
+    env = "BUTLER_CLAIM_TIMEOUT";
+    group = "dispatch";
+    default = "6h";
+    doc = "a Go time.ParseDuration string: age past which a butler Chore's Ledger claim is treated as a crashed run's leftover and taken over, carrying lastSwept and cursor forward from the last done; validated by the launcher at `spindrift butler` time";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    nixSubPath = "butler.claimTimeout";
+    boxEnv = false;
+  };
   repoSlug = {
     env = "REPO_SLUG";
     group = "forge";

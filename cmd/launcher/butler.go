@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +23,117 @@ import (
 // knob: the due check and budgets that would make this tunable are
 // deliberately out of scope for the one-shot command (issue #3875).
 const butlerClaimTimeout = 6 * time.Hour
+
+// butlerEveryConfig is BUTLER_EVERY parsed (schema key butlerEvery, ADR
+// 0056): a bare default interval plus per-Chore overrides. With no bare
+// token, the default is butlerEveryDefault; a bare "0" token, unlike an
+// absent one, still means "no interval".
+type butlerEveryConfig struct {
+	dflt      time.Duration
+	overrides map[string]time.Duration
+}
+
+// For returns chore's interval: its override, else the bare default.
+func (c butlerEveryConfig) For(chore string) time.Duration {
+	if d, ok := c.overrides[chore]; ok {
+		return d
+	}
+	return c.dflt
+}
+
+// butlerEveryDefault is the interval a Chore gets when BUTLER_EVERY carries
+// no bare default token: without this fallback, every enabled Chore but the
+// ones named in an override token would be due on every poll.
+const butlerEveryDefault = 6 * time.Hour
+
+// parseButlerEvery parses BUTLER_EVERY's grammar: space-separated tokens,
+// each either a bare Go time.ParseDuration string (the default interval for
+// every enabled Chore not otherwise overridden) or `<chore>=<duration>` (a
+// per-Chore override), e.g. "6h docs-drift=168h". A value with no bare token
+// falls back to butlerEveryDefault. Rejects an unparseable or negative
+// duration, more than one bare default token, a duplicate override for the
+// same Chore, and an empty chore name in a `=<duration>` token.
+func parseButlerEvery(value string) (butlerEveryConfig, error) {
+	cfg := butlerEveryConfig{overrides: make(map[string]time.Duration)}
+	haveDefault := false
+	for _, tok := range strings.Fields(value) {
+		chore, durStr, isOverride := strings.Cut(tok, "=")
+		if isOverride {
+			if chore == "" {
+				return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: empty chore name in %q", tok)
+			}
+			if _, exists := cfg.overrides[chore]; exists {
+				return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: duplicate override for chore %q", chore)
+			}
+			d, err := parseNonNegativeDuration(durStr)
+			if err != nil {
+				return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: chore %q: %w", chore, err)
+			}
+			cfg.overrides[chore] = d
+			continue
+		}
+		if haveDefault {
+			return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: more than one bare default token in %q", value)
+		}
+		d, err := parseNonNegativeDuration(tok)
+		if err != nil {
+			return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: %w", err)
+		}
+		cfg.dflt = d
+		haveDefault = true
+	}
+	if !haveDefault {
+		cfg.dflt = butlerEveryDefault
+	}
+	return cfg, nil
+}
+
+// checkOverrides rejects any override in c naming a Chore absent from
+// butlerChores -- otherwise a typo in the override key silently no-ops
+// instead of ever firing. Errors on the first offender in sorted key order,
+// for a deterministic message across runs.
+func (c butlerEveryConfig) checkOverrides(butlerChores string) error {
+	keys := make([]string, 0, len(c.overrides))
+	for chore := range c.overrides {
+		keys = append(keys, chore)
+	}
+	sort.Strings(keys)
+	for _, chore := range keys {
+		if !choreEnabled(butlerChores, chore) {
+			return fmt.Errorf("butler: BUTLER_EVERY: override for chore %q, which is not enabled (BUTLER_CHORES=%q)", chore, butlerChores)
+		}
+	}
+	return nil
+}
+
+// parseNonNegativeDuration parses s as a Go duration, rejecting a negative
+// result; parseButlerEvery's shared validation for both its bare-default and
+// per-Chore-override tokens.
+func parseNonNegativeDuration(s string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration %q: %w", s, err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("negative duration %q", s)
+	}
+	return d, nil
+}
+
+// parseButlerClaimTimeout parses BUTLER_CLAIM_TIMEOUT (schema key
+// butlerClaimTimeout, ADR 0056): a Go duration, required to be strictly
+// positive since a zero or negative timeout would make every claim
+// immediately stale.
+func parseButlerClaimTimeout(value string) (time.Duration, error) {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("butler: BUTLER_CLAIM_TIMEOUT: invalid duration %q: %w", value, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("butler: BUTLER_CLAIM_TIMEOUT: must be > 0, got %q", value)
+	}
+	return d, nil
+}
 
 // butlerSlot is the Ledger claim's Slot (and generation) for the one-shot
 // butler command: it runs outside the Daemon pool entirely, so there is no
