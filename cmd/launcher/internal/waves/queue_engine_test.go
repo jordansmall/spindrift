@@ -7,10 +7,13 @@ package waves
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // Proves that content arriving entirely through the FakeQueue's
@@ -94,5 +97,43 @@ func TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory(t *testing.T) {
 	}
 	if fake.DiscoverCalls == 0 {
 		t.Fatalf("Discover: got 0 calls, want at least 1")
+	}
+}
+
+// TestRunContinuous_ThroughFakeQueue_AlreadyClaimedSkipsWithoutDispatch pins
+// that a Queue.Claim failing with ErrAlreadyClaimed (#3887, another claimant
+// won the race) prints the dedicated skip line and never reaches
+// dispatch.Factory.New -- a nil Factory/Settler is a stronger guarantee here
+// than an fr.RunCalls==0 assertion would be, matching the stop-closed cases
+// above.
+func TestRunContinuous_ThroughFakeQueue_AlreadyClaimedSkipsWithoutDispatch(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1", Title: "one"}}}
+	fake.ClaimErr = fmt.Errorf("queue: claim #1: %w", forge.ErrAlreadyClaimed)
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
+	})
+
+	if !errors.Is(err, ErrOpenNoneDispatchable) {
+		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
+	}
+	if len(fake.ClaimCalls) != 1 || fake.ClaimCalls[0] != "1" {
+		t.Fatalf("ClaimCalls: got %v, want [\"1\"]", fake.ClaimCalls)
+	}
+	if !strings.Contains(out, "#1") || !strings.Contains(out, "skipped: already claimed") {
+		t.Fatalf("stdout: got %q, want a 'skipped: already claimed' line naming #1", out)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Fatalf("TransitionStateCalls: got %+v, want none (Claim went through the FakeQueue, never fc, and nothing dispatched to settle as Failed)", fc.TransitionStateCalls)
 	}
 }

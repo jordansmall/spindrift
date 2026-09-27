@@ -1,6 +1,7 @@
 package console
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -135,7 +136,11 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 		// runContinuousQueue's own Claim (launcher.go, issue #2938) is a
 		// documented no-op.
 		if err := tracker.TransitionState(pick.Number, forge.Dispatchable, forge.InProgress); err != nil {
-			q.dissolve(pick.Number, err.Error())
+			reason := err.Error()
+			if errors.Is(err, forge.ErrAlreadyClaimed) {
+				reason = "skipped: already claimed"
+			}
+			q.dissolve(pick.Number, reason)
 			continue
 		}
 		q.setState(pick.Number, PickRunning, "")

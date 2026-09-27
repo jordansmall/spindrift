@@ -229,6 +229,45 @@ func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) 
 	}
 }
 
+// TestDispatchWave_AlreadyClaimedSkipsWithoutDispatch pins that a claim
+// racing another claimant (ErrAlreadyClaimed, #3887) prints the dedicated
+// skip line, never launches the runner, and never marks the issue Failed --
+// the caller has no basis to call this a failure, only someone else's claim.
+func TestDispatchWave_AlreadyClaimedSkipsWithoutDispatch(t *testing.T) {
+	c := baseConfig()
+	c.MaxParallel = 1
+	label := "agent-trigger"
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	// Seeded already InProgress: the fake's TransitionState now returns
+	// ErrAlreadyClaimed for this issue instead of re-swapping labels (#3887).
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+
+	out := testutil.CaptureStdout(t, func() {
+		dispatchWave(c, fc, fc, f, s, []Issue{{Number: "1", Title: "first"}}, OriginDiscovered, claimer, nil)
+	})
+
+	if !strings.Contains(out, "#1") || !strings.Contains(out, "skipped: already claimed") {
+		t.Errorf("want a 'skipped: already claimed' line naming #1; got output=%q", out)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls on an already-claimed skip, got %d", len(fr.RunCalls))
+	}
+	iss, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(%q): %v", "1", err)
+	}
+	if containsLabel(iss.Labels, c.FailedLabel) {
+		t.Errorf("issue must NOT have %q on an already-claimed skip; labels=%v", c.FailedLabel, iss.Labels)
+	}
+}
+
 // TestDispatchWave_FailedBoxWithEmptyLogPrintsErrToStderr pins that a box which
 // never launched (RunErr with no log output, so Result.Err is populated) has
 // its reason printed on stderr next to the terse FAILED line, matching
