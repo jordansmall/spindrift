@@ -207,6 +207,7 @@ _assert_npmrc_rewritten_and_hidden() {
   # would be the re-apply's output, so this test could pass with the first
   # apply broken. Research still clones and still applies.
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   _start_stand_in_forwarder
 
   _seed_cargo_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"

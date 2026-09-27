@@ -88,6 +88,23 @@ setup() {
   grep -q 'DISPATCH_KIND=work' "$PODMAN_LOG"
 }
 
+# ADVISE_ONLY is derived from research's own descriptor (issue #3872), not a
+# kind-name string the Box would have to re-parse, so the entrypoint's
+# read-only posture gate has a flag to test instead of DISPATCH_KIND itself.
+@test "research passes ADVISE_ONLY=1 into each container" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  run "$SPINDRIFT_CMD" research
+  [ "$status" -eq 0 ]
+  grep -q 'ADVISE_ONLY=1' "$PODMAN_LOG"
+}
+
+@test "dispatch (work) never forwards ADVISE_ONLY into the container" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  run "$SPINDRIFT_CMD" dispatch
+  [ "$status" -eq 0 ]
+  ! grep -q 'ADVISE_ONLY' "$PODMAN_LOG"
+}
+
 @test "research <nums> dispatches exactly the named issue, bypassing the agent-research label" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tUnlabeled issue'

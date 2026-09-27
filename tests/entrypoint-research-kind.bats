@@ -10,6 +10,7 @@ setup() {
 
 @test "DISPATCH_KIND=research drives research-prompt.md, not issue-prompt.md" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q "Research GitHub issue #7" "$DRIVER_PROMPT_FILE"
@@ -27,6 +28,7 @@ setup() {
 
 @test "research kind never checks out or pushes an agent branch" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   run git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD
@@ -47,6 +49,7 @@ setup() {
 
 @test "research kind logs researching, not implementing, and names no branch" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q "==> claude researching issue #7" <<<"$output"
@@ -65,6 +68,7 @@ setup() {
 
 @test "runtime prompt-dir override of research-prompt.md lacking the outcome contract gets it appended" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
   printf 'research stub, no contract here\n' >"$prompt_dir/research-prompt.md"
@@ -80,6 +84,7 @@ setup() {
 
 @test "runtime prompt-dir override of research-prompt.md already containing the outcome contract is unchanged" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
   printf 'research stub\n\n# POST THE VERDICT\n\nalready has its own contract\n' \
@@ -96,6 +101,7 @@ setup() {
 
 @test "research kind fails loudly when RESEARCH_OUTCOME_CONTRACT_FILE is missing" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
   printf 'research stub, no contract here\n' >"$prompt_dir/research-prompt.md"
@@ -111,6 +117,7 @@ setup() {
 
 @test "research kind's OUTCOME grammar line renders the registry status enum" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>' "$DRIVER_PROMPT_FILE"
@@ -122,6 +129,7 @@ setup() {
 
 @test "research kind backstop: no outcome line emits blocked with no branch push" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
