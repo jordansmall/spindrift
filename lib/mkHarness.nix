@@ -54,6 +54,17 @@
   # EXPLORE step rather than sharing research-prompt.md's repo-exploration
   # prose.
   researchSelfContainedPrompt ? builtins.readFile ../templates/default/prompts/research-self-contained-prompt.md,
+  # Used instead of `prompt` when DISPATCH_KIND=butler (ADR 0056, issue
+  # #3875): a one-shot, read-only sweep of one Ledger Chore, never an issue,
+  # so like researchPrompt this replaces the whole issue-prompt.md flow
+  # rather than sharing its COMMS/CHECK/outcome blocks. Carries no harness-
+  # owned contract injection of its own: its OUTCOME section is self-
+  # contained in the template.
+  butlerPrompt ? builtins.readFile ../templates/default/prompts/butler-prompt.md,
+  # The named-Chore prompt directory ${CHORE_PROMPT} resolves into (ADR
+  # 0056): copied whole into the image, like fragmentsDir below, so a new
+  # Chore needs no mkHarness plumbing, only a new file under it.
+  choresDir ? ../templates/default/prompts/chores,
   # The conditional fragment registry (issue #622): rows of (gate, fragment,
   # var) that the entrypoint's fragment loop and its `_subst` allowlist are
   # both rendered from. Not Consumer-tunable; overridable here only for the
@@ -198,6 +209,8 @@ let
   # An alias for the fragmentsDir param above, kept so this file's existing
   # fragmentsSourceDir uses are unchanged (issue #463).
   fragmentsSourceDir = fragmentsDir;
+  # Mirrors fragmentsSourceDir's alias, for choresDir (ADR 0056, issue #3875).
+  choresSourceDir = choresDir;
 
   # The SPINDRIFT_OUTCOME contract is harness-owned (issue #419): a Consumer
   # `prompt` that drops it ships an agent that never emits the outcome line,
@@ -836,6 +849,8 @@ let
       fixPrompt
       fragmentsSourceDir
       fragmentRegistryPreamble
+      butlerPrompt
+      choresSourceDir
       ;
     # Carries the verdict contract rendered from RESEARCH_VERDICTS (#2201).
     researchPrompt = researchPromptRendered;
@@ -925,7 +940,9 @@ let
     cp ${hostPkgs.writeText "fix-prompt.md" (imageContracts.injectFixSharedBlocks imagePrompts.fixPrompt)} $out/fix-prompt.md
     cp ${hostPkgs.writeText "research-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchPrompt)} $out/research-prompt.md
     cp ${hostPkgs.writeText "research-self-contained-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchSelfContainedPrompt)} $out/research-self-contained-prompt.md
+    cp ${hostPkgs.writeText "butler-prompt.md" imagePrompts.butlerPrompt} $out/butler-prompt.md
     cp -r ${imagePrompts.fragmentsSourceDir} $out/fragments
+    cp -r ${imagePrompts.choresSourceDir} $out/chores
   '';
 
   # The baked-skills directory as a host store path, laid out as lib/image.nix

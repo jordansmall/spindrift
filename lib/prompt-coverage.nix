@@ -11,6 +11,12 @@
 # "covered"; reason is set only when it is "exempt". The other is null.
 [
   {
+    promptFile = "butler-prompt.md";
+    coverage = "covered";
+    cavemanVar = "CAVEMAN_STEP";
+    reason = null;
+  }
+  {
     promptFile = "conflict-resolve-prompt.md";
     coverage = "covered";
     cavemanVar = "CAVEMAN_STEP";

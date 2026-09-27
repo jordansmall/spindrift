@@ -1,5 +1,7 @@
 package promptassembly
 
+import "spindrift.dev/launcher/internal/dispatchkind"
+
 // trackerGates computes the Issue-Tracker gate family: the tracker
 // read/write/filer descriptor gates and the PR-body ticket-reference gates.
 // Gates passes orchestratorEnabled in so it stays the one place deriving it;
@@ -59,11 +61,15 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	}
 	g["FILER_FILE_RELAY"] = filerFileRelay
 	// FILER_FILE_RELAY stays kind-agnostic because the relay mechanism is the
-	// same for work and research. The label the launcher applies host-side is
-	// not: agent-review-finding for work, agent-research-finding for research,
-	// named in filer-label-relay.md. These two split that same boolean by kind
-	// (issue #2593).
-	g["FILER_FILE_RELAY_RESEARCH"] = researchForceRelay
+	// same for work, research, and the butler. The label the launcher applies
+	// host-side is not: agent-review-finding for work, agent-research-finding
+	// for research, agent-butler-finding for the butler (ADR 0056), named in
+	// filer-label-relay*.md. researchForceRelay alone (AdviseOnly) cannot tell
+	// research and the butler apart -- both are advise-only -- so these three
+	// split further on Settle, the descriptor axis that does distinguish them
+	// (SettleVerdict vs SettleLedger), rather than a kind-string comparison.
+	g["FILER_FILE_RELAY_RESEARCH"] = researchForceRelay && e.descriptor().Settle == dispatchkind.SettleVerdict
+	g["FILER_FILE_RELAY_BUTLER"] = researchForceRelay && e.descriptor().Settle == dispatchkind.SettleLedger
 	g["FILER_FILE_RELAY_WORK"] = filerFileRelay && !researchForceRelay
 	g["FILER_FILE_DIRECT_GH"] = filerFileDirectGH
 	g["FILER_FILE_DIRECT_FORGEJO"] = filerFileDirectForgejo

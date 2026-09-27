@@ -168,6 +168,17 @@ type Env struct {
 	// over both the AgentsJSONTemplate extraction and the agent-files rewrite.
 	ReviewModelOverride  string // dispatch.go: $BOX_REVIEW_MODEL_OVERRIDE
 	ReviewEffortOverride string // dispatch.go: $BOX_REVIEW_EFFORT_OVERRIDE
+
+	// ChoreName, ChoreHead, ChoreDiffRange, and ChoreSlice carry the butler's
+	// Chore key (ADR 0056, issue #3875): dispatch.go's buildBoxEnv forwards
+	// them only for a Factory.NewChore Dispatch (Keying == ByChore), in place
+	// of IssueNumber/IssueTitle/IssueText. ChoreName doubles as the
+	// prompts/chores/<name>.md lookup key choreSection resolves into
+	// CHORE_PROMPT (issue #3875 slice 4).
+	ChoreName      string // dispatch.go: $CHORE_NAME
+	ChoreHead      string // dispatch.go: $CHORE_HEAD
+	ChoreDiffRange string // dispatch.go: $CHORE_DIFF_RANGE
+	ChoreSlice     string // dispatch.go: $CHORE_SLICE
 }
 
 // kind is the DispatchKind fallback every reader of the field must apply
