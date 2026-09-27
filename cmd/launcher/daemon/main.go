@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/stopsignal"
 )
@@ -70,7 +71,7 @@ func parseArgs(args []string) (parsedArgs, error) {
 			v := args[i+1]
 			// A forgotten value must not swallow the kind selector or the
 			// next flag as the branch name.
-			if v == string(daemon.KindDispatch) || v == string(daemon.KindResearch) || strings.HasPrefix(v, "-") {
+			if _, ok := dispatchkind.ByVerb(v); ok || strings.HasPrefix(v, "-") {
 				return parsedArgs{}, fmt.Errorf("flag --feature-branch requires a branch name, got %q", v)
 			}
 			featureBranch = v

@@ -1,0 +1,111 @@
+// Package dispatchkind declares each Dispatch kind once (issue #3872):
+// every former string-switch on "dispatch"/"research" collapses onto one
+// Descriptor field. It imports no other spindrift internal package: forge
+// imports outcome, and both forge and outcome import dispatchkind (forge →
+// outcome → dispatchkind), so dispatchkind must stay a leaf — importing
+// forge back would cycle.
+package dispatchkind
+
+// Keying is how a Dispatch of this kind is identified against the tracker.
+type Keying int
+
+const (
+	ByIssue Keying = iota // a Dispatch carries one tracker issue
+	ByChore               // reserved for the butler (#3870); nothing reads it yet
+)
+
+// LabelFamily is the set of triage labels a kind's lifecycle moves through.
+// It starts at 1 so a Descriptor that omits Labels hits forge.FamilyLabels'
+// unknown-family panic rather than silently taking work's family.
+type LabelFamily int
+
+const (
+	LabelsConfigured LabelFamily = iota + 1 // operator-configured LABEL/IN_PROGRESS_LABEL/... (work)
+	LabelsResearch                          // fixed agent-research family, forge.ResearchDispatchLabels (ADR 0022)
+)
+
+// Settle is how a finished Box's outcome gets settled against the tracker.
+type Settle int
+
+const (
+	SettleMerge   Settle = iota // work's full merge gate, settle.New
+	SettleVerdict               // research's one-shot verdict comment, settle.NewResearchSettle*
+)
+
+// DaemonPriority is a kind's standing in the daemon's slotOrder preference.
+type DaemonPriority int
+
+const (
+	PriorityNormal   DaemonPriority = iota // preferred on every unreserved slot
+	PriorityReserved                       // preferred only on the RESEARCH_RESERVATION slots, last elsewhere
+)
+
+// Prompts names the kind's prompt templates. A zero value means "defer to
+// work's selection" for Base, and "no self-contained sub-mode" for
+// SelfContainedBase.
+type Prompts struct {
+	Base              string // "" = work's pass-dependent issue-prompt.md / fix-prompt.md selection
+	SelfContainedBase string // "" = kind has no --self-contained sub-mode
+}
+
+// Descriptor is everything that used to be a separate switch on a kind
+// string, gathered into one value per kind.
+type Descriptor struct {
+	Name           string // DISPATCH_KIND value, Box env, prompt assembly, outcome: "work" / "research"
+	Verb           string // CLI subcommand and daemon kind selector: "dispatch" / "research"
+	Keying         Keying
+	Labels         LabelFamily
+	Prompts        Prompts
+	Settle         Settle
+	AdviseOnly     bool // read-only posture: never lands code (no branch/PR/merge); ignores blockers
+	DaemonPriority DaemonPriority
+}
+
+var (
+	Work = &Descriptor{
+		Name:           "work",
+		Verb:           "dispatch",
+		Keying:         ByIssue,
+		Labels:         LabelsConfigured,
+		Settle:         SettleMerge,
+		DaemonPriority: PriorityNormal,
+	}
+	Research = &Descriptor{
+		Name:   "research",
+		Verb:   "research",
+		Keying: ByIssue,
+		Labels: LabelsResearch,
+		Prompts: Prompts{
+			Base:              "research-prompt.md",
+			SelfContainedBase: "research-self-contained-prompt.md",
+		},
+		Settle:         SettleVerdict,
+		AdviseOnly:     true,
+		DaemonPriority: PriorityReserved,
+	}
+)
+
+// All lists every kind in declaration order; that order is the daemon's
+// default pool order.
+var All = []*Descriptor{Work, Research}
+
+// ByName looks up a kind by its Name. "" is not special here — callers that
+// default "" to work do so explicitly via Work.Name.
+func ByName(name string) (*Descriptor, bool) {
+	for _, d := range All {
+		if d.Name == name {
+			return d, true
+		}
+	}
+	return nil, false
+}
+
+// ByVerb looks up a kind by its CLI/daemon Verb.
+func ByVerb(verb string) (*Descriptor, bool) {
+	for _, d := range All {
+		if d.Verb == verb {
+			return d, true
+		}
+	}
+	return nil, false
+}
