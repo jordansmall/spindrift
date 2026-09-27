@@ -480,6 +480,125 @@ func TestParseButlerArgs(t *testing.T) {
 	}
 }
 
+func TestParseButlerEvery(t *testing.T) {
+	cases := []struct {
+		name       string
+		value      string
+		wantErr    bool
+		wantChores map[string]time.Duration // For(chore) results to check
+	}{
+		{"empty value falls back to the 6h default for everyone", "", false, map[string]time.Duration{"bugs": 6 * time.Hour, "other": 6 * time.Hour}},
+		{"bare default applies to every chore", "6h", false, map[string]time.Duration{"bugs": 6 * time.Hour, "other": 6 * time.Hour}},
+		{"override wins over default", "6h docs-drift=168h", false, map[string]time.Duration{"docs-drift": 168 * time.Hour, "bugs": 6 * time.Hour}},
+		{"override with no bare default falls back to the 6h default for others", "docs-drift=168h", false, map[string]time.Duration{"docs-drift": 168 * time.Hour, "bugs": 6 * time.Hour}},
+		{"zero duration is valid and does not fall back", "0s", false, map[string]time.Duration{"bugs": 0}},
+		{"two bare defaults is an error", "6h 12h", true, nil},
+		{"duplicate override is an error", "docs-drift=1h docs-drift=2h", true, nil},
+		{"empty chore name is an error", "=1h", true, nil},
+		{"unparseable duration is an error", "bogus", true, nil},
+		{"negative bare default is an error", "-1h", true, nil},
+		{"negative override is an error", "docs-drift=-1h", true, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseButlerEvery(tc.value)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseButlerEvery(%q): got nil error, want one", tc.value)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseButlerEvery(%q): %v", tc.value, err)
+			}
+			for chore, want := range tc.wantChores {
+				if d := got.For(chore); d != want {
+					t.Errorf("parseButlerEvery(%q).For(%q) = %v, want %v", tc.value, chore, d, want)
+				}
+			}
+		})
+	}
+}
+
+// butlerEveryDefault must match BUTLER_EVERY's schema default, or an unset
+// value and an overrides-only value would get different intervals.
+func TestButlerEveryDefaultMatchesSchema(t *testing.T) {
+	for _, f := range schemaFlags {
+		if f.env != "BUTLER_EVERY" {
+			continue
+		}
+		if d, err := time.ParseDuration(f.dflt); err != nil || d != butlerEveryDefault {
+			t.Errorf("schema default %q, want %v (butlerEveryDefault)", f.dflt, butlerEveryDefault)
+		}
+		return
+	}
+	t.Fatal("BUTLER_EVERY missing from schemaFlags")
+}
+
+func TestButlerEveryConfigCheckOverrides(t *testing.T) {
+	cases := []struct {
+		name         string
+		value        string
+		butlerChores string
+		wantErr      string // substring, or "" for nil
+	}{
+		{"no overrides", "6h", "bugs", ""},
+		{"override matches an enabled chore", "docs-drift=168h", "bugs docs-drift", ""},
+		{"override names a chore not enabled", "docs-drift=168h", "bugs", "docs-drift"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			every, err := parseButlerEvery(tc.value)
+			if err != nil {
+				t.Fatalf("parseButlerEvery(%q): %v", tc.value, err)
+			}
+			err = every.checkOverrides(tc.butlerChores)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("checkOverrides(%q) = %v, want nil", tc.butlerChores, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("checkOverrides(%q) = %v, want error containing %q", tc.butlerChores, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseButlerClaimTimeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"valid duration", "6h", 6 * time.Hour, false},
+		{"short valid duration", "30m", 30 * time.Minute, false},
+		{"zero is rejected", "0s", 0, true},
+		{"negative is rejected", "-1h", 0, true},
+		{"unparseable is rejected", "bogus", 0, true},
+		{"empty is rejected", "", 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseButlerClaimTimeout(tc.value)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseButlerClaimTimeout(%q): got nil error, want one", tc.value)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseButlerClaimTimeout(%q): %v", tc.value, err)
+			}
+			if got != tc.want {
+				t.Errorf("parseButlerClaimTimeout(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
 // choreEnabled is BUTLER_CHORES's membership test: space-separated, exact
 // name match.
 func TestChoreEnabled(t *testing.T) {
