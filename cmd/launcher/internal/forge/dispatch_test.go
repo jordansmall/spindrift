@@ -107,3 +107,37 @@ func TestDispatchLabels_ClaimRemoveLabels_NonClaimOnlyRemovesFrom(t *testing.T) 
 		t.Errorf("ClaimRemoveLabels = %v, want %v", got, want)
 	}
 }
+
+func TestDispatchLabels_AlreadyClaimed(t *testing.T) {
+	d := DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+	}
+
+	// A genuine second claim: labels already carry InProgress, from is a
+	// distinct state.
+	if !d.AlreadyClaimed(Dispatchable, InProgress, []string{"agent-in-progress"}) {
+		t.Error("AlreadyClaimed(Dispatchable, InProgress, [agent-in-progress]) = false, want true")
+	}
+
+	// A normal claim onto an issue that does not yet carry InProgress.
+	if d.AlreadyClaimed(Dispatchable, InProgress, []string{"ready-for-agent"}) {
+		t.Error("AlreadyClaimed(Dispatchable, InProgress, [ready-for-agent]) = true, want false")
+	}
+
+	// The dispatch-workflow re-entry: from's own label equals the InProgress
+	// label (the workflow already claimed and handed the launcher
+	// --label agent-in-progress), so this must not read as an already-claimed
+	// error (#3887).
+	if d.AlreadyClaimed(InProgress, InProgress, []string{"agent-in-progress"}) {
+		t.Error("AlreadyClaimed(InProgress, InProgress, [agent-in-progress]) = true, want false")
+	}
+
+	// A transition that does not land on InProgress is never "already
+	// claimed".
+	if d.AlreadyClaimed(InProgress, Complete, []string{"agent-in-progress"}) {
+		t.Error("AlreadyClaimed(InProgress, Complete, [agent-in-progress]) = true, want false")
+	}
+}

@@ -343,11 +343,41 @@ func (j *jiraClient) swapLabel(num, add, remove string) error {
 		map[string]any{"update": map[string]any{"labels": ops}}, nil)
 }
 
+// alreadyClaimedNative reports whether num's current native status already
+// equals the InProgress mapping, the native-mode half of the already-claimed
+// check TransitionState runs before a claim. StatusMapping[from] == the
+// InProgress target is exempted the same way the fallback-label helper
+// exempts Label(from) == InProgress, mirroring the dispatch-workflow re-entry
+// case (#3887).
+func (j *jiraClient) alreadyClaimedNative(payload jiraIssuePayload, from forge.DispatchState) bool {
+	target, ok := j.cfg.StatusMapping[forge.InProgress]
+	if !ok || target == "" || j.cfg.StatusMapping[from] == target {
+		return false
+	}
+	return strings.EqualFold(payload.Fields.Status.Name, target)
+}
+
 // TransitionState moves issue num from state from to state to via the Jira
 // workflow transition matching StatusMapping[to]. When to is unmapped or that
 // transition is unavailable, it swaps the DispatchLabels for from/to instead
 // (ADR 0013) so the lifecycle always makes progress.
+//
+// A claim (to == InProgress) first GETs num and errors on
+// forge.ErrAlreadyClaimed without transitioning when either the native status
+// or the fallback label already reads InProgress (#3887), since either mode
+// may be the one that actually landed a prior claim. The check is
+// read-then-write, not atomic: another claimer can still land between the
+// two.
 func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) error {
+	if to == forge.InProgress {
+		var payload jiraIssuePayload
+		if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
+			return err
+		}
+		if j.cfg.Labels.AlreadyClaimed(from, to, payload.Fields.Labels) || j.alreadyClaimedNative(payload, from) {
+			return fmt.Errorf("jira: issue %s: %w (%q)", num, forge.ErrAlreadyClaimed, payload.Fields.Status.Name)
+		}
+	}
 	if target, ok := j.cfg.StatusMapping[to]; ok && target != "" {
 		err := j.transitionByStatus(num, target)
 		if err == nil {

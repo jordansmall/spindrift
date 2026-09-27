@@ -1,6 +1,9 @@
 package forge
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // DispatchState is the canonical state of an issue in the dispatch lifecycle.
 type DispatchState int
@@ -99,6 +102,21 @@ func (d DispatchLabels) Label(s DispatchState) string {
 // Ambiguous is a real label and is included.
 func (d DispatchLabels) AllLabels() []string {
 	return []string{d.Dispatchable, d.InProgress, d.Complete, d.Failed, d.Ambiguous}
+}
+
+// AlreadyClaimed reports whether a TransitionState(from, to) onto an issue
+// carrying labels claims an issue that is already InProgress (#3887). A from
+// state sharing the InProgress label is exempt: agent-dispatch.yml claims up
+// front, then runs the launcher with --label agent-in-progress, whose own
+// claim must keep succeeding on the issue it already owns.
+func (d DispatchLabels) AlreadyClaimed(from, to DispatchState, labels []string) bool {
+	if to != InProgress || d.InProgress == "" {
+		return false
+	}
+	if d.Label(from) == d.InProgress {
+		return false
+	}
+	return slices.Contains(labels, d.InProgress)
 }
 
 // ClaimRemoveLabels returns the labels a TransitionState call should remove.

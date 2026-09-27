@@ -261,7 +261,21 @@ func (e *execClient) StateLabels() forge.DispatchLabels {
 // (Complete, Failed) left by a prior run, matching the dispatch workflow's
 // claim-remove-labels set (#1985), so a re-triggered or recovered issue cannot
 // run while still labeled agent-failed or agent-complete.
+//
+// A claim first reads num's labels and errors on forge.ErrAlreadyClaimed
+// without editing anything when InProgress is already present (#3887). The
+// check is read-then-edit, not atomic: another claimer can land between the
+// read and the edit.
 func (e *execClient) TransitionState(num string, from, to forge.DispatchState) error {
+	if to == forge.InProgress {
+		labels, err := e.issueLabels(num)
+		if err != nil {
+			return err
+		}
+		if e.labels.AlreadyClaimed(from, to, labels) {
+			return fmt.Errorf("gh issue edit %s: %w (%q)", num, forge.ErrAlreadyClaimed, e.labels.Label(to))
+		}
+	}
 	add := e.labels.Label(to)
 	args := []string{"issue", "edit", num, "--repo", e.repo, "--add-label", add}
 	for _, remove := range e.labels.ClaimRemoveLabels(from, to) {

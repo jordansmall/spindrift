@@ -5,6 +5,7 @@
 package forgetest
 
 import (
+	"errors"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -49,6 +50,7 @@ type PriorityCapable interface {
 // backed by the calling adapter's own scripted-backend Harness.
 func RunTrackerContract(t *testing.T, h Harness) {
 	t.Run("DispatchLifecycle", func(t *testing.T) { testDispatchLifecycle(t, h) })
+	t.Run("ClaimAlreadyInProgress", func(t *testing.T) { testClaimAlreadyInProgress(t, h) })
 	t.Run("DoubleDispatchGuard", func(t *testing.T) { testDoubleDispatchGuard(t, h) })
 	t.Run("DepsOf", func(t *testing.T) { testDepsOf(t, h) })
 	t.Run("ResearchVerdictTerminals", func(t *testing.T) { testResearchVerdictTerminals(t, h) })
@@ -92,6 +94,30 @@ func testDispatchLifecycle(t *testing.T, h Harness) {
 	}
 	requireIn(t, tr, forge.Failed, "102")
 	requireNotIn(t, tr, forge.InProgress, "102")
+}
+
+// testClaimAlreadyInProgress checks that a second claim (TransitionState to
+// InProgress) on an issue that already carries the InProgress marker errors
+// with forge.ErrAlreadyClaimed and changes no labels, while a first, genuine
+// claim still succeeds (#3887).
+func testClaimAlreadyInProgress(t *testing.T, h Harness) {
+	tr := h.Tracker()
+	h.SeedIssue(forge.Issue{Number: "111", Title: "already claimed"})
+
+	if err := tr.TransitionState("111", forge.Untriaged, forge.Dispatchable); err != nil {
+		t.Fatalf("TransitionState(Untriaged, Dispatchable): %v", err)
+	}
+	if err := tr.TransitionState("111", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("TransitionState(Dispatchable, InProgress): %v", err)
+	}
+	requireIn(t, tr, forge.InProgress, "111")
+
+	err := tr.TransitionState("111", forge.Dispatchable, forge.InProgress)
+	if !errors.Is(err, forge.ErrAlreadyClaimed) {
+		t.Fatalf("second claim: err = %v, want errors.Is(forge.ErrAlreadyClaimed)", err)
+	}
+	requireIn(t, tr, forge.InProgress, "111")
+	requireNotIn(t, tr, forge.Dispatchable, "111")
 }
 
 // testDoubleDispatchGuard checks that CompleteVerdict requires InProgress: it

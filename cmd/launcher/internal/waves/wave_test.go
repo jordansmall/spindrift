@@ -193,7 +193,11 @@ func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) 
 	label := "" // empty: this test never sets a Dispatchable label
 
 	fc := forge.NewFake(dispatchLabels(c, label))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
+	// No pre-existing InProgress label: Claim must be a genuine first claim
+	// here, not a second claim on an already-claimed issue, which now errors
+	// distinctly (#3887) rather than reaching the orphaned-container check
+	// below this exercises.
+	fc.SetIssue(forge.Issue{Number: "1"})
 
 	fr := runner.NewFake()
 	fr.IsRunningRet = true
@@ -296,7 +300,7 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	label := "" // empty: this test never sets a Dispatchable label
 
 	fc := forge.NewFake(dispatchLabels(c, label))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1"})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	fr := runner.NewFake()
@@ -335,7 +339,7 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	label := "" // empty: this test never sets a Dispatchable label
 
 	fc := forge.NewFake(dispatchLabels(c, label))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1"})
 	// The real git Code Forge has no PR concept, so PRState always errors. A
 	// settle path that wrongly called verifyMerged for a push-only forge would
 	// read that error as "not merged" and demote the issue to failed.

@@ -261,10 +261,18 @@ func (lt *LocalTracker) Issue(num string) (forge.Issue, error) {
 // TransitionState rewrites issue num's frontmatter "state" marker to the label
 // for to. The local file has a single scalar state field, so the transition is
 // a plain overwrite rather than the GitHub adapter's label add/remove pair.
+//
+// A claim (to == InProgress) errors on forge.ErrAlreadyClaimed without
+// touching the file when the state field already reads InProgress (#3887).
+// The check is read-then-write, not atomic, so another claimer can still
+// land between the two.
 func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
 		return err
+	}
+	if lt.labels.AlreadyClaimed(from, to, []string{li.frontmatter.State}) {
+		return fmt.Errorf("local: issue %s: %w (%q)", num, forge.ErrAlreadyClaimed, lt.labels.Label(to))
 	}
 	li.frontmatter.State = lt.labels.Label(to)
 	return lt.writeIssueFile(num, li)
