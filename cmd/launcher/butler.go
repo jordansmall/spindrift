@@ -157,7 +157,7 @@ type butlerPolicy struct {
 // space-separated value (schema key butlerChores). A Consumer opts a Chore in
 // by naming it there; the default "" enables none (spec #3870).
 func choreEnabled(list, chore string) bool {
-	for _, name := range strings.Fields(list) {
+	for _, name := range butler.Chores(list) {
 		if name == chore {
 			return true
 		}
@@ -309,8 +309,8 @@ func butlerPreflight(cfg config, chore string, filerEnabled bool) error {
 		if !choreEnabled(cfg.butlerChores, chore) {
 			return fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", chore, cfg.butlerChores)
 		}
-	} else if len(strings.Fields(cfg.butlerChores)) == 0 {
-		return fmt.Errorf("butler: no chores enabled (BUTLER_CHORES is empty)")
+	} else if len(butler.Chores(cfg.butlerChores)) == 0 {
+		return fmt.Errorf("butler: %w", butler.ErrNoChores)
 	}
 	if _, err := butler.ParseClasses(cfg.butlerChoreClasses); err != nil {
 		return fmt.Errorf("butler: BUTLER_CHORE_CLASSES: %w", err)
@@ -384,7 +384,7 @@ func cmdButler(lc *launchContext, chore string) int {
 
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return lc.factory.NewChore(c) }
 
-	enabled := strings.Fields(lc.config.butlerChores)
+	enabled := butler.Chores(lc.config.butlerChores)
 	chores := []string{chore}
 	if chore == "" {
 		chores = enabled

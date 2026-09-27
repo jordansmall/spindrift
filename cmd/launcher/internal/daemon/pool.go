@@ -220,35 +220,50 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 	return p, pctx
 }
 
-// slotOrder returns the kinds slot tries, most preferred first: slots below
-// the reservation prefer the reserved kind (dispatchkind.PriorityReserved,
-// i.e. research), the rest prefer every other kind ahead of it. The order is
-// derived from kinds — only the reserved kind's position moves, so a third
-// kind added later keeps its configured place instead of silently inheriting
-// one half of a hardcoded pair. A kind with no descriptor (ByVerb misses) is
-// treated as normal priority, not reserved. Static, decided once from cfg
-// rather than a live count of who is running what: the floor is exact without
-// lock-step counting, and two slots choosing concurrently can never both claim
-// the same reserved slot (each computes its own answer independently, off its
-// own slot number, not off shared mutable state).
+// slotOrder returns the kinds slot tries, most preferred first, in three
+// tiers: the reserved kind (dispatchkind.PriorityReserved, i.e. research),
+// normal kinds (dispatchkind.PriorityNormal, e.g. work), and idle kinds
+// (dispatchkind.PriorityIdle, i.e. the butler, ADR 0056) — idle kinds are
+// always tried last, on every slot, since a slot must only pick one once
+// every other kind has reported no work. Within that, slots below the
+// reservation prefer the reserved tier ahead of normal; the rest prefer
+// normal ahead of reserved. The order is derived from kinds — only the
+// reserved kind's position moves relative to normal, so a kind added later
+// keeps its configured place within its own tier instead of silently
+// inheriting one half of a hardcoded pair. A kind with no descriptor (ByVerb
+// misses) is treated as normal priority, not reserved or idle. Static,
+// decided once from cfg rather than a live count of who is running what: the
+// floor is exact without lock-step counting, and two slots choosing
+// concurrently can never both claim the same reserved slot (each computes
+// its own answer independently, off its own slot number, not off shared
+// mutable state).
 func slotOrder(kinds []Kind, reservation, slot int) []Kind {
 	if len(kinds) < 2 {
 		return kinds
 	}
-	research := make([]Kind, 0, 1)
-	rest := make([]Kind, 0, len(kinds))
+	reserved := make([]Kind, 0, 1)
+	normal := make([]Kind, 0, len(kinds))
+	idle := make([]Kind, 0, 1)
 	for _, k := range kinds {
-		if d, ok := dispatchkind.ByVerb(string(k)); ok && d.DaemonPriority == dispatchkind.PriorityReserved {
-			research = append(research, k)
-			continue
+		d, ok := dispatchkind.ByVerb(string(k))
+		switch {
+		case ok && d.DaemonPriority == dispatchkind.PriorityReserved:
+			reserved = append(reserved, k)
+		case ok && d.DaemonPriority == dispatchkind.PriorityIdle:
+			idle = append(idle, k)
+		default:
+			normal = append(normal, k)
 		}
-		rest = append(rest, k)
 	}
 	order := make([]Kind, 0, len(kinds))
 	if slot < reservation {
-		return append(append(order, research...), rest...)
+		order = append(order, reserved...)
+		order = append(order, normal...)
+		return append(order, idle...)
 	}
-	return append(append(order, rest...), research...)
+	order = append(order, normal...)
+	order = append(order, reserved...)
+	return append(order, idle...)
 }
 
 // pickKind returns the Dispatch kind slot should fill itself with now: the
