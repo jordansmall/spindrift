@@ -76,8 +76,8 @@ var ErrLostRace = errors.New("ledger: tip moved since it was read")
 
 // Backend is the storage adapter a Chore's Ledger is built on. The local
 // forge implements it directly against its own bare Accumulation repo
-// (Local); a future push-to-remote backend implements it against a client's
-// working clone.
+// (Local); a hosted forge implements it against a client's working clone,
+// pushed to the remote (Remote).
 type Backend interface {
 	// Read returns chore's current tip, or a zero Tip (Commit == "") if the
 	// Ledger has no commit yet.
