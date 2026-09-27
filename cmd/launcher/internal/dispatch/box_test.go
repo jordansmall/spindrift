@@ -1004,7 +1004,7 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 
-	env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
+	env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce, d.chore)
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
