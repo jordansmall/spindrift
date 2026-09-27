@@ -109,6 +109,10 @@
             #     # cumulative cost in USD across every attempt dispatched so far -- the initial run, every fix pass, and any retried attempt within each (issue #2575) -- before selfHealGate stops dispatching further fix passes (issue #2001) and, forwarded into the Box, before the orchestrator's own review loop commits to a terminal land pass instead of a further BLOCK-triggered review round (issue #2694); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44
             #     usd = "0.000000";
             #   };
+            #   butler = {
+            #     # space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs` (templates/default/prompts/chores/bugs.md). `spindrift butler --chore <name>` refuses a name not listed here
+            #     chores = "";
+            #   };
             #   continuous = {
             #     # when enabled, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see the exit-code table in docs/reference.md's Dispatch exit codes section). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it. DEPRECATED: superseded by the daemon (apps.daemon, nix run .#daemon), which holds the pool as one single-Box launcher invocation per slot, each pinned to its own fetched revision, instead of one long-lived launcher process doing all the pool-holding itself (#3547); not removed — it stays available for operators who want no daemon at all, and it remains the Console's engine
             #     enable = false;

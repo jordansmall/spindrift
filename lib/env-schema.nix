@@ -380,6 +380,16 @@ in
     nixSubPath = "research.verdicts";
     boxEnv = false;
   };
+  butlerChores = {
+    env = "BUTLER_CHORES";
+    group = "dispatch";
+    default = "";
+    doc = "space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs` (templates/default/prompts/chores/bugs.md). `spindrift butler --chore <name>` refuses a name not listed here";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    nixSubPath = "butler.chores";
+    boxEnv = false;
+  };
   repoSlug = {
     env = "REPO_SLUG";
     group = "forge";

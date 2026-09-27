@@ -972,14 +972,21 @@ func localloopConfig(c config) localloop.Config {
 
 // newSettle constructs the Settler for one dispatch entry point, reused across
 // every issue in it: research's one-shot ResearchSettle, or work's merge gate.
+// SettleLedger (butler) returns nil: a ButlerSettle needs the per-run claim
+// and Scope, neither of which exists yet at bootstrap time, so the butler
+// command builds its own after claiming (ADR 0056, issue #3875) rather than
+// bootstrap misrouting it through work's merge-gate settle.New.
 func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Settler {
-	if c.kind().Settle == dispatchkind.SettleVerdict {
+	switch c.kind().Settle {
+	case dispatchkind.SettleVerdict:
 		vl := researchVerdictLabels(c)
 		filerEnabled := resolveAgentPresenceSignals(c.driver).filerEnabled
 		if c.boxForgeAndIssueAccess == "read-only" {
 			return settle.NewResearchSettleReadOnly(it, vl, filerEnabled)
 		}
 		return settle.NewResearchSettle(it, vl, filerEnabled)
+	case dispatchkind.SettleLedger:
+		return nil
 	}
 	return settle.New(settleConfig(c, lw, cf, caps), it, cf)
 }
@@ -2086,6 +2093,7 @@ var verbHandlers = map[string]verbHandler{
 		}
 		return cmdDispatch(lc)
 	},
+	"butler": butlerVerbHandler,
 	"registry": func(args []string, stderr io.Writer) int {
 		if len(args) == 0 || args[0] != "discover" {
 			fmt.Fprintln(stderr, "usage: spindrift registry discover <repo-dir> <routes-file> [--force]")
