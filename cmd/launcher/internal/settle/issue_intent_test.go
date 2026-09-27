@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -32,6 +33,83 @@ func filedURLs(filed []filedIntent) []string {
 		}
 	}
 	return urls
+}
+
+// TestParseIssueIntent_ClassMustBeALowercaseSlug: a Class outside
+// classSlugRE's shape, or past maxClassLen, is cleared rather than rejecting
+// the whole intent (issue #3880 review finding) -- it is Box-supplied text
+// interpolated unescaped into host-authored backlink/note strings, so
+// anything but a plain slug is treated the same as no claimed class at all.
+func TestParseIssueIntent_ClassMustBeALowercaseSlug(t *testing.T) {
+	cases := []struct {
+		name      string
+		class     string
+		wantClass string
+	}{
+		{"plain slug", "error-handling", "error-handling"},
+		{"single char", "a", "a"},
+		{"digits and hyphens", "a1-b2", "a1-b2"},
+		{"empty stays empty", "", ""},
+		{"uppercase rejected", "Error-Handling", ""},
+		{"leading hyphen rejected", "-error", ""},
+		{"embedded space rejected", "error handling", ""},
+		{"embedded newline rejected", "error\nhandling", ""},
+		{"backtick rejected", "error`handling", ""},
+		{"markdown-ish rejected", "**bold**", ""},
+		{"too long rejected", strings.Repeat("a", maxClassLen+1), ""},
+		{"exactly max length kept", strings.Repeat("a", maxClassLen), strings.Repeat("a", maxClassLen)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// json.Marshal, not string concatenation, so a class containing a
+			// character JSON must escape (a literal newline, a quote) still
+			// produces well-formed input -- the test is about classSlugRE's
+			// shape check, not JSON's own escaping rules.
+			payload, err := json.Marshal(map[string]string{"title": "t", "class": tc.class})
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+			in, ok := parseIssueIntent(string(payload))
+			if !ok {
+				t.Fatalf("parseIssueIntent(%q) ok = false, want true", payload)
+			}
+			if in.Class != tc.wantClass {
+				t.Errorf("Class = %q, want %q", in.Class, tc.wantClass)
+			}
+		})
+	}
+}
+
+// TestParseIssueIntent_ConcurrenceIsBoundedAndBacktickNeutralized: Concurrence
+// is Box-supplied prose too, interpolated into the same host-authored
+// promotion note as Class, so it gets the same treatment: capped length and
+// no backticks that could open/close a markdown code span in that note.
+func TestParseIssueIntent_ConcurrenceIsBoundedAndBacktickNeutralized(t *testing.T) {
+	cases := []struct {
+		name        string
+		concurrence string
+		want        string
+	}{
+		{"plain text kept", "looks good", "looks good"},
+		{"backtick neutralized", "agreed, `rm -rf /` is safe", "agreed, 'rm -rf /' is safe"},
+		{"exactly max length kept", strings.Repeat("a", maxConcurrenceLen), strings.Repeat("a", maxConcurrenceLen)},
+		{"too long truncated", strings.Repeat("a", maxConcurrenceLen+50), strings.Repeat("a", maxConcurrenceLen)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]string{"title": "t", "concurrence": tc.concurrence})
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+			in, ok := parseIssueIntent(string(payload))
+			if !ok {
+				t.Fatalf("parseIssueIntent(%q) ok = false, want true", payload)
+			}
+			if in.Concurrence != tc.want {
+				t.Errorf("Concurrence = %q, want %q", in.Concurrence, tc.want)
+			}
+		})
+	}
 }
 
 // captureStdout runs fn with os.Stdout redirected to a pipe and returns

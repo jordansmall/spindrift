@@ -81,7 +81,7 @@ func TestButlerSettle_FilesFindingsWithProvenanceLabelAndBacklink(t *testing.T) 
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
 	result := readyResult(
 		`{"title":"bug in a.go","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -124,7 +124,7 @@ func TestButlerSettle_DoneCommitContents(t *testing.T) {
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -176,7 +176,7 @@ func TestButlerSettle_PartialFilingFailure_RecordsOnlyWhatFiled(t *testing.T) {
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -210,7 +210,7 @@ func TestButlerSettle_CapDropsOverflowAndRecordsDropped(t *testing.T) {
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 2)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 2, PromotionPolicy{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -253,7 +253,7 @@ func TestButlerSettle_ZeroCapFilesEverything(t *testing.T) {
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -289,7 +289,7 @@ func TestButlerSettle_MalformedPayloadDoesNotCountTowardCap(t *testing.T) {
 
 	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 1)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 1, PromotionPolicy{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -360,7 +360,7 @@ func TestButlerSettle_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
 			fc := forge.NewFake()
 			scope := butler.Scope{Head: "newhead", NextCursor: "newcursor"}
 			now := start.Add(3 * time.Minute)
-			s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
+			s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
 			s.Settle(dispatch.NewFake(), "butler-bugs", 0, tc.result)
 
@@ -380,6 +380,397 @@ func TestButlerSettle_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
 			}
 			if tip.State.LastSwept != "prevhead" || tip.State.Cursor != "prevcursor" {
 				t.Errorf("LastSwept/Cursor = %q/%q, want prevhead/prevcursor (scope's newhead/newcursor must not land)", tip.State.LastSwept, tip.State.Cursor)
+			}
+		})
+	}
+}
+
+// labelsForFinding returns the labels PostIssue was called with for the
+// finding titled title, or nil if no such call happened.
+func labelsForFinding(fc *forge.Fake, title string) []string {
+	for _, call := range fc.PostIssueCalls {
+		if call.Title == title {
+			return call.Labels
+		}
+	}
+	return nil
+}
+
+// (e) All four gates pass: the finding files carrying both labels, a body
+// naming the class and quoting the reviewer's own concurrence, and the
+// Ledger done commit records the URL in Promoted (issue #3880).
+func TestButlerSettle_Promotion_AllGatesPass(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/701"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 2, Room: func() int { return 1 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(`{"title":"promotable bug","body":"repro","dedupTerms":["a.go:Foo"],"class":"error-handling","concurrence":"looks like a real bug, agreed"}`)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("want 1 PostIssue call, got %d", len(fc.PostIssueCalls))
+	}
+	call := fc.PostIssueCalls[0]
+	if !slices.Contains(call.Labels, "agent-butler-finding") || !slices.Contains(call.Labels, "ready-for-agent") {
+		t.Errorf("labels = %v, want both agent-butler-finding and ready-for-agent", call.Labels)
+	}
+	if !strings.Contains(call.Body, "Auto-promoted") || !strings.Contains(call.Body, "error-handling") || !strings.Contains(call.Body, "looks like a real bug, agreed") {
+		t.Errorf("body = %q, want an auto-promoted note naming the class and quoting the concurrence", call.Body)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want [%s]", tip.State.Promoted, fc.PostIssueURL)
+	}
+}
+
+// (e2) A Consumer-configured non-default work label (LABEL=agent-go) is what
+// a promoted finding actually carries, not a hardcoded "ready-for-agent"
+// (issue #3880).
+func TestButlerSettle_Promotion_CustomLabel(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/705"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 2, Room: func() int { return 1 }, Label: "agent-go"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(`{"title":"promotable bug","body":"repro","dedupTerms":["a.go:Foo"],"class":"error-handling","concurrence":"looks like a real bug, agreed"}`)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("want 1 PostIssue call, got %d", len(fc.PostIssueCalls))
+	}
+	call := fc.PostIssueCalls[0]
+	if !slices.Contains(call.Labels, "agent-go") || slices.Contains(call.Labels, "ready-for-agent") {
+		t.Errorf("labels = %v, want agent-go and not the ready-for-agent default", call.Labels)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want [%s]", tip.State.Promoted, fc.PostIssueURL)
+	}
+}
+
+// (f) Any single gate failing alone -- class not on the allow-list, no class
+// at all, too many files even with an allow-listed class, no files, no
+// reviewer concurrence, or no promotion room (default policy, or a Room
+// func) -- files the finding unlabelled: agent-butler-finding only, no
+// ready-for-agent, and nothing lands in the Ledger's Promoted list.
+func TestButlerSettle_Promotion_AnyGateFailingFilesUnlabelled(t *testing.T) {
+	base := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 2, Room: func() int { return 1 }, Label: "ready-for-agent"}
+
+	cases := []struct {
+		name    string
+		policy  PromotionPolicy
+		payload string
+	}{
+		{
+			"class not on the allow-list",
+			base,
+			`{"title":"f1","body":"b","dedupTerms":["a.go:X"],"class":"dead-code","concurrence":"agreed"}`,
+		},
+		{
+			"empty class",
+			base,
+			`{"title":"f2","body":"b","dedupTerms":["a.go:X"],"class":"","concurrence":"agreed"}`,
+		},
+		{
+			"files exceed the host limit despite an allow-listed class",
+			func() PromotionPolicy { p := base; p.MaxFiles = 1; return p }(),
+			`{"title":"f3","body":"b","dedupTerms":["a.go:X","b.go:Y"],"class":"error-handling","concurrence":"agreed"}`,
+		},
+		{
+			"zero files",
+			base,
+			`{"title":"f4","body":"b","dedupTerms":[],"class":"error-handling","concurrence":"agreed"}`,
+		},
+		{
+			"empty concurrence",
+			base,
+			`{"title":"f5","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":""}`,
+		},
+		{
+			"whitespace-only concurrence",
+			base,
+			`{"title":"f6","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"   "}`,
+		},
+		{
+			"maxPromotionsPerDay defaults to zero room",
+			func() PromotionPolicy { p := base; p.Room = func() int { return 0 }; return p }(),
+			`{"title":"f7","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`,
+		},
+		{
+			"no Room func at all",
+			func() PromotionPolicy { p := base; p.Room = nil; return p }(),
+			`{"title":"f8","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`,
+		},
+		{
+			"empty Label fails closed despite every other gate passing",
+			func() PromotionPolicy { p := base; p.Label = ""; return p }(),
+			`{"title":"f9","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := ledger.Local{Repo: newButlerBareRepo(t)}
+			start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			claim := claimButlerChore(t, backend, "bugs", start)
+
+			fc := forge.NewFake()
+			fc.PostIssueURL = "https://example.com/issues/702"
+
+			scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+			now := start.Add(time.Minute)
+			s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, tc.policy)
+
+			result := readyResult(tc.payload)
+			s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+			if len(fc.PostIssueCalls) != 1 {
+				t.Fatalf("want 1 PostIssue call, got %d", len(fc.PostIssueCalls))
+			}
+			labels := fc.PostIssueCalls[0].Labels
+			if len(labels) != 1 || labels[0] != "agent-butler-finding" {
+				t.Errorf("labels = %v, want exactly [agent-butler-finding]", labels)
+			}
+
+			tip, err := backend.Read("bugs")
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if len(tip.State.Promoted) != 0 {
+				t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+			}
+		})
+	}
+}
+
+// (g) Room of 1 with two eligible findings promotes only the first; the
+// second files unlabelled once the day's room is spent.
+func TestButlerSettle_Promotion_RoomOfOnePromotesOnlyFirst(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/703"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(
+		`{"title":"first eligible","body":"b1","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed one"}`,
+		`{"title":"second eligible","body":"b2","dedupTerms":["b.go:Y"],"class":"error-handling","concurrence":"agreed two"}`,
+	)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if got := labelsForFinding(fc, "first eligible"); !slices.Contains(got, "ready-for-agent") {
+		t.Errorf("first eligible labels = %v, want ready-for-agent", got)
+	}
+	if got := labelsForFinding(fc, "second eligible"); slices.Contains(got, "ready-for-agent") {
+		t.Errorf("second eligible labels = %v, want no ready-for-agent (room spent)", got)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Promoted) != 1 {
+		t.Errorf("Promoted = %v, want exactly 1 entry", tip.State.Promoted)
+	}
+}
+
+// (g2) Room of 1 with two eligible findings, but the first's PostIssue call
+// fails: the failed post must not spend the room, so the second still
+// promotes (issue #3880 review finding -- remaining must be returned on a
+// failed filing, not just decremented ahead of PostIssue).
+func TestButlerSettle_Promotion_FailedPostReturnsRoomToLaterFinding(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/706"
+	fc.PostIssueErrForTitle = map[string]error{"first eligible": errors.New("create failed")}
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(
+		`{"title":"first eligible","body":"b1","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed one"}`,
+		`{"title":"second eligible","body":"b2","dedupTerms":["b.go:Y"],"class":"error-handling","concurrence":"agreed two"}`,
+	)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if got := labelsForFinding(fc, "second eligible"); !slices.Contains(got, "ready-for-agent") {
+		t.Errorf("second eligible labels = %v, want ready-for-agent (the first's failed post must not spend the room)", got)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want exactly [%s] (only the second, successfully filed finding)", tip.State.Promoted, fc.PostIssueURL)
+	}
+}
+
+// (h) The Box cannot widen its own promotion: extra payload keys naming a
+// different allow-list, a bigger file limit, or the ready-for-agent label
+// directly are simply unknown fields to issueIntent and have no effect --
+// the finding still files unlabelled because its own claimed class isn't on
+// the host's real allow-list.
+func TestButlerSettle_Promotion_PayloadCannotWidenPolicy(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/704"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 5 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(
+		`{"title":"sneaky payload","body":"b","dedupTerms":["a.go:X"],"class":"dead-code","concurrence":"agreed","classes":["dead-code"],"maxFiles":999,"labels":["ready-for-agent"]}`,
+	)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	labels := labelsForFinding(fc, "sneaky payload")
+	if len(labels) != 1 || labels[0] != "agent-butler-finding" {
+		t.Errorf("labels = %v, want exactly [agent-butler-finding] -- the payload's extra keys must not widen the policy", labels)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Promoted) != 0 {
+		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+	}
+}
+
+// (i0) A multi-line Concurrence renders as one line in the promotion note --
+// the reviewer's own prose must not break the note's single sentence, or let
+// a crafted Concurrence inject its own markdown structure (issue #3880).
+func TestButlerSettle_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/707"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(`{"title":"multi-line concurrence","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed,\n\nbut also:\n- one\n- two"}`)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("want 1 PostIssue call, got %d", len(fc.PostIssueCalls))
+	}
+	body := fc.PostIssueCalls[0].Body
+	i := strings.Index(body, "**Auto-promoted**")
+	if i < 0 {
+		t.Fatalf("body = %q, want an Auto-promoted note", body)
+	}
+	rest := body[i:]
+	wantNote := "**Auto-promoted** to `ready-for-agent` by the butler: class `error-handling` is on the `bugs` Chore's allow-list, it touches 1 file(s) (host limit 1), and the in-Box reviewer agreed: agreed, but also: - one - two"
+	// rest is "<note>\n\n<dedup marker>": the note itself must be exactly one
+	// line, so cutting at the first newline must yield the whole expected
+	// note text, not a prefix of a multi-line one.
+	if !strings.HasPrefix(rest, wantNote+"\n\n") {
+		t.Errorf("note region = %q, want it to start with the one-line note %q", rest, wantNote)
+	}
+}
+
+// (i) PromotionPolicy.eligible in isolation: a base policy and intent that
+// pass every gate, then one table case per gate broken alone -- unlike the
+// Settle-level tests above, these need no forge, no Ledger, and no PostIssue.
+func TestPromotionPolicy_Eligible(t *testing.T) {
+	basePolicy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 2, Label: "ready-for-agent"}
+	baseIntent := issueIntent{Title: "t", Class: "error-handling", DedupTerms: []string{"a.go:X"}, Concurrence: "agreed"}
+
+	if !basePolicy.eligible(baseIntent, butlerFiles(baseIntent.DedupTerms)) {
+		t.Fatalf("base policy/intent must be eligible")
+	}
+
+	cases := []struct {
+		name   string
+		policy PromotionPolicy
+		intent issueIntent
+	}{
+		{
+			"empty Label",
+			func() PromotionPolicy { p := basePolicy; p.Label = ""; return p }(),
+			baseIntent,
+		},
+		{
+			"empty Class",
+			basePolicy,
+			func() issueIntent { in := baseIntent; in.Class = ""; return in }(),
+		},
+		{
+			"Class off the allow-list",
+			basePolicy,
+			func() issueIntent { in := baseIntent; in.Class = "dead-code"; return in }(),
+		},
+		{
+			"zero files",
+			basePolicy,
+			func() issueIntent { in := baseIntent; in.DedupTerms = nil; return in }(),
+		},
+		{
+			"files exceed MaxFiles",
+			func() PromotionPolicy { p := basePolicy; p.MaxFiles = 1; return p }(),
+			func() issueIntent { in := baseIntent; in.DedupTerms = []string{"a.go:X", "b.go:Y"}; return in }(),
+		},
+		{
+			"empty Concurrence",
+			basePolicy,
+			func() issueIntent { in := baseIntent; in.Concurrence = ""; return in }(),
+		},
+		{
+			"whitespace-only Concurrence",
+			basePolicy,
+			func() issueIntent { in := baseIntent; in.Concurrence = "   \n\t "; return in }(),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.policy.eligible(tc.intent, butlerFiles(tc.intent.DedupTerms)) {
+				t.Errorf("eligible() = true, want false with %s broken alone", tc.name)
 			}
 		})
 	}

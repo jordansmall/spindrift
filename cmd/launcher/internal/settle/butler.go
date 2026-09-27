@@ -2,6 +2,7 @@ package settle
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -12,6 +13,50 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
 )
+
+// PromotionPolicy is the host-side auto-promotion gate for one Chore's
+// findings (issue #3880, ADR 0056). It reaches ButlerSettle only through
+// NewButlerSettle's caller -- never from the Box's issue-intent payload --
+// so a Box cannot widen its own allow-list, raise its own file limit, or
+// grant itself more of the day's promotion room; issueIntent.Class and
+// .Concurrence are inputs to this gate, never the gate itself.
+type PromotionPolicy struct {
+	// Classes is this Chore's host-side finding-class allow-list (from
+	// BUTLER_CHORE_CLASSES). Nil/empty means no class is promotable -- an
+	// unconfigured Chore reads as opted out, not "trust the Box".
+	Classes []string
+	// MaxFiles is the host limit on how many files a promoted finding may
+	// touch. A finding naming zero files is never promotable regardless of
+	// MaxFiles (scope unknown), and MaxFiles itself must be >=1 for
+	// anything to promote.
+	MaxFiles int
+	// Room reports how many promotions remain today; evaluated at most once
+	// per Settle call (concurrent runs make a value fetched earlier stale by
+	// the time this run would spend it). nil, or a func returning <=0,
+	// means no room: promotion is off regardless of the other three gates.
+	Room func() int
+	// Label is the work kind's own configured dispatch label (LABEL,
+	// Consumer-configurable) -- carried on a promoted finding alongside
+	// "agent-butler-finding" so the work path picks it up (issue #3880).
+	// Empty means unconfigured: never promote, rather than guess a name.
+	Label string
+}
+
+// eligible reports whether in clears every promotion gate but room -- room
+// is this call's shared, mutable per-sweep remaining counter, not p's Room
+// field itself, so Settle checks it separately alongside eligible.
+func (p PromotionPolicy) eligible(in issueIntent, files []string) bool {
+	if p.Label == "" {
+		return false
+	}
+	if in.Class == "" || !slices.Contains(p.Classes, in.Class) {
+		return false
+	}
+	if len(files) < 1 || len(files) > p.MaxFiles {
+		return false
+	}
+	return strings.TrimSpace(in.Concurrence) != ""
+}
 
 // ButlerSettle is the butler dispatch kind's one-shot settle adapter (ADR
 // 0056, issue #3875): file each finding the Box reported, then write the
@@ -27,6 +72,7 @@ type ButlerSettle struct {
 	scope               butler.Scope
 	now                 func() time.Time
 	maxFindingsPerSweep int
+	policy              PromotionPolicy
 }
 
 var _ Settler = (*ButlerSettle)(nil)
@@ -36,9 +82,11 @@ var _ Settler = (*ButlerSettle)(nil)
 // compare-and-swap parent); scope is the run's computed Scope
 // (internal/butler.NextScope), whose Head/NextCursor become the done
 // commit's lastSwept/cursor on success. maxFindingsPerSweep caps how many
-// well-formed findings Settle will file in one sweep; 0 means no cap.
-func NewButlerSettle(it forge.IssueTracker, backend ledger.Backend, chore string, claim ledger.Tip, scope butler.Scope, now func() time.Time, maxFindingsPerSweep int) *ButlerSettle {
-	return &ButlerSettle{it: it, ledger: backend, chore: chore, claim: claim, scope: scope, now: now, maxFindingsPerSweep: maxFindingsPerSweep}
+// well-formed findings Settle will file in one sweep; 0 means no cap. policy
+// is the host-side auto-promotion gate (issue #3880); its zero value
+// (Classes nil, MaxFiles 0, Room nil) never promotes anything.
+func NewButlerSettle(it forge.IssueTracker, backend ledger.Backend, chore string, claim ledger.Tip, scope butler.Scope, now func() time.Time, maxFindingsPerSweep int, policy PromotionPolicy) *ButlerSettle {
+	return &ButlerSettle{it: it, ledger: backend, chore: chore, claim: claim, scope: scope, now: now, maxFindingsPerSweep: maxFindingsPerSweep, policy: policy}
 }
 
 // Settle files result's findings, if any, then writes the Chore's done
@@ -66,15 +114,35 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	capped := result
 	capped.IssueIntents = kept
 
-	filed := fileIssueIntentsDetailedFunc(b.it, num, capped, "agent-butler-finding", func(in issueIntent) string {
-		return butlerBacklink(b.chore, in.DedupTerms)
+	// Room is evaluated at most once per Settle, and only when this Chore
+	// has an allow-list at all -- a Chore with no Classes can never promote,
+	// so spending a Ledger walk on Room for it would be waste. Evaluating at
+	// settle time rather than at run start means a promotion whose done
+	// commit already landed is counted here; it is still a soft cap like
+	// ADR 0056's other budgets, not a hard one -- two runs settling at the
+	// same moment can each read the same total and both spend it.
+	remaining := 0
+	if len(b.policy.Classes) > 0 && b.policy.Room != nil {
+		remaining = b.policy.Room()
+	}
+
+	filed := fileIssueIntentsDetailedFunc(b.it, num, capped, "agent-butler-finding", func(in issueIntent) (string, []string, func()) {
+		backlink := butlerBacklink(b.chore, in)
+		files := butlerFiles(in.DedupTerms)
+		if !b.policy.eligible(in, files) || remaining <= 0 {
+			return backlink, nil, nil
+		}
+		note := promotionNote(b.chore, in, b.policy, len(files))
+		// Spend the slot only in onFiled, after PostIssue succeeds, so a
+		// failed post frees it back to the rest of the sweep.
+		return backlink + "\n\n" + note, []string{b.policy.Label}, func() { remaining-- }
 	})
 	reportFiled(num, filed)
 	if dropped > 0 {
 		fmt.Printf("    #%s  dropped %d finding(s) beyond the %d-per-sweep cap\n", num, dropped, b.maxFindingsPerSweep)
 	}
 
-	var urls []string
+	var urls, promoted []string
 	for _, f := range filed {
 		// Only a successful filing's URL is ever recorded: a Skipped intent
 		// was never posted (there is nothing to name), and a Failed one's
@@ -85,12 +153,16 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 			continue
 		}
 		urls = append(urls, f.URL)
+		if b.policy.Label != "" && slices.Contains(f.ExtraLabels, b.policy.Label) {
+			promoted = append(promoted, f.URL)
+		}
 	}
 
 	state := ledger.State{
 		LastSwept: b.scope.Head,
 		Cursor:    b.scope.NextCursor,
 		Filed:     urls,
+		Promoted:  promoted,
 		Usage:     d.CumulativeUsage(),
 		Dropped:   dropped,
 	}
@@ -101,21 +173,28 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	}
 
 	note := fmt.Sprintf("%d filed", len(urls))
+	if len(promoted) > 0 {
+		note = fmt.Sprintf("%d filed, %d promoted", len(urls), len(promoted))
+	}
 	if dropped > 0 {
-		note = fmt.Sprintf("%d filed, %d dropped", len(urls), dropped)
+		note = fmt.Sprintf("%s, %d dropped", note, dropped)
 	}
 	report.Settled(num, forge.Complete.String(), note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
 }
 
 // butlerBacklink renders the per-intent backlink fileIssueIntentsDetailedFunc
-// appends to a filed finding's body: which Chore filed it, and which files
-// (the path before the first ':' in each dedup term, deduped, order kept) it
-// concerns. The Files sentence is omitted entirely when terms yields no
-// paths, rather than printing "Files: ".
-func butlerBacklink(chore string, dedupTerms []string) string {
+// appends to a filed finding's body: which Chore filed it, the Box-claimed
+// class if any (issue #3870/#3880 -- named here regardless of whether the
+// finding ends up promoted), and which files (the path before the first ':'
+// in each dedup term, deduped, order kept) it concerns. The Files sentence is
+// omitted entirely when terms yields no paths, rather than printing "Files: ".
+func butlerBacklink(chore string, in issueIntent) string {
 	lead := fmt.Sprintf("Filed by the butler's `%s` Chore.", chore)
-	files := butlerFiles(dedupTerms)
+	if in.Class != "" {
+		lead += fmt.Sprintf(" Class: `%s`.", in.Class)
+	}
+	files := butlerFiles(in.DedupTerms)
 	if len(files) == 0 {
 		return lead
 	}
@@ -124,6 +203,28 @@ func butlerBacklink(chore string, dedupTerms []string) string {
 		quoted[i] = "`" + f + "`"
 	}
 	return fmt.Sprintf("%s Files: %s.", lead, strings.Join(quoted, ", "))
+}
+
+// promotionNote renders the visible note appended to a promoted finding's
+// body, naming the class and quoting the reviewer's own words (issue #3880)
+// rather than just asserting agreement -- a reader should be able to check
+// the reviewer's claim, not just trust that it happened.
+// Concurrence is collapsed to one line: it is reviewer-written prose, not
+// host text, and an embedded newline would otherwise let it break out of the
+// note's single sentence.
+func promotionNote(chore string, in issueIntent, policy PromotionPolicy, nFiles int) string {
+	concurrence := oneLine(in.Concurrence)
+	return fmt.Sprintf(
+		"**Auto-promoted** to `%s` by the butler: class `%s` is on the `%s` Chore's allow-list, it touches %d file(s) (host limit %d), and the in-Box reviewer agreed: %s",
+		policy.Label, in.Class, chore, nFiles, policy.MaxFiles, concurrence,
+	)
+}
+
+// oneLine collapses s's internal whitespace, including any newline, down to
+// single spaces and trims the ends -- Concurrence is Box-supplied reviewer
+// prose (issue #3880) and must render as one line in host-authored note text.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // butlerFiles extracts the file path from each "path/to/file.go:Symbol"

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -26,6 +27,17 @@ type issueIntent struct {
 	// Type is an optional finding-type token (issue #2594 / ADR 0041), never
 	// used directly as a label; see ensureTypeLabel.
 	Type string `json:"type"`
+	// Class and Concurrence are both Box claims the butler's auto-promotion
+	// gate (issue #3880, ADR 0056) takes as input, never as the gate itself:
+	// Class is the finding class the Box tagged, checked against the host's
+	// own allow-list; Concurrence is the in-Box reviewer's one-line
+	// agreement, empty when the reviewer dissented or never ran. Both are
+	// bounded and backtick-neutralized by parseIssueIntent before they ever
+	// reach host-authored note text. Neither field can promote anything on
+	// its own -- the host-side policy passed to ButlerSettle's constructor
+	// decides that.
+	Class       string `json:"class"`
+	Concurrence string `json:"concurrence"`
 }
 
 // ensureTypeLabel ensure-creates typ's mapped label and returns the label to
@@ -51,9 +63,42 @@ func ensureTypeLabel(it forge.IssueTracker, typ string, existing []string) strin
 	return typ
 }
 
+// classSlugRE bounds the Box-supplied Class to a lowercase slug: it is
+// interpolated into host-authored backlink/note text unescaped (issue
+// #3880), so anything outside this shape would let the Box inject its own
+// formatting into a host string rather than merely naming a class.
+var classSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// maxClassLen bounds Class's length; a finding class is a short slug, not
+// free text, and an unbounded value is as much an injection surface as a
+// disallowed character would be.
+const maxClassLen = 40
+
+// maxConcurrenceLen bounds Concurrence, in runes, for the same reason
+// maxClassLen bounds Class: it is Box-supplied prose interpolated into
+// host-authored note text, and an unbounded value would let one finding's
+// note balloon arbitrarily.
+const maxConcurrenceLen = 200
+
+// sanitizeConcurrence truncates s to maxConcurrenceLen runes and neutralizes
+// backticks, which would otherwise let Box text open or close a markdown
+// code span inside the host-authored promotion note, spoofing its
+// formatting rather than merely being quoted within it.
+func sanitizeConcurrence(s string) string {
+	s = strings.ReplaceAll(s, "`", "'")
+	if r := []rune(s); len(r) > maxConcurrenceLen {
+		s = string(r[:maxConcurrenceLen])
+	}
+	return s
+}
+
 // parseIssueIntent decodes one raw SPINDRIFT_ISSUE_INTENT payload, already
 // base64-decoded and nonce-verified by outcome.AllIssueIntentLinesInLog.
-// Returns ok=false for malformed JSON or a blank title.
+// Returns ok=false for malformed JSON or a blank title. A Class that isn't a
+// classSlugRE-shaped slug within maxClassLen is cleared rather than
+// rejecting the whole intent: it reads downstream as "no class claimed", so
+// it is simply never named and never promotable, the same as an
+// intentionally absent Class.
 func parseIssueIntent(raw string) (issueIntent, bool) {
 	var in issueIntent
 	if err := json.Unmarshal([]byte(raw), &in); err != nil {
@@ -62,6 +107,10 @@ func parseIssueIntent(raw string) (issueIntent, bool) {
 	if strings.TrimSpace(in.Title) == "" {
 		return issueIntent{}, false
 	}
+	if len(in.Class) > maxClassLen || !classSlugRE.MatchString(in.Class) {
+		in.Class = ""
+	}
+	in.Concurrence = sanitizeConcurrence(in.Concurrence)
 	return in, true
 }
 
@@ -82,6 +131,12 @@ type filedIntent struct {
 	// entry so a verdict-comment renderer can name what it matched (issue
 	// #3811), rather than that reference only ever reaching stdout.
 	DupRef string
+	// ExtraLabels holds the extraLabels decorate returned for this intent,
+	// set only on a successful filing -- a failed PostIssue never applied
+	// them. ButlerSettle reads this back to know which URLs its own
+	// promotion gate actually promoted, without threading a second return
+	// path through fileIssueIntentsDetailedFunc.
+	ExtraLabels []string
 }
 
 // fileIssueIntentsDetailed returns one filedIntent per well-formed payload in
@@ -90,18 +145,28 @@ type filedIntent struct {
 // any ensureTypeLabel match, never the payload's own (issue #1949). A package
 // function, not a *Settle method, so ResearchSettle can call it (issue #2590).
 func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel, bodyBacklink string) []filedIntent {
-	return fileIssueIntentsDetailedFunc(it, num, result, provenanceLabel, func(issueIntent) string { return bodyBacklink })
+	return fileIssueIntentsDetailedFunc(it, num, result, provenanceLabel, func(issueIntent) (string, []string, func()) { return bodyBacklink, nil, nil })
 }
 
 // fileIssueIntentsDetailedFunc is fileIssueIntentsDetailed's per-intent sibling
-// (issue #3875): bodyBacklink is computed from each intent rather than fixed
+// (issue #3875): decorate is computed from each intent rather than fixed
 // once, so a caller like ButlerSettle can name that intent's own files in its
-// backlink. fileIssueIntentsDetailed delegates to this with a constant
-// closure, rather than the other way around, so gate.go's call keeps its
-// existing (it, num, result, provenanceLabel, bodyBacklink string) shape --
-// nix/checks/dispatch-labels.nix's extractFileIssueIntentsProvenanceLabel
-// extracts the provenance label from that exact call site as source text.
-func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, bodyBacklink func(issueIntent) string) []filedIntent {
+// backlink. It also returns extraLabels -- labels beyond the provenance and
+// type labels this function already applies, e.g. ButlerSettle's own
+// auto-promotion gate (issue #3880) adding "ready-for-agent" -- appended
+// after them, and, on a successful filing only, recorded onto the resulting
+// filedIntent.ExtraLabels. The third return, onFiled, is called only after
+// PostIssue actually succeeds -- never on a failed or skipped intent -- so a
+// caller that spends shared state (ButlerSettle's per-run promotion room) on
+// deciding extraLabels can defer committing that spend until the filing it
+// was for is real: a failed PostIssue must not burn the day's promotion
+// room. fileIssueIntentsDetailed delegates to this with a constant closure,
+// rather than the other way around, so gate.go's call keeps its existing
+// (it, num, result, provenanceLabel, bodyBacklink string) shape --
+// nix/checks/dispatch-labels.nix's
+// extractFileIssueIntentsProvenanceLabel extracts the provenance label from
+// that exact call site as source text.
+func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func())) []filedIntent {
 	if !result.IssueIntentsFound {
 		return nil
 	}
@@ -162,8 +227,9 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		if ov.partial() {
 			fmt.Printf("    #%s  filing issue-intent %q despite partial dedup overlap (already tracked: [%s] via %s)\n", num, in.Title, strings.Join(ov.covered, ", "), strings.Join(ov.refs, ", "))
 		}
+		link, extraLabels, onFiled := decorate(in)
 		body := in.Body
-		if link := bodyBacklink(in); link != "" {
+		if link != "" {
 			body = in.Body + "\n\n" + link
 		}
 		// The launcher's own marker goes last unconditionally, even carrying
@@ -181,6 +247,7 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		if l := ensureTypeLabel(it, in.Type, existingLabels); l != "" {
 			labels = append(labels, l)
 		}
+		labels = append(labels, extraLabels...)
 		url, err := filer.PostIssue(in.Title, body, labels)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent file failed: %v\n", num, err)
@@ -194,7 +261,10 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		for k := range keys {
 			dedupIndex[k] = ref
 		}
-		out = append(out, filedIntent{Title: in.Title, URL: url})
+		if onFiled != nil {
+			onFiled()
+		}
+		out = append(out, filedIntent{Title: in.Title, URL: url, ExtraLabels: extraLabels})
 	}
 	return out
 }
