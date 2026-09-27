@@ -97,7 +97,7 @@ type Env struct {
 
 	// DispatchKind, SelfContained, FixPass, and ResumeAfterHold select which
 	// prompt renders (research/fix/issue) and the session-resume mode.
-	DispatchKind    string // entrypoint.sh: $DISPATCH_KIND (default "work"), read via _is_research_kind
+	DispatchKind    string // entrypoint.sh: $DISPATCH_KIND (default "work")
 	SelfContained   bool   // entrypoint.sh: $SELF_CONTAINED == "1", read via _is_self_contained
 	FixPass         int    // entrypoint.sh: $FIX_PASS (fix-pass number; >0 selects fix-prompt.md)
 	ResumeAfterHold bool   // entrypoint.sh: $RESUME_AFTER_HOLD presence

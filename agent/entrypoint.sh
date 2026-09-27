@@ -561,11 +561,11 @@ _subst() {
   env "${_assign[@]}" envsubst "$_vars" <"$f"
 }
 
-# _is_research_kind reports whether this dispatch is the advise-only research
-# kind (ADR 0022, issue #640); the default is work, so an unset DISPATCH_KIND is
-# never mistaken for research.
-_is_research_kind() {
-  [ "${DISPATCH_KIND:-work}" = "research" ]
+# _is_advise_only reports whether this dispatch's kind never lands code (ADR
+# 0022, issue #640). The launcher derives ADVISE_ONLY from the kind's descriptor
+# (issue #3872); unset defaults to off.
+_is_advise_only() {
+  [ "${ADVISE_ONLY:-}" = "1" ]
 }
 
 # _is_self_contained reports whether this is the research kind's no-repo sub-mode
@@ -1054,9 +1054,10 @@ main() {
     # covers all four ecosystems (issues #2932, #2933). See the revert/re-apply
     # dance around phase_branch_recovery/phase_prework_rebase just below.
     intree_binding_apply
-    # A research dispatch (ADR 0022, issue #640) explores the clone but never
-    # lands code: no branch to cut, adopt, or rebase, so no dance either.
-    if ! _is_research_kind; then
+    # An advise-only dispatch (research today, ADR 0022, issue #640) explores
+    # the clone but never lands code: no branch to cut, adopt, or rebase, so
+    # no dance either.
+    if ! _is_advise_only; then
       intree_binding_revert
       phase_branch_recovery
       phase_prework_rebase
@@ -1080,7 +1081,7 @@ main() {
   phase_conflict_resolve
   phase_prompt_assembly
 
-  if _is_research_kind; then
+  if _is_advise_only; then
     echo "==> claude researching issue #$ISSUE_NUMBER"
   else
     echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
@@ -1094,7 +1095,7 @@ main() {
   # nudge the marker-gate verb renders, near-miss-quoting variant included (issue
   # #1900). Research pins no session and a non-zero exit is the launcher's path.
   local _outcome_gate_resumed=""
-  if [ "$claude_rc" -eq 0 ] && ! _is_research_kind; then
+  if [ "$claude_rc" -eq 0 ] && ! _is_advise_only; then
     local _outcome_gate_json
     _outcome_gate_json="$(driver-exec marker-gate --phase nudge --marker outcome \
       --log-path "$_last_driver_text_log" \
@@ -1212,17 +1213,18 @@ main() {
   # warns when a git-tracked lockfile still names the run's Forwarder URL, so a
   # stale pin does not ship silently. Unguarded by $claude_rc, since a crashed
   # run can still have committed one. Guarded on !_is_self_contained rather than
-  # !_is_research_kind: only a self-contained dispatch has no clone to scan.
+  # !_is_advise_only: only a self-contained dispatch has no clone to scan.
   if ! _is_self_contained; then
     lockfile_forwarder_scan
   fi
 
   # Harness-owned code-out (ADR 0033, issues #1808, #2082): the Harness, not the
   # Agent, bundles the seam after the Driver exits, for CODE_FORGE=local and for
-  # a read-only Box that never pushed anything itself. Skipped for research,
-  # which never cuts $BRANCH, so bundle-out could not resolve it. Left unguarded
-  # under set -e on purpose: a bundle-out failure is a real container failure.
-  if ! _is_research_kind && _needs_outbox; then
+  # a read-only Box that never pushed anything itself. Skipped for an
+  # advise-only kind, which never cuts $BRANCH, so bundle-out could not resolve
+  # it. Left unguarded under set -e on purpose: a bundle-out failure is a real
+  # container failure.
+  if ! _is_advise_only && _needs_outbox; then
     driver-exec bundle-out \
       --repo "$WORK_DIR" \
       --base "origin/${BASE_BRANCH:-}" \

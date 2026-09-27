@@ -49,8 +49,9 @@ type Config struct {
 	RegistryProxyRoutes []registryproxy.Route
 
 	// Kind is the dispatch kind ("work" or "research", ADR 0022) forwarded as
-	// DISPATCH_KIND, so the entrypoint selects its prompt and skips the
-	// clone-branch/PR/CI phases for research. Empty defaults to "work".
+	// DISPATCH_KIND, so the entrypoint selects its prompt, plus ADVISE_ONLY
+	// from its descriptor, which gates the clone-branch/PR/CI phases. Empty
+	// defaults to "work".
 	Kind string
 
 	// SelfContained forwards the research kind's no-repo sub-mode as
@@ -162,6 +163,9 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 		kind = dispatchkind.Work.Name
 	}
 	env["DISPATCH_KIND"] = kind
+	if d, ok := dispatchkind.ByName(kind); ok && d.AdviseOnly {
+		env["ADVISE_ONLY"] = "1"
+	}
 	if cfg.SelfContained {
 		env["SELF_CONTAINED"] = "1"
 	}

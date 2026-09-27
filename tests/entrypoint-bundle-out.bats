@@ -85,6 +85,20 @@ setup() {
   unset CODE_FORGE            # default github
   unset BOX_WRITE_ENABLED
   export DISPATCH_KIND=research
+  export ADVISE_ONLY=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$OUTBOX_DIR" ]
+}
+
+# Issue #3872: the read-only posture is driven by ADVISE_ONLY itself, not a
+# DISPATCH_KIND=research string comparison, so a Box that carries the flag
+# under an unset (work) or unrecognized kind still skips bundle-out.
+@test "ADVISE_ONLY=1 alone, with DISPATCH_KIND unset, still skips bundle-out" {
+  unset CODE_FORGE            # default github
+  unset BOX_WRITE_ENABLED
+  unset DISPATCH_KIND
+  export ADVISE_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -e "$OUTBOX_DIR" ]
@@ -92,11 +106,12 @@ setup() {
 
 @test "read-only github research dispatch with a non-zero driver crash still never invokes bundle-out" {
   # ADR 0039 (issue #2252) made bundle-out run for non-zero claude_rc too, but
-  # the !_is_research_kind guard is unchanged: a research dispatch never cuts a
+  # the !_is_advise_only guard is unchanged: a research dispatch never cuts a
   # branch (ADR 0022), so it emits no bundle even when the driver crashed.
   unset CODE_FORGE            # default github
   unset BOX_WRITE_ENABLED
   export DISPATCH_KIND=research
+  export ADVISE_ONLY=1
   export FAKE_DRIVER_CRASH_EXIT=17
   run bash "$ENTRYPOINT"
   [ "$status" -eq 17 ]
