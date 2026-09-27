@@ -90,6 +90,18 @@ type filedIntent struct {
 // any ensureTypeLabel match, never the payload's own (issue #1949). A package
 // function, not a *Settle method, so ResearchSettle can call it (issue #2590).
 func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel, bodyBacklink string) []filedIntent {
+	return fileIssueIntentsDetailedFunc(it, num, result, provenanceLabel, func(issueIntent) string { return bodyBacklink })
+}
+
+// fileIssueIntentsDetailedFunc is fileIssueIntentsDetailed's per-intent sibling
+// (issue #3875): bodyBacklink is computed from each intent rather than fixed
+// once, so a caller like ButlerSettle can name that intent's own files in its
+// backlink. fileIssueIntentsDetailed delegates to this with a constant
+// closure, rather than the other way around, so gate.go's call keeps its
+// existing (it, num, result, provenanceLabel, bodyBacklink string) shape --
+// nix/checks/dispatch-labels.nix's extractFileIssueIntentsProvenanceLabel
+// extracts the provenance label from that exact call site as source text.
+func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, bodyBacklink func(issueIntent) string) []filedIntent {
 	if !result.IssueIntentsFound {
 		return nil
 	}
@@ -151,8 +163,8 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 			fmt.Printf("    #%s  filing issue-intent %q despite partial dedup overlap (already tracked: [%s] via %s)\n", num, in.Title, strings.Join(ov.covered, ", "), strings.Join(ov.refs, ", "))
 		}
 		body := in.Body
-		if bodyBacklink != "" {
-			body = in.Body + "\n\n" + bodyBacklink
+		if link := bodyBacklink(in); link != "" {
+			body = in.Body + "\n\n" + link
 		}
 		// The launcher's own marker goes last unconditionally, even carrying
 		// no terms: parseDedupMarker is last-wins, so omitting it would let a
