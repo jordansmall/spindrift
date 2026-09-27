@@ -1358,7 +1358,7 @@ itself. See `lib/env-schema.nix` for the authoritative list.
 | `MAX_JOBS`             | `0`     | `concurrency`      | caps the wave size (`0` = uncapped) |
 | `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | **deprecated**, superseded by [Daemon](#daemon) (issue #3547) — opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the freshness probe before every launch; exits with a new documented code when the probe finds the loaded image or the loaded host launcher stale (see the [exit-code table](#dispatch-exit-codes)) |
 | `DAEMON_APP`           | `.#`    | — (post-freeze; no legacy alias — set `dispatch.daemonApp`) | flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision — the Consumer's own CLI app, e.g. `.#` or `.#dogfood-bwrap`; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
-| `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
+| `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host; read by the daemon, and by `spindrift butler` for the zone its daily budgets reset in — see [Daemon](#daemon) |
 | `DAEMON_SELF_APP`      | `.#daemon` | — (post-freeze; no legacy alias — set `dispatch.daemonSelfApp`) | flake app attribute of the daemon itself, evaluated at each fetched tip to notice its own build changed and halt — distinct from `DAEMON_APP`, the child Dispatch app; a Consumer that re-exports the daemon under another top-level attribute (e.g. spindrift's own `.#dogfood-bwrap-daemon`) must set this to match, or the check would evaluate a different harness's daemon and report a permanent, spurious change; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `RESEARCH_RESERVATION` | `1`     | — (post-freeze; no legacy alias — set `dispatch.researchReservation`) | how many of `MAX_PARALLEL`'s pool slots prefer research Dispatches over work — a floor, not a ceiling; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_IDLE_FLOOR`    | `5m`    | — (post-freeze; no legacy alias — set `dispatch.daemonIdleFloor`) | wait before the daemon's first no-work check against a kind, and the poll slice size while riding out a jammed kind's backoff; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
@@ -4647,6 +4647,26 @@ restarting it. A run that itself crashes leaves the claim standing and exits
 non-zero, so the next invocation's staleness check is the only recovery path
 — there is no separate `recover` for butler.
 
+Four budget knobs (ADR 0056) cap a day of butler activity, summed across
+every Chore currently listed in `BUTLER_CHORES` (drop a Chore from the list
+and it stops counting): `BUTLER_MAX_SWEEPS_PER_DAY` (default `8`) caps runs
+started, `BUTLER_MAX_FINDINGS_PER_DAY` (default `10`) caps findings filed,
+and `BUTLER_DAILY_TOKEN_CEILING` (default `0`) caps the tokens completed runs
+spent, as a backstop. `BUTLER_MAX_FINDINGS_PER_SWEEP` (default `5`) caps one
+run: findings past it are dropped at settle and recorded as `dropped` in the
+Ledger, and a run does not start while fewer than that remain in the day's
+finding budget — bounding one run's contribution, though two Chores claimed
+on separate slots at once can each pass that check and jointly overshoot the
+day's budget. This headroom gate only applies when
+`BUTLER_MAX_FINDINGS_PER_DAY` is non-zero, and `BUTLER_MAX_FINDINGS_PER_SWEEP`
+must not exceed it — `spindrift butler` rejects that combination up front.
+With the defaults (day `10`, sweep `5`), a day that has already filed `6` or
+more refuses to start any further run, so part of the day's budget can go
+unused. `0` means no limit. Budgets gate only starting a run; a run already
+under way is never stopped. The totals are walked from today's Ledger
+commits each time, with no second store, and "today" runs midnight to
+midnight in `DAEMON_AWAKE_WINDOW`'s zone (UTC when that knob is unset).
+
 Each run scans two things: `lastSwept..HEAD` of the base branch (what changed
 since the last sweep) and the next slice of the tracked tree starting at
 `cursor` (40 paths per run, so a large repo is swept incrementally across
@@ -6236,6 +6256,10 @@ its real elapsed length: an overnight `22:00-06:00 America/New_York`
 window spans a real 7 hours across the March spring-forward night (the
 clock skips an hour) and a real 9 hours across the November fall-back
 night (the clock repeats one), never the naive 8 either way.
+
+`spindrift butler` reads `DAEMON_AWAKE_WINDOW` too, for its zone only: the
+butler's daily budgets reset at midnight there (UTC when the knob is unset;
+see [Butler](#butler)).
 
 **Event stream.** The daemon writes one JSON object per line to stdout — a
 JSON-lines stream, so a service manager captures the run's history without
