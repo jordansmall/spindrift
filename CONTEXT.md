@@ -100,9 +100,13 @@ the backlog before filing — open and closed alike. Its issues carry a
 provenance label naming the caller — `agent-review-finding`
 from the work loop, `agent-research-finding` from research — and are never
 dispatchable by its own hand: a human promotes them, preserving the rule
-that a human is the launch button. Filing is best-effort: a Filer failure
-never blocks the PR or alters the outcome. Provisioning it (a roster model)
-is the sole switch for both callers. Off by default.
+that a human is the launch button. The one opt-in exception is a [[Butler]]
+finding: a Consumer may let the host auto-promote it to the work label at
+settle, gated on a class allow-list, a file-count limit, an in-Box
+reviewer's concurrence, and a daily budget (`maxPromotionsPerDay`, default 0
+— off) — see docs/reference.md#butler. Filing is best-effort: a Filer
+failure never blocks the PR or alters the outcome. Provisioning it (a
+roster model) is the sole switch for both callers. Off by default.
 _Avoid_: triager (it does not triage), reporter (collides with outcome
 reporting).
 

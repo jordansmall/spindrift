@@ -4619,9 +4619,12 @@ override directory — but that override shadows all of `/agent/prompts`, so
 it must carry the full prompt tree, not only `chores/`. No Chore is enabled
 by default.
 `BUTLER_CHORE_CLASSES` (schema key `butlerChoreClasses`) holds each Chore's
-host-side allow-list of finding classes. It is validated but inert until
-auto-promotion lands (issue #3880); the default covers the three built-ins,
-and a Chore with no entry never promotes. The Box never sees it.
+host-side allow-list of finding classes — the trust gate for auto-promotion
+(issue #3880, below); the default covers the three built-ins, and a Chore
+with no entry never promotes. The Box never controls this list: it only
+ever sees it read-only, as `CHORE_CLASSES`, and only while promotion is
+actually on (`BUTLER_MAX_PROMOTIONS_PER_DAY` > 0), so a Box whose findings
+can never promote never spends reviewer turns on candidates it cannot win.
 
 A run claims the Chore's **Ledger** — its durable record, kept as a chain of
 commits on `refs/spindrift/butler/<chore>` in the Target repo, never on a
@@ -4675,11 +4678,38 @@ against that scope, driven by the Chore's prompt
 (`templates/default/prompts/butler-prompt.md`, composed with the named
 Chore's own prompt file). Like research, butler is advise-only: any finding
 the Box relays is filed as its own issue through the Filer, carrying the
-`agent-butler-finding` label and naming the Chore and the files involved —
-never promoted to `ready-for-agent` by the agent's own hand, same as every
-other agent-filed issue (see [Filer](#filer)). See the **Butler** / **Chore**
-/ **Ledger** glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full
-vocabulary.
+`agent-butler-finding` label and naming the Chore and the files involved.
+By default that is the whole story, same as every other agent-filed issue
+(see [Filer](#filer)) — but butler carries one opt-in exception to that
+rule: auto-promotion (below). See the **Butler** / **Chore** / **Ledger**
+glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full vocabulary.
+
+Auto-promotion (ADR 0056, issue #3880) adds `ready-for-agent` (or your
+configured `LABEL`) to a finding at settle, host-side, when every one of
+four gates holds: the finding's Box-tagged class is on
+`BUTLER_CHORE_CLASSES` for this Chore (the trust gate above); it names
+between 1 and `BUTLER_PROMOTION_MAX_FILES` (schema key
+`butlerPromotionMaxFiles`, default `3`) file paths, counted off the
+finding's dedup/site keys — a count of what the Box *claims*, not files
+verified against the tree, which is what the in-Box reviewer's
+"confined" check is for; a fresh in-Box `reviewer` subagent — spawned
+only for allow-listed candidates, a quality filter rather than a trust
+boundary — agreed (`butler-prompt.md`'s PROMOTION CANDIDATES step relays
+its concurrence as plain text), running under `butler-review-prompt.md`,
+which judges the finding handed to it rather than a branch diff, and
+which the butler keeps in `--agents` even under `ORCHESTRATOR`, since an
+advise-only run never gets the code-owned review pass that otherwise
+replaces it; and today's `BUTLER_MAX_PROMOTIONS_PER_DAY` (schema key
+`butlerMaxPromotionsPerDay`, default `0`) budget has room, walked from
+the Ledger at settle time like the budgets above. Default `0` means promotion
+is off — unlike every other butler budget, where `0` means no limit — so
+enabling a Chore, or listing classes in `BUTLER_CHORE_CLASSES`, never
+promotes anything by itself; it is not a start gate either, and a spent
+promotion budget still lets sweeps run and file. A promoted finding's body
+carries a visible **Auto-promoted** note naming the class, the file count
+against the limit, and quoting the reviewer's own concurrence, and its URL
+lands in the Ledger done commit's `promoted` list alongside the sweep's
+full `filed` list.
 
 ## Registry route discovery
 
