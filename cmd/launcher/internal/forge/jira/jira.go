@@ -471,6 +471,38 @@ func (j *jiraClient) ListOpenIssues() ([]forge.Issue, error) {
 	return issuesFromIssues(issues), nil
 }
 
+// ListIssuesWithLabels implements forge.LabeledBacklogLister (issue #3873):
+// state scopes the scan to open or closed issues, since a closed finding is a
+// durable triage decision the host must not refile. One "labels in (...)"
+// JQL clause covers every label in a single query, unlike github's and
+// forgejo's per-label calls, because JQL natively supports an any-of match.
+func (j *jiraClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
+	var statusClause string
+	switch state {
+	case forge.IssueOpen:
+		statusClause = "statusCategory != Done"
+	case forge.IssueClosed:
+		statusClause = "statusCategory = Done"
+	default:
+		return nil, fmt.Errorf("jira: unsupported issue state %q", state)
+	}
+	if len(labels) == 0 {
+		return nil, nil
+	}
+	quoted := make([]string, len(labels))
+	for i, label := range labels {
+		quoted[i] = fmt.Sprintf("%q", label)
+	}
+	jql := fmt.Sprintf("project = %q AND labels in (%s) AND %s order by created desc",
+		j.cfg.ProjectKey, strings.Join(quoted, ", "), statusClause)
+
+	issues, err := j.doSearch(jql)
+	if err != nil {
+		return nil, err
+	}
+	return issuesFromIssues(issues), nil
+}
+
 func issuesFromIssues(payload []jiraIssuePayload) []forge.Issue {
 	issues := make([]forge.Issue, len(payload))
 	for i, p := range payload {

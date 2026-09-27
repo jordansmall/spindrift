@@ -40,6 +40,10 @@ func TestLocalTracker_ImplementsLabeledTracker(t *testing.T) {
 	var _ forge.LabeledTracker = NewLocalTracker(t.TempDir(), testLabels)
 }
 
+func TestLocalTracker_ImplementsLabeledBacklogLister(t *testing.T) {
+	var _ forge.LabeledBacklogLister = NewLocalTracker(t.TempDir(), testLabels)
+}
+
 func TestParseLocalIssue_Frontmatter(t *testing.T) {
 	data := []byte(`---
 title: Fix the thing
@@ -376,6 +380,90 @@ func TestLocalTracker_AllIssues_ReturnsEveryIssueOpenAndClosed(t *testing.T) {
 	}
 	if issues[0].Number != "no-parent" || issues[1].Number != "seam-1" || issues[2].Number != "seam-2" {
 		t.Fatalf("AllIssues = %+v, want [no-parent, seam-1, seam-2] (created-ascending)", issues)
+	}
+}
+
+// A closed finding is a durable triage decision the host must not refile
+// (issue #3873), so ListIssuesWithLabels(IssueClosed, ...) must find it, and
+// must exclude an open issue carrying the same label.
+func TestLocalTracker_ListIssuesWithLabels_ClosedStateMatchesOnlyClosed(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+
+	writeLocalIssue(t, dir, "closed-finding", localIssue{frontmatter: localFrontmatter{
+		Title: "Closed finding", Created: "2026-07-09T12:00:00Z", Closed: true,
+		Labels: []string{"agent-review-finding"},
+	}})
+	writeLocalIssue(t, dir, "open-finding", localIssue{frontmatter: localFrontmatter{
+		Title: "Open finding", Created: "2026-07-08T12:00:00Z",
+		Labels: []string{"agent-review-finding"},
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	issues, err := lt.ListIssuesWithLabels(forge.IssueClosed, []string{"agent-review-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != "closed-finding" {
+		t.Fatalf("ListIssuesWithLabels(IssueClosed) = %+v, want [closed-finding]", issues)
+	}
+}
+
+// An issue matches when it carries at least one of labels, not all of them.
+func TestLocalTracker_ListIssuesWithLabels_MatchesAnyLabel(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+
+	writeLocalIssue(t, dir, "review", localIssue{frontmatter: localFrontmatter{
+		Title: "Review", Created: "2026-07-08T12:00:00Z", Closed: true,
+		Labels: []string{"agent-review-finding"},
+	}})
+	writeLocalIssue(t, dir, "research", localIssue{frontmatter: localFrontmatter{
+		Title: "Research", Created: "2026-07-09T12:00:00Z", Closed: true,
+		Labels: []string{"agent-research-finding"},
+	}})
+	writeLocalIssue(t, dir, "unrelated", localIssue{frontmatter: localFrontmatter{
+		Title: "Unrelated", Created: "2026-07-10T12:00:00Z", Closed: true,
+		Labels: []string{"bug"},
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	issues, err := lt.ListIssuesWithLabels(forge.IssueClosed, []string{"agent-review-finding", "agent-research-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	// listIssues returns oldest-created first; ListIssuesWithLabels reverses it
+	// to newest-first.
+	if len(issues) != 2 || issues[0].Number != "research" || issues[1].Number != "review" {
+		t.Fatalf("ListIssuesWithLabels = %+v, want newest-first [research, review]", issues)
+	}
+}
+
+// A state outside forge.IssueOpen/forge.IssueClosed must error rather than
+// silently match nothing.
+func TestLocalTracker_ListIssuesWithLabels_UnsupportedStateErrors(t *testing.T) {
+	lt := NewLocalTracker(t.TempDir(), testLabels)
+	if _, err := lt.ListIssuesWithLabels(forge.IssueMerged, []string{"agent-review-finding"}); err == nil {
+		t.Fatal("ListIssuesWithLabels(IssueMerged): want error, got nil")
+	}
+}
+
+// Empty labels is the doctor-advisory-label-missing edge folded to zero
+// inputs: an empty result, a nil error.
+func TestLocalTracker_ListIssuesWithLabels_NoLabelsReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "review", localIssue{frontmatter: localFrontmatter{
+		Title: "Review", Created: "2026-07-08T12:00:00Z", Closed: true,
+		Labels: []string{"agent-review-finding"},
+	}})
+
+	lt := NewLocalTracker(dir, testLabels)
+	issues, err := lt.ListIssuesWithLabels(forge.IssueClosed, nil)
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels(nil): %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("want empty result, got %+v", issues)
 	}
 }
 

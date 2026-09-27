@@ -134,23 +134,24 @@ func (c *forgejoClient) Issue(num string) (forge.Issue, error) {
 // by issue number. A state with no configured label applies no label filter.
 func (c *forgejoClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	label := c.cfg.Labels.Label(state)
-	return c.listIssues(label)
+	return c.listIssues("open", label)
 }
 
 // ListOpenIssues returns every open issue, ascending by issue number. It
 // applies no label filter, so untriaged issues are included.
 func (c *forgejoClient) ListOpenIssues() ([]forge.Issue, error) {
-	return c.listIssues("")
+	return c.listIssues("open", "")
 }
 
-// listIssues walks every page of the open-issue listing (issue #2265). It
-// sorts the merged pages by numeric issue number because Forgejo guarantees
-// no order of its own, and merging pages preserves none either.
-func (c *forgejoClient) listIssues(label string) ([]forge.Issue, error) {
+// listIssues walks every page of the issue listing in restState, "open" or
+// "closed" (issue #2265). It sorts the merged pages by numeric issue number
+// because Forgejo guarantees no order of its own, and merging pages preserves
+// none either.
+func (c *forgejoClient) listIssues(restState, label string) ([]forge.Issue, error) {
 	var issues []forge.Issue
 	err := c.rest.Paginate(func(page int) (bool, error) {
 		q := url.Values{
-			"state": {"open"},
+			"state": {restState},
 			"type":  {"issues"},
 			"limit": {strconv.Itoa(forge.ResultPageLimit)},
 			"page":  {strconv.Itoa(page)},
@@ -174,6 +175,56 @@ func (c *forgejoClient) listIssues(label string) ([]forge.Issue, error) {
 		ni, _ := strconv.Atoi(issues[i].Number)
 		nj, _ := strconv.Atoi(issues[j].Number)
 		return ni < nj
+	})
+	return issues, nil
+}
+
+// ListIssuesWithLabels implements forge.LabeledBacklogLister (issue #3873):
+// state scopes the scan to open or closed issues, since a closed finding is a
+// durable triage decision the host must not refile. Forgejo's "labels" query
+// param is comma-separated, but its match semantics are not reliably "any
+// of" across Forgejo versions, so this queries once per label via listIssues
+// (already fully paginated, so the merge is never truncated) and merges by
+// number -- an issue carrying two of the labels would otherwise come back
+// twice. A per-label failure degrades rather than aborting the whole scan,
+// mirroring the github adapter: only a failure on every label propagates.
+func (c *forgejoClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
+	var restState string
+	switch state {
+	case forge.IssueOpen, forge.IssueClosed:
+		restState = strings.ToLower(string(state))
+	default:
+		return nil, fmt.Errorf("forgejo: unsupported issue state %q", state)
+	}
+	seen := make(map[string]bool)
+	var issues []forge.Issue
+	failures := 0
+	var lastErr error
+	for _, label := range labels {
+		got, err := c.listIssues(restState, label)
+		if err != nil {
+			lastErr = err
+			fmt.Fprintf(os.Stderr, "WARNING: forgejo issue list (label %s) failed: %v\n", label, err)
+			failures++
+			continue
+		}
+		for _, iss := range got {
+			if seen[iss.Number] {
+				continue
+			}
+			seen[iss.Number] = true
+			issues = append(issues, iss)
+		}
+	}
+	if len(labels) > 0 && failures == len(labels) {
+		return nil, fmt.Errorf("forgejo: issue list: all %d label(s) failed: %w", len(labels), lastErr)
+	}
+	// listIssues sorts each per-label page ascending; a merge of two of them
+	// does not, and the doc promises newest-first.
+	sort.Slice(issues, func(i, j int) bool {
+		ni, _ := strconv.Atoi(issues[i].Number)
+		nj, _ := strconv.Atoi(issues[j].Number)
+		return ni > nj
 	})
 	return issues, nil
 }

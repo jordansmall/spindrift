@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -206,6 +207,36 @@ func (lt *LocalTracker) ListOpenIssues() ([]forge.Issue, error) {
 // its parent or state (forge.SeamLister).
 func (lt *LocalTracker) AllIssues() ([]forge.Issue, error) {
 	return lt.listIssues(func(localIssue) bool { return true })
+}
+
+// ListIssuesWithLabels implements forge.LabeledBacklogLister (issue #3873):
+// state scopes the scan to open or closed issue files, since a closed
+// finding is a durable triage decision the host must not refile. listIssues
+// returns oldest-created first; this reverses it to the promised
+// newest-first.
+func (lt *LocalTracker) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
+	var wantClosed bool
+	switch state {
+	case forge.IssueOpen:
+		wantClosed = false
+	case forge.IssueClosed:
+		wantClosed = true
+	default:
+		return nil, fmt.Errorf("local: unsupported issue state %q", state)
+	}
+	issues, err := lt.listIssues(func(li localIssue) bool {
+		if li.frontmatter.Closed != wantClosed {
+			return false
+		}
+		return slices.ContainsFunc(labels, func(label string) bool {
+			return slices.Contains(li.frontmatter.Labels, label)
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	slices.Reverse(issues)
+	return issues, nil
 }
 
 func (lt *LocalTracker) listIssues(keep func(localIssue) bool) ([]forge.Issue, error) {
