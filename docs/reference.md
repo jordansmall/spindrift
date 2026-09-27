@@ -3150,8 +3150,10 @@ channels). Everything upstream of the write mechanism — the Filer's own
 site-key search, conventional-commit titling, merge-vs-split judgment — is
 unchanged; only how the filed issue actually reaches GitHub differs, plus one
 added host-side backstop described below (`dedupTerms`, issue #3609): before
-filing, the Launcher re-checks each intent against the open backlog itself
-and skips a repeat that survived the Filer's own search. Every other
+filing, the Launcher re-checks each intent against the backlog itself — open
+and closed alike (issue #3873, since a closed finding was already filed once
+and must never be refiled just because it was since closed) — and skips a
+repeat that survived the Filer's own search. Every other
 combination (`read-write` regardless of `ORCHESTRATOR_ENABLED`, or
 `read-only` with the orchestrator off) keeps the direct `gh issue create`
 path above, unchanged.
@@ -3179,13 +3181,18 @@ early) — an intent carrying no usable term after that filter has an empty
 key set and never matches, and the run warns on stderr that the intent files
 without dedup. Before filing, the Launcher builds a dedup index once per run
 — and only once some intent actually carries a usable key, since a payload
-with none can match nothing — from the open backlog: a tracker that
-implements the optional `LabeledBacklogLister` capability (GitHub
-does) is asked for open issues labeled `agent-review-finding` or
-`agent-research-finding` directly, with bodies and newest-first, up to
-a larger scan limit than plain `ListOpenIssues()` allows; a tracker
-without the capability falls back to `ListOpenIssues()` itself. Each
-backlog issue's keys are only the terms recorded in its hidden
+with none can match nothing — from the backlog: a tracker that implements
+the optional `LabeledBacklogLister` capability (every real adapter — github,
+forgejo, jira, local — does) is asked for issues labeled
+`agent-review-finding` or `agent-research-finding` directly, closed then
+open, each with bodies and newest-first; the github adapter caps each
+label at a larger scan limit than plain `ListOpenIssues()` allows, while
+forgejo, jira and local read every matching issue; a tracker without the
+capability (a test fake) falls back to `ListOpenIssues()` itself, open
+only, unchanged from before issue #3873. Either of the two lookups can fail
+independently without blocking the other — a failed lookup warns and
+contributes nothing, the other's issues still index. Each backlog issue's
+keys are only the terms recorded in its hidden
 `<!-- spindrift-dedup: ... -->` marker line — written by the Launcher itself
 at filing time — never its title: two distinct findings can share a
 formulaic conventional-commit title, and keying on prose would merge
@@ -3208,7 +3215,7 @@ own line instead, naming the already-tracked keys and every issue
 covering them, and counts as `ok` in the tally below rather than
 `skipped`, since it did reach the tracker. The issue it files carries
 the already-covered keys in its own marker too, so that site is briefly
-named by two open issues and the index's last write wins; both are
+named by two issues and the index's last write wins; both are
 valid "already tracked" answers, and the next run sees full coverage
 and skips, so this converges rather than refiling forever.
 The index also grows as the run files its own intents, so two intents in
@@ -3268,10 +3275,11 @@ listing the real URLs — or, for a filing that failed, an inline
 title-and-summary bullet — right after the comment body, then posts the
 combined comment host-side in one call, so the researcher never fabricates
 an issue URL itself. An intent the host-side dedup check (dedup.go, issue
-#3609) matches against an already-open finding is never filed at all, and
-gets its own "## Skipped (deduplicated)" section instead, naming what it
-matched — the open issue's number, or the title of a peer this same run
-filed moments earlier — so a run where every finding dedups still says so
+#3609) matches against an already-filed finding — open or closed (issue
+#3873) — is never filed at all, and gets its own "## Skipped
+(deduplicated)" section instead, naming what it matched — the matched
+issue's number, or the title of a peer this same run filed moments earlier
+— so a run where every finding dedups still says so
 in the posted comment, rather than appending nothing (issue #3811); the
 work path posts that same section as a standalone comment of its own,
 since gate.go has no filed-issues comment to append it to, so a dedup skip
