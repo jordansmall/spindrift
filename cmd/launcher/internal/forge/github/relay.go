@@ -2,6 +2,7 @@ package github
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -49,6 +50,21 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 		}
 		return nil
 	})
+}
+
+// GitRemote builds the git remote URL and auth args for pushing straight to
+// repo, as the butler Ledger does (issue #3876): the host follows GH_HOST
+// (falling back to github.com) so a GitHub Enterprise Consumer lands on the
+// same host every other gh path talks to. The empty credential.helper first
+// resets any ambient helper, so the second -c is the only one in effect: the
+// launcher's own gh credential, the same one RelayBundle authenticates with.
+func GitRemote(repo string) (url string, gitArgs []string) {
+	host := os.Getenv("GH_HOST")
+	if host == "" {
+		host = "github.com"
+	}
+	return "https://" + host + "/" + repo + ".git",
+		[]string{"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"}
 }
 
 var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)
