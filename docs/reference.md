@@ -20,7 +20,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift dispatch --continuous`| **deprecated**, superseded by [Daemon](#daemon) (issue #3547) — run dispatch as a continuous slot-refill loop; bare-flag alias for the `--continuous-dispatch` bool |
 | `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](#research-dispatch) |
 | `spindrift research 42 57`       | research exactly these issues, same selective semantics as `dispatch <nums>`    |
-| `spindrift butler --chore <name>` | one-shot butler sweep of a Chore (ADR 0056): claims the Chore's Ledger, scans the next slice of the tree, runs one advise-only Box, files findings, writes a done Ledger commit — local forge only, see [Butler](#butler) |
+| `spindrift butler --chore <name>` | one-shot butler sweep of a Chore (ADR 0056): claims the Chore's Ledger, scans the next slice of the tree, runs one advise-only Box, files findings, writes a done Ledger commit — `local`, `github`, or `forgejo` forge, see [Butler](#butler) |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
@@ -4595,13 +4595,22 @@ of one standing Chore, keyed by chore name rather than by issue. Unlike
 runs at most one Chore, and only when it is named in `BUTLER_CHORES` (schema
 key `butlerChores`), a space-separated allowlist that defaults to none; the
 built-in catalog ships one Chore, `bugs`
-(`templates/default/prompts/chores/bugs.md`). Butler is local-forge only
-today — `spindrift butler` refuses to run under any `CODE_FORGE` other than
-`local` (ADR 0056's tracer bullet; hosted forges are future work).
+(`templates/default/prompts/chores/bugs.md`). Butler runs under
+`CODE_FORGE=local`, `github`, or `forgejo`; `spindrift butler` refuses to
+run under `git`.
 
 A run claims the Chore's **Ledger** — its durable record, kept as a chain of
-commits on `refs/spindrift/butler/<chore>` in the bare Accumulation repo,
-never on a branch. `git log refs/spindrift/butler/<chore>` in that repo is
+commits on `refs/spindrift/butler/<chore>` in the Target repo, never on a
+branch. On the local forge that ref lives in the bare Accumulation repo and
+moves with `git update-ref`. On `github` and `forgejo` it lives on the
+Target repo's remote: the host fetches the ref into a throwaway scratch
+clone, builds each state commit there, and pushes it with
+`--force-with-lease` on the tip it read, authenticated with the launcher's
+own credential (the `gh` CLI's for GitHub, `FORGEJO_TOKEN` for Forgejo).
+That push has its own refspec — it never goes through the bundle relay and
+never touches `refs/heads/` — and a lost lease is a lost claim, not an
+error. `git log refs/spindrift/butler/<chore>` (after `git fetch origin
+'+refs/spindrift/butler/*:refs/spindrift/butler/*'` on a hosted forge) is
 the Chore's full run history: every claim, every done commit's `lastSwept`
 (the base branch revision), `cursor` (where in the tree the next run picks
 up), `filed` (issues opened), and `usage`. The claim itself guards against

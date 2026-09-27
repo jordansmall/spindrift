@@ -65,6 +65,11 @@ token usage. `git log` on the ref is the chore's history.
 - **Local forge.** Under `CODE_FORGE=local` the ledger refs live in the
   bare Accumulation repo and are written with `update-ref`, as the land
   path already does.
+- **Hosted forges.** Under `github` and `forgejo` the host fetches the
+  chore's ref into a scratch clone, builds the state commit there, and
+  pushes it with the launcher's own credential. The ledger has its own
+  refspec: it never goes through the bundle relay and never touches
+  `refs/heads/`.
 
 **Findings may be auto-promoted, host-decided, behind a separate opt-in.**
 This is a deliberate exception to the rule that an agent-filed issue is
