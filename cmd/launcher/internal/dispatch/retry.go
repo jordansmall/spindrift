@@ -27,11 +27,17 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 
 	for {
 		resumeAfterHold := prevRedispatched
+		// Reset here, not in runOnce: an attempt that fails before reaching
+		// os.Create must not be judged against a prior attempt's log.
+		d.attemptLog = nil
 		err := once(resumeAfterHold)
+		// Per iteration only: the next attempt still writes logPath itself,
+		// whichever file this one settles from.
+		attemptLogPath := d.reclaimAttemptLog(logPath)
 
 		var cls driver.Classification
 		if err == nil {
-			result := d.successResult(logPath)
+			result := d.successResult(attemptLogPath)
 			if result.Resolved.Found || result.ParseErr != nil || result.ClassifyErr != nil {
 				return result
 			}
@@ -76,7 +82,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				continue
 			}
 
-			if result, ok := d.settledOutcome(logPath); ok {
+			if result, ok := d.settledOutcome(attemptLogPath); ok {
 				// A non-zero exit still settles on a genuine outcome the box
 				// printed before dying (issue #2075): reclassifying it would
 				// re-spend the tokens a post-hold resume preserved. A limit-hit
@@ -85,7 +91,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			}
 
 			var clsErr error
-			cls, clsErr = d.driver.ClassifyTransient(logPath)
+			cls, clsErr = d.driver.ClassifyTransient(attemptLogPath)
 			if clsErr != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: classify error: %v\n", d.number, clsErr)
 				return Result{Success: false, KilledBySignal: runner.KilledBySignal(err)}
@@ -93,7 +99,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 
 			if cls.Class == driver.Terminal {
 				result := Result{Success: false, KilledBySignal: runner.KilledBySignal(err)}
-				if logIsEmpty(logPath) {
+				if logIsEmpty(attemptLogPath) {
 					// A box that ran and failed left something in its log, so an
 					// empty log means it never launched (a pre-Box registry-proxy
 					// or outbox-setup error, issue #3119). Report that error
@@ -225,6 +231,54 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 		IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0, IssueIntentsRejected: issueIntentsRejected,
 		Passes: passes,
 	}
+}
+
+// reclaimAttemptLog returns the path to settle this attempt from: logPath, or
+// wherever a rename moved the attempt's log mid-run -- e.g. another process's
+// quarantinePriorRunLogs renaming a live log to "<path>.prior-run.N" (issue
+// #3886), which left Settle reporting "no outcome in log" though the Box
+// printed one. os.SameFile tracks the file across the rename.
+func (d *Dispatch) reclaimAttemptLog(logPath string) string {
+	if d.attemptLog == nil {
+		return logPath
+	}
+	if info, err := os.Stat(logPath); err == nil && os.SameFile(info, d.attemptLog) {
+		return logPath
+	}
+
+	dir := filepath.Dir(logPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return logPath
+	}
+	var moved string
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if os.SameFile(info, d.attemptLog) {
+			moved = filepath.Join(dir, entry.Name())
+			break
+		}
+	}
+	if moved == "" {
+		return logPath
+	}
+
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		// Rename back, not copy: usage roll-up, drill-in and recover read only
+		// the canonical path and its .N siblings, and must count it once.
+		if err := os.Rename(moved, logPath); err == nil {
+			fmt.Fprintf(os.Stderr, "    !! #%s: attempt log %s was moved mid-run to %s; restored it\n",
+				d.number, logPath, moved)
+			return logPath
+		}
+	}
+	// logPath is another file now, or the restore failed: leave both alone.
+	fmt.Fprintf(os.Stderr, "    !! #%s: attempt log %s was moved mid-run to %s; settling from there\n",
+		d.number, logPath, moved)
+	return moved
 }
 
 // settledOutcome returns the Result for an outcome line printed before a

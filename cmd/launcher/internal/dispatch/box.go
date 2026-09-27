@@ -62,6 +62,10 @@ type Dispatch struct {
 	// can never leak into a later attempt's Result; nil also covers the log
 	// carrier, where no buffer is ever minted.
 	signalBuffer *signalsocket.Buffer
+
+	// attemptLog is the identity of the log the current attempt created, so
+	// reclaimAttemptLog can find it after a mid-run rename (issue #3886).
+	attemptLog os.FileInfo
 }
 
 var _ Dispatcher = (*Dispatch)(nil)
@@ -302,6 +306,9 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		return fmt.Errorf("create log: %w", err)
 	}
 	defer logFile.Close()
+	if info, statErr := logFile.Stat(); statErr == nil {
+		d.attemptLog = info
+	}
 
 	// Unconditional: the stream view is byte-transparent, so a log-carrier
 	// run writes exactly what it wrote before.
