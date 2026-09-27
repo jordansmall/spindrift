@@ -5156,9 +5156,16 @@ Consumer beside `apps.default` (`lib/mkHarness.nix`), it's run as `nix run
 .#daemon` — or, for spindrift's own bwrap harness,
 `nix run .#dogfood-bwrap-daemon`. It takes an optional positional argument
 selecting which Dispatch kinds it draws from: `dispatch` restricts it to
-work, `research` restricts it to advise-only research, and omitting the
-argument (the default, issue #3541) draws from both, off the single pool
-described under **Pool** below. `status` is the other positional, and it is
+work, `research` restricts it to advise-only research, `butler` restricts it
+to Chore upkeep (ADR 0056, issue #3878), and omitting the argument (the
+default, issue #3541) draws from every kind off the single pool described
+under **Pool** below — except the butler, which the bare default drops when
+`BUTLER_CHORES` enables no Chore (its own default), so an operator who has
+opted into no Chore sees the same two-kind daemon as before; naming `butler`
+explicitly with an empty `BUTLER_CHORES` fails startup instead of running a
+kind that could only ever report no work (`daemon: butler selected but no
+chores enabled (BUTLER_CHORES is empty)`, `gateButlerKind`,
+`cmd/launcher/daemon/main.go`). `status` is the other positional, and it is
 dispatched ahead of that kind-selector parse rather than sharing its slot —
 `nix run .#daemon -- status` prints the checkout's current daemon state and
 exits without starting anything, needing no `--input` document (reading
@@ -5169,13 +5176,15 @@ status is not running a daemon). stdout is the machine-readable
 whenever it produced an answer, "no daemon running" included — a scripting
 caller reads `.live`, not the exit code, and this binary's own exit-code
 table already spends 1 on a genuine failure. See **Status file** below for
-what it reads. Both `dispatch`/`research` alone still run: `dispatch` is how an
+what it reads. `dispatch`, `research`, and `butler` alone each still run
+work-only, research-only, or butler-only, in turn: `dispatch` is how an
 operator who has not created the research labels runs the daemon, work-only,
-exactly as before this ticket. The default flipped to both because an
-operator no longer has to choose between advancing the queue and enriching
-the backlog for later — a daemon left running just does both. Unlike a
-single `spindrift dispatch`/`research` invocation, the daemon keeps working
-the queue after it drains, so work labelled later is picked up without a
+exactly as before this ticket. The default draws from every configured kind
+because an operator no longer has to choose between advancing the queue,
+enriching the backlog, and keeping up with Chore upkeep — a daemon left
+running just does whichever of the three it's configured for. Unlike a
+single `spindrift dispatch`/`research`/`butler` invocation, the daemon keeps
+working the queue after it drains, so work labelled later is picked up without a
 restart. It supersedes continuous dispatch as the way to hold a pool of
 Boxes, which is deprecated in its favour but not removed (issue #3547) —
 see **Deprecated** under [Continuous dispatch](#continuous-dispatch).
@@ -5257,8 +5266,9 @@ new one, since nothing the daemon does brings a deleted branch back.
 `cmd/launcher/internal/daemon/loop.go`): `Loop` runs that many slot
 goroutines, each independently resolving and driving its own children
 (concurrent resolutions share one fetch, as above), rather than one loop
-iterating a single child. When both kinds are in play, they draw from that
-same single pool rather than one pool apiece (`Config.Kinds`, issue #3541):
+iterating a single child. When more than one kind is in play, they all draw
+from that same single pool rather than one pool apiece (`Config.Kinds`,
+issue #3541, #3878):
 research runs through the full Box and costs exactly what work costs,
 so a second, research-only pool would quietly invalidate the operator's
 `MEMORY_LIMIT` × `MAX_PARALLEL` sizing by letting the daemon's real
@@ -5350,10 +5360,10 @@ itself per-checkout for a linked `git worktree`, exactly the granularity
 "one daemon per checkout" means. Two daemons against one checkout would
 each hold `MAX_PARALLEL` slots, doubling the real concurrency and making
 the `MEMORY_LIMIT` × `MAX_PARALLEL` sizing above a lie; the lock is what
-keeps that arithmetic honest. It covers both Dispatch kinds — two separate
-daemons, one `dispatch` and one `research`, against the same checkout is
-exactly the doubled concurrency the lock refuses. Running both kinds
-against one checkout is what a single dual-kind daemon drawing from one
+keeps that arithmetic honest. It covers every Dispatch kind — two separate
+daemons, say one `dispatch` and one `research`, against the same checkout is
+exactly the doubled concurrency the lock refuses. Running multiple kinds
+against one checkout is what a single multi-kind daemon drawing from one
 pool (**Reservation** below) already does; two daemon processes still mean
 two checkouts.
 
@@ -5684,6 +5694,24 @@ operator who wants that single slot work-first instead sets
 final value out of scope, and it expects a real unattended run to argue
 with it.
 
+**Idle tier.** The butler sits outside the reserved/normal split above: every
+slot tries it last, regardless of `RESEARCH_RESERVATION` — a slot below the
+reservation still tries research then work then the butler, and the rest
+still try work then research then the butler (`slotOrder`,
+`dispatchkind.PriorityIdle`, ADR 0056, issue #3878) — so it fills a slot only
+once both dispatch and research have just reported no work. A butler child
+already running is never preempted when dispatch or research work shows up:
+the Awake window rule only ever gates *starting* a child, never stopping one,
+so a Chore in progress runs to completion even if the queue fills mid-run.
+The butler backs off on its own idle timer the same way dispatch and
+research do (the per-kind idle backoff described below), so a butler check
+that finds no Chore due waits out its own growing interval independently of
+the other two kinds'. Nothing here limits the butler to one slot at a time:
+once dispatch and research have both backed off, every free slot may pick
+the butler at once, and whichever loses the Chore claim race just reports no
+work (exit 2) — which still steps the butler's shared idle backoff, same as
+any other empty check.
+
 **Cross-family discovery.** Running both kinds off one pool means the same
 issue can legitimately be dispatchable and researchable at once — the two
 label families are independent and, per `CLAUDE.md`'s "Research label
@@ -5742,10 +5770,11 @@ other kind's own timer, if any, is untouched.
 Because the backoff is now per kind, a `Wait` outcome (exit 2 or 3) no
 longer sleeps the slot in place: the slot records the no-work result
 against the kind it just ran and immediately loops back to the top, where
-it tries the *other* configured kind at once if that kind is still
-runnable — an empty work queue does not idle a slot that could be running
-research, and an empty research queue does not idle one that could be
-running work. Only once every configured kind is gated does the pool
+it tries the next kind in its preference order (**Reservation**/**Idle
+tier** above) at once if that kind is still runnable — an empty work queue
+does not idle a slot that could be running research, and an empty work-and-
+research pair does not idle a slot the butler could still fill. Only once
+every configured kind is gated does the pool
 actually sleep, and then for the shortest of the gated kinds' remaining
 waits — the pool as a whole can move the instant any one kind's gate
 lifts, even though a given slot only picks up work once it wakes and
@@ -5756,10 +5785,10 @@ in-place wait.
 
 | exit | meaning | daemon action |
 |------|---------|----------------|
-| 0    | dispatched work | go again at once; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
-| 2    | queue empty | record it against this kind's own backoff (emit `idle`), then loop back around: switch to the other configured kind at once if it is still runnable, or sleep — via the shared `idleSleep` — only if every kind is now gated. A queue-empty gate is never itself polled mid-wait: a merge cannot create work in an empty queue, so polling for one would only spend a query for nothing |
-| 3    | none dispatchable | with any sibling slot `resolving`, `running` or `backing_off` — doing anything at all but waiting for its own turn — routine: record it against this kind's backoff (emit `idle`) the same as exit 2. Only once every sibling is `idle` or `awaiting_window` is it recorded as a jam instead (emit `jam`), same routing (a single-slot daemon has no siblings at all and so reports every exit 3 as a jam). Either way the slot switches to the other configured kind at once if that kind is still runnable; only once every kind is gated, *and* at least one of them is jammed, does the shared `idleSleep` sleep in `IdleFloor`-sized slices, since a merge here *can* unblock the jam — there is no separate poll: the slot sleeps one slice, and the next round's own resolution, made before it picks a kind, is what finds out, so a jammed wait costs one fetch per slice, not one for a poll and another for the round it unblocks. The first no-work wait for a kind is exactly one `IdleFloor` slice and so still resolves nothing extra, with the next round's own resolution asked for only once that kind's backoff has grown past the floor; if that resolution reports the tip moved (`Tip.Moved`), the slot emits `tip_moved` once and resets *every currently-jammed kind's* backoff to `IdleFloor` (the observed change is evidence for all of them, not just the kind this slot was running), and goes again at once instead of riding out the rest of the wait. A mid-wait resolution that fails is treated as no change observed — it never feeds the breaker, since the iteration's own post-`pickKind` resolution is what reports a broken fetch |
-| 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild; resets this kind's idle backoff to `IdleFloor` (the other kind's timer is untouched) |
+| 0    | dispatched work | go again at once; resets this kind's idle backoff to `IdleFloor` (every other configured kind's timer is untouched) |
+| 2    | queue empty | record it against this kind's own backoff (emit `idle`), then loop back around: switch to the next configured kind in preference order at once if it is still runnable, or sleep — via the shared `idleSleep` — only if every kind is now gated. A queue-empty gate is never itself polled mid-wait: a merge cannot create work in an empty queue, so polling for one would only spend a query for nothing |
+| 3    | none dispatchable | with any sibling slot `resolving`, `running` or `backing_off` — doing anything at all but waiting for its own turn — routine: record it against this kind's backoff (emit `idle`) the same as exit 2. Only once every sibling is `idle` or `awaiting_window` is it recorded as a jam instead (emit `jam`), same routing (a single-slot daemon has no siblings at all and so reports every exit 3 as a jam). Either way the slot switches to the next configured kind in preference order at once if that kind is still runnable; only once every kind is gated, *and* at least one of them is jammed, does the shared `idleSleep` sleep in `IdleFloor`-sized slices, since a merge here *can* unblock the jam — there is no separate poll: the slot sleeps one slice, and the next round's own resolution, made before it picks a kind, is what finds out, so a jammed wait costs one fetch per slice, not one for a poll and another for the round it unblocks. The first no-work wait for a kind is exactly one `IdleFloor` slice and so still resolves nothing extra, with the next round's own resolution asked for only once that kind's backoff has grown past the floor; if that resolution reports the tip moved (`Tip.Moved`), the slot emits `tip_moved` once and resets *every currently-jammed kind's* backoff to `IdleFloor` (the observed change is evidence for all of them, not just the kind this slot was running), and goes again at once instead of riding out the rest of the wait. A mid-wait resolution that fails is treated as no change observed — it never feeds the breaker, since the iteration's own post-`pickKind` resolution is what reports a broken fetch |
+| 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild; resets this kind's idle backoff to `IdleFloor` (every other configured kind's timer is untouched) |
 | 5    | host-tainted | halt the pool |
 | 6    | config-invalid | halt the pool |
 | 7    | signalled stop | halt the pool once the operator's Stop latch is already closed; while Stop is still open, an unrecognised operator-external signal instead backs this slot off (see **Failures** below) |
