@@ -145,8 +145,22 @@ func conflictLogPathFor(pwd, number string) string {
 	return filepath.Join(HostLogDirFor(pwd), fmt.Sprintf("issue-%s-conflict-resolve.log", number))
 }
 
-// Run dispatches the initial box for this issue.
+// Run dispatches the initial box for this issue. It claims the issue before
+// touching disk (issue #3885): IsRunning cannot see another launcher's
+// container still being created, so without the claim a racing Run() would
+// quarantine that run's live log. The IsRunning guards still catch a container
+// orphaned by a killed launcher, whose claim died with it.
 func (d *Dispatch) Run() Result {
+	release, err := ClaimIssue(d.pwd, d.number)
+	if err != nil {
+		if errors.Is(err, ErrIssueClaimed) {
+			return Result{AlreadyInFlight: true}
+		}
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, err)
+		return Result{Success: false}
+	}
+	defer release()
+
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
 		d.announce(report.PhaseInitial)
