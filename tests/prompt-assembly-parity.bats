@@ -306,12 +306,14 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
   # AGENTS_JSON_TEMPLATE deliberately unset: this cell is about the
   # prompt-selection and session-mode axis, not roster interaction.
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
 
   assert_cell_golden "research" initial
 }
 
 @test "production path matches the golden fixture for the research filer-on cell" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   # A filer in the roster with BOX_FILER_ENABLED=1 pins gates_tracker.go's
   # researchForceRelay, which forces the verdict comment onto the
   # SPINDRIFT_COMMENT relay arm even though this suite's box is read-write
@@ -326,6 +328,7 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
 
 @test "production path matches the golden fixture for the self-contained research cell" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   export SELF_CONTAINED="1"
 
   assert_cell_golden "self-contained-research" initial
@@ -333,6 +336,7 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
 
 @test "production path matches the golden fixture for the self-contained research filer-on cell" {
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   export SELF_CONTAINED="1"
   # The same filer axis as the research filer-on cell above, isolated against
   # the self-contained knob instead (issue #2786).
@@ -589,6 +593,7 @@ SKILL
   # "github-read-only" does) so ISSUE_TRACKER_GITHUB_READONLY fires, gating
   # research-verdict-github-readonly-socket.md.
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   unset BOX_WRITE_ENABLED
   # The bash-side PR-intent nudge gate (agent/entrypoint.sh, carrier-aware
   # since issue #3726) fires for ANY read-only Box with status=ready and
@@ -606,6 +611,7 @@ SKILL
   # research, gating research-verdict-local-socket.md (ISSUE_TRACKER_LOCAL
   # ignores BOX_WRITE_ENABLED, so no read-only override is needed here).
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   export ISSUE_TRACKER="local"
   export BOX_TRACKER_AXIS_READ=LOCAL
   unset BOX_TRACKER_AXIS_WRITE
@@ -619,6 +625,7 @@ SKILL
   # unset BOX_WRITE_ENABLED so ISSUE_TRACKER_FORGEJO_READONLY fires, gating
   # research-verdict-forgejo-readonly-socket.md.
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   export ISSUE_TRACKER="forgejo"
   export BOX_TRACKER_AXIS_READ=FORGEJO
   export BOX_TRACKER_AXIS_WRITE=FORGEJO
@@ -672,6 +679,7 @@ SKILL
   # forces FILER_FILE_RELAY unconditionally (researchForceRelay), gating
   # research-file-issues-relay-socket.md.
   export DISPATCH_KIND="research"
+  export ADVISE_ONLY=1
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
   export BOX_WORKER_PROVISIONED=1

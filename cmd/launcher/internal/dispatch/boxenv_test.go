@@ -123,6 +123,26 @@ func TestBuildBoxEnv_SelfContainedAbsentByDefault(t *testing.T) {
 	}
 }
 
+// Issue #3872: ADVISE_ONLY is derived from the kind's own descriptor, not a
+// kind-name string comparison, so a future advise-only kind gets the
+// read-only Box posture for free.
+func TestBuildBoxEnv_AdviseOnlySetForAdviseOnlyKind(t *testing.T) {
+	if got := mustBuildBoxEnv(t, Config{Kind: "research"}, "3", "T", 0, "", "")["ADVISE_ONLY"]; got != "1" {
+		t.Errorf("ADVISE_ONLY with Config.Kind=research: got %q, want %q", got, "1")
+	}
+}
+
+// ADVISE_ONLY stays absent, not "0", for work (unset Kind) and for any
+// unrecognized kind string, matching SELF_CONTAINED's absent-by-default shape.
+func TestBuildBoxEnv_AdviseOnlyAbsentForWorkAndUnknownKind(t *testing.T) {
+	if _, ok := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["ADVISE_ONLY"]; ok {
+		t.Error("ADVISE_ONLY should be absent when Config.Kind is unset (work)")
+	}
+	if _, ok := mustBuildBoxEnv(t, Config{Kind: "bogus-kind"}, "3", "T", 0, "", "")["ADVISE_ONLY"]; ok {
+		t.Error("ADVISE_ONLY should be absent for an unrecognized Config.Kind")
+	}
+}
+
 // Issue #1937: the Box reads the Dispatch's per-run nonce as RUN_NONCE.
 func TestBuildBoxEnvSetsRunNonce(t *testing.T) {
 	env := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "the-nonce")
