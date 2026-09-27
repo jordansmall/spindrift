@@ -4594,10 +4594,16 @@ of one standing Chore, keyed by chore name rather than by issue. Unlike
 `dispatch`/`research`, nothing labels a Chore into being — each invocation
 runs at most one Chore, and only when it is named in `BUTLER_CHORES` (schema
 key `butlerChores`), a space-separated allowlist that defaults to none; the
-built-in catalog ships one Chore, `bugs`
-(`templates/default/prompts/chores/bugs.md`). Butler runs under
+built-in catalog ships three Chores, `bugs`, `refactor`, and `docs-drift`
+(`templates/default/prompts/chores/`). Butler runs under
 `CODE_FORGE=local`, `github`, or `forgejo`; `spindrift butler` refuses to
 run under `git`.
+
+A Consumer adds its own Chore, or overrides a built-in one's prompt, by
+shipping `chores/<name>.md` in its `SPINDRIFT_PROMPT_DIR` override
+directory (or mkHarness's `choresDir`) and naming it in `BUTLER_CHORES`.
+The Box resolves every Chore, built-in or not, from `chores/<name>.md`
+under its prompt directory. No Chore is enabled by default.
 
 A run claims the Chore's **Ledger** — its durable record, kept as a chain of
 commits on `refs/spindrift/butler/<chore>` in the Target repo, never on a

@@ -110,7 +110,7 @@
             #     usd = "0.000000";
             #   };
             #   butler = {
-            #     # space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs` (templates/default/prompts/chores/bugs.md). `spindrift butler --chore <name>` refuses a name not listed here
+            #     # space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs`, `refactor`, and `docs-drift` (templates/default/prompts/chores/). `spindrift butler --chore <name>` refuses a name not listed here
             #     chores = "";
             #   };
             #   continuous = {
