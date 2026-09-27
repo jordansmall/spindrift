@@ -20,11 +20,11 @@ import (
 // client rather than building a second one (issue #2256).
 const defaultForgejoHTTPTimeout = 30 * time.Second
 
-// forgejoGitRemoteURL builds a token-authenticated clone URL for repo (an
+// GitRemoteURL builds a token-authenticated clone URL for repo (an
 // owner/repo slug), carrying the token as the URL's userinfo with no password
 // half. If baseURL fails to parse, it concatenates the token in as userinfo, so
 // the fallback remote can still push instead of being anonymous.
-func forgejoGitRemoteURL(baseURL, repo, token string) string {
+func GitRemoteURL(baseURL, repo, token string) string {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		base := strings.TrimSuffix(baseURL, "/")
@@ -118,7 +118,7 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 
 	remote := gitRemoteURL
 	if remote == "" {
-		remote = forgejoGitRemoteURL(baseURL, cfg.Repo, cfg.Token)
+		remote = GitRemoteURL(baseURL, cfg.Repo, cfg.Token)
 	}
 
 	hc := cfg.HTTPClient

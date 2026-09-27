@@ -12,17 +12,17 @@ import (
 // The token must be embedded as the URL's userinfo, the only shape `git clone`
 // and `git push` accept for HTTP(S) auth.
 func TestForgejoGitRemoteURL_EmbedsTokenAsUserinfo(t *testing.T) {
-	got := forgejoGitRemoteURL("https://codeberg.org", "owner/repo", "tok")
+	got := GitRemoteURL("https://codeberg.org", "owner/repo", "tok")
 	want := "https://tok@codeberg.org/owner/repo.git"
 	if got != want {
-		t.Fatalf("forgejoGitRemoteURL(...) = %q, want %q", got, want)
+		t.Fatalf("GitRemoteURL(...) = %q, want %q", got, want)
 	}
 }
 
 // The embedded token must be exactly what forge.RedactURLCredentials strips, so
 // a log line built from this URL (a clone failure, say) never leaks it.
 func TestForgejoGitRemoteURL_RedactedStripsToken(t *testing.T) {
-	remote := forgejoGitRemoteURL("https://codeberg.org", "owner/repo", "tok")
+	remote := GitRemoteURL("https://codeberg.org", "owner/repo", "tok")
 	redacted := forge.RedactURLCredentials(remote)
 	if strings.Contains(redacted, "tok") {
 		t.Fatalf("RedactURLCredentials(%q) = %q, still contains the token", remote, redacted)
@@ -33,9 +33,9 @@ func TestForgejoGitRemoteURL_RedactedStripsToken(t *testing.T) {
 // the fallback branch. That branch must keep the token rather than yield an
 // anonymous remote that would fail to push.
 func TestForgejoGitRemoteURL_FallbackKeepsToken(t *testing.T) {
-	got := forgejoGitRemoteURL("https://forge.test\x7f", "owner/repo", "tok")
+	got := GitRemoteURL("https://forge.test\x7f", "owner/repo", "tok")
 	if !strings.Contains(got, "tok@") {
-		t.Fatalf("forgejoGitRemoteURL(...) = %q, want it to contain %q (token as userinfo)", got, "tok@")
+		t.Fatalf("GitRemoteURL(...) = %q, want it to contain %q (token as userinfo)", got, "tok@")
 	}
 }
 
