@@ -20,7 +20,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift dispatch --continuous`| **deprecated**, superseded by [Daemon](#daemon) (issue #3547) — run dispatch as a continuous slot-refill loop; bare-flag alias for the `--continuous-dispatch` bool |
 | `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](#research-dispatch) |
 | `spindrift research 42 57`       | research exactly these issues, same selective semantics as `dispatch <nums>`    |
-| `spindrift butler --chore <name>` | one-shot butler sweep of a Chore (ADR 0056): claims the Chore's Ledger, scans the next slice of the tree, runs one advise-only Box, files findings, writes a done Ledger commit — `local`, `github`, or `forgejo` forge, see [Butler](#butler) |
+| `spindrift butler [--chore <name>]` | one-shot butler sweep of the first due enabled Chore (`BUTLER_CHORES` order), or only the one named — claims the Chore's Ledger, scans the next slice of the tree, runs one advise-only Box, files findings, writes a done Ledger commit; exits "no work" (2) if none is due — `local`, `github`, or `forgejo` forge, see [Butler](#butler) |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
@@ -4588,16 +4588,27 @@ for the full rationale.
 
 ## Butler
 
-`spindrift butler --chore <name>` (and `--no-build`, mirroring the other
+`spindrift butler [--chore <name>]` (and `--no-build`, mirroring the other
 dispatch-family verbs) is a third Dispatch kind (ADR 0056): a one-shot sweep
 of one standing Chore, keyed by chore name rather than by issue. Unlike
 `dispatch`/`research`, nothing labels a Chore into being — each invocation
-runs at most one Chore, and only when it is named in `BUTLER_CHORES` (schema
-key `butlerChores`), a space-separated allowlist that defaults to none; the
+runs at most one Chore, and only one named in `BUTLER_CHORES` (schema key
+`butlerChores`), a space-separated allowlist that defaults to none; the
 built-in catalog ships three Chores, `bugs`, `refactor`, and `docs-drift`
 (`templates/default/prompts/chores/`). Butler runs under
 `CODE_FORGE=local`, `github`, or `forgejo`; `spindrift butler` refuses to
 run under `git`.
+
+The command evaluates every `BUTLER_CHORES` entry in order, or only the one
+named by `--chore <name>`, and runs the first one **due** (issue #3877): its
+interval (`BUTLER_EVERY`/`butlerEvery`, a bare default plus optional
+`<chore>=<duration>` overrides; with no bare default the interval is `6h`,
+and an override naming a Chore not in `BUTLER_CHORES` is rejected) has
+elapsed since its last done commit, there is something new to scan, and no
+other run holds a live claim on it. If none is due, or another run wins the race to claim it, the command
+exits "no work" (exit code 2, the same signal `dispatch` gives an empty
+queue) and prints why on stderr, e.g. `interval not elapsed` or `nothing to
+scan`, per candidate Chore.
 
 A Consumer adds its own Chore, or overrides a built-in one's prompt, by
 shipping `<name>.md` at the root of mkHarness's `choresDir` and naming it
@@ -4628,11 +4639,13 @@ the Chore's full run history: every claim, every done commit's `lastSwept`
 (the base branch revision), `cursor` (where in the tree the next run picks
 up), `filed` (issues opened), and `usage`. The claim itself guards against
 two runs working the same Chore at once — a live claim makes the next
-invocation exit as "no work" (exit code 2, the same signal `dispatch` gives
-an empty queue); a claim older than six hours is treated as a crashed
-worker's leftover and taken over. A run that itself crashes leaves the claim
-standing and exits non-zero, so the next invocation's staleness check is the
-only recovery path — there is no separate `recover` for butler.
+invocation exit as "no work"; a claim older than `BUTLER_CLAIM_TIMEOUT`
+(schema key `butlerClaimTimeout`, default `6h`) is treated as a crashed
+worker's leftover and taken over, carrying `lastSwept` and `cursor` forward
+from the last done commit so the takeover resumes the sweep rather than
+restarting it. A run that itself crashes leaves the claim standing and exits
+non-zero, so the next invocation's staleness check is the only recovery path
+— there is no separate `recover` for butler.
 
 Each run scans two things: `lastSwept..HEAD` of the base branch (what changed
 since the last sweep) and the next slice of the tracked tree starting at
