@@ -396,7 +396,7 @@ in
     env = "BUTLER_CHORE_CLASSES";
     group = "dispatch";
     default = "bugs=error-handling,resource-leak refactor=dead-code docs-drift=stale-reference";
-    doc = "space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); validated for syntax here but inert until auto-promotion consumes it (issue #3880); the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes";
+    doc = "space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); the auto-promotion trust gate (issue #3880) -- still only acts when BUTLER_MAX_PROMOTIONS_PER_DAY > 0; the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "butler.choreClasses";
@@ -453,6 +453,28 @@ in
     legacySettingsExempt = true;
     intKind = "nonneg";
     nixSubPath = "butler.maxFindingsPerSweep";
+    boxEnv = false;
+  };
+  butlerMaxPromotionsPerDay = {
+    env = "BUTLER_MAX_PROMOTIONS_PER_DAY";
+    group = "dispatch";
+    default = 0;
+    doc = "caps butler findings auto-promoted to ready-for-agent per day (ADR 0056); unlike the other budgets above, 0 means promotion is off (the default), so enabling a Chore alone never promotes; a finding is promoted only when its class is on BUTLER_CHORE_CLASSES for its Chore, it touches no more than BUTLER_PROMOTION_MAX_FILES files, the in-Box reviewer agreed, and this budget has room; any other finding is filed unlabelled; not a start gate -- a spent promotion budget still lets sweeps run and file";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "nonneg";
+    nixSubPath = "butler.maxPromotionsPerDay";
+    boxEnv = false;
+  };
+  butlerPromotionMaxFiles = {
+    env = "BUTLER_PROMOTION_MAX_FILES";
+    group = "dispatch";
+    default = 3;
+    doc = "host limit on the files (paths named by its dedup/site keys) an auto-promoted butler finding may touch; a finding over it, or naming none, is filed unlabelled even when its class is allow-listed";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "positive";
+    nixSubPath = "butler.promotionMaxFiles";
     boxEnv = false;
   };
   butlerDailyTokenCeiling = {
