@@ -390,6 +390,16 @@ in
     nixSubPath = "butler.chores";
     boxEnv = false;
   };
+  butlerChoreClasses = {
+    env = "BUTLER_CHORE_CLASSES";
+    group = "dispatch";
+    default = "bugs=error-handling,resource-leak refactor=dead-code docs-drift=stale-reference";
+    doc = "space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); validated for syntax here but inert until auto-promotion consumes it (issue #3880); the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    nixSubPath = "butler.choreClasses";
+    boxEnv = false;
+  };
   repoSlug = {
     env = "REPO_SLUG";
     group = "forge";

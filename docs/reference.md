@@ -4600,10 +4600,17 @@ built-in catalog ships three Chores, `bugs`, `refactor`, and `docs-drift`
 run under `git`.
 
 A Consumer adds its own Chore, or overrides a built-in one's prompt, by
-shipping `chores/<name>.md` in its `SPINDRIFT_PROMPT_DIR` override
-directory (or mkHarness's `choresDir`) and naming it in `BUTLER_CHORES`.
-The Box resolves every Chore, built-in or not, from `chores/<name>.md`
-under its prompt directory. No Chore is enabled by default.
+shipping `<name>.md` at the root of mkHarness's `choresDir` and naming it
+in `BUTLER_CHORES`. Setting `choresDir` replaces the whole built-in
+catalog, so copy in any built-in Chore you still enable, or its assembly
+fails. Alternatively, ship `chores/<name>.md` in a `SPINDRIFT_PROMPT_DIR`
+override directory — but that override shadows all of `/agent/prompts`, so
+it must carry the full prompt tree, not only `chores/`. No Chore is enabled
+by default.
+`BUTLER_CHORE_CLASSES` (schema key `butlerChoreClasses`) holds each Chore's
+host-side allow-list of finding classes. It is validated but inert until
+auto-promotion lands (issue #3880); the default covers the three built-ins,
+and a Chore with no entry never promotes. The Box never sees it.
 
 A run claims the Chore's **Ledger** — its durable record, kept as a chain of
 commits on `refs/spindrift/butler/<chore>` in the Target repo, never on a

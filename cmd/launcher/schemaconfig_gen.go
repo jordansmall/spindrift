@@ -14,6 +14,7 @@ type schemaConfig struct {
 	baseBranch                   string
 	boxForgeAndIssueAccess       string
 	branchPrefix                 string
+	butlerChoreClasses           string
 	butlerChores                 string
 	bwrapUnshareNet              bool
 	claudeOAuthToken             string
@@ -93,6 +94,7 @@ func loadSchemaConfig() schemaConfig {
 		baseBranch:              getenvSchema("BASE_BRANCH"),
 		boxForgeAndIssueAccess:  getenvSchema("BOX_FORGE_AND_ISSUE_ACCESS"),
 		branchPrefix:            getenvSchema("BRANCH_PREFIX"),
+		butlerChoreClasses:      getenvSchema("BUTLER_CHORE_CLASSES"),
 		butlerChores:            getenvSchema("BUTLER_CHORES"),
 		bwrapUnshareNet:         getenvSchema("BWRAP_UNSHARE_NET") != "",
 		claudeOAuthToken:        os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),

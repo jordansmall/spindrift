@@ -110,6 +110,8 @@
             #     usd = "0.000000";
             #   };
             #   butler = {
+            #     # space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); validated for syntax here but inert until auto-promotion consumes it (issue #3880); the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes
+            #     choreClasses = "bugs=error-handling,resource-leak refactor=dead-code docs-drift=stale-reference";
             #     # space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs`, `refactor`, and `docs-drift` (templates/default/prompts/chores/). `spindrift butler --chore <name>` refuses a name not listed here
             #     chores = "";
             #   };
