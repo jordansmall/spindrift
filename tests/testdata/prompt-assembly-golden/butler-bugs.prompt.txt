@@ -1,0 +1,88 @@
+# TASK
+
+Default to the `/caveman` skill for all narration and prose output this run.
+Code, commands, error messages, and commit messages are exempt and stay
+verbatim. Never route a commit message through `/caveman` or otherwise
+compress it — commit messages are always full human-quality prose.
+
+The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`
+line, the `VERDICT: APPROVE` / `VERDICT: BLOCK` line, and any host-relay
+signal line such as `SPINDRIFT_PR_INTENT` or `SPINDRIFT_ISSUE_INTENT`.
+Never route these through `/caveman`. Specifically, the `note=` field of
+the SPINDRIFT_OUTCOME line is exempt and stays human-quality prose, same
+tier as a commit message — on a blocked or ambiguous stop it is posted
+verbatim as a comment on the tracker issue, so caveman-compressing it
+ships caveman prose straight to a human reader.
+
+The payload those signals carry is exempt on that same tier, whichever
+carrier takes it: the draft PR's title and body, and a filed issue's title
+and body, stay full human-quality prose — as the base64 payload of a
+marker line under the `log` carrier, and as the text you hand
+`driver-exec signal pr-intent` or `driver-exec signal issue-intent` under
+the `socket` carrier, where no marker line renders at all. A human reads
+the PR and the filed issue cold, the same reason the `note=` field above
+is exempt.
+
+Where a marker line is the carrier, it must keep its required shape exactly
+intact — never reworded, reflowed, or line-wrapped: the leading token,
+the outcome line's key=value pairs, and the PR-intent line's nonce and
+base64 payload as one unbroken token. The verdict line must additionally
+remain the first line of the agent's final message.
+
+One-shot sweep of the `bugs` chore (ADR 0056). An
+advise-only Box: no branch cut, no commits, no PR, no push, and no direct
+write to the Issue Tracker. Scan the Target repo as checked out for this
+Chore's kind of finding and relay each one to the Filer — the launcher
+files it for a human to triage. The sweep records `deadbeef` as its
+head; the checkout may be newer if the base branch moved since. This run
+carries no tracker issue number: it is keyed by the Chore's own name,
+`bugs`, not an issue.
+
+# SCOPE
+
+Diff range since the last sweep: `cafef00d..deadbeef` (blank on a first
+sweep, or when nothing landed since the last one — review the slice below
+in full either way).
+
+Review that diff first, then sweep the rest of this run's slice: every path
+below, recursively.
+
+cmd/launcher/main.go
+cmd/launcher/internal/dispatch/dispatch.go
+
+# CHORE
+
+Look for latent bugs in the scoped code: correctness mistakes, wrong error
+handling (swallowed, mismatched, or missing), races and other concurrency
+hazards, off-by-one and boundary errors, and resource leaks (an unclosed
+file, connection, goroutine, or lock that outlives its scope).
+
+A finding must be concrete and cited with file:line, and worth a human's
+time to read and fix. Prefer filing nothing over a speculative or
+stylistic finding — this is not a style or readability sweep, and a vague
+"this could maybe be a problem" finding costs a human more to triage than
+it saves.
+
+# FILE FINDINGS
+
+Never push, never open a PR, never commit, never edit an issue, add or
+remove a label, or file an issue yourself, and never write to the Ledger —
+the launcher records this sweep's own done commit once you exit. Comments
+on an existing issue are also out of scope: relay through the Filer only.
+
+# OUTCOME
+
+Once every finding is relayed (or the sweep concludes there is nothing to
+relay), print exactly one line as your final output — raw plain text, not
+wrapped in backticks, a code fence, or any other markdown formatting:
+
+SPINDRIFT_OUTCOME issue=butler-bugs landing=none status=ready note=<n findings relayed>
+
+This must be the literal final message — nothing after it, no prose
+summary. `landing` is always `none`: this run lands nothing, on any forge.
+
+If you cannot complete the sweep — the clone fails, the slice is
+unreadable, or some other blocker stops you before a genuine conclusion —
+use `blocked` as the escape hatch instead, same raw plain text requirement:
+
+SPINDRIFT_OUTCOME issue=butler-bugs landing=none status=blocked note=<short reason>

@@ -138,6 +138,22 @@ assert_review_handoff_golden() {
   [ -s "$review_prompt_file" ]
 }
 
+# Shared env for the butler cells below (ADR 0056): the butler is keyed by
+# Chore name, never a tracker issue, so ISSUE_NUMBER/ISSUE_TITLE must be
+# unset -- entrypoint.sh's own early gate requires CHORE_NAME in their place
+# only when DISPATCH_KIND=butler. CHORE_HEAD/CHORE_DIFF_RANGE/CHORE_SLICE
+# mirror the Go suite's butlerEnv fixture (promptassembly/assemble_test.go)
+# so both harnesses exercise the same shape.
+setup_butler_env() {
+  export DISPATCH_KIND="butler"
+  export ADVISE_ONLY=1
+  unset ISSUE_NUMBER ISSUE_TITLE
+  export CHORE_NAME="$1"
+  export CHORE_HEAD="deadbeef"
+  export CHORE_DIFF_RANGE="cafef00d..deadbeef"
+  export CHORE_SLICE=$'cmd/launcher/main.go\ncmd/launcher/internal/dispatch/dispatch.go'
+}
+
 @test "assert_golden_text_or_update diffs and fails when golden and produced differ, UPDATE_GOLDENS unset" {
   local golden="$BATS_TEST_TMPDIR/golden.txt" produced="$BATS_TEST_TMPDIR/produced.txt"
   echo "golden content" >"$golden"
@@ -687,4 +703,22 @@ SKILL
   export BOX_SIGNAL_CARRIER="socket"
 
   assert_cell_golden "research-filer-on-signal-socket" initial
+}
+
+@test "production path matches the golden fixture for the butler bugs chore cell" {
+  setup_butler_env "bugs"
+
+  assert_cell_golden "butler-bugs" initial
+}
+
+@test "production path matches the golden fixture for the butler refactor chore cell" {
+  setup_butler_env "refactor"
+
+  assert_cell_golden "butler-refactor" initial
+}
+
+@test "production path matches the golden fixture for the butler docs-drift chore cell" {
+  setup_butler_env "docs-drift"
+
+  assert_cell_golden "butler-docs-drift" initial
 }
