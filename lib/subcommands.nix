@@ -28,6 +28,13 @@
     doc = "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes";
   }
   {
+    # butler shows no issue list at all: it takes a required --chore name,
+    # never an issue selection (ADR 0056, issue #3875).
+    name = "butler";
+    usage = "--chore <name> [--no-build]";
+    doc = "one-shot sweep of one opted-in butler Chore (BUTLER_CHORES): claims its Ledger, runs one read-only Box, and files findings; never merges, never promotes";
+  }
+  {
     name = "preview";
     usage = "[issue...]";
     doc = "dry-run: show what dispatch would pick up, in order";
