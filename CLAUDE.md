@@ -20,6 +20,10 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   finding (#393). Never carries a dispatch label
   (`agent-trigger`/`ready-for-agent`) — a human promotes it to
   `ready-for-agent` like any other issue before an agent picks it up.
+- `agent-butler-finding` — filed by the host from a butler Chore finding
+  (ADR 0056). Never carries a dispatch label
+  (`agent-trigger`/`ready-for-agent`) — a human promotes it to
+  `ready-for-agent` like any other issue before an agent picks it up.
 
 ### Dispatch authentication
 

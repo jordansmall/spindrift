@@ -20,6 +20,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift dispatch --continuous`| **deprecated**, superseded by [Daemon](#daemon) (issue #3547) — run dispatch as a continuous slot-refill loop; bare-flag alias for the `--continuous-dispatch` bool |
 | `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](#research-dispatch) |
 | `spindrift research 42 57`       | research exactly these issues, same selective semantics as `dispatch <nums>`    |
+| `spindrift butler --chore <name>` | one-shot butler sweep of a Chore (ADR 0056): claims the Chore's Ledger, scans the next slice of the tree, runs one advise-only Box, files findings, writes a done Ledger commit — local forge only, see [Butler](#butler) |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
@@ -4584,6 +4585,46 @@ it, since a no-repo work dispatch would have nothing to branch from or land
 a PR onto. See [ADR 0022's amendment for issue
 #2202](adr/0022-research-is-a-dispatch-kind.md#amendment-issue-2202-a-self-contained-no-repo-research-sub-mode)
 for the full rationale.
+
+## Butler
+
+`spindrift butler --chore <name>` (and `--no-build`, mirroring the other
+dispatch-family verbs) is a third Dispatch kind (ADR 0056): a one-shot sweep
+of one standing Chore, keyed by chore name rather than by issue. Unlike
+`dispatch`/`research`, nothing labels a Chore into being — each invocation
+runs at most one Chore, and only when it is named in `BUTLER_CHORES` (schema
+key `butlerChores`), a space-separated allowlist that defaults to none; the
+built-in catalog ships one Chore, `bugs`
+(`templates/default/prompts/chores/bugs.md`). Butler is local-forge only
+today — `spindrift butler` refuses to run under any `CODE_FORGE` other than
+`local` (ADR 0056's tracer bullet; hosted forges are future work).
+
+A run claims the Chore's **Ledger** — its durable record, kept as a chain of
+commits on `refs/spindrift/butler/<chore>` in the bare Accumulation repo,
+never on a branch. `git log refs/spindrift/butler/<chore>` in that repo is
+the Chore's full run history: every claim, every done commit's `lastSwept`
+(the base branch revision), `cursor` (where in the tree the next run picks
+up), `filed` (issues opened), and `usage`. The claim itself guards against
+two runs working the same Chore at once — a live claim makes the next
+invocation exit as "no work" (exit code 2, the same signal `dispatch` gives
+an empty queue); a claim older than six hours is treated as a crashed
+worker's leftover and taken over. A run that itself crashes leaves the claim
+standing and exits non-zero, so the next invocation's staleness check is the
+only recovery path — there is no separate `recover` for butler.
+
+Each run scans two things: `lastSwept..HEAD` of the base branch (what changed
+since the last sweep) and the next slice of the tracked tree starting at
+`cursor` (40 paths per run, so a large repo is swept incrementally across
+many runs rather than all at once). It then runs exactly one advise-only Box
+against that scope, driven by the Chore's prompt
+(`templates/default/prompts/butler-prompt.md`, composed with the named
+Chore's own prompt file). Like research, butler is advise-only: any finding
+the Box relays is filed as its own issue through the Filer, carrying the
+`agent-butler-finding` label and naming the Chore and the files involved —
+never promoted to `ready-for-agent` by the agent's own hand, same as every
+other agent-filed issue (see [Filer](#filer)). See the **Butler** / **Chore**
+/ **Ledger** glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full
+vocabulary.
 
 ## Registry route discovery
 

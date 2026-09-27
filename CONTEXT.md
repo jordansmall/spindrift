@@ -556,19 +556,21 @@ _Avoid_: config file (generated, never operator-edited), env preamble,
 defaults preamble.
 
 **Dispatch**:
-The per-issue execution, from claim to verdict: every Box launched for one
-issue — initial run, fix passes, conflict-resolve — plus its results and its
-Driver-cache entry. The thing whose states the Dispatch lifecycle names;
-distinct from the Driver's resumable conversation session, which the
-Driver-cache entry preserves across a Dispatch's fix passes.
+The per-issue or per-Chore execution, from claim to verdict: every Box
+launched for one issue or one [[Chore]] sweep — initial run, fix passes,
+conflict-resolve — plus its results and its Driver-cache entry. The thing
+whose states the Dispatch lifecycle names; distinct from the Driver's
+resumable conversation session, which the Driver-cache entry preserves
+across a Dispatch's fix passes.
 _Avoid_: session (collides with the Driver's conversation session), run, job.
 
 **Dispatch kind**:
 The axis naming what a Dispatch delivers: `work` (the original kind — lands
-code through the Code Forge) or `research` (lands a verdict and enrichment
-comments on the Issue Tracker; never touches the Code Forge). Kinds share the
-canonical Dispatch lifecycle; on the `github` tracker each kind maps the
-states to its own label family.
+code through the Code Forge), `research` (lands a verdict and enrichment
+comments on the Issue Tracker; never touches the Code Forge), or `butler`
+(sweeps one [[Chore]] and files findings; keyed by Chore, not issue). Kinds
+share the canonical Dispatch lifecycle; on the `github` tracker each kind
+maps the states to its own label family.
 _Avoid_: mode, dispatch type, pipeline.
 
 **Driving loop**:
@@ -641,12 +643,13 @@ side-effect issue, enrichment (that is the comment's context, not a new
 issue).
 
 **Butler**:
-A proposed third Dispatch kind (ADR 0056, working name) that keeps a Target
-repo tidy on its own initiative: one read-only Box scans one [[Chore]] and
-files what it finds through the [[Filer]]. Keyed by chore, not by issue —
-nothing labels it into being; the [[Daemon]] runs it only when no dispatch
-or research work is waiting. Advise-only for code; an opt-in, host-gated
-subset of its findings may be filed already dispatchable.
+A third Dispatch kind (ADR 0056) that keeps a Target repo tidy on its own
+initiative: one advise-only Box scans one [[Chore]] and files what it finds
+through the [[Filer]]. Keyed by chore, not by issue — nothing labels it into
+being; today only the one-shot `spindrift butler --chore <name>` runs it, and
+the [[Daemon]] will later run it only when no dispatch or research work is
+waiting. Advise-only for code; an opt-in, host-gated subset of its findings
+may be filed already dispatchable.
 _Avoid_: sweep, patrol, scheduler, cron, audit.
 
 **Chore**:
