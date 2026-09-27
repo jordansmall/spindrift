@@ -10,11 +10,12 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
-// choreNameRe is the ChoreName shape allowed to reach filepath.Join: letters,
+// ChoreNameRe is the ChoreName shape allowed to reach filepath.Join: letters,
 // digits, dash, and underscore only. No path separator or ".." can ever cross
 // this gate before choreSection builds the chores/<name>.md lookup path
-// (ADR 0056, issue #3875).
-var choreNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+// (ADR 0056, issue #3875). internal/butler bounds BUTLER_CHORE_CLASSES names
+// with it too.
+var ChoreNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // choreSection renders the ${CHORE_PROMPT} substitution value: the named
 // Chore's own prompt file under PromptsDir/chores/<name>.md. Every kind other
@@ -28,7 +29,7 @@ func choreSection(e Env) (string, error) {
 	if d.Keying != dispatchkind.ByChore {
 		return "", nil
 	}
-	if !choreNameRe.MatchString(e.ChoreName) {
+	if !ChoreNameRe.MatchString(e.ChoreName) {
 		return "", fmt.Errorf("promptassembly: invalid CHORE_NAME %q: must contain only letters, digits, '-', and '_'", e.ChoreName)
 	}
 	path := filepath.Join(e.PromptsDir, "chores", e.ChoreName+".md")

@@ -132,17 +132,22 @@ func runButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun,
 	return nil
 }
 
-// butlerPreflight holds the guards cmdButler checks before it claims anything.
-// The Filer gate matters because a butler Box relays findings only through the
-// Filer: without one it would still report ready, and settling would advance
+// butlerPreflight holds the guards cmdButler checks before it claims
+// anything. A malformed BUTLER_CHORE_CLASSES fails here, before any claim; a
+// Chore with no entry is fine, its allow-list is just empty. The Filer gate
+// matters because a butler Box relays findings only through the Filer:
+// without one it would still report ready, and settling would advance
 // lastSwept and the cursor past findings nobody filed.
-func butlerPreflight(codeForge, butlerChores, chore string, filerEnabled bool) error {
-	row, ok := backendByName(codeForge)
+func butlerPreflight(cfg config, chore string, filerEnabled bool) error {
+	row, ok := backendByName(cfg.codeForge)
 	if !ok || row.newLedger == nil {
-		return fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", codeForge, strings.Join(ledgerCapableNames(), ", "))
+		return fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", cfg.codeForge, strings.Join(ledgerCapableNames(), ", "))
 	}
-	if !choreEnabled(butlerChores, chore) {
-		return fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", chore, butlerChores)
+	if !choreEnabled(cfg.butlerChores, chore) {
+		return fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", chore, cfg.butlerChores)
+	}
+	if _, err := butler.ParseClasses(cfg.butlerChoreClasses); err != nil {
+		return fmt.Errorf("butler: BUTLER_CHORE_CLASSES: %w", err)
 	}
 	if !filerEnabled {
 		return fmt.Errorf("butler: chore %q needs a provisioned Filer to relay findings (set FILER_MODEL; DRIVER=opencode never provisions one)", chore)
@@ -158,7 +163,7 @@ func cmdButler(lc *launchContext, chore string) int {
 	defer lc.cleanup()
 
 	filerEnabled := resolveAgentPresenceSignals(lc.config.driver).filerEnabled
-	if err := butlerPreflight(lc.config.codeForge, lc.config.butlerChores, chore, filerEnabled); err != nil {
+	if err := butlerPreflight(lc.config, chore, filerEnabled); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
