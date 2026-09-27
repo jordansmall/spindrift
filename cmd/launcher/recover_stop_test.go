@@ -305,3 +305,74 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 		}
 	}
 }
+
+// TestRecoverByNumber_IssueClaimedElsewhere_Skips pins the acceptance
+// criterion for issue #3885: an issue whose flock claim.go's claim file
+// (2baa3b3d) another process still holds -- a live Run() -- must be skipped
+// outright, never relayed or settled out from under that owner.
+func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	branch := fc.AgentBranch("42")
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
+
+	dir := tempLogDir(t)
+
+	// Seeded as a live Run() would leave one mid-flight, to prove recover
+	// leaves it untouched rather than quarantining it aside.
+	logPath := dispatch.HostLogDirFor(dir) + "/issue-42.log"
+	if err := os.WriteFile(logPath, []byte("live run output\n"), 0o644); err != nil {
+		t.Fatalf("seed issue-42.log: %v", err)
+	}
+
+	release, err := dispatch.ClaimIssue(dir, "42")
+	if err != nil {
+		t.Fatalf("dispatch.ClaimIssue: %v", err)
+	}
+	defer release()
+
+	s := settle.NewFake()
+	var recErr error
+	out := captureStdout(t, func() {
+		recErr = recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, "42")
+	})
+
+	if recErr != nil {
+		t.Fatalf("recoverByNumber: got %v, want nil (skip, not an error)", recErr)
+	}
+	if !strings.Contains(out, "status=skipped") || !strings.Contains(out, "still live in another launcher process") {
+		t.Errorf("stdout = %q, want a skip line naming the live claim", out)
+	}
+	if len(s.SettleAdoptedCalls) != 0 {
+		t.Errorf("SettleAdoptedCalls = %d, want 0 (a live claim must not be settled)", len(s.SettleAdoptedCalls))
+	}
+	if len(s.SettleRelayedBranchCalls) != 0 {
+		t.Errorf("SettleRelayedBranchCalls = %d, want 0", len(s.SettleRelayedBranchCalls))
+	}
+
+	markerPath := dispatch.HostLogDirFor(dir) + "/issue-42.run-lineage"
+	if _, statErr := os.Stat(markerPath); statErr == nil {
+		t.Error("run-lineage marker created, want none while another process holds the claim")
+	}
+
+	got, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("issue-42.log missing after recoverByNumber: %v", readErr)
+	}
+	if string(got) != "live run output\n" {
+		t.Errorf("issue-42.log contents = %q, want untouched", got)
+	}
+	if _, statErr := os.Stat(logPath + ".1"); statErr == nil {
+		t.Error("issue-42.log.1 quarantine sibling created, want no rename while another process holds the claim")
+	}
+
+	iss, ierr := fc.Issue("42")
+	if ierr != nil {
+		t.Fatalf("fc.Issue(42): %v", ierr)
+	}
+	if !containsLabel(iss.Labels, c.inProgressLabel) {
+		t.Errorf("issue #42 labels = %v, want still in-progress (unsettled)", iss.Labels)
+	}
+}
