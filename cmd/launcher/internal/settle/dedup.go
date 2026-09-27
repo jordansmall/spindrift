@@ -3,6 +3,7 @@ package settle
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -12,7 +13,7 @@ import (
 // findingLabelReview and findingLabelResearch are the two provenance labels
 // fileIssueIntentsDetailed's callers pass (gate.go's work path and
 // research.go's research path), named here for isFindingIssue to match the
-// open backlog against. The two call sites keep their own string literals
+// backlog against. The two call sites keep their own string literals
 // rather than using these: nix/checks/dispatch-labels.nix extracts the label
 // straight out of gate.go's call as source text, and a constant there
 // extracts as nothing.
@@ -21,10 +22,15 @@ const (
 	findingLabelResearch = "agent-research-finding"
 )
 
+// findingLabels is the finding-label set isFindingIssue and
+// backlogDedupIndex both match against, so a third provenance label lands
+// in one place rather than two.
+var findingLabels = []string{findingLabelReview, findingLabelResearch}
+
 // dedupMarkerPrefix and dedupMarkerSuffix delimit the hidden marker line
 // buildDedupMarker appends to a filed finding's body (issue #3609): carrying
 // the intent's own DedupTerms lets a later run recover this issue's dedup key
-// set from the open backlog (backlogDedupIndex) without re-parsing prose.
+// set from the backlog (backlogDedupIndex) without re-parsing prose.
 const (
 	dedupMarkerPrefix = "<!-- spindrift-dedup: "
 	dedupMarkerSuffix = " -->"
@@ -127,34 +133,24 @@ func parseDedupMarker(body string) []string {
 	return nil
 }
 
-// isFindingIssue reports whether labels carries one of the two provenance
-// labels fileIssueIntentsDetailed files with. Dedup only ever consults
-// finding issues: an ordinary backlog issue that happens to share a title or
-// term must never suppress a filing.
+// isFindingIssue reports whether labels carries one of findingLabels, the
+// provenance labels fileIssueIntentsDetailed files with. Dedup only ever
+// consults finding issues: an ordinary backlog issue that happens to share
+// a title or term must never suppress a filing.
 func isFindingIssue(labels []string) bool {
 	for _, l := range labels {
-		if l == findingLabelReview || l == findingLabelResearch {
+		if slices.Contains(findingLabels, l) {
 			return true
 		}
 	}
 	return false
 }
 
-// backlogDedupIndex maps every dedup key already covered to a
-// human-readable reference: a "#<number>" for a key covered by an open
-// finding issue, built once per filing pass from listBacklogForDedup (issue
-// #3609, review), or a `this run's "<title>"` string for a key
-// fileIssueIntentsDetailed adds in place as this same run files its own
-// intents. A list failure is non-fatal: it warns, in the same style as the
-// sibling ListLabels warning this call sits beside, and the pass falls back
-// to intra-run-only dedup.
-func backlogDedupIndex(it forge.IssueTracker, num string) map[string]string {
-	index := make(map[string]string)
-	issues, err := listBacklogForDedup(it)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: list open issues failed: %v\n", num, err)
-		return index
-	}
+// indexFindingIssues folds each finding-labelled issue in issues into index,
+// keyed by its marker's dedup terms and valued "#<number>". A non-finding
+// issue is skipped: dedup only ever consults an issue fileIssueIntentsDetailed
+// itself filed. Later calls overwrite earlier ones for a shared key.
+func indexFindingIssues(index map[string]string, issues []forge.Issue) {
 	for _, iss := range issues {
 		if !isFindingIssue(iss.Labels) {
 			continue
@@ -164,21 +160,41 @@ func backlogDedupIndex(it forge.IssueTracker, num string) map[string]string {
 			index[k] = ref
 		}
 	}
-	return index
 }
 
-// listBacklogForDedup prefers forge.LabeledBacklogLister, scoped to the two
-// finding labels, which unlike ListOpenIssues on GitHub carries Body and
-// isn't truncated to the oldest page (issue #3609 review). Adapters without
-// the capability (forgejo, jira, local) already populate Body and walk every
-// page via ListOpenIssues, so they fall back to it unchanged; isFindingIssue
-// still filters the result either way, since the fallback read is
-// unlabelled.
-func listBacklogForDedup(it forge.IssueTracker) ([]forge.Issue, error) {
-	if lister, ok := it.(forge.LabeledBacklogLister); ok {
-		return lister.ListOpenIssuesWithLabels([]string{findingLabelReview, findingLabelResearch})
+// backlogDedupIndex maps every dedup key already covered to a
+// human-readable reference: a "#<number>" for a key covered by a finding
+// issue, open or closed -- closing a finding is a durable triage decision the
+// host enforces (issue #3873) -- or a `this run's "<title>"` string for a key
+// fileIssueIntentsDetailed adds in place as this same run files its own
+// intents. A list failure is non-fatal: it warns, in the same style as the
+// sibling ListLabels warning this call sits beside, and contributes nothing
+// to the index -- exactly as an open-lookup failure did before #3873 -- so
+// the closed and open lookups degrade independently: during an open-side
+// outage, closed keys still suppress a refile. Closed is indexed first so an
+// open issue, the one still actively tracked, wins a shared key. Every real
+// adapter implements forge.LabeledBacklogLister; a tracker without it (a
+// test fake) falls back to ListOpenIssues, open-only.
+func backlogDedupIndex(it forge.IssueTracker, num string) map[string]string {
+	index := make(map[string]string)
+	lister, ok := it.(forge.LabeledBacklogLister)
+	if !ok {
+		issues, err := it.ListOpenIssues()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: list open issues (unlabelled fallback) failed: %v\n", num, err)
+			return index
+		}
+		indexFindingIssues(index, issues)
+		return index
 	}
-	return it.ListOpenIssues()
+	for _, state := range []forge.IssueState{forge.IssueClosed, forge.IssueOpen} {
+		issues, err := lister.ListIssuesWithLabels(state, findingLabels)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: list %s finding issues failed: %v\n", num, strings.ToLower(string(state)), err)
+		}
+		indexFindingIssues(index, issues)
+	}
+	return index
 }
 
 // dedupOverlap records how much of an intent's dedup key set the index

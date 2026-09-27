@@ -1459,6 +1459,98 @@ func TestFileIssueIntentsDetailed_Dedup_FullOverlapBySingleIssueSkips(t *testing
 	}
 }
 
+// A finding whose site is already tracked by a CLOSED finding issue is
+// skipped exactly like an open match, naming the closed issue as the DupRef
+// -- a closed finding was already filed once and must never be refiled just
+// because it was since closed (issue #3873).
+func TestFileIssueIntentsDetailed_Dedup_ClosedFullOverlapSkips(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+	filer := fc.AsIssueFiler()
+	stub := &combinedBacklogListerFilerStub{
+		IssueTracker:         filer,
+		HostPostedIssueFiler: filer.(forge.HostPostedIssueFiler),
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueClosed: {
+				{
+					Number: "501",
+					Title:  "A closed earlier finding covering site a",
+					Body:   "some earlier body\n\n<!-- spindrift-dedup: site a -->",
+					Labels: []string{"agent-review-finding"},
+				},
+			},
+		},
+	}
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding on site a","body":"new body","dedupTerms":["site a"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	stdout := captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 0 {
+		t.Fatalf("PostIssueCalls = %+v, want none (site already tracked by a closed finding)", fc.PostIssueCalls)
+	}
+	if len(filed) != 1 || !filed[0].Skipped || filed[0].DupRef != "#501" {
+		t.Fatalf("filed = %+v, want one skipped entry with DupRef #501", filed)
+	}
+	line := lineContaining(t, stdout, "skipped duplicate issue-intent")
+	if !strings.Contains(line, "already tracked: #501") {
+		t.Errorf("skip line = %q, want it to name #501", line)
+	}
+}
+
+// A two-site finding where only one site is covered by a closed finding
+// still files -- same partial-overlap behaviour as an open match, since the
+// uncovered site is tracked nowhere else (issue #3873).
+func TestFileIssueIntentsDetailed_Dedup_ClosedPartialOverlapStillFiles(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+	filer := fc.AsIssueFiler()
+	stub := &combinedBacklogListerFilerStub{
+		IssueTracker:         filer,
+		HostPostedIssueFiler: filer.(forge.HostPostedIssueFiler),
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueClosed: {
+				{
+					Number: "501",
+					Title:  "A closed earlier finding covering site a",
+					Body:   "some earlier body\n\n<!-- spindrift-dedup: site a -->",
+					Labels: []string{"agent-review-finding"},
+				},
+			},
+		},
+	}
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a finding spanning two sites","body":"new body","dedupTerms":["site a","site b"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	stdout := captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1 (uncovered site b must still file)", fc.PostIssueCalls)
+	}
+	if len(filed) != 1 || filed[0].Skipped {
+		t.Fatalf("filed = %+v, want one non-skipped entry", filed)
+	}
+	if !strings.Contains(stdout, "partial dedup overlap") || !strings.Contains(stdout, "#501") {
+		t.Errorf("stdout = %q, want a partial-overlap line naming #501", stdout)
+	}
+}
+
 // A filed finding's body actually carries the hidden dedup marker line, and
 // the terms recovered from it via parseDedupMarker match the intent's own
 // DedupTerms, normalized (issue #3609).
@@ -1602,21 +1694,27 @@ func TestFileIssueIntentsDetailed_Dedup_NonFindingIssueNeverSuppresses(t *testin
 	}
 }
 
-// combinedBacklogListerFilerStub composes a LabeledBacklogLister that always
-// fails with a HostPostedIssueFiler-capable forge.Fake, so a test can drive
-// fileIssueIntentsDetailed's full path through backlogDedupIndex's
-// list-failure branch (dedup_test.go's own list-failure test calls
-// backlogDedupIndex directly, which never reaches a filer).
+// combinedBacklogListerFilerStub composes a scriptable LabeledBacklogLister
+// with a HostPostedIssueFiler-capable forge.Fake, so a test can drive
+// fileIssueIntentsDetailed's full path through backlogDedupIndex: err (when
+// set) fails both the closed and open lookups alike, for the list-failure
+// branch (dedup_test.go's own list-failure test calls backlogDedupIndex
+// directly, which never reaches a filer); issues, keyed by state, scripts a
+// per-state result for the closed-match tests (issue #3873).
 type combinedBacklogListerFilerStub struct {
 	forge.IssueTracker
 	forge.HostPostedIssueFiler
-	err   error
-	calls int
+	err    error
+	issues map[forge.IssueState][]forge.Issue
+	calls  int
 }
 
-func (s *combinedBacklogListerFilerStub) ListOpenIssuesWithLabels(labels []string) ([]forge.Issue, error) {
+func (s *combinedBacklogListerFilerStub) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
 	s.calls++
-	return nil, s.err
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.issues[state], nil
 }
 
 // A LabeledBacklogLister list failure degrades to intra-run-only dedup
@@ -1659,8 +1757,8 @@ func TestFileIssueIntentsDetailed_Dedup_ListFailureStillFiles(t *testing.T) {
 }
 
 // A pass whose intents carry no dedup terms never builds the backlog index:
-// the two list round trips could not match anything, so they are not paid
-// (issue #3609 review).
+// the two list round trips (closed and open) could not match anything, so
+// they are not paid (issue #3609 review).
 func TestFileIssueIntentsDetailed_Dedup_NoTermsSkipsBacklogList(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
@@ -1685,7 +1783,7 @@ func TestFileIssueIntentsDetailed_Dedup_NoTermsSkipsBacklogList(t *testing.T) {
 	})
 
 	if stub.calls != 0 {
-		t.Errorf("ListOpenIssuesWithLabels calls = %d, want 0 (no intent carries a dedup key)", stub.calls)
+		t.Errorf("ListIssuesWithLabels calls = %d, want 0 (no intent carries a dedup key)", stub.calls)
 	}
 	if len(fc.PostIssueCalls) != 2 {
 		t.Fatalf("PostIssueCalls = %+v, want 2", fc.PostIssueCalls)
@@ -1694,6 +1792,8 @@ func TestFileIssueIntentsDetailed_Dedup_NoTermsSkipsBacklogList(t *testing.T) {
 
 // The backlog index is built at most once even across several key-carrying
 // intents -- laziness must not turn the hoist into a per-intent round trip.
+// Two ListIssuesWithLabels calls (closed, then open) is that one build, not
+// two (issue #3873).
 func TestFileIssueIntentsDetailed_Dedup_BacklogListBuiltOnce(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
@@ -1717,8 +1817,8 @@ func TestFileIssueIntentsDetailed_Dedup_BacklogListBuiltOnce(t *testing.T) {
 		})
 	})
 
-	if stub.calls != 1 {
-		t.Errorf("ListOpenIssuesWithLabels calls = %d, want 1", stub.calls)
+	if stub.calls != 2 {
+		t.Errorf("ListIssuesWithLabels calls = %d, want 2 (one closed, one open, for the single build)", stub.calls)
 	}
 }
 

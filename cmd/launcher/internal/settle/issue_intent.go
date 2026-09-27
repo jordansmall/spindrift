@@ -68,8 +68,9 @@ func parseIssueIntent(raw string) (issueIntent, bool) {
 // filedIntent is the outcome of filing one issue-intent: a URL on success,
 // Failed with the intent's own body so a caller can degrade it into inline
 // comment text rather than dropping it silently, or Skipped when a dedup key
-// already matched an open finding issue or an earlier intent this same run
-// (issue #3609) -- never posted, so it has no URL and no Body to render.
+// already matched an open or closed finding issue, or an earlier intent this
+// same run (issue #3609) -- never posted, so it has no URL and no Body to
+// render.
 type filedIntent struct {
 	Title   string
 	URL     string
@@ -105,14 +106,14 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 	if listErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: list labels failed: %v\n", num, listErr)
 	}
-	// Backlog dedup keys (issue #3609), built at most once per pass for the
-	// same reason ListLabels is hoisted -- N findings would otherwise cost N
-	// ListOpenIssues round trips -- but lazily, since a payload whose intents
-	// carry no keys can never match anything the list returns.
-	// backlogDedupIndex yields a non-nil map even on failure, so the nil check
-	// below is a true once-only memo. Grown in place as this run files its own
-	// intents, so a duplicate pair within one payload dedups too, not just
-	// against the open backlog.
+	// Backlog dedup keys (issue #3609; closed findings too as of #3873), built
+	// at most once per pass for the same reason ListLabels is hoisted -- N
+	// findings would otherwise cost N pairs of backlog list round trips -- but
+	// lazily, since a payload whose intents carry no keys can never match
+	// anything the list returns. backlogDedupIndex yields a non-nil map even
+	// on failure, so the nil check below is a true once-only memo. Grown in
+	// place as this run files its own intents, so a duplicate pair within one
+	// payload dedups too, not just against the backlog.
 	var dedupIndex map[string]string
 	var out []filedIntent
 	for _, raw := range result.IssueIntents {

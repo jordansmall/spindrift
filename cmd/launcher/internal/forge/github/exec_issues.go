@@ -51,7 +51,7 @@ func (r ghIssueRow) toIssue() forge.Issue {
 }
 
 // byNumberAsc and byNumberDesc are the two number-comparator orders shared by
-// ListIssues/ListOpenIssues (ascending) and ListOpenIssuesWithLabels
+// ListIssues/ListOpenIssues (ascending) and ListIssuesWithLabels
 // (descending).
 func byNumberAsc(issues []forge.Issue) func(i, j int) bool {
 	return func(i, j int) bool {
@@ -121,8 +121,10 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 	return decodeIssueRows(out)
 }
 
-// ListOpenIssuesWithLabels implements forge.LabeledBacklogLister (issue #3609
-// review). "gh issue list --label A --label B" ANDs the labels together, so
+// ListIssuesWithLabels implements forge.LabeledBacklogLister (issue #3873,
+// building on the #3609 review). state scopes the scan to open or closed
+// issues -- a closed finding is a durable triage decision the host must not
+// refile. "gh issue list --label A --label B" ANDs the labels together, so
 // finding every issue carrying *either* one takes one query per label,
 // merged here and de-duplicated by number -- an issue carrying both labels
 // would otherwise come back twice.
@@ -131,11 +133,19 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 // target repo may simply lack one of the finding labels (spindrift doctor
 // treats agent-research-finding as advisory, never required), or a single
 // label's call can hit a transient 403/secondary rate limit. Either way,
-// returning nil,err here would hand backlogDedupIndex an empty index and
-// refile every open finding as a duplicate -- worse than the labels that did
-// succeed still being honored. Only a failure on every label propagates, so
-// a total outage still reaches backlogDedupIndex's own fallback.
-func (e *execClient) ListOpenIssuesWithLabels(labels []string) ([]forge.Issue, error) {
+// returning nil,err here would hand backlogDedupIndex an empty index for
+// this state (open or closed) and refile a finding already tracked there as
+// a duplicate -- worse than the labels that did succeed still being
+// honored. Only a failure on every label propagates, so a total outage
+// still reaches backlogDedupIndex's own fallback.
+func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
+	var ghState string
+	switch state {
+	case forge.IssueOpen, forge.IssueClosed:
+		ghState = strings.ToLower(string(state))
+	default:
+		return nil, fmt.Errorf("gh issue list: unsupported issue state %q", state)
+	}
 	seen := make(map[string]bool)
 	var issues []forge.Issue
 	failures := 0
@@ -143,7 +153,7 @@ func (e *execClient) ListOpenIssuesWithLabels(labels []string) ([]forge.Issue, e
 	for _, label := range labels {
 		cmd := exec.Command("gh", "issue", "list",
 			"--repo", e.repo,
-			"--state", "open",
+			"--state", ghState,
 			"--label", label,
 			"--limit", strconv.Itoa(forge.DedupScanLimit),
 			"--search", "sort:created-desc",
@@ -163,7 +173,7 @@ func (e *execClient) ListOpenIssuesWithLabels(labels []string) ([]forge.Issue, e
 			failures++
 			continue
 		}
-		forge.WarnDedupScanMayTruncate("gh issue list", label, len(raw))
+		forge.WarnDedupScanMayTruncate("gh issue list --state "+ghState, label, len(raw))
 		for _, r := range raw {
 			num := strconv.Itoa(r.Number)
 			if seen[num] {

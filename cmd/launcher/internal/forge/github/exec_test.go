@@ -2083,13 +2083,13 @@ func TestExecClient_ImplementsLabeledBacklogLister(t *testing.T) {
 	var _ forge.LabeledBacklogLister = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
-// ListOpenIssuesWithLabels must request body (dedup needs the hidden marker
+// ListIssuesWithLabels must request body (dedup needs the hidden marker
 // line), sort newest-first (a truncated page must drop the oldest finding
 // issues, not the newest), and query once per label -- gh issue list ANDs
 // multiple --label flags together, so two labels need two calls, merged and
 // de-duplicated by issue number rather than double-counting an issue that
 // carries both (issue #3609 review).
-func TestExecClient_ListOpenIssuesWithLabels(t *testing.T) {
+func TestExecClient_ListIssuesWithLabels(t *testing.T) {
 	dir := prependFakeGH(t, `case "$*" in
 *"agent-review-finding"*)
 	printf '[{"number":5,"title":"review finding","body":"body-5","labels":[{"name":"agent-review-finding"}]}]'
@@ -2100,9 +2100,9 @@ func TestExecClient_ListOpenIssuesWithLabels(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	issues, err := c.ListOpenIssuesWithLabels([]string{"agent-review-finding", "agent-research-finding"})
+	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
 	if err != nil {
-		t.Fatalf("ListOpenIssuesWithLabels: %v", err)
+		t.Fatalf("ListIssuesWithLabels: %v", err)
 	}
 
 	byNum := make(map[string]forge.Issue)
@@ -2148,7 +2148,7 @@ esac`)
 // or a transient 403 on that call) must not empty the whole dedup index --
 // the issues the succeeding label already returned still come back, with a
 // nil error (issue #3609 review).
-func TestExecClient_ListOpenIssuesWithLabels_PartialFailureReturnsSucceededLabels(t *testing.T) {
+func TestExecClient_ListIssuesWithLabels_PartialFailureReturnsSucceededLabels(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"agent-review-finding"*)
 	printf '[{"number":5,"title":"review finding","body":"body-5","labels":[{"name":"agent-review-finding"}]}]'
@@ -2160,9 +2160,9 @@ func TestExecClient_ListOpenIssuesWithLabels_PartialFailureReturnsSucceededLabel
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	issues, err := c.ListOpenIssuesWithLabels([]string{"agent-review-finding", "agent-research-finding"})
+	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
 	if err != nil {
-		t.Fatalf("ListOpenIssuesWithLabels: want nil error on partial failure, got %v", err)
+		t.Fatalf("ListIssuesWithLabels: want nil error on partial failure, got %v", err)
 	}
 	if len(issues) != 1 || issues[0].Number != "5" {
 		t.Fatalf("want the succeeded label's issue [5], got %+v", issues)
@@ -2172,20 +2172,20 @@ esac`)
 // When every label's gh call fails, the failure has to surface: it is the
 // signal backlogDedupIndex uses to fall back to intra-run-only dedup instead
 // of silently treating an empty index as "nothing to dedup against".
-func TestExecClient_ListOpenIssuesWithLabels_AllFailuresReturnsError(t *testing.T) {
+func TestExecClient_ListIssuesWithLabels_AllFailuresReturnsError(t *testing.T) {
 	prependFakeGH(t, `echo 'boom' >&2
 exit 1`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	_, err := c.ListOpenIssuesWithLabels([]string{"agent-review-finding", "agent-research-finding"})
+	_, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
 	if err == nil {
-		t.Fatal("ListOpenIssuesWithLabels: want error when every label fails, got nil")
+		t.Fatal("ListIssuesWithLabels: want error when every label fails, got nil")
 	}
 }
 
 // The merge across labels is newest-first, not the per-page created-desc
 // order coincidentally preserved by a single label.
-func TestExecClient_ListOpenIssuesWithLabels_NewestFirst(t *testing.T) {
+func TestExecClient_ListIssuesWithLabels_NewestFirst(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"agent-review-finding"*)
 	printf '[{"number":3,"title":"older review","body":"","labels":[{"name":"agent-review-finding"}]}]'
@@ -2196,9 +2196,9 @@ func TestExecClient_ListOpenIssuesWithLabels_NewestFirst(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	issues, err := c.ListOpenIssuesWithLabels([]string{"agent-review-finding", "agent-research-finding"})
+	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
 	if err != nil {
-		t.Fatalf("ListOpenIssuesWithLabels: %v", err)
+		t.Fatalf("ListIssuesWithLabels: %v", err)
 	}
 	if len(issues) != 2 || issues[0].Number != "9" || issues[1].Number != "3" {
 		t.Fatalf("want newest-first [9 3], got %+v", issues)
@@ -2207,16 +2207,83 @@ esac`)
 
 // Empty labels is the doctor-advisory-label-missing edge folded to zero
 // inputs: no gh call, no failure, an empty result.
-func TestExecClient_ListOpenIssuesWithLabels_NoLabelsReturnsEmpty(t *testing.T) {
+func TestExecClient_ListIssuesWithLabels_NoLabelsReturnsEmpty(t *testing.T) {
 	prependFakeGH(t, `exit 1`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	issues, err := c.ListOpenIssuesWithLabels(nil)
+	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, nil)
 	if err != nil {
-		t.Fatalf("ListOpenIssuesWithLabels(nil): %v", err)
+		t.Fatalf("ListIssuesWithLabels(nil): %v", err)
 	}
 	if len(issues) != 0 {
 		t.Fatalf("want empty result, got %+v", issues)
+	}
+}
+
+// forge.IssueOpen must reach gh as "--state open" (issue #3873): the host
+// dedup scan's open half must still exclude closed issues.
+func TestExecClient_ListIssuesWithLabels_OpenStateArgv(t *testing.T) {
+	dir := prependFakeGH(t, `printf '[]'`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if _, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding"}); err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+
+	calls, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("want 1 gh invocation, got %d (err %v)", len(calls), err)
+	}
+	raw, err := os.ReadFile(calls[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "--state\nopen") {
+		t.Errorf("argv = %q, want --state open", string(raw))
+	}
+}
+
+// forge.IssueClosed must reach gh as "--state closed" (issue #3873): a
+// closed finding is a durable triage decision the host must not refile.
+func TestExecClient_ListIssuesWithLabels_ClosedStateArgv(t *testing.T) {
+	dir := prependFakeGH(t, `printf '[]'`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if _, err := c.ListIssuesWithLabels(forge.IssueClosed, []string{"agent-review-finding"}); err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+
+	calls, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("want 1 gh invocation, got %d (err %v)", len(calls), err)
+	}
+	raw, err := os.ReadFile(calls[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "--state\nclosed") {
+		t.Errorf("argv = %q, want --state closed", string(raw))
+	}
+}
+
+// A state that isn't OPEN or CLOSED (e.g. forge.IssueMerged, an issue-view-only
+// state) must error before any gh process runs, not silently pass an
+// unrecognized value to --state.
+func TestExecClient_ListIssuesWithLabels_UnsupportedStateErrorsWithoutInvokingGH(t *testing.T) {
+	dir := prependFakeGH(t, `echo 'should not run' >&2; exit 1`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.ListIssuesWithLabels(forge.IssueMerged, []string{"agent-review-finding"})
+	if err == nil {
+		t.Fatal("ListIssuesWithLabels(IssueMerged): want error, got nil")
+	}
+
+	calls, err2 := filepath.Glob(filepath.Join(dir, "call-*.txt"))
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("want no gh invocation for an unsupported state, got %d", len(calls))
 	}
 }
 
