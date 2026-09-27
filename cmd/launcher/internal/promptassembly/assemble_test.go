@@ -3398,6 +3398,7 @@ func butlerEnv() Env {
 	env.ChoreHead = "deadbeef"
 	env.ChoreDiffRange = "cafef00d..deadbeef"
 	env.ChoreSlice = "cmd/launcher/main.go\ncmd/launcher/internal/dispatch/dispatch.go"
+	env.ChoreClasses = "flaky-test dead-code"
 	return env
 }
 
@@ -3420,6 +3421,7 @@ func TestAssembleButlerKindRendersButlerPrompt(t *testing.T) {
 		"cafef00d..deadbeef",
 		"cmd/launcher/main.go",
 		"Look for latent bugs",
+		"flaky-test dead-code",
 	} {
 		if !strings.Contains(result.Prompt, want) {
 			t.Errorf("Prompt missing %q:\n%s", want, result.Prompt)
@@ -3619,5 +3621,104 @@ func TestGatesFilerFileRelayResearchAndButlerAreDisjoint(t *testing.T) {
 	}
 	if !bg["FILER_FILE_RELAY_BUTLER"] {
 		t.Error("FILER_FILE_RELAY_BUTLER = false for a butler Env with the Filer enabled, want true")
+	}
+}
+
+// Butler review findings #1 and #2 (ADR 0056, issue #3880): the butler is
+// AdviseOnly, so it never gets the orchestrator's code-owned review pass
+// (line 426's gate), which means its `reviewer` subagent is the only review
+// a promotion candidate gets, orchestrator on or off. Dropping the reviewer
+// key under ORCHESTRATOR (work's behavior) would leave no finding ever
+// reviewed; rendering it from review-prompt.md (a branch-diff rubric) would
+// leave the reviewer judging an issue, branch, and diff it never has.
+func TestAssembleButlerReviewerKeptAndRendersButlerReviewPrompt(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	for _, orchestratorOn := range []bool{true, false} {
+		t.Run(fmt.Sprintf("orchestrator=%v", orchestratorOn), func(t *testing.T) {
+			env := butlerEnv()
+			env.OrchestratorEnabled = orchestratorOn
+			env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
+			env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			var parsed map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
+				t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
+			}
+			reviewerRaw, ok := parsed["reviewer"]
+			if !ok {
+				t.Fatalf("AgentsJSON missing reviewer key, want kept for the butler's inline review: %s", result.AgentsJSON)
+			}
+			var reviewer struct {
+				Prompt string `json:"prompt"`
+			}
+			if err := json.Unmarshal(reviewerRaw, &reviewer); err != nil {
+				t.Fatalf("unmarshal reviewer entry: %v", err)
+			}
+			if !strings.Contains(reviewer.Prompt, "one butler finding handed to you") {
+				t.Errorf("reviewer.prompt = %q, want the rendered butler-review-prompt.md, not review-prompt.md", reviewer.Prompt)
+			}
+			if strings.Contains(reviewer.Prompt, "adversarially review a branch diff") {
+				t.Errorf("reviewer.prompt = %q, want no review-prompt.md content", reviewer.Prompt)
+			}
+		})
+	}
+}
+
+// The opencode agent-files twin of the test above: reviewer.md must survive
+// orchestratorOn (never removed) and its body must come from the kind's own
+// reviewer prompt, both orchestrator states.
+func TestAssembleButlerDriverAgentFilesReviewerKeptAndRewritten(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	for _, orchestratorOn := range []bool{true, false} {
+		t.Run(fmt.Sprintf("orchestrator=%v", orchestratorOn), func(t *testing.T) {
+			dir := t.TempDir()
+			writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
+
+			env := butlerEnv()
+			env.OrchestratorEnabled = orchestratorOn
+			env.DriverAgentFilesDir = dir
+			env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
+
+			if _, err := Assemble(env, reg); err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			body := agentFileBody(t, filepath.Join(dir, "reviewer.md"))
+			if !strings.Contains(body, "one butler finding handed to you") {
+				t.Errorf("reviewer.md body = %q, want the rendered butler-review-prompt.md, not review-prompt.md", body)
+			}
+			if strings.Contains(body, "adversarially review a branch diff") {
+				t.Errorf("reviewer.md body = %q, want no review-prompt.md content", body)
+			}
+		})
+	}
+}
+
+// work's reviewer-drop stays exactly as it was (TestAssembleOrchestratorReviewerDrop
+// already pins the JSON path); this pins the opencode agent-files path's twin,
+// which this issue's rewriteAgentFiles signature change could otherwise regress.
+func TestAssembleWorkDriverAgentFilesReviewerStillDroppedOrchestratorOn(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+	writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
+
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "reviewer.md")); !os.IsNotExist(err) {
+		t.Errorf("reviewer.md still exists (or unexpected stat error %v), want removed under work + ORCHESTRATOR", err)
 	}
 }

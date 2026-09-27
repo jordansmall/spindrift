@@ -291,7 +291,8 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	scalars["CHORE_HEAD"] = e.ChoreHead
 	scalars["CHORE_DIFF_RANGE"] = e.ChoreDiffRange
 	scalars["CHORE_SLICE"] = e.ChoreSlice
-	for _, k := range []string{"CHORE_NAME", "CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE"} {
+	scalars["CHORE_CLASSES"] = e.ChoreClasses
+	for _, k := range []string{"CHORE_NAME", "CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE", "CHORE_CLASSES"} {
 		allowlist[k] = scalars[k]
 		vars[k] = varBody(k, scalars[k])
 	}
@@ -509,7 +510,14 @@ func Assemble(e Env, reg Registry) (Result, error) {
 				result.Handoff.ReviewModel = reviewer.Model
 				result.Handoff.ReviewEffort = reviewer.Effort
 			}
-			delete(agentsKeys, "reviewer")
+			// A kind with its own reviewer prompt (butler's
+			// butler-review-prompt.md, ADR 0056) never gets the code-owned
+			// review pass above (it's AdviseOnly), so its inline reviewer
+			// subagent is the only review it gets — keep the key instead of
+			// dropping it.
+			if bodies.kind.Prompts.Reviewer == "" {
+				delete(agentsKeys, "reviewer")
+			}
 			strippedJSON, err := json.Marshal(agentsKeys)
 			if err != nil {
 				return Result{}, fmt.Errorf("marshal reviewer-stripped agents json: %w", err)
@@ -517,7 +525,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 			agentsTemplate = string(strippedJSON)
 		}
 
-		agentsJSON, err := renderAgentsJSON(e, agentsTemplate, allowlist)
+		agentsJSON, err := renderAgentsJSON(e, agentsTemplate, allowlist, bodies.kind.Prompts.Reviewer)
 		if err != nil {
 			return Result{}, err
 		}
@@ -530,7 +538,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// model overwrites whatever the JSON path set in ReviewModel, and a
 	// missing reviewer.md leaves the JSON-path value unchanged.
 	if e.DriverAgentFilesDir != "" {
-		if err := rewriteAgentFiles(e, allowlist, gates["ORCHESTRATOR"], &result.Handoff.ReviewModel); err != nil {
+		if err := rewriteAgentFiles(e, allowlist, gates["ORCHESTRATOR"], &result.Handoff.ReviewModel, bodies.kind.Prompts.Reviewer); err != nil {
 			return Result{}, err
 		}
 	}
@@ -586,12 +594,32 @@ func reviewFanoutAgentFor(e Env) string {
 	return reviewFanoutFallbackAgent
 }
 
+// reviewerPromptOverride swaps in the kind's own reviewer prompt (butler's
+// butler-review-prompt.md, ADR 0056) for the roster's review-prompt.md, so a
+// kind whose reviewer subagent judges a delegation-message finding rather
+// than a branch diff gets a rubric that matches. reviewerPrompt == "" (a kind
+// with no reviewer prompt of its own) leaves promptFiles untouched; a roster
+// with no "reviewer" entry at all stays without one either way, since
+// nothing reads promptFiles["reviewer"] when the agents template carries no
+// "reviewer" key.
+func reviewerPromptOverride(reviewerPrompt string, promptFiles map[string]string) map[string]string {
+	if reviewerPrompt == "" {
+		return promptFiles
+	}
+	if promptFiles == nil {
+		promptFiles = map[string]string{}
+	}
+	promptFiles["reviewer"] = reviewerPrompt
+	return promptFiles
+}
+
 // renderAgentsJSON sets .{name}.prompt for every key in agentsTemplate whose
 // AgentsPromptFiles entry names a file that exists under PromptsDir.
 // agentsTemplate is a parameter rather than read from e.AgentsJSONTemplate so
 // the caller can pass the reviewer-stripped template the orchestrator-on
-// branch produces (issue #2353).
-func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string) (string, error) {
+// branch produces (issue #2353). reviewerPrompt is the dispatch kind's own
+// reviewer prompt filename, or "" when it has none.
+func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string, reviewerPrompt string) (string, error) {
 	var template map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(agentsTemplate), &template); err != nil {
 		return "", fmt.Errorf("parse agents json template: %w", err)
@@ -603,6 +631,7 @@ func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string)
 			return "", fmt.Errorf("parse agents prompt files: %w", err)
 		}
 	}
+	promptFiles = reviewerPromptOverride(reviewerPrompt, promptFiles)
 
 	for name := range template {
 		promptFile := promptFiles[name]
@@ -680,10 +709,14 @@ func reviewerModelFrontmatter(frontmatter string) string {
 // rewriteAgentFiles is renderAgentsJSON's twin for a Driver (opencode) whose
 // subagents use on-disk agent files. Call it only when DriverAgentFilesDir is
 // set. Under orchestratorOn, reviewer.md's `model:` scalar overwrites
-// *reviewModel and the file is removed; a missing one leaves it untouched.
-// Names are rewritten in sorted order, so Go map order cannot vary results.
-func rewriteAgentFiles(e Env, allowlist map[string]string, orchestratorOn bool, reviewModel *string) error {
-	if orchestratorOn {
+// *reviewModel and the file is removed; a missing one leaves it untouched. A
+// kind with its own reviewer prompt (reviewerPrompt != "") keeps reviewer.md
+// instead, since it never gets the code-owned review pass this removal makes
+// room for — the rewrite loop below then rewrites it from that kind's prompt
+// like any other agent file. Names are rewritten in sorted order, so Go map
+// order cannot vary results.
+func rewriteAgentFiles(e Env, allowlist map[string]string, orchestratorOn bool, reviewModel *string, reviewerPrompt string) error {
+	if orchestratorOn && reviewerPrompt == "" {
 		reviewerPath := filepath.Join(e.DriverAgentFilesDir, "reviewer.md")
 		if data, err := os.ReadFile(reviewerPath); err == nil {
 			*reviewModel = reviewerModelFrontmatter(frontmatterOf(data))
@@ -701,6 +734,7 @@ func rewriteAgentFiles(e Env, allowlist map[string]string, orchestratorOn bool, 
 			return fmt.Errorf("parse agents prompt files: %w", err)
 		}
 	}
+	promptFiles = reviewerPromptOverride(reviewerPrompt, promptFiles)
 
 	names := make([]string, 0, len(promptFiles))
 	for name := range promptFiles {

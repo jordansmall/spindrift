@@ -383,6 +383,7 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 			DiffRange: "cafe..deadbeef",
 			Slice:     []string{"a.go", "b.go"},
 		},
+		Classes: []string{"flaky-test", "dead-code"},
 	}
 	env, err := buildBoxEnv(cfg, "butler-lint-sweep", "unused title", 0, "", "the-nonce", chore)
 	if err != nil {
@@ -400,6 +401,9 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 	}
 	if got := env["CHORE_SLICE"]; got != "a.go\nb.go" {
 		t.Errorf("CHORE_SLICE: got %q, want %q", got, "a.go\nb.go")
+	}
+	if got := env["CHORE_CLASSES"]; got != "flaky-test dead-code" {
+		t.Errorf("CHORE_CLASSES: got %q, want %q", got, "flaky-test dead-code")
 	}
 	if got := env["BASE_BRANCH"]; got != "butler/lint-sweep" {
 		t.Errorf("BASE_BRANCH: got %q, want %q", got, "butler/lint-sweep")
@@ -444,5 +448,19 @@ func TestBuildBoxEnv_ChoreOmitsEmptyScopeFields(t *testing.T) {
 		if v, ok := env[name]; ok {
 			t.Errorf("%s should be absent for an empty Scope, got %q", name, v)
 		}
+	}
+}
+
+// A chore whose Classes is nil/empty (promotion off, or no allow-list --
+// butler.go's job to decide, this package just forwards whatever it is
+// given) omits CHORE_CLASSES entirely, the same absent-when-empty shape as
+// every other optional Chore field.
+func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
+	env, err := buildBoxEnv(Config{}, "butler-empty", "T", 0, "", "", &Chore{Name: "empty", Branch: "b"})
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	if v, ok := env["CHORE_CLASSES"]; ok {
+		t.Errorf("CHORE_CLASSES should be absent when Classes is empty, got %q", v)
 	}
 }

@@ -294,6 +294,7 @@ let
     cp ${pkgs.writeText "research-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchPrompt)} $out${contracts.agentPaths.PROMPTS_DIR}/research-prompt.md
     cp ${pkgs.writeText "research-self-contained-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchSelfContainedPrompt)} $out${contracts.agentPaths.PROMPTS_DIR}/research-self-contained-prompt.md
     cp ${pkgs.writeText "butler-prompt.md" prompts.butlerPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/butler-prompt.md
+    cp ${pkgs.writeText "butler-review-prompt.md" prompts.butlerReviewPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/butler-review-prompt.md
     cp -r ${prompts.fragmentsSourceDir} $out${contracts.agentPaths.PROMPTS_DIR}/fragments
     cp -r ${prompts.choresSourceDir} $out${contracts.agentPaths.PROMPTS_DIR}/chores
     ${lib.optionalString ((harnessSkills ++ agents.skills) != [ ]) ''

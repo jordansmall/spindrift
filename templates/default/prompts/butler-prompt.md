@@ -24,6 +24,34 @@ ${CHORE_SLICE}
 
 ${CHORE_PROMPT}
 
+# PROMOTION CANDIDATES
+
+Promotion classes for this run (blank when promotion is off):
+
+${CHORE_CLASSES}
+
+Tag every finding with a class: a short lowercase slug naming its kind.
+Prefer a promotion class when one genuinely fits; never stretch a finding
+to fit one just to make it a candidate.
+
+A finding is a promotion candidate only when its class is one of the
+promotion classes. For a candidate, and only a candidate, spawn a fresh
+`reviewer` subagent first: hand it the finding — title, body, class, and site
+keys — in the delegation message, since it has no issue, branch, or diff of
+its own to read. If its final message starts `VERDICT: APPROVE`, pass the
+filer its one-line reason as the finding's concurrence. Any other answer is
+dissent: relay the finding without a concurrence, same as a non-candidate.
+Never spawn the `reviewer` on a finding that isn't a candidate. If the
+promotion classes are blank, or no `reviewer` subagent is provisioned this
+run, no finding is a candidate: relay every finding, class included, with no
+concurrence.
+
+None of this — the class list, the reviewer, the concurrence — promotes
+anything by itself. The launcher alone decides whether a finding is
+promoted, against its own allow-list and daily budget, at settle. Pass
+every finding's class to the filer regardless of whether it is a
+candidate.
+
 # FILE FINDINGS
 
 ${BUTLER_FILE_ISSUES_RELAY_STEP}${BUTLER_FILE_ISSUES_RELAY_SOCKET_STEP}Never push, never open a PR, never commit, never edit an issue, add or

@@ -4,7 +4,9 @@ pre-provisioned via --agents; pass it each finding verbatim. This dispatch
 carries no tracker issue number for provenance — instead, give the filer the
 finding's dedup/site key (`path/to/file.go:Symbol`, or `path/to/file.go:<line>`
 when it names no symbol) naming the file(s) the finding concerns, so the
-launcher can derive that from the filed issue-intent.
+launcher can derive that from the filed issue-intent. Also give the filer the
+finding's class, and, only when the `reviewer` agreed on it (see PROMOTION
+CANDIDATES above), the reviewer's one-line concurrence.
 
 The butler never writes to the Issue Tracker itself — the filer is
 relay-only here. It sends each one over the Signal socket via
@@ -15,7 +17,8 @@ launcher files each one host-side once you exit, applying the
 The filer sends each in one call, the body on stdin through a quoted
 `SPINDRIFT_SIGNAL_EOF` heredoc (`-body-file` only as a fallback for a body
 already in a file). The flags are exactly `-title`, `-type`, `-dedup`
-(repeatable), and `-body-file` — there is no `-body` flag. `-type`
+(repeatable), `-body-file`, `-class`, and `-concurrence` (the last two only
+when the finding has one) — there is no `-body` flag. `-type`
 is exactly one of `bug`, `enhancement`, `chore`. A title with backticks
 needs single quotes, not double. A title containing a single quote needs
 `'\''` in its place. The filer runs the command bare — never through
