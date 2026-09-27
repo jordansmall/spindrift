@@ -1,0 +1,153 @@
+package settle
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/report"
+)
+
+// ButlerSettle is the butler dispatch kind's one-shot settle adapter (ADR
+// 0056, issue #3875): file each finding the Box reported, then write the
+// Chore's Ledger done commit carrying the advanced lastSwept/cursor, the
+// filed URLs, and the run's usage. No CI watch, no merge, and no tracker
+// label transition -- the butler carries no tracker issue of its own, only
+// a Ledger Chore.
+type ButlerSettle struct {
+	it     forge.IssueTracker
+	ledger ledger.Backend
+	chore  string
+	claim  ledger.Tip
+	scope  butler.Scope
+	now    func() time.Time
+}
+
+var _ Settler = (*ButlerSettle)(nil)
+
+// NewButlerSettle constructs a ButlerSettle for one Chore run. claim is the
+// Ledger tip Claim produced at the start of this run (ledger.Finish's
+// compare-and-swap parent); scope is the run's computed Scope
+// (internal/butler.NextScope), whose Head/NextCursor become the done
+// commit's lastSwept/cursor on success.
+func NewButlerSettle(it forge.IssueTracker, backend ledger.Backend, chore string, claim ledger.Tip, scope butler.Scope, now func() time.Time) *ButlerSettle {
+	return &ButlerSettle{it: it, ledger: backend, chore: chore, claim: claim, scope: scope, now: now}
+}
+
+// Settle files result's findings, if any, then writes the Chore's done
+// Ledger commit. A crashed run -- no outcome line, or an outcome line whose
+// status isn't "ready" (e.g. blocked) -- files nothing and writes no Ledger
+// commit at all, so the claim stands and lastSwept/cursor stay put for the
+// next run to resume from (ADR 0056).
+func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
+	logRejectedSignals(num, result)
+	if !result.Resolved.Found {
+		b.fail(num, "no ready outcome line")
+		return
+	}
+	o := result.Resolved.Outcome
+	if o.Status != outcome.StatusReady {
+		note := o.Note
+		if note == "" {
+			note = "status=" + o.Status
+		}
+		b.fail(num, note)
+		return
+	}
+
+	filed := fileIssueIntentsDetailedFunc(b.it, num, result, "agent-butler-finding", func(in issueIntent) string {
+		return butlerBacklink(b.chore, in.DedupTerms)
+	})
+	reportFiled(num, filed)
+
+	var urls []string
+	for _, f := range filed {
+		// Only a successful filing's URL is ever recorded: a Skipped intent
+		// was never posted (there is nothing to name), and a Failed one's
+		// dedup keys never reached the backlog, so leaving it out of Filed
+		// lets a later rotation re-find and refile it -- recording it here
+		// would suppress that retry for good.
+		if f.Failed || f.Skipped {
+			continue
+		}
+		urls = append(urls, f.URL)
+	}
+
+	state := ledger.State{
+		LastSwept: b.scope.Head,
+		Cursor:    b.scope.NextCursor,
+		Filed:     urls,
+		Usage:     d.CumulativeUsage(),
+	}
+	if _, err := ledger.Finish(b.ledger, b.chore, b.claim, state, b.now()); err != nil {
+		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
+		report.Settled(num, forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err))
+		return
+	}
+
+	note := fmt.Sprintf("%d filed", len(urls))
+	report.Settled(num, forge.Complete.String(), note)
+	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
+}
+
+// butlerBacklink renders the per-intent backlink fileIssueIntentsDetailedFunc
+// appends to a filed finding's body: which Chore filed it, and which files
+// (the path before the first ':' in each dedup term, deduped, order kept) it
+// concerns. The Files sentence is omitted entirely when terms yields no
+// paths, rather than printing "Files: ".
+func butlerBacklink(chore string, dedupTerms []string) string {
+	lead := fmt.Sprintf("Filed by the butler's `%s` Chore.", chore)
+	files := butlerFiles(dedupTerms)
+	if len(files) == 0 {
+		return lead
+	}
+	quoted := make([]string, len(files))
+	for i, f := range files {
+		quoted[i] = "`" + f + "`"
+	}
+	return fmt.Sprintf("%s Files: %s.", lead, strings.Join(quoted, ", "))
+}
+
+// butlerFiles extracts the file path from each "path/to/file.go:Symbol"
+// dedup term (the path before the first ':'), deduping while keeping first-
+// seen order. A term with no ':' is taken whole, on the same "usable as-is"
+// terms splitDedupTerms already applies elsewhere in this package.
+func butlerFiles(dedupTerms []string) []string {
+	seen := make(map[string]bool, len(dedupTerms))
+	var files []string
+	for _, term := range dedupTerms {
+		path := term
+		if i := strings.Index(term, ":"); i >= 0 {
+			path = term[:i]
+		}
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		files = append(files, path)
+	}
+	return files
+}
+
+// fail prints a status=failed line and reports the run failed. It applies no
+// tracker transition: LabelsNone means the butler has no tracker issue to
+// move, unlike ResearchSettle.fail's TransitionState call. Neither files
+// findings nor writes a Ledger commit, so the claim stands and
+// lastSwept/cursor stay at the prior run's values for the next run to
+// resume from.
+func (b *ButlerSettle) fail(num, note string) {
+	report.Settled(num, forge.Failed.String(), note)
+	fmt.Printf("    #%s  status=failed  note=%s\n", num, note)
+}
+
+// Fail is a no-op, reachable the same way ResearchSettle.Fail is: under
+// CONTINUOUS_DISPATCH the caller already handles a Box exit itself and calls
+// Fail on any Settler regardless of kind. The claim is left as-is -- the
+// next run's takeover of a stale claim is Claim's job, not Settle's.
+func (b *ButlerSettle) Fail(num string, gen uint64, result dispatch.Result) {
+}
