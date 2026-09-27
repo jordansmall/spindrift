@@ -96,7 +96,7 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	}
 	if _, err := ledger.Finish(b.ledger, b.chore, b.claim, state, b.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
-		report.Settled(num, forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err))
+		report.ChoreSettled(b.chore, forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err))
 		return
 	}
 
@@ -104,7 +104,7 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	if dropped > 0 {
 		note = fmt.Sprintf("%d filed, %d dropped", len(urls), dropped)
 	}
-	report.Settled(num, forge.Complete.String(), note)
+	report.ChoreSettled(b.chore, forge.Complete.String(), note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
 }
 
@@ -182,7 +182,7 @@ func capIntents(raw []string, n int) (kept []string, dropped int) {
 // lastSwept/cursor stay at the prior run's values for the next run to
 // resume from.
 func (b *ButlerSettle) fail(num, note string) {
-	report.Settled(num, forge.Failed.String(), note)
+	report.ChoreSettled(b.chore, forge.Failed.String(), note)
 	fmt.Printf("    #%s  status=failed  note=%s\n", num, note)
 }
 
