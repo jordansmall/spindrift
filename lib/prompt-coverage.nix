@@ -17,6 +17,12 @@
     reason = null;
   }
   {
+    promptFile = "butler-review-prompt.md";
+    coverage = "exempt";
+    cavemanVar = null;
+    reason = "its only output is the verdict and a one-line reason that becomes a promoted issue's concurrence, so it must stay human prose";
+  }
+  {
     promptFile = "conflict-resolve-prompt.md";
     coverage = "covered";
     cavemanVar = "CAVEMAN_STEP";

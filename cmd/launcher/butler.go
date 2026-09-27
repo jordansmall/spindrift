@@ -324,7 +324,18 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 
 	scope := butler.NextScope(claim.State, head, files, butler.DefaultSliceSize)
 
-	d := newDispatcher(dispatch.Chore{Name: chore, Branch: id.branch, Scope: scope})
+	// The Box only ever sees promo.Classes when promotion is actually on
+	// (promo.Room set, i.e. BUTLER_MAX_PROMOTIONS_PER_DAY > 0): with
+	// promotion off nothing can promote regardless of class, so telling the
+	// Box a class list would just spend reviewer turns on candidates
+	// settle can never promote. This is informational only -- the host
+	// never reads CHORE_CLASSES back; settle re-checks a finding's class
+	// against promo.Classes itself.
+	var choreClasses []string
+	if promo.Room != nil {
+		choreClasses = promo.Classes
+	}
+	d := newDispatcher(dispatch.Chore{Name: chore, Branch: id.branch, Scope: scope, Classes: choreClasses})
 	defer d.Close()
 	result := d.Run()
 

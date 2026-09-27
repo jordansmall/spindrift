@@ -179,6 +179,15 @@ type Env struct {
 	ChoreHead      string // dispatch.go: $CHORE_HEAD
 	ChoreDiffRange string // dispatch.go: $CHORE_DIFF_RANGE
 	ChoreSlice     string // dispatch.go: $CHORE_SLICE
+
+	// ChoreClasses is the Chore's promotion-candidate class allow-list
+	// (issue #3880), space-joined; empty whenever the host has promotion
+	// off (dispatch.Chore.Classes, set by butler.go's
+	// runOneButlerChore only when BUTLER_MAX_PROMOTIONS_PER_DAY > 0). It is
+	// informational for the Box's prompt only -- settle re-checks a
+	// finding's class against the host's own allow-list regardless of what
+	// this string says.
+	ChoreClasses string // dispatch.go: $CHORE_CLASSES
 }
 
 // kind is the DispatchKind fallback every reader of the field must apply

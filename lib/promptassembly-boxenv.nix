@@ -204,4 +204,9 @@
     env = "CHORE_SLICE";
     kind = "string";
   }
+  {
+    field = "ChoreClasses";
+    env = "CHORE_CLASSES";
+    kind = "string";
+  }
 ]
