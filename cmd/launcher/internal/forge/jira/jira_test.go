@@ -457,6 +457,12 @@ func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 	var labelCleanupOps []map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		// TransitionState's already-claimed precondition (#3887) GETs the
+		// issue before transitioning; report neither the fallback label nor
+		// the mapped status so the claim proceeds.
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-1":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"fields":{"status":{"name":"To Do"},"labels":[]}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-1/transitions":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"transitions": [
@@ -509,6 +515,11 @@ func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
 	var gotLabelOps []map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		// TransitionState's already-claimed precondition (#3887) GETs the
+		// issue before transitioning, even in fallback-label mode.
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-2":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"fields":{"status":{"name":"To Do"},"labels":[]}}`))
 		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-2":
 			var body struct {
 				Update struct {
@@ -546,6 +557,10 @@ func TestJiraClient_TransitionState_BlockedFallsBackToLabel(t *testing.T) {
 	var labelSwapped bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		// TransitionState's already-claimed precondition (#3887).
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-9":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"fields":{"status":{"name":"To Do"},"labels":[]}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-9/transitions":
 			// Only an irrelevant transition is offered, so "In Progress" is blocked.
 			w.WriteHeader(http.StatusOK)
@@ -582,6 +597,10 @@ func TestJiraClient_TransitionState_BlockedFallsBackToLabel(t *testing.T) {
 func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		// TransitionState's already-claimed precondition (#3887).
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-5":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"fields":{"status":{"name":"To Do"},"labels":[]}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-5/transitions":
 			w.WriteHeader(http.StatusInternalServerError)
 		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-5":
@@ -743,6 +762,12 @@ func TestJiraClient_ResearchDispatch_InProgressAndFailedUseResearchLabels(t *tes
 	var ops []map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		// TransitionState's already-claimed precondition (#3887) GETs the
+		// issue before a claim (PROJ-6, Dispatchable->InProgress); PROJ-7's
+		// InProgress->Failed transition below never lands here.
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/rest/api/2/issue/"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"fields":{"status":{"name":"To Do"},"labels":[]}}`))
 		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/rest/api/2/issue/"):
 			var body struct {
 				Update struct {

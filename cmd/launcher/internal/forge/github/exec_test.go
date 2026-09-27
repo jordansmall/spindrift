@@ -63,6 +63,16 @@ printf '%%s\n' "$@" > "%s/call-$(printf '%%02d' $n).txt"
 	return dir
 }
 
+// fakeGHClaimPrecondition scripts the `gh issue view --json labels` call a
+// claim (to == InProgress) now issues before its edit, the already-claimed
+// precondition check (#3887). Tests here only care about the edit call's
+// argv, so this always reports no labels, i.e. never already claimed.
+const fakeGHClaimPrecondition = `case "$*" in
+*"issue view"*)
+	printf '{"labels":[]}'
+	;;
+esac`
+
 // The fake gh script handles only the dependencies call, so a body-parsing
 // fallback would exit 1 and DepsOf would return an error.
 func TestExecClient_DepsOf_NativeWins(t *testing.T) {
@@ -1057,16 +1067,17 @@ esac`)
 // just the from-state label, matching the dispatch workflow's
 // claim-remove-labels set (#1985).
 func TestExecClient_TransitionState_ClaimStripsStaleFailedLabel(t *testing.T) {
-	dir := prependFakeGH(t, "")
+	dir := prependFakeGH(t, fakeGHClaimPrecondition)
 
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
 	if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	// call-00.txt is the precondition's `gh issue view`; call-01.txt is the edit.
+	raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
 	if err != nil {
-		t.Fatalf("call-00.txt (gh issue edit) not written: %v", err)
+		t.Fatalf("call-01.txt (gh issue edit) not written: %v", err)
 	}
 	argv := string(raw)
 	if !strings.Contains(argv, "--remove-label\nagent-failed") {
@@ -1077,16 +1088,17 @@ func TestExecClient_TransitionState_ClaimStripsStaleFailedLabel(t *testing.T) {
 // A claim also strips a stale agent-complete label, which is the
 // re-research or re-trigger-after-complete case (#1985).
 func TestExecClient_TransitionState_ClaimStripsStaleCompleteLabel(t *testing.T) {
-	dir := prependFakeGH(t, "")
+	dir := prependFakeGH(t, fakeGHClaimPrecondition)
 
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
 	if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	// call-00.txt is the precondition's `gh issue view`; call-01.txt is the edit.
+	raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
 	if err != nil {
-		t.Fatalf("call-00.txt (gh issue edit) not written: %v", err)
+		t.Fatalf("call-01.txt (gh issue edit) not written: %v", err)
 	}
 	argv := string(raw)
 	if !strings.Contains(argv, "--remove-label\nagent-complete") {
@@ -1149,14 +1161,15 @@ func TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow(t *te
 		filepath.Join("..", "..", "..", "..", "..", ".github", "workflows", "agent-dispatch.yml"),
 		"claim-remove-labels")
 
-	dir := prependFakeGH(t, "")
+	dir := prependFakeGH(t, fakeGHClaimPrecondition)
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
 	if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	callRaw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	// call-00.txt is the precondition's `gh issue view`; call-01.txt is the edit.
+	callRaw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
 	if err != nil {
-		t.Fatalf("call-00.txt (gh issue edit) not written: %v", err)
+		t.Fatalf("call-01.txt (gh issue edit) not written: %v", err)
 	}
 	argv := strings.Split(strings.TrimRight(string(callRaw), "\n"), "\n")
 	for i := 0; i < len(argv)-1; i++ {

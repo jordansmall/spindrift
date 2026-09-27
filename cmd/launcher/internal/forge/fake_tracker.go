@@ -221,6 +221,10 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 // (to == InProgress) also strips any stale Complete/Failed label left by a
 // prior run, as the github adapter does, so a test on the Fake cannot pass
 // while the real adapter misbehaves (#1985).
+//
+// A claim also errors on ErrAlreadyClaimed without mutating labels when num
+// already carries InProgress (#3887), so a test on the Fake pins the same
+// contract the real adapters must honor.
 func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) error {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
@@ -231,6 +235,9 @@ func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) 
 	iss, ok := tf.issues[num]
 	if !ok {
 		return nil // best-effort
+	}
+	if tf.labels.AlreadyClaimed(from, to, iss.Labels) {
+		return fmt.Errorf("fake: issue %s: %w (%q)", num, ErrAlreadyClaimed, tf.labels.Label(to))
 	}
 	add := tf.labels.Label(to)
 	remove := map[string]bool{}
