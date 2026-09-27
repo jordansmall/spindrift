@@ -17,13 +17,6 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// butlerClaimTimeout is how long a Ledger claim goes unheld before the next
-// run treats it as a crashed worker's leftover and takes it over, rather than
-// treating the Chore as busy (ADR 0056). A package const, not an operator
-// knob: the due check and budgets that would make this tunable are
-// deliberately out of scope for the one-shot command (issue #3875).
-const butlerClaimTimeout = 6 * time.Hour
-
 // butlerEveryConfig is BUTLER_EVERY parsed (schema key butlerEvery, ADR
 // 0056): a bare default interval plus per-Chore overrides. With no bare
 // token, the default is butlerEveryDefault; a bare "0" token, unlike an
@@ -140,11 +133,11 @@ func parseButlerClaimTimeout(value string) (time.Duration, error) {
 // real slot or generation to record.
 const butlerSlot = 0
 
-// butlerRun groups the adjacent string params runButlerChore takes -- the
-// scan target (repo/branch), the Chore, and the claimant host -- easy to
-// mis-order as bare positionals.
+// butlerRun groups the adjacent string params runButler takes -- the scan
+// target (repo/branch) and the claimant host -- easy to mis-order as bare
+// positionals.
 type butlerRun struct {
-	repo, branch, chore, host string
+	repo, branch, host string
 }
 
 // choreEnabled reports whether chore appears in list, BUTLER_CHORES's
@@ -159,10 +152,11 @@ func choreEnabled(list, chore string) bool {
 	return false
 }
 
-// parseButlerArgs parses `butler`'s own args: a required "--chore <name>",
+// parseButlerArgs parses `butler`'s own args: an optional "--chore <name>",
 // plus the --no-build flag every dispatch-family verb shares. Unlike
 // parseIssuePositionals's callers, butler takes no issue positionals, so any
-// other token is a usage error.
+// other token is a usage error. An empty chore return means "pick a due
+// Chore" rather than sweep one named explicitly.
 func parseButlerArgs(args []string) (chore string, noBuild bool, err error) {
 	noBuild, remaining := dispatchNoBuildArgs(args)
 	for i := 0; i < len(remaining); i++ {
@@ -175,71 +169,105 @@ func parseButlerArgs(args []string) (chore string, noBuild bool, err error) {
 		chore = remaining[i+1]
 		i++
 	}
-	if chore == "" {
-		return "", false, fmt.Errorf("usage: spindrift butler --chore <name> [--no-build]")
-	}
 	return chore, noBuild, nil
 }
 
-// runButlerChore claims chore's Ledger, computes this run's scan Scope
-// (internal/butler.NextScope), dispatches one Box through newDispatcher, and
-// settles the result (ADR 0056). Every collaborator is injected so this is
-// testable without a real Box or repo seam: newDispatcher builds the
-// Dispatcher for one Chore run (a real *dispatch.Factory.NewChore in
-// production, dispatch.Fake in tests).
+// runButler picks the first due Chore out of chores (in order) and sweeps
+// it, or reports why none is due (ADR 0056). chores is either the single
+// name given on --chore, or every BUTLER_CHORES entry in configured order
+// when none was given. HEAD is read once up front, and the due check
+// (internal/butler.Check) takes a single now() reading shared across every
+// candidate, so the picture of "what's due" is consistent across the whole
+// pass rather than drifting chore to chore.
 //
-// Returns errQueueEmpty when chore's claim is already live -- another run
-// holds it and it is not yet stale -- the same "nothing to do right now"
-// signal dispatch's queue-empty path returns, so exitCodeFor(2) applies
-// unchanged. Any other non-nil error means the run never got as far as
-// dispatching a Box (a git, ledger, or lost-race claim failure). Once the Box
-// has run, whether Settle actually wrote the done commit (Box success) or
-// left the claim standing (Box crash, ADR 0056) is read back off the Ledger
-// tip rather than threaded out of Settle, since a crashed run's Settle writes
-// nothing at all.
-func runButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, now func() time.Time) error {
-	tip, err := backend.Read(id.chore)
-	if err != nil {
-		return fmt.Errorf("butler: read %s ledger: %w", id.chore, err)
-	}
-	if tip.State.Phase == ledger.Claimed && !tip.State.StaleClaim(now(), butlerClaimTimeout) {
-		return errQueueEmpty
+// Returns errQueueEmpty, wrapped with the reason(s) each candidate was not
+// due, when nothing is due -- the same "nothing to do right now" signal
+// dispatch's queue-empty path returns, so exitCodeFor(2) applies unchanged
+// and its text is what cmdButler prints. A lost claim race also returns
+// errQueueEmpty. Any other non-nil error means a due candidate's run never
+// got as far as dispatching a Box (a git, ledger, or claim failure);
+// runButler does not fall through to the next candidate in that case.
+func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chores []string, every butlerEveryConfig, claimTimeout time.Duration, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, now func() time.Time) error {
+	if len(chores) == 0 {
+		return errors.New("butler: no chores to check")
 	}
 
 	head, err := butler.Head(id.repo, id.branch)
 	if err != nil {
 		return err
 	}
+	whenNow := now()
+
+	var reasons []string
+	for _, chore := range chores {
+		tip, err := backend.Read(chore)
+		if err != nil {
+			return fmt.Errorf("butler: read %s ledger: %w", chore, err)
+		}
+		interval := every.For(chore)
+		recent, err := backend.History(chore, whenNow.Add(-interval))
+		if err != nil {
+			return fmt.Errorf("butler: read %s ledger history: %w", chore, err)
+		}
+		verdict := butler.Check(tip, recent, head, whenNow, butler.DueConfig{Every: interval, ClaimTimeout: claimTimeout})
+		if verdict != butler.Due {
+			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", chore, verdict))
+			continue
+		}
+		return runOneButlerChore(backend, it, id, chore, tip, head, newDispatcher, whenNow, now)
+	}
+
+	return fmt.Errorf("butler: %s: %w", strings.Join(reasons, "; "), errQueueEmpty)
+}
+
+// runOneButlerChore claims chore's Ledger (already read as tip, at head),
+// computes this run's scan Scope (internal/butler.NextScope), dispatches one
+// Box through newDispatcher, and settles the result (ADR 0056). Every
+// collaborator is injected so this is testable without a real Box or repo
+// seam: newDispatcher builds the Dispatcher for one Chore run (a real
+// *dispatch.Factory.NewChore in production, dispatch.Fake in tests).
+// claimedAt is runButler's whenNow, reused for ClaimedBy.Start so the claim
+// is stamped at the same instant its due decision was made; now is called
+// fresh at settle time instead.
+//
+// Returns errQueueEmpty if Claim loses the race -- another worker claimed
+// chore between runButler's Read and this Claim -- the same "nothing to do
+// right now" signal a live claim reports. Any other non-nil error means the
+// run never got as far as dispatching a Box. Once the Box has run, whether
+// Settle actually wrote the done commit (Box success) or left the claim
+// standing (Box crash, ADR 0056) is read back off the Ledger tip rather than
+// threaded out of Settle, since a crashed run's Settle writes nothing at all.
+func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chore string, tip ledger.Tip, head string, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, claimedAt time.Time, now func() time.Time) error {
 	files, err := butler.TrackedFiles(id.repo, head)
 	if err != nil {
 		return err
 	}
 
-	claim, err := ledger.Claim(backend, id.chore, tip, ledger.ClaimedBy{Host: id.host, Slot: butlerSlot, Start: now()})
+	claim, err := ledger.Claim(backend, chore, tip, ledger.ClaimedBy{Host: id.host, Slot: butlerSlot, Start: claimedAt})
 	if err != nil {
 		if errors.Is(err, ledger.ErrLostRace) {
 			// Another worker claimed it between our Read and our Claim:
 			// exactly the "nothing to do right now" case, not a real error.
-			return errQueueEmpty
+			return fmt.Errorf("butler: chore %q claimed by another run first: %w", chore, errQueueEmpty)
 		}
-		return fmt.Errorf("butler: claim %s: %w", id.chore, err)
+		return fmt.Errorf("butler: claim %s: %w", chore, err)
 	}
 
 	scope := butler.NextScope(claim.State, head, files, butler.DefaultSliceSize)
 
-	d := newDispatcher(dispatch.Chore{Name: id.chore, Branch: id.branch, Scope: scope})
+	d := newDispatcher(dispatch.Chore{Name: chore, Branch: id.branch, Scope: scope})
 	defer d.Close()
 	result := d.Run()
 
-	s := settle.NewButlerSettle(it, backend, id.chore, claim, scope, now)
-	s.Settle(d, dispatch.ChoreKey(id.chore), butlerSlot, result)
+	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now)
+	s.Settle(d, dispatch.ChoreKey(chore), butlerSlot, result)
 
-	final, err := backend.Read(id.chore)
+	final, err := backend.Read(chore)
 	if err != nil {
-		return fmt.Errorf("butler: read %s ledger after settle: %w", id.chore, err)
+		return fmt.Errorf("butler: read %s ledger after settle: %w", chore, err)
 	}
 	if final.State.Phase != ledger.Done {
-		return fmt.Errorf("butler: chore %q run did not complete (claim left standing)", id.chore)
+		return fmt.Errorf("butler: chore %q run did not complete (claim left standing)", chore)
 	}
 	return nil
 }
@@ -249,33 +277,54 @@ func runButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun,
 // Chore with no entry is fine, its allow-list is just empty. The Filer gate
 // matters because a butler Box relays findings only through the Filer:
 // without one it would still report ready, and settling would advance
-// lastSwept and the cursor past findings nobody filed.
+// lastSwept and the cursor past findings nobody filed. An empty chore (no
+// --chore) needs BUTLER_CHORES to name at least one candidate instead.
 func butlerPreflight(cfg config, chore string, filerEnabled bool) error {
 	row, ok := backendByName(cfg.codeForge)
 	if !ok || row.newLedger == nil {
 		return fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", cfg.codeForge, strings.Join(ledgerCapableNames(), ", "))
 	}
-	if !choreEnabled(cfg.butlerChores, chore) {
-		return fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", chore, cfg.butlerChores)
+	if chore != "" {
+		if !choreEnabled(cfg.butlerChores, chore) {
+			return fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", chore, cfg.butlerChores)
+		}
+	} else if len(strings.Fields(cfg.butlerChores)) == 0 {
+		return fmt.Errorf("butler: no chores enabled (BUTLER_CHORES is empty)")
 	}
 	if _, err := butler.ParseClasses(cfg.butlerChoreClasses); err != nil {
 		return fmt.Errorf("butler: BUTLER_CHORE_CLASSES: %w", err)
 	}
 	if !filerEnabled {
-		return fmt.Errorf("butler: chore %q needs a provisioned Filer to relay findings (set FILER_MODEL; DRIVER=opencode never provisions one)", chore)
+		return fmt.Errorf("butler: needs a provisioned Filer to relay findings (set FILER_MODEL; DRIVER=opencode never provisions one)")
 	}
 	return nil
 }
 
-// cmdButler is the `butler --chore <name>` subcommand: a one-shot sweep of
-// one opted-in Chore (ADR 0056, issue #3875). Deliberately out of scope here:
-// picking a Chore itself (the due check), budgets, and promotion -- the
-// command always runs the exact Chore named, whatever its due state.
+// cmdButler is the `butler [--chore <name>]` subcommand (ADR 0056, issue
+// #3875, #3877): it sweeps the first due Chore among the one named on
+// --chore, or else every BUTLER_CHORES entry in order, and reports "no work"
+// with each candidate's reason if none is due. Deliberately out of scope
+// here: budgets and promotion.
 func cmdButler(lc *launchContext, chore string) int {
 	defer lc.cleanup()
 
 	filerEnabled := resolveAgentPresenceSignals(lc.config.driver).filerEnabled
 	if err := butlerPreflight(lc.config, chore, filerEnabled); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	every, err := parseButlerEvery(lc.config.butlerEvery)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := every.checkOverrides(lc.config.butlerChores); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	claimTimeout, err := parseButlerClaimTimeout(lc.config.butlerClaimTimeout)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -300,16 +349,17 @@ func cmdButler(lc *launchContext, chore string) int {
 
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return lc.factory.NewChore(c) }
 
-	id := butlerRun{repo: repo, branch: lc.config.baseBranch, chore: chore, host: host}
-	err = runButlerChore(backend, lc.issueTracker, id, newDispatcher, time.Now)
-	code := exitCodeFor(err)
-	switch {
-	case code == 1 && err != nil:
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-	case code == 2:
-		fmt.Fprintf(os.Stderr, "butler: chore %q is already claimed; nothing to do\n", chore)
+	chores := []string{chore}
+	if chore == "" {
+		chores = strings.Fields(lc.config.butlerChores)
 	}
-	return code
+
+	id := butlerRun{repo: repo, branch: lc.config.baseBranch, host: host}
+	err = runButler(backend, lc.issueTracker, id, chores, every, claimTimeout, newDispatcher, time.Now)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+	}
+	return exitCodeFor(err)
 }
 
 // butlerVerbHandler is verbHandlers["butler"]'s body, split out so its own

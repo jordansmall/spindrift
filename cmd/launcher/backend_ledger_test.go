@@ -82,13 +82,13 @@ func TestRemoteLedger_FetchesBaseBranchAndCleansUp(t *testing.T) {
 	}
 }
 
-// TestRunButlerChore_AgainstRemoteLedger drives runButlerChore against the
+// TestRunButler_AgainstRemoteLedger drives runButler against the
 // hosted-forge path end to end (issue #3876's stand-in for "works on
 // github/forgejo"): a Remote backend synced from a bare repo standing in for
 // the Target's remote. It asserts the remote's own
 // refs/spindrift/butler/<chore> ref -- not just the scratch repo's -- picked
 // up the done commit, and that refs/heads/main on the remote never moved.
-func TestRunButlerChore_AgainstRemoteLedger(t *testing.T) {
+func TestRunButler_AgainstRemoteLedger(t *testing.T) {
 	remoteRepo, head := newButlerTestRepo(t)
 
 	backend, repo, cleanup, err := remoteLedger(config{schemaConfig: schemaConfig{baseBranch: "main"}}, remoteRepo)
@@ -103,9 +103,9 @@ func TestRunButlerChore_AgainstRemoteLedger(t *testing.T) {
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return d }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	id := butlerRun{repo: repo, branch: "main", chore: "bugs", host: "test-host"}
-	if err := runButlerChore(backend, fc.AsIssueFiler(), id, newDispatcher, func() time.Time { return now }); err != nil {
-		t.Fatalf("runButlerChore: %v", err)
+	id := butlerRun{repo: repo, branch: "main", host: "test-host"}
+	if err := runButler(backend, fc.AsIssueFiler(), id, []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now }); err != nil {
+		t.Fatalf("runButler: %v", err)
 	}
 
 	subjects := gitLogSubjects(t, remoteRepo, ledger.RefPrefix+"bugs")
