@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -27,7 +28,7 @@ func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 	t.Setenv("RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindWork, false)
+	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err != nil {
 		t.Fatalf("newGatedContext() = %v, want nil error for a clean config", err)
@@ -58,13 +59,13 @@ func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 	t.Setenv("RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindResearch, false)
+	gc, err := newGatedContext(&w, dispatchkind.Research, false)
 
 	if err != nil {
 		t.Fatalf("newGatedContext() = %v, want nil error for a clean config", err)
 	}
-	if gc.config.dispatchKind != dispatchKindResearch {
-		t.Errorf("gc.config.dispatchKind = %q, want %q", gc.config.dispatchKind, dispatchKindResearch)
+	if gc.config.dispatchKind != dispatchkind.Research {
+		t.Errorf("gc.config.dispatchKind = %v, want %v", gc.config.dispatchKind, dispatchkind.Research)
 	}
 	if want := forge.ResearchDispatchLabels().Dispatchable; gc.config.label != want {
 		t.Errorf("gc.config.label = %q, want %q (forge.ResearchDispatchLabels().Dispatchable)", gc.config.label, want)
@@ -87,7 +88,7 @@ func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing
 	t.Setenv("RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindResearch, true)
+	gc, err := newGatedContext(&w, dispatchkind.Research, true)
 
 	if err != nil {
 		t.Fatalf("newGatedContext() = %v, want nil error for a clean self-contained research config", err)
@@ -98,7 +99,7 @@ func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing
 }
 
 // This pins that selfContained reaches validate(c), not just the config struct:
-// validate rejects selfContained paired with dispatchKindWork before any gate
+// validate rejects selfContained paired with dispatchkind.Work before any gate
 // runs.
 func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
@@ -112,7 +113,7 @@ func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) 
 	t.Setenv("RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindWork, true)
+	gc, err := newGatedContext(&w, dispatchkind.Work, true)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want validate()'s self-contained rejection")
@@ -139,7 +140,7 @@ func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 	t.Setenv("RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindWork, false)
+	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want validate()'s MERGE_MODE rejection")
@@ -170,7 +171,7 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindWork, false)
+	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject CODE_FORGE=git under read-only access")
@@ -211,7 +212,7 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	// (readonly_token_gate.go) would also fail if the walk reached it.
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindWork, false)
+	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkBwrapPastaGate's pasta-missing rejection")
@@ -257,7 +258,7 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	// fail if the walk reached it.
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindWork, false)
+	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkBwrapOverlayGate's overlay-probe rejection")
@@ -297,7 +298,7 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	t.Setenv("NETWORK_MODE", "open") // not host/none, so checkBwrapPastaGate would call runner.ValidatePasta() if reached
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindWork, false)
+	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject CODE_FORGE=git under read-only access")
@@ -334,7 +335,7 @@ func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *test
 	t.Setenv("NETWORK_MODE", "no-host-loopback")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w, dispatchKindWork, false)
+	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkNetworkModeRuntimeGate to reject NETWORK_MODE=no-host-loopback under RUNNER_KIND=bwrap")

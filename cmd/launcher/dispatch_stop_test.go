@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -332,7 +333,7 @@ func TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily(t *testi
 	}
 	t.Cleanup(func() { installStopSignal = orig })
 
-	c := applyDispatchKind(baseConfig(), dispatchKindResearch)
+	c := applyDispatchKind(baseConfig(), dispatchkind.Research)
 	c.maxParallel = 1
 	dir := tempLogDir(t)
 

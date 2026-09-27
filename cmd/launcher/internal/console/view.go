@@ -533,8 +533,8 @@ func renderWorkSection(m Model, budget int, compact bool) string {
 		// same failed blocker twice on one row (issue #755).
 		showReason := reason != "" && !(p.BlockedBy != "" && strings.HasPrefix(reason, blockerFailedPrefix))
 		var extras strings.Builder
-		if p.effectiveKind() == KindResearch {
-			fmt.Fprintf(&extras, "  %s", researchMarker)
+		if tag := kindMarker(p.effectiveKind()); tag != "" {
+			fmt.Fprintf(&extras, "  %s", tag)
 		}
 		if p.BlockedBy != "" {
 			fmt.Fprintf(&extras, "  (held by %s)", p.BlockedBy)

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/waves"
@@ -121,7 +122,7 @@ func TestQueryOpenIssues(t *testing.T) {
 			name: "work skips research in progress",
 			setup: func() (config, *forge.Fake) {
 				c := baseConfig()
-				c = applyDispatchKind(c, dispatchKindWork)
+				c = applyDispatchKind(c, dispatchkind.Work)
 				c.label = "ready-for-agent"
 				fc := forge.NewFake(testDispatchLabels)
 				fc.SetIssue(forge.Issue{Number: "1", Title: "researcher has this one", Labels: []string{c.label, "agent-research-in-progress"}})
@@ -139,7 +140,7 @@ func TestQueryOpenIssues(t *testing.T) {
 			setup: func() (config, *forge.Fake) {
 				c := baseConfig()
 				c.inProgressLabel = "custom-work-in-progress"
-				c = applyDispatchKind(c, dispatchKindResearch)
+				c = applyDispatchKind(c, dispatchkind.Research)
 				fc := forge.NewFake(forge.ResearchDispatchLabels())
 				fc.SetIssue(forge.Issue{Number: "1", Title: "worker has this one", Labels: []string{c.label, "custom-work-in-progress"}})
 				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.label}})
@@ -154,7 +155,7 @@ func TestQueryOpenIssues(t *testing.T) {
 			name: "work only, no research labels anywhere",
 			setup: func() (config, *forge.Fake) {
 				c := baseConfig()
-				c = applyDispatchKind(c, dispatchKindWork)
+				c = applyDispatchKind(c, dispatchkind.Work)
 				c.label = "ready-for-agent"
 				fc := forge.NewFake(testDispatchLabels)
 				fc.SetIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{c.label}})
@@ -171,7 +172,7 @@ func TestQueryOpenIssues(t *testing.T) {
 			name: "same family in progress excluded upstream not by this filter",
 			setup: func() (config, *forge.Fake) {
 				c := baseConfig()
-				c = applyDispatchKind(c, dispatchKindWork)
+				c = applyDispatchKind(c, dispatchkind.Work)
 				c.label = "ready-for-agent"
 				fc := forge.NewFake(testDispatchLabels)
 				fc.SetIssue(forge.Issue{Number: "1", Title: "already claimed by a worker", Labels: []string{c.inProgressLabel}})

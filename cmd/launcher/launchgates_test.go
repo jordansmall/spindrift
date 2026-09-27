@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -217,7 +218,7 @@ func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
 	t.Setenv("BOX_GH_TOKEN", "box-gh-token-distinct-from-launcher-token")
 
 	var enforceBuf bytes.Buffer
-	if _, err := newGatedContext(&enforceBuf, dispatchKindWork, false); err != nil {
+	if _, err := newGatedContext(&enforceBuf, dispatchkind.Work, false); err != nil {
 		t.Fatalf("newGatedContext() unexpected error: %v", err)
 	}
 

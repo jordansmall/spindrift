@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/outcome"
 )
 
@@ -96,6 +97,22 @@ func ResearchDispatchLabels() DispatchLabels {
 		Dispatchable: "agent-research",
 		InProgress:   "agent-research-in-progress",
 		Failed:       "agent-research-failed",
+	}
+}
+
+// FamilyLabels resolves a label family to the labels it moves through
+// (issue #3872). configured is the operator-configured work family, returned
+// as-is for LabelsConfigured. An unrecognized family is a programmer error —
+// a new dispatchkind.LabelFamily value must be wired in here — so it panics
+// rather than silently borrowing work's labels.
+func FamilyLabels(f dispatchkind.LabelFamily, configured DispatchLabels) DispatchLabels {
+	switch f {
+	case dispatchkind.LabelsResearch:
+		return ResearchDispatchLabels()
+	case dispatchkind.LabelsConfigured:
+		return configured
+	default:
+		panic(fmt.Sprintf("forge: unknown label family %v", f))
 	}
 }
 

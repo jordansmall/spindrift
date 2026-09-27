@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/localloop"
@@ -47,7 +48,7 @@ type launchContext struct {
 // label family, blocker handling, and Settle via applyDispatchKind (ADR 0022);
 // selfContained is research's no-repo sub-mode (issue #2202). The accumulation
 // lock is the one thing an early error return can leak, so a defer releases it.
-func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchContext, err error) {
+func bootstrap(ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (lc *launchContext, err error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -154,7 +155,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 }
 
 // workSettle asserts that lc.settle satisfies settle.WorkSettler. Both callers
-// bootstrap with dispatchKindWork, so a clear panic beats a generic interface
+// bootstrap with dispatchkind.Work, so a clear panic beats a generic interface
 // conversion one if that invariant is ever broken.
 func (lc *launchContext) workSettle() settle.WorkSettler {
 	ws, ok := lc.settle.(settle.WorkSettler)
@@ -191,12 +192,12 @@ func seedAccumulationRepoIfHostMediated(c config, pwd string) (*local.Accumulati
 // driver-cache watch goroutine for an already-ready runner. The returned Factory
 // owns its own driver-cache root, so the caller must call its Cleanup.
 func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Factory, settle.Settler) {
-	rc := applyDispatchKind(lc.config, dispatchKindResearch)
+	rc := applyDispatchKind(lc.config, dispatchkind.Research)
 	it := newIssueTracker(rc)
 	lw := localloop.Wire(localloopConfig(rc), it)
 	f := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge, lc.capabilities)
 
-	// newSettle takes the dispatchKindResearch branch here, and that branch
+	// newSettle takes the dispatchkind.SettleVerdict branch here, and that branch
 	// never reads its caps argument, so there is nothing worth resolving.
 	s := newSettle(rc, it, lw, lc.codeForge, forge.Capabilities{})
 	return it, f, s

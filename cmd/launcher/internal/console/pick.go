@@ -3,25 +3,38 @@ package console
 import (
 	"fmt"
 	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
-// Kind is the dispatch kind a Pick carries. KindResearch (issue #1839) is
-// advise-only: it posts one verdict comment instead of opening a branch or PR.
-type Kind string
+// Kind is the dispatch kind a Pick carries (issue #3872). KindResearch
+// (issue #1839) is advise-only: it posts one verdict comment instead of
+// opening a branch or PR.
+type Kind = *dispatchkind.Descriptor
 
-const (
-	KindWork     Kind = "work"
-	KindResearch Kind = "research"
+var (
+	KindWork     = dispatchkind.Work
+	KindResearch = dispatchkind.Research
 )
 
 // effectiveKind defaults an unset Kind to KindWork: every Pick literal built
-// before #1708 (test fixtures included) leaves Kind empty, so a zero value
+// before #1708 (test fixtures included) leaves Kind nil, so a zero value
 // must dispatch as work rather than as an undispatchable third kind.
 func (p Pick) effectiveKind() Kind {
-	if p.Kind == "" {
+	if p.Kind == nil {
 		return KindWork
 	}
 	return p.Kind
+}
+
+// kindMarker is the tag a non-work kind's row carries in View: its Name in
+// brackets, e.g. "[research]". It stays unstyled: View clips a row's extras
+// as one plain string, so ANSI escape bytes would count as display columns.
+func kindMarker(k Kind) string {
+	if k == KindWork {
+		return ""
+	}
+	return "[" + k.Name + "]"
 }
 
 // PickState is a queue row's position in its launch lifecycle.

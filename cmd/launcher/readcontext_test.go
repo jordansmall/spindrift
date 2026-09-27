@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -50,7 +51,7 @@ func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
 	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 
-	rc := newReadContext(dispatchKindWork, false)
+	rc := newReadContext(dispatchkind.Work, false)
 
 	if rc.config.issueTracker != "local" {
 		t.Errorf("rc.config.issueTracker = %q, want %q", rc.config.issueTracker, "local")
@@ -69,7 +70,7 @@ func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
 func TestNewReadContext_FullyLocal_ResolvesCapabilities(t *testing.T) {
 	setFullyLocalEnv(t)
 
-	rc := newReadContext(dispatchKindWork, false)
+	rc := newReadContext(dispatchkind.Work, false)
 
 	if rc.capabilities.LandingRecorder == nil {
 		t.Error("rc.capabilities.LandingRecorder = nil, want non-nil for a local IssueTracker")
@@ -113,7 +114,7 @@ func TestNewReadContext_InvalidConfig_ConstructsCleanly(t *testing.T) {
 	setFullyLocalEnv(t)
 	t.Setenv("GIT_USER_NAME", "")
 
-	rc := newReadContext(dispatchKindWork, false)
+	rc := newReadContext(dispatchkind.Work, false)
 
 	if rc.issueTracker == nil {
 		t.Error("rc.issueTracker = nil, want a non-nil IssueTracker even though rc.config fails validation")
