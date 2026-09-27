@@ -1229,12 +1229,11 @@ let
   # The fileset is a directory-level approximation of the launcher's import
   # graph, not the graph itself: it subtracts the driver-exec, orchestrator,
   # quickstart and daemon subtrees (each an independent `package main` the
-  # launcher never imports), plus internal/daemon (issue #3538: no
-  # non-test package outside cmd/launcher/daemon imports it, and every test
-  # file is filtered out below). A reviewer found 13 directories included
-  # here that are outside the real import graph (internal/testutil, for
-  # one), so perturbing those still moves this outPath (issue #2677 review
-  # fix).
+  # launcher never imports). internal/daemon stays in: `spindrift butler`
+  # imports it for the awake window's zone (issue #3879). A reviewer found 13
+  # directories included here that are outside the real import graph
+  # (internal/testutil, for one), so perturbing those still moves this outPath
+  # (issue #2677 review fix).
   launcherCurrencyFileset =
     lib.fileset.difference
       (lib.fileset.unions [
@@ -1248,7 +1247,6 @@ let
           ../cmd/launcher/orchestrator
           ../cmd/launcher/quickstart
           ../cmd/launcher/daemon
-          ../cmd/launcher/internal/daemon
         ]
       );
 

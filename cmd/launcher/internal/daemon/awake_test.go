@@ -25,6 +25,25 @@ func TestParseWindowEmptyIsAlwaysAwake(t *testing.T) {
 	}
 }
 
+func TestWindowLocationNilIsUTC(t *testing.T) {
+	var w *Window
+	if got := w.Location(); got != time.UTC {
+		t.Fatalf("nil Window.Location() = %v, want time.UTC", got)
+	}
+}
+
+func TestWindowLocationConfigured(t *testing.T) {
+	w, err := ParseWindow("22:00-06:00 Europe/London")
+	if err != nil {
+		t.Fatalf("ParseWindow: %v", err)
+	}
+	// time.LoadLocation does not guarantee returning the same *Location
+	// pointer across calls, so compare by name rather than identity.
+	if got := w.Location().String(); got != "Europe/London" {
+		t.Fatalf("Window.Location() = %v, want Europe/London", got)
+	}
+}
+
 func TestParseWindowWhitespaceTrimmed(t *testing.T) {
 	w, err := ParseWindow("  22:00-06:00 UTC  ")
 	if err != nil {

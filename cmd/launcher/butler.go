@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -140,6 +141,18 @@ type butlerRun struct {
 	repo, branch, host string
 }
 
+// butlerPolicy is runButler's resolved butler knobs (ADR 0056).
+type butlerPolicy struct {
+	every        butlerEveryConfig
+	claimTimeout time.Duration
+	budgets      butler.Budgets
+	// zone is DAEMON_AWAKE_WINDOW's zone, where the budgets' day starts.
+	zone *time.Location
+	// enabled is every BUTLER_CHORES entry, not just this pass's candidates:
+	// budgets are summed across all of them, even under --chore.
+	enabled []string
+}
+
 // choreEnabled reports whether chore appears in list, BUTLER_CHORES's
 // space-separated value (schema key butlerChores). A Consumer opts a Chore in
 // by naming it there; the default "" enables none (spec #3870).
@@ -187,7 +200,7 @@ func parseButlerArgs(args []string) (chore string, noBuild bool, err error) {
 // errQueueEmpty. Any other non-nil error means a due candidate's run never
 // got as far as dispatching a Box (a git, ledger, or claim failure);
 // runButler does not fall through to the next candidate in that case.
-func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chores []string, every butlerEveryConfig, claimTimeout time.Duration, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, now func() time.Time) error {
+func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chores []string, policy butlerPolicy, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, now func() time.Time) error {
 	if len(chores) == 0 {
 		return errors.New("butler: no chores to check")
 	}
@@ -198,26 +211,28 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 	}
 	whenNow := now()
 
+	today, err := ledger.DayTotalsAll(backend, policy.enabled, whenNow.In(policy.zone))
+	if err != nil {
+		return fmt.Errorf("butler: total today's ledgers: %w", err)
+	}
+
 	var reasons []string
 	for _, chore := range chores {
 		tip, err := backend.Read(chore)
 		if err != nil {
 			return fmt.Errorf("butler: read %s ledger: %w", chore, err)
 		}
-		interval := every.For(chore)
+		interval := policy.every.For(chore)
 		recent, err := backend.History(chore, whenNow.Add(-interval))
 		if err != nil {
 			return fmt.Errorf("butler: read %s ledger history: %w", chore, err)
 		}
-		// TODO(#3879 follow-up): wire real cross-Chore ledger.Totals here
-		// once the coordinator sums them; the zero value leaves every
-		// Budgets check disabled (zero means unlimited) for this slice.
-		verdict := butler.Check(tip, recent, head, whenNow, ledger.Totals{}, butler.DueConfig{Every: interval, ClaimTimeout: claimTimeout})
+		verdict := butler.Check(tip, recent, head, whenNow, today, butler.DueConfig{Every: interval, ClaimTimeout: policy.claimTimeout, Budgets: policy.budgets})
 		if verdict != butler.Due {
 			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", chore, verdict))
 			continue
 		}
-		return runOneButlerChore(backend, it, id, chore, tip, head, newDispatcher, whenNow, now)
+		return runOneButlerChore(backend, it, id, chore, tip, head, policy.budgets.MaxFindingsPerSweep, newDispatcher, whenNow, now)
 	}
 
 	return fmt.Errorf("butler: %s: %w", strings.Join(reasons, "; "), errQueueEmpty)
@@ -240,7 +255,7 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 // Settle actually wrote the done commit (Box success) or left the claim
 // standing (Box crash, ADR 0056) is read back off the Ledger tip rather than
 // threaded out of Settle, since a crashed run's Settle writes nothing at all.
-func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chore string, tip ledger.Tip, head string, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, claimedAt time.Time, now func() time.Time) error {
+func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chore string, tip ledger.Tip, head string, maxFindingsPerSweep int, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, claimedAt time.Time, now func() time.Time) error {
 	files, err := butler.TrackedFiles(id.repo, head)
 	if err != nil {
 		return err
@@ -262,7 +277,7 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 	defer d.Close()
 	result := d.Run()
 
-	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now, 0)
+	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now, maxFindingsPerSweep)
 	s.Settle(d, dispatch.ChoreKey(chore), butlerSlot, result)
 
 	final, err := backend.Read(chore)
@@ -281,7 +296,10 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 // matters because a butler Box relays findings only through the Filer:
 // without one it would still report ready, and settling would advance
 // lastSwept and the cursor past findings nobody filed. An empty chore (no
-// --chore) needs BUTLER_CHORES to name at least one candidate instead.
+// --chore) needs BUTLER_CHORES to name at least one candidate instead. A
+// per-sweep cap above the day cap is also rejected here: left alone, every
+// run would trip internal/butler.Check's SweepFindingsExceedHeadroom at
+// Filed=0 and no run could ever start.
 func butlerPreflight(cfg config, chore string, filerEnabled bool) error {
 	row, ok := backendByName(cfg.codeForge)
 	if !ok || row.newLedger == nil {
@@ -300,6 +318,9 @@ func butlerPreflight(cfg config, chore string, filerEnabled bool) error {
 	if !filerEnabled {
 		return fmt.Errorf("butler: needs a provisioned Filer to relay findings (set FILER_MODEL; DRIVER=opencode never provisions one)")
 	}
+	if cfg.butlerMaxFindingsPerSweep > 0 && cfg.butlerMaxFindingsPerDay > 0 && cfg.butlerMaxFindingsPerSweep > cfg.butlerMaxFindingsPerDay {
+		return fmt.Errorf("butler: BUTLER_MAX_FINDINGS_PER_SWEEP (%d) exceeds BUTLER_MAX_FINDINGS_PER_DAY (%d); no run could ever start", cfg.butlerMaxFindingsPerSweep, cfg.butlerMaxFindingsPerDay)
+	}
 	return nil
 }
 
@@ -307,7 +328,7 @@ func butlerPreflight(cfg config, chore string, filerEnabled bool) error {
 // #3875, #3877): it sweeps the first due Chore among the one named on
 // --chore, or else every BUTLER_CHORES entry in order, and reports "no work"
 // with each candidate's reason if none is due. Deliberately out of scope
-// here: budgets and promotion.
+// here: promotion.
 func cmdButler(lc *launchContext, chore string) int {
 	defer lc.cleanup()
 
@@ -327,6 +348,17 @@ func cmdButler(lc *launchContext, chore string) int {
 		return 1
 	}
 	claimTimeout, err := parseButlerClaimTimeout(lc.config.butlerClaimTimeout)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	budgets := butler.Budgets{
+		MaxSweepsPerDay:     lc.config.butlerMaxSweepsPerDay,
+		MaxFindingsPerDay:   lc.config.butlerMaxFindingsPerDay,
+		MaxFindingsPerSweep: lc.config.butlerMaxFindingsPerSweep,
+		DailyTokenCeiling:   lc.config.butlerDailyTokenCeiling,
+	}
+	window, err := daemon.ParseWindow(lc.config.daemonAwakeWindow)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -352,13 +384,22 @@ func cmdButler(lc *launchContext, chore string) int {
 
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return lc.factory.NewChore(c) }
 
+	enabled := strings.Fields(lc.config.butlerChores)
 	chores := []string{chore}
 	if chore == "" {
-		chores = strings.Fields(lc.config.butlerChores)
+		chores = enabled
+	}
+
+	policy := butlerPolicy{
+		every:        every,
+		claimTimeout: claimTimeout,
+		budgets:      budgets,
+		zone:         window.Location(),
+		enabled:      enabled,
 	}
 
 	id := butlerRun{repo: repo, branch: lc.config.baseBranch, host: host}
-	err = runButler(backend, lc.issueTracker, id, chores, every, claimTimeout, newDispatcher, time.Now)
+	err = runButler(backend, lc.issueTracker, id, chores, policy, newDispatcher, time.Now)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
