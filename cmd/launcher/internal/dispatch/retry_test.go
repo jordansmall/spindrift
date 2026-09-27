@@ -1322,3 +1322,167 @@ func TestDispatchWithRetry_MissingPassManifestDegradesToNil(t *testing.T) {
 		t.Errorf("ParseErr: got %v, want nil (a missing manifest must never surface as a parse error)", result.ParseErr)
 	}
 }
+
+// captureStderr runs fn with os.Stderr swapped for a pipe and returns
+// whatever fn wrote to it.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	return string(captured)
+}
+
+// A quarantinePriorRunLogs run elsewhere in the fleet can rename a still-live
+// attempt's log to "<path>.prior-run.N" while this Box is writing it (issue
+// #3886): the canonical path goes missing mid-run, so Settle must find the
+// file the Box actually wrote by identity, not by name, and restore it.
+func TestDispatchWithRetry_LogRenamedMidRunRestoresCanonicalPath(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	fr.WriteToOutput = nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=done")
+
+	logPath := d.logPath()
+	moved := logPath + ".prior-run.2"
+	fr.RunFunc = func(runner.Box) error {
+		return os.Rename(logPath, moved)
+	}
+
+	var result Result
+	stderr := captureStderr(t, func() { result = d.Run() })
+
+	if !result.Success || !result.Resolved.Found {
+		t.Fatalf("want a successful, found outcome; got: %+v", result)
+	}
+	if result.Resolved.Outcome.Status != "ready" {
+		t.Errorf("Outcome.Status: got %q, want %q", result.Resolved.Outcome.Status, "ready")
+	}
+	if !strings.Contains(stderr, logPath) || !strings.Contains(stderr, moved) {
+		t.Errorf("stderr must name both %q and %q, got: %s", logPath, moved, stderr)
+	}
+	if !fileExists(logPath) {
+		t.Error("want canonical log path restored on disk")
+	}
+	if fileExists(moved) {
+		t.Error("want the moved-aside path gone after restore")
+	}
+
+	attempts := AllAttemptLogPaths(d.pwd, d.number)
+	count := 0
+	for _, pl := range attempts {
+		if pl.Path == logPath {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("AllAttemptLogPaths must contain the canonical log exactly once, got %d: %+v", count, attempts)
+	}
+
+	lp := LogPaths(d.pwd, d.number)
+	count = 0
+	for _, pl := range lp {
+		if pl.Path == logPath {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("LogPaths must contain the canonical log exactly once, got %d: %+v", count, lp)
+	}
+}
+
+// If the canonical path is occupied by something else by the time Settle
+// looks -- another process already recreated it -- restoring by rename would
+// clobber that file, so this settles from the moved-aside copy instead and
+// leaves both files in place.
+func TestDispatchWithRetry_LogRenamedMidRunAndCanonicalReoccupiedSettlesFromMoved(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	fr.WriteToOutput = nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=done")
+
+	logPath := d.logPath()
+	moved := logPath + ".prior-run.2"
+	fr.RunFunc = func(runner.Box) error {
+		if err := os.Rename(logPath, moved); err != nil {
+			return err
+		}
+		return os.WriteFile(logPath, nil, 0o644)
+	}
+
+	var result Result
+	stderr := captureStderr(t, func() { result = d.Run() })
+
+	if !result.Success || !result.Resolved.Found {
+		t.Fatalf("want a successful, found outcome; got: %+v", result)
+	}
+	if result.Resolved.Outcome.Status != "ready" {
+		t.Errorf("Outcome.Status: got %q, want %q", result.Resolved.Outcome.Status, "ready")
+	}
+	if !strings.Contains(stderr, logPath) || !strings.Contains(stderr, moved) {
+		t.Errorf("stderr must name both %q and %q, got: %s", logPath, moved, stderr)
+	}
+	if !fileExists(logPath) {
+		t.Error("want the reoccupied canonical path left alone")
+	}
+	if !fileExists(moved) {
+		t.Error("want the moved-aside path left in place, not consumed")
+	}
+	if info, err := os.Stat(logPath); err != nil || info.Size() != 0 {
+		t.Errorf("want the canonical path still the empty reoccupying file, size err=%v", err)
+	}
+}
+
+// A log genuinely gone (removed, not renamed -- the Box's log dir vanished
+// outright) must settle exactly as it did before #3886: no outcome found, no
+// "moved" diagnostic, since reclaimAttemptLog has nothing on disk to point at.
+func TestDispatchWithRetry_LogRemovedMidRunBehavesAsBefore(t *testing.T) {
+	fr := runner.NewFake()
+	classified := false
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		classified = true
+		return driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	logPath := d.logPath()
+	fr.RunFunc = func(runner.Box) error {
+		if err := os.Remove(logPath); err != nil {
+			return err
+		}
+		return boxErr
+	}
+
+	var result Result
+	stderr := captureStderr(t, func() { result = d.Run() })
+
+	if result.Success {
+		t.Errorf("want Success=false, got true: %+v", result)
+	}
+	if result.Resolved.Found {
+		t.Errorf("want no outcome found, got: %+v", result.Resolved)
+	}
+	if !classified {
+		t.Error("want classification to run when the log truly has nothing to reclaim")
+	}
+	if strings.Contains(stderr, "moved mid-run") {
+		t.Errorf("must not print a moved diagnostic for a genuinely removed log, got: %s", stderr)
+	}
+}
