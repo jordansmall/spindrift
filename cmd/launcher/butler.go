@@ -277,7 +277,10 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 	defer d.Close()
 	result := d.Run()
 
-	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now, maxFindingsPerSweep)
+	// PromotionPolicy{} (Classes nil, Room nil) never promotes: wiring the
+	// real host-side allow-list/limits/budget into this call is issue
+	// #3880's next slice.
+	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now, maxFindingsPerSweep, settle.PromotionPolicy{})
 	s.Settle(d, dispatch.ChoreKey(chore), butlerSlot, result)
 
 	final, err := backend.Read(chore)
