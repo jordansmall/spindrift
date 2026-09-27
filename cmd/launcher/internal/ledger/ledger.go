@@ -8,6 +8,7 @@ package ledger
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"spindrift.dev/launcher/internal/usage"
@@ -173,6 +174,34 @@ func DayTotals(b Backend, chore string, now time.Time) (Totals, error) {
 		}
 	}
 	return t, nil
+}
+
+// add returns the field-wise sum of t and o, for DayTotalsAll folding one
+// Chore's Totals into a running cross-Chore total.
+func (t Totals) add(o Totals) Totals {
+	return Totals{
+		Claims:   t.Claims + o.Claims,
+		Filed:    t.Filed + o.Filed,
+		Promoted: t.Promoted + o.Promoted,
+		Dropped:  t.Dropped + o.Dropped,
+		Usage:    addUsage(t.Usage, o.Usage),
+	}
+}
+
+// DayTotalsAll sums DayTotals across chores for the local day containing
+// now. Budgets (ADR 0056) are global across every enabled Chore, not
+// per-Chore, so the due check needs this cross-Chore total rather than any
+// single Chore's DayTotals.
+func DayTotalsAll(b Backend, chores []string, now time.Time) (Totals, error) {
+	var sum Totals
+	for _, chore := range chores {
+		t, err := DayTotals(b, chore, now)
+		if err != nil {
+			return Totals{}, fmt.Errorf("chore %s: %w", chore, err)
+		}
+		sum = sum.add(t)
+	}
+	return sum, nil
 }
 
 // addUsage sums two Usage snapshots field-by-field, for DayTotals folding a

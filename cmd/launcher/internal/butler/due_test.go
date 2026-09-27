@@ -6,6 +6,7 @@ import (
 
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 func TestCheck(t *testing.T) {
@@ -17,6 +18,7 @@ func TestCheck(t *testing.T) {
 		tip    ledger.Tip
 		recent []ledger.Entry
 		head   string
+		today  ledger.Totals
 		cfg    butler.DueConfig
 		want   butler.NotDue
 	}{
@@ -160,11 +162,90 @@ func TestCheck(t *testing.T) {
 			cfg:  butler.DueConfig{Every: 0, ClaimTimeout: time.Hour},
 			want: butler.Due,
 		},
+		{
+			name:  "sweep budget spent",
+			tip:   ledger.Tip{},
+			head:  "h1",
+			today: ledger.Totals{Claims: 3},
+			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{MaxSweepsPerDay: 3}},
+			want:  butler.SweepBudgetSpent,
+		},
+		{
+			name:  "sweep budget just under limit is due",
+			tip:   ledger.Tip{},
+			head:  "h1",
+			today: ledger.Totals{Claims: 2},
+			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{MaxSweepsPerDay: 3}},
+			want:  butler.Due,
+		},
+		{
+			name:  "finding budget spent",
+			tip:   ledger.Tip{},
+			head:  "h1",
+			today: ledger.Totals{Filed: 5},
+			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{MaxFindingsPerDay: 5}},
+			want:  butler.FindingBudgetSpent,
+		},
+		{
+			name:  "finding budget just under limit is due",
+			tip:   ledger.Tip{},
+			head:  "h1",
+			today: ledger.Totals{Filed: 4},
+			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{MaxFindingsPerDay: 5}},
+			want:  butler.Due,
+		},
+		{
+			name:  "a full sweep would exceed today's finding headroom",
+			tip:   ledger.Tip{},
+			head:  "h1",
+			today: ledger.Totals{Filed: 8},
+			cfg: butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{
+				MaxFindingsPerDay: 10, MaxFindingsPerSweep: 3,
+			}},
+			want: butler.SweepFindingsExceedHeadroom,
+		},
+		{
+			name:  "headroom exactly covers a full sweep is due",
+			tip:   ledger.Tip{},
+			head:  "h1",
+			today: ledger.Totals{Filed: 7},
+			cfg: butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{
+				MaxFindingsPerDay: 10, MaxFindingsPerSweep: 3,
+			}},
+			want: butler.Due,
+		},
+		{
+			name:  "daily token ceiling reached",
+			tip:   ledger.Tip{},
+			head:  "h1",
+			today: ledger.Totals{Usage: usage.Usage{InputTokens: 1000}},
+			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{DailyTokenCeiling: 1000}},
+			want:  butler.TokenCeilingReached,
+		},
+		{
+			name:  "just under the daily token ceiling is due",
+			tip:   ledger.Tip{},
+			head:  "h1",
+			today: ledger.Totals{Usage: usage.Usage{InputTokens: 999}},
+			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{DailyTokenCeiling: 1000}},
+			want:  butler.Due,
+		},
+		{
+			name: "zero budgets mean unlimited despite huge totals",
+			tip:  ledger.Tip{},
+			head: "h1",
+			today: ledger.Totals{
+				Claims: 1_000_000, Filed: 1_000_000,
+				Usage: usage.Usage{InputTokens: 1_000_000},
+			},
+			cfg:  butler.DueConfig{ClaimTimeout: time.Hour},
+			want: butler.Due,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := butler.Check(tt.tip, tt.recent, tt.head, now, tt.cfg)
+			got := butler.Check(tt.tip, tt.recent, tt.head, now, tt.today, tt.cfg)
 			if got != tt.want {
 				t.Errorf("Check() = %d (%s), want %d (%s)", got, got, tt.want, tt.want)
 			}
@@ -181,6 +262,10 @@ func TestNotDueString(t *testing.T) {
 		{butler.LiveClaim, "claimed by another run"},
 		{butler.IntervalNotElapsed, "interval not elapsed"},
 		{butler.NothingToScan, "nothing to scan"},
+		{butler.SweepBudgetSpent, "daily sweep budget spent"},
+		{butler.FindingBudgetSpent, "daily finding budget spent"},
+		{butler.SweepFindingsExceedHeadroom, "a full sweep's findings would exceed today's finding budget"},
+		{butler.TokenCeilingReached, "daily token ceiling reached"},
 		{butler.NotDue(99), "unknown"},
 	}
 	for _, tt := range tests {
