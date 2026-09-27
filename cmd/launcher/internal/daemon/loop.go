@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -241,7 +242,7 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	}
 	seenKinds := make(map[Kind]bool, len(cfg.Kinds))
 	for _, k := range cfg.Kinds {
-		if k != KindDispatch && k != KindResearch {
+		if _, ok := dispatchkind.ByVerb(string(k)); !ok {
 			return invalidConfig(em, cfg, fmt.Sprintf("unknown kind %q", k))
 		}
 		if seenKinds[k] {

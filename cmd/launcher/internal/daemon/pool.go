@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -220,10 +221,12 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 }
 
 // slotOrder returns the kinds slot tries, most preferred first: slots below
-// the reservation prefer research, the rest prefer every other kind ahead of
-// it. The order is derived from kinds — only research's position moves, so a
-// third kind added later keeps its configured place instead of silently
-// inheriting one half of a hardcoded pair. Static, decided once from cfg
+// the reservation prefer the reserved kind (dispatchkind.PriorityReserved,
+// i.e. research), the rest prefer every other kind ahead of it. The order is
+// derived from kinds — only the reserved kind's position moves, so a third
+// kind added later keeps its configured place instead of silently inheriting
+// one half of a hardcoded pair. A kind with no descriptor (ByVerb misses) is
+// treated as normal priority, not reserved. Static, decided once from cfg
 // rather than a live count of who is running what: the floor is exact without
 // lock-step counting, and two slots choosing concurrently can never both claim
 // the same reserved slot (each computes its own answer independently, off its
@@ -235,7 +238,7 @@ func slotOrder(kinds []Kind, reservation, slot int) []Kind {
 	research := make([]Kind, 0, 1)
 	rest := make([]Kind, 0, len(kinds))
 	for _, k := range kinds {
-		if k == KindResearch {
+		if d, ok := dispatchkind.ByVerb(string(k)); ok && d.DaemonPriority == dispatchkind.PriorityReserved {
 			research = append(research, k)
 			continue
 		}
