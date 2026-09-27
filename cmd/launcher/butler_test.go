@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,9 +16,18 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
+// testClaimTimeout is the claim timeout every test passes explicitly now
+// that BUTLER_CLAIM_TIMEOUT is an operator knob rather than a package const.
+const testClaimTimeout = 6 * time.Hour
+
+// noEvery is a butlerEveryConfig with no bare default and no overrides: every
+// chore has interval zero, so IntervalNotElapsed never blocks a due check --
+// the shape most tests want when the interval itself isn't what's under test.
+var noEvery = butlerEveryConfig{}
+
 // newButlerTestRepo builds a bare repo with one commit on "main" holding one
-// tracked file, the fixture every runButlerChore test claims and sweeps
-// against (same exec-git convention as internal/butler/git_test.go and
+// tracked file, the fixture every runButler test claims and sweeps against
+// (same exec-git convention as internal/butler/git_test.go and
 // internal/settle/butler_test.go's own bare-repo fixtures).
 func newButlerTestRepo(t *testing.T) (repo, head string) {
 	t.Helper()
@@ -65,6 +75,53 @@ func runButlerGit(t *testing.T, dir string, args ...string) {
 	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", full, err, out)
 	}
+}
+
+// addButlerCommit commits one new tracked file (name/content) on top of
+// repo's current refs/heads/main tip, moves the branch to it, and returns the
+// new commit sha -- simulating real work landing on the branch between
+// butler runs, so a run's DiffRange and tree-walk slice have something new to
+// see.
+func addButlerCommit(t *testing.T, repo, name, content string) string {
+	t.Helper()
+	parent := strings.TrimSpace(string(runButlerGitOutput(t, repo, "rev-parse", "refs/heads/main")))
+
+	hashCmd := exec.Command("git", "-C", repo, "hash-object", "-w", "--stdin")
+	hashCmd.Stdin = strings.NewReader(content)
+	blobOut, err := hashCmd.Output()
+	if err != nil {
+		t.Fatalf("hash-object: %v", err)
+	}
+	blob := strings.TrimSpace(string(blobOut))
+
+	lsOut := runButlerGitOutput(t, repo, "ls-tree", parent)
+	entries := string(lsOut) + "100644 blob " + blob + "\t" + name + "\n"
+
+	mktreeCmd := exec.Command("git", "-C", repo, "mktree")
+	mktreeCmd.Stdin = strings.NewReader(entries)
+	treeOut, err := mktreeCmd.Output()
+	if err != nil {
+		t.Fatalf("mktree: %v", err)
+	}
+	tree := strings.TrimSpace(string(treeOut))
+
+	commitOut, err := exec.Command("git", "-C", repo, "commit-tree", tree, "-p", parent, "-m", "add "+name).Output()
+	if err != nil {
+		t.Fatalf("commit-tree: %v", err)
+	}
+	commit := strings.TrimSpace(string(commitOut))
+	runButlerGit(t, repo, "update-ref", "refs/heads/main", commit)
+	return commit
+}
+
+func runButlerGitOutput(t *testing.T, repo string, args ...string) []byte {
+	t.Helper()
+	full := append([]string{"-C", repo}, args...)
+	out, err := exec.Command("git", full...).Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", full, err)
+	}
+	return out
 }
 
 // readyDispatcher builds a dispatch.Fake whose Run() reports a ready outcome
@@ -121,10 +178,10 @@ func gitLogSubjects(t *testing.T, repo, ref string) []string {
 	return strings.Split(trimmed, "\n")
 }
 
-// testButlerRun is the butlerRun every runButlerChore test sweeps: the
-// "bugs" Chore on repo's main branch.
+// testButlerRun is the butlerRun every runButler test sweeps against: repo's
+// main branch, claimed as "test-host".
 func testButlerRun(repo string) butlerRun {
-	return butlerRun{repo: repo, branch: "main", chore: "bugs", host: "test-host"}
+	return butlerRun{repo: repo, branch: "main", host: "test-host"}
 }
 
 // (a) A clean run claims, dispatches, files its one finding, and writes a
@@ -132,7 +189,7 @@ func testButlerRun(repo string) butlerRun {
 // Accumulation repo's refs/spindrift/butler/<chore> ref, the issue's own
 // acceptance criterion (`git log refs/spindrift/butler/bugs`). A
 // Consumer-declared Chore ("tidy-deps") runs exactly like a built-in one.
-func TestRunButlerChore_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
+func TestRunButler_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 	for _, chore := range []string{"bugs", "tidy-deps"} {
 		t.Run(chore, func(t *testing.T) {
 			repo, head := newButlerTestRepo(t)
@@ -152,13 +209,10 @@ func TestRunButlerChore_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 				return d
 			}
 
-			br := testButlerRun(repo)
-			br.chore = chore
-
 			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			err := runButlerChore(backend, fc.AsIssueFiler(), br, newDispatcher, func() time.Time { return now })
+			err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{chore}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
 			if err != nil {
-				t.Fatalf("runButlerChore: %v", err)
+				t.Fatalf("runButler: %v", err)
 			}
 
 			subjects := gitLogSubjects(t, repo, ledger.RefPrefix+chore)
@@ -188,8 +242,8 @@ func TestRunButlerChore_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 
 // (b) A crashed run (no ready outcome) leaves the claim standing: Settle
 // writes nothing, so the Ledger tip after the run is still the claim, and
-// runButlerChore reports the failure via a non-nil error.
-func TestRunButlerChore_CrashedRunLeavesClaimStanding(t *testing.T) {
+// runButler reports the failure via a non-nil error.
+func TestRunButler_CrashedRunLeavesClaimStanding(t *testing.T) {
 	repo, _ := newButlerTestRepo(t)
 	backend := ledger.Local{Repo: repo}
 
@@ -197,12 +251,12 @@ func TestRunButlerChore_CrashedRunLeavesClaimStanding(t *testing.T) {
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return crashedDispatcher() }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	err := runButlerChore(backend, fc.AsIssueFiler(), testButlerRun(repo), newDispatcher, func() time.Time { return now })
+	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
 	if err == nil {
-		t.Fatal("runButlerChore: got nil error, want one reporting the crashed run")
+		t.Fatal("runButler: got nil error, want one reporting the crashed run")
 	}
 	if errors.Is(err, errQueueEmpty) {
-		t.Errorf("runButlerChore err = %v, want a real failure, not errQueueEmpty", err)
+		t.Errorf("runButler err = %v, want a real failure, not errQueueEmpty", err)
 	}
 
 	tip, rerr := backend.Read("bugs")
@@ -214,10 +268,36 @@ func TestRunButlerChore_CrashedRunLeavesClaimStanding(t *testing.T) {
 	}
 }
 
-// (c) A live (non-stale) claim held by another run makes runButlerChore
-// report "no work" (errQueueEmpty) without dispatching a Box or writing a new
+// A claim is stamped with the instant its due check used, not a second now()
+// reading: with a clock that advances on every call, the crashed run's
+// standing claim must still carry the first reading.
+func TestRunButler_ClaimStartIsDueCheckInstant(t *testing.T) {
+	repo, _ := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return crashedDispatcher() }
+
+	first := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	calls := 0
+	now := func() time.Time {
+		calls++
+		return first.Add(time.Duration(calls-1) * time.Hour)
+	}
+	_ = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, now)
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.ClaimedBy == nil || !tip.State.ClaimedBy.Start.Equal(first) {
+		t.Errorf("ClaimedBy = %+v, want Start %v (the due check's reading)", tip.State.ClaimedBy, first)
+	}
+}
+
+// (c) A live (non-stale) claim held by another run makes runButler report
+// "no work" (errQueueEmpty) without dispatching a Box or writing a new
 // commit.
-func TestRunButlerChore_LiveClaimReportsNoWork(t *testing.T) {
+func TestRunButler_LiveClaimReportsNoWork(t *testing.T) {
 	repo, _ := newButlerTestRepo(t)
 	backend := ledger.Local{Repo: repo}
 
@@ -233,9 +313,9 @@ func TestRunButlerChore_LiveClaimReportsNoWork(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	err = runButlerChore(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), newDispatcher, func() time.Time { return now.Add(time.Minute) })
+	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now.Add(time.Minute) })
 	if !errors.Is(err, errQueueEmpty) {
-		t.Fatalf("runButlerChore err = %v, want errQueueEmpty", err)
+		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
 	if dispatched {
 		t.Error("newDispatcher was called; want no Box dispatched against a live claim")
@@ -250,10 +330,10 @@ func TestRunButlerChore_LiveClaimReportsNoWork(t *testing.T) {
 	}
 }
 
-// (d) A claim older than butlerClaimTimeout is a crashed worker's leftover
+// (d) A claim older than the claim timeout is a crashed worker's leftover
 // (ADR 0056): the next run takes it over rather than reporting "no work",
 // and a clean sweep against it still ends in a done commit.
-func TestRunButlerChore_StaleClaimIsTakenOver(t *testing.T) {
+func TestRunButler_StaleClaimIsTakenOver(t *testing.T) {
 	repo, _ := newButlerTestRepo(t)
 	backend := ledger.Local{Repo: repo}
 
@@ -270,10 +350,10 @@ func TestRunButlerChore_StaleClaimIsTakenOver(t *testing.T) {
 		return readyDispatcher()
 	}
 
-	now := start.Add(butlerClaimTimeout + time.Minute)
-	err := runButlerChore(backend, fc.AsIssueFiler(), testButlerRun(repo), newDispatcher, func() time.Time { return now })
+	now := start.Add(testClaimTimeout + time.Minute)
+	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
 	if err != nil {
-		t.Fatalf("runButlerChore: %v", err)
+		t.Fatalf("runButler: %v", err)
 	}
 	if !dispatched {
 		t.Fatal("newDispatcher was not called; want the stale claim taken over and a Box dispatched")
@@ -288,9 +368,86 @@ func TestRunButlerChore_StaleClaimIsTakenOver(t *testing.T) {
 	}
 }
 
-// (e) A claim just younger than butlerClaimTimeout is still live: runButlerChore
+// (d2) Stale-claim takeover, covered end to end (issue #3877): a crashed
+// run's claim sits on top of an earlier done commit that carries lastSwept
+// and a mid-tree cursor forward. The next run, after the branch has moved,
+// takes the stale claim over rather than reporting "no work", sweeps
+// lastSwept..newHead, resumes the tree walk strictly after the old cursor
+// (never restarting it), and ends in a done commit -- the full claimed(seed)
+// -> done(seed) -> claimed(stale) -> done(final) chain, newest first.
+func TestRunButler_StaleClaimTakeoverEndToEnd(t *testing.T) {
+	repo, head1 := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	seedStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedClaim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: seedStart})
+	if err != nil {
+		t.Fatalf("seed Claim: %v", err)
+	}
+	seedDone, err := ledger.Finish(backend, "bugs", seedClaim, ledger.State{LastSwept: head1, Cursor: "a.go"}, seedStart)
+	if err != nil {
+		t.Fatalf("seed Finish: %v", err)
+	}
+
+	deadStart := seedStart.Add(time.Hour)
+	if _, err := ledger.Claim(backend, "bugs", seedDone, ledger.ClaimedBy{Host: "dead-host", Start: deadStart}); err != nil {
+		t.Fatalf("seed dead Claim: %v", err)
+	}
+
+	newHead := addButlerCommit(t, repo, "b.go", "package b\n")
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9003"
+	var dispatchedChore dispatch.Chore
+	dispatched := false
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+		dispatched = true
+		dispatchedChore = c
+		return readyDispatcher()
+	}
+
+	now := deadStart.Add(testClaimTimeout + time.Minute)
+	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("runButler: %v", err)
+	}
+	if !dispatched {
+		t.Fatal("newDispatcher was not called; want the stale claim taken over and a Box dispatched")
+	}
+
+	wantDiff := head1 + ".." + newHead
+	if dispatchedChore.Scope.DiffRange != wantDiff {
+		t.Errorf("Scope.DiffRange = %q, want %q", dispatchedChore.Scope.DiffRange, wantDiff)
+	}
+	if len(dispatchedChore.Scope.Slice) != 1 || dispatchedChore.Scope.Slice[0] != "b.go" {
+		t.Errorf("Scope.Slice = %v, want [b.go] (resumed strictly after the old cursor a.go, not restarted)", dispatchedChore.Scope.Slice)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.Phase != ledger.Done {
+		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
+	}
+	if tip.State.LastSwept != newHead {
+		t.Errorf("LastSwept = %q, want %q", tip.State.LastSwept, newHead)
+	}
+
+	// Newest first: the final done commit, the takeover's own new claimed
+	// commit (ledger.Claim always appends a fresh state, never reusing the
+	// stale one), the dead host's now-superseded claim, and the seed done
+	// commit it was taken over on top of.
+	subjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+	want := []string{"bugs: done", "bugs: claimed", "bugs: claimed", "bugs: done", "bugs: claimed"}
+	if !reflect.DeepEqual(subjects, want) {
+		t.Errorf("git log subjects = %v, want %v", subjects, want)
+	}
+}
+
+// (e) A claim just younger than the claim timeout is still live: runButler
 // reports errQueueEmpty without taking it over or dispatching a Box.
-func TestRunButlerChore_ClaimJustUnderTimeoutStillLive(t *testing.T) {
+func TestRunButler_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 	repo, _ := newButlerTestRepo(t)
 	backend := ledger.Local{Repo: repo}
 
@@ -306,10 +463,10 @@ func TestRunButlerChore_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	now := start.Add(butlerClaimTimeout - time.Minute)
-	err = runButlerChore(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), newDispatcher, func() time.Time { return now })
+	now := start.Add(testClaimTimeout - time.Minute)
+	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
-		t.Fatalf("runButlerChore err = %v, want errQueueEmpty", err)
+		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
 	if dispatched {
 		t.Error("newDispatcher was called; want no Box dispatched against a claim not yet stale")
@@ -327,7 +484,7 @@ func TestRunButlerChore_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 // (f) ledger.Claim losing the race (a rival's commit landed between this run's
 // Read and its own Claim) is the same "nothing to do right now" signal as a
 // live claim, not a real error, and dispatches no Box.
-func TestRunButlerChore_ClaimLostRaceReportsNoWork(t *testing.T) {
+func TestRunButler_ClaimLostRaceReportsNoWork(t *testing.T) {
 	repo, _ := newButlerTestRepo(t)
 	backend := lostRaceBackend{Backend: ledger.Local{Repo: repo}}
 
@@ -338,16 +495,201 @@ func TestRunButlerChore_ClaimLostRaceReportsNoWork(t *testing.T) {
 	}
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	err := runButlerChore(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), newDispatcher, func() time.Time { return now })
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
-		t.Fatalf("runButlerChore err = %v, want errQueueEmpty", err)
+		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
 	if dispatched {
 		t.Error("newDispatcher was called; want no Box dispatched when Claim loses the race")
 	}
 }
 
-// (g) cmdButler rejects a chore not named in BUTLER_CHORES, before ever
+// (g) A named --chore not yet due by interval reports why and exits "no
+// work", without claiming or dispatching.
+func TestRunButler_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
+	repo, head := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	doneAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: doneAt})
+	if err != nil {
+		t.Fatalf("seed Claim: %v", err)
+	}
+	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head}, doneAt); err != nil {
+		t.Fatalf("seed Finish: %v", err)
+	}
+	beforeSubjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+
+	dispatched := false
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+		dispatched = true
+		return dispatch.NewFake()
+	}
+
+	every, everr := parseButlerEvery("6h")
+	if everr != nil {
+		t.Fatalf("parseButlerEvery: %v", everr)
+	}
+	now := doneAt.Add(time.Hour) // well inside the 6h interval
+	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, every, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	if !errors.Is(err, errQueueEmpty) {
+		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
+	}
+	if !strings.Contains(err.Error(), `chore "bugs" not due`) || !strings.Contains(err.Error(), "interval not elapsed") {
+		t.Errorf("runButler err = %q, want it to name the chore and say interval not elapsed", err)
+	}
+	if dispatched {
+		t.Error("newDispatcher was called; want no Box dispatched against a chore not due")
+	}
+
+	afterSubjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+	if !reflect.DeepEqual(afterSubjects, beforeSubjects) {
+		t.Errorf("git log subjects = %v, want unchanged %v", afterSubjects, beforeSubjects)
+	}
+}
+
+// (h) A named --chore fully rotated through the tree, with head unmoved
+// since the last sweep, reports "nothing to scan" and exits "no work".
+func TestRunButler_NamedChoreNothingToScanReportsWhy(t *testing.T) {
+	repo, head := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	fc := forge.NewFake()
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher, func() time.Time { return now }); err != nil {
+		t.Fatalf("seed clean run: %v", err)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.LastSwept != head || tip.State.Cursor != "" {
+		t.Fatalf("seeded tip = %+v, want LastSwept=%s Cursor=\"\" (single-file repo, fully swept)", tip.State, head)
+	}
+
+	dispatched := false
+	newDispatcher2 := func(c dispatch.Chore) dispatch.Dispatcher {
+		dispatched = true
+		return dispatch.NewFake()
+	}
+	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, noEvery, testClaimTimeout, newDispatcher2, func() time.Time { return now.Add(time.Hour) })
+	if !errors.Is(err, errQueueEmpty) {
+		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
+	}
+	if !strings.Contains(err.Error(), "nothing to scan") {
+		t.Errorf("runButler err = %q, want it to say nothing to scan", err)
+	}
+	if dispatched {
+		t.Error("newDispatcher was called; want no Box dispatched with nothing left to scan")
+	}
+}
+
+// (i) With no --chore, runButler picks the first due candidate in order,
+// skipping one that isn't due yet and leaving its Ledger untouched.
+func TestRunButler_NoChorePicksFirstDueCandidate(t *testing.T) {
+	repo, head := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	doneAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: doneAt})
+	if err != nil {
+		t.Fatalf("seed Claim: %v", err)
+	}
+	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head}, doneAt); err != nil {
+		t.Fatalf("seed Finish: %v", err)
+	}
+	beforeSubjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9004"
+	var dispatchedChore dispatch.Chore
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+		dispatchedChore = c
+		return readyDispatcher()
+	}
+
+	every, everr := parseButlerEvery("6h")
+	if everr != nil {
+		t.Fatalf("parseButlerEvery: %v", everr)
+	}
+	now := doneAt.Add(time.Hour)
+	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs", "refactor"}, every, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("runButler: %v", err)
+	}
+	if dispatchedChore.Name != "refactor" {
+		t.Errorf("dispatched chore = %q, want refactor (bugs is not due yet)", dispatchedChore.Name)
+	}
+
+	afterSubjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+	if !reflect.DeepEqual(afterSubjects, beforeSubjects) {
+		t.Errorf("bugs ledger subjects = %v, want unchanged %v", afterSubjects, beforeSubjects)
+	}
+	refactorTip, err := backend.Read("refactor")
+	if err != nil {
+		t.Fatalf("Read refactor: %v", err)
+	}
+	if refactorTip.State.Phase != ledger.Done {
+		t.Errorf("refactor Phase = %q, want %q", refactorTip.State.Phase, ledger.Done)
+	}
+}
+
+// (j) With no --chore, when nothing is due, runButler reports errQueueEmpty
+// naming every candidate's own reason.
+func TestRunButler_NoChoreNoneDueReportsEachReason(t *testing.T) {
+	repo, head := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	doneAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, chore := range []string{"bugs", "refactor"} {
+		claim, err := ledger.Claim(backend, chore, ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: doneAt})
+		if err != nil {
+			t.Fatalf("seed Claim(%s): %v", chore, err)
+		}
+		if _, err := ledger.Finish(backend, chore, claim, ledger.State{LastSwept: head}, doneAt); err != nil {
+			t.Fatalf("seed Finish(%s): %v", chore, err)
+		}
+	}
+
+	dispatched := false
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+		dispatched = true
+		return dispatch.NewFake()
+	}
+
+	every, everr := parseButlerEvery("6h")
+	if everr != nil {
+		t.Fatalf("parseButlerEvery: %v", everr)
+	}
+	now := doneAt.Add(time.Hour)
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs", "refactor"}, every, testClaimTimeout, newDispatcher, func() time.Time { return now })
+	if !errors.Is(err, errQueueEmpty) {
+		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
+	}
+	if !strings.Contains(err.Error(), `chore "bugs" not due: interval not elapsed`) || !strings.Contains(err.Error(), `chore "refactor" not due: interval not elapsed`) {
+		t.Errorf("runButler err = %q, want both candidates' reasons named", err)
+	}
+	if dispatched {
+		t.Error("newDispatcher was called; want no Box dispatched when nothing is due")
+	}
+}
+
+// An empty chores slice is unreachable from cmdButler (butlerPreflight
+// guards it), but runButler guards it too rather than formatting the
+// reasons-join of nothing into "butler: : queue empty".
+func TestRunButler_NoChoresIsError(t *testing.T) {
+	repo, _ := newButlerTestRepo(t)
+	backend := ledger.Local{Repo: repo}
+
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), nil, noEvery, testClaimTimeout, nil, func() time.Time { return time.Time{} })
+	if err == nil || errors.Is(err, errQueueEmpty) {
+		t.Fatalf("runButler err = %v, want a plain error, not errQueueEmpty", err)
+	}
+}
+
+// (k) cmdButler rejects a chore not named in BUTLER_CHORES, before ever
 // touching the factory or issue tracker.
 func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 	lc := &launchContext{
@@ -357,6 +699,24 @@ func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 	code := cmdButler(lc, "bugs")
 	if code != 1 {
 		t.Errorf("cmdButler code = %d, want 1", code)
+	}
+}
+
+// cmdButler rejects a BUTLER_EVERY override naming a Chore not in
+// BUTLER_CHORES, so a misspelled key fails loudly instead of never firing.
+func TestCmdButler_RejectsOverrideForChoreNotEnabled(t *testing.T) {
+	t.Setenv("FILER_MODEL", "test-model")
+	lc := &launchContext{
+		config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "bugs", butlerEvery: "6h bgus=1h"}},
+		cleanup: func() {},
+	}
+	var code int
+	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
+	if code != 1 {
+		t.Errorf("cmdButler code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, `override for chore "bgus"`) {
+		t.Errorf("stderr = %q, want the rejected override named", stderr)
 	}
 }
 
@@ -395,11 +755,12 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 	}
 }
 
-// (i) butlerPreflight guards codeForge, BUTLER_CHORES membership, and the
-// Filer gate in that order, before cmdButler ever claims a Ledger -- in
-// particular a chore run with no provisioned Filer (DRIVER=opencode, or
-// FILER_MODEL="") must be refused up front rather than sweep and silently
-// drop findings.
+// (m) butlerPreflight guards codeForge, BUTLER_CHORES membership (or, with
+// no --chore, BUTLER_CHORES being non-empty at all), BUTLER_CHORE_CLASSES
+// syntax, and the Filer gate in that order, before cmdButler ever claims a
+// Ledger -- in particular a chore run with no provisioned Filer
+// (DRIVER=opencode, or FILER_MODEL="") must be refused up front rather than
+// sweep and silently drop findings.
 func TestButlerPreflight(t *testing.T) {
 	cases := []struct {
 		name               string
@@ -421,6 +782,9 @@ func TestButlerPreflight(t *testing.T) {
 		{"chore checked before filer", "local", "other-chore", "", "bugs", false, "is not enabled"},
 		{"classes checked before filer", "local", "bugs", "bugs", "bugs", false, "BUTLER_CHORE_CLASSES"},
 		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", "tidy-deps", true, ""},
+		{"no chore: all clear with chores enabled", "local", "bugs", "", "", true, ""},
+		{"no chore: empty BUTLER_CHORES rejected", "local", "", "", "", true, "BUTLER_CHORES is empty"},
+		{"no chore: filer checked after empty-chores guard", "local", "", "", "", false, "BUTLER_CHORES is empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -443,8 +807,9 @@ func TestButlerPreflight(t *testing.T) {
 	}
 }
 
-// (j) parseButlerArgs: --chore is required and takes exactly one value;
-// --no-build is the one other flag butler shares with dispatch/research.
+// (n) parseButlerArgs: --chore is optional (an empty return means "pick a
+// due Chore"); --no-build is the one other flag butler shares with
+// dispatch/research.
 func TestParseButlerArgs(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -456,8 +821,8 @@ func TestParseButlerArgs(t *testing.T) {
 		{"chore only", []string{"--chore", "bugs"}, "bugs", false, false},
 		{"chore plus no-build", []string{"--chore", "bugs", "--no-build"}, "bugs", true, false},
 		{"no-build before chore", []string{"--no-build", "--chore", "bugs"}, "bugs", true, false},
-		{"missing --chore entirely", []string{}, "", false, true},
-		{"missing --chore entirely with no-build", []string{"--no-build"}, "", false, true},
+		{"no args at all: pick a due chore", []string{}, "", false, false},
+		{"no-build alone: pick a due chore", []string{"--no-build"}, "", true, false},
 		{"--chore with no value", []string{"--chore"}, "", false, true},
 		{"unrecognized token", []string{"bogus"}, "", false, true},
 	}

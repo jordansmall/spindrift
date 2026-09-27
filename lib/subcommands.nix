@@ -28,11 +28,12 @@
     doc = "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes";
   }
   {
-    # butler shows no issue list at all: it takes a required --chore name,
-    # never an issue selection (ADR 0056, issue #3875).
+    # butler shows no issue list at all: --chore names one Chore, never an
+    # issue selection (ADR 0056, issue #3875); omitted, it picks the first
+    # due BUTLER_CHORES entry itself (issue #3877).
     name = "butler";
-    usage = "--chore <name> [--no-build]";
-    doc = "one-shot sweep of one opted-in butler Chore (BUTLER_CHORES): claims its Ledger, runs one read-only Box, and files findings; never merges, never promotes";
+    usage = "[--chore <name>] [--no-build]";
+    doc = "one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; never merges, never promotes";
   }
   {
     name = "preview";
