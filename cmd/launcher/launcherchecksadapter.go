@@ -7,8 +7,8 @@ import (
 
 // launcherCheckConfig adapts config to launcherchecks.Config. It narrows
 // dispatchKind to the ResearchDispatch bool that launcherchecks'
-// repo-slug/gh-token exemption needs, since launcherchecks has no dispatch
-// kind string.
+// repo-slug/gh-token exemption needs (true when the kind has a self-contained
+// sub-mode), since launcherchecks has no dispatch kind string.
 func launcherCheckConfig(c config) launcherchecks.Config {
 	return launcherchecks.Config{
 		RepoSlug:     c.repoSlug,
@@ -27,7 +27,7 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 		IssueTracker: c.issueTracker,
 		CodeForge:    c.codeForge,
 
-		ResearchDispatch: c.dispatchKind == dispatchKindResearch,
+		ResearchDispatch: c.kind().Prompts.SelfContainedBase != "",
 		SelfContained:    c.selfContained,
 	}
 }

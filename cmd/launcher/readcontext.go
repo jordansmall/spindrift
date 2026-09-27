@@ -2,6 +2,7 @@ package main
 
 import (
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -24,7 +25,7 @@ type readContext struct {
 // It applies kind and selfContained the way bootstrap() does (issue #2944),
 // so a caller needing the research label family or the no-repo sub-mode gets
 // it through the same seam.
-func newReadContext(kind string, selfContained bool) readContext {
+func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) readContext {
 	c := applyDispatchKind(loadConfig(), kind)
 	c.selfContained = selfContained
 	it := newIssueTracker(c)

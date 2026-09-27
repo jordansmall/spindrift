@@ -81,7 +81,7 @@ func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities
 // (issue #2941).
 func cmdReconcile() int {
 	// reconcile never dispatches, so it carries no dispatch kind (issue #2944).
-	rc := newReadContext("", false)
+	rc := newReadContext(nil, false)
 
 	pwd, err := os.Getwd()
 	if err != nil {

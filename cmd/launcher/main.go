@@ -20,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
@@ -128,11 +129,11 @@ type config struct {
 	// boxEnv=true entries, so the Go source never enumerates them by hand.
 	boxEnvVars string
 
-	// dispatchKind is "" (doctor, reconcile, preview, none of which dispatch)
-	// or dispatchKindWork/dispatchKindResearch (ADR 0022). Set via
-	// applyDispatchKind, never read from the environment directly: it is
+	// dispatchKind is nil (doctor, reconcile, preview, none of which dispatch)
+	// or dispatchkind.Work/dispatchkind.Research (ADR 0022, issue #3872). Set
+	// via applyDispatchKind, never read from the environment directly: it is
 	// operator intent carried by which subcommand launched, not a config knob.
-	dispatchKind string
+	dispatchKind *dispatchkind.Descriptor
 
 	// selfContained is the research kind's no-repo sub-mode (issue #2202,
 	// --self-contained): the Box clones no repo and explores none, and startup
@@ -140,41 +141,58 @@ type config struct {
 	// rejects it for any other kind.
 	selfContained bool
 
-	// otherFamilyInProgressLabel is the other Dispatch kind's in-progress
-	// label (issue #3541): set via applyDispatchKind alongside dispatchKind,
+	// otherFamilyInProgressLabels are every other Dispatch kind's in-progress
+	// labels (issue #3541): set via applyDispatchKind alongside dispatchKind,
 	// never read from the environment directly, same as dispatchKind above.
-	// queryOpenIssues skips a discovered issue carrying it, so a researcher
-	// and a worker never run on the same issue at once.
-	otherFamilyInProgressLabel string
+	// queryOpenIssues skips a discovered issue carrying any of them, so a
+	// researcher and a worker never run on the same issue at once. A blank
+	// label (an unconfigured family) is left out, and a label two families
+	// share is listed once.
+	otherFamilyInProgressLabels []string
 }
 
-// The two Dispatch kinds (ADR 0022). Both share the four canonical
-// DispatchState lifecycle states; research selects the fixed agent-research
-// label family and a one-shot Settle instead of work's full merge gate.
-const (
-	dispatchKindWork     = "work"
-	dispatchKindResearch = "research"
-)
+// kind is c.dispatchKind, reading a nil one (doctor, reconcile, preview,
+// none of which dispatch) as work.
+func (c config) kind() *dispatchkind.Descriptor {
+	if c.dispatchKind == nil {
+		return dispatchkind.Work
+	}
+	return c.dispatchKind
+}
 
-// applyDispatchKind sets c's dispatchKind and, for research, swaps the four
-// lifecycle label fields to the fixed research family. Unlike the work labels
-// these aren't operator-configurable, since the research CI workflow and
-// prompt key off them directly. completeLabel is left blank: the
+// applyDispatchKind sets c's dispatchKind and swaps the four lifecycle label
+// fields to kind's label family via forge.FamilyLabels. Only work's family is
+// operator-configurable; research's is fixed, since its CI workflow and prompt
+// key off the names directly, and leaves completeLabel blank — the
 // verdict-carrying transition uses IssueTracker.CompleteVerdict instead.
-func applyDispatchKind(c config, kind string) config {
+// configuredWork is captured before the swap overwrites it, since the other
+// family's in-progress label (issue #3541) may be the configured one.
+func applyDispatchKind(c config, kind *dispatchkind.Descriptor) config {
 	c.dispatchKind = kind
-	if kind == dispatchKindResearch {
-		// Read the configured work in-progress label before the swap below
-		// overwrites c.inProgressLabel with the research family's — this is
-		// the only chance to capture it (issue #3541).
-		c.otherFamilyInProgressLabel = c.inProgressLabel
-		rl := forge.ResearchDispatchLabels()
-		c.label = rl.Dispatchable
-		c.inProgressLabel = rl.InProgress
-		c.completeLabel = rl.Complete
-		c.failedLabel = rl.Failed
-	} else {
-		c.otherFamilyInProgressLabel = forge.ResearchDispatchLabels().InProgress
+	configuredWork := forge.DispatchLabels{
+		Dispatchable: c.label,
+		InProgress:   c.inProgressLabel,
+		Complete:     c.completeLabel,
+		Failed:       c.failedLabel,
+	}
+
+	ownFamily := c.kind().Labels
+	own := forge.FamilyLabels(ownFamily, configuredWork)
+	c.label = own.Dispatchable
+	c.inProgressLabel = own.InProgress
+	c.completeLabel = own.Complete
+	c.failedLabel = own.Failed
+
+	c.otherFamilyInProgressLabels = nil
+	for _, d := range dispatchkind.All {
+		if d.Labels == ownFamily {
+			continue
+		}
+		label := forge.FamilyLabels(d.Labels, configuredWork).InProgress
+		if label == "" || containsLabel(c.otherFamilyInProgressLabels, label) {
+			continue
+		}
+		c.otherFamilyInProgressLabels = append(c.otherFamilyInProgressLabels, label)
 	}
 	return c
 }
@@ -515,7 +533,7 @@ func resolveAgentPresenceSignals(driver string) agentPresence {
 }
 
 func validate(c config) error {
-	if c.selfContained && c.dispatchKind != dispatchKindResearch {
+	if c.selfContained && c.kind().Prompts.SelfContainedBase == "" {
 		return fmt.Errorf("--self-contained is only valid for the research dispatch kind")
 	}
 	// internal/launcherchecks' repoRequirementExempt holds the REPO_SLUG/
@@ -599,7 +617,7 @@ func dispatchLabels(c config) forge.DispatchLabels {
 // (RESEARCH_VERDICTS) for the research kind, or the zero value for work. Only
 // ResearchSettle calls CompleteVerdict, so a zero value is inert for work.
 func researchVerdictLabels(c config) forge.VerdictLabels {
-	if c.dispatchKind == dispatchKindResearch {
+	if c.kind().Settle == dispatchkind.SettleVerdict {
 		vl, err := forge.ParseResearchVerdicts(c.researchVerdicts)
 		if err != nil {
 			// validate() already rejects a malformed set before this is
@@ -840,7 +858,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		// roster at eval time and re-forwarding them would override it.
 		ReviewModelOverride:    os.Getenv("REVIEW_MODEL"),
 		ReviewEffortOverride:   os.Getenv("REVIEW_EFFORT"),
-		Kind:                   c.dispatchKind,
+		Kind:                   c.kind().Name,
 		SelfContained:          c.selfContained,
 		ForgeDescriptor:        caps.ForgeDescriptor,
 		TrackerDescriptor:      caps.TrackerDescriptor,
@@ -955,7 +973,7 @@ func localloopConfig(c config) localloop.Config {
 // newSettle constructs the Settler for one dispatch entry point, reused across
 // every issue in it: research's one-shot ResearchSettle, or work's merge gate.
 func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Settler {
-	if c.dispatchKind == dispatchKindResearch {
+	if c.kind().Settle == dispatchkind.SettleVerdict {
 		vl := researchVerdictLabels(c)
 		filerEnabled := resolveAgentPresenceSignals(c.driver).filerEnabled
 		if c.boxForgeAndIssueAccess == "read-only" {
@@ -969,19 +987,14 @@ func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.Co
 // wavesConfig builds the subset of config the wave engine (internal/waves)
 // needs.
 func wavesConfig(c config) waves.Config {
-	// "work" is not a CLI verb; the dispatch subcommand is.
-	verb := "dispatch"
-	if c.dispatchKind == dispatchKindResearch {
-		verb = dispatchKindResearch
-	}
 	return waves.Config{
 		MaxParallel:    c.maxParallel,
 		MaxJobs:        c.maxJobs,
 		OverlapGate:    c.overlapGate,
 		CompleteLabel:  c.completeLabel,
 		FailedLabel:    c.failedLabel,
-		IgnoreBlockers: c.dispatchKind == dispatchKindResearch,
-		Verb:           verb,
+		IgnoreBlockers: c.kind().AdviseOnly,
+		Verb:           c.kind().Verb,
 		// The same tuning dispatch's exit-retry path and settleConfig thread
 		// (issue #2866, #2928), here reaching RunContinuous's rate-limited
 		// re-discover loop. RunContinuous fills Clock.
@@ -1188,6 +1201,16 @@ func containsLabel(labels []string, target string) bool {
 	return false
 }
 
+// containsAnyLabel reports whether labels carries any of targets.
+func containsAnyLabel(labels, targets []string) bool {
+	for _, t := range targets {
+		if containsLabel(labels, t) {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveOrigin is the one place c.issueNumber is read as the claimed-single
 // versus discovered-batch sentinel; every other call site reads the derived
 // Origin instead of re-checking the sentinel.
@@ -1233,11 +1256,11 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
 		// session, CI, or a human, not just this launcher's own claims. It
 		// also keeps work-only operation working with no research labels
 		// defined — an absent label is a label no issue carries, so the
-		// filter is a no-op and containsLabel never has to special-case "".
+		// filter is a no-op (applyDispatchKind already dropped blank labels).
 		// Silent like the Dispatchable filter above: an issue held back by
-		// the other family's in-progress label is no more newsworthy than
+		// another family's in-progress label is no more newsworthy than
 		// one that never had the dispatchable label to begin with.
-		if c.otherFamilyInProgressLabel != "" && containsLabel(fi.Labels, c.otherFamilyInProgressLabel) {
+		if containsAnyLabel(fi.Labels, c.otherFamilyInProgressLabels) {
 			continue
 		}
 		issues = append(issues, newIssue(fi))
@@ -2001,7 +2024,7 @@ var verbHandlers = map[string]verbHandler{
 	},
 	"reconcile": func(args []string, stderr io.Writer) int { return cmdReconcile() },
 	"console": func(args []string, stderr io.Writer) int {
-		lc, err := bootstrap(true, dispatchKindWork, false)
+		lc, err := bootstrap(true, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
@@ -2021,7 +2044,7 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
 			return 1
 		}
-		lc, err := bootstrap(true, dispatchKindWork, false)
+		lc, err := bootstrap(true, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
@@ -2041,7 +2064,7 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		lc, err := bootstrap(!parsed.noBuild, dispatchKindWork, false)
+		lc, err := bootstrap(!parsed.noBuild, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)
@@ -2053,7 +2076,7 @@ var verbHandlers = map[string]verbHandler{
 	},
 	"research": func(args []string, stderr io.Writer) int {
 		parsed := parseIssuePositionals(args)
-		lc, err := bootstrap(!parsed.noBuild, dispatchKindResearch, parsed.selfContained)
+		lc, err := bootstrap(!parsed.noBuild, dispatchkind.Research, parsed.selfContained)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)

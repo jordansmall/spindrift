@@ -10,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
@@ -173,7 +174,7 @@ func heldIssues(issues, selected []Issue) []Issue {
 func printSelectiveRerunHint(cfg Config, held []Issue) {
 	verb := cfg.Verb
 	if verb == "" {
-		verb = "dispatch"
+		verb = dispatchkind.Work.Verb
 	}
 	nums := make([]string, len(held))
 	for i, iss := range held {

@@ -18,7 +18,7 @@ import (
 // own via newReadContext (issue #2941) instead of bootstrap.
 func cmdDoctor(verbose bool) int {
 	// doctor never dispatches, so it carries no dispatch kind (issue #2944).
-	rc := newReadContext("", false)
+	rc := newReadContext(nil, false)
 	return doctorReport(rc, os.Stdout, os.Stderr, os.Stdin, doctorOptions{interactive: isStdinTTY(), verbose: verbose})
 }
 

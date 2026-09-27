@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -158,7 +159,7 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	}
 	kind := cfg.Kind
 	if kind == "" {
-		kind = "work"
+		kind = dispatchkind.Work.Name
 	}
 	env["DISPATCH_KIND"] = kind
 	if cfg.SelfContained {

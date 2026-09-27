@@ -3,8 +3,46 @@ package forge_test
 import (
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
+
+// TestFamilyLabels verifies the single label-family switch (issue #3872):
+// LabelsConfigured passes the caller's configured labels through unchanged,
+// LabelsResearch always returns the fixed research family regardless of what
+// configured carries.
+func TestFamilyLabels(t *testing.T) {
+	configured := forge.DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+	}
+	if got := forge.FamilyLabels(dispatchkind.LabelsConfigured, configured); got != configured {
+		t.Errorf("FamilyLabels(LabelsConfigured, %+v) = %+v, want it unchanged", configured, got)
+	}
+	want := forge.ResearchDispatchLabels()
+	if got := forge.FamilyLabels(dispatchkind.LabelsResearch, configured); got != want {
+		t.Errorf("FamilyLabels(LabelsResearch, %+v) = %+v, want %+v", configured, got, want)
+	}
+}
+
+// TestFamilyLabelsUnknownFamilyPanics guards against a new
+// dispatchkind.LabelFamily value silently borrowing work's labels: it must be
+// wired into FamilyLabels explicitly instead. The zero value counts as
+// unknown too, so a Descriptor that omits Labels panics as well.
+func TestFamilyLabelsUnknownFamilyPanics(t *testing.T) {
+	for _, f := range []dispatchkind.LabelFamily{0, 99} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("FamilyLabels(%d) did not panic", f)
+				}
+			}()
+			forge.FamilyLabels(f, forge.DispatchLabels{})
+		}()
+	}
+}
 
 func TestParseVerdict(t *testing.T) {
 	vl := forge.ResearchVerdictLabels()

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -76,7 +77,7 @@ func Run(cfg Config, w io.Writer) error {
 		note += "; a resume attempt also produced no outcome"
 	}
 
-	if cfg.Kind == "research" {
+	if d, ok := dispatchkind.ByName(cfg.Kind); ok && d.AdviseOnly {
 		return emit(w, cfg.Issue, "none", "blocked", note)
 	}
 
