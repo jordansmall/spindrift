@@ -24,6 +24,12 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   (ADR 0056). Never carries a dispatch label
   (`agent-trigger`/`ready-for-agent`) — a human promotes it to
   `ready-for-agent` like any other issue before an agent picks it up.
+  **Opt-in exception** (issue #3880): the host itself adds
+  `ready-for-agent` (or your configured `LABEL`) at settle when the
+  finding's class clears the Chore's host-side allow-list, a bounded
+  number of files, an in-Box reviewer's concurrence, and the day's
+  promotion budget — off by default. See
+  [Butler](docs/reference.md#butler).
 
 ### Dispatch authentication
 
