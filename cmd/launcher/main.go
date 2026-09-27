@@ -1334,6 +1334,17 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, err))
 	}
 	iss := newIssue(fi)
+	// A live Run() for this issue, in any process sharing pwd, holds this
+	// claim; its owner settles the run, so recover must not (issue #3885).
+	release, claimErr := dispatch.ClaimIssue(pwd, iss.number)
+	if claimErr != nil {
+		if errors.Is(claimErr, dispatch.ErrIssueClaimed) {
+			fmt.Printf("    #%s  status=skipped  note=a Box for this issue is still live in another launcher process\n", issueNum)
+			return nil
+		}
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: claim: %w", issueNum, claimErr))
+	}
+	defer release()
 	branch := cf.AgentBranch(iss.number)
 	backoff := retry.LinearBackoff{Unit: time.Duration(c.transientBackoffSecs) * time.Second, Clock: retry.RealClock()}
 	// transientRetryMax counts retries everywhere else, so the first attempt
