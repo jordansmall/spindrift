@@ -114,6 +114,8 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		bodyFile := fs.String("body-file", "", "file holding the body; empty or - reads stdin")
 		var dedup stringSliceFlag
 		fs.Var(&dedup, "dedup", "site key for dedup, e.g. path/to/file.go:Symbol; repeat for more than one")
+		class := fs.String("class", "", "promotion-candidate class (issue #3880); omit unless the finding is on CHORE_CLASSES")
+		concurrence := fs.String("concurrence", "", "the reviewer subagent's one-line agreement (issue #3880); omit on dissent or if it never ran")
 		if !parseSignalFlags(fs, rest, kind, stdout) {
 			return 1
 		}
@@ -138,6 +140,12 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		// to what it was before this field existed.
 		if len(dedup) > 0 {
 			payload["dedupTerms"] = rawStringSlice(dedup)
+		}
+		if *class != "" {
+			payload["class"] = rawString(*class)
+		}
+		if *concurrence != "" {
+			payload["concurrence"] = rawString(*concurrence)
 		}
 		return postSignal(stdout, client, base, secret, kind, payload)
 
