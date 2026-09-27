@@ -70,8 +70,9 @@ func TestHeadlessQueue_QueueContract(t *testing.T) {
 }
 
 // FakeQueue's Claim always returns f.ClaimErr regardless of prior claim
-// state, so both calls in the contract's ClaimIdempotence check return nil,
-// same as headlessHarness.
+// state, so both calls in the contract's ClaimIdempotence check return nil --
+// unlike headlessHarness, whose real forge.Fake now distinguishes a genuine
+// second claim via forge.ErrAlreadyClaimed (#3887).
 type fakeQueueHarness struct{ f *waves.FakeQueue }
 
 func (h fakeQueueHarness) Queue() waves.Queue { return h.f }

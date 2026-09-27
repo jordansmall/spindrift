@@ -6,8 +6,10 @@
 package wavestest
 
 import (
+	"errors"
 	"testing"
 
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -37,10 +39,9 @@ func RunQueueContract(t *testing.T, h Harness) {
 }
 
 // testClaimIdempotence pins that a repeat claim of an already-claimed issue is
-// safe and returns nil on every adapter: LabelClaimer's TransitionState is
-// best-effort (#1985), swapping labels without checking that num carries the
-// "from" label. Claimer's stale-listing race (queue.go) is a genuine backend
-// error, not a double-transition rejection a bare repeat claim can produce.
+// safe: nil from a Queue whose Claim is a no-op or bare recorder, or
+// forge.ErrAlreadyClaimed from a tracker-backed claim (#3887), never any other
+// error.
 func testClaimIdempotence(t *testing.T, h Harness) {
 	q := h.Queue()
 	h.SeedDispatchable("1")
@@ -48,8 +49,8 @@ func testClaimIdempotence(t *testing.T, h Harness) {
 	if err := q.Claim("1"); err != nil {
 		t.Fatalf("first Claim(1): got %v, want nil (issue is freshly seeded as dispatchable)", err)
 	}
-	if err := q.Claim("1"); err != nil {
-		t.Fatalf("second Claim(1) on already-claimed work: got %v, want nil (Claim is idempotent on every adapter)", err)
+	if err := q.Claim("1"); err != nil && !errors.Is(err, forge.ErrAlreadyClaimed) {
+		t.Fatalf("second Claim(1) on already-claimed work: got %v, want nil or forge.ErrAlreadyClaimed", err)
 	}
 }
 

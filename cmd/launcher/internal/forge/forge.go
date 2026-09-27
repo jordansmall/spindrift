@@ -51,6 +51,13 @@ var ErrNotFound = errors.New("forge: not found")
 // primary hourly quota or the secondary abuse-detection limit.
 var ErrRateLimit = errors.New("forge rate limited")
 
+// ErrAlreadyClaimed is returned by TransitionState when a claim (to ==
+// InProgress) lands on an issue that already carries the InProgress marker,
+// so a second claimer errors instead of silently re-swapping labels. Callers
+// treat this as "someone else has it" and skip the issue rather than fail the
+// run (#3887).
+var ErrAlreadyClaimed = errors.New("forge: issue already claimed")
+
 // Issue is a GitHub issue as seen by the launcher.
 type Issue struct {
 	Number string // launcher keeps issue numbers as strings
