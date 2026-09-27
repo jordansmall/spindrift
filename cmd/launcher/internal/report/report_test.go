@@ -65,6 +65,60 @@ func TestFromEnv_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestFromEnv_ChoreRoundTrip pins ChoreBox/ChoreSettled's wire shape (issue
+// #3878): a Chore-keyed record carries "chore", never "issue" — Issue's
+// omitempty tag must actually elide the field, not just leave it "".
+func TestFromEnv_ChoreRoundTrip(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer r.Close()
+	t.Cleanup(func() { w.Close() })
+
+	fd := int(w.Fd())
+	var stderr bytes.Buffer
+	rep := FromEnv(getenvFor(map[string]string{"SPINDRIFT_REPORT_FD": fmt.Sprint(fd)}), &stderr)
+	if rep == nil {
+		t.Fatalf("FromEnv returned nil, stderr: %s", stderr.String())
+	}
+
+	rep.ChoreBox("bugs", "initial")
+	rep.ChoreSettled("bugs", "complete", "2 filed")
+	w.Close()
+
+	scanner := bufio.NewScanner(r)
+	var lines []string
+	var recs []Record
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+		var rec Record
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			t.Fatalf("unmarshal %q: %v", scanner.Text(), err)
+		}
+		recs = append(recs, rec)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("got %d records, want 2: %+v", len(recs), recs)
+	}
+	wantBox := Record{Event: "box", Chore: "bugs", Phase: "initial"}
+	if recs[0] != wantBox {
+		t.Errorf("box record = %+v, want %+v", recs[0], wantBox)
+	}
+	wantSettled := Record{Event: "settled", Chore: "bugs", State: "complete", Note: "2 filed"}
+	if recs[1] != wantSettled {
+		t.Errorf("settled record = %+v, want %+v", recs[1], wantSettled)
+	}
+	for _, line := range lines {
+		if strings.Contains(line, `"issue"`) {
+			t.Errorf("line %q names issue, want it omitted entirely (omitempty)", line)
+		}
+	}
+}
+
 func TestFromEnv_Unset(t *testing.T) {
 	var stderr bytes.Buffer
 	rep := FromEnv(getenvFor(nil), &stderr)

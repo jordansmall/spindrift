@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -158,6 +159,35 @@ func TestButlerSettle_DoneCommitContents(t *testing.T) {
 	}
 	if tip.State.ClaimedBy != nil {
 		t.Errorf("ClaimedBy = %+v, want nil on a Done state", tip.State.ClaimedBy)
+	}
+}
+
+// TestButlerSettle_ReportsChoreSettledNotIssue pins issue #3878: a butler
+// run's terminal report.Record must carry the Chore, not num (the
+// dispatch.ChoreKey-shaped "butler-bugs"), since the report wire's Issue
+// field means a tracker issue and a Chore is not one.
+func TestButlerSettle_ReportsChoreSettledNotIssue(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/501"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0)
+
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, readyResult())
+
+	recs := readRecords()
+	if len(recs) != 1 {
+		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
+	}
+	if recs[0].Event != "settled" || recs[0].Chore != "bugs" || recs[0].Issue != "" {
+		t.Errorf("record = %+v, want event=settled chore=bugs issue=\"\"", recs[0])
 	}
 }
 

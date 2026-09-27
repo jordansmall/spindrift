@@ -37,6 +37,33 @@ func TestDispatch_Run_EmitsBoxRecordAndUnchangedHumanLine(t *testing.T) {
 	}
 }
 
+// TestDispatch_Run_ChoreDispatch_EmitsChoreBoxRecord pins announce's other
+// branch (issue #3878): a Factory.NewChore Dispatch (ADR 0056) has no
+// tracker issue, so its box record must name the Chore instead — never
+// d.number, which is "butler-"+Name, not an issue.
+func TestDispatch_Run_ChoreDispatch_EmitsChoreBoxRecord(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f, err := NewFactory(retryConfig(3, 0, 0), dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	t.Cleanup(f.Cleanup)
+	d := f.NewChore(Chore{Name: "bugs", Branch: "main"})
+
+	testutil.CaptureStdout(t, func() { d.Run() })
+
+	recs := readRecords()
+	if len(recs) != 1 {
+		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
+	}
+	if recs[0].Event != "box" || recs[0].Chore != "bugs" || recs[0].Issue != "" || recs[0].Phase != "initial" {
+		t.Errorf("record = %+v, want event=box chore=bugs issue=\"\" phase=initial", recs[0])
+	}
+}
+
 func TestDispatch_Fix_EmitsBoxRecordWithFixPassPhase(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 

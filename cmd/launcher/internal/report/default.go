@@ -32,3 +32,13 @@ func Box(issue, phase string) {
 func Settled(issue, state, note string) {
 	Default().Settled(issue, state, note)
 }
+
+// ChoreBox forwards to Default().ChoreBox.
+func ChoreBox(chore, phase string) {
+	Default().ChoreBox(chore, phase)
+}
+
+// ChoreSettled forwards to Default().ChoreSettled.
+func ChoreSettled(chore, state, note string) {
+	Default().ChoreSettled(chore, state, note)
+}

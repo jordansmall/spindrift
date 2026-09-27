@@ -28,10 +28,16 @@ const MaxLine = 4096
 const clipMark = "…"
 
 // Record is one line of the report protocol, always terminated by "\n" and
-// containing exactly one JSON object.
+// containing exactly one JSON object. Issue and Chore are mutually
+// exclusive: an ordinary Box/Settled call names the tracker issue being
+// dispatched, while a butler run (ADR 0056) carries no tracker issue at
+// all and names its Chore instead via ChoreBox/ChoreSettled. A Record
+// always carries exactly one of the two — daemon.ParseRecord enforces that
+// on the reading side.
 type Record struct {
 	Event string `json:"event"`
-	Issue string `json:"issue"`
+	Issue string `json:"issue,omitempty"`
+	Chore string `json:"chore,omitempty"`
 	Phase string `json:"phase,omitempty"`
 	State string `json:"state,omitempty"`
 	Note  string `json:"note,omitempty"`
@@ -92,6 +98,17 @@ func (r *Reporter) Box(issue, phase string) {
 // vocabulary from the existing outcome/settle machinery.
 func (r *Reporter) Settled(issue, state, note string) {
 	r.emit(Record{Event: EventSettled, Issue: issue, State: state, Note: note})
+}
+
+// ChoreBox is Box's Chore-keyed counterpart: a butler run (ADR 0056) has no
+// tracker issue to name, only the Chore it is running.
+func (r *Reporter) ChoreBox(chore, phase string) {
+	r.emit(Record{Event: EventBox, Chore: chore, Phase: phase})
+}
+
+// ChoreSettled is Settled's Chore-keyed counterpart.
+func (r *Reporter) ChoreSettled(chore, state, note string) {
+	r.emit(Record{Event: EventSettled, Chore: chore, State: state, Note: note})
 }
 
 // emit swallows write failures: a broken report pipe (parent gone, pipe
