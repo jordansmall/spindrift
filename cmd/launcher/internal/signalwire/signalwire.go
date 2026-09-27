@@ -86,12 +86,19 @@ type PRIntent struct {
 // IssueIntent is an issue-intent signal's content. Type is the closed
 // doctor.FindingTypeLabels vocabulary; the host still picks labels, but
 // DedupTerms is the Box's to supply (issue #3609) -- only the Box knows the
-// finding's site.
+// finding's site. Class and Concurrence are issue #3880's auto-promotion
+// gate: Class is the Box's own claim about the finding's kind, checked
+// against the host's allow-list only at settle, and Concurrence is the
+// in-Box reviewer subagent's one-line agreement, empty when it dissented or
+// never ran. Neither can promote anything by itself -- the host holds the
+// allow-list and the daily budget, and the Box cannot change either.
 type IssueIntent struct {
-	Title      string   `json:"title"`
-	Body       string   `json:"body"`
-	Type       string   `json:"type"`
-	DedupTerms []string `json:"dedupTerms,omitempty"`
+	Title       string   `json:"title"`
+	Body        string   `json:"body"`
+	Type        string   `json:"type"`
+	DedupTerms  []string `json:"dedupTerms,omitempty"`
+	Class       string   `json:"class,omitempty"`
+	Concurrence string   `json:"concurrence,omitempty"`
 }
 
 // Receipt is an accept reply's payload.

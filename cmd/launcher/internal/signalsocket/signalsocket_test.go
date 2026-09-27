@@ -174,16 +174,19 @@ func TestBytesCountsContentFields(t *testing.T) {
 	}
 }
 
-// A term-less intent must hash and count exactly as it did before DedupTerms
-// joined the hash and Bytes -- both literals below are the pre-slice values,
-// pinned so a future change to the framing can't silently drift them.
+// A term-less, class-less, concurrence-less intent must hash and count a
+// fixed literal -- pinned so a future change to the framing can't silently
+// drift it. Bytes stays the pre-slice value since Class/Concurrence
+// contribute their own (zero) length either way; the hash moved once, when
+// issue #3880 gave Class and Concurrence their own always-framed slots
+// alongside Type, and is now pinned again at that new value.
 func TestBytesAndHashUnchangedWithoutDedupTerms(t *testing.T) {
 	b := newAll(t)
 	r := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "ti", Body: "body", Type: "bug"})
 	if want := len("ti") + len("body") + len("bug"); r.Bytes != want {
 		t.Fatalf("bytes = %d, want %d", r.Bytes, want)
 	}
-	const wantHash = "sha256:d283ef3bbd4c840de967b6e793568e1c6c1c12f67c614348526099916d0f2565"
+	const wantHash = "sha256:ec5a271124c04d25b1cad1bf2c34421dc0229c8a63c2f9fe2eb42619742fe2d3"
 	if r.Hash != wantHash {
 		t.Fatalf("hash = %q, want %q", r.Hash, wantHash)
 	}
@@ -223,6 +226,40 @@ func TestIssueIntentsDedupTermsRepeatIsIdempotent(t *testing.T) {
 	}
 	if got := b.IssueIntents(); len(got) != 1 {
 		t.Fatalf("IssueIntents() = %+v, want 1 entry (repeat did not grow the list)", got)
+	}
+}
+
+// Class and Concurrence are optional (issue #3880): an intent that sets
+// neither must accept, and setting either must not sink the intent on its
+// own -- the socket carries them; only settle gates on them.
+func TestIssueIntentClassAndConcurrenceOptional(t *testing.T) {
+	b := newAll(t)
+	mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug"})
+	mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t2", Body: "b2", Type: "bug", Class: "flaky-test"})
+	mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t3", Body: "b3", Type: "bug", Class: "flaky-test", Concurrence: "confirmed by the reviewer"})
+	stored := b.IssueIntents()
+	if len(stored) != 3 {
+		t.Fatalf("IssueIntents() = %+v, want 3", stored)
+	}
+	if stored[1].Class != "flaky-test" {
+		t.Errorf("stored[1].Class = %q, want %q", stored[1].Class, "flaky-test")
+	}
+	if stored[2].Concurrence != "confirmed by the reviewer" {
+		t.Errorf("stored[2].Concurrence = %q, want %q", stored[2].Concurrence, "confirmed by the reviewer")
+	}
+}
+
+// Distinct Class/Concurrence must mint distinct intents even when
+// title/body/type match, the same guarantee TestIssueIntentsDedupTermsDistinguish
+// gives DedupTerms.
+func TestIssueIntentClassAndConcurrenceDistinguish(t *testing.T) {
+	b := newAll(t)
+	first := signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", Class: "flaky-test"}
+	second := signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", Class: "dead-code"}
+	r1 := mustAcceptIssue(t, b, first)
+	r2 := mustAcceptIssue(t, b, second)
+	if r1.Hash == r2.Hash {
+		t.Fatalf("distinct classes hashed alike: %q", r1.Hash)
 	}
 }
 
@@ -327,6 +364,26 @@ func TestRejectInvalidUTF8DedupTermDirectBufferCall(t *testing.T) {
 	mustReject(t, rej, "invalid_utf8", 400)
 	if !strings.HasPrefix(rej.Reason, "dedupTerms[0] ") {
 		t.Fatalf("reason = %q, want it to name dedupTerms[0]", rej.Reason)
+	}
+}
+
+func TestRejectOversizeClass(t *testing.T) {
+	big := strings.Repeat("x", signalwire.MaxBodyBytes+1)
+	b := newAll(t)
+	_, rej := b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", Class: big})
+	mustReject(t, rej, "oversize", 413)
+	if !strings.HasPrefix(rej.Reason, "class ") {
+		t.Fatalf("reason = %q, want it to name class", rej.Reason)
+	}
+}
+
+func TestRejectInvalidUTF8Concurrence(t *testing.T) {
+	bad := string([]byte{0x41, 0xff, 0xfe})
+	b := newAll(t)
+	_, rej := b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", Concurrence: bad})
+	mustReject(t, rej, "invalid_utf8", 400)
+	if !strings.HasPrefix(rej.Reason, "concurrence ") {
+		t.Fatalf("reason = %q, want it to name concurrence", rej.Reason)
 	}
 }
 
