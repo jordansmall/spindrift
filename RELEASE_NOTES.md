@@ -9,6 +9,55 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.19.2 — 2026-09-26
+
+Mostly fixes to how review findings become issues, plus a daemon flag for
+pointing a night's work at a feature branch.
+
+No breaking changes.
+
+- **The daemon can run a campaign on a feature branch.** Pointing the daemon's
+  own `BASE_BRANCH` at a feature branch used to halt it as "self-changed" on
+  every merge that touched its closure. Pass `--feature-branch <branch>` and the
+  daemon stays on its base branch for its own fetch and self-check, while every
+  child and the startup doctor preflight work against the feature branch. It's a
+  CLI flag only, so a throwaway branch name never ends up in your flake config.
+  If the branch disappears from origin (merged and deleted, say), the daemon
+  refuses at startup or halts mid-run with a new exit code, 12, before claiming
+  anything, rather than parking a queue of issues as `agent-failed`. A network
+  blip still goes through the normal backoff. Add 12 to your restart wrapper's
+  "don't restart" list if you use one.
+- **Duplicate findings stop turning into duplicate issues.** Both review axes
+  often flag the same defect independently, and a retry or a later run would
+  refile whatever was already open. The Filer now tags each finding with where
+  it lives (`path/to/file.go:Symbol`), and settle skips any finding whose sites
+  are all already tracked by an open issue. A finding that spans two sites
+  still files if only one of them is covered. Skips show up in the `filed=`
+  tally, and a "Skipped (deduplicated)" section on the issue or verdict comment
+  tells you which open issue already covers each one, so "already tracked" no
+  longer looks the same as "never filed".
+- **Less backlog from review nits.** Review triage used to have two outcomes,
+  fix it now or file it. It now has a third: a finding that's correct but
+  trivial and outside what the branch touched gets dropped. From round 2 on, an
+  ambiguous finding is only escalated when fixing it would widen the diff, so
+  small in-scope fixes still land inline instead of becoming issues. An unsure
+  finding on code the branch never touched now gets filed rather than fixed out
+  of scope.
+- **No more made-up PR links in filed issues.** The Filer was told it had a PR
+  URL for its "Found by review" line when usually no PR existed yet, so it
+  sometimes invented one (`pull/DRAFT`, a 404). It now uses the branch form by
+  default and only links a PR it was actually given.
+- **Socket signals are harder to get wrong.** The prompts now show a single
+  heredoc call for sending a verdict, PR intent, or issue intent over the
+  socket, with the full flag list, instead of writing a file first. Research
+  runs were spending about an eighth of their API calls on that. When an agent
+  does pass a bad flag, the error now reads like a normal rejection and is
+  reported to the host log, rather than scrolling off inside a usage dump.
+- **Smaller fixes.** The launcher's warning about an exported daemon knob (like
+  `DAEMON_IDLE_FLOOR`) no longer suggests a `--daemon-idle-floor` flag that the
+  launcher accepts and silently ignores. It points you at the settings path
+  instead.
+
 ## 0.19.1 — 2026-09-23
 
 Mostly a shakedown of the daemon that 0.19.0 shipped, plus a new way for a Box
