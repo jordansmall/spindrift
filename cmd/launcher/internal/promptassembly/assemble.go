@@ -61,8 +61,9 @@ type Caps struct {
 // Handoff is the static per-run configuration assemble-prompt hands to a
 // driver-exec/orchestrator invocation, written to disk as JSON so a process
 // starting after assemble-prompt exits re-derives nothing. Assemble sets only
-// SessionMode, Invoker, ReviewModel, and ReviewEffort; the CLI wrapper
-// populates every other field from flags and static config (issue #2975).
+// SessionMode, Invoker, ReviewModel, ReviewEffort, and AdvisoryReviewer; the
+// CLI wrapper populates every other field from flags and static config
+// (issue #2975).
 type Handoff struct {
 	// SessionMode is "resume" or "initial" (entrypoint.sh: 1037-1052).
 	SessionMode string
@@ -87,6 +88,10 @@ type Handoff struct {
 	// field under the same condition, and is likewise overridden last by an
 	// explicit dispatch-time REVIEW_EFFORT (issue #3171).
 	ReviewEffort string
+	// AdvisoryReviewer is true when the kind supplies its own reviewer prompt
+	// (butler, ADR 0056) under ORCHESTRATOR: its inline reviewer only
+	// advises, so its verdict must not steer the pass loop (issue #3925).
+	AdvisoryReviewer bool
 	// Model, Effort, Driver, DriverBin, and DriverFlags are the Driver
 	// invocation's static configuration, never derived from Env/gate logic.
 	Model       string
@@ -476,8 +481,9 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	result := Result{
 		Prompt: bodies.base.text(),
 		Handoff: Handoff{
-			SessionMode: bodies.sessionMode,
-			Invoker:     invoker,
+			SessionMode:      bodies.sessionMode,
+			Invoker:          invoker,
+			AdvisoryReviewer: gates["ORCHESTRATOR"] && bodies.kind.Prompts.Reviewer != "",
 		},
 	}
 

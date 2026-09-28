@@ -3660,6 +3660,38 @@ func TestAssembleButlerReviewerKeptAndRendersButlerReviewPrompt(t *testing.T) {
 			if strings.Contains(reviewer.Prompt, "adversarially review a branch diff") {
 				t.Errorf("reviewer.prompt = %q, want no review-prompt.md content", reviewer.Prompt)
 			}
+			// AdvisoryReviewer only matters once the orchestrator's pass loop
+			// exists to be steered, so it hinges on ORCHESTRATOR too, not
+			// merely on the kind owning a reviewer prompt (issue #3925).
+			if result.Handoff.AdvisoryReviewer != orchestratorOn {
+				t.Errorf("Handoff.AdvisoryReviewer = %v, want %v (orchestrator=%v)", result.Handoff.AdvisoryReviewer, orchestratorOn, orchestratorOn)
+			}
+		})
+	}
+}
+
+// A kind with no reviewer prompt of its own (work, research) never sets
+// AdvisoryReviewer, even under ORCHESTRATOR: its inline reviewer subagent is
+// dropped there, so no advisory verdict exists to suppress (issue #3925).
+func TestAssembleAdvisoryReviewerOnlyForKindWithOwnReviewerPrompt(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	for _, kind := range []string{"work", "research"} {
+		t.Run(kind, func(t *testing.T) {
+			env := coveredEnv()
+			env.DispatchKind = kind
+			if kind == "research" {
+				env.ResearchStatusEnum = "recommend|reject|unclear"
+			}
+			env.OrchestratorEnabled = true
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			if result.Handoff.AdvisoryReviewer {
+				t.Errorf("Handoff.AdvisoryReviewer = true for kind %q under ORCHESTRATOR, want false", kind)
+			}
 		})
 	}
 }
