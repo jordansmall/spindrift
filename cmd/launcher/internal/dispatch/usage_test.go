@@ -214,6 +214,35 @@ func TestCumulativeUsage_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 	}
 }
 
+// Issue #3895: CumulativeUsage sums turns and durations too, not just tokens and
+// cost, since the butler writes it into the ledger whole.
+func TestCumulativeUsage_SumsDurationAndTurnsAcrossAttempts(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("15", "test issue")
+
+	// logPath().1 is what rotateStaleLog leaves behind for an abandoned attempt.
+	if err := writeFile(d.logPath()+".1", `{"type":"result","num_turns":1,"total_cost_usd":3.00,"duration_ms":5000,"duration_api_ms":1000,"usage":{"input_tokens":5000,"output_tokens":250}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	writeRunLog(t, d, `{"type":"result","num_turns":2,"total_cost_usd":0.10,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`)
+
+	got := d.CumulativeUsage()
+	if got.NumTurns != 3 {
+		t.Errorf("NumTurns = %d, want 3 (sum across rotated attempt and current attempt)", got.NumTurns)
+	}
+	if got.DurationApiMs != 1500 {
+		t.Errorf("DurationApiMs = %d, want 1500 (sum across rotated attempt and current attempt)", got.DurationApiMs)
+	}
+	if got.DurationMs != 6000 {
+		t.Errorf("DurationMs = %d, want 6000 (sum of attempt totals, not a wall-clock span)", got.DurationMs)
+	}
+}
+
 // Issue #2575: the rendered comment is the counterpart of CumulativeUsage's
 // multi-pass sum, so its Turns, API time and token figures must cover every
 // fix-pass log too.

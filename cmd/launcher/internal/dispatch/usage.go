@@ -52,11 +52,15 @@ func (d *Dispatch) UsageReport() string {
 	return body
 }
 
-// CumulativeUsage sums token and cost usage across every attempt log this run has
+// CumulativeUsage sums every usage field across every attempt log this run has
 // produced, retried attempts included, so selfHealGate's budget gate reads the
-// run's true total spend (issues #561, #2001, #2575). A caller that never called
-// Run() must call EnsureRunLineage first. An attempt log that fails to parse, or
-// has no result event, contributes nothing rather than aborting the sum.
+// run's true total spend (issues #561, #2001, #2575). Its DurationMs is the total
+// time across attempts, not the wall-clock span aggregatedReport derives. settle/
+// butler.go writes this sum whole into the ledger's State.Usage, so turns and
+// durations are summed too, not just tokens and cost. A caller that never
+// called Run() must call EnsureRunLineage first. An attempt log that fails to
+// parse, or has no result event, contributes nothing rather than aborting the
+// sum.
 func (d *Dispatch) CumulativeUsage() usage.Usage {
 	var total usage.Usage
 	for _, pl := range AllAttemptLogPaths(d.pwd, d.number) {
@@ -64,11 +68,7 @@ func (d *Dispatch) CumulativeUsage() usage.Usage {
 		if err != nil || !r.Found {
 			continue
 		}
-		total.InputTokens += r.Totals.InputTokens
-		total.OutputTokens += r.Totals.OutputTokens
-		total.CacheReadInputTokens += r.Totals.CacheReadInputTokens
-		total.CacheCreationInputTokens += r.Totals.CacheCreationInputTokens
-		total.TotalCostUSD += r.Totals.TotalCostUSD
+		total = total.Add(r.Totals)
 	}
 	return total
 }
@@ -88,13 +88,7 @@ func aggregatedReport(found []usage.Report) usage.Report {
 	modelIndex := make(map[string]int)
 
 	for _, r := range found {
-		total.InputTokens += r.Totals.InputTokens
-		total.OutputTokens += r.Totals.OutputTokens
-		total.CacheReadInputTokens += r.Totals.CacheReadInputTokens
-		total.CacheCreationInputTokens += r.Totals.CacheCreationInputTokens
-		total.TotalCostUSD += r.Totals.TotalCostUSD
-		total.DurationApiMs += r.Totals.DurationApiMs
-		total.NumTurns += r.Totals.NumTurns
+		total = total.Add(r.Totals)
 
 		for _, m := range r.SummedByModel {
 			if i, ok := modelIndex[m.Model]; ok {

@@ -144,9 +144,9 @@ type Dispatcher interface {
 	// initial run.
 	UsageReport() string
 
-	// CumulativeUsage sums token and cost usage across the initial run and
-	// every fix pass. selfHealGate's budget gate (issue #2001) reads it before
-	// dispatching another fix pass.
+	// CumulativeUsage sums every usage field — tokens, cost, durations, and
+	// turns — across the initial run and every fix pass. selfHealGate's
+	// budget gate (issue #2001) reads it before dispatching another fix pass.
 	CumulativeUsage() usage.Usage
 
 	// Close evicts this issue's driver-cache entry; the per-issue caller
