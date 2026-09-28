@@ -2043,13 +2043,13 @@ type verbHandler func(args []string, stderr io.Writer) int
 var verbHandlers = map[string]verbHandler{
 	"build": func(args []string, stderr io.Writer) int { return cmdBuild() },
 	"doctor": func(args []string, stderr io.Writer) int {
-		verbose, bad, ok := doctorVerboseArgs(args)
+		opts, bad, ok := doctorFlagArgs(args)
 		if !ok {
 			fmt.Fprintf(stderr, "unrecognized argument: %s\n", bad)
-			fmt.Fprintln(stderr, "usage: spindrift doctor [--verbose|-v]")
+			fmt.Fprintln(stderr, "usage: spindrift doctor [--verbose|-v] [--butler]")
 			return 1
 		}
-		return cmdDoctor(verbose)
+		return cmdDoctor(opts)
 	},
 	"reconcile": func(args []string, stderr io.Writer) int { return cmdReconcile() },
 	"console": func(args []string, stderr io.Writer) int {

@@ -273,6 +273,158 @@ func TestDoctorReport_Healthy_ExitsZeroStderrEmpty(t *testing.T) {
 	}
 }
 
+// Issue #3920: --butler is opt-in, so the same otherwise-healthy config
+// (BUTLER_CHORES unset) exits 0 without the flag but exits 2 with it, since
+// resolveButlerSettings rejects an empty BUTLER_CHORES via butler.ErrNoChores.
+func TestDoctorReport_Butler_OptInValidatesButlerConfig(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	c := minimalValidConfig()
+	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+
+	var stdoutNoButler, stderrNoButler bytes.Buffer
+	if got := doctorReport(doctorReadContext(c, f), &stdoutNoButler, &stderrNoButler, strings.NewReader(""), doctorOptions{interactive: false, verbose: true}); got != 0 {
+		t.Errorf("without --butler: want exit 0, got %d; stderr: %q", got, stderrNoButler.String())
+	}
+	if stderrNoButler.String() != "" {
+		t.Errorf("without --butler: want stderr empty, got %q", stderrNoButler.String())
+	}
+
+	var stdoutButler, stderrButler bytes.Buffer
+	got := doctorReport(doctorReadContext(c, f), &stdoutButler, &stderrButler, strings.NewReader(""), doctorOptions{interactive: false, verbose: true, butler: true})
+	if got != 2 {
+		t.Errorf("with --butler: want exit 2, got %d; stderr: %q", got, stderrButler.String())
+	}
+	if !strings.Contains(stderrButler.String(), "butler") {
+		t.Errorf("with --butler: want stderr to name the butler config problem, got %q", stderrButler.String())
+	}
+	if stdoutButler.String() == "" {
+		t.Error("with --butler: want stdout to still carry doctor's own report (issue #2559), got empty")
+	}
+}
+
+// Issue #3920: doctor --butler folds resolveButlerSettings's whole chain
+// (butlerPreflight, BUTLER_EVERY, BUTLER_CLAIM_TIMEOUT, DAEMON_AWAKE_WINDOW)
+// into configErr, so each of butlerPreflight's guards must actually reach
+// exit 2 through doctorReport, not just through a direct butlerPreflight
+// call. The "healthy" row proves the baseline config clears every guard on
+// its own, so each mutated row below fails for its own reason rather than
+// one the baseline never cleared. "opencode driver" drives through the real
+// config.driver field into resolveAgentPresenceSignals rather than a literal
+// filerEnabled bool, so a mis-wired driver arg would show up here.
+func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
+	newHealthyConfig := func(t *testing.T) config {
+		t.Helper()
+		t.Setenv("FILER_MODEL", "claude-haiku-4-5-20251001")
+		c := minimalValidConfig()
+		c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+			"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+		c.codeForge = "github" // ledger-capable (backendByName's newLedger != nil)
+		c.butlerChores = "bugs"
+		c.butlerClaimTimeout = "15m" // parseButlerClaimTimeout rejects "" outright
+		return c
+	}
+
+	cases := []struct {
+		name    string
+		mutate  func(t *testing.T, c *config)
+		wantErr string // substring expected on stderr; "" means want exit 0
+	}{
+		{
+			name:    "healthy baseline",
+			mutate:  func(t *testing.T, c *config) {},
+			wantErr: "",
+		},
+		{
+			name: "no filer provisioned",
+			mutate: func(t *testing.T, c *config) {
+				t.Setenv("FILER_MODEL", "")
+			},
+			wantErr: "needs a provisioned Filer",
+		},
+		{
+			name: "DRIVER=opencode never provisions a filer",
+			mutate: func(t *testing.T, c *config) {
+				c.driver = "opencode" // resolveAgentPresenceSignals forces filerEnabled false here
+			},
+			wantErr: "needs a provisioned Filer",
+		},
+		{
+			name: "non-ledger CODE_FORGE",
+			mutate: func(t *testing.T, c *config) {
+				c.codeForge = "git"
+			},
+			wantErr: "cannot host a butler Ledger",
+		},
+		{
+			name: "malformed BUTLER_CHORE_CLASSES",
+			mutate: func(t *testing.T, c *config) {
+				c.butlerChoreClasses = "bugs" // missing "=chore" pairing
+			},
+			wantErr: "BUTLER_CHORE_CLASSES",
+		},
+		{
+			name: "sweep cap above day cap",
+			mutate: func(t *testing.T, c *config) {
+				c.butlerMaxFindingsPerSweep = 6
+				c.butlerMaxFindingsPerDay = 5
+			},
+			wantErr: "exceeds",
+		},
+		{
+			name: "malformed BUTLER_EVERY",
+			mutate: func(t *testing.T, c *config) {
+				c.butlerEvery = "not-a-duration"
+			},
+			wantErr: "BUTLER_EVERY",
+		},
+		{
+			name: "malformed BUTLER_CLAIM_TIMEOUT",
+			mutate: func(t *testing.T, c *config) {
+				c.butlerClaimTimeout = "not-a-duration"
+			},
+			wantErr: "BUTLER_CLAIM_TIMEOUT",
+		},
+		{
+			name: "malformed DAEMON_AWAKE_WINDOW",
+			mutate: func(t *testing.T, c *config) {
+				c.daemonAwakeWindow = "not-a-window"
+			},
+			wantErr: "DAEMON_AWAKE_WINDOW",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := forge.NewFake()
+			f.ProbeRepo = "owner/repo"
+			f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+			c := newHealthyConfig(t)
+			tc.mutate(t, &c)
+
+			var stdout, stderr bytes.Buffer
+			got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true, butler: true})
+
+			if tc.wantErr == "" {
+				if got != 0 {
+					t.Errorf("want exit 0, got %d; stderr: %q", got, stderr.String())
+				}
+				return
+			}
+			if got != 2 {
+				t.Errorf("want exit 2, got %d; stderr: %q", got, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantErr) {
+				t.Errorf("want stderr to contain %q, got %q", tc.wantErr, stderr.String())
+			}
+		})
+	}
+}
+
 // Issue #2942 AC4: runDoctor's call site reads the package-level gateRegistry
 // var it is handed rather than some other fixed set, which
 // launchgates_test.go's TestWalkGateRegistry_StopsAtFirstFailure cannot prove.

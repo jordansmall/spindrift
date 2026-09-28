@@ -54,7 +54,7 @@
   }
   {
     name = "doctor";
-    usage = "[--verbose|-v]";
+    usage = "[--verbose|-v] [--butler]";
     doc = "check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)";
   }
   {
