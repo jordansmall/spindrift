@@ -1025,7 +1025,9 @@ a PR URL (`github` Code Forge), a branch ref (push-only `git`), or a
 verdict-comment URL (research dispatch); `status` values are scoped to the
 Dispatch kind (`ready`/`blocked`/`ambiguous`/`already-resolved` for work, the
 verdicts plus `blocked` for research; `already-resolved` settles
-`agent-complete` and closes the issue as completed). An optional trailing
+`agent-complete` and closes the issue as completed, but only with no commits
+or outbox bundle behind it — otherwise it is demoted to `blocked`, by a
+synthetic line in-box or by settle host-side). An optional trailing
 `synthetic=true` field marks the line as the ADR 0036 backstop the Launcher stitches in host-side when a
 Box never printed a real outcome line — the synthetic `blocked` mentioned
 below is one such line. Unlike the mid-run signal channels below, this line carries no

@@ -2589,6 +2589,13 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   closes the issue itself too, setting the local `closed:` axis directly
   (issue #4017) — nothing landed for reconcile to observe, so ADR 0029's
   reconcile-only rule for `closed:` has this one exception.
+  The claim only stands with no work behind it. If the branch carries
+  commits ahead of its base, the Box's harness demotes it to
+  `status=blocked` ("agent reported already-resolved but N commits exist on
+  `<branch>`") and preserves the commits the way any blocked run's are,
+  pushed or bundled; an outbox bundle arriving with the claim demotes it
+  host-side too. Either way the issue settles `agent-failed`, stays open,
+  and gets the corrective note as a comment.
 - **Stranded issues are recovered explicitly, never adopted automatically.** A
   bare `agent-in-progress` label carries no liveness signal — it cannot tell an
   issue a crashed launcher stranded apart from one a live runner (another Box,
