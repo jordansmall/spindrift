@@ -249,13 +249,13 @@ phase_branch_recovery() {
   # no open PR exists keeps this Box's first incremental push a fast-forward.
   _rebase_and_publish=""
 
-  # CODE_FORGE=local has no PR concept and no writable origin: the mount is
-  # read-only (ADR 0033), and work is bundled out at the end rather than pushed.
-  # A stale refs/remotes/origin/$BRANCH is simply superseded by a fresh checkout,
-  # with nothing to adopt through a gh call that would break the
-  # no-forge-network-calls guarantee.
-  if [ "${CODE_FORGE:-github}" = "local" ]; then
-    echo "==> CODE_FORGE=local: starting $BRANCH fresh from origin/${BASE_BRANCH:-}"
+  # gh can answer "is there an open PR?" only for CODE_FORGE=github. local and
+  # git have no PR concept (ADR 0033, ADR 0013); forgejo's PRs are not on
+  # github.com and its Box carries no GH_TOKEN, so a gh query would abort every
+  # retry or read "no PR" and force-reset a live Forgejo PR's branch (issue
+  # #3942). A stale refs/remotes/origin/$BRANCH is superseded by a fresh checkout.
+  if [ "${CODE_FORGE:-github}" != "github" ]; then
+    echo "==> CODE_FORGE=${CODE_FORGE:-github}: starting $BRANCH fresh from origin/${BASE_BRANCH:-}"
     git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
     return
   fi
