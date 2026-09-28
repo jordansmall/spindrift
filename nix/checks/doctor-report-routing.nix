@@ -213,8 +213,8 @@ in
               relPath = "doctor.go";
               original = doctorMainSrc;
               anchor = "the configErr stderr line";
-              contents = replaceStrings [ ''fmt.Fprintf(stderr, "%s\n", v.configErr)'' ] [
-                ''fmt.Fprintf(stdout, "%s\n", v.configErr)''
+              contents = replaceStrings [ ''fmt.Fprintf(stderr, "%s\n", configErr)'' ] [
+                ''fmt.Fprintf(stdout, "%s\n", configErr)''
               ] doctorMainSrc;
             }
           ];
@@ -263,8 +263,8 @@ in
               relPath = "doctor.go";
               original = doctorMainSrc;
               anchor = "the configErr stderr line";
-              contents = replaceStrings [ ''fmt.Fprintf(stderr, "%s\n", v.configErr)'' ] [
-                ''fmt.Fprintf(os.Stderr, "%s\n", v.configErr)''
+              contents = replaceStrings [ ''fmt.Fprintf(stderr, "%s\n", configErr)'' ] [
+                ''fmt.Fprintf(os.Stderr, "%s\n", configErr)''
               ] doctorMainSrc;
             }
           ];

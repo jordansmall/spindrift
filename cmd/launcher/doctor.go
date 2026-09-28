@@ -15,19 +15,23 @@ import (
 // own adapter rather than the combined Client, so a CODE_FORGE=git deployment
 // checks the actual remote it will push to instead of the IssueTracker's repo
 // a second time. It needs no runner/dispatch/settle wiring, so it builds its
-// own via newReadContext (issue #2941) instead of bootstrap.
-func cmdDoctor(verbose bool) int {
+// own via newReadContext (issue #2941) instead of bootstrap. opts.interactive
+// is ignored: it is always overwritten below from the stdin TTY probe, never
+// from the caller's flag parse.
+func cmdDoctor(opts doctorOptions) int {
 	// doctor never dispatches, so it carries no dispatch kind (issue #2944).
 	rc := newReadContext(nil, false)
-	return doctorReport(rc, os.Stdout, os.Stderr, os.Stdin, doctorOptions{interactive: isStdinTTY(), verbose: verbose})
+	opts.interactive = isStdinTTY()
+	return doctorReport(rc, os.Stdout, os.Stderr, os.Stdin, opts)
 }
 
-// doctorOptions is doctorReport's last parameter. A struct rather than two
+// doctorOptions is doctorReport's last parameter. A struct rather than
 // adjacent same-typed bools because Go cannot catch swapped bools at a call
 // site (issue #3060).
 type doctorOptions struct {
 	interactive bool
 	verbose     bool
+	butler      bool
 }
 
 // doctorReport runs cmdDoctor's exit-vocabulary classification (issue #2569).
@@ -36,18 +40,28 @@ type doctorOptions struct {
 // stderr so redirecting stdout never loses the reason for a non-zero exit. Call
 // rc.validation() once: it holds the memoized Probes (issues #3144, #2992).
 // opts.verbose gates the report's ok:/advisory: rows (issue #3777); it never
-// changes which exit code doctorExitCodeFor returns.
+// changes which exit code doctorExitCodeFor returns. opts.butler folds the
+// butler's own config checks into configErr (issue #3920).
 func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, opts doctorOptions) int {
 	v := rc.validation()
-	if v.configErr != nil {
-		fmt.Fprintf(stderr, "%s\n", v.configErr)
+	configErr := v.configErr
+	if opts.butler {
+		// "" means no --chore: validate every BUTLER_CHORES entry, and an
+		// empty BUTLER_CHORES fails (ErrNoChores) -- same as gateButlerKind
+		// refusing an explicit butler selector with no chores.
+		if _, err := resolveButlerSettings(rc.config, ""); err != nil {
+			configErr = errors.Join(configErr, err)
+		}
+	}
+	if configErr != nil {
+		fmt.Fprintf(stderr, "%s\n", configErr)
 	}
 	rep := doctor.NewReporter(stdout, opts.verbose)
 	runErr := runDoctor(rc.issueTracker, rc.codeForge, rc.config, rep, rep.AdvisoryWriter(), stdin, opts.interactive, v.reportChecks)
 	if runErr != nil {
 		fmt.Fprintf(stderr, "%s\n", runErr)
 	}
-	return doctorExitCodeFor(v.configErr, runErr)
+	return doctorExitCodeFor(configErr, runErr)
 }
 
 // doctorExitCodeFor maps cmdDoctor's two failure sources to the doctor

@@ -61,20 +61,24 @@ func dispatchSelfContainedArgs(args []string) (selfContained bool, remaining []s
 	return
 }
 
-// doctorVerboseArgs parses doctor's own args: --verbose or -v requests the
-// full report (issue #3777). Unlike the dispatch-only parsers above, doctor
-// takes no positionals of its own, so any other token — flag or bare word —
-// is a usage error; ok is false exactly when badArg holds that token.
-func doctorVerboseArgs(args []string) (verbose bool, badArg string, ok bool) {
+// doctorFlagArgs parses doctor's own args: --verbose or -v requests the full
+// report (issue #3777); --butler additionally validates the butler config,
+// folding a failure into doctor's config-invalid exit (issue #3920). Unlike
+// the dispatch-only parsers above, doctor takes no positionals of its own, so
+// any other token — flag or bare word — is a usage error; ok is false
+// exactly when badArg holds that token.
+func doctorFlagArgs(args []string) (opts doctorOptions, badArg string, ok bool) {
 	for _, a := range args {
 		switch a {
 		case "--verbose", "-v":
-			verbose = true
+			opts.verbose = true
+		case "--butler":
+			opts.butler = true
 		default:
-			return false, a, false
+			return doctorOptions{}, a, false
 		}
 	}
-	return verbose, "", true
+	return opts, "", true
 }
 
 // issueArgs is parseIssuePositionals's result. A struct rather than four
@@ -322,10 +326,10 @@ func parseFlags(args []string) ([]string, error) {
 			i++
 			continue
 		}
-		// --verbose is a subcommand flag and must follow the "doctor" verb on
-		// the command line; every other verb falls through to the unknown-flag
-		// error below (issue #3777).
-		if arg == "--verbose" && verbSoFar(remaining) == "doctor" {
+		// --verbose and --butler are doctor's own subcommand flags and must
+		// follow the "doctor" verb on the command line; every other verb
+		// falls through to the unknown-flag error below (issues #3777, #3920).
+		if (arg == "--verbose" || arg == "--butler") && verbSoFar(remaining) == "doctor" {
 			remaining = append(remaining, arg)
 			i++
 			continue

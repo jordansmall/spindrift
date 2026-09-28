@@ -1361,6 +1361,7 @@ rec {
         "--force"
         "--continuous"
         "--verbose"
+        "--butler"
         "--help"
         "--version"
         "--secret-cmd"
@@ -1488,6 +1489,10 @@ rec {
           doc = "show the full doctor report — every check and gate row, not just failures (short form: -v)";
         }
         {
+          flag = "butler";
+          doc = "make doctor also validate the butler config (exit 2 on failure)";
+        }
+        {
           flag = "help";
           doc = "show usage and exit";
         }
@@ -1574,6 +1579,7 @@ rec {
         "    '--force:alias for --yes'\n"
         "    '--continuous:bare-flag alias for the deprecated --continuous-dispatch bool (still available, spelled --continuous-dispatch=1)'\n"
         "    '--verbose:show the full doctor report — every check and gate row, not just failures (short form: -v)'\n"
+        "    '--butler:make doctor also validate the butler config (exit 2 on failure)'\n"
         "    '--help:show usage'\n"
         "    '--version:show version'\n"
         "    '--secret-cmd:templated secret-fetch command; {name} substitutes the kebab-case env name (lowest precedence)'\n"

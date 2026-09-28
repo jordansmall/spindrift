@@ -241,7 +241,7 @@ func TestParseFlags_MissingValue(t *testing.T) {
 	}
 }
 
-// --verbose must survive the global flag pass to reach doctorVerboseArgs
+// --verbose must survive the global flag pass to reach doctorFlagArgs
 // (issue #3777); without a passthrough entry parseFlags would reject it as
 // an unknown flag before the doctor verb handler ever sees it.
 func TestParseFlags_VerbosePassesThrough(t *testing.T) {
@@ -254,11 +254,60 @@ func TestParseFlags_VerbosePassesThrough(t *testing.T) {
 	}
 }
 
+// --butler must survive the global flag pass to reach doctorFlagArgs (issue
+// #3920), same as --verbose (issue #3777): without a passthrough entry
+// parseFlags would reject it as an unknown flag before the doctor verb
+// handler ever sees it.
+func TestParseFlags_ButlerPassesThrough(t *testing.T) {
+	remaining, err := parseFlags([]string{"doctor", "--butler"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(remaining) != 2 || remaining[0] != "doctor" || remaining[1] != "--butler" {
+		t.Errorf("remaining = %v, want [doctor --butler]", remaining)
+	}
+}
+
+// --verbose and --butler are independent doctor flags, so both must survive
+// the global flag pass together, in either order.
+func TestParseFlags_VerboseAndButlerPassThrough(t *testing.T) {
+	remaining, err := parseFlags([]string{"doctor", "--verbose", "--butler"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"doctor", "--verbose", "--butler"}
+	if len(remaining) != len(want) {
+		t.Fatalf("remaining = %v, want %v", remaining, want)
+	}
+	for i := range want {
+		if remaining[i] != want[i] {
+			t.Errorf("remaining = %v, want %v", remaining, want)
+		}
+	}
+}
+
+// --butler is scoped to doctor, just like --verbose (issue #3777); every
+// other verb hits the ordinary unknown-flag error.
+func TestParseFlags_ButlerRejectedUnlessAfterDoctor(t *testing.T) {
+	cases := [][]string{
+		{"dispatch", "--butler"},
+		{"--butler", "doctor"},
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, err := parseFlags(args)
+			if err == nil || !strings.Contains(err.Error(), "unknown flag: --butler") {
+				t.Errorf("parseFlags(%v) err = %v, want unknown flag: --butler", args, err)
+			}
+		})
+	}
+}
+
 // parseFlags verb-scopes the "--verbose" spelling to doctor; every other
 // verb still hits the ordinary unknown-flag error, whether --verbose trails
 // the verb or (since parseFlags hasn't seen a verb yet) leads it. The bare
 // "-v" spelling has no "--" prefix, so parseFlags forwards it as a
-// positional to whatever verb follows: doctorVerboseArgs accepts it as the
+// positional to whatever verb follows: doctorFlagArgs accepts it as the
 // short spelling of --verbose for doctor, while other verbs reject it their
 // own way, e.g. as a bogus issue ID (issue #3777).
 func TestParseFlags_VerboseRejectedUnlessAfterDoctor(t *testing.T) {
@@ -290,29 +339,34 @@ func TestParseFlags_VerboseAfterLeadingDispatchFlag(t *testing.T) {
 	}
 }
 
-// doctorVerboseArgs is doctor's own arg parser (issue #3777): --verbose or
-// -v requests the full report; anything else, flag or positional, is a
-// usage error naming the bad token, since doctor takes no positionals.
-func TestDoctorVerboseArgs(t *testing.T) {
+// doctorFlagArgs is doctor's own arg parser (issues #3777, #3920): --verbose
+// or -v requests the full report, --butler additionally validates the
+// butler config; anything else, flag or positional, is a usage error naming
+// the bad token, since doctor takes no positionals.
+func TestDoctorFlagArgs(t *testing.T) {
 	cases := []struct {
 		name        string
 		args        []string
 		wantVerbose bool
+		wantButler  bool
 		wantBad     string
 		wantOK      bool
 	}{
-		{"long flag", []string{"--verbose"}, true, "", true},
-		{"short flag", []string{"-v"}, true, "", true},
-		{"no args", nil, false, "", true},
-		{"bogus flag", []string{"--bogus"}, false, "--bogus", false},
-		{"positional", []string{"foo"}, false, "foo", false},
+		{"long flag", []string{"--verbose"}, true, false, "", true},
+		{"short flag", []string{"-v"}, true, false, "", true},
+		{"butler flag", []string{"--butler"}, false, true, "", true},
+		{"both flags", []string{"--verbose", "--butler"}, true, true, "", true},
+		{"no args", nil, false, false, "", true},
+		{"bogus flag", []string{"--bogus"}, false, false, "--bogus", false},
+		{"positional", []string{"foo"}, false, false, "foo", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			verbose, bad, ok := doctorVerboseArgs(tc.args)
-			if verbose != tc.wantVerbose || bad != tc.wantBad || ok != tc.wantOK {
-				t.Errorf("doctorVerboseArgs(%v) = (%v, %q, %v), want (%v, %q, %v)",
-					tc.args, verbose, bad, ok, tc.wantVerbose, tc.wantBad, tc.wantOK)
+			opts, bad, ok := doctorFlagArgs(tc.args)
+			verbose, butler := opts.verbose, opts.butler
+			if verbose != tc.wantVerbose || butler != tc.wantButler || bad != tc.wantBad || ok != tc.wantOK {
+				t.Errorf("doctorFlagArgs(%v) = (%v, %v, %q, %v), want (%v, %v, %q, %v)",
+					tc.args, verbose, butler, bad, ok, tc.wantVerbose, tc.wantButler, tc.wantBad, tc.wantOK)
 			}
 		})
 	}
@@ -570,7 +624,7 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 		"  preview [issue...]                                       dry-run: show what dispatch would pick up, in order\n" +
 		"  build                                                    realize the agent image without running any agent\n" +
 		"  recover <issue>                                          run the merge gate for a single issue\n" +
-		"  doctor [--verbose|-v]                                    check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)\n" +
+		"  doctor [--verbose|-v] [--butler]                         check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)\n" +
 		"  reconcile                                                local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n" +
 		"  registry discover <repo-dir> <routes-file> [--force]     discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n"
 
