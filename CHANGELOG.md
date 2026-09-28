@@ -1,5 +1,141 @@
 # Changelog
 
+## [0.20.1](https://github.com/jordansmall/spindrift/compare/v0.20.0...v0.20.1) (2026-09-28)
+
+
+### Features
+
+* **backstop:** demote already-resolved claims with commits ([7ebcc45](https://github.com/jordansmall/spindrift/commit/7ebcc45ebd23be0aa9657ea9bab6935d2ff98f80)), closes [#4016](https://github.com/jordansmall/spindrift/issues/4016)
+* **daemon:** name a butler slot's Chore in the status snapshot ([172d488](https://github.com/jordansmall/spindrift/commit/172d488b073a7d4f2416db71112e368436b0a2ac)), closes [#3923](https://github.com/jordansmall/spindrift/issues/3923)
+* **daemon:** name the Chore in the daemon status summary line ([da5c7af](https://github.com/jordansmall/spindrift/commit/da5c7af3505eb859860136bd0975fbbafc24fa05)), closes [#3923](https://github.com/jordansmall/spindrift/issues/3923)
+* **doctor:** add --butler to validate butler config ([86a8b04](https://github.com/jordansmall/spindrift/commit/86a8b041420523bd899d6305cac0b43ec82c9ec5)), closes [#3920](https://github.com/jordansmall/spindrift/issues/3920)
+* **driver-exec:** add advise-only posture query ([b3c1112](https://github.com/jordansmall/spindrift/commit/b3c11124671c9e764da906b4ce433ec611fb2e8f)), closes [#3901](https://github.com/jordansmall/spindrift/issues/3901)
+* **entrypoint:** demote commit-carrying already-resolved runs ([85502db](https://github.com/jordansmall/spindrift/commit/85502dbdb9451bee1f6f505c525c6169324c6ea5)), closes [#4016](https://github.com/jordansmall/spindrift/issues/4016)
+* **ledger:** add Reserve for promotion slots ([1f27835](https://github.com/jordansmall/spindrift/commit/1f27835feca042d767ed0a93fa21dc9cef411ca6)), closes [#3926](https://github.com/jordansmall/spindrift/issues/3926)
+* **nix:** bake chore prompt catalog into run doc ([a0d6d2a](https://github.com/jordansmall/spindrift/commit/a0d6d2acfe4f216843d72f50993772ed97a643e9)), closes [#3905](https://github.com/jordansmall/spindrift/issues/3905)
+* **outcome:** add already-resolved work status ([d925c37](https://github.com/jordansmall/spindrift/commit/d925c3767f0900f47fa9aa3696de62559f50220e)), closes [#4015](https://github.com/jordansmall/spindrift/issues/4015)
+* **prompt:** add ALREADY RESOLVED gate to the issue prompt ([d7683a6](https://github.com/jordansmall/spindrift/commit/d7683a6f00da65fcaa9e8bad37b95ca2d76a610d)), closes [#4015](https://github.com/jordansmall/spindrift/issues/4015)
+* **promptassembly:** mark a kind-owned reviewer as advisory ([8c33fda](https://github.com/jordansmall/spindrift/commit/8c33fda7e30ba76d6afa8d694cabe0336152206c)), closes [#3925](https://github.com/jordansmall/spindrift/issues/3925)
+* **settle:** close already-resolved local issues ([c107d16](https://github.com/jordansmall/spindrift/commit/c107d161154e01c1e7a6259e3e85f6fba851230f))
+* **settle:** close already-resolved runs as complete ([25c1c35](https://github.com/jordansmall/spindrift/commit/25c1c35c86c4c38724262025c8dbd8c021690803)), closes [#4015](https://github.com/jordansmall/spindrift/issues/4015)
+* **settle:** fail already-resolved runs that carry commits ([038ba9b](https://github.com/jordansmall/spindrift/commit/038ba9b1eae937ee5f3fc4baee8d2c08a3832a03)), closes [#4016](https://github.com/jordansmall/spindrift/issues/4016)
+* **usage:** add Usage.Add for field-wise sums ([52c2f70](https://github.com/jordansmall/spindrift/commit/52c2f707fbebe5333251f2a6242048842af0326e)), closes [#3895](https://github.com/jordansmall/spindrift/issues/3895)
+
+
+### Bug Fixes
+
+* **butler:** exit config-invalid on bad config ([4301a80](https://github.com/jordansmall/spindrift/commit/4301a8072d22f62c46162d0e403c2c548949ddbe)), closes [#3920](https://github.com/jordansmall/spindrift/issues/3920)
+* **butler:** reserve promotion slots before filing ([cd1b3be](https://github.com/jordansmall/spindrift/commit/cd1b3be9d8a514c8a944b499caa9d61bc03841b3)), closes [#3926](https://github.com/jordansmall/spindrift/issues/3926)
+* **checks:** bound Go check parallelism by cores ([8db7794](https://github.com/jordansmall/spindrift/commit/8db77949981ad7fdb7d283ca5477c7d01bb51de0)), closes [#3915](https://github.com/jordansmall/spindrift/issues/3915)
+* **ci:** fail gh-token-refresher mint on error ([40bb410](https://github.com/jordansmall/spindrift/commit/40bb4100c86e1cd928a8dcbc8c7196694dae3843)), closes [#3940](https://github.com/jordansmall/spindrift/issues/3940)
+* **ci:** match agent-setup nix cache key to ci.yml ([8cad807](https://github.com/jordansmall/spindrift/commit/8cad8072f76864caaf0953ccf0006de3eb68a562)), closes [#3937](https://github.com/jordansmall/spindrift/issues/3937)
+* **ci:** point workflows at .spindrift/logs ([6c2c8d8](https://github.com/jordansmall/spindrift/commit/6c2c8d8b42310db51ea66f6985b1bcb69ade6d3c)), closes [#3934](https://github.com/jordansmall/spindrift/issues/3934)
+* **daemon:** stop butler siblings masking jams ([753923a](https://github.com/jordansmall/spindrift/commit/753923af2e64f08684cb4f201806b4e88728f2ad)), closes [#3922](https://github.com/jordansmall/spindrift/issues/3922)
+* **daemon:** validate the butler at startup preflight ([207e887](https://github.com/jordansmall/spindrift/commit/207e8877e2cc32ed367ca939fcc93db381d3acf9)), closes [#3920](https://github.com/jordansmall/spindrift/issues/3920)
+* **doctor:** follow GH_HOST like the butler Ledger remote ([a3e4b52](https://github.com/jordansmall/spindrift/commit/a3e4b52cba014ef05ff809f09ba59dda910261f4)), closes [#3912](https://github.com/jordansmall/spindrift/issues/3912)
+* **entrypoint:** isolate prefetch without a devShell ([363b9e5](https://github.com/jordansmall/spindrift/commit/363b9e5a8ed3085698738f2c25b189ac8e3df25c)), closes [#3943](https://github.com/jordansmall/spindrift/issues/3943)
+* **entrypoint:** make copied skills writable ([9a76238](https://github.com/jordansmall/spindrift/commit/9a76238af90b538495ccbfaf1836adf9f658eecc)), closes [#3941](https://github.com/jordansmall/spindrift/issues/3941)
+* **entrypoint:** skip gh PR lookup on non-github forges ([b6dcd03](https://github.com/jordansmall/spindrift/commit/b6dcd03376a58f1669f3e3d5215e480c71f8ce02)), closes [#3942](https://github.com/jordansmall/spindrift/issues/3942)
+* **forge:** guard forgejo ListIssues on absent label ([8f4bd5a](https://github.com/jordansmall/spindrift/commit/8f4bd5a39b02b46f5accf6a103c5d8d4bc0bf053)), closes [#3952](https://github.com/jordansmall/spindrift/issues/3952)
+* **forgejo:** count org-level labels as defined ([160575e](https://github.com/jordansmall/spindrift/commit/160575ea949b30091a45a800e2b3ee866f464ca5)), closes [#3997](https://github.com/jordansmall/spindrift/issues/3997)
+* **forgejo:** fetch issue comments in one request ([2727b40](https://github.com/jordansmall/spindrift/commit/2727b40c3d1d28284d403ba52fda44b65c461b7a)), closes [#3978](https://github.com/jordansmall/spindrift/issues/3978)
+* **forgejo:** include recover reason in park comment ([5bd0cf1](https://github.com/jordansmall/spindrift/commit/5bd0cf11bbb252836c53d61a210971625f3b67db)), closes [#4010](https://github.com/jordansmall/spindrift/issues/4010)
+* **forgejo:** walk issue and pull pages until empty ([6ff7bc5](https://github.com/jordansmall/spindrift/commit/6ff7bc5c2edc3d3016586e41ade4e5df43eddc56)), closes [#3978](https://github.com/jordansmall/spindrift/issues/3978)
+* **forge:** paginate forgejo ListLabels ([89a3847](https://github.com/jordansmall/spindrift/commit/89a3847ec725a77dd9b95a1cea1b7d097156e122)), closes [#3953](https://github.com/jordansmall/spindrift/issues/3953)
+* **forge:** skip absent finding labels in forgejo dedup scan ([dff07eb](https://github.com/jordansmall/spindrift/commit/dff07ebffde53cf218311ec113395c6a9e52c188)), closes [#3944](https://github.com/jordansmall/spindrift/issues/3944)
+* **labels:** describe agent-research as the queue ([9920c5a](https://github.com/jordansmall/spindrift/commit/9920c5a85f030b7c7d861db2214a18e02a82a0c4)), closes [#3936](https://github.com/jordansmall/spindrift/issues/3936)
+* **launcher:** validate butler chores before claim ([996e54e](https://github.com/jordansmall/spindrift/commit/996e54e1a10e777747a3c6d91356c299a9f32288)), closes [#3905](https://github.com/jordansmall/spindrift/issues/3905)
+* **orchestrator:** stop an advisory reviewer steering the legacy loop ([0d29c6f](https://github.com/jordansmall/spindrift/commit/0d29c6f19bab7749a2a32ba07f9ed9f95ea72388)), closes [#3925](https://github.com/jordansmall/spindrift/issues/3925)
+* **runner:** let dispatch alone decide the outbox mount ([c2b0736](https://github.com/jordansmall/spindrift/commit/c2b0736e75bb2a4428b4c6156b1087b3ece8a698)), closes [#3957](https://github.com/jordansmall/spindrift/issues/3957)
+* **settle:** blank non-alphanumeric dedup keys ([7cd0442](https://github.com/jordansmall/spindrift/commit/7cd0442236ca8e237346f11b2a1ae0416d79b3ad)), closes [#4019](https://github.com/jordansmall/spindrift/issues/4019)
+* **settle:** fold punctuation in finding dedup keys ([833c4ac](https://github.com/jordansmall/spindrift/commit/833c4acfc4e4302300e2bb99e853ddcb881550c3)), closes [#3977](https://github.com/jordansmall/spindrift/issues/3977)
+* **settle:** truncate concurrence at grapheme bounds ([4875ef4](https://github.com/jordansmall/spindrift/commit/4875ef4ad193dfc8a603cb86eb8c53cd294c7b47)), closes [#3928](https://github.com/jordansmall/spindrift/issues/3928)
+
+
+### Performance Improvements
+
+* **butler:** share one ledger snapshot per pass ([3de01c9](https://github.com/jordansmall/spindrift/commit/3de01c9c1ce1d0a897a1f9bfb0980ea514b63156)), closes [#3918](https://github.com/jordansmall/spindrift/issues/3918)
+* **ledger:** add Snapshot for one-fetch batch reads ([7b9053a](https://github.com/jordansmall/spindrift/commit/7b9053a608d8a704f26cb54eb0bffb7e253c2798)), closes [#3918](https://github.com/jordansmall/spindrift/issues/3918)
+
+
+### Security
+
+* **dispatch:** force butler box to read-only mode ([b720190](https://github.com/jordansmall/spindrift/commit/b720190842d1d896798504f61cf128ea287b9807)), closes [#3906](https://github.com/jordansmall/spindrift/issues/3906)
+* **settle:** quote concurrence in a code span ([a445b1e](https://github.com/jordansmall/spindrift/commit/a445b1e86f7a2772fac70c06395d5d344b3ac200)), closes [#3928](https://github.com/jordansmall/spindrift/issues/3928)
+
+
+### Documentation
+
+* **adr:** amend 0022 for the agent-research-trigger label ([6e0e012](https://github.com/jordansmall/spindrift/commit/6e0e012a359026f4626b3ff008ffcd6f2becb187)), closes [#4007](https://github.com/jordansmall/spindrift/issues/4007)
+* **adr:** amend 0039 with the already-resolved status ([4d59338](https://github.com/jordansmall/spindrift/commit/4d59338a8a908e6f5e43f3347d31af2d3a6a9039)), closes [#4018](https://github.com/jordansmall/spindrift/issues/4018)
+* **adr:** amend 0051 for butler jam siblings ([bfdb9ea](https://github.com/jordansmall/spindrift/commit/bfdb9ea240b600043979ccf5b6e494fafc25a437)), closes [#3922](https://github.com/jordansmall/spindrift/issues/3922)
+* **adr:** amend 0056 for promotion reservations ([ef6946f](https://github.com/jordansmall/spindrift/commit/ef6946f2e0e44565d6a1ee92ad0c108ffefc7d98)), closes [#3926](https://github.com/jordansmall/spindrift/issues/3926)
+* **adr:** propose the butler patch rung ([8cba933](https://github.com/jordansmall/spindrift/commit/8cba933003272be811d791dca32144ef30ae56b7))
+* **ci:** complete agent-recover exit-code comment in GitHub mirror ([1a35b35](https://github.com/jordansmall/spindrift/commit/1a35b35e5a2ecdc11cbd1019a81588ffe6d9dcbc)), closes [#4011](https://github.com/jordansmall/spindrift/issues/4011)
+* **contributing:** document ADR amendment conventions ([d2d2fd9](https://github.com/jordansmall/spindrift/commit/d2d2fd9c63d863a3106e1ba98f70c32ae046288f)), closes [#3862](https://github.com/jordansmall/spindrift/issues/3862)
+* describe the already-resolved outcome status ([6044948](https://github.com/jordansmall/spindrift/commit/6044948cd2ce63d159712721ccfade3e7b381891)), closes [#4015](https://github.com/jordansmall/spindrift/issues/4015)
+* document agent App IDs as repo variables ([3767ee1](https://github.com/jordansmall/spindrift/commit/3767ee1a733e810d849ed12c0f5fad9d1f62f488)), closes [#3935](https://github.com/jordansmall/spindrift/issues/3935)
+* **forgejo:** align agent-recover comments with draft adoption ([756601d](https://github.com/jordansmall/spindrift/commit/756601dd3c597ef56f4ac0e4864db1f4fc7c7445)), closes [#3938](https://github.com/jordansmall/spindrift/issues/3938)
+* **migrating:** note the agent-research-trigger label move ([ee017ab](https://github.com/jordansmall/spindrift/commit/ee017ab6271cd77b1e7d2ac8f50a391502e4f913)), closes [#4007](https://github.com/jordansmall/spindrift/issues/4007)
+* name agent-research-trigger as the CI trigger ([613f819](https://github.com/jordansmall/spindrift/commit/613f819a43337a3bc61bfb27a7ecf82380d739d6)), closes [#3936](https://github.com/jordansmall/spindrift/issues/3936)
+* note punctuation-only dedup terms blank ([340fa6e](https://github.com/jordansmall/spindrift/commit/340fa6e1483ed33b01e62bf04e42e2294f442a64)), closes [#4019](https://github.com/jordansmall/spindrift/issues/4019)
+* note settle closes already-resolved local issues ([0a2cb10](https://github.com/jordansmall/spindrift/commit/0a2cb102a49eee87b0377b66b5c9bc775c4bccff))
+* note the already-resolved gate for custom prompts ([3551c1d](https://github.com/jordansmall/spindrift/commit/3551c1d31db93632e5e1ddc2ef477eb47c2478e3)), closes [#4018](https://github.com/jordansmall/spindrift/issues/4018)
+* **reference:** describe dedup term punctuation fold ([a67d991](https://github.com/jordansmall/spindrift/commit/a67d9918e8edc69736cb5f13228afe7748979f5d))
+* **reference:** describe the butler's read-only posture ([43b99f7](https://github.com/jordansmall/spindrift/commit/43b99f7fac24d7aa5fb324845dd2b6ee3ea3c477)), closes [#3906](https://github.com/jordansmall/spindrift/issues/3906)
+* **reference:** document the chore field on daemon status slots ([2eff1e4](https://github.com/jordansmall/spindrift/commit/2eff1e42746bb8309a4d1a433c0cab905445e93f)), closes [#3923](https://github.com/jordansmall/spindrift/issues/3923)
+* **reference:** drop hard-coded ADR range ([e51201f](https://github.com/jordansmall/spindrift/commit/e51201f7684267c16c284e94be29ff92d12ef778)), closes [#3857](https://github.com/jordansmall/spindrift/issues/3857)
+* **reference:** name check behind the carve-out ([6782e67](https://github.com/jordansmall/spindrift/commit/6782e670fdadb16cb495a0e3ef2b6742741e3c2d))
+* **reference:** name siblings that mute jam ([77d867e](https://github.com/jordansmall/spindrift/commit/77d867e585bc6b96fca69d1834208435d5a8dc22)), closes [#3922](https://github.com/jordansmall/spindrift/issues/3922)
+* **reference:** note butler chore preflight ([0786f73](https://github.com/jordansmall/spindrift/commit/0786f73e1848e75096d4b67d168c620767675f5c)), closes [#3905](https://github.com/jordansmall/spindrift/issues/3905)
+* **reference:** note inert daemon-only flags ([8e8d5dd](https://github.com/jordansmall/spindrift/commit/8e8d5dd191363657df496502dddd2e144283c35e)), closes [#3854](https://github.com/jordansmall/spindrift/issues/3854)
+* **reference:** note that prefetch failures are non-fatal ([1800b07](https://github.com/jordansmall/spindrift/commit/1800b07edda574c22c141acd82ba95f523379f56))
+* **release-notes:** add 0.20.1 highlights ([b95f192](https://github.com/jordansmall/spindrift/commit/b95f192280294b49c588642f544d2a19407608d1))
+* state the evidence rule for already-resolved ([af28059](https://github.com/jordansmall/spindrift/commit/af280599bd49c63c802c83aaf5d3e39c6ccfbb8a)), closes [#4016](https://github.com/jordansmall/spindrift/issues/4016)
+
+
+### Code Refactoring
+
+* **checks:** share lib/image.nix cores parse ([dc29377](https://github.com/jordansmall/spindrift/commit/dc293777a5d02e2ae6e5b15126bffac2246920f2))
+* **dispatch:** build every Dispatch from its subject ([f4cc1fb](https://github.com/jordansmall/spindrift/commit/f4cc1fb48edebdbc1c05f45fbb2e0bc4cc002724)), closes [#3954](https://github.com/jordansmall/spindrift/issues/3954)
+* **dispatch:** derive the box env key from its subject ([6b916b7](https://github.com/jordansmall/spindrift/commit/6b916b781f968e85b9342e9378b815bb369227d1)), closes [#3954](https://github.com/jordansmall/spindrift/issues/3954)
+* **dispatch:** pass a subject sum type to env ([d837cd2](https://github.com/jordansmall/spindrift/commit/d837cd24c1a7cad2b5f389b2929ee65c13c9b4cc)), closes [#3907](https://github.com/jordansmall/spindrift/issues/3907)
+* **dispatch:** stop forwarding ADVISE_ONLY to the Box ([5797f73](https://github.com/jordansmall/spindrift/commit/5797f732e2526e421209c181b0ba8036a705bf9e)), closes [#3901](https://github.com/jordansmall/spindrift/issues/3901)
+* **dispatch:** sum attempt usage with Usage.Add ([4a3f7fb](https://github.com/jordansmall/spindrift/commit/4a3f7fb6a45253915889fabc25ad3d5d02a4adc0)), closes [#3895](https://github.com/jordansmall/spindrift/issues/3895)
+* **doctor:** drive advisory label tiers from a table ([5a7927d](https://github.com/jordansmall/spindrift/commit/5a7927dbdb0d0ad8660f2b3fe3e121552426ba16)), closes [#3908](https://github.com/jordansmall/spindrift/issues/3908)
+* **entrypoint:** derive advise-only from descriptor ([1c8898f](https://github.com/jordansmall/spindrift/commit/1c8898fba05a2fb1156063c587a3b6cd94476397)), closes [#3901](https://github.com/jordansmall/spindrift/issues/3901)
+* **forge:** add MergeLabeledIssues helper ([55ac29d](https://github.com/jordansmall/spindrift/commit/55ac29d1eac65fa67b0d42d77b35ddb66c7d0991)), closes [#3898](https://github.com/jordansmall/spindrift/issues/3898)
+* **forge:** delegate label scans to shared helper ([86b8be6](https://github.com/jordansmall/spindrift/commit/86b8be649a234ed5c5e53482f2a9ada3bb85d82b)), closes [#3898](https://github.com/jordansmall/spindrift/issues/3898)
+* **github:** extract GH_HOST resolution to Host ([5e7b439](https://github.com/jordansmall/spindrift/commit/5e7b439d005b831d1b67fae99ab9397b87ac92a1))
+* **ledger:** sum usage with Usage.Add ([38b1e9f](https://github.com/jordansmall/spindrift/commit/38b1e9f08db1b50bc6daa26a961a81959758e164)), closes [#3895](https://github.com/jordansmall/spindrift/issues/3895)
+* **promptassembly:** hide chore-name regexp ([a8d9eb7](https://github.com/jordansmall/spindrift/commit/a8d9eb74c59983aa5f6a190f8706c52e0bced255)), closes [#3916](https://github.com/jordansmall/spindrift/issues/3916)
+
+
+### Tests
+
+* **bats:** cover already-resolved label lifecycle ([f825ae8](https://github.com/jordansmall/spindrift/commit/f825ae88f5132b5a34a78ca2b4528d2e363b953c))
+* **checks:** guard GOMAXPROCS fallback parity ([3a77339](https://github.com/jordansmall/spindrift/commit/3a773394769cf2e17336098a4468acfb57407adb)), closes [#3965](https://github.com/jordansmall/spindrift/issues/3965)
+* **checks:** pin advanced tuning rows to schema ([6403a36](https://github.com/jordansmall/spindrift/commit/6403a3691fecec55471c7592460fad90d16f66d6)), closes [#3855](https://github.com/jordansmall/spindrift/issues/3855)
+* **checks:** pin agent-setup nix cache key to ci.yml ([c9d1221](https://github.com/jordansmall/spindrift/commit/c9d12211e0797709a6075e81f429d3df1cf077c5)), closes [#3937](https://github.com/jordansmall/spindrift/issues/3937)
+* **checks:** pin workflows to .spindrift/logs ([0c81ffc](https://github.com/jordansmall/spindrift/commit/0c81ffc37f852cd3026167677f7dd18b0064781e)), closes [#3934](https://github.com/jordansmall/spindrift/issues/3934)
+* **daemon:** guard clearKnobEnvT against knob list drift ([16e42c5](https://github.com/jordansmall/spindrift/commit/16e42c5cdcbf5afa5ad3b5657e6c9877a9e787a2)), closes [#3961](https://github.com/jordansmall/spindrift/issues/3961)
+* **daemon:** make momentary-probe lock test deterministic ([fe33979](https://github.com/jordansmall/spindrift/commit/fe33979b3138ea7b10ac50396c8e402fd4c3a2d0))
+* **daemon:** scrub ambient knob env in mainRun tests ([bfc20da](https://github.com/jordansmall/spindrift/commit/bfc20dac760e04fd51925eb7719388e5fde6b962)), closes [#3911](https://github.com/jordansmall/spindrift/issues/3911)
+* **dispatch:** pin the subject Factory attaches ([75c0eb0](https://github.com/jordansmall/spindrift/commit/75c0eb0e50c74083699bbe2933272f58c2ac9c99))
+* **doctor:** build full advisory label sets from the table ([9f14a64](https://github.com/jordansmall/spindrift/commit/9f14a64884f7fd3e85676ebd062b285da6c4f90e)), closes [#3908](https://github.com/jordansmall/spindrift/issues/3908)
+* **entrypoint:** pin read-only guards for butler box ([c3ea508](https://github.com/jordansmall/spindrift/commit/c3ea508892f35b217c5cc7cfddf76d1c1eac2a17)), closes [#3906](https://github.com/jordansmall/spindrift/issues/3906)
+* **landdelta:** stop auto-gc racing TempDir cleanup ([7a42239](https://github.com/jordansmall/spindrift/commit/7a422397ebb25e930f2397d68bbee7361de1b75e))
+* **localloop:** cover an already-resolved local issue ([37d389d](https://github.com/jordansmall/spindrift/commit/37d389df675f6d01f99ac71d22e1dd515b66ceb2))
+* **orchestrator:** pin butler issue-intent relay ([131ba2d](https://github.com/jordansmall/spindrift/commit/131ba2d0826f224716421c5a77f0c507194507d0)), closes [#3909](https://github.com/jordansmall/spindrift/issues/3909)
+* **orchestrator:** pin butler relay twins' prose ([3685b01](https://github.com/jordansmall/spindrift/commit/3685b0184ba4296a37ee0040a0abea38a44084ec)), closes [#3927](https://github.com/jordansmall/spindrift/issues/3927)
+* **orchestrator:** pin research relay twins' prose ([7b3303f](https://github.com/jordansmall/spindrift/commit/7b3303fd44b25445b5d166664f6bb65339517217)), closes [#3947](https://github.com/jordansmall/spindrift/issues/3947)
+* **promptassembly:** trim promptsDirExceptSubdir doc ([20470e8](https://github.com/jordansmall/spindrift/commit/20470e84a65d4ef2de8e2f1b6900a980edafe930)), closes [#3916](https://github.com/jordansmall/spindrift/issues/3916)
+
+
+### Styles
+
+* **settle:** rewrap closeIssue doc comment ([78948cf](https://github.com/jordansmall/spindrift/commit/78948cfdfeed412264311f98f9143bbd8127948f))
+
 ## [0.20.0](https://github.com/jordansmall/spindrift/compare/v0.19.2...v0.20.0) (2026-09-28)
 
 
