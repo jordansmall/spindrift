@@ -329,7 +329,7 @@ func decode(w http.ResponseWriter, r *http.Request, content any) *signalwire.Rej
 	// encoding/json substitutes U+FFFD for it inside a string, so a check
 	// behind the decoder would hash and accept bytes the Box never sent.
 	if !utf8.Valid(raw) {
-		return invalidUTF8Reject("request body")
+		return signalwire.InvalidUTF8Reject("request body")
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()

@@ -10,6 +10,14 @@
 // for the registry proxy's Box-facing contract.
 package signalwire
 
+import (
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+	"unicode/utf8"
+)
+
 // Kind is the closed set of signal kinds. A Kind names the route the handler
 // serves, so it is a receipt field, never a request field.
 type Kind string
@@ -83,15 +91,17 @@ type PRIntent struct {
 	Body  string `json:"body"`
 }
 
-// IssueIntent is an issue-intent signal's content. Type is the closed
-// doctor.FindingTypeLabels vocabulary; the host still picks labels, but
-// DedupTerms is the Box's to supply (issue #3609) -- only the Box knows the
-// finding's site. Class and Concurrence are issue #3880's auto-promotion
-// gate: Class is the Box's own claim about the finding's kind, checked
-// against the host's allow-list only at settle, and Concurrence is the
-// in-Box reviewer subagent's one-line agreement, empty when it dissented or
-// never ran. Neither can promote anything by itself -- the host holds the
-// allow-list and the daily budget, and the Box cannot change either.
+// IssueIntent is an issue-intent finding's one wire shape, used end to end:
+// driver-exec's client builds it, the socket buffers it, and settle files
+// it. Type is the closed doctor.FindingTypeLabels vocabulary; the host
+// still picks labels, but DedupTerms is the Box's to supply (issue #3609)
+// -- only the Box knows the finding's site. Class and Concurrence are issue
+// #3880's auto-promotion gate: Class is the Box's own claim about the
+// finding's kind, checked against the host's allow-list only at settle, and
+// Concurrence is the in-Box reviewer subagent's one-line agreement, empty
+// when it dissented or never ran. Neither can promote anything by itself --
+// the host holds the allow-list and the daily budget, and the Box cannot
+// change either.
 type IssueIntent struct {
 	Title       string   `json:"title"`
 	Body        string   `json:"body"`
@@ -99,6 +109,58 @@ type IssueIntent struct {
 	DedupTerms  []string `json:"dedupTerms,omitempty"`
 	Class       string   `json:"class,omitempty"`
 	Concurrence string   `json:"concurrence,omitempty"`
+}
+
+// PruneBlankDedupTerms returns i with every whitespace-only DedupTerms entry
+// removed. It is the one place that rule lives -- Validate calls it before
+// building its field list, and the socket calls it before computing
+// Bytes/Hash, so the two carriers cannot drift on which terms survive.
+func (i IssueIntent) PruneBlankDedupTerms() IssueIntent {
+	i.DedupTerms = slices.DeleteFunc(slices.Clone(i.DedupTerms), func(t string) bool {
+		return strings.TrimSpace(t) == ""
+	})
+	return i
+}
+
+// Validate checks the rules every carrier shares: non-blank title and body,
+// well-formed UTF-8 within MaxBodyBytes for every field set, then a legal
+// Class slug. Type stays optional here because the log carrier lets the Box
+// omit it; the socket requires it itself, via ValidateTypeRequired.
+func (i IssueIntent) Validate() *Reject {
+	return i.validate(false)
+}
+
+// ValidateTypeRequired is Validate plus a non-blank Type, for the socket
+// route where Type is mandatory. Folding the check into the same field list
+// -- rather than checking it separately, before or after -- keeps the
+// "wrong in two ways always reports the same fault" contract CheckFields
+// gives every other field.
+func (i IssueIntent) ValidateTypeRequired() *Reject {
+	return i.validate(true)
+}
+
+func (i IssueIntent) validate(typeRequired bool) *Reject {
+	i = i.PruneBlankDedupTerms()
+	fs := []Field{{"title", i.Title}, {"body", i.Body}}
+	if i.Type != "" || typeRequired {
+		fs = append(fs, Field{"type", i.Type})
+	}
+	for idx, term := range i.DedupTerms {
+		fs = append(fs, Field{fmt.Sprintf("dedupTerms[%d]", idx), term})
+	}
+	if i.Class != "" {
+		fs = append(fs, Field{"class", i.Class})
+	}
+	if i.Concurrence != "" {
+		fs = append(fs, Field{"concurrence", i.Concurrence})
+	}
+	if rej := CheckFields(fs...); rej != nil {
+		return rej
+	}
+	if i.Class != "" && !ValidClass(i.Class) {
+		return &Reject{Status: "invalid_class", Reason: "class " + ClassRule, Code: http.StatusBadRequest}
+	}
+	return nil
 }
 
 // Receipt is an accept reply's payload.
@@ -117,6 +179,47 @@ type Reject struct {
 	Status string `json:"status"`
 	Reason string `json:"reason"`
 	Code   int    `json:"-"`
+}
+
+// Field is one content field: its wire name and its value. Every field is
+// bounded by MaxBodyBytes -- title and type included, not just body --
+// because the alternative is a per-field guess: without it a title is held
+// only by MaxRequestBytes, seven times the limit any tracker accepts.
+type Field struct {
+	Name  string
+	Value string
+}
+
+// CheckFields runs the content checks every carrier of a wire shape shares,
+// in their pinned order -- empty, then UTF-8, then size -- across every
+// field, so a signal wrong in two ways always reports the same fault.
+func CheckFields(fs ...Field) *Reject {
+	for _, f := range fs {
+		if strings.TrimSpace(f.Value) == "" {
+			return &Reject{Status: "empty", Reason: f.Name + " is empty", Code: http.StatusBadRequest}
+		}
+	}
+	for _, f := range fs {
+		if !utf8.ValidString(f.Value) {
+			return InvalidUTF8Reject(f.Name)
+		}
+	}
+	for _, f := range fs {
+		if len(f.Value) > MaxBodyBytes {
+			return &Reject{
+				Status: "oversize",
+				Reason: fmt.Sprintf("%s exceeds the %d-byte limit", f.Name, MaxBodyBytes),
+				Code:   http.StatusRequestEntityTooLarge,
+			}
+		}
+	}
+	return nil
+}
+
+// InvalidUTF8Reject is the package's one invalid_utf8 reject: the caller
+// names the offending field or, for a raw request body, a fixed token.
+func InvalidUTF8Reject(what string) *Reject {
+	return &Reject{Status: "invalid_utf8", Reason: what + " is not valid utf-8", Code: http.StatusBadRequest}
 }
 
 // Status reports what the buffer has accepted so far: kinds and hashes, never

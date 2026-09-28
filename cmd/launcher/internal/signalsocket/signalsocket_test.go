@@ -377,6 +377,24 @@ func TestRejectOversizeClass(t *testing.T) {
 	}
 }
 
+// A malformed Class is signalwire's own invalid_class reject, surfaced
+// through the socket like every other Validate reject.
+func TestRejectInvalidClass(t *testing.T) {
+	b := newAll(t)
+	_, rej := b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", Class: "Not_A_Slug"})
+	mustReject(t, rej, "invalid_class", 400)
+	if !strings.Contains(rej.Reason, signalwire.ClassRule) {
+		t.Fatalf("reason = %q, want it to contain the class rule", rej.Reason)
+	}
+}
+
+// A legal class slug must not sink the intent -- the acceptance-side
+// counterpart to TestRejectInvalidClass.
+func TestAcceptValidClass(t *testing.T) {
+	b := newAll(t)
+	mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", Class: "flaky-test"})
+}
+
 func TestRejectInvalidUTF8Concurrence(t *testing.T) {
 	bad := string([]byte{0x41, 0xff, 0xfe})
 	b := newAll(t)
@@ -491,6 +509,28 @@ func TestCheckOrder(t *testing.T) {
 	mustReject(t, rej, "invalid_type", 400)
 }
 
+// TestIssueIntentEmptyTypeBeatsOtherFaults pins the socket's required-type
+// check into the same "empty always wins" precedence CheckFields gives every
+// other field: an intent wrong in two ways -- blank type plus an oversize
+// body, or blank type plus an illegal class -- must always report the empty
+// type, never the other fault (issue #3992).
+func TestIssueIntentEmptyTypeBeatsOtherFaults(t *testing.T) {
+	big := strings.Repeat("x", signalwire.MaxBodyBytes+1)
+	b := signalsocket.New(signalsocket.Config{Consumes: allKinds()})
+
+	_, rej := b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: big})
+	mustReject(t, rej, "empty", 400)
+	if rej.Reason != "type is empty" {
+		t.Fatalf("reason = %q, want %q", rej.Reason, "type is empty")
+	}
+
+	_, rej = b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: "b", Class: "Not A Slug"})
+	mustReject(t, rej, "empty", 400)
+	if rej.Reason != "type is empty" {
+		t.Fatalf("reason = %q, want %q", rej.Reason, "type is empty")
+	}
+}
+
 func TestRejectReasonsAreOneQuietLine(t *testing.T) {
 	bad := string([]byte{0xff})
 	big := strings.Repeat("x", signalwire.MaxBodyBytes+1)
@@ -510,6 +550,7 @@ func TestRejectReasonsAreOneQuietLine(t *testing.T) {
 	collect(b.AcceptComment(signalwire.Comment{Body: bad}))
 	collect(b.AcceptComment(signalwire.Comment{Body: big}))
 	collect(b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: "b", Type: "nope"}))
+	collect(b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t9", Body: "b", Type: "bug", Class: "Not_A_Slug"}))
 	collect(b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t9", Body: "b", Type: "bug"}))
 
 	seen := map[string]bool{}
@@ -531,8 +572,8 @@ func TestRejectReasonsAreOneQuietLine(t *testing.T) {
 		}
 		seen[rej.Status] = true
 	}
-	if len(seen) != 6 {
-		t.Fatalf("distinct statuses = %d, want 6: %v", len(seen), seen)
+	if len(seen) != 7 {
+		t.Fatalf("distinct statuses = %d, want 7: %v", len(seen), seen)
 	}
 }
 
