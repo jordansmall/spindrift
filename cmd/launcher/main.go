@@ -20,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
@@ -1511,7 +1512,7 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	// caller settles that failure itself. Inline rather than through
 	// settle/gate.go's latch, which exists for a path that can reach a second,
 	// contradicting terminal transition; this one reaches at most one.
-	report.Settled(num, forge.Complete.String(), note)
+	report.Settled(dispatchkey.Issue(num), forge.Complete.String(), note)
 	if commentErr := it.Comment(num, note); commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
@@ -186,7 +187,7 @@ func TestButlerSettle_ReportsChoreSettledNotIssue(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "settled" || recs[0].Chore != "bugs" || recs[0].Issue != "" {
+	if recs[0].Event != "settled" || recs[0].Key != dispatchkey.Chore("bugs") {
 		t.Errorf("record = %+v, want event=settled chore=bugs issue=\"\"", recs[0])
 	}
 }

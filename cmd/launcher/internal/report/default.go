@@ -1,6 +1,10 @@
 package report
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
+)
 
 // def holds the process-wide default Reporter. A process-wide default
 // rather than threaded config exists because there is exactly one report
@@ -24,21 +28,11 @@ func Default() *Reporter {
 }
 
 // Box forwards to Default().Box.
-func Box(issue, phase string) {
-	Default().Box(issue, phase)
+func Box(key dispatchkey.Key, phase string) {
+	Default().Box(key, phase)
 }
 
 // Settled forwards to Default().Settled.
-func Settled(issue, state, note string) {
-	Default().Settled(issue, state, note)
-}
-
-// ChoreBox forwards to Default().ChoreBox.
-func ChoreBox(chore, phase string) {
-	Default().ChoreBox(chore, phase)
-}
-
-// ChoreSettled forwards to Default().ChoreSettled.
-func ChoreSettled(chore, state, note string) {
-	Default().ChoreSettled(chore, state, note)
+func Settled(key dispatchkey.Key, state, note string) {
+	Default().Settled(key, state, note)
 }

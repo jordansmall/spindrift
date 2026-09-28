@@ -41,12 +41,11 @@ var ErrKindMismatch = errors.New("record key does not match child kind")
 // the given kind. An unknown event name or a blank line is not an error —
 // it's ignored, since a forward-compatible reader must tolerate an event it
 // doesn't understand yet — and reports (Record{}, false, nil). Malformed
-// JSON reports (Record{}, false, err), and so does a known event whose
-// Issue/Chore pair isn't exactly one valid one of the two (issue #3878): an
-// issue-keyed record and a Chore-keyed butler record (ADR 0056) share this
-// wire shape, and a record naming both or neither is never valid — and nor
-// is a record whose key shape doesn't match kind: a Chore record from a
-// non-butler child, or an issue record from a butler child.
+// JSON reports (Record{}, false, err), as does a record naming both issue
+// and chore (report.Record's decoder rejects it). So does a known event
+// with no key, an invalid one, or one whose shape doesn't match kind: a
+// Chore-keyed record from a non-butler child, or an issue-keyed record from
+// a butler child.
 func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	if line == "" {
 		return Record{}, false, nil
@@ -60,27 +59,22 @@ func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	default:
 		return Record{}, false, nil
 	}
-	hasIssue := rec.Issue != ""
-	hasChore := rec.Chore != ""
-	switch {
-	case hasIssue && hasChore:
-		return Record{}, false, fmt.Errorf("daemon: record: carries both issue %q and chore %q", rec.Issue, rec.Chore)
-	case hasIssue:
-		if !validIssue(rec.Issue) {
-			return Record{}, false, fmt.Errorf("daemon: record: invalid issue %q", rec.Issue)
-		}
-		if kind == KindButler {
-			return Record{}, false, fmt.Errorf("daemon: record: butler child sent issue-keyed record %q: %w", rec.Issue, ErrKindMismatch)
-		}
-	case hasChore:
-		if !validChore(rec.Chore) {
-			return Record{}, false, fmt.Errorf("daemon: record: invalid chore %q", rec.Chore)
-		}
-		if kind != KindButler {
-			return Record{}, false, fmt.Errorf("daemon: record: %s child sent chore-keyed record %q: %w", kind, rec.Chore, ErrKindMismatch)
-		}
-	default:
+	if rec.Key.IsZero() {
 		return Record{}, false, fmt.Errorf("daemon: record: carries neither issue nor chore")
+	}
+	issue, chore := rec.Key.Fields()
+	if issue != "" && !validIssue(issue) {
+		return Record{}, false, fmt.Errorf("daemon: record: invalid issue %q", issue)
+	}
+	if chore != "" && !validChore(chore) {
+		return Record{}, false, fmt.Errorf("daemon: record: invalid chore %q", chore)
+	}
+	if rec.Key.IsChore() != (kind == KindButler) {
+		shape := "issue-keyed"
+		if rec.Key.IsChore() {
+			shape = "chore-keyed"
+		}
+		return Record{}, false, fmt.Errorf("daemon: record: %s child sent %s record %q: %w", kind, shape, rec.Key, ErrKindMismatch)
 	}
 	return rec, true, nil
 }

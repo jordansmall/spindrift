@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
 // MaxLine is the largest line this package writes and the most the daemon's
@@ -28,19 +30,51 @@ const MaxLine = 4096
 const clipMark = "…"
 
 // Record is one line of the report protocol, always terminated by "\n" and
-// containing exactly one JSON object. Issue and Chore are mutually
-// exclusive: an ordinary Box/Settled call names the tracker issue being
-// dispatched, while a butler run (ADR 0056) carries no tracker issue at
-// all and names its Chore instead via ChoreBox/ChoreSettled. A Record
-// always carries exactly one of the two — daemon.ParseRecord enforces that
-// on the reading side.
+// containing exactly one JSON object. Key is an issue for an ordinary
+// Dispatch and a Chore for a butler run (ADR 0056); daemon.ParseRecord
+// enforces on the reading side that a known event carries one.
 type Record struct {
+	Event string
+	Key   dispatchkey.Key
+	Phase string
+	State string
+	Note  string
+}
+
+// recordWire is Record's JSON shape. The Key splits back into the
+// "issue"/"chore" pair the wire has always carried, so records stay
+// byte-identical across the move to dispatchkey.Key (issue #3988).
+type recordWire struct {
 	Event string `json:"event"`
 	Issue string `json:"issue,omitempty"`
 	Chore string `json:"chore,omitempty"`
 	Phase string `json:"phase,omitempty"`
 	State string `json:"state,omitempty"`
 	Note  string `json:"note,omitempty"`
+}
+
+func (r Record) MarshalJSON() ([]byte, error) {
+	issue, chore := r.Key.Fields()
+	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note})
+}
+
+// UnmarshalJSON leaves Key zero, without error, when neither issue nor chore
+// is set: an event this reader doesn't know yet may carry no key, and
+// ParseRecord decides whether a known one may. Both set is always an error.
+func (r *Record) UnmarshalJSON(data []byte) error {
+	var w recordWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	var key dispatchkey.Key
+	if w.Issue != "" || w.Chore != "" {
+		var err error
+		if key, err = dispatchkey.Parse(w.Issue, w.Chore); err != nil {
+			return err
+		}
+	}
+	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note}
+	return nil
 }
 
 // EventBox and EventSettled are the two Record.Event values this package
@@ -88,27 +122,18 @@ type Reporter struct {
 	fd int
 }
 
-// Box records that a Box started for issue at phase (e.g. "initial",
-// "fix-pass-N", "conflict-resolve").
-func (r *Reporter) Box(issue, phase string) {
-	r.emit(Record{Event: EventBox, Issue: issue, Phase: phase})
+// Box records that a Box started for key at phase (e.g. "initial",
+// "fix-pass-N", "conflict-resolve"). key is issue-keyed for an ordinary
+// dispatch or Chore-keyed for a butler run (ADR 0056) — same method, either
+// key shape.
+func (r *Reporter) Box(key dispatchkey.Key, phase string) {
+	r.emit(Record{Event: EventBox, Key: key, Phase: phase})
 }
 
-// Settled records issue's terminal state, once, using the host-decided
+// Settled records key's terminal state, once, using the host-decided
 // vocabulary from the existing outcome/settle machinery.
-func (r *Reporter) Settled(issue, state, note string) {
-	r.emit(Record{Event: EventSettled, Issue: issue, State: state, Note: note})
-}
-
-// ChoreBox is Box's Chore-keyed counterpart: a butler run (ADR 0056) has no
-// tracker issue to name, only the Chore it is running.
-func (r *Reporter) ChoreBox(chore, phase string) {
-	r.emit(Record{Event: EventBox, Chore: chore, Phase: phase})
-}
-
-// ChoreSettled is Settled's Chore-keyed counterpart.
-func (r *Reporter) ChoreSettled(chore, state, note string) {
-	r.emit(Record{Event: EventSettled, Chore: chore, State: state, Note: note})
+func (r *Reporter) Settled(key dispatchkey.Key, state, note string) {
+	r.emit(Record{Event: EventSettled, Key: key, State: state, Note: note})
 }
 
 // emit swallows write failures: a broken report pipe (parent gone, pipe

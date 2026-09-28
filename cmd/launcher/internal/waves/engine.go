@@ -10,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
@@ -30,7 +31,7 @@ func transitionState(it forge.IssueTracker, num string, from, to forge.DispatchS
 	// (issue #3627): the record is what the host decided, not whether the
 	// tracker write landed.
 	if to.Terminal() {
-		report.Settled(num, to.String(), note)
+		report.Settled(dispatchkey.Issue(num), to.String(), note)
 	}
 }
 

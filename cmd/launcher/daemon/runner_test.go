@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -156,8 +157,8 @@ func TestRunChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
 	want := []daemon.Record{
-		{Event: "box", Issue: "101", Phase: "initial"},
-		{Event: "settled", Issue: "101", State: "merged"},
+		{Event: "box", Key: dispatchkey.Issue("101"), Phase: "initial"},
+		{Event: "settled", Key: dispatchkey.Issue("101"), State: "merged"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("OnRecord calls = %+v, want %+v", got, want)
@@ -224,7 +225,7 @@ func TestRunChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
 	if _, err := r.RunChild(context.Background(), req); err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
-	want := []daemon.Record{{Event: "box", Issue: "7", Phase: "fix-pass-1"}}
+	want := []daemon.Record{{Event: "box", Key: dispatchkey.Issue("7"), Phase: "fix-pass-1"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("OnRecord calls = %+v, want %+v", got, want)
 	}
@@ -258,7 +259,7 @@ func TestRunChild_KindMismatchReportedPastMalformedLine(t *testing.T) {
 	if _, err := r.RunChild(context.Background(), req); err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
-	want := []daemon.Record{{Event: "box", Chore: "bugs", Phase: "initial"}}
+	want := []daemon.Record{{Event: "box", Key: dispatchkey.Chore("bugs"), Phase: "initial"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("OnRecord calls = %+v, want %+v", got, want)
 	}
@@ -299,7 +300,7 @@ func TestRunChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
 	if _, err := r.RunChild(context.Background(), req); err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
-	want := []daemon.Record{{Event: "box", Issue: "9", Phase: "initial"}}
+	want := []daemon.Record{{Event: "box", Key: dispatchkey.Issue("9"), Phase: "initial"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("OnRecord calls = %+v, want %+v", got, want)
 	}
@@ -337,7 +338,7 @@ func TestRunChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 		t.Fatalf("report.FromEnv: got nil Reporter")
 	}
 	note := strings.Repeat("a", 5000)
-	rep.Settled("123", "blocked", note)
+	rep.Settled(dispatchkey.Issue("123"), "blocked", note)
 	pw.Close()
 	line, err := io.ReadAll(pr)
 	if err != nil {
@@ -368,7 +369,7 @@ func TestRunChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("OnRecord calls = %+v, want exactly 1", got)
 	}
-	if got[0].Event != "settled" || got[0].Issue != "123" || got[0].State != "blocked" {
+	if got[0].Event != "settled" || got[0].Key != dispatchkey.Issue("123") || got[0].State != "blocked" {
 		t.Errorf("record = %+v, want event=settled issue=123 state=blocked", got[0])
 	}
 	if stderr := readStderr(); len(stderr) != 0 {

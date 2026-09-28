@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -178,7 +179,7 @@ func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
 	// yet (its held child has reported no box record), so slot 1 would park
 	// in awaitBaton forever without this: a live box record is the only
 	// thing that passes the baton before a child exits.
-	r.fireOnRecord(t, 0, Record{Event: report.EventBox, Chore: "bugs"})
+	r.fireOnRecord(t, 0, Record{Event: report.EventBox, Key: dispatchkey.Chore("bugs")})
 
 	// A sibling slot picks up and starts the regained kind, not the butler.
 	go func() {

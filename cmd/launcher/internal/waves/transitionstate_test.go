@@ -3,6 +3,7 @@ package waves
 import (
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
@@ -21,7 +22,7 @@ func TestTransitionState_NoteReported(t *testing.T) {
 		t.Fatalf("got %d records, want 1: %+v", len(recs), recs)
 	}
 	rec := recs[0]
-	if rec.Event != report.EventSettled || rec.Issue != "42" || rec.State != "failed" {
+	if rec.Event != report.EventSettled || rec.Key != dispatchkey.Issue("42") || rec.State != "failed" {
 		t.Fatalf("unexpected record: %+v", rec)
 	}
 	if want := "box never launched: boom"; rec.Note != want {

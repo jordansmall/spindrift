@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
@@ -47,7 +48,7 @@ func TestSettle_FlushSettled_EmitsLatchedRecordOnce(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want exactly 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "settled" || recs[0].Issue != "9" || recs[0].State != "failed" || recs[0].Note != "some reason" {
+	if recs[0].Event != "settled" || recs[0].Key != dispatchkey.Issue("9") || recs[0].State != "failed" || recs[0].Note != "some reason" {
 		t.Errorf("record = %+v, want event=settled issue=9 state=failed note=%q", recs[0], "some reason")
 	}
 }
@@ -140,7 +141,7 @@ func TestSettleAdopted_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want exactly 1 (completeLanding's Complete must never itself reach the daemon): %+v", len(recs), recs)
 	}
-	if recs[0].Event != "settled" || recs[0].Issue != "9" || recs[0].State != "failed" {
+	if recs[0].Event != "settled" || recs[0].Key != dispatchkey.Issue("9") || recs[0].State != "failed" {
 		t.Errorf("record = %+v, want event=settled issue=9 state=failed (verifyMerged's demotion, not completeLanding's earlier Complete)", recs[0])
 	}
 }
@@ -186,7 +187,7 @@ func TestResearchSettle_Fail_CarriesNoteIntoSettledRecord(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	want := report.Record{Event: "settled", Issue: "42", State: "failed", Note: "no verdict outcome line"}
+	want := report.Record{Event: "settled", Key: dispatchkey.Issue("42"), State: "failed", Note: "no verdict outcome line"}
 	if recs[0] != want {
 		t.Errorf("record = %+v, want %+v", recs[0], want)
 	}
@@ -213,7 +214,7 @@ func TestResearchSettle_Recommend_EmitsSettledRecordWithVerdictNote(t *testing.T
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	want := report.Record{Event: "settled", Issue: "42", State: "complete", Note: "verdict recommend"}
+	want := report.Record{Event: "settled", Key: dispatchkey.Issue("42"), State: "complete", Note: "verdict recommend"}
 	if recs[0] != want {
 		t.Errorf("record = %+v, want %+v", recs[0], want)
 	}

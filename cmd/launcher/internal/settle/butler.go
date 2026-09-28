@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
@@ -202,7 +203,7 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	}
 	if _, err := ledger.Finish(b.ledger, b.chore, finishParent, state, b.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
-		report.ChoreSettled(b.chore, forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err))
+		report.Settled(dispatchkey.Chore(b.chore), forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err))
 		return
 	}
 
@@ -213,7 +214,7 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	if dropped > 0 {
 		note = fmt.Sprintf("%s, %d dropped", note, dropped)
 	}
-	report.ChoreSettled(b.chore, forge.Complete.String(), note)
+	report.Settled(dispatchkey.Chore(b.chore), forge.Complete.String(), note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
 }
 
@@ -319,7 +320,7 @@ func capIntents(raw []string, n int) (kept []string, dropped int) {
 // lastSwept/cursor stay at the prior run's values for the next run to
 // resume from.
 func (b *ButlerSettle) fail(num, note string) {
-	report.ChoreSettled(b.chore, forge.Failed.String(), note)
+	report.Settled(dispatchkey.Chore(b.chore), forge.Failed.String(), note)
 	fmt.Printf("    #%s  status=failed  note=%s\n", num, note)
 }
 
