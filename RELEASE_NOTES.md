@@ -9,6 +9,49 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.20.1 — 2026-09-28
+
+Issues that are already fixed now close themselves, plus a round of butler
+and Forgejo hardening.
+
+No breaking changes.
+
+- **Already-fixed issues close as done.** Before starting work, the worker
+  now checks whether the issue's change is already on your base branch. If it
+  can show that it is (the commit or PR that did it, plus a check that
+  proves it), it reports `already-resolved` and stops without opening a PR.
+  The host then closes the issue as completed with `agent-complete` and
+  leaves a comment saying why, on GitHub, Forgejo, and the local forge. A run
+  that claims this but also made commits counts as a failure instead, so
+  real work never gets closed out by mistake. If you use your own worker
+  prompt, add the new ALREADY RESOLVED gate to get this (see
+  `MIGRATING.md`); without it your runs just behave as before.
+- **A sturdier butler.** A butler run is now always read-only, whatever
+  your other settings say. Bad butler config is caught up front:
+  `spindrift doctor --butler` checks it, the daemon validates it at startup
+  and exits config-invalid, and a one-shot run checks its Chores before
+  claiming anything. Auto-promotion reserves its budget before filing, so two
+  runs can't overshoot the day's promotion cap. The daemon's status now names
+  the Chore each butler slot is sweeping, and idle butler slots no longer
+  hide a daemon that's jammed on real work. Reviewer quotes on promoted
+  issues are rendered as code so they can't inject formatting.
+- **Forgejo catches up on big repos.** Issue, pull, and label listings now
+  page through everything instead of stopping at the first page, org-level
+  labels count as defined, and a missing finding label no longer breaks
+  listing or duplicate checks. Issue comments load in one request, the Box
+  skips a GitHub-only PR lookup on other forges, and a parked issue's comment
+  now says why `recover` parked it.
+- **Fewer duplicate findings.** The duplicate check ignores punctuation when
+  comparing finding titles, so the same finding worded with different quotes
+  or dashes is recognised as a repeat.
+- **CI and Box fixes.** The bundled workflows look for run logs in
+  `.spindrift/logs`, where they actually live now. The token refresher fails
+  loudly when it can't mint a token, and the agent setup reuses the main CI
+  job's Nix cache. Inside the Box, skills copied into the workspace are
+  writable, dependency prefetch works in repos with no devShell, and the
+  in-Box Go checks cap their parallelism to the Box's cores so they're less
+  likely to get killed for memory.
+
 ## 0.20.0 — 2026-09-27
 
 Introducing the butler (beta): agents that tidy your repo on idle time instead
