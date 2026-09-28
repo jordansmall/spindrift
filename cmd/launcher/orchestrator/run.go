@@ -84,6 +84,10 @@ type config struct {
 	// whole after each pass so every exit path leaves it consistent with the
 	// passes that actually ran. Empty disables it.
 	manifestPath string
+	// advisoryReviewer mirrors Handoff.AdvisoryReviewer: the inline reviewer
+	// subagent's verdict only advises the pass, so the legacy loop never
+	// reads it as the pass's own (issue #3925).
+	advisoryReviewer bool
 }
 
 // passOutcome is what the caller derived from this pass's own log, before
@@ -249,6 +253,12 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// driver-exec truncates cfg.logPath for each pass (issue #626), so on
 		// return the file holds exactly this pass's raw stream.
 		verdict, hasOutcome := scanPassLog(cfg.logPath, cfg.driver, passmachine.KindLegacy)
+		if cfg.advisoryReviewer {
+			// Discarded here, not filtered by role in passmachine.Scan: the
+			// advisory reviewer shares the roster reviewer's name, and Scan
+			// has no kind context.
+			verdict = ""
+		}
 		if verdict != "" {
 			state.LastVerdict = verdict
 		}
