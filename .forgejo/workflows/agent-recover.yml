@@ -1,9 +1,9 @@
 name: Agent recover
 
 # Adding the `agent-recover` label to an issue re-runs the merge gate on it:
-# `spindrift recover <n>` finds the open non-draft PR for the issue's branch and
-# drives it to green (self-healing red CI up to MAX_FIX_ATTEMPTS), then applies
-# MERGE_MODE. It is the manual unstick for an issue stranded in
+# `spindrift recover <n>` finds the issue's branch's open PR -- draft or not --
+# and drives it to green (self-healing red CI up to MAX_FIX_ATTEMPTS), then
+# applies MERGE_MODE. It is the manual unstick for an issue stranded in
 # `agent-in-progress` after a killed launcher — the case `spindrift dispatch`
 # can't reconcile on its own — and the retry path for an `agent-failed` PR.
 #
@@ -90,11 +90,13 @@ jobs:
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
-      # recover exits non-zero ONLY when there is nothing to adopt (no open PR,
-      # a draft-only PR, or the issue can't be fetched) — and in that case it
-      # leaves labels untouched. Every path where a PR exists (green->complete,
-      # red-exhausted->failed, merge-blocked->complete) exits 0 with the label
-      # already swapped, so the park step below stays dormant.
+      # recover exits non-zero when it can't adopt anything — no open PR,
+      # the issue can't be fetched, or the claim or PR lookup errors — and
+      # in those cases it leaves labels untouched. A signalled stop also
+      # exits non-zero. Every path that adopts and settles a PR
+      # (green->complete, red-exhausted->failed, merge-blocked->complete)
+      # exits 0 with the label already swapped, so the park step below
+      # stays dormant.
       - name: Recover the issue
         id: recover
         run: |
@@ -123,9 +125,10 @@ jobs:
           add-labels: agent-failed
           remove-labels: agent-in-progress
           comment: >-
-            ⚠️ `spindrift recover` found nothing to adopt — no open non-draft PR
-            on `agent/issue-${{ github.event.issue.number }}`. Parked to
-            `agent-failed`; re-label `agent-recover` once an open PR exists, or
+            ⚠️ `spindrift recover` could not adopt anything for
+            `agent/issue-${{ github.event.issue.number }}` — no open PR, or
+            recover errored (see the run logs). Parked to `agent-failed`;
+            re-label `agent-recover` once an open PR exists, or
             `ready-for-agent` to re-dispatch from scratch.
 
       - name: Upload run logs
