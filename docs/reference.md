@@ -4752,11 +4752,12 @@ enabling a Chore, or listing classes in `BUTLER_CHORE_CLASSES`, never
 promotes anything by itself; it is not a start gate either, and a spent
 promotion budget still lets sweeps run and file. A promoted finding's body
 carries a visible **Auto-promoted** note naming the class, the file count
-against the limit, and quoting the reviewer's own concurrence, and its URL
-lands in the Ledger done commit's `promoted` list alongside the sweep's
-full `filed` list. Before filing, settle reserves the slots it means to
-spend in a Ledger commit of their own (issue #3926), so a done commit
-that never lands (a claim takeover, or a failed Ledger push) still
+against the limit, and the reviewer's own concurrence quoted as literal
+code-span text — so Box-written mentions, links, and formatting in it don't
+render — and its URL lands in the Ledger done commit's `promoted` list
+alongside the sweep's full `filed` list. Before filing, settle reserves the
+slots it means to spend in a Ledger commit of their own (issue #3926), so a
+done commit that never lands (a claim takeover, or a failed Ledger push) still
 counts those promotions against the day's budget; a run that cannot
 write the reservation files every finding unlabelled. A running butler Box never mutes the daemon's `jam` event
 (issue #3922), so with promotion on, a jam can fire shortly before a

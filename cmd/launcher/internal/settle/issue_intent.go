@@ -33,9 +33,10 @@ type issueIntent struct {
 	// own allow-list; Concurrence is the in-Box reviewer's one-line
 	// agreement, empty when the reviewer dissented or never ran. Both are
 	// bounded and backtick-neutralized by parseIssueIntent before they ever
-	// reach host-authored note text. Neither field can promote anything on
-	// its own -- the host-side policy passed to ButlerSettle's constructor
-	// decides that.
+	// reach host-authored note text; promotionNote quotes Concurrence inside
+	// a markdown code span. Neither field can promote anything on its own --
+	// the host-side policy passed to ButlerSettle's constructor decides
+	// that.
 	Class       string `json:"class"`
 	Concurrence string `json:"concurrence"`
 }

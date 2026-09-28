@@ -242,14 +242,16 @@ func butlerBacklink(chore string, in issueIntent) string {
 // promotionNote renders the visible note appended to a promoted finding's
 // body, naming the class and quoting the reviewer's own words (issue #3880)
 // rather than just asserting agreement -- a reader should be able to check
-// the reviewer's claim, not just trust that it happened.
-// Concurrence is collapsed to one line: it is reviewer-written prose, not
-// host text, and an embedded newline would otherwise let it break out of the
-// note's single sentence.
+// the reviewer's claim, not just trust that it happened. Concurrence is
+// sanitized here rather than trusted to the caller, collapsed to one line so
+// an embedded newline can't break out of the note's sentence, and quoted in
+// a code span (see sanitizeConcurrence). The span also leans on oneLine's
+// trim (CommonMark strips a space opening/closing a span) and on eligible
+// rejecting an empty Concurrence (a bare pair of backticks).
 func promotionNote(chore string, in issueIntent, policy PromotionPolicy, nFiles int) string {
-	concurrence := oneLine(in.Concurrence)
+	concurrence := oneLine(sanitizeConcurrence(in.Concurrence))
 	return fmt.Sprintf(
-		"**Auto-promoted** to `%s` by the butler: class `%s` is on the `%s` Chore's allow-list, it touches %d file(s) (host limit %d), and the in-Box reviewer agreed: %s",
+		"**Auto-promoted** to `%s` by the butler: class `%s` is on the `%s` Chore's allow-list, it touches %d file(s) (host limit %d), and the in-Box reviewer agreed: `%s`",
 		policy.Label, in.Class, chore, nFiles, policy.MaxFiles, concurrence,
 	)
 }
