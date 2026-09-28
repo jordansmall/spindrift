@@ -67,6 +67,19 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	// Placed and best-effort for the same reasons as reportFiled above; why the
 	// work path needs its own post is on postSkippedComment (issue #3811).
 	postSkippedComment(s.it, num, filed)
+
+	// An already-resolved claim with commits behind it must not close the
+	// issue (issue #4016, ADR 0039). The Box's harness demotes one it can
+	// count commits for to a synthetic blocked line; an outbox bundle is the
+	// launcher's own evidence of commits the claim still stands over.
+	demotedResolved := o.Status == outcome.StatusBlocked && result.Resolved.Provenance == outcome.ProvenanceSynthetic &&
+		result.Resolved.SelfReportFound && result.Resolved.SelfReport.Status == outcome.StatusAlreadyResolved
+	if o.Status == outcome.StatusAlreadyResolved && s.bundlePresent(num) {
+		o.Status = outcome.StatusBlocked
+		o.Note = fmt.Sprintf("agent reported already-resolved but a bundle of commits exists for %s", s.cf.AgentBranch(num))
+		demotedResolved = true
+	}
+
 	switch o.Status {
 	case outcome.StatusBlocked:
 		// A read-only run's status=blocked may be the ADR 0036 synthetic
@@ -95,7 +108,16 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		if s.readOnly {
 			s.relayBlockedWork(num, result)
 		}
-		s.postBlockedNoteComment(num, o.Note)
+		if demotedResolved {
+			// postBlockedNoteComment skips read-write on the assumption the
+			// Box commented itself, but an agent that believed it was done
+			// never did.
+			if err := s.it.Comment(num, o.Note); err != nil {
+				fmt.Fprintf(os.Stderr, "    ?? #%s: could not post already-resolved-demoted comment: %v\n", num, err)
+			}
+		} else {
+			s.postBlockedNoteComment(num, o.Note)
+		}
 		s.postUsageComment(num, d)
 	case outcome.StatusReady:
 		pr := o.Landing
