@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"reflect"
 	"testing"
 
 	"spindrift.dev/launcher/internal/butler"
@@ -189,6 +190,29 @@ func TestFactory_NewChore_KeysLogPathButlerPrefixed(t *testing.T) {
 	want := logPathFor(dir, "butler-lint-sweep")
 	if got := d.logPath(); got != want {
 		t.Errorf("NewChore logPath: got %q, want %q", got, want)
+	}
+}
+
+// Issue #3907: New and NewChore populate the sealed subject sum type
+// directly, the seam buildBoxEnv and announce switch over.
+func TestFactory_SetsSubject(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("7", "Test issue")
+	if got := d.subject; got != (issueSubject{Number: "7", Title: "Test issue"}) {
+		t.Errorf("subject: got %+v, want issueSubject{7, Test issue}", got)
+	}
+
+	c := Chore{Name: "lint-sweep", Branch: "butler/lint-sweep"}
+	cd := f.NewChore(c)
+	gotChore, ok := cd.subject.(choreSubject)
+	if !ok || !reflect.DeepEqual(gotChore.Chore, c) {
+		t.Errorf("NewChore subject: got %+v (ok=%v), want choreSubject{%+v}", cd.subject, ok, c)
 	}
 }
 
