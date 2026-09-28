@@ -2,7 +2,9 @@
 // one resume pass if attempted, produced no parseable SPINDRIFT_OUTCOME line
 // (issue #2157). The status comes from the git-observed evidence Run gathers
 // while salvaging and pushing, never from the driver's own possibly malformed
-// text, so a run that landed clean still resolves to ready (issue #2380).
+// text, so a run that landed clean still resolves to ready (issue #2380). It
+// also demotes a status=already-resolved line the same evidence contradicts
+// (issue #4016).
 package outcomebackstop
 
 import (

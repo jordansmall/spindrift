@@ -116,6 +116,45 @@ func TestRunOutcomeBackstop_DefaultRunStateFilePathIsTmpRunState(t *testing.T) {
 	}
 }
 
+// Issue #4016: a non-empty -prior-outcome-line claiming already-resolved
+// routes to the demotion path instead of the always-emit backstop, even
+// though the branch has commits Run itself would resolve as status=ready.
+func TestRunOutcomeBackstop_PriorOutcomeLineDemotesAlreadyResolved(t *testing.T) {
+	dir := t.TempDir()
+	runGitCmd(t, dir, "init", "-b", "main")
+	runGitCmd(t, dir, "config", "user.name", "Test Bot")
+	runGitCmd(t, dir, "config", "user.email", "bot@example.com")
+	writeTestFile(t, filepath.Join(dir, "base.txt"), "base\n")
+	runGitCmd(t, dir, "add", "base.txt")
+	runGitCmd(t, dir, "commit", "-m", "base")
+	runGitCmd(t, dir, "checkout", "-b", "agent/issue-42")
+	writeTestFile(t, filepath.Join(dir, "feature.txt"), "feature\n")
+	runGitCmd(t, dir, "add", "feature.txt")
+	runGitCmd(t, dir, "commit", "-m", "feature")
+
+	var stdout bytes.Buffer
+	rc := runOutcomeBackstop([]string{
+		"--repo", dir,
+		"--issue", "42",
+		"--branch", "agent/issue-42",
+		"--base", "main",
+		"--host-mediated-remote", "1",
+		"--run-state-file", filepath.Join(t.TempDir(), "no-run-state.json"),
+		"--prior-outcome-line", "SPINDRIFT_OUTCOME issue=42 landing=none status=already-resolved",
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runOutcomeBackstop exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	out := stdout.String()
+	if !bytes.Contains([]byte(out), []byte("status=blocked")) {
+		t.Fatalf("expected status=blocked (demoted), got %q", out)
+	}
+	if !bytes.Contains([]byte(out), []byte("agent reported already-resolved but 1 commits exist on agent/issue-42")) {
+		t.Fatalf("expected the demotion note naming the commit count and branch, got %q", out)
+	}
+}
+
 // A missing -base must fail loudly instead of running outcomebackstop.Run
 // against a zero-value Config.
 func TestRunOutcomeBackstop_MissingRequiredFlagReturnsNonZero(t *testing.T) {
