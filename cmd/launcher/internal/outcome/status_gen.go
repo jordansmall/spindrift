@@ -12,16 +12,17 @@ package outcome
 // research verdict vocabulary (see forge.ResearchVerdictLabels); the
 // research vocabulary is operator-configurable via RESEARCH_VERDICTS.
 const (
-	StatusReady     = "ready"
-	StatusBlocked   = "blocked"
-	StatusAmbiguous = "ambiguous"
-	StatusRecommend = "recommend"
-	StatusReject    = "reject"
-	StatusUnclear   = "unclear"
+	StatusReady           = "ready"
+	StatusBlocked         = "blocked"
+	StatusAmbiguous       = "ambiguous"
+	StatusAlreadyResolved = "already-resolved"
+	StatusRecommend       = "recommend"
+	StatusReject          = "reject"
+	StatusUnclear         = "unclear"
 )
 
 // WorkStatuses is the ordered work-kind agent-emittable status set.
-var WorkStatuses = []string{StatusReady, StatusBlocked, StatusAmbiguous}
+var WorkStatuses = []string{StatusReady, StatusBlocked, StatusAmbiguous, StatusAlreadyResolved}
 
 // ResearchStatuses is the ordered research-kind agent-emittable status set.
 var ResearchStatuses = []string{StatusRecommend, StatusReject, StatusUnclear, StatusBlocked}
