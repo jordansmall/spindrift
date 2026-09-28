@@ -1098,36 +1098,25 @@ func forgejoCommentsPage(start, count int) string {
 	return b.String()
 }
 
-// Comments must walk every page through rest.Client.Paginate, mirroring
-// listIssues (issue #2265). Forgejo's API defaults to 30 items per page, so a
-// longer thread would otherwise lose everything past page 1 and IssueText's
-// last-10 window would render stale comments rather than the newest ones.
-func TestForgejoClient_Comments_PaginatesAcrossMultipleRealPages(t *testing.T) {
-	const pageSize = forge.ResultPageLimit
-	var gotPages []string
+// Real Forgejo's comments endpoint ignores page/limit and returns every
+// comment on every request (issue #3978) — unlike every other list endpoint
+// this adapter walks. This fake mirrors that: it serves the full set
+// regardless of query params. Comments must make exactly one request and
+// return each comment exactly once, in order, rather than looping forever
+// treating a full-looking response as "another page to fetch".
+func TestForgejoClient_Comments_UnpaginatedEndpointServesEveryCommentOnce(t *testing.T) {
+	const total = forge.ResultPageLimit + 20
+	var requests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/issues/10/comments" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		q := r.URL.Query()
-		if limit := q.Get("limit"); limit != strconv.Itoa(pageSize) {
-			t.Errorf("limit query param = %q, want %q", limit, strconv.Itoa(pageSize))
+		if r.URL.Query().Has("page") || r.URL.Query().Has("limit") {
+			t.Errorf("comments request query = %q, want no page or limit param (Comments must not paginate)", r.URL.RawQuery)
 		}
-		page, err := strconv.Atoi(q.Get("page"))
-		if err != nil {
-			t.Fatalf("invalid page query param: %v", err)
-		}
-		gotPages = append(gotPages, q.Get("page"))
+		requests++
 		w.WriteHeader(http.StatusOK)
-		switch page {
-		case 1:
-			w.Write([]byte(forgejoCommentsPage(1, pageSize)))
-		case 2:
-			w.Write([]byte(forgejoCommentsPage(pageSize+1, 5)))
-		default:
-			t.Errorf("server received request for page %d, want no request beyond the short page 2", page)
-			w.WriteHeader(http.StatusNotFound)
-		}
+		w.Write([]byte(forgejoCommentsPage(1, total)))
 	}))
 	defer srv.Close()
 
@@ -1141,18 +1130,17 @@ func TestForgejoClient_Comments_PaginatesAcrossMultipleRealPages(t *testing.T) {
 		t.Fatalf("Comments: %v", err)
 	}
 
-	wantCount := pageSize + 5
-	if len(comments) != wantCount {
-		t.Fatalf("Comments returned %d comments, want %d (all pages merged)", len(comments), wantCount)
+	if len(comments) != total {
+		t.Fatalf("Comments returned %d comments, want %d (every comment, exactly once)", len(comments), total)
 	}
 	for i, c := range comments {
 		wantBody := fmt.Sprintf("comment %d", i+1)
 		if c.Body != wantBody {
-			t.Fatalf("comments[%d].Body = %q, want %q (oldest-first order across merged pages)", i, c.Body, wantBody)
+			t.Fatalf("comments[%d].Body = %q, want %q (oldest-first order)", i, c.Body, wantBody)
 		}
 	}
-	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
-		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
+	if requests != 1 {
+		t.Fatalf("server saw %d requests, want exactly 1 — Comments must not paginate an endpoint that ignores page/limit", requests)
 	}
 }
 
