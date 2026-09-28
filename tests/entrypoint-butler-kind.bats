@@ -17,7 +17,6 @@ setup() {
 set_butler_env() {
   unset ISSUE_NUMBER ISSUE_TITLE
   export DISPATCH_KIND="butler"
-  export ADVISE_ONLY=1
   export CHORE_NAME="bugs"
   export CHORE_HEAD="deadbeef"
   export CHORE_DIFF_RANGE=""

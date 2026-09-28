@@ -75,11 +75,9 @@ _parity_stub_prompt_dir() {
         fi
         if [ "$gate" = true ]; then
           export DISPATCH_KIND="research"
-          export ADVISE_ONLY=1
           unset BOX_WRITE_ENABLED
         else
           unset DISPATCH_KIND
-          unset ADVISE_ONLY
           export BOX_WRITE_ENABLED=1
         fi
         ;;
@@ -155,11 +153,9 @@ _parity_stub_prompt_dir() {
         export BOX_WRITE_ENABLED=1
         if [ "$gate" = true ]; then
           export DISPATCH_KIND="research"
-          export ADVISE_ONLY=1
           export BOX_FILER_ENABLED=1
         else
           unset DISPATCH_KIND
-          unset ADVISE_ONLY
           unset BOX_FILER_ENABLED
         fi
         ;;
