@@ -471,6 +471,51 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	}
 }
 
+// TestPoolExit3RunningButlerSiblingIsNotEngaged pins the one exception to
+// the occupancy axis above: a sibling PhaseRunning a butler child never
+// counts as engaged, for any reporting kind, so it must not suppress a
+// jam — unlike a sibling resolving, backing off, or running a
+// dispatch/research child, which all still count.
+func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
+	tests := []struct {
+		name          string
+		siblingPhase  Phase
+		siblingKind   Kind // only used when siblingPhase == PhaseRunning
+		reportingKind Kind
+		wantJam       bool
+	}{
+		{"running butler sibling, dispatch reports", PhaseRunning, KindButler, KindDispatch, true},
+		{"running butler sibling, research reports", PhaseRunning, KindButler, KindResearch, true},
+		{"running research sibling, dispatch reports", PhaseRunning, KindResearch, KindDispatch, false},
+		{"resolving sibling (no kind), dispatch reports", PhaseResolving, "", KindDispatch, false},
+		{"backing-off sibling (no kind), dispatch reports", PhaseBackingOff, "", KindDispatch, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clk := &testClock{}
+			nw := newNotifyWriter()
+			em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+			cfg := testConfig(2)
+			cfg.Kinds = []Kind{KindDispatch, KindResearch, KindButler}
+			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+			defer p.cancel()
+
+			if tt.siblingPhase == PhaseRunning {
+				p.startChild(1, tt.siblingKind, "rev1")
+			} else {
+				p.setPhase(1, tt.siblingPhase)
+			}
+			p.noteWaitResult(0, tt.reportingKind, "rev1", true)
+
+			events := decodeEvents(t, bytes.NewBufferString(nw.String()))
+			gotJam := countEvents(eventNames(events), "jam") == 1
+			if gotJam != tt.wantJam {
+				t.Fatalf("events = %v, want jam=%v", eventNames(events), tt.wantJam)
+			}
+		})
+	}
+}
+
 // TestPoolExit3WithPoolIdleIsAJam pins the jam half of the occupancy axis:
 // a slot's exit 3 with every sibling truly parked (asleep in their own
 // idle wait, not occupied) must be reported as a jam, carrying the slot

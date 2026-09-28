@@ -323,8 +323,9 @@ func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
 // fetching, or resolving its own self-build, or sleeping out a failure
 // backoff), the issues this slot found "none dispatchable" were claimed or
 // overlap-deferred against that very sibling — routine, reported like any
-// other idle wait. With every sibling idle or merely parked on the shut
-// Awake window too, nothing is running and nothing can start: a jam an
+// other idle wait. With every sibling idle, merely parked on the shut
+// Awake window, or running only a butler child (see siblingsEngaged),
+// nothing that could unblock it is running or can start: a jam an
 // operator may need to clear. The jam alarm's predicate below is
 // deliberately not the same as jammed itself: jammed records the queue
 // condition this check saw (see kindBackoff.markNoWork), while the alarm
@@ -336,7 +337,7 @@ func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatch
 		var wait time.Duration
 		s.kinds[kind], wait = s.kinds[kind].markNoWork(now, noneDispatchable)
 		if noneDispatchable && !s.siblingsEngaged(slot) {
-			return []Event{{Event: "jam", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is running"}}
+			return []Event{{Event: "jam", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is doing anything that could unblock it"}}
 		}
 		return []Event{{Event: "idle", Kind: kind, Wait: wait.String(), Slot: intPtr(slot)}}
 	})
@@ -463,14 +464,27 @@ func (s *state) working() bool {
 // #3571). idle and awaiting-window are the only two phases a slot can sit
 // in indefinitely while genuinely doing nothing, which is exactly the
 // "every sibling parked" case the jam alarm exists to catch.
+//
+// One exception: a sibling PhaseRunning a butler child never counts. A
+// butler run never releases an issue a dispatch/research read found blocked
+// or overlap-deferred — a promoted finding (#3880) is new work, not a
+// release — so it can't explain a none-dispatchable read (#3922). A
+// resolving or backing-off sibling carries no kind (only PhaseRunning
+// does), so it always counts. The skip ignores the reporting kind, which
+// is safe only while the butler never exits 3 (exitCodeFor maps 3 solely
+// from waves.ErrOpenNoneDispatchable) and so never reports a jam itself.
 func (s *state) siblingsEngaged(slot int) bool {
 	for sl, ss := range s.slots {
 		if sl == slot {
 			continue
 		}
-		if ss.phase != PhaseIdle && ss.phase != PhaseAwaitingWindow {
-			return true
+		if ss.phase == PhaseIdle || ss.phase == PhaseAwaitingWindow {
+			continue
 		}
+		if ss.phase == PhaseRunning && ss.flight.kind == KindButler {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -566,10 +580,11 @@ func (p *pool) awaitBaton(ctx context.Context, slot int) {
 	}
 	// A slot parked here is waiting for its own turn, not doing anything,
 	// so it must read as PhaseIdle: siblingsEngaged counts every other
-	// phase as engaged, and a slot that parked straight out of its own
-	// resolve would otherwise suppress a sibling's real jam for the whole
-	// hold. Rides in the same mutate as baton_hold so the phase is always
-	// visible to the snapshot that publishes alongside that event.
+	// phase as engaged (a running butler sibling aside), and a slot that
+	// parked straight out of its own resolve would otherwise suppress a
+	// sibling's real jam for the whole hold. Rides in the same mutate as
+	// baton_hold so the phase is always visible to the snapshot that
+	// publishes alongside that event.
 	p.mutate(func(s *state) []Event {
 		s.slots[slot].phase = PhaseIdle
 		return []Event{{Event: "baton_hold", Slot: intPtr(slot), Reason: batonHoldReason}}
