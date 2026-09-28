@@ -757,8 +757,8 @@ func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 		cleanup: func() {},
 	}
 	code := cmdButler(lc, "bugs")
-	if code != 1 {
-		t.Errorf("cmdButler code = %d, want 1", code)
+	if code != exitConfigInvalid {
+		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
 }
 
@@ -808,8 +808,8 @@ func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
 	lc := testButlerLaunchContext(t, repo, "bad.name")
 	var code int
 	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
-	if code != 1 {
-		t.Errorf("cmdButler code = %d, want 1", code)
+	if code != exitConfigInvalid {
+		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
 	if !strings.Contains(stderr, "invalid name format") {
 		t.Errorf("stderr = %q, want it to name the invalid format", stderr)
@@ -826,13 +826,59 @@ func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
 	lc := testButlerLaunchContext(t, repo, "bugs")
 	var code int
 	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
-	if code != 1 {
-		t.Errorf("cmdButler code = %d, want 1", code)
+	if code != exitConfigInvalid {
+		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
 	if !strings.Contains(stderr, "prompt file missing") {
 		t.Errorf("stderr = %q, want it to name the missing prompt", stderr)
 	}
 	assertNoButlerLedgerClaims(t, repo)
+}
+
+// cmdButler exits exitConfigInvalid, not 1, for a malformed BUTLER_EVERY,
+// BUTLER_CLAIM_TIMEOUT, or DAEMON_AWAKE_WINDOW too, even though each fails
+// past butlerPreflight: all three parse inside resolveButlerSettings, the
+// same config-validation prelude, so their errors get the same treatment
+// (issue #3920, keeps a config failure out of the daemon's shared breaker).
+func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
+	tests := []struct {
+		name       string
+		set        func(cfg *config)
+		wantSubstr string
+	}{
+		{
+			name:       "BUTLER_EVERY",
+			set:        func(cfg *config) { cfg.butlerEvery = "not-a-duration" },
+			wantSubstr: "BUTLER_EVERY",
+		},
+		{
+			name:       "BUTLER_CLAIM_TIMEOUT",
+			set:        func(cfg *config) { cfg.butlerClaimTimeout = "not-a-duration" },
+			wantSubstr: "BUTLER_CLAIM_TIMEOUT",
+		},
+		{
+			name:       "DAEMON_AWAKE_WINDOW",
+			set:        func(cfg *config) { cfg.daemonAwakeWindow = "not-a-window" },
+			wantSubstr: "DAEMON_AWAKE_WINDOW",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("FILER_MODEL", "test-model")
+			repo, _ := newButlerTestRepo(t)
+			lc := testButlerLaunchContext(t, repo, "bugs")
+			tt.set(&lc.config)
+			var code int
+			stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
+			if code != exitConfigInvalid {
+				t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
+			}
+			if !strings.Contains(stderr, tt.wantSubstr) {
+				t.Errorf("stderr = %q, want it to name %s", stderr, tt.wantSubstr)
+			}
+			assertNoButlerLedgerClaims(t, repo)
+		})
+	}
 }
 
 // cmdButler rejects a BUTLER_EVERY override naming a Chore not in
@@ -845,8 +891,8 @@ func TestCmdButler_RejectsOverrideForChoreNotEnabled(t *testing.T) {
 	}
 	var code int
 	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
-	if code != 1 {
-		t.Errorf("cmdButler code = %d, want 1", code)
+	if code != exitConfigInvalid {
+		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
 	if !strings.Contains(stderr, `override for chore "bgus"`) {
 		t.Errorf("stderr = %q, want the rejected override named", stderr)
@@ -861,8 +907,8 @@ func TestCmdButler_RejectsForgeWithNoLedger(t *testing.T) {
 		cleanup: func() {},
 	}
 	code := cmdButler(lc, "bugs")
-	if code != 1 {
-		t.Errorf("cmdButler code = %d, want 1", code)
+	if code != exitConfigInvalid {
+		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
 }
 
@@ -881,8 +927,8 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 				cleanup: func() {},
 			}
 			code := cmdButler(lc, chore)
-			if code != 1 {
-				t.Errorf("cmdButler(%q) code = %d, want 1", chore, code)
+			if code != exitConfigInvalid {
+				t.Errorf("cmdButler(%q) code = %d, want %d", chore, code, exitConfigInvalid)
 			}
 		})
 	}
