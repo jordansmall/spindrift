@@ -277,7 +277,13 @@ Box only advises — the claim is honored only when the host's own evidence
 agrees there is nothing to land. An `already-resolved` claim that arrives
 alongside commits or an outbox bundle contradicts itself, and the host
 demotes it to `blocked` rather than trust the driver's bare assertion, so
-real work is never closed out silently as already done.
+real work is never closed out silently as already done. Issue #4016 split
+the check across the two places that can see the evidence: the Box's
+harness, not the Agent, counts `base..branch` after the Driver exits and
+appends a synthetic `blocked` line naming the count, pushing or bundling
+the commits as any blocked run's; settle demotes a claim that arrives
+with an outbox bundle itself, and posts the corrective note on either
+path.
 
 No outcome-line grammar change: this adds a value to the work kind's status
 set (`lib/prompt-contract.nix`'s `outcomeStatusSets`, generated into
