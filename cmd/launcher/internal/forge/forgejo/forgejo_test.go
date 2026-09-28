@@ -370,6 +370,37 @@ func TestForgejoClient_ListLabels_StopsOnRepeatedFirstLabelAcrossPages(t *testin
 	}
 }
 
+// ListIssuesWithLabels must see a finding label that only shows up on
+// /labels page 2 because the server caps the page size below
+// forge.ResultPageLimit (issue #3944): if ListLabels stopped as soon as a
+// page came back short, this label would look undefined and get silently
+// dropped from the dedup scan instead of getting its own /issues query.
+func TestForgejoClient_ListIssuesWithLabels_SeesLabelOnServerCappedLabelsPage2(t *testing.T) {
+	var issuesRequests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveCappedLabelsPage(w, r, "page1-", `[{"name":"agent-review-finding"}]`)
+			return
+		}
+		issuesRequests = append(issuesRequests, r.URL.Query().Get("labels"))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	issues, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	if len(issuesRequests) != 1 || issuesRequests[0] != "agent-review-finding" {
+		t.Fatalf("issues requests = %+v, want exactly one for the page-2 label", issuesRequests)
+	}
+	if len(issues) != 1 || issues[0].Number != "5" {
+		t.Fatalf("issues = %+v", issues)
+	}
+}
+
 // Forgejo's label-creation endpoint wants a leading hash on the color, unlike
 // the color argument's own bare-hex convention.
 func TestForgejoClient_CreateLabel_PostsHexColorWithHash(t *testing.T) {
@@ -564,6 +595,10 @@ func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
 func TestForgejoClient_ListIssuesWithLabels_ClosedStateAndLabelQuery(t *testing.T) {
 	var gotState, gotLabels string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[{"name":"agent-review-finding"}]`)
+			return
+		}
 		q := r.URL.Query()
 		gotState = q.Get("state")
 		gotLabels = q.Get("labels")
@@ -594,6 +629,10 @@ func TestForgejoClient_ListIssuesWithLabels_ClosedStateAndLabelQuery(t *testing.
 // de-duplicated by number.
 func TestForgejoClient_ListIssuesWithLabels_MergesAndDedupsAcrossLabels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[{"name":"agent-review-finding"},{"name":"agent-research-finding"}]`)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		switch r.URL.Query().Get("labels") {
 		case "agent-review-finding":
@@ -635,6 +674,10 @@ func TestForgejoClient_ListIssuesWithLabels_MergesAndDedupsAcrossLabels(t *testi
 // still come back, with a nil error, mirroring the github adapter.
 func TestForgejoClient_ListIssuesWithLabels_PartialFailureReturnsSucceededLabels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[{"name":"agent-review-finding"},{"name":"agent-research-finding"}]`)
+			return
+		}
 		switch r.URL.Query().Get("labels") {
 		case "agent-review-finding":
 			w.WriteHeader(http.StatusOK)
@@ -659,6 +702,10 @@ func TestForgejoClient_ListIssuesWithLabels_PartialFailureReturnsSucceededLabels
 // signal backlogDedupIndex uses to fall back to intra-run-only dedup.
 func TestForgejoClient_ListIssuesWithLabels_AllFailuresReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[{"name":"agent-review-finding"},{"name":"agent-research-finding"}]`)
+			return
+		}
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	defer srv.Close()
@@ -667,6 +714,21 @@ func TestForgejoClient_ListIssuesWithLabels_AllFailuresReturnsError(t *testing.T
 	_, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
 	if err == nil {
 		t.Fatal("ListIssuesWithLabels: want error when every label fails, got nil")
+	}
+}
+
+// The same "all failed" signal must surface through the unfiltered fallback
+// a /labels outage takes.
+func TestForgejoClient_ListIssuesWithLabels_LabelsErrorAndAllIssuesFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	_, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
+	if err == nil {
+		t.Fatal("ListIssuesWithLabels: want error when /labels and every /issues query fail, got nil")
 	}
 }
 
@@ -711,6 +773,97 @@ func TestForgejoClient_ListIssuesWithLabels_NoLabelsReturnsEmptyWithoutRequest(t
 	}
 	if requested {
 		t.Error("ListIssuesWithLabels(nil): want no request, got one")
+	}
+}
+
+// A label absent from the repo's defined set gets no /issues request at all:
+// Forgejo's ListIssues handler drops an unresolved labels filter entirely
+// rather than erroring, so querying it would scan every issue in state.
+func TestForgejoClient_ListIssuesWithLabels_SkipsLabelsNotDefinedOnRepo(t *testing.T) {
+	for _, state := range []forge.IssueState{forge.IssueOpen, forge.IssueClosed} {
+		t.Run(string(state), func(t *testing.T) {
+			var issuesRequests []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+					serveLabels(w, r, `[{"name":"agent-review-finding"}]`)
+					return
+				}
+				issuesRequests = append(issuesRequests, r.URL.Query().Get("labels"))
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`))
+			}))
+			defer srv.Close()
+
+			fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+			issues, err := fc.ListIssuesWithLabels(state, []string{"agent-review-finding", "agent-missing-finding"})
+			if err != nil {
+				t.Fatalf("ListIssuesWithLabels: %v", err)
+			}
+			if len(issuesRequests) != 1 || issuesRequests[0] != "agent-review-finding" {
+				t.Fatalf("issues requests = %+v, want exactly one for the defined label", issuesRequests)
+			}
+			if len(issues) != 1 || issues[0].Number != "5" {
+				t.Fatalf("issues = %+v", issues)
+			}
+		})
+	}
+}
+
+// When every requested label is undefined on the repo, skipping all of them
+// is lossless: the result is empty and no /issues request runs at all.
+func TestForgejoClient_ListIssuesWithLabels_AllLabelsUndefinedReturnsEmptyWithoutRequest(t *testing.T) {
+	requested := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[]`)
+			return
+		}
+		requested = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	issues, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: want nil error when every label is undefined, got %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("want empty result, got %+v", issues)
+	}
+	if requested {
+		t.Error("want no /issues request when every label is undefined")
+	}
+}
+
+// A ListLabels failure must not become an empty dedup index: a transient
+// labels-endpoint outage falls back to querying every requested label
+// unfiltered, the pre-existing behavior. 404 (not 500) keeps the rest
+// client's transient-status retry/backoff out of this test.
+func TestForgejoClient_ListIssuesWithLabels_LabelsErrorFallsBackToQueryingAllLabels(t *testing.T) {
+	var issuesRequests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		issuesRequests = append(issuesRequests, r.URL.Query().Get("labels"))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	issues, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding", "agent-research-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	if len(issuesRequests) != 2 {
+		t.Fatalf("issues requests = %+v, want both labels queried unfiltered", issuesRequests)
+	}
+	if len(issues) != 1 || issues[0].Number != "5" {
+		t.Fatalf("issues = %+v", issues)
 	}
 }
 
