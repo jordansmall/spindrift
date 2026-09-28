@@ -24,27 +24,41 @@ import (
 // testClaimTimeout (issue #3990).
 const testRunClaimTimeout = 6 * time.Hour
 
-// noRunEvery is an Every func with no interval at all: every chore is due
-// by interval immediately, the shape most tests below want when the
-// interval itself isn't what's under test. Distinct from sweep_test.go's
-// fixed-shape testPolicy, since the tests below each build their own Policy
-// (chores, promotion knobs) per case.
-func noRunEvery(string) time.Duration { return 0 }
+// noRunEvery is the zero Every: it never blocks a due check
+// (IntervalNotElapsed), the shape most tests below want when the interval
+// itself isn't what's under test. Distinct from sweep_test.go's fixed-shape
+// testPolicy, since the tests below each build their own Policy (chores,
+// promotion knobs) per case.
+const noRunEvery time.Duration = 0
 
 // testRunPolicy builds a Policy for the tests below: testRunClaimTimeout, an
 // unlimited (zero) Budgets, UTC, ready-for-agent as the promotion label, and
-// Enabled set to chores -- migrated from cmd/launcher's retired
-// testButlerPolicy.
-func testRunPolicy(every func(string) time.Duration, chores ...string) Policy {
+// Chores built from chores, each with the same Every and no Classes --
+// migrated from cmd/launcher's retired testButlerPolicy.
+func testRunPolicy(every time.Duration, chores ...string) Policy {
+	cs := make([]chore.Chore, len(chores))
+	for i, name := range chores {
+		cs[i] = chore.Chore{Name: name, Every: every}
+	}
 	return Policy{
 		Branch:         "main",
 		Host:           "test-host",
-		Every:          every,
+		Chores:         cs,
 		ClaimTimeout:   testRunClaimTimeout,
 		Zone:           time.UTC,
-		Enabled:        chores,
 		PromotionLabel: "ready-for-agent",
 	}
+}
+
+// withClasses returns chores with classes attached to the entry named name,
+// the shape promotion tests build their Policy.Chores from.
+func withClasses(chores []chore.Chore, name string, classes ...string) []chore.Chore {
+	for i, c := range chores {
+		if c.Name == name {
+			chores[i].Classes = classes
+		}
+	}
+	return chores
 }
 
 // newRunTestRepo builds a bare repo with one commit on "main" holding one
@@ -54,15 +68,7 @@ func testRunPolicy(every func(string) time.Duration, chores ...string) Policy {
 // migrated from cmd/launcher's retired newButlerTestRepo).
 func newRunTestRepo(t *testing.T) (repo, head string) {
 	t.Helper()
-	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
-	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
-	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
-
-	dir := t.TempDir()
-	bare := filepath.Join(dir, "repo.git")
-	runRepoGit(t, "", "init", "--bare", "-q", bare)
-	runRepoGit(t, bare, "config", "gc.auto", "0")
+	bare := newButlerBareRepo(t)
 
 	hashCmd := exec.Command("git", "-C", bare, "hash-object", "-w", "--stdin")
 	hashCmd.Stdin = strings.NewReader("package a\n")
@@ -272,7 +278,7 @@ func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 			}
 
 			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, choreName), func() time.Time { return now })
+			r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, choreName), func() time.Time { return now })
 			out, err := r.Sweep([]string{choreName})
 			if err != nil {
 				t.Fatalf("Sweep: %v", err)
@@ -316,7 +322,7 @@ func TestSweep_CrashedRunLeavesClaimStanding(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return crashedDispatcher() }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -349,7 +355,7 @@ func TestSweep_ClaimStartIsDueCheckInstant(t *testing.T) {
 		calls++
 		return first.Add(time.Duration(calls-1) * time.Hour)
 	}
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), now)
+	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), now)
 	if _, err := r.Sweep([]string{"bugs"}); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -381,7 +387,7 @@ func TestSweep_LiveClaimReportsNoWork(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now.Add(time.Minute) })
+	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now.Add(time.Minute) })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -427,7 +433,7 @@ func TestSweep_StaleClaimIsTakenOver(t *testing.T) {
 	}
 
 	now := start.Add(testRunClaimTimeout + time.Minute)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -487,7 +493,7 @@ func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
 	}
 
 	now := deadStart.Add(testRunClaimTimeout + time.Minute)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -548,7 +554,7 @@ func TestSweep_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 	}
 
 	now := start.Add(testRunClaimTimeout - time.Minute)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -593,7 +599,7 @@ func TestSweep_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
 	}
 
 	now := doneAt.Add(time.Hour) // well inside the 6h interval
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(func(string) time.Duration { return 6 * time.Hour }, "bugs"), func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(6*time.Hour, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -624,7 +630,7 @@ func TestSweep_NamedChoreNothingToScanReportsWhy(t *testing.T) {
 	fc := forge.NewFake()
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	if _, err := r.Sweep([]string{"bugs"}); err != nil {
 		t.Fatalf("seed clean run: %v", err)
 	}
@@ -642,7 +648,7 @@ func TestSweep_NamedChoreNothingToScanReportsWhy(t *testing.T) {
 		dispatched = true
 		return dispatch.NewFake()
 	}
-	r2 := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox2, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now.Add(time.Hour) })
+	r2 := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox2, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now.Add(time.Hour) })
 	out, err := r2.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -685,7 +691,7 @@ func TestSweep_NoChorePicksFirstDueCandidate(t *testing.T) {
 	}
 
 	now := doneAt.Add(time.Hour)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, testRunPolicy(func(string) time.Duration { return 6 * time.Hour }, "bugs", "refactor"), func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(6*time.Hour, "bugs", "refactor"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs", "refactor"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -735,7 +741,7 @@ func TestSweep_NoChoreNoneDueReportsEachReason(t *testing.T) {
 	}
 
 	now := doneAt.Add(time.Hour)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(func(string) time.Duration { return 6 * time.Hour }, "bugs", "refactor"), func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(6*time.Hour, "bugs", "refactor"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs", "refactor"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -775,7 +781,7 @@ func TestSweep_BudgetSpentByAnotherEnabledChore(t *testing.T) {
 
 	policy := testRunPolicy(noRunEvery, "bugs", "refactor")
 	policy.Budgets = chore.Budgets{MaxSweepsPerDay: 1}
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, forge.NewFake().AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -833,7 +839,7 @@ func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 	t.Run("same NY day: budget still spent", func(t *testing.T) {
 		dispatched = false
 		now := time.Date(2026, 1, 10, 23, 50, 0, 0, loc)
-		r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+		r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 		out, err := r.Sweep([]string{"bugs"})
 		if err != nil {
 			t.Fatalf("Sweep: %v", err)
@@ -853,7 +859,7 @@ func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 	t.Run("next NY day: due again", func(t *testing.T) {
 		dispatched = false
 		now := time.Date(2026, 1, 11, 0, 10, 0, 0, loc)
-		r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+		r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 		out, err := r.Sweep([]string{"bugs"})
 		if err != nil {
 			t.Fatalf("Sweep: %v", err)
@@ -895,7 +901,7 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	policy := testRunPolicy(noRunEvery, "bugs")
 	policy.Budgets = chore.Budgets{MaxFindingsPerSweep: 1}
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -917,7 +923,7 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 }
 
 // (m) BUTLER_MAX_PROMOTIONS_PER_DAY (Policy.MaxPromotionsPerDay) defaults to
-// 0, so wiring the class allow-list alone (Policy.Classes) never promotes
+// 0, so wiring the class allow-list alone (Chore.Classes) never promotes
 // anything -- a Consumer has to opt in to promotion itself, not just to a
 // Chore (issue #3880).
 func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
@@ -933,12 +939,12 @@ func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 	}
 
 	policy := testRunPolicy(noRunEvery, "bugs")
-	policy.Classes = map[string][]string{"bugs": {"error-handling"}}
+	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
 	policy.PromotionMaxFiles = 3
 	// MaxPromotionsPerDay left at its zero value -- the default -- on purpose.
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -951,7 +957,7 @@ func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 		t.Fatalf("PostIssueCalls = %+v, want one call with no ready-for-agent label", fc.PostIssueCalls)
 	}
 	// Promotion off (MaxPromotionsPerDay is 0): the Box must not be told a
-	// class list even though Policy.Classes has one, since nothing it could
+	// class list even though the Chore has Classes, since nothing it could
 	// hand back would ever promote (issue #3880).
 	if len(gotChore.Classes) != 0 {
 		t.Errorf("dispatch.Chore.Classes = %v, want none with promotion off", gotChore.Classes)
@@ -981,12 +987,12 @@ func TestSweep_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
 	}
 
 	policy := testRunPolicy(noRunEvery, "bugs")
-	policy.Classes = map[string][]string{"bugs": {"error-handling"}}
+	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
 	policy.PromotionMaxFiles = 3
 	policy.MaxPromotionsPerDay = 1
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1024,13 +1030,13 @@ func TestSweep_PromotionUsesConfiguredWorkLabel(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
 
 	policy := testRunPolicy(noRunEvery, "bugs")
-	policy.Classes = map[string][]string{"bugs": {"error-handling"}}
+	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
 	policy.PromotionMaxFiles = 3
 	policy.MaxPromotionsPerDay = 1
 	policy.PromotionLabel = "agent-go"
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	if _, err := r.Sweep([]string{"bugs"}); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -1070,11 +1076,11 @@ func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
 
 	policy := testRunPolicy(noRunEvery, "bugs")
-	policy.Classes = map[string][]string{"bugs": {"error-handling"}}
+	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
 	policy.PromotionMaxFiles = 3
 	policy.MaxPromotionsPerDay = 1
 
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1106,15 +1112,15 @@ func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T)
 	fc.PostIssueURL = "https://example.com/issues/9203"
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
 
-	policy := testRunPolicy(noRunEvery, "bugs")
+	policy := testRunPolicy(noRunEvery, "bugs", "refactor")
 	// error-handling is allow-listed for "refactor", not "bugs" -- the Chore
 	// this run actually sweeps.
-	policy.Classes = map[string][]string{"refactor": {"error-handling"}}
+	policy.Chores = withClasses(policy.Chores, "refactor", "error-handling")
 	policy.PromotionMaxFiles = 3
 	policy.MaxPromotionsPerDay = 1
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo, Branch: "main"}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1166,7 +1172,7 @@ func TestSweep_RemoteBackendFetchesOnceForDueCheck(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	r := New(remote, GitTree{Repo: codeRepo, Branch: "main"}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs", "docs-drift"), func() time.Time { return now.Add(time.Minute) })
+	r := New(remote, GitTree{Repo: codeRepo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs", "docs-drift"), func() time.Time { return now.Add(time.Minute) })
 	out, err := r.Sweep([]string{"bugs", "docs-drift"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1180,5 +1186,86 @@ func TestSweep_RemoteBackendFetchesOnceForDueCheck(t *testing.T) {
 
 	if got := fetchCmdCount(t, trace); got != 1 {
 		t.Errorf("fetch count = %d, want exactly 1 for the whole due check", got)
+	}
+}
+
+// TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape drives a full Sweep
+// against a Remote Ledger backend built the same way a hosted-forge backend
+// row (github, forgejo) wires one -- ledger.NewRemote's scratch repo fetched
+// forward to the base branch (Remote.FetchBranch), so the same repo path
+// serves both the GitTree and the Ledger (issue #3876's stand-in for "works
+// on github/forgejo"), migrated from cmd/launcher's retired
+// TestRunButler_AgainstRemoteLedger (issue #3990): the assertion is about
+// ledger.Remote's own push/fetch behavior under a real Sweep, not about
+// cmd/launcher's backend-row wiring (remoteLedger itself is a 3-line
+// convenience over these same two calls), so it belongs here rather than at
+// the verb level. It asserts the remote's own refs/spindrift/butler/<chore>
+// ref -- not just the scratch repo's -- picked up the done commit, and that
+// refs/heads/main on the remote never moved.
+func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
+	remoteRepo, head := newRunTestRepo(t)
+
+	scratch := t.TempDir()
+	backend, err := ledger.NewRemote(scratch, remoteRepo)
+	if err != nil {
+		t.Fatalf("NewRemote: %v", err)
+	}
+	if err := backend.FetchBranch("main"); err != nil {
+		t.Fatalf("FetchBranch: %v", err)
+	}
+
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, GitTree{Repo: scratch}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept {
+		t.Fatalf("Kind = %v, want Swept: %+v", out.Kind, out)
+	}
+
+	subjects := gitLogSubjects(t, remoteRepo, ledger.RefPrefix+"bugs")
+	if len(subjects) != 2 || subjects[0] != "bugs: done" || subjects[1] != "bugs: claimed" {
+		t.Fatalf("remote git log subjects = %v, want [bugs: done, bugs: claimed]", subjects)
+	}
+
+	remoteHead := strings.TrimSpace(string(runRepoGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")))
+	if remoteHead != head {
+		t.Errorf("remote refs/heads/main moved to %q, want unchanged %q", remoteHead, head)
+	}
+}
+
+// TestPromotion_RoomFetchesOnceAcrossEnabledChores pins that
+// Runner.promotionPolicy's Room re-walks the Ledger fresh each call (unlike
+// Sweep's shared Snapshot, per its own doc comment), but still costs exactly
+// one fetch for that one call, however many Chores are enabled -- Room calls
+// ledger.Snapshot inside itself, not a raw DayTotalsAll(backend, ...) that
+// would sync once per enabled Chore (issue #3918), migrated from
+// cmd/launcher's retired TestPromotionPolicy_RoomFetchesOnceAcrossEnabledChores
+// (issue #3990).
+func TestPromotion_RoomFetchesOnceAcrossEnabledChores(t *testing.T) {
+	ledgerURL := newRunLedgerURL(t)
+
+	remote, err := ledger.NewRemote(t.TempDir(), ledgerURL)
+	if err != nil {
+		t.Fatalf("NewRemote: %v", err)
+	}
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	policy := testRunPolicy(noRunEvery, "bugs", "docs-drift")
+	policy.MaxPromotionsPerDay = 1
+	r := New(remote, GitTree{}, forge.NewFake().AsIssueFiler(), nil, policy, func() time.Time { return now })
+	pp := r.promotionPolicy(policy.Chores[0]) // Chores[0] is "bugs"
+
+	trace := filepath.Join(t.TempDir(), "trace2.log")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+
+	if got := pp.Room(); got != 1 {
+		t.Errorf("Room() = %d, want 1 (no promotions yet)", got)
+	}
+	if got := fetchCmdCount(t, trace); got != 1 {
+		t.Errorf("fetch count = %d, want exactly 1 for one Room() call", got)
 	}
 }

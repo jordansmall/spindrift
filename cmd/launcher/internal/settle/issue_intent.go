@@ -36,8 +36,8 @@ type issueIntent struct {
 	// agreement, empty when the reviewer dissented or never ran. Both are
 	// bounded before they ever reach host-authored note text -- see
 	// sanitizeConcurrence for how Concurrence is neutralized. Neither field
-	// can promote anything on its own -- the host-side policy passed to
-	// ButlerSettle's constructor decides that.
+	// can promote anything on its own -- the host-side policy the Butler
+	// Runner's promotion gate holds decides that.
 	Class       string `json:"class"`
 	Concurrence string `json:"concurrence"`
 }
@@ -85,11 +85,11 @@ const (
 // grapheme-cluster boundary, and neutralizes backticks. Only an oversized
 // first cluster yields "", which fails closed: eligible rejects an empty
 // concurrence. An oversized later cluster just ends the result at the
-// preceding boundary, an ordinary truncated fragment. promotionNote quotes the
-// result inside a markdown code span; with every backtick gone the Box text
-// can't close that span early, so the span keeps swallowing whatever
-// formatting -- @mentions, links, emphasis, inline HTML -- the Box text
-// tries to spoof.
+// preceding boundary, an ordinary truncated fragment. internal/butler's
+// promotionNote quotes the result inside a markdown code span; with every
+// backtick gone the Box text can't close that span early, so the span keeps
+// swallowing whatever formatting -- @mentions, links, emphasis, inline HTML
+// -- the Box text tries to spoof.
 func sanitizeConcurrence(s string) string {
 	s = strings.ReplaceAll(s, "`", "'")
 	lastEnd := 0
@@ -144,9 +144,9 @@ type filedIntent struct {
 	DupRef string
 	// ExtraLabels holds the extraLabels decorate returned for this intent,
 	// set only on a successful filing -- a failed PostIssue never applied
-	// them. ButlerSettle reads this back to know which URLs its own
-	// promotion gate actually promoted, without threading a second return
-	// path through fileIssueIntentsDetailedFunc.
+	// them. internal/butler's settle step reads this back to know which URLs
+	// its own promotion gate actually promoted, without threading a second
+	// return path through fileIssueIntentsDetailedFunc.
 	ExtraLabels []string
 }
 
@@ -161,17 +161,18 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 
 // fileIssueIntentsDetailedFunc is fileIssueIntentsDetailed's per-intent sibling
 // (issue #3875): decorate is computed from each intent rather than fixed
-// once, so a caller like ButlerSettle can name that intent's own files in its
-// backlink. It also returns extraLabels -- labels beyond the provenance and
-// type labels this function already applies, e.g. ButlerSettle's own
-// auto-promotion gate (issue #3880) adding "ready-for-agent" -- appended
-// after them, and, on a successful filing only, recorded onto the resulting
-// filedIntent.ExtraLabels. The third return, onFiled, is called only after
-// PostIssue actually succeeds -- never on a failed or skipped intent -- so a
-// caller that spends shared state (ButlerSettle's per-run promotion room) on
-// deciding extraLabels can defer committing that spend until the filing it
-// was for is real: a failed PostIssue must not burn the day's promotion
-// room. fileIssueIntentsDetailed delegates to this with a constant closure,
+// once, so a caller like internal/butler's settle step can name that intent's
+// own files in its backlink. It also returns extraLabels -- labels beyond the
+// provenance and type labels this function already applies, e.g. the Butler
+// Runner's own auto-promotion gate (issue #3880) adding "ready-for-agent" --
+// appended after them, and, on a successful filing only, recorded onto the
+// resulting filedIntent.ExtraLabels. The third return, onFiled, is called
+// only after PostIssue actually succeeds -- never on a failed or skipped
+// intent -- so a caller that spends shared state (the Runner's per-run
+// promotion room) on deciding extraLabels can defer committing that spend
+// until the filing it was for is real: a failed PostIssue must not burn the
+// day's promotion room. fileIssueIntentsDetailed delegates to this with a
+// constant closure,
 // rather than the other way around, so gate.go's call keeps its existing
 // (it, num, result, provenanceLabel, bodyBacklink string) shape --
 // nix/checks/dispatch-labels.nix's

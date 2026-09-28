@@ -2,6 +2,7 @@ package butler
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,18 +22,17 @@ type fakeTree struct {
 	filesErr error
 }
 
-func (f fakeTree) Head() (string, error)                        { return f.head, f.headErr }
+func (f fakeTree) Head(branch string) (string, error)           { return f.head, f.headErr }
 func (f fakeTree) TrackedFiles(commit string) ([]string, error) { return f.files, f.filesErr }
 
 func testPolicy() Policy {
 	return Policy{
 		Branch:       "main",
 		Host:         "test-host",
-		Every:        func(string) time.Duration { return 0 },
+		Chores:       []chore.Chore{{Name: "bugs"}},
 		ClaimTimeout: time.Hour,
 		Budgets:      chore.Budgets{},
 		Zone:         time.UTC,
-		Enabled:      []string{"bugs"},
 	}
 }
 
@@ -69,6 +69,18 @@ func TestSweep_EmptyChoresErrors(t *testing.T) {
 	_, err := r.Sweep(nil)
 	if err == nil || err.Error() != "butler: no chores to check" {
 		t.Errorf("err = %v, want %q", err, "butler: no chores to check")
+	}
+}
+
+// TestSweep_UnconfiguredChoreErrors rejects a candidate absent from
+// Policy.Chores rather than sweeping it with a zero Every and no Classes.
+func TestSweep_UnconfiguredChoreErrors(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	r := New(backend, fakeTree{}, forge.NewFake().AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return dispatch.NewFake() }, testPolicy(), time.Now)
+
+	_, err := r.Sweep([]string{"refactor"})
+	if err == nil || !strings.Contains(err.Error(), `chore "refactor" is not configured`) {
+		t.Errorf("err = %v, want it to name the unconfigured chore", err)
 	}
 }
 

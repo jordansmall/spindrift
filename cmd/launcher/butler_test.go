@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,52 +8,18 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/chore"
-	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/ledger"
-	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// testClaimTimeout is the claim timeout every test passes explicitly now
-// that BUTLER_CLAIM_TIMEOUT is an operator knob rather than a package const.
-const testClaimTimeout = 6 * time.Hour
-
-// noEvery is the zero Every: it never blocks a due check
-// (IntervalNotElapsed), the shape most tests want when the interval itself
-// isn't what's under test.
-const noEvery time.Duration = 0
-
-// testChores builds the []chore.Chore testButlerPolicy takes: every name gets
-// the same Every and no Classes -- the shape most tests want when a per-chore
-// interval or class allow-list isn't what's under test.
-func testChores(every time.Duration, names ...string) []chore.Chore {
-	chores := make([]chore.Chore, len(names))
-	for i, name := range names {
-		chores[i] = chore.Chore{Name: name, Every: every}
-	}
-	return chores
-}
-
-// testButlerPolicy builds a butlerPolicy for tests that don't exercise
-// budgets or the day zone: testClaimTimeout, an unlimited (zero) Budgets,
-// UTC, and chores built by testChores -- everything but budget/zone tests,
-// which build their own butlerPolicy explicitly.
-func testButlerPolicy(every time.Duration, chores ...string) butlerPolicy {
-	return butlerPolicy{
-		chores:       testChores(every, chores...),
-		claimTimeout: testClaimTimeout,
-		zone:         time.UTC,
-		label:        "ready-for-agent",
-	}
-}
-
 // newButlerTestRepo builds a bare repo with one commit on "main" holding one
-// tracked file, the fixture every runButler test claims and sweeps against
-// (same exec-git convention as internal/chore/git_test.go and
-// internal/settle/butler_test.go's own bare-repo fixtures).
+// tracked file, the fixture this file's preflight-rejection tests use to
+// prove a claim never lands (same exec-git convention as
+// internal/chore/git_test.go and internal/butler's own bare-repo fixtures).
 func newButlerTestRepo(t *testing.T) (repo, head string) {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
@@ -103,45 +68,6 @@ func runButlerGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// fetchCmdCount counts top-level `git fetch` processes recorded in a
-// GIT_TRACE2_EVENT log at path: one "cmd_name" event per git process, so a
-// fetch's own upload-pack child (its own cmd_name "upload-pack") never
-// counts as a second fetch.
-func fetchCmdCount(t *testing.T, path string) int {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read trace2 log %s: %v", path, err)
-	}
-	count := 0
-	for _, line := range strings.Split(string(data), "\n") {
-		if line == "" {
-			continue
-		}
-		var ev struct {
-			Event string `json:"event"`
-			Name  string `json:"name"`
-		}
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			t.Fatalf("parse trace2 line %q: %v", line, err)
-		}
-		if ev.Event == "cmd_name" && ev.Name == "fetch" {
-			count++
-		}
-	}
-	return count
-}
-
-// newButlerLedgerURL builds a fresh bare repo at a temp path to stand in for
-// a Remote ledger's URL, separate from the scratch repo Remote syncs into.
-func newButlerLedgerURL(t *testing.T) string {
-	t.Helper()
-	url := filepath.Join(t.TempDir(), "ledger.git")
-	runButlerGit(t, "", "init", "--bare", "-q", url)
-	runButlerGit(t, url, "config", "gc.auto", "0")
-	return url
-}
-
 func runButlerGitOutput(t *testing.T, repo string, args ...string) []byte {
 	t.Helper()
 	full := append([]string{"-C", repo}, args...)
@@ -152,41 +78,55 @@ func runButlerGitOutput(t *testing.T, repo string, args ...string) []byte {
 	return out
 }
 
-// readyDispatcher builds a dispatch.Fake whose Run() reports a ready outcome
-// carrying one filed-issue intent, the "clean run" shape ButlerSettle expects
-// (internal/settle/butler_test.go's readyResult mirrors this). Still used by
-// backend_ledger_test.go's TestRunButler_AgainstRemoteLedger; the rest of
-// this file's own TestRunButler_* callers moved to internal/butler (issue
-// #3990).
-func readyDispatcher() *dispatch.Fake {
-	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success: true,
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
+// TestButlerOutcomeErr pins the stderr text and exit code `spindrift butler`
+// reports for each Sweep Outcome; the Daemon backs off on exit 2.
+func TestButlerOutcomeErr(t *testing.T) {
+	cases := []struct {
+		name     string
+		outcome  butler.Outcome
+		wantErr  string // "" means nil
+		wantCode int
+	}{
+		{
+			name:     "NotDue joins every candidate's reason and wraps errQueueEmpty",
+			outcome:  butler.Outcome{Kind: butler.NotDue, Reasons: []string{`chore "bugs" not due: interval not elapsed`, `chore "docs-drift" not due: budget spent`}},
+			wantErr:  `butler: chore "bugs" not due: interval not elapsed; chore "docs-drift" not due: budget spent: queue empty`,
+			wantCode: 2,
 		},
-		IssueIntentsFound: true,
-		IssueIntents:      []string{`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"]}`},
+		{
+			name:     "LostRace names the chore and wraps errQueueEmpty",
+			outcome:  butler.Outcome{Kind: butler.LostRace, Chore: "bugs"},
+			wantErr:  `butler: chore "bugs" claimed by another run first: queue empty`,
+			wantCode: 2,
+		},
+		{
+			name:     "ClaimLeft names the chore, not wrapped in errQueueEmpty",
+			outcome:  butler.Outcome{Kind: butler.ClaimLeft, Chore: "bugs"},
+			wantErr:  `butler: chore "bugs" run did not complete (claim left standing)`,
+			wantCode: 1,
+		},
+		{
+			name:     "Swept prints nothing and exits 0",
+			outcome:  butler.Outcome{Kind: butler.Swept, Chore: "bugs", Filed: 2, Promoted: 1},
+			wantErr:  "",
+			wantCode: 0,
+		},
 	}
-	return d
-}
-
-// gitLogSubjects returns ref's commit subjects in refs, newest first, the
-// same shape the issue's acceptance criterion inspects with `git log
-// --format=%s`. Still used by backend_ledger_test.go's
-// TestRunButler_AgainstRemoteLedger (issue #3990).
-func gitLogSubjects(t *testing.T, repo, ref string) []string {
-	t.Helper()
-	out, err := exec.Command("git", "-C", repo, "log", "--format=%s", ref).Output()
-	if err != nil {
-		t.Fatalf("git log %s: %v", ref, err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := butlerOutcomeErr(tc.outcome)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("butlerOutcomeErr(%+v) = %v, want nil", tc.outcome, err)
+				}
+			} else if err == nil || err.Error() != tc.wantErr {
+				t.Fatalf("butlerOutcomeErr(%+v) = %v, want %q", tc.outcome, err, tc.wantErr)
+			}
+			if code := exitCodeFor(err); code != tc.wantCode {
+				t.Errorf("exitCodeFor(butlerOutcomeErr(%+v)) = %d, want %d", tc.outcome, code, tc.wantCode)
+			}
+		})
 	}
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
-		return nil
-	}
-	return strings.Split(trimmed, "\n")
 }
 
 // (k) cmdButler rejects a chore not named in BUTLER_CHORES, before ever
@@ -566,6 +506,44 @@ func TestButlerEveryDefaultMatchesSchema(t *testing.T) {
 	t.Fatal("BUTLER_EVERY missing from schemaFlags")
 }
 
+// The two host promotion knobs (BUTLER_MAX_PROMOTIONS_PER_DAY,
+// BUTLER_PROMOTION_MAX_FILES) resolve through the generated schemaFlags
+// table and loadSchemaConfig, the same wiring every other schema knob uses
+// (issue #3880).
+func TestButlerPromotionKnobsParseFromSchema(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		dflt string
+	}{
+		{"BUTLER_MAX_PROMOTIONS_PER_DAY", "0"},
+		{"BUTLER_PROMOTION_MAX_FILES", "3"},
+	} {
+		found := false
+		for _, f := range schemaFlags {
+			if f.env != tc.env {
+				continue
+			}
+			found = true
+			if f.dflt != tc.dflt {
+				t.Errorf("%s default = %q, want %q", tc.env, f.dflt, tc.dflt)
+			}
+		}
+		if !found {
+			t.Errorf("%s missing from schemaFlags", tc.env)
+		}
+	}
+
+	t.Setenv("BUTLER_MAX_PROMOTIONS_PER_DAY", "7")
+	t.Setenv("BUTLER_PROMOTION_MAX_FILES", "9")
+	cfg := loadSchemaConfig()
+	if cfg.butlerMaxPromotionsPerDay != 7 {
+		t.Errorf("butlerMaxPromotionsPerDay = %d, want 7", cfg.butlerMaxPromotionsPerDay)
+	}
+	if cfg.butlerPromotionMaxFiles != 9 {
+		t.Errorf("butlerPromotionMaxFiles = %d, want 9", cfg.butlerPromotionMaxFiles)
+	}
+}
+
 func TestParseButlerClaimTimeout(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -596,34 +574,5 @@ func TestParseButlerClaimTimeout(t *testing.T) {
 				t.Errorf("parseButlerClaimTimeout(%q) = %v, want %v", tc.value, got, tc.want)
 			}
 		})
-	}
-}
-
-// (t) promotionPolicy's Room re-walks the Ledger fresh each call (unlike
-// runButler's shared Snapshot, per its own doc comment), but still costs
-// exactly one fetch for that one call, however many Chores are enabled --
-// ledger.Snapshot inside Room, not a raw DayTotalsAll(backend, ...) that
-// would sync once per enabled Chore (issue #3918).
-func TestPromotionPolicy_RoomFetchesOnceAcrossEnabledChores(t *testing.T) {
-	ledgerURL := newButlerLedgerURL(t)
-
-	remote, err := ledger.NewRemote(t.TempDir(), ledgerURL)
-	if err != nil {
-		t.Fatalf("NewRemote: %v", err)
-	}
-
-	policy := testButlerPolicy(noEvery, "bugs", "docs-drift")
-	policy.maxPromotionsPerDay = 1
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	pp := policy.promotionPolicy(remote, policy.chores[0], func() time.Time { return now }) // chores[0] is "bugs"
-
-	trace := filepath.Join(t.TempDir(), "trace2.log")
-	t.Setenv("GIT_TRACE2_EVENT", trace)
-
-	if got := pp.Room(); got != 1 {
-		t.Errorf("Room() = %d, want 1 (no promotions yet)", got)
-	}
-	if got := fetchCmdCount(t, trace); got != 1 {
-		t.Errorf("fetch count = %d, want exactly 1 for one Room() call", got)
 	}
 }

@@ -996,10 +996,8 @@ func localloopConfig(c config) localloop.Config {
 
 // newSettle constructs the Settler for one dispatch entry point, reused across
 // every issue in it: research's one-shot ResearchSettle, or work's merge gate.
-// SettleLedger (butler) returns nil: a ButlerSettle needs the per-run claim
-// and Scope, neither of which exists yet at bootstrap time, so the butler
-// command builds its own after claiming (ADR 0056, issue #3875) rather than
-// bootstrap misrouting it through work's merge-gate settle.New.
+// The butler kind falls through to the merge gate too; its verb never reads
+// lc.settle (internal/butler's Runner settles its own run, issue #3990).
 func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Settler {
 	switch c.kind().Settle {
 	case dispatchkind.SettleVerdict:
@@ -1009,8 +1007,6 @@ func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.Co
 			return settle.NewResearchSettleReadOnly(it, vl, filerEnabled)
 		}
 		return settle.NewResearchSettle(it, vl, filerEnabled)
-	case dispatchkind.SettleLedger:
-		return nil
 	}
 	return settle.New(settleConfig(c, lw, cf, caps), it, cf)
 }
