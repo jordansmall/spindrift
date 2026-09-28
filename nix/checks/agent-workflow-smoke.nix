@@ -7,6 +7,9 @@
 # agent-research-close.yml is deliberately absent from both sets: it claims no
 # issue and builds no image, so it has nothing to reach agent-setup for. Its
 # label guard is pinned in nix/checks/dispatch-labels.nix instead.
+#
+# It also pins both agent workflow sets to `.spindrift/logs/`, where the launcher
+# writes (HostLogDirFor): a repo-root `logs/` is always empty (#3934).
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
@@ -14,6 +17,7 @@ let
     concatStringsSep
     filter
     hasInfix
+    replaceStrings
     ;
   setupSrc = builtins.readFile ../../.github/actions/agent-setup/action.yml;
   swapSrc = builtins.readFile ../../.github/actions/forgejo-label-swap/label-swap.sh;
@@ -52,6 +56,35 @@ let
       && hasInfix "uses: ./.github/actions/forgejo-label-swap" src
     )
   ) (builtins.attrNames forgejoWorkflows);
+
+  # Every agent workflow uploads its run logs. Any "logs/" left once the correct
+  # dir is stripped out is a stale path, however it is quoted or prefixed.
+  allWorkflows = githubWorkflows // forgejoWorkflows;
+  badLogsDir = filter (
+    name:
+    let
+      src = allWorkflows.${name};
+    in
+    !(
+      hasInfix "path: .spindrift/logs/" src
+      && !hasInfix "logs/" (replaceStrings [ ".spindrift/logs/" ] [ "" ] src)
+    )
+  ) (builtins.attrNames allWorkflows);
+  # The strip above cannot see a `.spindrift/log/` typo in the marker path, so
+  # pin the blocked-release step's test and read positively.
+  badBlockedMarker = filter (
+    name:
+    let
+      src = allWorkflows.${name};
+    in
+    !(
+      hasInfix "-f .spindrift/logs/blocked.txt" src
+      && hasInfix "cat .spindrift/logs/blocked.txt" src
+    )
+  ) [
+    "agent-dispatch.yml"
+    "forgejo/agent-dispatch.yml"
+  ];
 in
 {
   agent-workflows-control-plane-wiring =
@@ -68,4 +101,13 @@ in
       forgejoBroken == [ ]
     ) "forgejo agent workflow(s) do not reach the build via agent-setup with `forge: forgejo` and a forgejo-label-swap claim — they would fall back onto the gh-shaped smoke/claim and fail on api.github.com: ${concatStringsSep ", " forgejoBroken}";
     pkgs.runCommand "agent-workflows-control-plane-wiring" { } "touch $out";
+
+  agent-workflows-log-dir =
+    assert assertMsg (
+      badLogsDir == [ ]
+    ) "agent workflow(s) do not upload `.spindrift/logs/` or still reference a stale `logs/` dir — the launcher writes to `.spindrift/logs/` (dispatch.HostLogDirFor, issue #3934): ${concatStringsSep ", " badLogsDir}";
+    assert assertMsg (
+      badBlockedMarker == [ ]
+    ) "agent dispatch workflow(s) no longer test and read `.spindrift/logs/blocked.txt` — a dependency-blocked issue would never be released (issue #3934): ${concatStringsSep ", " badBlockedMarker}";
+    pkgs.runCommand "agent-workflows-log-dir" { } "touch $out";
 }
