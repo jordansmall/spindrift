@@ -59,6 +59,82 @@ func (p PromotionPolicy) eligible(in issueIntent, files []string) bool {
 	return strings.TrimSpace(in.Concurrence) != ""
 }
 
+// Finding is the promotion-relevant view of one well-formed butler finding,
+// handed to a Runner's plan callback (issue #3990) before anything is filed
+// so the callback can count eligible findings and reserve promotion room up
+// front, the same order ButlerSettle.Settle already reserves Ledger slots
+// before any PostIssue call.
+type Finding struct {
+	Class, Concurrence string
+	DedupTerms         []string
+}
+
+// Decoration is what a plan's per-finding callback adds to one finding's
+// filing: an optional Backlink appended to its body, any ExtraLabels beyond
+// the provenance label, and an OnFiled hook run only after PostIssue
+// succeeds -- never on a failed or skipped intent (see
+// fileIssueIntentsDetailedFunc's decorate contract) -- so a callback that
+// spends shared state (like promotion room) can defer committing that spend
+// until the filing it was for is real.
+type Decoration struct {
+	Backlink    string
+	ExtraLabels []string
+	OnFiled     func()
+}
+
+// FiledFinding is one successful filing -- never a failed or dedup-skipped
+// one, since a caller acting on Filed (e.g. a Ledger done commit) must only
+// ever record what actually landed.
+type FiledFinding struct {
+	URL         string
+	ExtraLabels []string
+}
+
+// FileButlerFindings caps result's issue-intent findings at maxPerSweep (0
+// means no cap; see capIntents), hands the kept well-formed findings to plan
+// before filing anything, then files the capped result under the
+// "agent-butler-finding" provenance label using the Decoration the plan's
+// returned callback produces per finding. It prints the same filed/dropped
+// lines ButlerSettle.Settle always has, and returns only successful filings
+// in payload order, plus the dropped count.
+//
+// The "agent-butler-finding" literal stays here, not a parameter:
+// nix/checks/dispatch-labels.nix's comment names this file's occurrence of
+// it by source text.
+func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, plan func(kept []Finding) func(Finding) Decoration) (filed []FiledFinding, dropped int) {
+	logRejectedSignals(num, result)
+	kept, dropped := capIntents(result.IssueIntents, maxPerSweep)
+	capped := result
+	capped.IssueIntents = kept
+
+	var findings []Finding
+	for _, raw := range kept {
+		in, ok := parseIssueIntent(raw)
+		if !ok {
+			continue
+		}
+		findings = append(findings, Finding{Class: in.Class, Concurrence: in.Concurrence, DedupTerms: in.DedupTerms})
+	}
+	decide := plan(findings)
+
+	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, "agent-butler-finding", func(in issueIntent) (string, []string, func()) {
+		d := decide(Finding{Class: in.Class, Concurrence: in.Concurrence, DedupTerms: in.DedupTerms})
+		return d.Backlink, d.ExtraLabels, d.OnFiled
+	})
+	reportFiled(num, rawFiled)
+	if dropped > 0 {
+		fmt.Printf("    #%s  dropped %d finding(s) beyond the %d-per-sweep cap\n", num, dropped, maxPerSweep)
+	}
+
+	for _, f := range rawFiled {
+		if f.Failed || f.Skipped {
+			continue
+		}
+		filed = append(filed, FiledFinding{URL: f.URL, ExtraLabels: f.ExtraLabels})
+	}
+	return filed, dropped
+}
+
 // ButlerSettle is the butler dispatch kind's one-shot settle adapter (ADR
 // 0056, issue #3875): file each finding the Box reported, then write the
 // Chore's Ledger done commit carrying the advanced lastSwept/cursor, the
@@ -98,7 +174,6 @@ func NewButlerSettle(it forge.IssueTracker, backend ledger.Backend, choreName st
 // commit at all, so the claim stands and lastSwept/cursor stay put for the
 // next run to resume from (ADR 0056).
 func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
-	logRejectedSignals(num, result)
 	if !result.Resolved.Found {
 		b.fail(num, "no ready outcome line")
 		return
@@ -113,80 +188,64 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 		return
 	}
 
-	kept, dropped := capIntents(result.IssueIntents, b.maxFindingsPerSweep)
-	capped := result
-	capped.IssueIntents = kept
-
-	// Room is evaluated at most once per Settle, and only when this Chore
-	// has an allow-list at all -- a Chore with no Classes can never promote,
-	// so spending a Ledger walk on Room for it would be waste. Evaluating at
-	// settle time rather than at run start means a promotion whose
-	// reservation commit already landed is counted here; it is still a soft
-	// cap like ADR 0056's other budgets, not a hard one -- two runs settling
-	// at the same moment can each read the same total and both spend it.
-	remaining := 0
-	if len(b.policy.Classes) > 0 && b.policy.Room != nil {
-		remaining = b.policy.Room()
-	}
-
-	// Reserve the slots this run intends to spend before filing anything
-	// (issue #3926): if the done commit below never lands -- the claim was
-	// lost to a takeover, or the push itself fails -- the reservation still
-	// counts against DayTotals, so a lost Finish can never let a Chore
-	// promote past the day's budget. finishParent moves to the reservation
-	// tip on success so the done commit's own CAS is checked against it, not
-	// the stale claim.
 	finishParent := b.claim
-	if remaining > 0 {
-		eligible := 0
-		for _, raw := range capped.IssueIntents {
-			in, ok := parseIssueIntent(raw)
-			if !ok {
-				continue
-			}
-			if b.policy.eligible(in, butlerFiles(in.DedupTerms)) {
-				eligible++
-			}
+	filed, dropped := FileButlerFindings(b.it, num, result, b.maxFindingsPerSweep, func(kept []Finding) func(Finding) Decoration {
+		// Room is evaluated at most once per Settle, and only when this Chore
+		// has an allow-list at all -- a Chore with no Classes can never
+		// promote, so spending a Ledger walk on Room for it would be waste.
+		// Evaluating at settle time rather than at run start means a
+		// promotion whose reservation commit already landed is counted here;
+		// it is still a soft cap like ADR 0056's other budgets, not a hard
+		// one -- two runs settling at the same moment can each read the same
+		// total and both spend it.
+		remaining := 0
+		if len(b.policy.Classes) > 0 && b.policy.Room != nil {
+			remaining = b.policy.Room()
 		}
-		n := min(remaining, eligible)
-		if n > 0 {
-			reserved, err := ledger.Reserve(b.ledger, b.chore, b.claim, n, b.now())
-			if err != nil {
-				fmt.Printf("    #%s  status=promotion-reserve-failed  !! %v\n", num, err)
-				remaining = 0
-			} else {
-				remaining = n
-				finishParent = reserved
-			}
-		}
-	}
 
-	filed := fileIssueIntentsDetailedFunc(b.it, num, capped, "agent-butler-finding", func(in issueIntent) (string, []string, func()) {
-		backlink := butlerBacklink(b.chore, in)
-		files := butlerFiles(in.DedupTerms)
-		if !b.policy.eligible(in, files) || remaining <= 0 {
-			return backlink, nil, nil
+		// Reserve the slots this run intends to spend before filing anything
+		// (issue #3926): if the done commit below never lands -- the claim was
+		// lost to a takeover, or the push itself fails -- the reservation still
+		// counts against DayTotals, so a lost Finish can never let a Chore
+		// promote past the day's budget. finishParent moves to the reservation
+		// tip on success so the done commit's own CAS is checked against it, not
+		// the stale claim.
+		if remaining > 0 {
+			eligible := 0
+			for _, f := range kept {
+				if b.policy.eligible(issueIntent{Class: f.Class, Concurrence: f.Concurrence}, butlerFiles(f.DedupTerms)) {
+					eligible++
+				}
+			}
+			n := min(remaining, eligible)
+			if n > 0 {
+				reserved, err := ledger.Reserve(b.ledger, b.chore, b.claim, n, b.now())
+				if err != nil {
+					fmt.Printf("    #%s  status=promotion-reserve-failed  !! %v\n", num, err)
+					remaining = 0
+				} else {
+					remaining = n
+					finishParent = reserved
+				}
+			}
 		}
-		note := promotionNote(b.chore, in, b.policy, len(files))
-		// Spend the slot only in onFiled, after PostIssue succeeds, so a
-		// failed post frees it back to the rest of the sweep.
-		return backlink + "\n\n" + note, []string{b.policy.Label}, func() { remaining-- }
+
+		return func(f Finding) Decoration {
+			in := issueIntent{Class: f.Class, Concurrence: f.Concurrence, DedupTerms: f.DedupTerms}
+			backlink := butlerBacklink(b.chore, in)
+			files := butlerFiles(f.DedupTerms)
+			if !b.policy.eligible(in, files) || remaining <= 0 {
+				return Decoration{Backlink: backlink}
+			}
+			note := promotionNote(b.chore, in, b.policy, len(files))
+			// Spend the slot only in OnFiled, after PostIssue succeeds, so a
+			// failed post frees it back to the rest of the sweep.
+			return Decoration{Backlink: backlink + "\n\n" + note, ExtraLabels: []string{b.policy.Label}, OnFiled: func() { remaining-- }}
+		}
 	})
-	reportFiled(num, filed)
-	if dropped > 0 {
-		fmt.Printf("    #%s  dropped %d finding(s) beyond the %d-per-sweep cap\n", num, dropped, b.maxFindingsPerSweep)
-	}
 
 	var urls, promoted []string
 	for _, f := range filed {
-		// Only a successful filing's URL is ever recorded: a Skipped intent
-		// was never posted (there is nothing to name), and a Failed one's
-		// dedup keys never reached the backlog, so leaving it out of Filed
-		// lets a later rotation re-find and refile it -- recording it here
-		// would suppress that retry for good.
-		if f.Failed || f.Skipped {
-			continue
-		}
 		urls = append(urls, f.URL)
 		if b.policy.Label != "" && slices.Contains(f.ExtraLabels, b.policy.Label) {
 			promoted = append(promoted, f.URL)
