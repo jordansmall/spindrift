@@ -99,7 +99,7 @@ pinned_session_id() {
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
   # DRIVER_PROMPT_FILE holds the last prompt written, which is the resume pass's.
   grep -q 'SPINDRIFT_OUTCOME: SUCCESS' "$DRIVER_PROMPT_FILE"
-  grep -q 'valid status values are ready, blocked, or ambiguous' "$DRIVER_PROMPT_FILE"
+  grep -q 'valid status values are ready, blocked, ambiguous, or already-resolved' "$DRIVER_PROMPT_FILE"
   # The example line substitutes the real issue and landing values, leaving
   # only status and note as placeholders (issue #2449).
   grep -q 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=' "$DRIVER_PROMPT_FILE"

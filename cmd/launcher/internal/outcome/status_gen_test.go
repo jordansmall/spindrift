@@ -20,6 +20,9 @@ func TestStatusGenConstants(t *testing.T) {
 	if want, got := "ambiguous", outcome.StatusAmbiguous; got != want {
 		t.Errorf("StatusAmbiguous = %q, want %q", got, want)
 	}
+	if want, got := "already-resolved", outcome.StatusAlreadyResolved; got != want {
+		t.Errorf("StatusAlreadyResolved = %q, want %q", got, want)
+	}
 	if want, got := "recommend", outcome.StatusRecommend; got != want {
 		t.Errorf("StatusRecommend = %q, want %q", got, want)
 	}
@@ -30,7 +33,7 @@ func TestStatusGenConstants(t *testing.T) {
 		t.Errorf("StatusUnclear = %q, want %q", got, want)
 	}
 
-	wantWork := []string{"ready", "blocked", "ambiguous"}
+	wantWork := []string{"ready", "blocked", "ambiguous", "already-resolved"}
 	if !reflect.DeepEqual(outcome.WorkStatuses, wantWork) {
 		t.Errorf("WorkStatuses = %v, want %v", outcome.WorkStatuses, wantWork)
 	}

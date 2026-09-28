@@ -891,7 +891,10 @@ rec {
     let
       capitalize =
         s: toUpper (builtins.substring 0 1 s) + builtins.substring 1 (builtins.stringLength s - 1) s;
-      constName = word: "Status" + capitalize word;
+      # "already-resolved" must render StatusAlreadyResolved, not an invalid
+      # hyphenated identifier.
+      splitHyphen = word: builtins.filter builtins.isString (builtins.split "-" word);
+      constName = word: "Status" + concatStrings (map capitalize (splitHyphen word));
       allWords = builtins.concatLists (map (row: row.statuses) outcomeStatusSets);
       uniqueWords = builtins.foldl' (
         acc: w: if builtins.elem w acc then acc else acc ++ [ w ]

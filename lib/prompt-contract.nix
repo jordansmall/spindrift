@@ -589,6 +589,7 @@ rec {
         "ready"
         "blocked"
         "ambiguous"
+        "already-resolved"
       ];
     }
     {

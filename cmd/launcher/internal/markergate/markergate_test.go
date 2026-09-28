@@ -80,7 +80,7 @@ func TestRenderNudgePrompt_OutcomeNearMiss(t *testing.T) {
 	if !strings.Contains(got, outcome.Token+": done") {
 		t.Fatalf("expected near-miss line quoted, got %q", got)
 	}
-	if !strings.Contains(got, "ready, blocked, or ambiguous") {
+	if !strings.Contains(got, "ready, blocked, ambiguous, or already-resolved") {
 		t.Fatalf("expected Oxford-comma status prose, got %q", got)
 	}
 	// Pins against the registry-rendered fieldShape, not a fresh hand-typed literal.
