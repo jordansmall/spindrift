@@ -269,9 +269,8 @@ carrying the note, transitions `agent-in-progress` → `agent-complete`
 (`forge.Complete`), and closes the issue itself as `completed` — never "not
 planned" (contrast `agent-research-reject`'s close), since no PR carries a
 `Closes #N` here for GitHub's own auto-close to catch. Under
-`ISSUE_TRACKER=local` the issue reaches `agent-complete` but, for now,
-stays open: settle never writes the local tracker's `closed:` axis (ADR
-0029); issue #4017 tracks giving that path a close.
+`ISSUE_TRACKER=local` settle closes the issue too, setting the local
+tracker's `closed:` axis directly (issue #4017, amending ADR 0029).
 
 In keeping with this ADR's Decision — the host decides from evidence, the
 Box only advises — the claim is honored only when the host's own evidence
