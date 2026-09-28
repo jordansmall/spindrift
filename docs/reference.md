@@ -1361,7 +1361,10 @@ this release too, deprecated — ADR 0020). The launcher does generate a
 flake-option/flag parity (issue #3567), but never reads the value — passing
 one is accepted and silently inert. Set them through `settings` /
 `perSystem.spindrift.dispatch.*` instead, which the daemon resolves for
-itself. See `lib/env-schema.nix` for the authoritative list.
+itself. See `lib/env-schema.nix` for the authoritative list. The
+`launcher-ignores-doc-consistency` check pins which rows below carry
+that clause to the schema's `launcherIgnores` axis, and requires each such
+row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 
 | var                    | default | `settings` section | meaning                                                |
 | ---------------------- | ------- | ------------------ | ------------------------------------------------------ |
