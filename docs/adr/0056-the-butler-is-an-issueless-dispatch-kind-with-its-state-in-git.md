@@ -137,3 +137,24 @@ sweeps on upgrade.
   `agent-butler-finding`.
 - "butler", "chore", and "ledger" are working names; "chore" collides with
   the Conventional Commits type and is expected to be renamed.
+
+## Amendment (issue #3926): promotions are reserved before they are filed
+
+A promotion's only Ledger record used to be the done commit's `promoted`
+list, written after the findings were already filed and labelled. A done
+commit that never landed (a claim-timeout takeover winning the
+compare-and-swap, or a failed push of the Ledger ref) left promoted issues
+on the tracker that the promotions-per-day budget never counted. Settle now
+first appends a reservation: a claimed-phase commit on top of its own claim,
+carrying the number of slots it is about to spend (`reserved`), and parents
+the done commit on that. Today's promotion total counts a reservation's
+slots unless a done commit lands directly on it, in which case the done
+commit's own `promoted` list is the count instead, so a finished run counts
+once and a lost one still counts. A reservation is not a claim, so it
+doesn't count against sweeps per day. A run that cannot write its
+reservation no longer holds its claim and files everything unlabelled. The
+total still comes from walking the Ledger, so there is still no second
+store. Over-counting is the failure direction: a reserved slot whose post
+fails, or whose finding is deduplicated, stays spent if the done commit is
+then lost. `filed` keeps the old behaviour, so a lost done commit still
+undercounts the findings-per-day budget.
