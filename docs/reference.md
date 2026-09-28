@@ -5688,6 +5688,10 @@ has announced so far, deduped — a fix pass or conflict-resolve for an
 issue already in the list is the same claim continuing, not a second
 one, so each issue names once no matter how many boxes it takes —
 enough to correlate a running Box with the commit that produced it.
+`chore` is present only for a busy butler slot whose child has boxed
+a Chore, and names the most recent one — the same key as the `chore`
+field on the `box`/`settled`/`child_finish` events below, so status
+and the event stream join on it — and is never folded into `issues`.
 `phase` is the slot's own position in its iteration,
 one of five values: `idle` (parked, holding nothing), `awaiting_window`
 (parked because the Awake window is shut), `resolving` (fetching the
