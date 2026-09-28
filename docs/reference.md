@@ -4694,6 +4694,18 @@ By default that is the whole story, same as every other agent-filed issue
 rule: auto-promotion (below). See the **Butler** / **Chore** / **Ledger**
 glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full vocabulary.
 
+The butler Box always runs the read-only posture, whatever
+`BOX_FORGE_AND_ISSUE_ACCESS` says (issue #3906): the launcher never sets
+`BOX_WRITE_ENABLED` for it, so the entrypoint installs the read-only guards
+(the `gh`/`fj` shims, plus the git push hook on an outbox-relay or
+host-mediated forge) and the launcher mounts the outbox to match. Research
+does not get this treatment; under `read-write` it still posts its own
+verdict comment. Treat the guards as defense in depth on top of the prompt
+and the Filer relay, not as token-level enforcement: under `read-write` the
+Box still holds the ordinary write-capable token, and a direct API call
+gets around the shims. Real enforcement still means
+`BOX_FORGE_AND_ISSUE_ACCESS=read-only` with a read-only Box token.
+
 Auto-promotion (ADR 0056, issue #3880) adds `ready-for-agent` (or your
 configured `LABEL`) to a finding at settle, host-side, when every one of
 four gates holds: the finding's Box-tagged class is on
