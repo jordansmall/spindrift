@@ -14,13 +14,17 @@ import (
 // runGitT runs git in dir with a fixed committer identity rather than the
 // ambient git config, so these tests behave the same on any machine, and with
 // commit.gpgsign off so a developer's global signing config cannot hang a
-// commit on a passphrase prompt.
+// commit on a passphrase prompt. Auto-gc and auto-maintenance are off because
+// git can fork them detached after a commit or rebase, and one still writing
+// .git/objects fails t.TempDir()'s RemoveAll with "directory not empty".
 func runGitT(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	full := append([]string{
 		"-c", "user.name=landdelta test",
 		"-c", "user.email=landdelta-test@example.com",
 		"-c", "commit.gpgsign=false",
+		"-c", "gc.auto=0",
+		"-c", "maintenance.auto=false",
 	}, args...)
 	cmd := exec.Command("git", full...)
 	cmd.Dir = dir
