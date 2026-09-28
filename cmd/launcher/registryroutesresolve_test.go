@@ -332,6 +332,36 @@ match-host = "host.example.com"
 	}
 }
 
+// checkoutIsTargetRepo follows GH_HOST (issue #3912), so a GitHub Enterprise
+// origin must derive routes the same way a github.com one does, not fail
+// closed as if the checkout weren't the Target repo.
+func TestBuildRegistryProxyRoutes_HostRooted_DerivesUpstream_UnderGHHost(t *testing.T) {
+	t.Setenv("GH_HOST", "ghe.example.com")
+
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@ghe.example.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	if _, err := buildRegistryProxyRoutes(c); err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil: a GH_HOST-matching origin must derive routes", err)
+	}
+}
+
 // Issue #3258 AC3: one "allow" line in the route TOML patches the derivation gap
 // of a repo whose .npmrc only derives "/npm", so EnforcedPaths ends up covering
 // both the derived and the allow-declared path.

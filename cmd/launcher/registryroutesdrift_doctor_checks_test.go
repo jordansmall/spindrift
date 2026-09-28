@@ -582,6 +582,32 @@ func TestCheckoutIsTargetRepo_GithubMismatch(t *testing.T) {
 	}
 }
 
+// The github case follows GH_HOST like the butler Ledger remote (issue
+// #3912): a GitHub Enterprise checkout matches on its own host, compared
+// case-insensitively, and github.com stops matching once GH_HOST names
+// another host.
+func TestCheckoutIsTargetRepo_Github_FollowsGHHost(t *testing.T) {
+	c := minimalValidConfig() // repoSlug: "owner/repo"
+
+	for _, tc := range []struct {
+		ghHost, remoteURL string
+		want              bool
+	}{
+		{"ghe.example.com", "git@ghe.example.com:owner/repo.git", true},
+		{"ghe.example.com", "https://ghe.example.com/owner/repo.git", true},
+		{"GHE.Example.com", "git@ghe.example.com:owner/repo.git", true},
+		{"ghe.example.com", "git@github.com:owner/repo.git", false},
+	} {
+		t.Run(tc.ghHost+" "+tc.remoteURL, func(t *testing.T) {
+			t.Setenv("GH_HOST", tc.ghHost)
+			dir := newGitCheckoutWithRemote(t, tc.remoteURL)
+			if got := checkoutIsTargetRepo(dir, c); got != tc.want {
+				t.Errorf("checkoutIsTargetRepo(%q, c) = %v, want %v for GH_HOST=%q, remote %q", dir, got, tc.want, tc.ghHost, tc.remoteURL)
+			}
+		})
+	}
+}
+
 func TestCheckoutIsTargetRepo_GitMatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
