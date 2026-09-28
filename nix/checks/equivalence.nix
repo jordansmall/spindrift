@@ -75,6 +75,9 @@ in
     ! grep -q '@imagePath@' "$buildCmd"
     ! grep -q '@imagePath@' "$runCmd"
 
+    # The default template's chores/*.md stems (issue #3905).
+    grep -q '"CHORE_CATALOG":"bugs docs-drift refactor"' "$runDoc"
+
     case '${harness.internals.imagePath}' in
       /nix/store/*spindrift*) : ;;
       *) echo "unexpected image path: ${harness.internals.imagePath}" >&2; exit 1 ;;

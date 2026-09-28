@@ -55,6 +55,7 @@ let
     scoutProvisioned = true;
     reviewLoopInline = true;
     reviewLoopOrchestrator = false;
+    choreCatalog = "chore-a chore-b";
     nixStoreWritable = true;
     syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
   };
@@ -347,6 +348,8 @@ in
       "runArtifacts (bwrap) must render WORKER_PROVISIONED as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (out.SCOUT_PROVISIONED == "true")
       "runArtifacts (bwrap) must render SCOUT_PROVISIONED as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.CHORE_CATALOG == "chore-a chore-b")
+      "runArtifacts (bwrap) must render CHORE_CATALOG from its choreCatalog input, got: ${builtins.toJSON out}";
     assert assertMsg (out.REVIEW_LOOP_INLINE == "true")
       "runArtifacts (bwrap) must render REVIEW_LOOP_INLINE as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (out.REVIEW_LOOP_ORCHESTRATOR == "false")
@@ -453,6 +456,7 @@ in
         scoutProvisioned = false;
         reviewLoopInline = false;
         reviewLoopOrchestrator = true;
+        choreCatalog = "chore-a chore-b";
         # OCI's writable-store mechanism (lib/image.nix) never reads this
         # artifact, so false is a placeholder, required only because
         # nixStoreWritable has no default (issue #2665).
@@ -586,6 +590,7 @@ in
         scoutProvisioned = false;
         reviewLoopInline = true;
         reviewLoopOrchestrator = false;
+        choreCatalog = "chore-a chore-b";
         nixStoreWritable = false;
         syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
         syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
@@ -809,6 +814,7 @@ in
         "AGENT_FILES_DRV"
         "BAKED_PREFETCH"
         "BOX_ENV_VARS"
+        "CHORE_CATALOG"
         "DRIVER"
         "DRIVER_SESSION_CACHE_DIR"
         "DRIVER_SKILLS_DIR"

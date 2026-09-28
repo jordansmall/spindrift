@@ -68,7 +68,9 @@
   butlerReviewPrompt ? builtins.readFile ../templates/default/prompts/butler-review-prompt.md,
   # The named-Chore prompt directory ${CHORE_PROMPT} resolves into (ADR
   # 0056): copied whole into the image, like fragmentsDir below, so a new
-  # Chore needs no mkHarness plumbing, only a new file under it.
+  # Chore needs no mkHarness plumbing, only a new file under it. Must stay
+  # a plain path, not a derivation: choreCatalog below readDirs it, which
+  # a derivation would turn into import-from-derivation.
   choresDir ? ../templates/default/prompts/chores,
   # The conditional fragment registry (issue #622): rows of (gate, fragment,
   # var) that the entrypoint's fragment loop and its `_subst` allowlist are
@@ -216,6 +218,16 @@ let
   fragmentsSourceDir = fragmentsDir;
   # Mirrors fragmentsSourceDir's alias, for choresDir (ADR 0056, issue #3875).
   choresSourceDir = choresDir;
+
+  # The CHORE_CATALOG run artifact (issue #3905): the `<name>.md` stems
+  # lib/image.nix bakes under chores/.
+  choreCatalog = lib.concatStringsSep " " (
+    lib.pipe (builtins.readDir choresSourceDir) [
+      (lib.filterAttrs (name: type: (type == "regular" || type == "symlink") && lib.hasSuffix ".md" name))
+      builtins.attrNames
+      (map (lib.removeSuffix ".md"))
+    ]
+  );
 
   # The SPINDRIFT_OUTCOME contract is harness-owned (issue #419): a Consumer
   # `prompt` that drops it ships an agent that never emits the outcome line,
@@ -1093,6 +1105,7 @@ let
       scoutProvisioned
       reviewLoopInline
       reviewLoopOrchestrator
+      choreCatalog
       # Always renders the Consumer's raw knob value (issue #2665), unlike
       # nixConfigPath below. The AND-gate with NixConfigFile lives in
       # bwrap.go, not here.

@@ -151,6 +151,9 @@ rec {
       scoutProvisioned,
       reviewLoopInline,
       reviewLoopOrchestrator,
+      # Space-joined stems of the image's chores/*.md (issue #3905), so
+      # butlerPreflight rejects a Chore with no prompt before claiming it.
+      choreCatalog,
       # The bwrap-only nix.conf artifact (issue #2664), from the same
       # nixConfigFile derivation the OCI image bakes in directly. Defaults to
       # "" so a non-nixInBox Consumer renders the key present-but-empty rather
@@ -247,6 +250,7 @@ rec {
       SCOUT_PROVISIONED = if scoutProvisioned then "true" else "false";
       REVIEW_LOOP_INLINE = if reviewLoopInline then "true" else "false";
       REVIEW_LOOP_ORCHESTRATOR = if reviewLoopOrchestrator then "true" else "false";
+      CHORE_CATALOG = choreCatalog;
     };
 
   # The Launcher input document's `artifacts` section for the `build` wrapper
@@ -366,6 +370,7 @@ rec {
           scoutProvisioned = false;
           reviewLoopInline = false;
           reviewLoopOrchestrator = false;
+          choreCatalog = "dummy";
           nixConfigPath = "dummy";
           nixConfigDrv = "dummy";
           nixStoreWritable = false;
