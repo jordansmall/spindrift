@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // Issue #3445 made an IssueTextFor error fatal to the dispatch. Callers of
@@ -124,20 +125,17 @@ func TestBuildBoxEnv_SelfContainedAbsentByDefault(t *testing.T) {
 	}
 }
 
-// Issue #3872: ADVISE_ONLY is derived from the kind's own descriptor, not a
-// kind-name string comparison, so a future advise-only kind gets the
-// read-only Box posture for free.
-func TestBuildBoxEnv_AdviseOnlySetForAdviseOnlyKind(t *testing.T) {
-	if got := mustBuildBoxEnv(t, Config{Kind: "research"}, "3", "T", 0, "", "")["ADVISE_ONLY"]; got != "1" {
-		t.Errorf("ADVISE_ONLY with Config.Kind=research: got %q, want %q", got, "1")
-	}
-}
-
-// ADVISE_ONLY stays absent, not "0", for work (unset Kind) and for any
-// unrecognized kind string, matching SELF_CONTAINED's absent-by-default shape.
-func TestBuildBoxEnv_AdviseOnlyAbsentForWorkAndUnknownKind(t *testing.T) {
-	if _, ok := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["ADVISE_ONLY"]; ok {
-		t.Error("ADVISE_ONLY should be absent when Config.Kind is unset (work)")
+// Issue #3901: the Box resolves its advise-only posture from DISPATCH_KIND
+// itself, so a second ADVISE_ONLY input must never come back to disagree.
+func TestBuildBoxEnv_AdviseOnlyNeverForwarded(t *testing.T) {
+	for _, d := range dispatchkind.All {
+		env := mustBuildBoxEnv(t, Config{Kind: d.Name}, "3", "T", 0, "", "")
+		if _, ok := env["ADVISE_ONLY"]; ok {
+			t.Errorf("ADVISE_ONLY should never be forwarded (kind=%s)", d.Name)
+		}
+		if got := env["DISPATCH_KIND"]; got != d.Name {
+			t.Errorf("DISPATCH_KIND with Config.Kind=%s: got %q, want %q", d.Name, got, d.Name)
+		}
 	}
 	if _, ok := mustBuildBoxEnv(t, Config{Kind: "bogus-kind"}, "3", "T", 0, "", "")["ADVISE_ONLY"]; ok {
 		t.Error("ADVISE_ONLY should be absent for an unrecognized Config.Kind")
@@ -421,18 +419,6 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 	}
 	if got := env["MODEL"]; got != "from-resolver" {
 		t.Errorf("MODEL: got %q, want %q (other BoxEnvVars still resolve normally)", got, "from-resolver")
-	}
-}
-
-// ADVISE_ONLY still comes from the kind descriptor, unaffected by the chore
-// attachment (dispatch.go's kind block runs after the chore/issue split).
-func TestBuildBoxEnv_ChoreAdviseOnlyFromKind(t *testing.T) {
-	env, err := buildBoxEnv(Config{Kind: "butler"}, "butler-lint-sweep", "T", 0, "", "", &Chore{Name: "lint-sweep"})
-	if err != nil {
-		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
-	}
-	if got := env["ADVISE_ONLY"]; got != "1" {
-		t.Errorf("ADVISE_ONLY with Config.Kind=butler: got %q, want %q", got, "1")
 	}
 }
 
