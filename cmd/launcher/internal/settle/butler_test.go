@@ -735,7 +735,7 @@ func TestButlerSettle_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
 		t.Fatalf("body = %q, want an Auto-promoted note", body)
 	}
 	rest := body[i:]
-	wantNote := "**Auto-promoted** to `ready-for-agent` by the butler: class `error-handling` is on the `bugs` Chore's allow-list, it touches 1 file(s) (host limit 1), and the in-Box reviewer agreed: agreed, but also: - one - two"
+	wantNote := "**Auto-promoted** to `ready-for-agent` by the butler: class `error-handling` is on the `bugs` Chore's allow-list, it touches 1 file(s) (host limit 1), and the in-Box reviewer agreed: `agreed, but also: - one - two`"
 	// rest is "<note>\n\n<dedup marker>": the note itself must be exactly one
 	// line, so cutting at the first newline must yield the whole expected
 	// note text, not a prefix of a multi-line one.
@@ -801,6 +801,35 @@ func TestPromotionPolicy_Eligible(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.policy.eligible(tc.intent, butlerFiles(tc.intent.DedupTerms)) {
 				t.Errorf("eligible() = true, want false with %s broken alone", tc.name)
+			}
+		})
+	}
+}
+
+// (i2) promotionNote renders raw Box-supplied markdown/HTML in Concurrence as
+// literal code-span text (issue #3928; see sanitizeConcurrence).
+func TestPromotionNote_ConcurrenceMarkdownNeutralized(t *testing.T) {
+	policy := PromotionPolicy{Label: "ready-for-agent", MaxFiles: 1}
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"mention", "@octocat", "@octocat"},
+		{"emphasis", "**bold** *it* _u_", "**bold** *it* _u_"},
+		{"link", "[x](https://evil.example)", "[x](https://evil.example)"},
+		{"bare url", "https://evil.example", "https://evil.example"},
+		{"inline html", "<a href=x>y</a>", "<a href=x>y</a>"},
+		{"backtick span-close attempt", "ok` @octocat `", "ok' @octocat '"},
+		{"leading/trailing space trimmed", "  padded  ", "padded"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := issueIntent{Class: "cls", Concurrence: c.raw}
+			note := promotionNote("bugs", in, policy, 1)
+			wantSuffix := "agreed: `" + c.want + "`"
+			if !strings.HasSuffix(note, wantSuffix) {
+				t.Errorf("note = %q, want suffix %q", note, wantSuffix)
 			}
 		})
 	}
