@@ -64,8 +64,9 @@ func PriorityLabelNames() []string {
 	return forge.PriorityLabelNames()
 }
 
-// AmbiguousLabelNames returns the single fixed ambiguous-spec-tier label name.
-// The literal mirrors forge.DispatchLabels.Ambiguous, which has no accessor.
+// AmbiguousLabelNames returns the single fixed ambiguous-spec-tier label name
+// (issue #2275). The literal mirrors forge.DispatchLabels.Ambiguous, which
+// has no accessor.
 func AmbiguousLabelNames() []string {
 	return []string{"agent-ambiguous-spec"}
 }
@@ -76,6 +77,60 @@ func AmbiguousLabelNames() []string {
 // Ledger), so this finding label is its only doctor-visible one.
 func ButlerLabelNames() []string {
 	return []string{"agent-butler-finding"}
+}
+
+// labelTier is one advisory label family. Only the work tier is Required, and
+// its names come from Config, so it stays outside this table.
+type labelTier struct {
+	noun  string
+	ref   string // ADR citation after the noun in report lines; may be empty
+	names func() []string
+}
+
+// tierResult carries its tier alongside the missing names so consumers never
+// index a parallel slice against advisoryTiers.
+type tierResult struct {
+	tier    labelTier
+	missing []string
+}
+
+// advisoryTiers is the single place a tier's report metadata — noun, ref,
+// names, and print order — lives. A new tier still needs a row in
+// lib/labels.nix. nix/checks/dispatch-labels.nix only sees names written as a
+// `return []string{"..."}` literal here; names sourced elsewhere (as priority's
+// come from forge) escape that extraction silently.
+var advisoryTiers = []labelTier{
+	{noun: "research", ref: "(ADR 0022 / ADR 0041)", names: ResearchLabelNames},
+	{noun: "priority", ref: "(ADR 0040)", names: PriorityLabelNames},
+	{noun: "ambiguous-spec", ref: "", names: AmbiguousLabelNames},
+	{noun: "butler", ref: "(ADR 0056)", names: ButlerLabelNames},
+}
+
+// AdvisoryLabelNames returns every advisory-tier label name in advisoryTiers
+// order.
+func AdvisoryLabelNames() []string {
+	var names []string
+	for _, t := range advisoryTiers {
+		names = append(names, t.names()...)
+	}
+	return names
+}
+
+// refSuffix keeps an empty ref from leaving a double space in a report line.
+func refSuffix(ref string) string {
+	if ref == "" {
+		return ""
+	}
+	return " " + ref
+}
+
+func allLabelsPresentMessage() string {
+	nouns := []string{"triage"}
+	for _, t := range advisoryTiers {
+		nouns = append(nouns, t.noun)
+	}
+	last := len(nouns) - 1
+	return "all " + strings.Join(nouns[:last], ", ") + ", and " + nouns[last] + " labels present"
 }
 
 // RuntimeCheckName is exported so callers filtering the row out of a larger slice
@@ -136,10 +191,11 @@ type Config struct {
 }
 
 // Run probes the issue tracker and code forge, then checks that every configured
-// triage, research, priority, and ambiguous-spec label exists, offering to create
-// missing ones when interactive. Only missing work-tier labels fail the run; the
-// other tiers and extraChecks are advisory. stdin is the caller's own scanner, so
-// Quickstart can hand one over mid-flow without losing already-buffered input.
+// work-tier label and every advisory tier in advisoryTiers exists, offering to
+// create missing ones when interactive. Only missing work-tier labels fail the
+// run; the other tiers and extraChecks are advisory. stdin is the caller's own
+// scanner, so Quickstart can hand one over mid-flow without losing
+// already-buffered input.
 func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
 	if c.TokenHint != "" {
@@ -284,47 +340,40 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		return missing
 	}
 
-	// checkLabels reports on all five tiers, but only the work tier is fatal. The
-	// research (ADR 0022), priority (ADR 0040), ambiguous-spec (#2275), and
-	// butler (ADR 0056) families stay advisory so a CI doctor run stays green on
-	// a deployment that does not use them yet.
-	checkLabels := func() (workMissing, researchMissing, priorityMissing, ambiguousMissing, butlerMissing []string, err error) {
+	// checkLabels reports on the work tier plus every advisoryTiers entry, but
+	// only the work tier is fatal — the advisory tiers stay non-fatal so a CI
+	// doctor run stays green on a deployment that does not use them yet.
+	checkLabels := func() (workMissing []string, tierResults []tierResult, err error) {
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("%w: label check failed: %w", ErrConnectivity, lerr)
+			return nil, nil, fmt.Errorf("%w: label check failed: %w", ErrConnectivity, lerr)
 		}
 		present := make(map[string]bool, len(existing))
 		for _, l := range existing {
 			present[l] = true
 		}
 		workMissing = checkLabelSet([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}, present, Required)
-		researchMissing = checkLabelSet(ResearchLabelNames(), present, Advisory)
-		priorityMissing = checkLabelSet(PriorityLabelNames(), present, Advisory)
-		ambiguousMissing = checkLabelSet(AmbiguousLabelNames(), present, Advisory)
-		butlerMissing = checkLabelSet(ButlerLabelNames(), present, Advisory)
-		return workMissing, researchMissing, priorityMissing, ambiguousMissing, butlerMissing, nil
+		tierResults = make([]tierResult, len(advisoryTiers))
+		for i, t := range advisoryTiers {
+			tierResults[i] = tierResult{tier: t, missing: checkLabelSet(t.names(), present, Advisory)}
+		}
+		return workMissing, tierResults, nil
 	}
 
-	workMissing, researchMissing, priorityMissing, ambiguousMissing, butlerMissing, err := checkLabels()
+	workMissing, tierResults, err := checkLabels()
 	if err != nil {
 		return err
 	}
-	if len(researchMissing) > 0 {
-		rep.Finding(Advisory, "%d research label(s) missing (ADR 0022 / ADR 0041) — does not fail this check", len(researchMissing))
+	var advisoryMissing []string
+	for _, tr := range tierResults {
+		if len(tr.missing) > 0 {
+			rep.Finding(Advisory, "%d %s label(s) missing%s — does not fail this check", len(tr.missing), tr.tier.noun, refSuffix(tr.tier.ref))
+		}
+		advisoryMissing = append(advisoryMissing, tr.missing...)
 	}
-	if len(priorityMissing) > 0 {
-		rep.Finding(Advisory, "%d priority label(s) missing (ADR 0040) — does not fail this check", len(priorityMissing))
-	}
-	if len(ambiguousMissing) > 0 {
-		rep.Finding(Advisory, "%d ambiguous-spec label(s) missing — does not fail this check", len(ambiguousMissing))
-	}
-	if len(butlerMissing) > 0 {
-		rep.Finding(Advisory, "%d butler label(s) missing (ADR 0056) — does not fail this check", len(butlerMissing))
-	}
-	advisoryMissing := append(append(append(append([]string{}, researchMissing...), priorityMissing...), ambiguousMissing...), butlerMissing...)
 	missing := append(append([]string{}, workMissing...), advisoryMissing...)
 	if len(missing) == 0 {
-		rep.Success("all triage, research, priority, ambiguous-spec, and butler labels present")
+		rep.Success("%s", allLabelsPresentMessage())
 		return nil
 	}
 
@@ -405,40 +454,30 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		rep.Passthrough("created: label %q\n", name)
 	}
 
-	workMissing, researchMissing, priorityMissing, ambiguousMissing, butlerMissing, err = checkLabels()
+	workMissing, tierResults, err = checkLabels()
 	if err != nil {
 		return err
 	}
 	if len(workMissing) > 0 {
 		return fmt.Errorf("%w: %s still missing after creation", ErrRequiredLabelsMissing, strings.Join(workMissing, ", "))
 	}
-	// Work labels are fatal above, so each advisory tier (ADR 0022 / ADR 0040 /
-	// ADR 0041 / #2275 / ADR 0056) gets its own wrap-up line here, or one
-	// success line naming all five tiers when none is still short.
+	// Work labels are fatal above, so each advisory tier gets its own wrap-up
+	// line here, or one success line naming every tier when none is still
+	// short.
 	stillMissing := false
 	// These lines carry the "advisory:" prefix like a Finding, but they
 	// report a CreateLabel outcome that already happened rather than a fresh
 	// probe result, so the acceptance criteria class them as always-on
 	// passthrough instead of routing them through Finding's tier gate.
-	if len(researchMissing) > 0 {
-		rep.Passthrough("advisory: %d research label(s) still missing after creation (ADR 0022 / ADR 0041) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
-		stillMissing = true
-	}
-	if len(priorityMissing) > 0 {
-		rep.Passthrough("advisory: %d priority label(s) still missing after creation (ADR 0040) — does not fail this check: %s\n", len(priorityMissing), strings.Join(priorityMissing, ", "))
-		stillMissing = true
-	}
-	if len(ambiguousMissing) > 0 {
-		rep.Passthrough("advisory: %d ambiguous-spec label(s) still missing after creation — does not fail this check: %s\n", len(ambiguousMissing), strings.Join(ambiguousMissing, ", "))
-		stillMissing = true
-	}
-	if len(butlerMissing) > 0 {
-		rep.Passthrough("advisory: %d butler label(s) still missing after creation (ADR 0056) — does not fail this check: %s\n", len(butlerMissing), strings.Join(butlerMissing, ", "))
-		stillMissing = true
+	for _, tr := range tierResults {
+		if len(tr.missing) > 0 {
+			rep.Passthrough("advisory: %d %s label(s) still missing after creation%s — does not fail this check: %s\n", len(tr.missing), tr.tier.noun, refSuffix(tr.tier.ref), strings.Join(tr.missing, ", "))
+			stillMissing = true
+		}
 	}
 	if stillMissing {
 		return nil
 	}
-	rep.Success("all triage, research, priority, ambiguous-spec, and butler labels present")
+	rep.Success("%s", allLabelsPresentMessage())
 	return nil
 }

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,6 +26,51 @@ func defaultDoctorConfig() Config {
 		// MergePolicy and BaseBranch on the returned Config.
 		MergePolicy: "manual",
 		BaseBranch:  "main",
+	}
+}
+
+// TestAdvisoryLabelNames_MatchesTierFuncsConcatenatedInOrder pins
+// AdvisoryLabelNames as a flattening of the per-tier funcs in table order, so
+// a reordering of advisoryTiers or a divergence between the two would fail
+// here first.
+func TestAdvisoryLabelNames_MatchesTierFuncsConcatenatedInOrder(t *testing.T) {
+	var want []string
+	want = append(want, ResearchLabelNames()...)
+	want = append(want, PriorityLabelNames()...)
+	want = append(want, AmbiguousLabelNames()...)
+	want = append(want, ButlerLabelNames()...)
+
+	got := AdvisoryLabelNames()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AdvisoryLabelNames() = %v, want %v", got, want)
+	}
+}
+
+// TestRefSuffix pins refSuffix's empty-ref branch: an empty ref must produce
+// no leading space, so a table row with ref "" (ambiguous-spec) never leaves
+// a double space before the em dash in a report line.
+func TestRefSuffix(t *testing.T) {
+	cases := []struct {
+		ref  string
+		want string
+	}{
+		{"", ""},
+		{"(ADR 0040)", " (ADR 0040)"},
+	}
+	for _, c := range cases {
+		if got := refSuffix(c.ref); got != c.want {
+			t.Errorf("refSuffix(%q) = %q, want %q", c.ref, got, c.want)
+		}
+	}
+}
+
+// TestAllLabelsPresentMessage_ExactString pins the all-present success
+// sentence built from advisoryTiers against the golden report's exact wording
+// (cmd/launcher/testdata/golden/doctor-healthy-report.txt).
+func TestAllLabelsPresentMessage_ExactString(t *testing.T) {
+	const want = "all triage, research, priority, ambiguous-spec, and butler labels present"
+	if got := allLabelsPresentMessage(); got != want {
+		t.Fatalf("allLabelsPresentMessage() = %q, want %q", got, want)
 	}
 }
 
@@ -919,5 +966,56 @@ func TestRun_Quiet_Interactive_StillMissingAfterCreation_AlwaysOn(t *testing.T) 
 	want := "advisory: 1 research label(s) still missing after creation (ADR 0022 / ADR 0041) — does not fail this check: " + missingResearch + "\n"
 	if got := buf.String(); !strings.Contains(got, want) {
 		t.Errorf("want the still-missing line even in quiet mode, want %q, got:\n%s", want, got)
+	}
+}
+
+// TestRun_NewAdvisoryTier_OneTableEntryIsEnough pins the design claim behind
+// advisoryTiers: appending one entry — with no other doctor.go edit — is
+// enough for Run to report a wholly new tier exactly like a shipped one. It
+// mutates the package-level table, which is safe only while no test in this
+// package calls t.Parallel — adding one anywhere would race this mutation.
+func TestRun_NewAdvisoryTier_OneTableEntryIsEnough(t *testing.T) {
+	cfg := defaultDoctorConfig()
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	// Every shipped label, captured before the table grows, so only
+	// agent-hypothetical reports missing.
+	present := append([]string{cfg.Label, cfg.InProgressLabel, cfg.FailedLabel, cfg.CompleteLabel},
+		AdvisoryLabelNames()...)
+	f.Labels = present
+	// Both snapshots omit agent-hypothetical, so the re-verify after creation
+	// reaches the still-missing Passthrough too.
+	f.LabelsSeq = [][]string{present, present}
+
+	saved := advisoryTiers
+	t.Cleanup(func() { advisoryTiers = saved })
+	advisoryTiers = append(append([]labelTier{}, saved...), labelTier{
+		noun:  "hypothetical",
+		ref:   "(ADR 9999)",
+		names: func() []string { return []string{"agent-hypothetical"} },
+	})
+
+	if !slices.Contains(AdvisoryLabelNames(), "agent-hypothetical") {
+		t.Errorf("want AdvisoryLabelNames to include the new tier's label, got %v", AdvisoryLabelNames())
+	}
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		labelMissingMsg("agent-hypothetical"),
+		"advisory: 1 hypothetical label(s) missing (ADR 9999) — does not fail this check",
+		"advisory: 1 hypothetical label(s) still missing after creation (ADR 9999) — does not fail this check: agent-hypothetical\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("want the new tier reported as %q, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "all triage,") {
+		t.Errorf("must not print the all-present success line when the new tier's label is missing, got:\n%s", out)
 	}
 }
