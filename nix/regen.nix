@@ -31,6 +31,8 @@ let
   boxEnvFixture = renderers.renderSetBoxEnvFixture schema;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
+  choreCatalog = import ../lib/chore-catalog.nix;
+  choreBuiltinsFile = renderers.renderChoreBuiltinsGo choreCatalog.names;
   agentPaths = import ../lib/agent-paths.nix;
   agentPathsFile = renderers.renderAgentPathsGo agentPaths;
   runtimeValues = import ../lib/runtime-values.nix;
@@ -167,6 +169,7 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/schemaconfig_gen.go"
     ${writeGenerated "docs/flake-options.md" flakeOptionsDoc}
     ${writeGenerated "cmd/launcher/internal/driver/drivernames_gen.go" driverNamesFile}
+    ${writeGenerated "cmd/launcher/internal/chore/builtins_gen.go" choreBuiltinsFile}
     ${writeGenerated "cmd/launcher/internal/agentpaths/agentpaths_gen.go" agentPathsFile}
     ${writeGenerated "cmd/launcher/internal/runner/runtimevalues_gen.go" runtimeValuesFile}
     ${writeGenerated "cmd/launcher/quickstart/quickstart_paths_gen.go" quickstartPathsFile}

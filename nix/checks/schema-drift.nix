@@ -490,6 +490,26 @@ checkedMerge {
         touch $out
       '';
 
+  # Regenerate with `nix run .#regen` when lib/chore-catalog.nix changes
+  # (issue #3991).
+  chore-builtins-gen =
+    let
+      choreCatalog = import ../../lib/chore-catalog.nix;
+      generated = pkgs.writeText "builtins_gen.go.generated" (
+        renderers.renderChoreBuiltinsGo choreCatalog.names
+      );
+    in
+    pkgs.runCommand "chore-builtins-gen"
+      {
+        inherit generated;
+        committed = ../../cmd/launcher/internal/chore/builtins_gen.go;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "cmd/launcher/internal/chore/builtins_gen.go is out of sync with lib/chore-catalog.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # Regenerate with `nix run .#regen` when lib/agent-paths.nix changes.
   # runner/mount.go's SPINDRIFT_PROMPT_DIR target reads agentpaths.PromptsDir
   # rather than its own literal, so renaming a baked /agent/* path fails here
