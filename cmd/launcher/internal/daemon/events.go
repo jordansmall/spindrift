@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
 // emitErrW is where Emit reports a failed Encode, and where pool.publish
@@ -31,11 +33,12 @@ type Event struct {
 	// moved tip is evidence for every jammed kind at once, not just
 	// whichever kind Kind would have named.
 	Kinds []Kind `json:"kinds,omitempty"`
-	Issue string `json:"issue,omitempty"`
-	// Chore is Issue's Chore-keyed counterpart (ADR 0056, issue #3878): a
-	// butler child's box/settled/child_finish events carry it instead of
-	// Issue, since a butler run has no tracker issue to name.
-	Chore string `json:"chore,omitempty"`
+	// Key is a box/settled/child_finish event's Dispatch key — a tracker
+	// issue for an ordinary Dispatch, a butler Chore for a butler run (ADR
+	// 0056, issue #3878) — and zero for every other event. It marshals onto
+	// the wire's unchanged "issue"/"chore" fields (see MarshalJSON/
+	// UnmarshalJSON, issue #3988), never as "key" itself.
+	Key dispatchkey.Key `json:"-"`
 	// Phase is the box event's own field — "initial", "fix-pass-N" or
 	// "conflict-resolve" — carried straight from the child's report.Record
 	// (issue #3627); no other event sets it.
@@ -55,6 +58,43 @@ type Event struct {
 	// the event names the transition without cross-referencing an earlier
 	// backoff event.
 	Failures *int `json:"failures,omitempty"`
+}
+
+// eventWire is Event's JSON shape: eventFields sheds Event's methods so
+// marshalling it doesn't recurse, and Key splits back into the wire's
+// "issue"/"chore" pair, which sits at the end of the object.
+type eventWire struct {
+	eventFields
+	Issue string `json:"issue,omitempty"`
+	Chore string `json:"chore,omitempty"`
+}
+
+type eventFields Event
+
+func (ev Event) MarshalJSON() ([]byte, error) {
+	issue, chore := ev.Key.Fields()
+	return json.Marshal(eventWire{eventFields: eventFields(ev), Issue: issue, Chore: chore})
+}
+
+// UnmarshalJSON leaves Key zero, without error, when neither issue nor chore
+// is set: most events carry no key at all. Both set is always an error —
+// ParseRecord already enforces exactly one on the way in, so a decoded
+// event with both is a genuine wire corruption, not a case to tolerate.
+func (ev *Event) UnmarshalJSON(data []byte) error {
+	var w eventWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	var key dispatchkey.Key
+	if w.Issue != "" || w.Chore != "" {
+		var err error
+		if key, err = dispatchkey.Parse(w.Issue, w.Chore); err != nil {
+			return err
+		}
+	}
+	*ev = Event(w.eventFields)
+	ev.Key = key
+	return nil
 }
 
 // ShutdownDrain is the reason on the shutdown event the daemon emits for the

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/report"
 )
@@ -166,19 +167,17 @@ const (
 
 // slotFlight is what one occupied slot currently has in flight. issues is
 // the deduped set behind SlotStatus.Issues (origin/main's "seen" semantics,
-// issue #3627's review finding) in first-seen order; last is tracked
+// issue #3627's review finding) in first-seen order; key is tracked
 // separately since a repeat-issue box (e.g. a fix-pass after the initial
 // box) must still move flightClaim's answer even though it adds nothing to
-// issues. chore is the Chore-keyed counterpart of last for a butler child
-// (ADR 0056, issue #3878): a Chore is never a tracker issue, so it is
-// tracked on its own field — surfaced as SlotStatus.Chore — and never
-// folded into issues/SlotStatus.Issues.
+// issues, and a Chore-keyed box (ADR 0056, issue #3878) never enters issues
+// at all — a Chore is never a tracker issue — so key alone carries it,
+// surfaced as SlotStatus.Chore.
 type slotFlight struct {
 	kind     Kind
 	revision string
 	issues   []string
-	last     string
-	chore    string
+	key      dispatchkey.Key
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -373,34 +372,30 @@ func (p *pool) finishChild(slot int) {
 	})
 }
 
-// noteBox records rec.Issue (or, for a butler child, rec.Chore — ParseRecord
-// already enforces exactly one of the two is non-empty) as slot's most
-// recently boxed claim and, the first time this child run boxes an issue,
-// appends it to slot's in-flight issue list for a snapshot to report while
-// the child is still running — deduped, to match origin/main's "seen"
-// semantics, since a fix-pass box for an issue already open in this slot is
-// the same claim continuing, not a second one (issue #3627's review
-// finding). A chore is never added to that list (issue #3878):
-// SlotStatus.Issues names tracker issues, and a Chore is not one —
-// flight.chore alone tracks it, for flightClaim and SlotStatus.Chore to
-// read. It emits the box event unconditionally, dedup or not: a fix-pass
-// box is a real thing that happened, and only the status-file issue list
-// collapses repeats, not the event stream. Both in one mutate so the event
-// and the status snapshot it rides alongside always agree. A no-op — no
-// state change, no event — if slot is not currently running: the child
-// reported after the slot cleared, which can only be a race (RunChild
-// already returned), not a state worth publishing.
+// noteBox records rec.Key as slot's most recently boxed claim and, the
+// first time this child run boxes a tracker-issue key, appends it to slot's
+// in-flight issue list for a snapshot to report while the child is still
+// running — deduped, to match origin/main's "seen" semantics, since a
+// fix-pass box for an issue already open in this slot is the same claim
+// continuing, not a second one (issue #3627's review finding). A Chore key
+// (ADR 0056, issue #3878) is never added to that list: SlotStatus.Issues
+// names tracker issues, and a Chore is not one — flight.key alone tracks
+// it, for flightClaim and SlotStatus.Chore to read. It emits the box event
+// unconditionally, dedup or not: a fix-pass box is a real thing that
+// happened, and only the status-file issue list collapses repeats, not the
+// event stream. Both in one mutate so the event and the status snapshot it
+// rides alongside always agree. A no-op — no state change, no event — if
+// slot is not currently running: the child reported after the slot
+// cleared, which can only be a race (RunChild already returned), not a
+// state worth publishing.
 func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
-	issue, chore := rec.Key.Fields()
 	p.mutate(func(s *state) []Event {
 		if s.slots[slot].phase != PhaseRunning {
 			return nil
 		}
 		flight := &s.slots[slot].flight
-		if chore != "" {
-			flight.chore = chore
-		} else {
-			flight.last = issue
+		flight.key = rec.Key
+		if issue, _ := rec.Key.Fields(); issue != "" {
 			seen := false
 			for _, existing := range flight.issues {
 				if existing == issue {
@@ -412,7 +407,7 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 				flight.issues = append(flight.issues, issue)
 			}
 		}
-		return []Event{{Event: report.EventBox, Kind: kind, Revision: revision, Issue: issue, Chore: chore, Phase: rec.Phase, Slot: intPtr(slot)}}
+		return []Event{{Event: report.EventBox, Kind: kind, Revision: revision, Key: rec.Key, Phase: rec.Phase, Slot: intPtr(slot)}}
 	})
 }
 
@@ -426,24 +421,21 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 // terminal outcome, true whether or not the slot still runs, and dropping
 // it would lose the one event that answers "what happened to #123".
 func (p *pool) noteSettled(slot int, kind Kind, revision string, rec Record) {
-	issue, chore := rec.Key.Fields()
 	p.mutate(func(*state) []Event {
-		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Issue: issue, Chore: chore, State: rec.State, Note: rec.Note, Slot: intPtr(slot)}}
+		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Key: rec.Key, State: rec.State, Note: rec.Note, Slot: intPtr(slot)}}
 	})
 }
 
-// flightClaim returns the issue and Chore slot's child most recently boxed
-// (the last values noteBox recorded, regardless of whether that box was a
-// repeat and so never grew the deduped issues list) — exactly one of the two
-// is ever non-empty. Read directly under p.mu rather than through mutate,
-// since it changes nothing; callers that need it for a child_finish event
-// must call it before finishChild zeroes the slot's flight — this is the
-// only place either is still available at all.
-func (p *pool) flightClaim(slot int) (issue, chore string) {
+// flightClaim returns the key slot's child most recently boxed (the value
+// noteBox recorded, regardless of whether that box was a repeat and so
+// never grew the deduped issues list). Read directly under p.mu rather than
+// through mutate, since it changes nothing; callers that need it for a
+// child_finish event must call it before finishChild zeroes the slot's
+// flight — this is the only place it is still available at all.
+func (p *pool) flightClaim(slot int) dispatchkey.Key {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	f := p.st.slots[slot].flight
-	return f.last, f.chore
+	return p.st.slots[slot].flight.key
 }
 
 // working reports whether any slot's phase is running — snapshotLocked's
@@ -1043,7 +1035,7 @@ func (p *pool) snapshotLocked() Status {
 		}
 		slots[i].Kind = ss.flight.kind
 		slots[i].Revision = ss.flight.revision
-		slots[i].Chore = ss.flight.chore
+		_, slots[i].Chore = ss.flight.key.Fields()
 		if len(ss.flight.issues) > 0 {
 			// A snapshot handed to a writer must not alias state this slot
 			// keeps appending to.

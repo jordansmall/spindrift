@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
 // failWriter always fails, simulating a closed or full stdout.
@@ -24,7 +26,7 @@ func TestEmitterEmit(t *testing.T) {
 	e.Emit(Event{
 		Event:    "child_finish",
 		Kind:     KindDispatch,
-		Issue:    "42",
+		Key:      dispatchkey.Issue("42"),
 		Revision: "abc123",
 		Exit:     &exitCode,
 		Outcome:  "dispatched",
@@ -63,6 +65,42 @@ func TestEmitterEmit(t *testing.T) {
 	}
 	if _, ok := got["reason"]; ok {
 		t.Errorf("reason present in output, want omitted: %v", got)
+	}
+}
+
+// TestEventMarshalJSONProjectsKeyOntoIssueOrChore pins the wire shape
+// (issue #3988): Key never appears as "key" on the wire, only as the
+// "issue"/"chore" pair report.Record's own MarshalJSON already documents,
+// and a keyless event (e.g. shutdown) carries neither.
+func TestEventMarshalJSONProjectsKeyOntoIssueOrChore(t *testing.T) {
+	issueLine, err := json.Marshal(Event{Event: "box", Key: dispatchkey.Issue("42")})
+	if err != nil {
+		t.Fatalf("marshal issue-keyed event: %v", err)
+	}
+	if !strings.Contains(string(issueLine), `"issue":"42"`) {
+		t.Errorf("issue-keyed event = %s, want it to contain %q", issueLine, `"issue":"42"`)
+	}
+	if strings.Contains(string(issueLine), `"chore"`) {
+		t.Errorf("issue-keyed event = %s, want no \"chore\" field", issueLine)
+	}
+
+	choreLine, err := json.Marshal(Event{Event: "box", Key: dispatchkey.Chore("bugs")})
+	if err != nil {
+		t.Fatalf("marshal chore-keyed event: %v", err)
+	}
+	if !strings.Contains(string(choreLine), `"chore":"bugs"`) {
+		t.Errorf("chore-keyed event = %s, want it to contain %q", choreLine, `"chore":"bugs"`)
+	}
+	if strings.Contains(string(choreLine), `"issue"`) {
+		t.Errorf("chore-keyed event = %s, want no \"issue\" field", choreLine)
+	}
+
+	shutdownLine, err := json.Marshal(Event{Event: "shutdown", Reason: ShutdownDrain})
+	if err != nil {
+		t.Fatalf("marshal keyless event: %v", err)
+	}
+	if strings.Contains(string(shutdownLine), `"issue"`) || strings.Contains(string(shutdownLine), `"chore"`) {
+		t.Errorf("keyless event = %s, want neither \"issue\" nor \"chore\"", shutdownLine)
 	}
 }
 
