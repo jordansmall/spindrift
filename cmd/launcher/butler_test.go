@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/signalwire"
 )
 
 // testClaimTimeout is the claim timeout every test passes explicitly now
@@ -960,6 +961,7 @@ func TestButlerPreflight(t *testing.T) {
 		{"forge with no ledger rejected", "git", "bugs", "", 0, 0, "bugs", true, nil, false, "cannot host a butler Ledger (supported: github, forgejo, local)"},
 		{"chore not enabled", "local", "other-chore", "", 0, 0, "bugs", true, nil, false, "is not enabled"},
 		{"malformed classes rejected", "local", "bugs", "bugs", 0, 0, "bugs", true, nil, false, "BUTLER_CHORE_CLASSES"},
+		{"non-slug class rejected", "local", "bugs", "bugs=Error_Handling", 0, 0, "bugs", true, nil, false, "Error_Handling"},
 		{"filer not provisioned", "local", "bugs", "", 0, 0, "bugs", false, nil, false, "needs a provisioned Filer"},
 		{"forge checked before chore", "git", "other-chore", "", 0, 0, "bugs", false, nil, false, "cannot host a butler Ledger"},
 		{"chore checked before filer", "local", "other-chore", "", 0, 0, "bugs", false, nil, false, "is not enabled"},
@@ -997,6 +999,9 @@ func TestButlerPreflight(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("butlerPreflight(%+v) err = %v, want substring %q", tc, err, tc.wantErr)
+			}
+			if tc.name == "non-slug class rejected" && !strings.Contains(err.Error(), signalwire.ClassRule) {
+				t.Errorf("butlerPreflight(%+v) err = %v, want it to contain signalwire.ClassRule %q", tc, err, signalwire.ClassRule)
 			}
 		})
 	}

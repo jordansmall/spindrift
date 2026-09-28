@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/signalwire"
 )
 
 // ParseClasses parses BUTLER_CHORE_CLASSES (ADR 0056): a space-separated list
@@ -28,8 +29,8 @@ func ParseClasses(s string) (map[string][]string, error) {
 		classes := strings.Split(classesPart, ",")
 		seen := map[string]bool{}
 		for _, class := range classes {
-			if !promptassembly.ValidChoreName(class) {
-				return nil, fmt.Errorf("invalid class %q for chore %q: %s", class, chore, promptassembly.ChoreNameRule)
+			if !signalwire.ValidClass(class) {
+				return nil, fmt.Errorf("invalid class %q for chore %q: %s", class, chore, signalwire.ClassRule)
 			}
 			if seen[class] {
 				return nil, fmt.Errorf("duplicate class %q for chore %q", class, chore)
