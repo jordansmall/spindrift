@@ -105,6 +105,45 @@ func TestIssueIntentRelaySummariesSharedSendParagraph(t *testing.T) {
 	}
 }
 
+// TestIssueIntentButlerFileIssuesRelayFragmentsShareProse pins the prose
+// butler-file-issues-relay.md (log carrier) and
+// butler-file-issues-relay-socket.md (socket carrier) share. The carrier is
+// chosen per dispatch and fragments have no shared include, so that prose is
+// mirrored by hand and a one-sided edit drifts silently unless caught here
+// (issue #3927). Only the mechanism clause and the socket twin's send
+// paragraph legitimately differ. Whitespace is normalized first, so unlike
+// TestIssueIntentRelaySummariesSharedSendParagraph a one-sided re-wrap passes.
+func TestIssueIntentButlerFileIssuesRelayFragmentsShareProse(t *testing.T) {
+	logRaw := readPromptFile(t, repoRoot, "fragments/butler-file-issues-relay.md")
+	socketRaw := readPromptFile(t, repoRoot, "fragments/butler-file-issues-relay-socket.md")
+
+	// The socket-only send paragraph is pinned by
+	// TestIssueIntentRelaySummariesSharedSendParagraph instead.
+	sendParagraph := sharedSpanBetween(t, socketRaw, "The filer sends each in one call")
+	socketRaw = strings.Replace(socketRaw, sendParagraph, "", 1)
+
+	normalizedLog := normalizeWhitespace(logRaw)
+	normalizedSocket := normalizeWhitespace(socketRaw)
+
+	const logClause = "It emits `SPINDRIFT_ISSUE_INTENT` lines instead of filing directly"
+	const socketClause = "It sends each one over the Signal socket via `driver-exec signal issue-intent` instead of filing directly"
+	const placeholder = "<mechanism clause>"
+
+	if strings.Count(normalizedLog, logClause) != 1 {
+		t.Fatalf("butler-file-issues-relay.md does not contain the log mechanism clause exactly once:\n%s", normalizedLog)
+	}
+	if strings.Count(normalizedSocket, socketClause) != 1 {
+		t.Fatalf("butler-file-issues-relay-socket.md does not contain the socket mechanism clause exactly once:\n%s", normalizedSocket)
+	}
+
+	normalizedLog = strings.Replace(normalizedLog, logClause, placeholder, 1)
+	normalizedSocket = strings.Replace(normalizedSocket, socketClause, placeholder, 1)
+
+	if normalizedLog != normalizedSocket {
+		t.Errorf("butler-file-issues-relay.md and butler-file-issues-relay-socket.md diverge beyond the mechanism clause and the socket-only send paragraph:\nbutler-file-issues-relay.md (normalized):\n%s\n\nbutler-file-issues-relay-socket.md (normalized):\n%s", normalizedLog, normalizedSocket)
+	}
+}
+
 // TestFilerFileRelaySocketFragmentSendShape pins filer-file-relay-socket.md's
 // heredoc example carrying -dedup, the closing delimiter sitting alone at
 // column one, and no bare EOF delimiter, since that fragment (unlike the
