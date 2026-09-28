@@ -1031,9 +1031,11 @@ _stripped_review_handoff() {
 # preserves any committed work on BRANCH and prints one synthetic status=blocked
 # SPINDRIFT_OUTCOME line. Called only when the Driver produced no parseable
 # outcome, so the launcher always gets a terminal signal (issue #593). The whole
-# decision lives in the verb (issue #2157, ADR 0036); this is exec glue.
+# decision lives in the verb (issue #2157, ADR 0036); this is exec glue. Extra
+# args pass through to the verb, e.g. main()'s --prior-outcome-line (#4016).
 emit_outcome_backstop() {
   local _recovery="${1:-}"
+  shift || true
   # --run-state-file is a fixed path, not a launcher-set env var: it mirrors the
   # orchestrator's own --state-file default (issue #1997). A missing file, from a
   # non-orchestrator run or one that never reached a review pass, is handled by
@@ -1051,7 +1053,8 @@ emit_outcome_backstop() {
     --max-attempts "$MAX_REBASE_ATTEMPTS" \
     --backoff-secs "$TRANSIENT_BACKOFF_SECS" \
     --jitter-secs "$HOLD_JITTER_SECS" \
-    --run-state-file "/tmp/run-state.json"
+    --run-state-file "/tmp/run-state.json" \
+    "$@"
 }
 
 main() {
@@ -1264,6 +1267,19 @@ main() {
           printf '%s\n' "$_pr_intent_restore_line"
         fi
       fi
+    fi
+  fi
+
+  # A commit-carrying branch behind a status=already-resolved claim would skip
+  # review, CI and the merge gate yet still close the issue (issue #4016), so
+  # the verb demotes it to blocked and preserves the work; it prints nothing
+  # otherwise. Unguarded by $claude_rc: a crashed run's claim would close too.
+  if ! _is_advise_only && [ -n "$_last_outcome_line" ]; then
+    local _demoted_outcome_line
+    _demoted_outcome_line="$(emit_outcome_backstop "" --prior-outcome-line "$_last_outcome_line")"
+    if [ -n "$_demoted_outcome_line" ]; then
+      printf '%s\n' "$_demoted_outcome_line"
+      _last_outcome_line="$_demoted_outcome_line"
     fi
   fi
 
