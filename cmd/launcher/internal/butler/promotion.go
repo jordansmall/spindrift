@@ -8,12 +8,12 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// PromotionPolicy is the host-side auto-promotion gate for one Chore's
-// findings (issue #3880, ADR 0056), moved verbatim from settle.PromotionPolicy
-// (issue #3990) -- the Box's issue-intent payload is only ever an input to
-// eligible, never the gate itself, so a Box cannot widen its own allow-list,
-// raise its own file limit, or grant itself more of the day's promotion room.
-type PromotionPolicy struct {
+// promotion is the host-side auto-promotion gate for one Chore's findings
+// (issue #3880, ADR 0056). The Box's issue-intent payload is
+// only ever an input to eligible, never the gate itself, so a Box cannot
+// widen its own allow-list, raise its own file limit, or grant itself more
+// of the day's promotion room.
+type promotion struct {
 	// Classes is this Chore's host-side finding-class allow-list (from
 	// BUTLER_CHORE_CLASSES). Nil/empty means no class is promotable -- an
 	// unconfigured Chore reads as opted out, not "trust the Box".
@@ -40,7 +40,7 @@ type PromotionPolicy struct {
 // itself, so the settle step checks it separately alongside eligible.
 // f.Concurrence is already sanitized (settle.parseIssueIntent), so eligible
 // only needs to check it's non-blank.
-func (p PromotionPolicy) eligible(f settle.Finding, files []string) bool {
+func (p promotion) eligible(f settle.Finding, files []string) bool {
 	if p.Label == "" {
 		return false
 	}
@@ -60,7 +60,7 @@ func (p PromotionPolicy) eligible(f settle.Finding, files []string) bool {
 // arrives already sanitized (settle.parseIssueIntent runs before a Finding
 // ever reaches this package), so only oneLine's collapse is needed here to
 // keep the reviewer's prose from breaking the note's single sentence.
-func promotionNote(choreName string, f settle.Finding, policy PromotionPolicy, nFiles int) string {
+func promotionNote(choreName string, f settle.Finding, policy promotion, nFiles int) string {
 	concurrence := oneLine(f.Concurrence)
 	return fmt.Sprintf(
 		"**Auto-promoted** to `%s` by the butler: class `%s` is on the `%s` Chore's allow-list, it touches %d file(s) (host limit %d), and the in-Box reviewer agreed: `%s`",

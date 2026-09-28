@@ -26,8 +26,7 @@ type settled struct {
 	filed, promoted, dropped int
 }
 
-// settleRun is one Chore run's settle step (moved from settle.ButlerSettle,
-// issue #3990): file each finding the Box reported, then write the Chore's
+// settleRun is one Chore run's settle step: file each finding the Box reported, then write the Chore's
 // done Ledger commit carrying the advanced lastSwept/cursor, the filed URLs,
 // and the run's usage. No CI watch, no merge, and no tracker label
 // transition -- the butler carries no tracker issue of its own, only a
@@ -40,7 +39,7 @@ type settleRun struct {
 	scope               chore.Scope
 	now                 func() time.Time
 	maxFindingsPerSweep int
-	policy              PromotionPolicy
+	policy              promotion
 }
 
 // newSettleRun constructs a settleRun for one Chore run. claim is the Ledger
@@ -52,7 +51,7 @@ type settleRun struct {
 // many well-formed findings settle will file in one sweep; 0 means no cap.
 // policy is the host-side auto-promotion gate (issue #3880); its zero value
 // never promotes anything.
-func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, maxFindingsPerSweep int, policy PromotionPolicy) *settleRun {
+func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, maxFindingsPerSweep int, policy promotion) *settleRun {
 	return &settleRun{it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, maxFindingsPerSweep: maxFindingsPerSweep, policy: policy}
 }
 
@@ -60,8 +59,13 @@ func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName strin
 // Ledger commit. A crashed run -- no outcome line, or an outcome line whose
 // status isn't "ready" (e.g. blocked) -- files nothing and writes no Ledger
 // commit at all, so the claim stands and lastSwept/cursor stay put for the
-// next run to resume from (ADR 0056).
-func (s *settleRun) settle(d dispatch.Dispatcher, num string, result dispatch.Result) settled {
+// next run to resume from (ADR 0056). Rejected signal lines are warned about
+// first, before either crash guard, so a crashed run's dropped comment/
+// issue-intent/pr-intent lines are never silently lost (issue #3990).
+func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settled {
+	num := dispatchkey.Chore(s.chore).String()
+	settle.LogRejectedSignals(num, result)
+
 	if !result.Resolved.Found {
 		s.fail(num, "no ready outcome line")
 		return settled{}

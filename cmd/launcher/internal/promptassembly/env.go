@@ -182,11 +182,10 @@ type Env struct {
 
 	// ChoreClasses is the Chore's promotion-candidate class allow-list
 	// (issue #3880), space-joined; empty whenever the host has promotion
-	// off (dispatch.Chore.Classes, set by butler.go's
-	// runOneButlerChore only when BUTLER_MAX_PROMOTIONS_PER_DAY > 0). It is
-	// informational for the Box's prompt only -- settle re-checks a
-	// finding's class against the host's own allow-list regardless of what
-	// this string says.
+	// off (dispatch.Chore.Classes, set by internal/butler's Runner only
+	// when BUTLER_MAX_PROMOTIONS_PER_DAY > 0). It is informational for the
+	// Box's prompt only -- settle re-checks a finding's class against the
+	// host's own allow-list regardless of what this string says.
 	ChoreClasses string // dispatch.go: $CHORE_CLASSES
 }
 

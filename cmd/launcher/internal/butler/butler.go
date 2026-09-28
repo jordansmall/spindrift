@@ -1,19 +1,19 @@
 // Package butler runs one Butler Chore sweep end to end -- claim, scope,
-// Box, file, finish -- behind a single Sweep call (issue #3990). It replaces
-// cmd/launcher's runButler/runOneButlerChore, keeping the pure Chore due/scope
-// logic in internal/chore and the finding-filing/promotion logic in
-// internal/settle, and owns only the orchestration between them.
+// Box, file, finish -- behind a single Sweep call (issue #3990). The pure
+// due/scope logic stays in internal/chore and finding filing in
+// internal/settle; promotion, budget room and the settle step are this
+// package's own unexported seams.
 package butler
 
 import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 )
@@ -21,35 +21,38 @@ import (
 // Tree is the checkout a Butler scans -- a thin seam over internal/chore's
 // git-shelling Head/TrackedFiles so Sweep is testable without a real repo.
 type Tree interface {
-	Head() (string, error)
+	Head(branch string) (string, error)
 	TrackedFiles(commit string) ([]string, error)
 }
 
-// GitTree is Tree's production implementation: Repo/Branch identify the bare
-// Accumulation repo and branch internal/chore's git wrapper shells out to.
+// GitTree is Tree's production implementation: Repo identifies the bare
+// Accumulation repo internal/chore's git wrapper shells out to. The branch
+// comes from Sweep's own r.policy.Branch, not a field here, so it's never
+// passed twice (issue #3990).
 type GitTree struct {
-	Repo, Branch string
+	Repo string
 }
 
-// Head resolves g.Branch's tip in g.Repo.
-func (g GitTree) Head() (string, error) { return chore.Head(g.Repo, g.Branch) }
+// Head resolves branch's tip in g.Repo.
+func (g GitTree) Head(branch string) (string, error) { return chore.Head(g.Repo, branch) }
 
 // TrackedFiles returns every path git tracks in commit's tree.
 func (g GitTree) TrackedFiles(commit string) ([]string, error) {
 	return chore.TrackedFiles(g.Repo, commit)
 }
 
-// Policy is a Runner's resolved butler knobs (ADR 0056), mirroring
-// cmd/launcher's butlerPolicy/butlerRun.
+// Policy is a Runner's resolved butler knobs (ADR 0056).
 type Policy struct {
 	// Branch is the branch a run's Box clones and scans (forwarded as
 	// dispatch.Chore.Branch).
 	Branch string
 	// Host identifies this claimant in the Ledger's ClaimedBy.
 	Host string
-	// Every reports a Chore's due interval (BUTLER_EVERY, with per-Chore
-	// overrides already resolved).
-	Every func(chore string) time.Duration
+	// Chores is every BUTLER_CHORES entry resolved by chore.Load, not just
+	// this Sweep's candidates: budgets are summed across all of them, even
+	// under a single --chore, and each Chore carries its own Every and
+	// Classes.
+	Chores []chore.Chore
 	// ClaimTimeout is the age past which a live claim is treated as stale.
 	ClaimTimeout time.Duration
 	// Budgets caps a local day's claims/findings/tokens across every enabled
@@ -57,13 +60,6 @@ type Policy struct {
 	Budgets chore.Budgets
 	// Zone is DAEMON_AWAKE_WINDOW's zone, where the budgets' day starts.
 	Zone *time.Location
-	// Enabled is every BUTLER_CHORES entry, not just this Sweep's
-	// candidates: budgets are summed across all of them, even under a single
-	// --chore.
-	Enabled []string
-	// Classes is BUTLER_CHORE_CLASSES parsed: each enabled Chore's host-side
-	// finding-class allow-list (issue #3880).
-	Classes map[string][]string
 	// PromotionMaxFiles is BUTLER_PROMOTION_MAX_FILES, the host limit on how
 	// many files an auto-promoted finding may touch.
 	PromotionMaxFiles int
@@ -124,23 +120,33 @@ func New(backend ledger.Backend, tree Tree, it forge.IssueTracker, newBox func(d
 
 // Sweep picks the first due Chore out of chores (in order) and runs it, or
 // reports why none is due (ADR 0056). chores is either the single name given
-// on --chore, or every BUTLER_CHORES entry in configured order when none was
-// given. tree.Head is read once up front, and the due check
-// (internal/chore.Check) shares a single now() reading across every
-// candidate, so the picture of "what's due" is consistent across the whole
-// pass rather than drifting chore to chore. The due check -- today's totals
-// plus each candidate's Read/History -- shares one ledger.Snapshot, so a
-// Remote backend costs one fetch for the whole pass rather than one per
-// candidate; the Claim and the settle step still go through the backend
-// directly, so they see a fresh tip. The tip handed to the run is the
-// snapshot's, so a rival commit since then just loses the Claim
-// compare-and-swap (Outcome{Kind: LostRace}) rather than being overwritten.
+// on --chore, or every Policy.Chores entry in configured order when none was
+// given; a name absent from Policy.Chores is an error, since its Every and
+// Classes would otherwise silently read as zero. tree.Head is read once up
+// front, and the due check (internal/chore.Check) shares a single now()
+// reading across every candidate, so the picture of "what's due" is
+// consistent across the whole pass rather than drifting chore to chore. The
+// due check -- today's totals plus each candidate's Read/History -- shares
+// one ledger.Snapshot, so a Remote backend costs one fetch for the whole pass
+// rather than one per candidate; the Claim and the settle step still go
+// through the backend directly, so they see a fresh tip. The tip handed to
+// the run is the snapshot's, so a rival commit since then just loses the
+// Claim compare-and-swap (Outcome{Kind: LostRace}) rather than being
+// overwritten.
 func (r *Runner) Sweep(chores []string) (Outcome, error) {
 	if len(chores) == 0 {
 		return Outcome{}, errors.New("butler: no chores to check")
 	}
+	candidates := make([]chore.Chore, len(chores))
+	for i, name := range chores {
+		j := slices.IndexFunc(r.policy.Chores, func(c chore.Chore) bool { return c.Name == name })
+		if j < 0 {
+			return Outcome{}, fmt.Errorf("butler: chore %q is not configured", name)
+		}
+		candidates[i] = r.policy.Chores[j]
+	}
 
-	head, err := r.tree.Head()
+	head, err := r.tree.Head(r.policy.Branch)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -151,34 +157,44 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("butler: snapshot ledger: %w", err)
 	}
 
-	today, err := ledger.DayTotalsAll(snap, r.policy.Enabled, whenNow.In(r.policy.Zone))
+	today, err := ledger.DayTotalsAll(snap, r.policy.choreNames(), whenNow.In(r.policy.Zone))
 	if err != nil {
 		return Outcome{}, fmt.Errorf("butler: total today's ledgers: %w", err)
 	}
 
 	var reasons []string
-	for _, choreName := range chores {
-		tip, err := snap.Read(choreName)
+	for _, c := range candidates {
+		tip, err := snap.Read(c.Name)
 		if err != nil {
-			return Outcome{}, fmt.Errorf("butler: read %s ledger: %w", choreName, err)
+			return Outcome{}, fmt.Errorf("butler: read %s ledger: %w", c.Name, err)
 		}
-		interval := r.policy.Every(choreName)
-		recent, err := snap.History(choreName, whenNow.Add(-interval))
+		recent, err := snap.History(c.Name, whenNow.Add(-c.Every))
 		if err != nil {
-			return Outcome{}, fmt.Errorf("butler: read %s ledger history: %w", choreName, err)
+			return Outcome{}, fmt.Errorf("butler: read %s ledger history: %w", c.Name, err)
 		}
-		verdict := chore.Check(tip, recent, head, whenNow, today, chore.DueConfig{Every: interval, ClaimTimeout: r.policy.ClaimTimeout, Budgets: r.policy.Budgets})
+		verdict := chore.Check(tip, recent, head, whenNow, today, chore.DueConfig{Every: c.Every, ClaimTimeout: r.policy.ClaimTimeout, Budgets: r.policy.Budgets})
 		if verdict != chore.Due {
-			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", choreName, verdict))
+			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", c.Name, verdict))
 			continue
 		}
-		return r.run(choreName, tip, head, whenNow)
+		return r.run(c, tip, head, whenNow)
 	}
 
 	return Outcome{Kind: NotDue, Reasons: reasons}, nil
 }
 
-// run claims choreName's Ledger (already read as tip, at head), computes this
+// choreNames returns every Policy.Chores name, in order -- the slice
+// ledger.DayTotalsAll needs to sum budgets across every enabled Chore, not
+// just this Sweep's candidates.
+func (p Policy) choreNames() []string {
+	names := make([]string, len(p.Chores))
+	for i, c := range p.Chores {
+		names[i] = c.Name
+	}
+	return names
+}
+
+// run claims c's Ledger (already read as tip, at head), computes this
 // run's scan Scope (internal/chore.NextScope), dispatches one Box through
 // r.newBox, and settles the result (ADR 0056). claimedAt is Sweep's whenNow,
 // reused for ClaimedBy.Start so the claim is stamped at the same instant its
@@ -188,7 +204,8 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 // the settle step's own return, never by re-reading the Ledger -- a crashed
 // run's settle writes nothing at all, so there would be nothing new there to
 // read back anyway.
-func (r *Runner) run(choreName string, tip ledger.Tip, head string, claimedAt time.Time) (Outcome, error) {
+func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.Time) (Outcome, error) {
+	choreName := c.Name
 	files, err := r.tree.TrackedFiles(head)
 	if err != nil {
 		return Outcome{}, err
@@ -206,7 +223,7 @@ func (r *Runner) run(choreName string, tip ledger.Tip, head string, claimedAt ti
 	}
 
 	scope := chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
-	promo := r.promotionPolicy(choreName)
+	promo := r.promotionPolicy(c)
 
 	// The Box only ever sees promo.Classes when promotion is actually on
 	// (promo.Room set, i.e. MaxPromotionsPerDay > 0): with promotion off
@@ -222,16 +239,16 @@ func (r *Runner) run(choreName string, tip ledger.Tip, head string, claimedAt ti
 	result := d.Run()
 
 	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, r.policy.Budgets.MaxFindingsPerSweep, promo)
-	s := step.settle(d, dispatchkey.Chore(choreName).String(), result)
+	s := step.settle(d, result)
 	if !s.done {
 		return Outcome{Kind: ClaimLeft, Chore: choreName}, nil
 	}
 	return Outcome{Kind: Swept, Chore: choreName, Filed: s.filed, Promoted: s.promoted, Dropped: s.dropped}, nil
 }
 
-// promotionPolicy builds choreName's PromotionPolicy (issue #3880): Classes
-// and MaxFiles come straight from r.policy, and Room -- when promotion is on
-// at all -- re-walks today's Ledger at settle time (r.backend, r.policy.Enabled,
+// promotionPolicy builds c's promotion (issue #3880): Classes and MaxFiles
+// come straight from c and r.policy, and Room -- when promotion is on at all
+// -- re-walks today's Ledger at settle time (r.backend, r.policy.choreNames(),
 // r.now().In(r.policy.Zone)), the same call Sweep makes at run start, so a
 // promotion whose done commit already landed is counted here. Room takes its
 // own fresh ledger.Snapshot each call rather than reusing Sweep's, since it
@@ -240,9 +257,9 @@ func (r *Runner) run(choreName string, tip ledger.Tip, head string, claimedAt ti
 // at the same moment can each read the same total and both spend it. A
 // Snapshot or DayTotalsAll error fails closed (0 room, a warning to stderr)
 // rather than promoting on a total it could not compute.
-func (r *Runner) promotionPolicy(choreName string) PromotionPolicy {
-	pp := PromotionPolicy{
-		Classes:  r.policy.Classes[choreName],
+func (r *Runner) promotionPolicy(c chore.Chore) promotion {
+	pp := promotion{
+		Classes:  c.Classes,
 		MaxFiles: r.policy.PromotionMaxFiles,
 		Label:    r.policy.PromotionLabel,
 	}
@@ -250,7 +267,7 @@ func (r *Runner) promotionPolicy(choreName string) PromotionPolicy {
 		return pp
 	}
 	perDay := r.policy.MaxPromotionsPerDay
-	backend, enabled, zone, now := r.backend, r.policy.Enabled, r.policy.Zone, r.now
+	backend, enabled, zone, now := r.backend, r.policy.choreNames(), r.policy.Zone, r.now
 	pp.Room = func() int {
 		var totals ledger.Totals
 		snap, err := ledger.Snapshot(backend)
