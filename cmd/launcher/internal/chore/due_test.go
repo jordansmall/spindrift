@@ -1,17 +1,17 @@
-package butler_test
+package chore_test
 
 import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/usage"
 )
 
 func TestCheck(t *testing.T) {
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
-	cfg := butler.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
+	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
 
 	tests := []struct {
 		name   string
@@ -19,15 +19,15 @@ func TestCheck(t *testing.T) {
 		recent []ledger.Entry
 		head   string
 		today  ledger.Totals
-		cfg    butler.DueConfig
-		want   butler.NotDue
+		cfg    chore.DueConfig
+		want   chore.NotDue
 	}{
 		{
 			name: "empty ledger is due",
 			tip:  ledger.Tip{},
 			head: "h1",
 			cfg:  cfg,
-			want: butler.Due,
+			want: chore.Due,
 		},
 		{
 			name: "done long ago with new head is due",
@@ -39,7 +39,7 @@ func TestCheck(t *testing.T) {
 			},
 			head: "new",
 			cfg:  cfg,
-			want: butler.Due,
+			want: chore.Due,
 		},
 		{
 			name: "stale claim is taken over: due",
@@ -50,7 +50,7 @@ func TestCheck(t *testing.T) {
 			}},
 			head: "new",
 			cfg:  cfg,
-			want: butler.Due,
+			want: chore.Due,
 		},
 		{
 			name: "claim exactly at timeout is still live",
@@ -61,7 +61,7 @@ func TestCheck(t *testing.T) {
 			}},
 			head: "new",
 			cfg:  cfg,
-			want: butler.LiveClaim,
+			want: chore.LiveClaim,
 		},
 		{
 			name: "claim past timeout is stale: due",
@@ -72,7 +72,7 @@ func TestCheck(t *testing.T) {
 			}},
 			head: "new",
 			cfg:  cfg,
-			want: butler.Due,
+			want: chore.Due,
 		},
 		{
 			name: "claim well within timeout is live",
@@ -83,7 +83,7 @@ func TestCheck(t *testing.T) {
 			}},
 			head: "new",
 			cfg:  cfg,
-			want: butler.LiveClaim,
+			want: chore.LiveClaim,
 		},
 		{
 			name: "done inside the interval window blocks: not elapsed",
@@ -95,7 +95,7 @@ func TestCheck(t *testing.T) {
 			},
 			head: "new",
 			cfg:  cfg,
-			want: butler.IntervalNotElapsed,
+			want: chore.IntervalNotElapsed,
 		},
 		{
 			name: "done at exactly Every ago is due",
@@ -107,7 +107,7 @@ func TestCheck(t *testing.T) {
 			},
 			head: "new",
 			cfg:  cfg,
-			want: butler.Due,
+			want: chore.Due,
 		},
 		{
 			name: "old done entries outside the window are ignored",
@@ -121,7 +121,7 @@ func TestCheck(t *testing.T) {
 			},
 			head: "new",
 			cfg:  cfg,
-			want: butler.Due,
+			want: chore.Due,
 		},
 		{
 			name: "every zero disables the interval check",
@@ -132,8 +132,8 @@ func TestCheck(t *testing.T) {
 				{At: now.Add(-time.Second), State: ledger.State{Phase: ledger.Done}},
 			},
 			head: "new",
-			cfg:  butler.DueConfig{Every: 0, ClaimTimeout: time.Hour},
-			want: butler.Due,
+			cfg:  chore.DueConfig{Every: 0, ClaimTimeout: time.Hour},
+			want: chore.Due,
 		},
 		{
 			name: "fully rotated with head unchanged: nothing to scan",
@@ -141,8 +141,8 @@ func TestCheck(t *testing.T) {
 				LastSwept: "head1", Cursor: "", Phase: ledger.Done,
 			}},
 			head: "head1",
-			cfg:  butler.DueConfig{Every: 0, ClaimTimeout: time.Hour},
-			want: butler.NothingToScan,
+			cfg:  chore.DueConfig{Every: 0, ClaimTimeout: time.Hour},
+			want: chore.NothingToScan,
 		},
 		{
 			name: "fully rotated but head moved on: due",
@@ -150,8 +150,8 @@ func TestCheck(t *testing.T) {
 				LastSwept: "head1", Cursor: "", Phase: ledger.Done,
 			}},
 			head: "head2",
-			cfg:  butler.DueConfig{Every: 0, ClaimTimeout: time.Hour},
-			want: butler.Due,
+			cfg:  chore.DueConfig{Every: 0, ClaimTimeout: time.Hour},
+			want: chore.Due,
 		},
 		{
 			name: "mid-rotation cursor with lastSwept == head is due",
@@ -159,76 +159,76 @@ func TestCheck(t *testing.T) {
 				LastSwept: "head1", Cursor: "some/path", Phase: ledger.Done,
 			}},
 			head: "head1",
-			cfg:  butler.DueConfig{Every: 0, ClaimTimeout: time.Hour},
-			want: butler.Due,
+			cfg:  chore.DueConfig{Every: 0, ClaimTimeout: time.Hour},
+			want: chore.Due,
 		},
 		{
 			name:  "sweep budget spent",
 			tip:   ledger.Tip{},
 			head:  "h1",
 			today: ledger.Totals{Claims: 3},
-			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{MaxSweepsPerDay: 3}},
-			want:  butler.SweepBudgetSpent,
+			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{MaxSweepsPerDay: 3}},
+			want:  chore.SweepBudgetSpent,
 		},
 		{
 			name:  "sweep budget just under limit is due",
 			tip:   ledger.Tip{},
 			head:  "h1",
 			today: ledger.Totals{Claims: 2},
-			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{MaxSweepsPerDay: 3}},
-			want:  butler.Due,
+			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{MaxSweepsPerDay: 3}},
+			want:  chore.Due,
 		},
 		{
 			name:  "finding budget spent",
 			tip:   ledger.Tip{},
 			head:  "h1",
 			today: ledger.Totals{Filed: 5},
-			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{MaxFindingsPerDay: 5}},
-			want:  butler.FindingBudgetSpent,
+			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{MaxFindingsPerDay: 5}},
+			want:  chore.FindingBudgetSpent,
 		},
 		{
 			name:  "finding budget just under limit is due",
 			tip:   ledger.Tip{},
 			head:  "h1",
 			today: ledger.Totals{Filed: 4},
-			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{MaxFindingsPerDay: 5}},
-			want:  butler.Due,
+			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{MaxFindingsPerDay: 5}},
+			want:  chore.Due,
 		},
 		{
 			name:  "a full sweep would exceed today's finding headroom",
 			tip:   ledger.Tip{},
 			head:  "h1",
 			today: ledger.Totals{Filed: 8},
-			cfg: butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{
+			cfg: chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{
 				MaxFindingsPerDay: 10, MaxFindingsPerSweep: 3,
 			}},
-			want: butler.SweepFindingsExceedHeadroom,
+			want: chore.SweepFindingsExceedHeadroom,
 		},
 		{
 			name:  "headroom exactly covers a full sweep is due",
 			tip:   ledger.Tip{},
 			head:  "h1",
 			today: ledger.Totals{Filed: 7},
-			cfg: butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{
+			cfg: chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{
 				MaxFindingsPerDay: 10, MaxFindingsPerSweep: 3,
 			}},
-			want: butler.Due,
+			want: chore.Due,
 		},
 		{
 			name:  "daily token ceiling reached",
 			tip:   ledger.Tip{},
 			head:  "h1",
 			today: ledger.Totals{Usage: usage.Usage{InputTokens: 1000}},
-			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{DailyTokenCeiling: 1000}},
-			want:  butler.TokenCeilingReached,
+			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{DailyTokenCeiling: 1000}},
+			want:  chore.TokenCeilingReached,
 		},
 		{
 			name:  "just under the daily token ceiling is due",
 			tip:   ledger.Tip{},
 			head:  "h1",
 			today: ledger.Totals{Usage: usage.Usage{InputTokens: 999}},
-			cfg:   butler.DueConfig{ClaimTimeout: time.Hour, Budgets: butler.Budgets{DailyTokenCeiling: 1000}},
-			want:  butler.Due,
+			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{DailyTokenCeiling: 1000}},
+			want:  chore.Due,
 		},
 		{
 			name: "zero budgets mean unlimited despite huge totals",
@@ -238,14 +238,14 @@ func TestCheck(t *testing.T) {
 				Claims: 1_000_000, Filed: 1_000_000,
 				Usage: usage.Usage{InputTokens: 1_000_000},
 			},
-			cfg:  butler.DueConfig{ClaimTimeout: time.Hour},
-			want: butler.Due,
+			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
+			want: chore.Due,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := butler.Check(tt.tip, tt.recent, tt.head, now, tt.today, tt.cfg)
+			got := chore.Check(tt.tip, tt.recent, tt.head, now, tt.today, tt.cfg)
 			if got != tt.want {
 				t.Errorf("Check() = %d (%s), want %d (%s)", got, got, tt.want, tt.want)
 			}
@@ -255,18 +255,18 @@ func TestCheck(t *testing.T) {
 
 func TestNotDueString(t *testing.T) {
 	tests := []struct {
-		reason butler.NotDue
+		reason chore.NotDue
 		want   string
 	}{
-		{butler.Due, "due"},
-		{butler.LiveClaim, "claimed by another run"},
-		{butler.IntervalNotElapsed, "interval not elapsed"},
-		{butler.NothingToScan, "nothing to scan"},
-		{butler.SweepBudgetSpent, "daily sweep budget spent"},
-		{butler.FindingBudgetSpent, "daily finding budget spent"},
-		{butler.SweepFindingsExceedHeadroom, "a full sweep's findings would exceed today's finding budget"},
-		{butler.TokenCeilingReached, "daily token ceiling reached"},
-		{butler.NotDue(99), "unknown"},
+		{chore.Due, "due"},
+		{chore.LiveClaim, "claimed by another run"},
+		{chore.IntervalNotElapsed, "interval not elapsed"},
+		{chore.NothingToScan, "nothing to scan"},
+		{chore.SweepBudgetSpent, "daily sweep budget spent"},
+		{chore.FindingBudgetSpent, "daily finding budget spent"},
+		{chore.SweepFindingsExceedHeadroom, "a full sweep's findings would exceed today's finding budget"},
+		{chore.TokenCeilingReached, "daily token ceiling reached"},
+		{chore.NotDue(99), "unknown"},
 	}
 	for _, tt := range tests {
 		if got := tt.reason.String(); got != tt.want {

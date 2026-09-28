@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -48,7 +48,7 @@ func testButlerPolicy(every butlerEveryConfig, chores ...string) butlerPolicy {
 
 // newButlerTestRepo builds a bare repo with one commit on "main" holding one
 // tracked file, the fixture every runButler test claims and sweeps against
-// (same exec-git convention as internal/butler/git_test.go and
+// (same exec-git convention as internal/chore/git_test.go and
 // internal/settle/butler_test.go's own bare-repo fixtures).
 func newButlerTestRepo(t *testing.T) (repo, head string) {
 	t.Helper()
@@ -250,8 +250,8 @@ func testButlerRun(repo string) butlerRun {
 // acceptance criterion (`git log refs/spindrift/butler/bugs`). A
 // Consumer-declared Chore ("tidy-deps") runs exactly like a built-in one.
 func TestRunButler_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
-	for _, chore := range []string{"bugs", "tidy-deps"} {
-		t.Run(chore, func(t *testing.T) {
+	for _, choreName := range []string{"bugs", "tidy-deps"} {
+		t.Run(choreName, func(t *testing.T) {
 			repo, head := newButlerTestRepo(t)
 			backend := ledger.Local{Repo: repo}
 
@@ -260,8 +260,8 @@ func TestRunButler_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 
 			d := readyDispatcher()
 			newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
-				if c.Name != chore || c.Branch != "main" {
-					t.Fatalf("newDispatcher chore = %+v, want Name=%s Branch=main", c, chore)
+				if c.Name != choreName || c.Branch != "main" {
+					t.Fatalf("newDispatcher chore = %+v, want Name=%s Branch=main", c, choreName)
 				}
 				if c.Scope.Head != head {
 					t.Fatalf("newDispatcher scope.Head = %q, want %q", c.Scope.Head, head)
@@ -270,17 +270,17 @@ func TestRunButler_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 			}
 
 			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{chore}, testButlerPolicy(noEvery, chore), newDispatcher, func() time.Time { return now })
+			err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{choreName}, testButlerPolicy(noEvery, choreName), newDispatcher, func() time.Time { return now })
 			if err != nil {
 				t.Fatalf("runButler: %v", err)
 			}
 
-			subjects := gitLogSubjects(t, repo, ledger.RefPrefix+chore)
-			if len(subjects) != 2 || subjects[0] != chore+": done" || subjects[1] != chore+": claimed" {
-				t.Fatalf("git log subjects = %v, want [%s: done, %s: claimed]", subjects, chore, chore)
+			subjects := gitLogSubjects(t, repo, ledger.RefPrefix+choreName)
+			if len(subjects) != 2 || subjects[0] != choreName+": done" || subjects[1] != choreName+": claimed" {
+				t.Fatalf("git log subjects = %v, want [%s: done, %s: claimed]", subjects, choreName, choreName)
 			}
 
-			tip, err := backend.Read(chore)
+			tip, err := backend.Read(choreName)
 			if err != nil {
 				t.Fatalf("Read: %v", err)
 			}
@@ -703,13 +703,13 @@ func TestRunButler_NoChoreNoneDueReportsEachReason(t *testing.T) {
 	backend := ledger.Local{Repo: repo}
 
 	doneAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, chore := range []string{"bugs", "refactor"} {
-		claim, err := ledger.Claim(backend, chore, ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: doneAt})
+	for _, choreName := range []string{"bugs", "refactor"} {
+		claim, err := ledger.Claim(backend, choreName, ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: doneAt})
 		if err != nil {
-			t.Fatalf("seed Claim(%s): %v", chore, err)
+			t.Fatalf("seed Claim(%s): %v", choreName, err)
 		}
-		if _, err := ledger.Finish(backend, chore, claim, ledger.State{LastSwept: head}, doneAt); err != nil {
-			t.Fatalf("seed Finish(%s): %v", chore, err)
+		if _, err := ledger.Finish(backend, choreName, claim, ledger.State{LastSwept: head}, doneAt); err != nil {
+			t.Fatalf("seed Finish(%s): %v", choreName, err)
 		}
 	}
 
@@ -920,15 +920,15 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 	if def := schemaDefault("BUTLER_CHORES"); def != "" {
 		t.Fatalf("schemaDefault(BUTLER_CHORES) = %q, want \"\" (test assumes opt-in-only default)", def)
 	}
-	for _, chore := range []string{"bugs", "refactor", "docs-drift"} {
-		t.Run(chore, func(t *testing.T) {
+	for _, choreName := range []string{"bugs", "refactor", "docs-drift"} {
+		t.Run(choreName, func(t *testing.T) {
 			lc := &launchContext{
 				config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: schemaDefault("BUTLER_CHORES")}},
 				cleanup: func() {},
 			}
-			code := cmdButler(lc, chore)
+			code := cmdButler(lc, choreName)
 			if code != exitConfigInvalid {
-				t.Errorf("cmdButler(%q) code = %d, want %d", chore, code, exitConfigInvalid)
+				t.Errorf("cmdButler(%q) code = %d, want %d", choreName, code, exitConfigInvalid)
 			}
 		})
 	}
@@ -1088,7 +1088,7 @@ func TestParseButlerArgs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			chore, noBuild, err := parseButlerArgs(tc.args)
+			choreName, noBuild, err := parseButlerArgs(tc.args)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("parseButlerArgs(%v): got nil error, want one", tc.args)
@@ -1098,8 +1098,8 @@ func TestParseButlerArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseButlerArgs(%v): %v", tc.args, err)
 			}
-			if chore != tc.wantChore || noBuild != tc.wantNo {
-				t.Errorf("parseButlerArgs(%v) = (%q, %v), want (%q, %v)", tc.args, chore, noBuild, tc.wantChore, tc.wantNo)
+			if choreName != tc.wantChore || noBuild != tc.wantNo {
+				t.Errorf("parseButlerArgs(%v) = (%q, %v), want (%q, %v)", tc.args, choreName, noBuild, tc.wantChore, tc.wantNo)
 			}
 		})
 	}
@@ -1136,9 +1136,9 @@ func TestParseButlerEvery(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseButlerEvery(%q): %v", tc.value, err)
 			}
-			for chore, want := range tc.wantChores {
-				if d := got.For(chore); d != want {
-					t.Errorf("parseButlerEvery(%q).For(%q) = %v, want %v", tc.value, chore, d, want)
+			for choreName, want := range tc.wantChores {
+				if d := got.For(choreName); d != want {
+					t.Errorf("parseButlerEvery(%q).For(%q) = %v, want %v", tc.value, choreName, d, want)
 				}
 			}
 		})
@@ -1268,7 +1268,7 @@ func TestRunButler_BudgetSpentByAnotherEnabledChore(t *testing.T) {
 	}
 
 	policy := testButlerPolicy(noEvery, "bugs", "refactor")
-	policy.budgets = butler.Budgets{MaxSweepsPerDay: 1}
+	policy.budgets = chore.Budgets{MaxSweepsPerDay: 1}
 	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
@@ -1316,7 +1316,7 @@ func TestRunButler_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 	}
 
 	policy := testButlerPolicy(noEvery, "bugs")
-	policy.budgets = butler.Budgets{MaxSweepsPerDay: 1}
+	policy.budgets = chore.Budgets{MaxSweepsPerDay: 1}
 	policy.zone = loc
 
 	t.Run("same NY day: budget still spent", func(t *testing.T) {
@@ -1373,7 +1373,7 @@ func TestRunButler_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	policy := testButlerPolicy(noEvery, "bugs")
-	policy.budgets = butler.Budgets{MaxFindingsPerSweep: 1}
+	policy.budgets = chore.Budgets{MaxFindingsPerSweep: 1}
 	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
@@ -1662,9 +1662,9 @@ func TestRunButler_RemoteBackendFetchesOnceForDueCheck(t *testing.T) {
 	}
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, chore := range []string{"bugs", "docs-drift"} {
-		if _, err := ledger.Claim(remote, chore, ledger.Tip{}, ledger.ClaimedBy{Host: "other-host", Start: now}); err != nil {
-			t.Fatalf("seed Claim %s: %v", chore, err)
+	for _, choreName := range []string{"bugs", "docs-drift"} {
+		if _, err := ledger.Claim(remote, choreName, ledger.Tip{}, ledger.ClaimedBy{Host: "other-host", Start: now}); err != nil {
+			t.Fatalf("seed Claim %s: %v", choreName, err)
 		}
 	}
 

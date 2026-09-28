@@ -1,10 +1,10 @@
-package butler_test
+package chore_test
 
 import (
 	"reflect"
 	"testing"
 
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/ledger"
 )
 
@@ -15,7 +15,7 @@ func TestNextScope(t *testing.T) {
 		head      string
 		files     []string
 		sliceSize int
-		want      butler.Scope
+		want      chore.Scope
 	}{
 		{
 			name:      "first run: no LastSwept, no DiffRange, slice starts at the top",
@@ -23,7 +23,7 @@ func TestNextScope(t *testing.T) {
 			head:      "headsha",
 			files:     []string{"c", "a", "b"},
 			sliceSize: 2,
-			want: butler.Scope{
+			want: chore.Scope{
 				Head: "headsha", DiffRange: "",
 				Slice: []string{"a", "b"}, NextCursor: "b",
 			},
@@ -34,7 +34,7 @@ func TestNextScope(t *testing.T) {
 			head:      "newsha",
 			files:     []string{"a", "b", "c", "d", "e"},
 			sliceSize: 2,
-			want: butler.Scope{
+			want: chore.Scope{
 				Head: "newsha", DiffRange: "oldsha..newsha",
 				Slice: []string{"c", "d"}, NextCursor: "d",
 			},
@@ -45,7 +45,7 @@ func TestNextScope(t *testing.T) {
 			head:      "samesha",
 			files:     []string{"a", "b"},
 			sliceSize: 2,
-			want: butler.Scope{
+			want: chore.Scope{
 				Head: "samesha", DiffRange: "",
 				Slice: []string{"a", "b"}, NextCursor: "",
 			},
@@ -56,7 +56,7 @@ func TestNextScope(t *testing.T) {
 			head:      "h",
 			files:     []string{"a", "b", "c", "d", "e"},
 			sliceSize: 2,
-			want: butler.Scope{
+			want: chore.Scope{
 				Head: "h", DiffRange: "s..h",
 				Slice: []string{"c", "d"}, NextCursor: "d",
 			},
@@ -67,7 +67,7 @@ func TestNextScope(t *testing.T) {
 			head:      "h",
 			files:     []string{"a", "b", "c", "d", "e"},
 			sliceSize: 2,
-			want: butler.Scope{
+			want: chore.Scope{
 				Head: "h", DiffRange: "s..h",
 				Slice: []string{"a", "b"}, NextCursor: "b",
 			},
@@ -78,7 +78,7 @@ func TestNextScope(t *testing.T) {
 			head:      "h",
 			files:     []string{"a", "b", "c", "d", "e"},
 			sliceSize: 2,
-			want: butler.Scope{
+			want: chore.Scope{
 				Head: "h", DiffRange: "s..h",
 				Slice: []string{"a", "b"}, NextCursor: "b",
 			},
@@ -89,7 +89,7 @@ func TestNextScope(t *testing.T) {
 			head:      "h",
 			files:     []string{"a", "b", "c", "d", "e"},
 			sliceSize: 2,
-			want: butler.Scope{
+			want: chore.Scope{
 				Head: "h", DiffRange: "s..h",
 				Slice: []string{"d", "e"}, NextCursor: "",
 			},
@@ -100,7 +100,7 @@ func TestNextScope(t *testing.T) {
 			head:      "h",
 			files:     nil,
 			sliceSize: 40,
-			want: butler.Scope{
+			want: chore.Scope{
 				Head: "h", DiffRange: "",
 				Slice: nil, NextCursor: "",
 			},
@@ -111,7 +111,7 @@ func TestNextScope(t *testing.T) {
 			head:      "h",
 			files:     []string{"c", "a", "b"},
 			sliceSize: 40,
-			want: butler.Scope{
+			want: chore.Scope{
 				Head: "h", DiffRange: "",
 				Slice: []string{"a", "b", "c"}, NextCursor: "",
 			},
@@ -120,7 +120,7 @@ func TestNextScope(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := butler.NextScope(tt.prev, tt.head, tt.files, tt.sliceSize)
+			got := chore.NextScope(tt.prev, tt.head, tt.files, tt.sliceSize)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("NextScope(%+v, %q, %v, %d) = %+v, want %+v",
 					tt.prev, tt.head, tt.files, tt.sliceSize, got, tt.want)

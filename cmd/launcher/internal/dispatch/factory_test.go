@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -243,7 +243,7 @@ func TestFactory_NewChore_RunForwardsChoreEnv(t *testing.T) {
 	d := f.NewChore(Chore{
 		Name:   "lint-sweep",
 		Branch: "butler/lint-sweep",
-		Scope:  butler.Scope{Head: "deadbeef"},
+		Scope:  chore.Scope{Head: "deadbeef"},
 	})
 	if result := d.Run(); !result.Success {
 		t.Fatalf("Run: want Success=true, got %+v", result)

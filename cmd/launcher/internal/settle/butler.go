@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
@@ -69,7 +69,7 @@ type ButlerSettle struct {
 	ledger              ledger.Backend
 	chore               string
 	claim               ledger.Tip
-	scope               butler.Scope
+	scope               chore.Scope
 	now                 func() time.Time
 	maxFindingsPerSweep int
 	policy              PromotionPolicy
@@ -82,13 +82,13 @@ var _ Settler = (*ButlerSettle)(nil)
 // compare-and-swap parent, unless Settle first reserves promotion slots
 // (issue #3926), in which case the reservation commit takes over as parent;
 // scope is the run's computed Scope
-// (internal/butler.NextScope), whose Head/NextCursor become the done
+// (internal/chore.NextScope), whose Head/NextCursor become the done
 // commit's lastSwept/cursor on success. maxFindingsPerSweep caps how many
 // well-formed findings Settle will file in one sweep; 0 means no cap. policy
 // is the host-side auto-promotion gate (issue #3880); its zero value
 // (Classes nil, MaxFiles 0, Room nil) never promotes anything.
-func NewButlerSettle(it forge.IssueTracker, backend ledger.Backend, chore string, claim ledger.Tip, scope butler.Scope, now func() time.Time, maxFindingsPerSweep int, policy PromotionPolicy) *ButlerSettle {
-	return &ButlerSettle{it: it, ledger: backend, chore: chore, claim: claim, scope: scope, now: now, maxFindingsPerSweep: maxFindingsPerSweep, policy: policy}
+func NewButlerSettle(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, maxFindingsPerSweep int, policy PromotionPolicy) *ButlerSettle {
+	return &ButlerSettle{it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, maxFindingsPerSweep: maxFindingsPerSweep, policy: policy}
 }
 
 // Settle files result's findings, if any, then writes the Chore's done
@@ -223,8 +223,8 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 // finding ends up promoted), and which files (the path before the first ':'
 // in each dedup term, deduped, order kept) it concerns. The Files sentence is
 // omitted entirely when terms yields no paths, rather than printing "Files: ".
-func butlerBacklink(chore string, in issueIntent) string {
-	lead := fmt.Sprintf("Filed by the butler's `%s` Chore.", chore)
+func butlerBacklink(choreName string, in issueIntent) string {
+	lead := fmt.Sprintf("Filed by the butler's `%s` Chore.", choreName)
 	if in.Class != "" {
 		lead += fmt.Sprintf(" Class: `%s`.", in.Class)
 	}
@@ -248,11 +248,11 @@ func butlerBacklink(chore string, in issueIntent) string {
 // a code span (see sanitizeConcurrence). The span also leans on oneLine's
 // trim (CommonMark strips a space opening/closing a span) and on eligible
 // rejecting an empty Concurrence (a bare pair of backticks).
-func promotionNote(chore string, in issueIntent, policy PromotionPolicy, nFiles int) string {
+func promotionNote(choreName string, in issueIntent, policy PromotionPolicy, nFiles int) string {
 	concurrence := oneLine(sanitizeConcurrence(in.Concurrence))
 	return fmt.Sprintf(
 		"**Auto-promoted** to `%s` by the butler: class `%s` is on the `%s` Chore's allow-list, it touches %d file(s) (host limit %d), and the in-Box reviewer agreed: `%s`",
-		policy.Label, in.Class, chore, nFiles, policy.MaxFiles, concurrence,
+		policy.Label, in.Class, choreName, nFiles, policy.MaxFiles, concurrence,
 	)
 }
 

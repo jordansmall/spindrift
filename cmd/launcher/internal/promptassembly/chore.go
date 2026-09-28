@@ -19,7 +19,7 @@ const ChoreNameRule = "must contain only letters, digits, '-', and '_'"
 // underscore -- the one shape a ChoreName must satisfy before it can safely reach
 // filepath.Join. No path separator or ".." can ever cross this gate before
 // choreSection builds the chores/<name>.md lookup path (ADR 0056, issue
-// #3875). internal/butler bounds BUTLER_CHORE_CLASSES names with it too.
+// #3875). internal/chore bounds BUTLER_CHORE_CLASSES names with it too.
 func ValidChoreName(s string) bool {
 	return choreNameRe.MatchString(s)
 }

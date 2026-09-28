@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
@@ -41,15 +41,15 @@ func newButlerBareRepo(t *testing.T) string {
 // claimButlerChore reads chore's current tip and appends a Claimed state on
 // top of it, the same handoff a real run's claim step performs before it
 // ever dispatches a Box.
-func claimButlerChore(t *testing.T, backend ledger.Backend, chore string, start time.Time) ledger.Tip {
+func claimButlerChore(t *testing.T, backend ledger.Backend, choreName string, start time.Time) ledger.Tip {
 	t.Helper()
-	tip, err := backend.Read(chore)
+	tip, err := backend.Read(choreName)
 	if err != nil {
-		t.Fatalf("Read(%q): %v", chore, err)
+		t.Fatalf("Read(%q): %v", choreName, err)
 	}
-	claim, err := ledger.Claim(backend, chore, tip, ledger.ClaimedBy{Host: "worker", Start: start})
+	claim, err := ledger.Claim(backend, choreName, tip, ledger.ClaimedBy{Host: "worker", Start: start})
 	if err != nil {
-		t.Fatalf("Claim(%q): %v", chore, err)
+		t.Fatalf("Claim(%q): %v", choreName, err)
 	}
 	return claim
 }
@@ -80,7 +80,7 @@ func TestButlerSettle_FilesFindingsWithProvenanceLabelAndBacklink(t *testing.T) 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/501"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
@@ -123,7 +123,7 @@ func TestButlerSettle_DoneCommitContents(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/501"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
@@ -176,7 +176,7 @@ func TestButlerSettle_ReportsChoreSettledNotIssue(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/501"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
@@ -204,7 +204,7 @@ func TestButlerSettle_PartialFilingFailure_RecordsOnlyWhatFiled(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/501"
 	fc.PostIssueErrForTitle = map[string]error{"second finding": errors.New("create failed")}
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
@@ -238,7 +238,7 @@ func TestButlerSettle_CapDropsOverflowAndRecordsDropped(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/501"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 2, PromotionPolicy{})
 
@@ -281,7 +281,7 @@ func TestButlerSettle_ZeroCapFilesEverything(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/501"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
@@ -317,7 +317,7 @@ func TestButlerSettle_MalformedPayloadDoesNotCountTowardCap(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/501"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 1, PromotionPolicy{})
 
@@ -388,7 +388,7 @@ func TestButlerSettle_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
 			claim := claimButlerChore(t, backend, "bugs", start.Add(2*time.Minute))
 
 			fc := forge.NewFake()
-			scope := butler.Scope{Head: "newhead", NextCursor: "newcursor"}
+			scope := chore.Scope{Head: "newhead", NextCursor: "newcursor"}
 			now := start.Add(3 * time.Minute)
 			s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, PromotionPolicy{})
 
@@ -437,7 +437,7 @@ func TestButlerSettle_Promotion_AllGatesPass(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/701"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 2, Room: func() int { return 1 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
@@ -476,7 +476,7 @@ func TestButlerSettle_Promotion_CustomLabel(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/705"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 2, Room: func() int { return 1 }, Label: "agent-go"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
@@ -570,7 +570,7 @@ func TestButlerSettle_Promotion_AnyGateFailingFilesUnlabelled(t *testing.T) {
 			fc := forge.NewFake()
 			fc.PostIssueURL = "https://example.com/issues/702"
 
-			scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+			scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 			now := start.Add(time.Minute)
 			s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, tc.policy)
 
@@ -606,7 +606,7 @@ func TestButlerSettle_Promotion_RoomOfOnePromotesOnlyFirst(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/703"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
@@ -646,7 +646,7 @@ func TestButlerSettle_Promotion_FailedPostReturnsRoomToLaterFinding(t *testing.T
 	fc.PostIssueURL = "https://example.com/issues/706"
 	fc.PostIssueErrForTitle = map[string]error{"first eligible": errors.New("create failed")}
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
@@ -683,7 +683,7 @@ func TestButlerSettle_Promotion_PayloadCannotWidenPolicy(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/704"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 5 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
@@ -718,7 +718,7 @@ func TestButlerSettle_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/707"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
@@ -843,11 +843,11 @@ type doneAppendErr struct {
 	err error
 }
 
-func (w doneAppendErr) Append(chore, old string, s ledger.State, at time.Time) (string, error) {
+func (w doneAppendErr) Append(choreName, old string, s ledger.State, at time.Time) (string, error) {
 	if s.Phase == ledger.Done {
 		return "", w.err
 	}
-	return w.Backend.Append(chore, old, s, at)
+	return w.Backend.Append(choreName, old, s, at)
 }
 
 // takeoverOnDone wraps a ledger.Backend and, on any Done-phase Append, first
@@ -858,17 +858,17 @@ type takeoverOnDone struct {
 	ledger.Backend
 }
 
-func (w takeoverOnDone) Append(chore, old string, s ledger.State, at time.Time) (string, error) {
+func (w takeoverOnDone) Append(choreName, old string, s ledger.State, at time.Time) (string, error) {
 	if s.Phase == ledger.Done {
-		tip, err := w.Backend.Read(chore)
+		tip, err := w.Backend.Read(choreName)
 		if err != nil {
 			return "", err
 		}
-		if _, err := ledger.Claim(w.Backend, chore, tip, ledger.ClaimedBy{Host: "rival", Start: at}); err != nil {
+		if _, err := ledger.Claim(w.Backend, choreName, tip, ledger.ClaimedBy{Host: "rival", Start: at}); err != nil {
 			return "", err
 		}
 	}
-	return w.Backend.Append(chore, old, s, at)
+	return w.Backend.Append(choreName, old, s, at)
 }
 
 // (j) The reservation Reserve writes before filing survives a non-CAS Finish
@@ -885,7 +885,7 @@ func TestButlerSettle_Promotion_ReserveCountsDespiteDoneAppendFailure(t *testing
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/710"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
@@ -919,7 +919,7 @@ func TestButlerSettle_Promotion_ReserveCountsDespiteTakeoverBeforeDone(t *testin
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/711"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
@@ -954,7 +954,7 @@ func TestButlerSettle_Promotion_StaleClaimReserveFailsNeverPromotes(t *testing.T
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/712"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Hour)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", staleClaim, scope, func() time.Time { return now }, 0, policy)
@@ -990,7 +990,7 @@ func TestButlerSettle_Promotion_SuccessNoDoubleCount(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/713"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
@@ -1021,7 +1021,7 @@ func TestButlerSettle_Promotion_NoReservationCommitWhenNothingEligible(t *testin
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/714"
 
-	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
 	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 0 }, Label: "ready-for-agent"}
 	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
