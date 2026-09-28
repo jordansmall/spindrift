@@ -148,6 +148,10 @@ let
     # ab-orchestrator.sh is not, so tests/ab-orchestrator.bats resolves the
     # script through this var rather than $BATS_TEST_DIRNAME/../.
     AB_ORCHESTRATOR_SH = ../../ab-orchestrator.sh;
+    # tests/gh-token-refresher.bats (issue #3940) extracts mint_token
+    # straight out of the composite action's `run:` block, so it tracks the
+    # real body rather than a hand-copied stand-in.
+    GH_TOKEN_REFRESHER_ACTION_YML = ../../.github/actions/gh-token-refresher/action.yml;
     PROMPTS_DIR = ../../templates/default/prompts;
     # The baked default prompt dir the `run` command mounts, plus a
     # Consumer-configured one whose rendered content reaches the stubbed
