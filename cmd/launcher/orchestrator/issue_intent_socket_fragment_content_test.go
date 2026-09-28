@@ -74,6 +74,10 @@ func TestIssueIntentSocketFragmentContract(t *testing.T) {
 	}
 }
 
+// relaySendParagraphMarker opens the send paragraph the relay-socket
+// summaries share.
+const relaySendParagraphMarker = "The filer sends each in one call"
+
 // TestIssueIntentRelaySummariesSharedSendParagraph pins the three relay
 // summaries' send paragraph byte-for-byte (issues #3866, #3909):
 // file-issues-relay-socket.md, research-file-issues-relay-socket.md, and
@@ -85,7 +89,7 @@ func TestIssueIntentSocketFragmentContract(t *testing.T) {
 // normalized to the shared "and `-body-file`" wording before comparing; any
 // other wording change in any copy still fails.
 func TestIssueIntentRelaySummariesSharedSendParagraph(t *testing.T) {
-	marker := "The filer sends each in one call"
+	marker := relaySendParagraphMarker
 
 	fileIssues := sharedSpanBetween(t, readPromptFile(t, repoRoot, "fragments/file-issues-relay-socket.md"), marker)
 	researchFileIssues := sharedSpanBetween(t, readPromptFile(t, repoRoot, "fragments/research-file-issues-relay-socket.md"), marker)
@@ -105,42 +109,51 @@ func TestIssueIntentRelaySummariesSharedSendParagraph(t *testing.T) {
 	}
 }
 
-// TestIssueIntentButlerFileIssuesRelayFragmentsShareProse pins the prose
-// butler-file-issues-relay.md (log carrier) and
-// butler-file-issues-relay-socket.md (socket carrier) share. The carrier is
-// chosen per dispatch and fragments have no shared include, so that prose is
-// mirrored by hand and a one-sided edit drifts silently unless caught here
-// (issue #3927). Only the mechanism clause and the socket twin's send
-// paragraph legitimately differ. Whitespace is normalized first, so unlike
-// TestIssueIntentRelaySummariesSharedSendParagraph a one-sided re-wrap passes.
-func TestIssueIntentButlerFileIssuesRelayFragmentsShareProse(t *testing.T) {
-	logRaw := readPromptFile(t, repoRoot, "fragments/butler-file-issues-relay.md")
-	socketRaw := readPromptFile(t, repoRoot, "fragments/butler-file-issues-relay-socket.md")
-
-	// The socket-only send paragraph is pinned by
-	// TestIssueIntentRelaySummariesSharedSendParagraph instead.
-	sendParagraph := sharedSpanBetween(t, socketRaw, "The filer sends each in one call")
-	socketRaw = strings.Replace(socketRaw, sendParagraph, "", 1)
-
-	normalizedLog := normalizeWhitespace(logRaw)
-	normalizedSocket := normalizeWhitespace(socketRaw)
-
+// TestIssueIntentFileIssuesRelayTwinsShareProse pins the prose each
+// log/socket carrier twin shares: butler-file-issues-relay.md /
+// butler-file-issues-relay-socket.md (issue #3927) and
+// research-file-issues-relay.md / research-file-issues-relay-socket.md
+// (issue #3947). The carrier is chosen per dispatch and fragments have no
+// shared include, so that prose is mirrored by hand and a one-sided edit
+// drifts silently unless caught here. Only the mechanism clause and the
+// socket twin's send paragraph legitimately differ. Whitespace is normalized
+// first, so unlike TestIssueIntentRelaySummariesSharedSendParagraph a
+// one-sided re-wrap passes.
+func TestIssueIntentFileIssuesRelayTwinsShareProse(t *testing.T) {
 	const logClause = "It emits `SPINDRIFT_ISSUE_INTENT` lines instead of filing directly"
 	const socketClause = "It sends each one over the Signal socket via `driver-exec signal issue-intent` instead of filing directly"
 	const placeholder = "<mechanism clause>"
 
-	if strings.Count(normalizedLog, logClause) != 1 {
-		t.Fatalf("butler-file-issues-relay.md does not contain the log mechanism clause exactly once:\n%s", normalizedLog)
-	}
-	if strings.Count(normalizedSocket, socketClause) != 1 {
-		t.Fatalf("butler-file-issues-relay-socket.md does not contain the socket mechanism clause exactly once:\n%s", normalizedSocket)
-	}
+	for _, name := range []string{"butler-file-issues-relay", "research-file-issues-relay"} {
+		t.Run(name, func(t *testing.T) {
+			logPath := "fragments/" + name + ".md"
+			socketPath := "fragments/" + name + "-socket.md"
 
-	normalizedLog = strings.Replace(normalizedLog, logClause, placeholder, 1)
-	normalizedSocket = strings.Replace(normalizedSocket, socketClause, placeholder, 1)
+			logRaw := readPromptFile(t, repoRoot, logPath)
+			socketRaw := readPromptFile(t, repoRoot, socketPath)
 
-	if normalizedLog != normalizedSocket {
-		t.Errorf("butler-file-issues-relay.md and butler-file-issues-relay-socket.md diverge beyond the mechanism clause and the socket-only send paragraph:\nbutler-file-issues-relay.md (normalized):\n%s\n\nbutler-file-issues-relay-socket.md (normalized):\n%s", normalizedLog, normalizedSocket)
+			// The socket-only send paragraph is pinned by
+			// TestIssueIntentRelaySummariesSharedSendParagraph instead.
+			sendParagraph := sharedSpanBetween(t, socketRaw, relaySendParagraphMarker)
+			socketRaw = strings.Replace(socketRaw, sendParagraph, "", 1)
+
+			normalizedLog := normalizeWhitespace(logRaw)
+			normalizedSocket := normalizeWhitespace(socketRaw)
+
+			if strings.Count(normalizedLog, logClause) != 1 {
+				t.Fatalf("%s does not contain the log mechanism clause exactly once:\n%s", logPath, normalizedLog)
+			}
+			if strings.Count(normalizedSocket, socketClause) != 1 {
+				t.Fatalf("%s does not contain the socket mechanism clause exactly once:\n%s", socketPath, normalizedSocket)
+			}
+
+			normalizedLog = strings.Replace(normalizedLog, logClause, placeholder, 1)
+			normalizedSocket = strings.Replace(normalizedSocket, socketClause, placeholder, 1)
+
+			if normalizedLog != normalizedSocket {
+				t.Errorf("%s and %s diverge beyond the mechanism clause and the socket-only send paragraph:\n%s (normalized):\n%s\n\n%s (normalized):\n%s", logPath, socketPath, logPath, normalizedLog, socketPath, normalizedSocket)
+			}
+		})
 	}
 }
 
