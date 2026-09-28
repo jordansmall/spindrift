@@ -215,6 +215,28 @@ ADR under [`docs/adr/`](docs/adr/), numbered `NNNN-slug.md`, one above the highe
 number already there. A change to a seam — a new Issue Tracker or Code Forge
 adapter, a new Driver, a new runner — should reference or add an ADR.
 
+An ADR is a decided record, so how you amend one depends on what changed:
+
+- **Prose that only catches up to shipped detail** — a path, a name, a
+  mechanism that landed as decided — is edited in place with no marker. It
+  does not change the decision, so it does not rewrite the record.
+- **Shipped behaviour that diverges from the decision** gets an inline marker
+  at the point of divergence: an italic *Amended by issue #NNNN:* lead-in
+  paragraph, a parenthetical (Amended by issue #NNNN: …), or a mid-sentence
+  "amended by issue #NNNN". Any of these spellings is fine; naming the
+  landing PR (`, landed in PR #NNNN`) is optional.
+- **A substantive new decision layered on top** gets an appended
+  `## Amendment (issue #NNNN): <title>` section.
+- **A later ADR that changes one aspect** — a default, say — while the
+  earlier ADR's mechanism stands gets a `> **Amended by [ADR NNNN](…):** …`
+  header note on the earlier ADR.
+- **A reversal** gets a new superseding ADR, never an in-place rewrite (ADR
+  0007), and the old ADR gains a `> **Superseded by [ADR NNNN](…).**` header
+  note — `Superseded in part by` when the new ADR replaces the mechanism of
+  only part of the old one. Older notes (ADRs 0005, 0018) vary in spelling.
+  A single superseded consequence can instead be marked inline, as a
+  parenthetical (Superseded by ADR NNNN: …).
+
 Some surfaces are a **versioned contract**: CLI verbs and flags, the flake option
 surface, `SPINDRIFT_*` variable names, and the label lifecycle names. Breaking
 any of them needs a `feat!:`/`fix!:` commit and a note in
