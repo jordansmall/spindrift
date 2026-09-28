@@ -14,9 +14,10 @@ push, no PR.
 Consumers running a custom or forked worker prompt — an override prompt
 directory supplied via `--prompt-dir` / `SPINDRIFT_PROMPT_DIR` /
 `perSystem.spindrift.agents.promptDir` — need to add an equivalent gate to
-their `issue-prompt.md`. Without it, a worker that lands on an already-done issue
-keeps reporting `status=blocked` instead, and the run settles `agent-failed`
-open for a human to close by hand rather than closing itself out.
+their `issue-prompt.md`. Without it, a worker that lands on an already-done
+issue keeps reporting `status=blocked` instead, and the run settles
+`agent-failed` open for a human to close by hand rather than closing itself
+out.
 
 On the new status, the host (`settle`) posts a closing comment, transitions
 the issue to `agent-complete`, and closes it as `completed` (never "not
