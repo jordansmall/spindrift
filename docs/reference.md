@@ -4716,6 +4716,10 @@ with no entry never promotes. The Box never controls this list: it only
 ever sees it read-only, as `CHORE_CLASSES`, and only while promotion is
 actually on (`BUTLER_MAX_PROMOTIONS_PER_DAY` > 0), so a Box whose findings
 can never promote never spends reviewer turns on candidates it cannot win.
+Every class, configured or Box-reported, shares one grammar (issue #3986):
+a lowercase slug of letters, digits, and `-`, not starting with `-`, at most
+40 characters; a configured class that isn't one fails `spindrift butler`
+preflight (and `spindrift doctor --butler`) naming the class and the rule.
 
 A run claims the Chore's **Ledger** — its durable record, kept as a chain of
 commits on `refs/spindrift/butler/<chore>` in the Target repo, never on a
