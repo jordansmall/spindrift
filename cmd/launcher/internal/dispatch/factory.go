@@ -77,6 +77,7 @@ func (f *Factory) New(number, title string) *Dispatch {
 		nonce:           newNonce(),
 		agentGeneration: f.AgentGeneration(),
 		killed:          f.armKillLatch(number),
+		subject:         issueSubject{Number: number, Title: title},
 	}
 }
 
@@ -86,11 +87,11 @@ func (f *Factory) New(number, title string) *Dispatch {
 func ChoreKey(name string) string { return "butler-" + name }
 
 // NewChore constructs a Dispatch for one one-shot butler run, keyed by
-// ChoreKey rather than a tracker issue number; buildBoxEnv reads the attached
-// Chore to skip the issue-keyed env entirely.
+// ChoreKey rather than a tracker issue number; buildBoxEnv reads the
+// choreSubject to skip the issue-keyed env entirely.
 func (f *Factory) NewChore(c Chore) *Dispatch {
 	d := f.New(ChoreKey(c.Name), "butler: "+c.Name)
-	d.chore = &c
+	d.subject = choreSubject{Chore: c}
 	return d
 }
 

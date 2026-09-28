@@ -67,11 +67,12 @@ type Dispatch struct {
 	// reclaimAttemptLog can find it after a mid-run rename (issue #3886).
 	attemptLog os.FileInfo
 
-	// chore is non-nil only for a Factory.NewChore Dispatch (ADR 0056, issue
-	// #3875): it carries the one-shot butler run's Chore name, target branch,
-	// and scan Scope, which buildBoxEnv forwards as CHORE_*/BASE_BRANCH in
-	// place of the issue-keyed ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT trio.
-	chore *Chore
+	// subject is what this Dispatch's Box works (ADR 0056, issue #3875): an
+	// issueSubject for a tracker issue, or a choreSubject for a
+	// Factory.NewChore Dispatch. buildBoxEnv forwards a choreSubject as
+	// CHORE_*/BASE_BRANCH in place of the issue-keyed
+	// ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT trio.
+	subject subject
 }
 
 var _ Dispatcher = (*Dispatch)(nil)
@@ -187,7 +188,7 @@ func (d *Dispatch) Run() Result {
 				return quarantineErr{err: fmt.Errorf("mark run lineage: %w", err)}
 			}
 		}
-		env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce, d.chore)
+		env, err := buildBoxEnv(d.cfg, d.number, d.subject, 0, "", d.nonce)
 		if err != nil {
 			return err
 		}
@@ -205,7 +206,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		d.announce(report.PhaseFixPass(pass))
-		env, err := buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce, d.chore)
+		env, err := buildBoxEnv(d.cfg, d.number, d.subject, pass, ciFailureSummary, d.nonce)
 		if err != nil {
 			return err
 		}
@@ -220,7 +221,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 // without the main agent prompt, so it needs neither retry nor driver cache.
 func (d *Dispatch) ResolveConflict(pr string) error {
 	d.announce(report.PhaseConflictResolve)
-	env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce, d.chore)
+	env, err := buildBoxEnv(d.cfg, d.number, d.subject, 0, "", d.nonce)
 	if err != nil {
 		return err
 	}
@@ -233,14 +234,14 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 // the report vocabulary spelled once in report.PhaseInitial,
 // report.PhaseConflictResolve, and report.PhaseFixPass; humanPhase maps it
 // onto announceLine's own vocabulary here rather than at the two call sites,
-// so a phase name only needs to be spelled once per caller. d.chore non-nil
+// so a phase name only needs to be spelled once per caller. A choreSubject
 // (a Factory.NewChore Dispatch, ADR 0056) reports the Chore-keyed record
-// instead: d.number is "butler-"+Name, not a tracker issue, and the report
+// instead: d.number is ChoreKey(Name), not a tracker issue, and the report
 // wire shape must never carry that key as an Issue (issue #3878).
 func (d *Dispatch) announce(phase string) {
 	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.title))
-	if d.chore != nil {
-		report.ChoreBox(d.chore.Name, phase)
+	if c, ok := d.subject.(choreSubject); ok {
+		report.ChoreBox(c.Chore.Name, phase)
 		return
 	}
 	report.Box(d.number, phase)
