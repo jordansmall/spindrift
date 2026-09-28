@@ -23,8 +23,8 @@ func Issue(number string) Key { return Key{issue: number} }
 func Chore(name string) Key { return Key{chore: name} }
 
 // String renders the key exactly as today's call sites do: the bare issue
-// number, or "butler-" + chore name (see dispatch.ChoreKey,
-// agent/entrypoint.sh's _issue_ref, and butler-prompt.md's OUTCOME line).
+// number, or "butler-" + chore name (see agent/entrypoint.sh's _issue_ref
+// and butler-prompt.md's OUTCOME line).
 func (k Key) String() string {
 	if k.chore != "" {
 		return "butler-" + k.chore

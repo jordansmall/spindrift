@@ -13,6 +13,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/chore"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
@@ -44,25 +45,25 @@ type Chore struct {
 	Classes []string
 }
 
-// subject is what a Dispatch's Box works: a tracker issue (issueSubject) or a
-// one-shot butler Chore (choreSubject, ADR 0056). key and title supply the
-// Dispatch's log/lock/cache key and its human-facing title (issue #3954).
-// Being unexported, they keep out only other packages' types; a third
-// in-package variant is caught by buildBoxEnv's unknown-subject error.
-type subject interface {
-	key() string
-	title() string
+// subject is what a Dispatch's Box works: a tracker issue or a one-shot
+// butler Chore (ADR 0056), told apart by its Dispatch key. key and title
+// supply the Dispatch's log/lock/cache key and its human-facing title
+// (issue #3954); chore is set only when key.IsChore().
+type subject struct {
+	key   dispatchkey.Key
+	title string
+	chore Chore
 }
 
-type issueSubject struct{ Number, Title string }
+// issueSubject builds the tracker-issue arm of subject.
+func issueSubject(number, title string) subject {
+	return subject{key: dispatchkey.Issue(number), title: title}
+}
 
-type choreSubject struct{ Chore Chore }
-
-func (s issueSubject) key() string   { return s.Number }
-func (s issueSubject) title() string { return s.Title }
-
-func (s choreSubject) key() string   { return ChoreKey(s.Chore.Name) }
-func (s choreSubject) title() string { return "butler: " + s.Chore.Name }
+// choreSubject builds the butler-Chore arm of subject (ADR 0056).
+func choreSubject(c Chore) subject {
+	return subject{key: dispatchkey.Chore(c.Name), title: "butler: " + c.Name, chore: c}
+}
 
 // Config carries the subset of launcher config a Dispatch needs to build a
 // Box's env and drive its retry policy.
@@ -199,23 +200,20 @@ func (c Config) boxAccessForKind() string {
 // templates promise the Box an injected ISSUE_TEXT section. It fires before any
 // box runs, so the empty-log check surfaces it on Result.Err (issue #3119).
 //
-// subj is a choreSubject only for a Factory.NewChore Dispatch (ADR 0056):
-// subj.key() is then ChoreKey(subj.Chore.Name), not a tracker issue number,
-// so this skips ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT and the BASE_BRANCH entry
-// of the ResolveEnv loop entirely (CODE_FORGE=local's localBaseBranchResolver,
-// the only ResolveEnv caller that reads the key, would otherwise run an
-// issue-tracker lookup against a chore key that names no issue) and forwards
-// CHORE_* plus BASE_BRANCH from the Chore directly instead.
+// subj.key.IsChore() is true only for a Factory.NewChore Dispatch (ADR
+// 0056), and then this skips ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT and the
+// BASE_BRANCH entry of the ResolveEnv loop entirely (CODE_FORGE=local's
+// localBaseBranchResolver, the only ResolveEnv caller that reads the key,
+// would otherwise run an issue-tracker lookup against a chore key that names
+// no issue) and forwards CHORE_* plus BASE_BRANCH from the Chore directly
+// instead.
 func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string, nonce string) (map[string]string, error) {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
 		resolve = func(_, name string) string { return os.Getenv(name) }
 	}
-	_, isChore := subj.(choreSubject)
-	if _, isIssue := subj.(issueSubject); !isChore && !isIssue {
-		return nil, fmt.Errorf("unknown dispatch subject %T", subj)
-	}
-	key := subj.key()
+	isChore := subj.key.IsChore()
+	key := subj.key.String()
 	env := make(map[string]string)
 	for _, name := range strings.Fields(cfg.BoxEnvVars) {
 		if isChore && name == "BASE_BRANCH" {
@@ -230,29 +228,28 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 			env["BOX_FORGE_AND_ISSUE_ACCESS"] = "read-only"
 		}
 	}
-	switch s := subj.(type) {
-	case choreSubject:
-		env["CHORE_NAME"] = s.Chore.Name
-		env["BASE_BRANCH"] = s.Chore.Branch
-		if s.Chore.Scope.Head != "" {
-			env["CHORE_HEAD"] = s.Chore.Scope.Head
+	if isChore {
+		env["CHORE_NAME"] = subj.chore.Name
+		env["BASE_BRANCH"] = subj.chore.Branch
+		if subj.chore.Scope.Head != "" {
+			env["CHORE_HEAD"] = subj.chore.Scope.Head
 		}
-		if s.Chore.Scope.DiffRange != "" {
-			env["CHORE_DIFF_RANGE"] = s.Chore.Scope.DiffRange
+		if subj.chore.Scope.DiffRange != "" {
+			env["CHORE_DIFF_RANGE"] = subj.chore.Scope.DiffRange
 		}
-		if len(s.Chore.Scope.Slice) > 0 {
-			env["CHORE_SLICE"] = strings.Join(s.Chore.Scope.Slice, "\n")
+		if len(subj.chore.Scope.Slice) > 0 {
+			env["CHORE_SLICE"] = strings.Join(subj.chore.Scope.Slice, "\n")
 		}
-		if len(s.Chore.Classes) > 0 {
-			env["CHORE_CLASSES"] = strings.Join(s.Chore.Classes, " ")
+		if len(subj.chore.Classes) > 0 {
+			env["CHORE_CLASSES"] = strings.Join(subj.chore.Classes, " ")
 		}
-	case issueSubject:
-		env["ISSUE_NUMBER"] = s.Number
-		env["ISSUE_TITLE"] = s.Title
+	} else {
+		env["ISSUE_NUMBER"] = key
+		env["ISSUE_TITLE"] = subj.title
 		if cfg.IssueTextFor != nil {
-			text, err := cfg.IssueTextFor(s.Number)
+			text, err := cfg.IssueTextFor(key)
 			if err != nil {
-				return nil, fmt.Errorf("issue text for #%s: %w", s.Number, err)
+				return nil, fmt.Errorf("issue text for #%s: %w", key, err)
 			}
 			if text != "" {
 				env["ISSUE_TEXT"] = text

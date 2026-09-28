@@ -165,7 +165,7 @@ func TestButlerSettle_DoneCommitContents(t *testing.T) {
 
 // TestButlerSettle_ReportsChoreSettledNotIssue pins issue #3878: a butler
 // run's terminal report.Record must carry the Chore, not num (the
-// dispatch.ChoreKey-shaped "butler-bugs"), since the report wire's Issue
+// dispatchkey.Chore-shaped "butler-bugs"), since the report wire's Issue
 // field means a tracker issue and a Chore is not one.
 func TestButlerSettle_ReportsChoreSettledNotIssue(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)

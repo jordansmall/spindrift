@@ -63,16 +63,16 @@ func NewFactory(cfg Config, pwd string, r runner.Runner, drv driver.Driver, cloc
 // New constructs a Dispatch for one issue, claiming its per-issue driver-cache
 // directory up front and minting its per-run nonce (issue #1937).
 func (f *Factory) New(number, title string) *Dispatch {
-	return f.newDispatch(issueSubject{Number: number, Title: title})
+	return f.newDispatch(issueSubject(number, title))
 }
 
 // newDispatch is the single construction path New and NewChore share (issue
-// #3954): it derives the Dispatch's log/lock/cache key from subj.key()
+// #3954): it derives the Dispatch's log/lock/cache key from subj.key.String()
 // rather than taking one from the caller, so the key and subj can never
 // drift apart.
 func (f *Factory) newDispatch(subj subject) *Dispatch {
 	f.newCalled.Store(true)
-	key := subj.key()
+	key := subj.key.String()
 	return &Dispatch{
 		number:          key,
 		pwd:             f.pwd,
@@ -89,16 +89,11 @@ func (f *Factory) newDispatch(subj subject) *Dispatch {
 	}
 }
 
-// ChoreKey is a Chore Dispatch's log/lock/cache/BoxName key, namespaced away
-// from any tracker issue number so a chore Dispatch can never collide with an
-// issue-keyed one sharing the same pwd (ADR 0056).
-func ChoreKey(name string) string { return "butler-" + name }
-
 // NewChore constructs a Dispatch for one one-shot butler run, keyed by
-// ChoreKey rather than a tracker issue number; buildBoxEnv reads the
-// choreSubject to skip the issue-keyed env entirely.
+// dispatchkey.Chore(c.Name) rather than a tracker issue number (ADR 0056);
+// buildBoxEnv reads subj.key.IsChore() to skip the issue-keyed env entirely.
 func (f *Factory) NewChore(c Chore) *Dispatch {
-	return f.newDispatch(choreSubject{Chore: c})
+	return f.newDispatch(choreSubject(c))
 }
 
 // newNonce mints an unpredictable per-run nonce (issue #1937) that lets the

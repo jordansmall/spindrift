@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
@@ -361,7 +362,7 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 	result := d.Run()
 
 	s := settle.NewButlerSettle(it, backend, choreName, claim, scope, now, maxFindingsPerSweep, promo)
-	s.Settle(d, dispatch.ChoreKey(choreName), butlerSlot, result)
+	s.Settle(d, dispatchkey.Chore(choreName).String(), butlerSlot, result)
 
 	final, err := backend.Read(choreName)
 	if err != nil {
