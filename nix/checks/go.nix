@@ -48,6 +48,7 @@ in
       ${./gh-token-intervals.nix} \
       ${./go-check-env.nix} \
       ${./go.nix} \
+      ${./image-nix-cores.nix} \
       ${./image.nix} \
       ${./jira-status-mapping.nix} \
       ${./mk-fragment-parity.nix} \

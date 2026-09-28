@@ -37,6 +37,8 @@ let
 
   goCheckEnv = import ./go-check-env.nix;
 
+  imageNixCores = import ./image-nix-cores.nix;
+
   common = {
     inherit
       pkgs
@@ -49,6 +51,7 @@ let
       batsShards
       mkFragmentParity
       goCheckEnv
+      imageNixCores
       ;
   };
   sourceChecks =
