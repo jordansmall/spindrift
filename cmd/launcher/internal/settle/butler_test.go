@@ -805,3 +805,206 @@ func TestPromotionPolicy_Eligible(t *testing.T) {
 		})
 	}
 }
+
+// doneAppendErr wraps a ledger.Backend and fails any Done-phase Append with a
+// plain (non-CAS) error, simulating a push failure after a reservation
+// already landed cleanly (issue #3926).
+type doneAppendErr struct {
+	ledger.Backend
+	err error
+}
+
+func (w doneAppendErr) Append(chore, old string, s ledger.State, at time.Time) (string, error) {
+	if s.Phase == ledger.Done {
+		return "", w.err
+	}
+	return w.Backend.Append(chore, old, s, at)
+}
+
+// takeoverOnDone wraps a ledger.Backend and, on any Done-phase Append, first
+// lands a rival Claim on the current tip before delegating -- so the done
+// write's own compare-and-swap loses to a real takeover that happened after
+// this run's reservation, rather than a synthetic error (issue #3926).
+type takeoverOnDone struct {
+	ledger.Backend
+}
+
+func (w takeoverOnDone) Append(chore, old string, s ledger.State, at time.Time) (string, error) {
+	if s.Phase == ledger.Done {
+		tip, err := w.Backend.Read(chore)
+		if err != nil {
+			return "", err
+		}
+		if _, err := ledger.Claim(w.Backend, chore, tip, ledger.ClaimedBy{Host: "rival", Start: at}); err != nil {
+			return "", err
+		}
+	}
+	return w.Backend.Append(chore, old, s, at)
+}
+
+// (j) The reservation Reserve writes before filing survives a non-CAS Finish
+// failure (e.g. a failed push): the promotion is already posted and labelled,
+// so DayTotals must still count it even though the done commit never landed
+// (issue #3926).
+func TestButlerSettle_Promotion_ReserveCountsDespiteDoneAppendFailure(t *testing.T) {
+	inner := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, inner, "bugs", start)
+
+	backend := doneAppendErr{Backend: inner, err: errors.New("push failed")}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/710"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 || !slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
+		t.Fatalf("PostIssueCalls = %+v, want one call carrying ready-for-agent", fc.PostIssueCalls)
+	}
+
+	totals, err := ledger.DayTotals(inner, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Promoted != 1 {
+		t.Errorf("Promoted = %d, want 1 (the reservation, despite the lost done commit)", totals.Promoted)
+	}
+}
+
+// (k) A rival takeover lands between this run's reservation and its done
+// write: the done commit's own CAS legitimately loses, but the reservation
+// still stands in the chain and must still count (issue #3926).
+func TestButlerSettle_Promotion_ReserveCountsDespiteTakeoverBeforeDone(t *testing.T) {
+	inner := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, inner, "bugs", start)
+
+	backend := takeoverOnDone{Backend: inner}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/711"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 || !slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
+		t.Fatalf("PostIssueCalls = %+v, want one call carrying ready-for-agent", fc.PostIssueCalls)
+	}
+
+	totals, err := ledger.DayTotals(inner, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Promoted != 1 {
+		t.Errorf("Promoted = %d, want 1 (the reservation, despite the takeover before done)", totals.Promoted)
+	}
+}
+
+// (l) A takeover happens before Settle even starts (the research repro): the
+// claim this run holds is already stale by the time Reserve runs, so Reserve
+// itself loses its CAS. The run must not promote -- the finding files
+// unlabelled, and DayTotals never counts it (issue #3926).
+func TestButlerSettle_Promotion_StaleClaimReserveFailsNeverPromotes(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	staleClaim := claimButlerChore(t, backend, "bugs", start)
+	// A rival takes over on top of staleClaim before this run ever settles.
+	claimButlerChore(t, backend, "bugs", start.Add(30*time.Minute))
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/712"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Hour)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", staleClaim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("want 1 PostIssue call, got %d", len(fc.PostIssueCalls))
+	}
+	if labels := fc.PostIssueCalls[0].Labels; slices.Contains(labels, "ready-for-agent") {
+		t.Errorf("labels = %v, want no ready-for-agent (Reserve lost its CAS)", labels)
+	}
+
+	totals, err := ledger.DayTotals(backend, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Promoted != 0 {
+		t.Errorf("Promoted = %d, want 0 (Reserve never landed)", totals.Promoted)
+	}
+}
+
+// (m) The ordinary success path reserves then finishes on top of the
+// reservation: DayTotals must count the promotion exactly once, from the
+// done commit's own Promoted list, not doubled by the reservation beneath it
+// (issue #3926).
+func TestButlerSettle_Promotion_SuccessNoDoubleCount(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/713"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	totals, err := ledger.DayTotals(backend, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Promoted != 1 {
+		t.Errorf("Promoted = %d, want exactly 1", totals.Promoted)
+	}
+	if totals.Claims != 1 {
+		t.Errorf("Claims = %d, want exactly 1 (the reservation must never count as a Claim)", totals.Claims)
+	}
+}
+
+// (n) No room, and no eligible finding either: Settle must never write a
+// reservation commit at all, so the chain holds only the original claim and
+// the done commit (issue #3926).
+func TestButlerSettle_Promotion_NoReservationCommitWhenNothingEligible(t *testing.T) {
+	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/714"
+
+	scope := butler.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := PromotionPolicy{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 0 }, Label: "ready-for-agent"}
+	s := NewButlerSettle(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+
+	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
+	s.Settle(dispatch.NewFake(), "butler-bugs", 0, result)
+
+	entries, err := backend.History("bugs", start.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("History = %d entries, want exactly 2 (claim, done -- no reservation)", len(entries))
+	}
+}
