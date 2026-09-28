@@ -275,7 +275,7 @@ func TestDoctorReport_Healthy_ExitsZeroStderrEmpty(t *testing.T) {
 
 // Issue #3920: --butler is opt-in, so the same otherwise-healthy config
 // (BUTLER_CHORES unset) exits 0 without the flag but exits 2 with it, since
-// resolveButlerSettings rejects an empty BUTLER_CHORES via butler.ErrNoChores.
+// resolveButlerSettings rejects an empty BUTLER_CHORES via chore.ErrNoChores.
 func TestDoctorReport_Butler_OptInValidatesButlerConfig(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"

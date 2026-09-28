@@ -1,4 +1,4 @@
-package butler_test
+package chore_test
 
 import (
 	"os/exec"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 )
 
 // newBareRepoWithFiles builds a bare repo with one commit on "main" holding
@@ -67,7 +67,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 func TestHead(t *testing.T) {
 	bare, commit := newBareRepoWithFiles(t, "a.go", "b.go")
 
-	got, err := butler.Head(bare, "main")
+	got, err := chore.Head(bare, "main")
 	if err != nil {
 		t.Fatalf("Head: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestHead(t *testing.T) {
 		t.Fatalf("Head(main) = %s, want %s", got, commit)
 	}
 
-	if _, err := butler.Head(bare, "no-such-branch"); err == nil {
+	if _, err := chore.Head(bare, "no-such-branch"); err == nil {
 		t.Fatal("Head(no-such-branch): got nil error, want one")
 	}
 }
@@ -86,7 +86,7 @@ func TestTrackedFiles(t *testing.T) {
 	// exercised by git itself, not this package's thin wrapper.
 	bare, commit := newBareRepoWithFiles(t, "c.go", "a.go", "b.go")
 
-	got, err := butler.TrackedFiles(bare, commit)
+	got, err := chore.TrackedFiles(bare, commit)
 	if err != nil {
 		t.Fatalf("TrackedFiles: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestTrackedFilesEmptyTree(t *testing.T) {
 	}
 	commit := strings.TrimSpace(string(commitOut))
 
-	got, err := butler.TrackedFiles(bareRepo, commit)
+	got, err := chore.TrackedFiles(bareRepo, commit)
 	if err != nil {
 		t.Fatalf("TrackedFiles: %v", err)
 	}

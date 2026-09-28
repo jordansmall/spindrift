@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
@@ -414,17 +414,17 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 			return "", nil
 		},
 	}
-	chore := Chore{
+	c := Chore{
 		Name:   "lint-sweep",
 		Branch: "butler/lint-sweep",
-		Scope: butler.Scope{
+		Scope: chore.Scope{
 			Head:      "deadbeef",
 			DiffRange: "cafe..deadbeef",
 			Slice:     []string{"a.go", "b.go"},
 		},
 		Classes: []string{"flaky-test", "dead-code"},
 	}
-	env, err := buildBoxEnv(cfg, choreSubject{Chore: chore}, 0, "", "the-nonce")
+	env, err := buildBoxEnv(cfg, choreSubject{Chore: c}, 0, "", "the-nonce")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}

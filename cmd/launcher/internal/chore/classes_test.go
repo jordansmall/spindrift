@@ -1,4 +1,4 @@
-package butler
+package chore
 
 import (
 	"reflect"

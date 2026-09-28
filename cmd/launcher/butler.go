@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -32,8 +32,8 @@ type butlerEveryConfig struct {
 }
 
 // For returns chore's interval: its override, else the bare default.
-func (c butlerEveryConfig) For(chore string) time.Duration {
-	if d, ok := c.overrides[chore]; ok {
+func (c butlerEveryConfig) For(choreName string) time.Duration {
+	if d, ok := c.overrides[choreName]; ok {
 		return d
 	}
 	return c.dflt
@@ -55,19 +55,19 @@ func parseButlerEvery(value string) (butlerEveryConfig, error) {
 	cfg := butlerEveryConfig{overrides: make(map[string]time.Duration)}
 	haveDefault := false
 	for _, tok := range strings.Fields(value) {
-		chore, durStr, isOverride := strings.Cut(tok, "=")
+		choreName, durStr, isOverride := strings.Cut(tok, "=")
 		if isOverride {
-			if chore == "" {
+			if choreName == "" {
 				return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: empty chore name in %q", tok)
 			}
-			if _, exists := cfg.overrides[chore]; exists {
-				return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: duplicate override for chore %q", chore)
+			if _, exists := cfg.overrides[choreName]; exists {
+				return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: duplicate override for chore %q", choreName)
 			}
 			d, err := parseNonNegativeDuration(durStr)
 			if err != nil {
-				return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: chore %q: %w", chore, err)
+				return butlerEveryConfig{}, fmt.Errorf("butler: BUTLER_EVERY: chore %q: %w", choreName, err)
 			}
-			cfg.overrides[chore] = d
+			cfg.overrides[choreName] = d
 			continue
 		}
 		if haveDefault {
@@ -92,13 +92,13 @@ func parseButlerEvery(value string) (butlerEveryConfig, error) {
 // for a deterministic message across runs.
 func (c butlerEveryConfig) checkOverrides(butlerChores string) error {
 	keys := make([]string, 0, len(c.overrides))
-	for chore := range c.overrides {
-		keys = append(keys, chore)
+	for choreName := range c.overrides {
+		keys = append(keys, choreName)
 	}
 	sort.Strings(keys)
-	for _, chore := range keys {
-		if !choreEnabled(butlerChores, chore) {
-			return fmt.Errorf("butler: BUTLER_EVERY: override for chore %q, which is not enabled (BUTLER_CHORES=%q)", chore, butlerChores)
+	for _, choreName := range keys {
+		if !choreEnabled(butlerChores, choreName) {
+			return fmt.Errorf("butler: BUTLER_EVERY: override for chore %q, which is not enabled (BUTLER_CHORES=%q)", choreName, butlerChores)
 		}
 	}
 	return nil
@@ -149,13 +149,13 @@ type butlerRun struct {
 type butlerPolicy struct {
 	every        butlerEveryConfig
 	claimTimeout time.Duration
-	budgets      butler.Budgets
+	budgets      chore.Budgets
 	// zone is DAEMON_AWAKE_WINDOW's zone, where the budgets' day starts.
 	zone *time.Location
 	// enabled is every BUTLER_CHORES entry, not just this pass's candidates:
 	// budgets are summed across all of them, even under --chore.
 	enabled []string
-	// choreClasses is BUTLER_CHORE_CLASSES parsed once (butler.ParseClasses),
+	// choreClasses is BUTLER_CHORE_CLASSES parsed once (chore.ParseClasses),
 	// not per run: cmdButler's preflight already validated it, so re-parsing
 	// inside the sweep loop would only repeat work with the same answer.
 	choreClasses map[string][]string
@@ -183,9 +183,9 @@ type butlerPolicy struct {
 // settling at the same moment can each read the same total and both spend
 // it. A Snapshot or DayTotalsAll error fails closed (0 room, a warning to
 // stderr) rather than promoting on a total it could not compute.
-func (p butlerPolicy) promotionPolicy(backend ledger.Backend, chore string, now func() time.Time) settle.PromotionPolicy {
+func (p butlerPolicy) promotionPolicy(backend ledger.Backend, choreName string, now func() time.Time) settle.PromotionPolicy {
 	pp := settle.PromotionPolicy{
-		Classes:  p.choreClasses[chore],
+		Classes:  p.choreClasses[choreName],
 		MaxFiles: p.promotionMaxFiles,
 		Label:    p.label,
 	}
@@ -215,9 +215,9 @@ func (p butlerPolicy) promotionPolicy(backend ledger.Backend, chore string, now 
 // choreEnabled reports whether chore appears in list, BUTLER_CHORES's
 // space-separated value (schema key butlerChores). A Consumer opts a Chore in
 // by naming it there; the default "" enables none (spec #3870).
-func choreEnabled(list, chore string) bool {
-	for _, name := range butler.Chores(list) {
-		if name == chore {
+func choreEnabled(list, choreName string) bool {
+	for _, name := range chore.Chores(list) {
+		if name == choreName {
 			return true
 		}
 	}
@@ -229,7 +229,7 @@ func choreEnabled(list, chore string) bool {
 // parseIssuePositionals's callers, butler takes no issue positionals, so any
 // other token is a usage error. An empty chore return means "pick a due
 // Chore" rather than sweep one named explicitly.
-func parseButlerArgs(args []string) (chore string, noBuild bool, err error) {
+func parseButlerArgs(args []string) (choreName string, noBuild bool, err error) {
 	noBuild, remaining := dispatchNoBuildArgs(args)
 	for i := 0; i < len(remaining); i++ {
 		if remaining[i] != "--chore" {
@@ -238,17 +238,17 @@ func parseButlerArgs(args []string) (chore string, noBuild bool, err error) {
 		if i+1 >= len(remaining) {
 			return "", false, fmt.Errorf("flag --chore requires a value")
 		}
-		chore = remaining[i+1]
+		choreName = remaining[i+1]
 		i++
 	}
-	return chore, noBuild, nil
+	return choreName, noBuild, nil
 }
 
 // runButler picks the first due Chore out of chores (in order) and sweeps
 // it, or reports why none is due (ADR 0056). chores is either the single
 // name given on --chore, or every BUTLER_CHORES entry in configured order
 // when none was given. HEAD is read once up front, and the due check
-// (internal/butler.Check) takes a single now() reading shared across every
+// (internal/chore.Check) takes a single now() reading shared across every
 // candidate, so the picture of "what's due" is consistent across the whole
 // pass rather than drifting chore to chore. The due check -- today's totals
 // plus each candidate's Read/History -- shares one ledger.Snapshot, so a
@@ -270,7 +270,7 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 		return errors.New("butler: no chores to check")
 	}
 
-	head, err := butler.Head(id.repo, id.branch)
+	head, err := chore.Head(id.repo, id.branch)
 	if err != nil {
 		return err
 	}
@@ -287,30 +287,30 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 	}
 
 	var reasons []string
-	for _, chore := range chores {
-		tip, err := snap.Read(chore)
+	for _, choreName := range chores {
+		tip, err := snap.Read(choreName)
 		if err != nil {
-			return fmt.Errorf("butler: read %s ledger: %w", chore, err)
+			return fmt.Errorf("butler: read %s ledger: %w", choreName, err)
 		}
-		interval := policy.every.For(chore)
-		recent, err := snap.History(chore, whenNow.Add(-interval))
+		interval := policy.every.For(choreName)
+		recent, err := snap.History(choreName, whenNow.Add(-interval))
 		if err != nil {
-			return fmt.Errorf("butler: read %s ledger history: %w", chore, err)
+			return fmt.Errorf("butler: read %s ledger history: %w", choreName, err)
 		}
-		verdict := butler.Check(tip, recent, head, whenNow, today, butler.DueConfig{Every: interval, ClaimTimeout: policy.claimTimeout, Budgets: policy.budgets})
-		if verdict != butler.Due {
-			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", chore, verdict))
+		verdict := chore.Check(tip, recent, head, whenNow, today, chore.DueConfig{Every: interval, ClaimTimeout: policy.claimTimeout, Budgets: policy.budgets})
+		if verdict != chore.Due {
+			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", choreName, verdict))
 			continue
 		}
-		promo := policy.promotionPolicy(backend, chore, now)
-		return runOneButlerChore(backend, it, id, chore, tip, head, policy.budgets.MaxFindingsPerSweep, promo, newDispatcher, whenNow, now)
+		promo := policy.promotionPolicy(backend, choreName, now)
+		return runOneButlerChore(backend, it, id, choreName, tip, head, policy.budgets.MaxFindingsPerSweep, promo, newDispatcher, whenNow, now)
 	}
 
 	return fmt.Errorf("butler: %s: %w", strings.Join(reasons, "; "), errQueueEmpty)
 }
 
 // runOneButlerChore claims chore's Ledger (already read as tip, at head),
-// computes this run's scan Scope (internal/butler.NextScope), dispatches one
+// computes this run's scan Scope (internal/chore.NextScope), dispatches one
 // Box through newDispatcher, and settles the result (ADR 0056). Every
 // collaborator is injected so this is testable without a real Box or repo
 // seam: newDispatcher builds the Dispatcher for one Chore run (a real
@@ -327,23 +327,23 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 // Settle actually wrote the done commit (Box success) or left the claim
 // standing (Box crash, ADR 0056) is read back off the Ledger tip rather than
 // threaded out of Settle, since a crashed run's Settle writes nothing at all.
-func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chore string, tip ledger.Tip, head string, maxFindingsPerSweep int, promo settle.PromotionPolicy, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, claimedAt time.Time, now func() time.Time) error {
-	files, err := butler.TrackedFiles(id.repo, head)
+func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerRun, choreName string, tip ledger.Tip, head string, maxFindingsPerSweep int, promo settle.PromotionPolicy, newDispatcher func(dispatch.Chore) dispatch.Dispatcher, claimedAt time.Time, now func() time.Time) error {
+	files, err := chore.TrackedFiles(id.repo, head)
 	if err != nil {
 		return err
 	}
 
-	claim, err := ledger.Claim(backend, chore, tip, ledger.ClaimedBy{Host: id.host, Slot: butlerSlot, Start: claimedAt})
+	claim, err := ledger.Claim(backend, choreName, tip, ledger.ClaimedBy{Host: id.host, Slot: butlerSlot, Start: claimedAt})
 	if err != nil {
 		if errors.Is(err, ledger.ErrLostRace) {
 			// Another worker claimed it between our Read and our Claim:
 			// exactly the "nothing to do right now" case, not a real error.
-			return fmt.Errorf("butler: chore %q claimed by another run first: %w", chore, errQueueEmpty)
+			return fmt.Errorf("butler: chore %q claimed by another run first: %w", choreName, errQueueEmpty)
 		}
-		return fmt.Errorf("butler: claim %s: %w", chore, err)
+		return fmt.Errorf("butler: claim %s: %w", choreName, err)
 	}
 
-	scope := butler.NextScope(claim.State, head, files, butler.DefaultSliceSize)
+	scope := chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
 
 	// The Box only ever sees promo.Classes when promotion is actually on
 	// (promo.Room set, i.e. BUTLER_MAX_PROMOTIONS_PER_DAY > 0): with
@@ -356,19 +356,19 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 	if promo.Room != nil {
 		choreClasses = promo.Classes
 	}
-	d := newDispatcher(dispatch.Chore{Name: chore, Branch: id.branch, Scope: scope, Classes: choreClasses})
+	d := newDispatcher(dispatch.Chore{Name: choreName, Branch: id.branch, Scope: scope, Classes: choreClasses})
 	defer d.Close()
 	result := d.Run()
 
-	s := settle.NewButlerSettle(it, backend, chore, claim, scope, now, maxFindingsPerSweep, promo)
-	s.Settle(d, dispatch.ChoreKey(chore), butlerSlot, result)
+	s := settle.NewButlerSettle(it, backend, choreName, claim, scope, now, maxFindingsPerSweep, promo)
+	s.Settle(d, dispatch.ChoreKey(choreName), butlerSlot, result)
 
-	final, err := backend.Read(chore)
+	final, err := backend.Read(choreName)
 	if err != nil {
-		return fmt.Errorf("butler: read %s ledger after settle: %w", chore, err)
+		return fmt.Errorf("butler: read %s ledger after settle: %w", choreName, err)
 	}
 	if final.State.Phase != ledger.Done {
-		return fmt.Errorf("butler: chore %q run did not complete (claim left standing)", chore)
+		return fmt.Errorf("butler: chore %q run did not complete (claim left standing)", choreName)
 	}
 	return nil
 }
@@ -392,7 +392,7 @@ type choreCatalog struct {
 // lastSwept and the cursor past findings nobody filed. An empty chore (no
 // --chore) needs BUTLER_CHORES to name at least one candidate instead. A
 // per-sweep cap above the day cap is also rejected here: left alone, every
-// run would trip internal/butler.Check's SweepFindingsExceedHeadroom at
+// run would trip internal/chore.Check's SweepFindingsExceedHeadroom at
 // Filed=0 and no run could ever start.
 //
 // The chore name format and prompt-file-exists checks below catch a
@@ -400,25 +400,25 @@ type choreCatalog struct {
 // claim -- otherwise they'd only surface once runOneButlerChore's Box fails
 // in promptassembly.choreSection, leaving the claim standing for the full
 // claim timeout (issue #3905).
-func butlerPreflight(cfg config, chore string, filerEnabled bool, catalog choreCatalog) error {
+func butlerPreflight(cfg config, choreName string, filerEnabled bool, catalog choreCatalog) error {
 	row, ok := backendByName(cfg.codeForge)
 	if !ok || row.newLedger == nil {
 		return fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", cfg.codeForge, strings.Join(ledgerCapableNames(), ", "))
 	}
-	enabled := butler.Chores(cfg.butlerChores)
-	for _, c := range append([]string{chore}, enabled...) {
+	enabled := chore.Chores(cfg.butlerChores)
+	for _, c := range append([]string{choreName}, enabled...) {
 		if c != "" && !promptassembly.ValidChoreName(c) {
 			return fmt.Errorf("butler: chore %q: invalid name format: %s", c, promptassembly.ChoreNameRule)
 		}
 	}
-	if chore != "" {
-		if !choreEnabled(cfg.butlerChores, chore) {
-			return fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", chore, cfg.butlerChores)
+	if choreName != "" {
+		if !choreEnabled(cfg.butlerChores, choreName) {
+			return fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", choreName, cfg.butlerChores)
 		}
 	} else if len(enabled) == 0 {
-		return fmt.Errorf("butler: %w", butler.ErrNoChores)
+		return fmt.Errorf("butler: %w", chore.ErrNoChores)
 	}
-	if _, err := butler.ParseClasses(cfg.butlerChoreClasses); err != nil {
+	if _, err := chore.ParseClasses(cfg.butlerChoreClasses); err != nil {
 		return fmt.Errorf("butler: BUTLER_CHORE_CLASSES: %w", err)
 	}
 	// An override only takes effect when it names an existing directory
@@ -470,15 +470,15 @@ type butlerSettings struct {
 // resolveButlerSettings runs every butler config check -- butlerPreflight's
 // guards, then BUTLER_EVERY (and its per-chore overrides),
 // BUTLER_CLAIM_TIMEOUT, and DAEMON_AWAKE_WINDOW -- before any Ledger claim.
-func resolveButlerSettings(cfg config, chore string) (butlerSettings, error) {
+func resolveButlerSettings(cfg config, choreName string) (butlerSettings, error) {
 	filerEnabled := resolveAgentPresenceSignals(cfg.driver).filerEnabled
-	if err := butlerPreflight(cfg, chore, filerEnabled, resolveChoreCatalog()); err != nil {
+	if err := butlerPreflight(cfg, choreName, filerEnabled, resolveChoreCatalog()); err != nil {
 		return butlerSettings{}, err
 	}
 	// butlerPreflight already validated this string; parsing again here (once,
 	// not per Chore run) turns it into the map runOneButlerChore's
 	// promotionPolicy indexes by chore.
-	choreClasses, err := butler.ParseClasses(cfg.butlerChoreClasses)
+	choreClasses, err := chore.ParseClasses(cfg.butlerChoreClasses)
 	if err != nil {
 		return butlerSettings{}, fmt.Errorf("butler: BUTLER_CHORE_CLASSES: %w", err)
 	}
@@ -510,15 +510,15 @@ func resolveButlerSettings(cfg config, chore string) (butlerSettings, error) {
 // resolveButlerSettings failure exits exitConfigInvalid (6) rather than 1,
 // so the daemon's shared breaker (internal/daemon/outcome.go) never treats a
 // config problem as an unclassified error (issue #3920).
-func cmdButler(lc *launchContext, chore string) int {
+func cmdButler(lc *launchContext, choreName string) int {
 	defer lc.cleanup()
 
-	settings, err := resolveButlerSettings(lc.config, chore)
+	settings, err := resolveButlerSettings(lc.config, choreName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return exitConfigInvalid
 	}
-	budgets := butler.Budgets{
+	budgets := chore.Budgets{
 		MaxSweepsPerDay:     lc.config.butlerMaxSweepsPerDay,
 		MaxFindingsPerDay:   lc.config.butlerMaxFindingsPerDay,
 		MaxFindingsPerSweep: lc.config.butlerMaxFindingsPerSweep,
@@ -545,9 +545,9 @@ func cmdButler(lc *launchContext, chore string) int {
 
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return lc.factory.NewChore(c) }
 
-	enabled := butler.Chores(lc.config.butlerChores)
-	chores := []string{chore}
-	if chore == "" {
+	enabled := chore.Chores(lc.config.butlerChores)
+	chores := []string{choreName}
+	if choreName == "" {
 		chores = enabled
 	}
 
@@ -574,7 +574,7 @@ func cmdButler(lc *launchContext, chore string) int {
 // butlerVerbHandler is verbHandlers["butler"]'s body, split out so its own
 // flag-parsing errors are testable without going through bootstrap.
 func butlerVerbHandler(args []string, stderr io.Writer) int {
-	chore, noBuild, err := parseButlerArgs(args)
+	choreName, noBuild, err := parseButlerArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
@@ -584,5 +584,5 @@ func butlerVerbHandler(args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return bootstrapExitCode(err)
 	}
-	return cmdButler(lc, chore)
+	return cmdButler(lc, choreName)
 }

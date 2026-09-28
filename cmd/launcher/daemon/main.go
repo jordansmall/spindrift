@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -52,7 +52,7 @@ type parsedArgs struct {
 // butler upkeep. `dispatch` alone keeps work-only operation, which is how an
 // operator who has not created the research labels on their target repo
 // runs the daemon; `research` alone restricts it to advise-only research;
-// `butler` alone restricts it to the butler. The bare default's butler is
+// `butler` alone restricts it to the chore. The bare default's butler is
 // provisional until gateButlerKind, since parseArgs has no document to
 // resolve BUTLER_CHORES against.
 func parseArgs(args []string) (parsedArgs, error) {
@@ -111,11 +111,11 @@ func parseArgs(args []string) (parsedArgs, error) {
 // running nothing. A butler that survives this gate has the rest of its
 // config validated by that same `doctor --butler` (issue #3920).
 func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, butlerChores string) ([]daemon.Kind, error) {
-	if len(butler.Chores(butlerChores)) > 0 || !slices.Contains(kinds, daemon.KindButler) {
+	if len(chore.Chores(butlerChores)) > 0 || !slices.Contains(kinds, daemon.KindButler) {
 		return kinds, nil
 	}
 	if explicitSelector {
-		return nil, fmt.Errorf("daemon: butler selected but %w", butler.ErrNoChores)
+		return nil, fmt.Errorf("daemon: butler selected but %w", chore.ErrNoChores)
 	}
 	return slices.DeleteFunc(slices.Clone(kinds), func(k daemon.Kind) bool { return k == daemon.KindButler }), nil
 }

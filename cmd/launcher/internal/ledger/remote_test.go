@@ -245,7 +245,7 @@ func TestRemoteSnapshotDoesNotReFetch(t *testing.T) {
 
 // TestRemoteFetchBranch asserts that FetchBranch mirrors the remote's branch
 // head into the scratch repo, which the butler command needs to compute
-// butler.Head/butler.TrackedFiles against a local repo.
+// chore.Head/chore.TrackedFiles against a local repo.
 func TestRemoteFetchBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 	bare := newBareRepo(t)

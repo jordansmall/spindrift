@@ -33,7 +33,7 @@ type backendRow struct {
 	newReadOnlyCodeForge func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge
 
 	// newLedger returns this CODE_FORGE's butler Ledger backend (issue #3876),
-	// the local repo path holding the base branch (for butler.Head /
+	// the local repo path holding the base branch (for chore.Head /
 	// TrackedFiles), and a cleanup func to run once the run is over. nil means
 	// this forge cannot host a butler Ledger yet (git).
 	newLedger func(c config) (ledger.Backend, string, func(), error)
@@ -45,7 +45,7 @@ type backendRow struct {
 
 // remoteLedger builds a Ledger against a hosted forge: a fresh scratch repo
 // (ledger.NewRemote), fetched forward to c.baseBranch so the returned repo
-// path also satisfies butler.Head/TrackedFiles. Shared by the github and
+// path also satisfies chore.Head/TrackedFiles. Shared by the github and
 // forgejo rows, which differ only in url and gitArgs.
 func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, string, func(), error) {
 	dir, err := os.MkdirTemp("", "spindrift-ledger-*")

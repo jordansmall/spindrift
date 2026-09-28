@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/butler"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
@@ -21,7 +21,7 @@ import (
 // Chore is a one-shot butler run's key (ADR 0056, issue #3875), Factory.NewChore's
 // argument: unlike an issue-keyed Dispatch, it carries no tracker number or
 // issue text, only the Ledger Chore's name, its target branch, and the scan
-// Scope internal/butler computed for this run.
+// Scope internal/chore computed for this run.
 type Chore struct {
 	// Name is the Chore's name, forwarded as CHORE_NAME and folded into the
 	// Dispatch's log/lock/cache key as "butler-"+Name (Factory.NewChore).
@@ -30,10 +30,10 @@ type Chore struct {
 	// BASE_BRANCH directly rather than through Config.ResolveEnv: a chore has
 	// no issue number for the local-forge BASE_BRANCH resolver to key off.
 	Branch string
-	// Scope is this run's scan scope (internal/butler.NextScope): Head,
+	// Scope is this run's scan scope (internal/chore.NextScope): Head,
 	// DiffRange, and Slice forward as CHORE_HEAD, CHORE_DIFF_RANGE, and
 	// CHORE_SLICE.
-	Scope butler.Scope
+	Scope chore.Scope
 	// Classes is the promotion-candidate class allow-list forwarded as
 	// CHORE_CLASSES (issue #3880), informational only: the Box never reads
 	// it back into a promotion decision, since the host re-checks a

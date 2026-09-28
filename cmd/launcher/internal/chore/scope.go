@@ -1,8 +1,13 @@
-// Package butler computes the scan scope for one butler run (ADR 0056): the
-// range of new commits since the Chore's last sweep, plus the next slice of
-// the tree at the cursor, so new code is checked promptly and old code
-// eventually, and no run reads the whole repo.
-package butler
+// Package chore holds the pure Chore computations (ADR 0056): the scan
+// Scope and NextScope for one run (the range of new commits since the
+// Chore's last sweep, plus the next slice of the tree at the cursor, so new
+// code is checked promptly and old code eventually, and no run reads the
+// whole repo), the due Check, class parsing, and the enabled-Chore helpers.
+//
+// It stays a leaf: it imports no forge, dispatch, settle, or daemon
+// package itself. dispatch imports Scope, so any such import back would
+// cycle.
+package chore
 
 import (
 	"sort"
