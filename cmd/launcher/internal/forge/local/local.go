@@ -418,7 +418,9 @@ func (lt *LocalTracker) RecordLandingPass(num string, pass int, kind string) err
 }
 
 // CloseIssue sets issue num's closed: frontmatter field (forge.IssueCloser,
-// ADR 0029). reconcile is its sole caller.
+// ADR 0029). reconcile is its usual caller; settle's already-resolved arm
+// (issue #4017) also calls it directly, since that outcome has nothing
+// landed for reconcile to observe.
 func (lt *LocalTracker) CloseIssue(num string) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {

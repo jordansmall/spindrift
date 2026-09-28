@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -139,5 +140,64 @@ func TestSettle_ImmediateMergeClosesForgejoIssue(t *testing.T) {
 	}
 	if len(comments) != 1 {
 		t.Errorf("usage comment posts = %d, want 1", len(comments))
+	}
+}
+
+// TestSettle_AlreadyResolvedClosesForgejoIssue is the forgejo-backed variant
+// of already_resolved_test.go's ForgejoShapeCloses case (issue #4017): a real
+// forgejoClient over an httptest server ends closed via closeResolvedIssue's
+// MergeCloser branch, not the merged-PR backstop this file's other test
+// covers, so status=already-resolved and its own note flow through PATCH too.
+func TestSettle_AlreadyResolvedClosesForgejoIssue(t *testing.T) {
+	const issNum = "55"
+	const repoPath = "/api/v1/repos/owner/repo"
+	const note = "Already fixed by commit abc1234 on main."
+
+	srv := newFakeForgejoIssueServer([]string{"agent-in-progress"})
+	ts := httptest.NewServer(srv.handler(t, repoPath, 55))
+	defer ts.Close()
+
+	it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
+		BaseURL: ts.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+		Labels:  testDispatchLabels,
+	})
+
+	cf := forge.NewFake(testDispatchLabels)
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-55", Status: outcome.StatusAlreadyResolved, Note: note},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), it, cf)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	srv.mu.Lock()
+	closeCalls, finalState, comments, labels := srv.closeCalls, srv.state, srv.commentCalls, srv.labels
+	srv.mu.Unlock()
+
+	if finalState != "closed" {
+		t.Errorf("forgejo issue state = %q, want %q (already-resolved must close it end-to-end)", finalState, "closed")
+	}
+	if closeCalls != 1 {
+		t.Errorf("PATCH close calls = %d, want 1", closeCalls)
+	}
+	if !containsLabel(labels, "agent-complete") {
+		t.Errorf("forgejo issue labels = %v, want agent-complete", labels)
+	}
+	if containsLabel(labels, "agent-in-progress") {
+		t.Errorf("forgejo issue labels = %v, must not still carry agent-in-progress", labels)
+	}
+	// The closing note and the separate usage-report comment (postUsageComment).
+	if len(comments) != 2 {
+		t.Fatalf("comment posts = %d, want 2 (closing note + usage report): %v", len(comments), comments)
+	}
+	if !strings.Contains(comments[0], "already complete") || !strings.Contains(comments[0], note) {
+		t.Errorf("first comment = %q, want closing sentence + note %q", comments[0], note)
 	}
 }

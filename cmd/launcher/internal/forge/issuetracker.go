@@ -239,7 +239,8 @@ type GithubTracker interface {
 // own merged-PR auto-close.
 type IssueCloser interface {
 	// CloseIssue marks issue num closed (the local closed: axis, ADR 0029).
-	// Reconcile is its sole caller.
+	// Reconcile is its usual caller; settle's already-resolved arm (issue
+	// #4017) also calls it directly.
 	CloseIssue(num string) error
 }
 
@@ -248,8 +249,9 @@ type IssueCloser interface {
 // for settle's own close on a status=already-resolved outcome (issue #4015).
 // Only github and forgejo implement it. The method is not named CloseIssue
 // because ISSUE_TRACKER=local with CODE_FORGE=github is valid, and a shared
-// name would let settle drive the local closed: axis, a write only reconcile
-// may make.
+// name would let settle's merge backstop close a local issue, whose closed:
+// axis only reconcile writes for landed work (settle's already-resolved
+// close goes through IssueCloser deliberately, issue #4017).
 type MergeCloser interface {
 	// CloseMergedIssue closes issue num once settle has independently
 	// confirmed either a genuine merge or that the work is already resolved

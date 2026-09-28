@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -162,6 +163,269 @@ func TestSettle_AlreadyResolvedOutcome_SettledRecordStateComplete(t *testing.T) 
 	want := report.Record{Event: "settled", Issue: issNum, State: "complete", Note: note}
 	if recs[0] != want {
 		t.Errorf("record = %+v, want %+v", recs[0], want)
+	}
+}
+
+// orderTrackingTracker wraps a forge.IssueTracker to log Comment,
+// TransitionState, and CloseMergedIssue calls into one shared slice, in
+// call order, across methods — forge.Fake logs each method into its own
+// slice, with no cross-method ordering, so this is the cheapest way to
+// assert gate.go's already-resolved arm fires comment, then label swap,
+// then close, in that order.
+type orderTrackingTracker struct {
+	forge.IssueTracker
+	closer forge.MergeCloser
+	order  *[]string
+}
+
+func (o orderTrackingTracker) Comment(num, body string) error {
+	*o.order = append(*o.order, "comment")
+	return o.IssueTracker.Comment(num, body)
+}
+
+func (o orderTrackingTracker) TransitionState(num string, from, to forge.DispatchState) error {
+	*o.order = append(*o.order, "transition")
+	return o.IssueTracker.TransitionState(num, from, to)
+}
+
+func (o orderTrackingTracker) CloseMergedIssue(num string) error {
+	*o.order = append(*o.order, "close")
+	return o.closer.CloseMergedIssue(num)
+}
+
+var _ forge.MergeCloser = orderTrackingTracker{}
+
+// Issue #4017: a forgejo-shaped tracker (MergeCloser, no IssueCloser) closes
+// an already-resolved issue through closeResolvedIssue's MergeCloser branch,
+// same as closeIssue's existing merged-PR backstop.
+func TestSettle_AlreadyResolvedOutcome_ForgejoShapeCloses(t *testing.T) {
+	const issNum = "42"
+	const note = "Already fixed by commit abc1234 on main."
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: note},
+		},
+	}
+
+	forgejoShaped := fc.AsForgejoShaped()
+	closer, ok := forgejoShaped.(forge.MergeCloser)
+	if !ok {
+		t.Fatalf("AsForgejoShaped() must implement forge.MergeCloser")
+	}
+	var order []string
+	tracker := orderTrackingTracker{IssueTracker: forgejoShaped, closer: closer, order: &order}
+
+	s := newTestSettle(baseConfig(), tracker, fc)
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CommentCalls) == 0 || !strings.Contains(fc.CommentCalls[0].Body, "already complete") || !strings.Contains(fc.CommentCalls[0].Body, note) {
+		t.Fatalf("first comment: got %+v, want closing sentence + note %q", fc.CommentCalls, note)
+	}
+
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
+	}
+	call := fc.TransitionStateCalls[0]
+	if call.Num != issNum || call.From != forge.InProgress || call.To != forge.Complete {
+		t.Errorf("TransitionState call: got %+v, want num=%s from=InProgress to=Complete", call, issNum)
+	}
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete; got labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("issue must not be stranded in agent-in-progress; got labels=%v", iss.Labels)
+	}
+
+	if len(fc.CloseMergedIssueCalls) != 1 || fc.CloseMergedIssueCalls[0] != issNum {
+		t.Errorf("CloseMergedIssueCalls = %v, want [%s]", fc.CloseMergedIssueCalls, issNum)
+	}
+
+	// gate.go's already-resolved arm posts the closing comment, then swaps
+	// the label (transitionState), then closes, then posts the separate
+	// usage-report comment — so the first three entries, not the whole
+	// log, are the ones under test here.
+	want := []string{"comment", "transition", "close"}
+	if len(order) < len(want) {
+		t.Fatalf("call order = %v, want a %v prefix", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Errorf("call order = %v, want a %v prefix", order, want)
+			break
+		}
+	}
+}
+
+// Issue #4017: a local-shaped tracker (IssueCloser, no MergeCloser) closes an
+// already-resolved issue through closeResolvedIssue's IssueCloser fallback —
+// the one exception to ADR 0029's reconcile-only local closed: axis, since
+// already-resolved has no merged PR for reconcile to key off.
+func TestSettle_AlreadyResolvedOutcome_LocalShapeCloses(t *testing.T) {
+	const issNum = "42"
+	const note = "Already fixed by commit abc1234 on main."
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: note},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc.AsLocalShaped(), fc)
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
+	}
+	call := fc.TransitionStateCalls[0]
+	if call.Num != issNum || call.From != forge.InProgress || call.To != forge.Complete {
+		t.Errorf("TransitionState call: got %+v, want num=%s from=InProgress to=Complete", call, issNum)
+	}
+
+	if len(fc.CloseIssueCalls) != 1 || fc.CloseIssueCalls[0] != issNum {
+		t.Errorf("CloseIssueCalls = %v, want [%s]", fc.CloseIssueCalls, issNum)
+	}
+	if len(fc.CloseMergedIssueCalls) != 0 {
+		t.Errorf("CloseMergedIssueCalls = %v, want none", fc.CloseMergedIssueCalls)
+	}
+
+	iss, _ := fc.Issue(issNum)
+	if iss.State != forge.IssueClosed {
+		t.Errorf("issue must be closed; got state=%v", iss.State)
+	}
+}
+
+// Issue #4017: closeResolvedIssue's IssueCloser fallback returns an error
+// (e.g. the tracker rejects a double close). Settle must not panic and must
+// still land on Complete — a close failure is best-effort, logged to
+// stderr, matching closeIssue's own error handling.
+func TestSettle_AlreadyResolvedOutcome_IssueCloserErrorStillCompletes(t *testing.T) {
+	const issNum = "42"
+	const note = "Already fixed by commit abc1234 on main."
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CloseIssueErr = errors.New("tracker rejected close")
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: note},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc.AsLocalShaped(), fc)
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
+	}
+	call := fc.TransitionStateCalls[0]
+	if call.Num != issNum || call.From != forge.InProgress || call.To != forge.Complete {
+		t.Errorf("TransitionState call: got %+v, want num=%s from=InProgress to=Complete", call, issNum)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("a close error must still leave the issue at agent-complete; got labels=%v", iss.Labels)
+	}
+	if iss.State == forge.IssueClosed {
+		t.Errorf("a rejected close must leave the issue open; got state=%v", iss.State)
+	}
+}
+
+// Issue #4017: a tracker with neither MergeCloser nor IssueCloser (e.g. a
+// jira-shaped tracker) must leave closeResolvedIssue a no-op — Settle still
+// reaches Complete, and no close call is attempted on either interface.
+func TestSettle_AlreadyResolvedOutcome_NeitherCloserShapeCompletesWithNoClose(t *testing.T) {
+	const issNum = "42"
+	const note = "Already fixed by commit abc1234 on main."
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: note},
+		},
+	}
+
+	tracker := fc.AsNoLandingRecorder()
+	if _, ok := tracker.(forge.MergeCloser); ok {
+		t.Fatalf("AsNoLandingRecorder() must not implement forge.MergeCloser")
+	}
+	if _, ok := tracker.(forge.IssueCloser); ok {
+		t.Fatalf("AsNoLandingRecorder() must not implement forge.IssueCloser")
+	}
+
+	s := newTestSettle(baseConfig(), tracker, fc)
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
+	}
+	call := fc.TransitionStateCalls[0]
+	if call.Num != issNum || call.From != forge.InProgress || call.To != forge.Complete {
+		t.Errorf("TransitionState call: got %+v, want num=%s from=InProgress to=Complete", call, issNum)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("neither-closer shape must still reach agent-complete; got labels=%v", iss.Labels)
+	}
+	if len(fc.CloseIssueCalls) != 0 || len(fc.CloseMergedIssueCalls) != 0 {
+		t.Errorf("neither-closer shape must attempt no close calls; CloseIssueCalls=%v CloseMergedIssueCalls=%v", fc.CloseIssueCalls, fc.CloseMergedIssueCalls)
+	}
+}
+
+// Issue #4017: a tracker implementing both closers closes through MergeCloser
+// only — closeResolvedIssue's IssueCloser branch is a fallback, not a second
+// close.
+func TestSettle_AlreadyResolvedOutcome_BothClosersPrefersMergeCloser(t *testing.T) {
+	const issNum = "42"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: "Already fixed."},
+		},
+	}
+
+	var tracker forge.IssueTracker = fc
+	if _, ok := tracker.(forge.IssueCloser); !ok {
+		t.Fatalf("forge.Fake must implement forge.IssueCloser for this test")
+	}
+
+	s := newTestSettle(baseConfig(), tracker, fc)
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CloseMergedIssueCalls) != 1 || fc.CloseMergedIssueCalls[0] != issNum {
+		t.Errorf("CloseMergedIssueCalls = %v, want [%s]", fc.CloseMergedIssueCalls, issNum)
+	}
+	if len(fc.CloseIssueCalls) != 0 {
+		t.Errorf("CloseIssueCalls = %v, want none -- MergeCloser wins", fc.CloseIssueCalls)
 	}
 }
 
