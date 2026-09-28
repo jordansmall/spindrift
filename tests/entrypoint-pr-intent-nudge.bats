@@ -372,3 +372,16 @@ setup() {
   # other skip reason.
   grep -q '^SPINDRIFT_OUTCOME .*status=blocked' <<<"$output"
 }
+
+# The gate's `! _is_advise_only` guard (issue #3906) covers research too, not
+# only the butler case in tests/entrypoint-butler-kind.bats.
+@test "PR-intent gate: never fires under DISPATCH_KIND=research, advise-only never opens a PR" {
+  export DISPATCH_KIND="research"
+  unset BOX_WRITE_ENABLED
+  export RUN_NONCE="deadbeefcafe1234"
+  export FAKE_DRIVER_NO_PR_INTENT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q "PR-intent marker missing" <<<"$output"
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
+}
