@@ -957,20 +957,24 @@ func writeInputDocT(t *testing.T, settings map[string]string) string {
 	return path
 }
 
+// daemonKnobEnvVars is every env var the daemon package reads by name,
+// including the wrapper's SPINDRIFT_DAEMON_PROGRAM, cleared to keep
+// mainRun's self-change check off. TestClearKnobEnvT_CoversEveryKnob pins
+// it to the call sites.
+var daemonKnobEnvVars = []string{
+	"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION",
+	"DAEMON_IDLE_FLOOR", "DAEMON_IDLE_CAP", "DAEMON_FAILURE_BACKOFF",
+	"DAEMON_BREAKER_THRESHOLD", "DAEMON_BREAKER_WINDOW", "BOX_SIGNAL_CARRIER",
+	"DAEMON_AWAKE_WINDOW", "BUTLER_CHORES", "DAEMON_SELF_APP",
+	"SPINDRIFT_DAEMON_PROGRAM",
+}
+
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the
 // test, so an ambient export in the host/CI environment cannot shadow the
-// input document values these tests set up. It also clears the wrapper's
-// SPINDRIFT_DAEMON_PROGRAM, which is not a document knob, to keep mainRun's
-// self-change check off.
+// input document values these tests set up.
 func clearKnobEnvT(t *testing.T) {
 	t.Helper()
-	for _, v := range []string{
-		"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION",
-		"DAEMON_IDLE_FLOOR", "DAEMON_IDLE_CAP", "DAEMON_FAILURE_BACKOFF",
-		"DAEMON_BREAKER_THRESHOLD", "DAEMON_BREAKER_WINDOW", "BOX_SIGNAL_CARRIER",
-		"DAEMON_AWAKE_WINDOW", "BUTLER_CHORES", "DAEMON_SELF_APP",
-		"SPINDRIFT_DAEMON_PROGRAM",
-	} {
+	for _, v := range daemonKnobEnvVars {
 		t.Setenv(v, "")
 	}
 }
