@@ -450,3 +450,20 @@ func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
 		t.Errorf("CHORE_CLASSES should be absent when Classes is empty, got %q", v)
 	}
 }
+
+// A nil subject used to mean the issue arm (a nil *Chore); now it matches no
+// arm, so it must fail loudly rather than launch a Box with neither
+// ISSUE_* nor CHORE_*.
+func TestBuildBoxEnv_NilSubjectErrors(t *testing.T) {
+	resolved := false
+	cfg := Config{
+		BoxEnvVars: "BASE_BRANCH",
+		ResolveEnv: func(_, _ string) string { resolved = true; return "" },
+	}
+	if _, err := buildBoxEnv(cfg, "7", nil, 0, "", ""); err == nil {
+		t.Fatal("buildBoxEnv(nil subject): want error, got nil")
+	}
+	if resolved {
+		t.Error("buildBoxEnv(nil subject) called ResolveEnv before rejecting the subject")
+	}
+}
