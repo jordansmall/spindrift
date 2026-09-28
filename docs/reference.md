@@ -3217,7 +3217,8 @@ more site keys (issue #3609). Unlike `labels`, which stays host-derived,
 the same site; whitespace touching a separator is absorbed into the fold
 too, so `Type. Field` also keys as `type:field`; and any leading or
 trailing separator is trimmed, so a separator-only term normalizes to
-empty) and dropped if it's
+empty, and a term with no letter or digit at all, e.g. `-` or `!!`, also
+normalizes to empty) and dropped if it's
 empty, contains `,` (the marker line's own field separator), or contains
 `--` (which would close the `<!-- spindrift-dedup: ... -->` HTML comment
 early) — an intent carrying no usable term after that filter has an empty
