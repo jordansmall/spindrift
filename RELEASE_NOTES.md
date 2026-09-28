@@ -9,6 +9,59 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.20.0 — 2026-09-27
+
+Introducing the butler (beta): agents that tidy your repo on idle time instead
+of waiting for an issue.
+
+No breaking changes.
+
+- **The butler, a new kind of run (beta).** Dispatch works an issue and
+  research reviews one, but nothing so far went looking for work on its own.
+  The butler does. It runs standing **Chores**, repo hygiene sweeps that ship
+  as `bugs`, `refactor`, and `docs-drift`, and each run reads what changed on
+  your base branch since the last sweep plus the next slice of the tree, so a
+  big repo gets covered bit by bit. It's advise-only: findings come back as
+  issues labelled `agent-butler-finding` for a human to promote, just like
+  review and research findings. You can add your own Chore, or override a
+  built-in's prompt, by dropping a markdown file into `choresDir`. It's off
+  until you list Chores in `BUTLER_CHORES` (`spindrift doctor` offers to
+  create the new label), and it's beta, so expect the knobs and defaults to
+  shift over the next few releases.
+- **Run it once, or let the daemon run it for you.** `spindrift butler`
+  sweeps the first Chore that's due (or the one you name with `--chore`) and
+  exits "no work" (code 2) with a reason when nothing is. Under the daemon,
+  any slot with no issue to work picks up a due Chore instead. Each Chore
+  keeps its history on a git ref in your repo
+  (`refs/spindrift/butler/<chore>`), which doubles as the claim that stops two
+  runs sweeping the same Chore at once. A crashed run's claim goes stale after
+  `BUTLER_CLAIM_TIMEOUT` and the next run resumes where it left off. It works
+  on the local forge, GitHub, and Forgejo.
+- **Budgets keep a night of sweeps in check.** Per-Chore intervals
+  (`BUTLER_EVERY`, 6h by default) plus daily caps on sweeps, filed findings,
+  and tokens (`BUTLER_MAX_SWEEPS_PER_DAY`, `BUTLER_MAX_FINDINGS_PER_DAY`,
+  `BUTLER_DAILY_TOKEN_CEILING`) stop the butler from burying your backlog.
+  A single sweep files at most `BUTLER_MAX_FINDINGS_PER_SWEEP` findings.
+- **Optional auto-promotion for small, trusted findings.** If you want the
+  butler to feed the work queue directly, set `BUTLER_MAX_PROMOTIONS_PER_DAY`
+  above zero. A finding then gets `ready-for-agent` at settle only when its
+  class is on the Chore's allow-list (`BUTLER_CHORE_CLASSES`), it touches no
+  more than `BUTLER_PROMOTION_MAX_FILES` files, a separate in-Box reviewer
+  agrees with it, and the day's promotion budget has room. Promoted issues
+  say so in the body and quote the reviewer. The default is zero, so nothing
+  promotes itself unless you turn it on.
+- **Closed findings stay closed.** The host-side duplicate check used to look
+  only at open issues, so a finding you'd already closed could come back on
+  the next run. Closing one is now a triage decision that sticks.
+- **Two launchers can't run the same issue anymore.** A race between two
+  launchers claiming one issue could let both run it, and the loser would
+  move the winner's live log aside, so a green run got parked as
+  `agent-failed`. Claims now refuse an issue that's already in progress, a
+  per-issue lock stops a second run (or a `recover`) from touching a live
+  run's files, and settle finds a log that got moved mid-run instead of
+  reporting "no outcome". Losing a claim race now shows up as a skip, not a
+  failure.
+
 ## 0.19.2 — 2026-09-26
 
 Mostly fixes to how review findings become issues, plus a daemon flag for
