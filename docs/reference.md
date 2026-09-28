@@ -4152,12 +4152,16 @@ is a source-only swap at the mint step.
 Provision a **worker App** installed on **only the Target repository**, granting
 the same scopes the PAT table above lists (Contents RW, Pull requests RW, Issues
 RW, Workflows RW — off by default, Checks R, Commit statuses R, Metadata R), and
-store its credentials as two repository secrets:
+store its App ID as a repository variable and its private key as a
+repository secret:
 
-| secret                                     | value                              |
-| ------------------------------------------ | ---------------------------------- |
-| `SPINDRIFT_AGENT_WORKER_APP_ID`            | the App's numeric App ID           |
-| `SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY`   | a generated private key (PEM body) |
+| name                                       | kind     | value                              |
+| ------------------------------------------ | -------- | ---------------------------------- |
+| `SPINDRIFT_AGENT_WORKER_APP_ID`            | variable | the App's numeric App ID           |
+| `SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY`   | secret   | a generated private key (PEM body) |
+
+The workflows read the ID as `vars.SPINDRIFT_AGENT_WORKER_APP_ID`, so an ID
+stored as a secret reads as empty and the mint step fails.
 
 Why an App instead of the PAT: every App installation gets its **own rate-limit
 bucket**, isolated from every personal PAT on the account. The
@@ -4210,11 +4214,12 @@ The research dispatch kind (ADR 0022) authenticates with a second, separately
 scoped **GitHub App**, kept disjoint from the work App (a distinct App, or a
 distinct installation) so the advise-only scope can never widen to the work
 scope. Provision the App with the three permissions below, install it on the
-Target repo, and store its App ID and private key as the
-`SPINDRIFT_AGENT_RESEARCH_APP_ID` / `SPINDRIFT_AGENT_RESEARCH_APP_PRIVATE_KEY`
-repository secrets; `agent-research.yml` mints a short-lived installation token
-from them per run (via `actions/create-github-app-token`) and hands it to the
-shared `agent-setup` seam:
+Target repo, and store its App ID as the `SPINDRIFT_AGENT_RESEARCH_APP_ID`
+repository variable and its private key as the
+`SPINDRIFT_AGENT_RESEARCH_APP_PRIVATE_KEY` repository secret;
+`agent-research.yml` mints a short-lived installation token from them per run
+(via `actions/create-github-app-token`) and hands it to the shared
+`agent-setup` seam:
 
 | permission        | level     | why                                       |
 | ----------------- | --------- | ------------------------------------------ |
@@ -4230,14 +4235,15 @@ short-lived (expires ~1h after minting) and draws on the research
 installation's own rate-limit bucket, isolated from the work App and any
 personal PAT.
 
-The research App is optional. Leave `SPINDRIFT_AGENT_RESEARCH_APP_ID` unset and
-`agent-research.yml` skips the mint step and falls back to the
-`SPINDRIFT_GH_TOKEN` PAT (Contents/Pull requests/Issues RW + Metadata R, above)
-— research still works, but gives up the read-only guarantee: a compromised
-researcher could push to a branch or open a PR with the broader token, even
-though nothing in the research flow asks it to. Configure the dedicated App
-when the blast radius matters more than one extra pair of repo secrets to
-manage.
+The research App is optional. Leave the `SPINDRIFT_AGENT_RESEARCH_APP_ID`
+variable unset and `agent-research.yml` skips the mint step and falls back to
+the `SPINDRIFT_GH_TOKEN` PAT (Contents/Pull requests/Issues RW + Metadata R,
+above) — research still works, but gives up the read-only guarantee: a
+compromised researcher could push to a branch or open a PR with the broader
+token, even though nothing in the research flow asks it to. An App ID stored
+as a secret instead of a variable reads as empty, exactly like an unset one, and
+silently takes the same fallback. Configure the dedicated App when the blast
+radius matters more than one extra repo variable and secret to manage.
 
 ### Threat model
 
