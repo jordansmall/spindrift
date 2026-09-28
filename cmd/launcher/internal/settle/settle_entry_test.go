@@ -211,7 +211,7 @@ func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
 // combination, and settle's post-merge backstop is scoped to
 // forge.MergeCloser, which the local adapter (AsLocalShaped) does not
 // implement even though it does implement IssueCloser. Only reconcile's
-// sweep may write local's closed: axis.
+// sweep may close a landed local issue (ADR 0029).
 func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
 	const issNum = "58"
 

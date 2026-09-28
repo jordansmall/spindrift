@@ -1,6 +1,7 @@
 // Package reconcile implements ADR 0029's reconcile sweep: the sole authority
-// that closes a local issue once Code Forge reality (a merged landing PR)
-// says the work landed. The sweep only observes, it never lands code.
+// that closes a landed local issue once Code Forge reality (a merged landing
+// PR) says the work landed (settle closes an already-resolved issue
+// directly, issue #4017). The sweep only observes, it never lands code.
 package reconcile
 
 import (

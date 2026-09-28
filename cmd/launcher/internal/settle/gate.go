@@ -183,7 +183,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
 		s.transitionState(num, forge.InProgress, forge.Complete, o.Note)
-		s.closeIssue(num)
+		s.closeResolvedIssue(num)
 		s.postUsageComment(num, d)
 	default:
 		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
@@ -335,18 +335,40 @@ func (s *Settle) recordLandingPass(num, landing string, passes []passmanifest.En
 	}
 }
 
+// reportCloseErr logs a close failure; a failed close never fails settle.
+func reportCloseErr(num string, err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not close issue: %v\n", num, err)
+	}
+}
+
 // closeIssue closes num through the tracker's optional MergeCloser (issue
 // #1892), a backstop for github's merged-PR auto-close, which only fires when
-// the PR body carries a literal Closes #<N>, and the sole close for a
-// status=already-resolved outcome (issue #4015), which has no PR. MergeCloser
-// rather than IssueCloser keeps this a no-op for local, whose closed: axis is
-// reconcile's sole write path (ADR 0029), even paired with a github Code Forge.
-func (s *Settle) closeIssue(num string) {
+// the PR body carries a literal Closes #<N>. MergeCloser rather than
+// IssueCloser keeps this a no-op for local, whose closed: axis only reconcile
+// writes for landed work (ADR 0029), even paired with a github Code Forge.
+// Reports whether the tracker implements MergeCloser.
+func (s *Settle) closeIssue(num string) bool {
 	closer, ok := s.it.(forge.MergeCloser)
 	if !ok {
+		return false
+	}
+	reportCloseErr(num, closer.CloseMergedIssue(num))
+	return true
+}
+
+// closeResolvedIssue closes num for a status=already-resolved outcome (issue
+// #4017), which has no PR and so no merge for closeIssue's MergeCloser path
+// to key off. No PR and no merge means nothing landed for reconcile to
+// observe either, so it would leave a local issue open forever; this is the
+// one direct close outside ADR 0029's reconcile-only closed: axis. Prefers
+// MergeCloser (forgejo, github) when present, falling back to IssueCloser
+// (local) otherwise.
+func (s *Settle) closeResolvedIssue(num string) {
+	if s.closeIssue(num) {
 		return
 	}
-	if err := closer.CloseMergedIssue(num); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not close issue: %v\n", num, err)
+	if closer, ok := s.it.(forge.IssueCloser); ok {
+		reportCloseErr(num, closer.CloseIssue(num))
 	}
 }
