@@ -97,15 +97,16 @@ jobs:
             --gh-token-refresh-file "$GH_TOKEN_REFRESH_FILE"
 
       # The launcher parses the two blocker formats and, when this claimed issue
-      # is blocked by an unmet dependency, drops logs/blocked.txt naming the
-      # blockers instead of working it. Undo the up-front claim (back to
-      # ready-for-agent) and say why. No recovery — the operator re-triggers once
-      # the blocker resolves. always() so a failed build (no marker) is a no-op.
+      # is blocked by an unmet dependency, drops .spindrift/logs/blocked.txt
+      # naming the blockers instead of working it. Undo the up-front claim (back
+      # to ready-for-agent) and say why. No recovery — the operator re-triggers
+      # once the blocker resolves. always() so a failed build (no marker) is a
+      # no-op.
       - name: Release the claim if blocked
         if: always()
         run: |
-          [ -f logs/blocked.txt ] || exit 0
-          blockers=$(cat logs/blocked.txt)
+          [ -f .spindrift/logs/blocked.txt ] || exit 0
+          blockers=$(cat .spindrift/logs/blocked.txt)
           gh issue comment "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
             --body "🚧 Agent made no changes: this issue is blocked by ${blockers} (not yet \`agent-complete\` or closed). Released back to \`ready-for-agent\`; re-trigger once the blocker is resolved."
@@ -119,5 +120,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agent-logs-${{ github.event.issue.number }}
-          path: logs/
+          path: .spindrift/logs/
           if-no-files-found: ignore

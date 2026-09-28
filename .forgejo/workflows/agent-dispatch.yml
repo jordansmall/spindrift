@@ -103,10 +103,10 @@ jobs:
             --git-user-email "${{ steps.setup.outputs.git-user-email }}"
 
       # The launcher parses the two blocker formats and, when this claimed issue
-      # is blocked by an unmet dependency, drops logs/blocked.txt naming the
-      # blockers instead of working it. Detect that marker, then undo the
-      # up-front claim (back to ready-for-agent) and say why. No recovery — the
-      # operator re-triggers once the blocker resolves. always() so a failed
+      # is blocked by an unmet dependency, drops .spindrift/logs/blocked.txt
+      # naming the blockers instead of working it. Detect that marker, then undo
+      # the up-front claim (back to ready-for-agent) and say why. No recovery —
+      # the operator re-triggers once the blocker resolves. always() so a failed
       # build (no marker) is a no-op. The label swap runs through the
       # forgejo-label-swap composite (Forgejo REST); `fj` has no label verb and
       # is not guaranteed on the runner.
@@ -114,11 +114,11 @@ jobs:
         id: blocked
         if: always()
         run: |
-          if [ -f logs/blocked.txt ]; then
+          if [ -f .spindrift/logs/blocked.txt ]; then
             {
               echo "blocked=true"
               echo "blockers<<EOF"
-              cat logs/blocked.txt
+              cat .spindrift/logs/blocked.txt
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
           else
@@ -146,5 +146,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agent-logs-${{ github.event.issue.number }}
-          path: logs/
+          path: .spindrift/logs/
           if-no-files-found: ignore
