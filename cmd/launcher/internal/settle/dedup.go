@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -49,12 +50,18 @@ var dedupPunctRun = regexp.MustCompile(` ?[.:#/_][ .:#/_]*`)
 // folded to one ":" (issue #3977), and any leading/trailing ":" trimmed.
 // The fold target is never "-": "a-:b" would become "a--b", which
 // normalizeDedupTerm rejects. Returns "" for a blank, whitespace-only, or
-// separator-only s. Pure normalization only -- normalizeDedupTerm is the
-// one to call when the result must also be safe to carry as a marker term.
+// separator-only s, and for one with no letter or digit (e.g. "-" or "!!"),
+// which names no site and would only collide unrelated findings (issue
+// #4019). Pure normalization only -- normalizeDedupTerm is the one to call
+// when the result must also be safe to carry as a marker term.
 func normalizeDedupKey(s string) string {
 	k := strings.ToLower(strings.Join(strings.Fields(s), " "))
 	k = dedupPunctRun.ReplaceAllString(k, ":")
-	return strings.Trim(k, ":")
+	k = strings.Trim(k, ":")
+	if !strings.ContainsFunc(k, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) {
+		return ""
+	}
+	return k
 }
 
 // normalizeDedupTerm normalizes s per normalizeDedupKey and reports whether
@@ -63,9 +70,10 @@ func normalizeDedupKey(s string) string {
 // so a term carrying one could never round-trip through
 // buildDedupMarker/parseDedupMarker -- or contains "--", which inside
 // buildDedupMarker's HTML comment could close it early (e.g. a term holding
-// "-->") and corrupt the rest of the key set. Splitting or stripping the bad
-// substring instead would either invent a bogus generic key or silently
-// repair a malformed payload; dropping the whole term is the only safe move.
+// "foo-->bar") and corrupt the rest of the key set. Splitting or stripping
+// the bad substring instead would either invent a bogus generic key or
+// silently repair a malformed payload; dropping the whole term is the only
+// safe move.
 func normalizeDedupTerm(s string) (string, bool) {
 	k := normalizeDedupKey(s)
 	if k == "" || strings.Contains(k, ",") || strings.Contains(k, "--") {
