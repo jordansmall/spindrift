@@ -33,7 +33,9 @@
 # bindregistry is the source of truth for the ecosystem classification. The
 # `env-handoff` verb (issue #2975 slice 3) is an eighth, delegated the same
 # way -- promptassembly.Handoff is the source of truth for the Handoff/
-# ArgvShape/Caps grammar it emits, not a bash re-derivation of that shape.
+# ArgvShape/Caps grammar it emits, not a bash re-derivation of that shape. The
+# `advise-only` verb (issue #3901) is a ninth, delegated the same way --
+# dispatchkind is the source of truth for the posture.
 set -euo pipefail
 
 if [ "${1:-}" = "assemble-prompt" ]; then
@@ -59,6 +61,11 @@ fi
 if [ "${1:-}" = "env-handoff" ]; then
   shift
   exec "$DRIVER_EXEC_BIN" env-handoff "$@"
+fi
+
+if [ "${1:-}" = "advise-only" ]; then
+  shift
+  exec "$DRIVER_EXEC_BIN" advise-only "$@"
 fi
 
 if [ "${1:-}" = "bundle-out" ]; then
