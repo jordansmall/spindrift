@@ -2,7 +2,9 @@
 # Butler dispatch kind (ADR 0056, issue #3875): DISPATCH_KIND=butler carries one
 # Ledger Chore (CHORE_NAME) instead of a tracker issue, and selects
 # butler-prompt.md instead of issue-prompt.md, so a butler Box must start
-# without ISSUE_NUMBER.
+# without ISSUE_NUMBER. Also pins the butler's forced read-only posture
+# (issue #3906): no gh shim escape hatch, and no PR-intent nudge either,
+# since an advise-only kind never opens a PR.
 
 load helper
 
@@ -62,4 +64,31 @@ set_butler_env() {
   [ "$output" = "main" ]
   run git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "butler-bugs"
   [ -z "$output" ]
+}
+
+@test "butler Box with BOX_WRITE_ENABLED unset installs the read-only gh shim, rejecting gh pr create (#3906)" {
+  set_butler_env
+  unset BOX_WRITE_ENABLED
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  local shim_dir
+  shim_dir="$HOME/.spindrift/readonly-gh-shim"
+  [ -d "$shim_dir" ]
+
+  PATH="$shim_dir:$PATH" run gh pr create --title "x" --body "y"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gh pr create"* ]]
+}
+
+@test "butler Box missing PR-intent never gets a PR-intent nudge, advise-only never opens a PR (#3906)" {
+  set_butler_env
+  unset BOX_WRITE_ENABLED
+  export BOX_OUTBOX_RELAY_CAPABLE=1
+  export RUN_NONCE="deadbeefcafe1234"
+  export FAKE_DRIVER_NO_PR_INTENT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q "PR-intent marker missing" <<<"$output"
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
 }
