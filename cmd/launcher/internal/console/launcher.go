@@ -150,12 +150,12 @@ func (l *Launcher) Pick(tracker forge.IssueTracker, num, title string, kind Kind
 	return msg, l.Land(msg)
 }
 
-// trackerFor returns l.ResearchTracker for a pick whose kind carries the
-// research label family, when one is wired, so a research promotion or claim
-// lands its TransitionState call on the tracker instance carrying that same
-// family (issue #1708).
+// trackerFor returns l.ResearchTracker for a pick whose kind's Tracker axis
+// names the research tracker, when one is wired, so a research promotion or
+// claim lands its TransitionState call on the tracker instance carrying that
+// same label family (issue #1708).
 func (l *Launcher) trackerFor(kind Kind, workTracker forge.IssueTracker) forge.IssueTracker {
-	if kind.Labels == dispatchkind.LabelsResearch && l.ResearchTracker != nil {
+	if kind.Tracker == dispatchkind.TrackerResearch && l.ResearchTracker != nil {
 		return l.ResearchTracker
 	}
 	return workTracker

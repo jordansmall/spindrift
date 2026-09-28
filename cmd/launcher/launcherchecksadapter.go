@@ -1,14 +1,15 @@
 package main
 
 import (
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/launcherchecks"
 )
 
 // launcherCheckConfig adapts config to launcherchecks.Config. It narrows
 // dispatchKind to the ResearchDispatch bool that launcherchecks'
-// repo-slug/gh-token exemption needs (true when the kind has a self-contained
-// sub-mode), since launcherchecks has no dispatch kind string.
+// repo-slug/gh-token exemption needs (true when the kind's Tracker axis names
+// the research tracker), since launcherchecks has no dispatch kind string.
 func launcherCheckConfig(c config) launcherchecks.Config {
 	return launcherchecks.Config{
 		RepoSlug:     c.repoSlug,
@@ -27,7 +28,7 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 		IssueTracker: c.issueTracker,
 		CodeForge:    c.codeForge,
 
-		ResearchDispatch: c.kind().Prompts.SelfContainedBase != "",
+		ResearchDispatch: c.kind().Tracker == dispatchkind.TrackerResearch,
 		SelfContained:    c.selfContained,
 	}
 }

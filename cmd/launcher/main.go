@@ -633,7 +633,7 @@ func dispatchLabels(c config) forge.DispatchLabels {
 // (RESEARCH_VERDICTS) for the research kind, or the zero value for work. Only
 // ResearchSettle calls CompleteVerdict, so a zero value is inert for work.
 func researchVerdictLabels(c config) forge.VerdictLabels {
-	if c.kind().Settle == dispatchkind.SettleVerdict {
+	if c.kind().Tracker == dispatchkind.TrackerResearch {
 		vl, err := forge.ParseResearchVerdicts(c.researchVerdicts)
 		if err != nil {
 			// validate() already rejects a malformed set before this is
