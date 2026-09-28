@@ -4663,7 +4663,10 @@ of one standing Chore, keyed by chore name rather than by issue. Unlike
 runs at most one Chore, and only one named in `BUTLER_CHORES` (schema key
 `butlerChores`), a space-separated allowlist that defaults to none; the
 built-in catalog ships three Chores, `bugs`, `refactor`, and `docs-drift`
-(`templates/default/prompts/chores/`). Butler runs under
+(`templates/default/prompts/chores/`). Naming a Chore in `BUTLER_CHORES`
+with no matching `<name>.md` prompt in the chores directory fails the
+Consumer's flake evaluation (`nix flake check`, or any build of the
+harness), naming the Chore. Butler runs under
 `CODE_FORGE=local`, `github`, or `forgejo`; `spindrift butler` refuses to
 run under `git`.
 
