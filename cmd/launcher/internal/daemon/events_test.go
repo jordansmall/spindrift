@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // failWriter always fails, simulating a closed or full stdout.
@@ -25,7 +26,7 @@ func TestEmitterEmit(t *testing.T) {
 	exitCode := 0
 	e.Emit(Event{
 		Event:    "child_finish",
-		Kind:     KindDispatch,
+		Kind:     KindOf(dispatchkind.Work),
 		Key:      dispatchkey.Issue("42"),
 		Revision: "abc123",
 		Exit:     &exitCode,

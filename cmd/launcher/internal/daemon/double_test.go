@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -763,16 +764,16 @@ func TestScriptedRunnerResultsSharedSequence(t *testing.T) {
 	r := &scriptedRunner{results: []ChildResult{{Exit: 0}, {Exit: 3}}}
 	ctx := context.Background()
 
-	res, err := r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindDispatch})
+	res, err := r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if err != nil || res.Exit != 0 {
 		t.Fatalf("call 1 = (%+v, %v), want Exit 0", res, err)
 	}
-	res, err = r.RunChild(ctx, ChildRequest{Slot: 1, Kind: KindDispatch})
+	res, err = r.RunChild(ctx, ChildRequest{Slot: 1, Kind: KindOf(dispatchkind.Work)})
 	if err != nil || res.Exit != 3 {
 		t.Fatalf("call 2 = (%+v, %v), want Exit 3", res, err)
 	}
 	// exhausted: repeats last
-	res, err = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindDispatch})
+	res, err = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if err != nil || res.Exit != 3 {
 		t.Fatalf("call 3 = (%+v, %v), want Exit 3 (repeat)", res, err)
 	}
@@ -803,43 +804,43 @@ func TestScriptedRunnerRunErrAt(t *testing.T) {
 func TestScriptedRunnerByKindScripting(t *testing.T) {
 	r := &scriptedRunner{
 		byKind: map[Kind][]ChildResult{
-			KindDispatch: {{Exit: 0}, {Exit: 1}},
-			KindResearch: {{Exit: 9}},
+			KindOf(dispatchkind.Work):     {{Exit: 0}, {Exit: 1}},
+			KindOf(dispatchkind.Research): {{Exit: 9}},
 		},
 	}
 	ctx := context.Background()
 
-	res, _ := r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindDispatch})
+	res, _ := r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if res.Exit != 0 {
 		t.Fatalf("dispatch call 1 exit = %d, want 0", res.Exit)
 	}
-	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindResearch})
+	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Research)})
 	if res.Exit != 9 {
 		t.Fatalf("research call 1 exit = %d, want 9", res.Exit)
 	}
-	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindDispatch})
+	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if res.Exit != 1 {
 		t.Fatalf("dispatch call 2 exit = %d, want 1", res.Exit)
 	}
 	// dispatch queue exhausted: repeats last
-	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindDispatch})
+	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if res.Exit != 1 {
 		t.Fatalf("dispatch call 3 exit = %d, want 1 (repeat)", res.Exit)
 	}
-	if r.kindCount(KindDispatch) != 3 {
-		t.Fatalf("kindCount(dispatch) = %d, want 3", r.kindCount(KindDispatch))
+	if r.kindCount(KindOf(dispatchkind.Work)) != 3 {
+		t.Fatalf("kindCount(dispatch) = %d, want 3", r.kindCount(KindOf(dispatchkind.Work)))
 	}
-	if r.kindCount(KindResearch) != 1 {
-		t.Fatalf("kindCount(research) = %d, want 1", r.kindCount(KindResearch))
+	if r.kindCount(KindOf(dispatchkind.Research)) != 1 {
+		t.Fatalf("kindCount(research) = %d, want 1", r.kindCount(KindOf(dispatchkind.Research)))
 	}
 }
 
 func TestScriptedRunnerByKindWinsOverResults(t *testing.T) {
 	r := &scriptedRunner{
-		byKind:  map[Kind][]ChildResult{KindDispatch: {{Exit: 5}}},
+		byKind:  map[Kind][]ChildResult{KindOf(dispatchkind.Work): {{Exit: 5}}},
 		results: []ChildResult{{Exit: 2}},
 	}
-	res, _ := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindDispatch})
+	res, _ := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if res.Exit != 5 {
 		t.Fatalf("exit = %d, want 5 (byKind wins over results)", res.Exit)
 	}
@@ -847,11 +848,11 @@ func TestScriptedRunnerByKindWinsOverResults(t *testing.T) {
 
 func TestScriptedRunnerRunErrAtWinsOverByKind(t *testing.T) {
 	r := &scriptedRunner{
-		byKind:   map[Kind][]ChildResult{KindDispatch: {{Exit: 5}}},
+		byKind:   map[Kind][]ChildResult{KindOf(dispatchkind.Work): {{Exit: 5}}},
 		runErrAt: 1,
 		runErr:   errors.New("runboom"),
 	}
-	res, err := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindDispatch})
+	res, err := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if err == nil || res.Exit != 0 {
 		t.Fatalf("= (%+v, %v), want (zero ChildResult, runErr) (runErrAt wins over byKind)", res, err)
 	}

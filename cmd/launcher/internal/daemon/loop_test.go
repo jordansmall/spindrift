@@ -20,6 +20,7 @@ import (
 	reportpkg "spindrift.dev/launcher/internal/report"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 type runCall struct {
@@ -89,7 +90,7 @@ const (
 // count: Kind, IdleFloor/IdleCap, and the three breaker knobs above.
 func testConfig(slots int) Config {
 	return Config{
-		Kinds:            []Kind{KindDispatch},
+		Kinds:            []Kind{KindOf(dispatchkind.Work)},
 		IdleFloor:        testIdleFloor,
 		IdleCap:          testIdleCap,
 		FailureBackoff:   testFailureBackoff,
@@ -416,9 +417,9 @@ func TestLoopPinsEachChildToTheResolvedRevisionEvenWhenItChanges(t *testing.T) {
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
 	want := []runCall{
-		{Kind: KindDispatch, Revision: "rev1"},
-		{Kind: KindDispatch, Revision: "rev2"},
-		{Kind: KindDispatch, Revision: "rev3"},
+		{Kind: KindOf(dispatchkind.Work), Revision: "rev1"},
+		{Kind: KindOf(dispatchkind.Work), Revision: "rev2"},
+		{Kind: KindOf(dispatchkind.Work), Revision: "rev3"},
 	}
 	if fmt.Sprint(r.calls()) != fmt.Sprint(want) {
 		t.Fatalf("run calls = %v, want %v: each child must be pinned to that iteration's resolved revision", r.calls(), want)
@@ -728,7 +729,7 @@ func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
 	}{
 		{"empty kinds", invalid(func(c *Config) { c.Kinds = nil })},
 		{"unknown kind", invalid(func(c *Config) { c.Kinds = []Kind{Kind("bogus")} })},
-		{"duplicate kind", invalid(func(c *Config) { c.Kinds = []Kind{KindDispatch, KindDispatch} })},
+		{"duplicate kind", invalid(func(c *Config) { c.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Work)} })},
 		{"negative reservation", invalid(func(c *Config) { c.ResearchReservation = -1 })},
 		{"reservation above slots", invalid(func(c *Config) { c.ResearchReservation = 3 })},
 	}
@@ -1183,8 +1184,8 @@ func TestLoopTipMovedFiresDespiteSelfEvalErrorOnSameResolve(t *testing.T) {
 	if tipMoved == nil {
 		t.Fatalf("events = %v, want a tip_moved event despite the self-eval error on the same resolve", eventNames(events))
 	}
-	if len(tipMoved.Kinds) != 1 || tipMoved.Kinds[0] != KindDispatch {
-		t.Fatalf("tip_moved.Kinds = %v, want [%v]: the jammed kind's backoff must be the one reset", tipMoved.Kinds, KindDispatch)
+	if len(tipMoved.Kinds) != 1 || tipMoved.Kinds[0] != KindOf(dispatchkind.Work) {
+		t.Fatalf("tip_moved.Kinds = %v, want [%v]: the jammed kind's backoff must be the one reset", tipMoved.Kinds, KindOf(dispatchkind.Work))
 	}
 
 	want := []time.Duration{testIdleFloor, testIdleFloor}
@@ -1942,7 +1943,7 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 	if st.State != StateWorking {
 		t.Fatalf("in-flight state = %q, want %q", st.State, StateWorking)
 	}
-	if len(st.Slots) != 1 || !st.Slots[0].Busy || st.Slots[0].Kind != KindDispatch || st.Slots[0].Revision != "rev1" {
+	if len(st.Slots) != 1 || !st.Slots[0].Busy || st.Slots[0].Kind != KindOf(dispatchkind.Work) || st.Slots[0].Revision != "rev1" {
 		t.Fatalf("in-flight slot = %+v, want busy dispatch@rev1", st.Slots)
 	}
 	if !reflect.DeepEqual(st.Slots[0].Issues, []string{"42"}) {
@@ -2052,7 +2053,7 @@ func TestLoopButlerBoxSettledCarryChoreNotIssue(t *testing.T) {
 	em := newTestEmitter(&buf)
 
 	cfg := testConfig(1)
-	cfg.Kinds = []Kind{KindButler}
+	cfg.Kinds = []Kind{KindOf(dispatchkind.Butler)}
 	cfg.Status = sw
 
 	reason := Loop(context.Background(), cfg, r, em, clk).String()

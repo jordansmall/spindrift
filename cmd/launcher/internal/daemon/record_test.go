@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -21,21 +22,21 @@ func TestParseRecord(t *testing.T) {
 		{
 			name:   "box",
 			line:   `{"event":"box","issue":"42","phase":"initial"}`,
-			kind:   KindDispatch,
+			kind:   KindOf(dispatchkind.Work),
 			want:   Record{Event: report.EventBox, Key: dispatchkey.Issue("42"), Phase: "initial"},
 			wantOK: true,
 		},
 		{
 			name:   "box fix pass",
 			line:   `{"event":"box","issue":"42","phase":"fix-pass-2"}`,
-			kind:   KindDispatch,
+			kind:   KindOf(dispatchkind.Work),
 			want:   Record{Event: report.EventBox, Key: dispatchkey.Issue("42"), Phase: "fix-pass-2"},
 			wantOK: true,
 		},
 		{
 			name:   "settled",
 			line:   `{"event":"settled","issue":"42","state":"complete","note":"merged"}`,
-			kind:   KindDispatch,
+			kind:   KindOf(dispatchkind.Work),
 			want:   Record{Event: report.EventSettled, Key: dispatchkey.Issue("42"), State: "complete", Note: "merged"},
 			wantOK: true,
 		},
@@ -50,101 +51,101 @@ func TestParseRecord(t *testing.T) {
 		{
 			name:    "malformed json",
 			line:    `{"event":"box"`,
-			kind:    KindDispatch,
+			kind:    KindOf(dispatchkind.Work),
 			wantErr: true,
 		},
 		{
 			name:    "empty issue",
 			line:    `{"event":"box","issue":""}`,
-			kind:    KindDispatch,
+			kind:    KindOf(dispatchkind.Work),
 			wantErr: true,
 		},
 		{
 			name:    "non-digit issue",
 			line:    `{"event":"box","issue":"42a"}`,
-			kind:    KindDispatch,
+			kind:    KindOf(dispatchkind.Work),
 			wantErr: true,
 		},
 		{
 			name:    "signed issue",
 			line:    `{"event":"box","issue":"-42"}`,
-			kind:    KindDispatch,
+			kind:    KindOf(dispatchkind.Work),
 			wantErr: true,
 		},
 		{
 			name:    "issue too long",
 			line:    `{"event":"box","issue":"12345678901"}`,
-			kind:    KindDispatch,
+			kind:    KindOf(dispatchkind.Work),
 			wantErr: true,
 		},
 		{
 			name:   "issue at length cap",
 			line:   `{"event":"box","issue":"1234567890"}`,
-			kind:   KindDispatch,
+			kind:   KindOf(dispatchkind.Work),
 			want:   Record{Event: report.EventBox, Key: dispatchkey.Issue("1234567890")},
 			wantOK: true,
 		},
 		{
 			name:   "chore box",
 			line:   `{"event":"box","chore":"bugs","phase":"initial"}`,
-			kind:   KindButler,
+			kind:   KindOf(dispatchkind.Butler),
 			want:   Record{Event: report.EventBox, Key: dispatchkey.Chore("bugs"), Phase: "initial"},
 			wantOK: true,
 		},
 		{
 			name:   "chore settled",
 			line:   `{"event":"settled","chore":"bugs","state":"complete","note":"2 filed"}`,
-			kind:   KindButler,
+			kind:   KindOf(dispatchkind.Butler),
 			want:   Record{Event: report.EventSettled, Key: dispatchkey.Chore("bugs"), State: "complete", Note: "2 filed"},
 			wantOK: true,
 		},
 		{
 			name:    "empty chore",
 			line:    `{"event":"box","chore":""}`,
-			kind:    KindButler,
+			kind:    KindOf(dispatchkind.Butler),
 			wantErr: true,
 		},
 		{
 			name:    "chore too long",
 			line:    `{"event":"box","chore":"` + strings.Repeat("a", 65) + `"}`,
-			kind:    KindButler,
+			kind:    KindOf(dispatchkind.Butler),
 			wantErr: true,
 		},
 		{
 			name:   "chore at length cap",
 			line:   `{"event":"box","chore":"` + strings.Repeat("a", 64) + `"}`,
-			kind:   KindButler,
+			kind:   KindOf(dispatchkind.Butler),
 			want:   Record{Event: report.EventBox, Key: dispatchkey.Chore(strings.Repeat("a", 64))},
 			wantOK: true,
 		},
 		{
 			name:    "invalid chore charset",
 			line:    `{"event":"box","chore":"bugs/x"}`,
-			kind:    KindButler,
+			kind:    KindOf(dispatchkind.Butler),
 			wantErr: true,
 		},
 		{
 			name:    "both issue and chore",
 			line:    `{"event":"box","issue":"42","chore":"bugs"}`,
-			kind:    KindDispatch,
+			kind:    KindOf(dispatchkind.Work),
 			wantErr: true,
 		},
 		{
 			name:    "neither issue nor chore",
 			line:    `{"event":"box"}`,
-			kind:    KindDispatch,
+			kind:    KindOf(dispatchkind.Work),
 			wantErr: true,
 		},
 		{
 			name:    "issue record from butler kind",
 			line:    `{"event":"box","issue":"42","phase":"initial"}`,
-			kind:    KindButler,
+			kind:    KindOf(dispatchkind.Butler),
 			wantErr: true,
 		},
 		{
 			name:    "chore record from non-butler kind",
 			line:    `{"event":"box","chore":"bugs","phase":"initial"}`,
-			kind:    KindDispatch,
+			kind:    KindOf(dispatchkind.Work),
 			wantErr: true,
 		},
 	}
@@ -176,10 +177,10 @@ func TestParseRecord_KindMismatchIsDistinct(t *testing.T) {
 		kind     Kind
 		mismatch bool
 	}{
-		{`{"event":"box","issue":"42"}`, KindButler, true},
-		{`{"event":"box","chore":"bugs"}`, KindResearch, true},
-		{`{"event":"box","chore":"bugs/x"}`, KindButler, false},
-		{`not json`, KindDispatch, false},
+		{`{"event":"box","issue":"42"}`, KindOf(dispatchkind.Butler), true},
+		{`{"event":"box","chore":"bugs"}`, KindOf(dispatchkind.Research), true},
+		{`{"event":"box","chore":"bugs/x"}`, KindOf(dispatchkind.Butler), false},
+		{`not json`, KindOf(dispatchkind.Work), false},
 	}
 	for _, tc := range cases {
 		_, _, err := ParseRecord(tc.line, tc.kind)

@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 func TestStatusWriter_WriteReadRoundTrip(t *testing.T) {
@@ -17,15 +19,15 @@ func TestStatusWriter_WriteReadRoundTrip(t *testing.T) {
 	w := NewStatusWriter(dir, func() time.Time { return fixed })
 
 	want := Status{
-		Kinds: []Kind{KindDispatch, KindResearch},
+		Kinds: []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
 		State: StateWorking,
 		Slots: []SlotStatus{
-			{Slot: 0, Busy: true, Kind: KindDispatch, Revision: "abc123", Issues: []string{"42"}},
+			{Slot: 0, Busy: true, Kind: KindOf(dispatchkind.Work), Revision: "abc123", Issues: []string{"42"}},
 			{Slot: 1, Busy: false},
 		},
 		Checks: []KindCheck{
-			{Kind: KindDispatch},
-			{Kind: KindResearch, NextCheck: "2026-09-20T12:05:00Z"},
+			{Kind: KindOf(dispatchkind.Work)},
+			{Kind: KindOf(dispatchkind.Research), NextCheck: "2026-09-20T12:05:00Z"},
 		},
 	}
 	if err := w.Write(want); err != nil {
@@ -43,7 +45,7 @@ func TestStatusWriter_WriteReadRoundTrip(t *testing.T) {
 	if got.State != want.State {
 		t.Errorf("State = %q, want %q", got.State, want.State)
 	}
-	if len(got.Kinds) != 2 || got.Kinds[0] != KindDispatch || got.Kinds[1] != KindResearch {
+	if len(got.Kinds) != 2 || got.Kinds[0] != KindOf(dispatchkind.Work) || got.Kinds[1] != KindOf(dispatchkind.Research) {
 		t.Errorf("Kinds = %v, want %v", got.Kinds, want.Kinds)
 	}
 	if len(got.Slots) != 2 || got.Slots[0].Revision != "abc123" || got.Slots[0].Issues[0] != "42" {
@@ -71,7 +73,7 @@ func TestStatus_StateMarshalsAsPlainString(t *testing.T) {
 // settled, and child_finish events carry the Chore under that same key, and
 // docs/reference.md promises an operator can join the two on it.
 func TestSlotStatus_ChoreMarshalsUnderChoreKey(t *testing.T) {
-	data, err := json.Marshal(SlotStatus{Busy: true, Kind: KindButler, Chore: "bugs"})
+	data, err := json.Marshal(SlotStatus{Busy: true, Kind: KindOf(dispatchkind.Butler), Chore: "bugs"})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -183,7 +185,7 @@ func TestReadStatus_StatusPresentLockNotHeld(t *testing.T) {
 func TestReadStatus_LockHeldByUsAndStatusNamesOurPid(t *testing.T) {
 	dir := t.TempDir()
 
-	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -216,7 +218,7 @@ func TestReadStatus_LockHeldByUsAndStatusNamesOurPid(t *testing.T) {
 func TestReadStatus_LockHeldByUsButStatusNamesOtherPid(t *testing.T) {
 	dir := t.TempDir()
 
-	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -419,7 +421,7 @@ func TestParseHolderPid(t *testing.T) {
 func TestReadStatus_UnreadableHolderLineReadsAsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
-	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -466,7 +468,7 @@ func TestReadStatus_UnreadableHolderLineReadsAsNotLive(t *testing.T) {
 func TestReadStatus_EmptyStatusAndUnparseableHolderNotLive(t *testing.T) {
 	dir := t.TempDir()
 
-	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -505,7 +507,7 @@ func TestReadStatus_EmptyStatusAndUnparseableHolderNotLive(t *testing.T) {
 func TestReadStatus_MatchingPidDifferentHostNotLive(t *testing.T) {
 	dir := t.TempDir()
 
-	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -540,7 +542,7 @@ func TestReadStatus_MatchingPidDifferentHostNotLive(t *testing.T) {
 func TestReadStatus_GarbageStatusUnderHeldLockKeepsLockHeld(t *testing.T) {
 	dir := t.TempDir()
 
-	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: unexpected error: %v", err)
 	}

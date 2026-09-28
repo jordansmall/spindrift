@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // TestHaltString_MatchesDocumentedGrammar pins one Halt.String() case per
@@ -109,9 +111,9 @@ func TestHaltEvent_ReasonMatchesStringAndOmitsZeroFields(t *testing.T) {
 		t.Fatalf("marshalled Event has a kind/revision key with zero values: %s", body)
 	}
 
-	h2 := Halt{Class: HaltSelfChanged, Detail: "d", Kind: KindDispatch, Revision: "rev1"}
+	h2 := Halt{Class: HaltSelfChanged, Detail: "d", Kind: KindOf(dispatchkind.Work), Revision: "rev1"}
 	ev2 := h2.Event()
-	if ev2.Kind != KindDispatch || ev2.Revision != "rev1" {
+	if ev2.Kind != KindOf(dispatchkind.Work) || ev2.Revision != "rev1" {
 		t.Fatalf("Event() = %+v, want Kind/Revision carried through", ev2)
 	}
 }

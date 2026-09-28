@@ -69,7 +69,7 @@ func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	if chore != "" && !validChore(chore) {
 		return Record{}, false, fmt.Errorf("daemon: record: invalid chore %q", chore)
 	}
-	if rec.Key.IsChore() != (kind == KindButler) {
+	if rec.Key.IsChore() != kind.choreKeyed() {
 		shape := "issue-keyed"
 		if rec.Key.IsChore() {
 			shape = "chore-keyed"

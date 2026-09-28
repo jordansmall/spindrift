@@ -1,6 +1,22 @@
 package daemon
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
+)
+
+func TestKindOf_ChoreKeyed(t *testing.T) {
+	for _, d := range dispatchkind.All {
+		k := KindOf(d)
+		if got, want := k.choreKeyed(), d.Keying == dispatchkind.ByChore; got != want {
+			t.Errorf("KindOf(%s).choreKeyed() = %v, want %v", d.Name, got, want)
+		}
+	}
+	if Kind("bogus").choreKeyed() {
+		t.Error(`Kind("bogus").choreKeyed() = true, want false`)
+	}
+}
 
 func TestParseKind(t *testing.T) {
 	cases := []struct {
@@ -9,10 +25,10 @@ func TestParseKind(t *testing.T) {
 		want    Kind
 		wantErr bool
 	}{
-		{"empty defaults to dispatch", "", KindDispatch, false},
-		{"dispatch", "dispatch", KindDispatch, false},
-		{"research", "research", KindResearch, false},
-		{"butler", "butler", KindButler, false},
+		{"empty defaults to dispatch", "", KindOf(dispatchkind.Work), false},
+		{"dispatch", "dispatch", KindOf(dispatchkind.Work), false},
+		{"research", "research", KindOf(dispatchkind.Research), false},
+		{"butler", "butler", KindOf(dispatchkind.Butler), false},
 		{"unknown", "bogus", "", true},
 	}
 	for _, tc := range cases {
@@ -41,10 +57,10 @@ func TestParseKinds(t *testing.T) {
 		want    []Kind
 		wantErr bool
 	}{
-		{"empty defaults to every kind", "", []Kind{KindDispatch, KindResearch, KindButler}, false},
-		{"dispatch", "dispatch", []Kind{KindDispatch}, false},
-		{"research", "research", []Kind{KindResearch}, false},
-		{"butler", "butler", []Kind{KindButler}, false},
+		{"empty defaults to every kind", "", []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)}, false},
+		{"dispatch", "dispatch", []Kind{KindOf(dispatchkind.Work)}, false},
+		{"research", "research", []Kind{KindOf(dispatchkind.Research)}, false},
+		{"butler", "butler", []Kind{KindOf(dispatchkind.Butler)}, false},
 		{"unknown", "bogus", nil, true},
 	}
 	for _, tc := range cases {

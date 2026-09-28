@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 func TestChildCommand(t *testing.T) {
@@ -18,67 +20,67 @@ func TestChildCommand(t *testing.T) {
 	}{
 		{
 			name: "default attr",
-			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch},
+			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "dispatch", "--max-jobs", "1", "--max-parallel", "1"},
 		},
 		{
 			name: "empty attr treated like default",
-			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: "", Revision: "abc123", Kind: KindDispatch},
+			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: "", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "dispatch", "--max-jobs", "1", "--max-parallel", "1"},
 		},
 		{
 			name: "named attr",
-			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#dogfood-bwrap", Revision: "abc123", Kind: KindDispatch},
+			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#dogfood-bwrap", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1#dogfood-bwrap", "--", "dispatch", "--max-jobs", "1", "--max-parallel", "1"},
 		},
 		{
 			name: "research kind",
-			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindResearch},
+			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Research)},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "research", "--max-jobs", "1", "--max-parallel", "1"},
 		},
 		{
 			name:    "empty repo path",
-			spec:    ChildSpec{RepoPath: "", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch},
+			spec:    ChildSpec{RepoPath: "", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			wantErr: true,
 		},
 		{
 			name:    "non-absolute repo path",
-			spec:    ChildSpec{RepoPath: "relative/path", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch},
+			spec:    ChildSpec{RepoPath: "relative/path", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			wantErr: true,
 		},
 		{
 			name:    "empty revision",
-			spec:    ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "", Kind: KindDispatch},
+			spec:    ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "", Kind: KindOf(dispatchkind.Work)},
 			wantErr: true,
 		},
 		{
 			name:    "repo path with hash",
-			spec:    ChildSpec{RepoPath: "/home/op/re#po", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch},
+			spec:    ChildSpec{RepoPath: "/home/op/re#po", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			wantErr: true,
 		},
 		{
 			name:    "repo path with question mark",
-			spec:    ChildSpec{RepoPath: "/home/op/re?po", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch},
+			spec:    ChildSpec{RepoPath: "/home/op/re?po", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			wantErr: true,
 		},
 		{
 			name:    "repo path with ampersand",
-			spec:    ChildSpec{RepoPath: "/home/op/re&po", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch},
+			spec:    ChildSpec{RepoPath: "/home/op/re&po", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			wantErr: true,
 		},
 		{
 			name:    "app attr with hash",
-			spec:    ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#do#gfood", Revision: "abc123", Kind: KindDispatch},
+			spec:    ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#do#gfood", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			wantErr: true,
 		},
 		{
 			name:    "app attr with question mark",
-			spec:    ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#do?gfood", Revision: "abc123", Kind: KindDispatch},
+			spec:    ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#do?gfood", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			wantErr: true,
 		},
 		{
 			name:    "app attr with ampersand",
-			spec:    ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#do&gfood", Revision: "abc123", Kind: KindDispatch},
+			spec:    ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#do&gfood", Revision: "abc123", Kind: KindOf(dispatchkind.Work)},
 			wantErr: true,
 		},
 		{
@@ -98,14 +100,14 @@ func TestChildCommand(t *testing.T) {
 		},
 		{
 			name: "feature branch appends base-branch after max-parallel",
-			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch, FeatureBranch: "feat/thing"},
+			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work), FeatureBranch: "feat/thing"},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "dispatch", "--max-jobs", "1", "--max-parallel", "1", "--base-branch", "feat/thing"},
 		},
 		{
 			// Research children get --base-branch too: ChildCommand appends
 			// it for every kind, not just dispatch.
 			name: "feature branch appends base-branch for research kind too",
-			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindResearch, FeatureBranch: "feat/thing"},
+			spec: ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Research), FeatureBranch: "feat/thing"},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "research", "--max-jobs", "1", "--max-parallel", "1", "--base-branch", "feat/thing"},
 		},
 	}
@@ -393,7 +395,7 @@ func TestChildEnvEmptyEnvReturnsNonNil(t *testing.T) {
 
 func TestChildCommandReturnsChildEnv(t *testing.T) {
 	spec := ChildSpec{
-		RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch,
+		RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work),
 		Env:   []string{"PATH=/bin", "MODEL=opus"},
 		Knobs: []string{"MODEL"},
 	}
@@ -432,7 +434,7 @@ func TestDoctorCommandReturnsChildEnv(t *testing.T) {
 // neither the variable nor (elsewhere, at the exec.Cmd level) the
 // descriptor.
 func TestChildCommandSetsReportFD(t *testing.T) {
-	for _, kind := range []Kind{KindDispatch, KindResearch} {
+	for _, kind := range []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)} {
 		spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: kind, Env: []string{"PATH=/bin"}}
 		got, err := ChildCommand(spec)
 		if err != nil {
@@ -451,7 +453,7 @@ func TestChildCommandSetsReportFD(t *testing.T) {
 // value ChildCommand sets, or the child would see two conflicting
 // definitions of the same variable.
 func TestChildCommandStripsAmbientReportFD(t *testing.T) {
-	spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch, Env: []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=9"}}
+	spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work), Env: []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=9"}}
 	got, err := ChildCommand(spec)
 	if err != nil {
 		t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
@@ -495,7 +497,7 @@ func TestChildCommandCarriesSignalCarrier(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindDispatch, Env: tc.env, Knobs: tc.knobs}
+			spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work), Env: tc.env, Knobs: tc.knobs}
 			got, err := ChildCommand(spec)
 			if err != nil {
 				t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
