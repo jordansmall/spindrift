@@ -71,7 +71,7 @@ in
       role = "ResearchDispatchable";
       name = "agent-research";
       color = "fbca04";
-      description = "Apply to fire a research dispatch";
+      description = "Standing research queue; spindrift research and the daemon draw from it";
     }
     {
       role = "ResearchInProgress";

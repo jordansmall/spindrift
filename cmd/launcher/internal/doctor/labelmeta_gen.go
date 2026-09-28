@@ -15,7 +15,7 @@ var TriageLabelMeta = map[string]LabelMeta{
 	"agent-failed":      MetaFailed,
 	"agent-complete":    MetaComplete,
 
-	"agent-research":             LabelMeta{Description: "Apply to fire a research dispatch", Color: "fbca04"},
+	"agent-research":             LabelMeta{Description: "Standing research queue; spindrift research and the daemon draw from it", Color: "fbca04"},
 	"agent-research-in-progress": LabelMeta{Description: "A Box is reviewing this issue", Color: "bfd4f2"},
 	"agent-research-failed":      LabelMeta{Description: "Box crashed or produced no verdict; needs human triage", Color: "b60205"},
 
