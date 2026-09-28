@@ -45,7 +45,6 @@ _stub_prompt_dir() {
   printf 'research stub, no verdict-comment marker here\n' >"$prompt_dir/research-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export DISPATCH_KIND="research"
-  export ADVISE_ONLY=1
   unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
@@ -60,7 +59,6 @@ _stub_prompt_dir() {
   printf 'research stub\n\nPost your verdict with SPINDRIFT_COMMENT here\n' >"$prompt_dir/research-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export DISPATCH_KIND="research"
-  export ADVISE_ONLY=1
   unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -172,7 +170,6 @@ _stub_prompt_dir() {
     >"$prompt_dir/research-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export DISPATCH_KIND="research"
-  export ADVISE_ONLY=1
   unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

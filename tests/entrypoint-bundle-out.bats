@@ -85,22 +85,34 @@ setup() {
   unset CODE_FORGE            # default github
   unset BOX_WRITE_ENABLED
   export DISPATCH_KIND=research
-  export ADVISE_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -e "$OUTBOX_DIR" ]
 }
 
-# Issue #3872: the read-only posture is driven by ADVISE_ONLY itself, not a
-# DISPATCH_KIND=research string comparison, so a Box that carries the flag
-# under an unset (work) or unrecognized kind still skips bundle-out.
-@test "ADVISE_ONLY=1 alone, with DISPATCH_KIND unset, still skips bundle-out" {
+# Issue #3901: the posture comes from DISPATCH_KIND's descriptor alone, so a
+# stale ADVISE_ONLY in the env never leaks the read-only posture into work.
+@test "a stale ADVISE_ONLY=1 is ignored under DISPATCH_KIND unset (work)" {
   unset CODE_FORGE            # default github
   unset BOX_WRITE_ENABLED
   unset DISPATCH_KIND
   export ADVISE_ONLY=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
+  [ ! -f "$OUTBOX_DIR/seam.bundle" ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=none status=blocked note=.*ready.*no commits exist on agent/issue-7' <<<"$output"
+}
+
+# Issue #3901: an unrecognized kind fails closed before clone_repo rather than
+# defaulting to work's (or any other) posture.
+@test "an unrecognized DISPATCH_KIND fails the Box before clone" {
+  unset CODE_FORGE            # default github
+  unset BOX_WRITE_ENABLED
+  export DISPATCH_KIND="bogus-kind"
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"bogus-kind"* ]]
+  [ ! -d "$WORK_DIR" ]
   [ ! -e "$OUTBOX_DIR" ]
 }
 
@@ -111,7 +123,6 @@ setup() {
   unset CODE_FORGE            # default github
   unset BOX_WRITE_ENABLED
   export DISPATCH_KIND=research
-  export ADVISE_ONLY=1
   export FAKE_DRIVER_CRASH_EXIT=17
   run bash "$ENTRYPOINT"
   [ "$status" -eq 17 ]

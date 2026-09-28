@@ -580,10 +580,10 @@ _subst() {
 }
 
 # _is_advise_only reports whether this dispatch's kind never lands code (ADR
-# 0022, issue #640). The launcher derives ADVISE_ONLY from the kind's descriptor
-# (issue #3872); unset defaults to off.
+# 0022, issue #640), per the kind's descriptor as main() resolved it into
+# _advise_only (issue #3901).
 _is_advise_only() {
-  [ "${ADVISE_ONLY:-}" = "1" ]
+  [ "${_advise_only:-}" = "1" ]
 }
 
 # _is_self_contained reports whether this is the research kind's no-repo sub-mode
@@ -596,8 +596,8 @@ _is_self_contained() {
 # issue #3875): a one-shot, advise-only sweep of one Ledger Chore, never a
 # tracker issue. Compared directly against DISPATCH_KIND, like
 # _is_self_contained above, rather than derived from a generic descriptor
-# flag: unlike ADVISE_ONLY (shared with research), requiring CHORE_NAME in
-# place of ISSUE_NUMBER is genuinely butler-specific.
+# flag: unlike the descriptor's AdviseOnly bit (shared with research),
+# requiring CHORE_NAME in place of ISSUE_NUMBER is genuinely butler-specific.
 _is_butler() {
   [ "${DISPATCH_KIND:-}" = "butler" ]
 }
@@ -1063,8 +1063,18 @@ main() {
   # `local x` as unbound, not empty (issue #2448).
   local _outcome_via_backstop=""
   local ORCHESTRATOR
+  local _advise_only
 
   configure_env
+
+  # The Box's one input for its advise-only posture (issue #3901), resolved
+  # before clone_repo so an unrecognized kind fails closed instead of
+  # defaulting to the work posture. Assigned apart from its `local` above so
+  # `||` sees the substitution's exit status, not `local`'s.
+  _advise_only=$(driver-exec advise-only --dispatch-kind "${DISPATCH_KIND:-work}") || {
+    echo "==> unrecognized DISPATCH_KIND=${DISPATCH_KIND:-work}; aborting before clone"
+    exit 1
+  }
 
   # Must run before any phase that could first invoke a cargo/npm/pnpm/yarn/Go/
   # Gradle build. Gradle's own binding is written by the same `driver-exec

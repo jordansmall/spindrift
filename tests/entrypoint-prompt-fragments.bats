@@ -160,7 +160,6 @@ setup() {
 # is a no-op in-box because settle posts the outcome note= host-side.
 @test "research verdict step: github tracker keeps gh issue comment unchanged" {
   export DISPATCH_KIND="research"
-  export ADVISE_ONLY=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -170,7 +169,6 @@ setup() {
 
 @test "research verdict step: local tracker emits a nonce-guarded SPINDRIFT_COMMENT line, never gh issue comment" {
   export DISPATCH_KIND="research"
-  export ADVISE_ONLY=1
   export ISSUE_TRACKER=local
   export BOX_TRACKER_AXIS_READ=LOCAL
   unset BOX_TRACKER_AXIS_WRITE
@@ -211,7 +209,6 @@ setup() {
 # form local always gets, never the in-box gh issue comment invocation.
 @test "research verdict step: github tracker under read-only relays via a nonce-guarded SPINDRIFT_COMMENT line, never gh issue comment" {
   export DISPATCH_KIND="research"
-  export ADVISE_ONLY=1
   unset BOX_WRITE_ENABLED
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readonly"
@@ -258,7 +255,6 @@ setup() {
 
 @test "research verdict step: github tracker under read-write is unaffected by the new gate" {
   export DISPATCH_KIND="research"
-  export ADVISE_ONLY=1
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readwrite-explicit"
   # setup_entrypoint_env already exports BOX_WRITE_ENABLED=1 (the
   # BOX_FORGE_AND_ISSUE_ACCESS=read-write default), so no override is needed.
@@ -272,7 +268,6 @@ setup() {
 # above (ISSUE_TRACKER_FORGEJO_READWRITE/_READONLY).
 @test "research verdict step: forgejo tracker under read-write keeps fj issue comment unchanged" {
   export DISPATCH_KIND="research"
-  export ADVISE_ONLY=1
   export ISSUE_TRACKER=forgejo
   export BOX_TRACKER_AXIS_READ=FORGEJO
   export BOX_TRACKER_AXIS_WRITE=FORGEJO
@@ -287,7 +282,6 @@ setup() {
 
 @test "research verdict step: forgejo tracker under read-only relays via a nonce-guarded SPINDRIFT_COMMENT line, never fj issue comment" {
   export DISPATCH_KIND="research"
-  export ADVISE_ONLY=1
   export ISSUE_TRACKER=forgejo
   export BOX_TRACKER_AXIS_READ=FORGEJO
   export BOX_TRACKER_AXIS_WRITE=FORGEJO
