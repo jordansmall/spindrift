@@ -1,6 +1,11 @@
 package forge
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"sort"
+	"strconv"
+)
 
 // DepSource records whether a Dependency came from the tracker's native
 // dependency API or was parsed from issue body text.
@@ -128,6 +133,48 @@ type LabeledBacklogLister interface {
 	// one of labels, Body populated, newest first. state must be IssueOpen
 	// or IssueClosed. An empty labels returns no issues and a nil error.
 	ListIssuesWithLabels(state IssueState, labels []string) ([]Issue, error)
+}
+
+// MergeLabeledIssues calls fetch once per label, merges the results by
+// Number, and sorts them newest first. A failed label is logged and
+// skipped rather than aborting the whole scan: the repo may simply lack one
+// of the labels, or one call may hit a transient rate limit, and a hard
+// failure would hand the caller an empty result that discards what the
+// succeeding labels already found. Only a failure on every label is
+// returned, so a total outage still reaches the caller's own fallback.
+// source prefixes the warning and error text (e.g. "gh issue list").
+func MergeLabeledIssues(source string, labels []string, fetch func(label string) ([]Issue, error)) ([]Issue, error) {
+	seen := make(map[string]bool)
+	var issues []Issue
+	failures := 0
+	var lastErr error
+	for _, label := range labels {
+		got, err := fetch(label)
+		if err != nil {
+			lastErr = err
+			fmt.Fprintf(os.Stderr, "WARNING: %s: label %s failed: %v\n", source, label, err)
+			failures++
+			continue
+		}
+		for _, iss := range got {
+			if seen[iss.Number] {
+				continue
+			}
+			seen[iss.Number] = true
+			issues = append(issues, iss)
+		}
+	}
+	if len(labels) > 0 && failures == len(labels) {
+		return nil, fmt.Errorf("%s: all %d label(s) failed: %w", source, len(labels), lastErr)
+	}
+	// A merge of per-label pages is unordered whatever order each page
+	// arrived in, and the LabeledBacklogLister doc promises newest-first.
+	sort.Slice(issues, func(i, j int) bool {
+		ni, _ := strconv.Atoi(issues[i].Number)
+		nj, _ := strconv.Atoi(issues[j].Number)
+		return ni > nj
+	})
+	return issues, nil
 }
 
 // HostPostedCommenter is the optional IssueTracker capability for adapters
