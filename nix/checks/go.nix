@@ -99,9 +99,9 @@ in
   '';
 
   # go test guards config-parsing regressions (#112). docs/, .github/,
-  # .forgejo/, templates/, README.md and lib/ are copied beside cmd/launcher,
-  # mirroring the repo layout, so the tests resolve their relative paths (#611,
-  # #1985, #2038, #2507, #2566, #2741, #2743). forge's tests shell out to git;
+  # .forgejo/, templates/, agent/, README.md and lib/ are copied beside
+  # cmd/launcher, mirroring the repo layout, so the tests resolve their relative
+  # paths (#611, #1985, #2038, #2507, #2566, #2741, #2743, #3988). forge's tests shell out to git;
   # the RUNTIME=bwrap tests LookPath "bwrap" (#2441), and bubblewrap is Linux-only.
   launcher-go-test =
     pkgs.runCommand "launcher-go-test"
@@ -118,6 +118,7 @@ in
         cp -r ${../../.github} src/.github
         cp -r ${../../.forgejo} src/.forgejo
         cp -r ${../../templates} src/templates
+        cp -r ${../../agent} src/agent
         cp ${../../README.md} src/README.md
         cp -r ${../../lib} src/lib
         chmod -R +w src
