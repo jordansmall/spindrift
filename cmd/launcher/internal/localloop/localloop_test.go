@@ -1692,3 +1692,119 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 		t.Errorf("Integration branch %s exists, want it absent -- the dependent must never have been dispatched/landed while held", integ12)
 	}
 }
+
+// Issue #4017: a status=already-resolved outcome has no bundle and no merged
+// PR for reconcile to key off -- the landing branch is recorded, but nothing
+// landed -- so settle closes the local issue directly (closeResolvedIssue's
+// IssueCloser fallback). This drives that outcome
+// through the real LocalTracker end to end: the issue file's frontmatter
+// lands Complete and closed:, the local status listing (ListOpenIssues)
+// drops it, and a subsequent reconcile+Surface sweep reports the parentless
+// ticket as never-landed rather than stuck or surfaced -- there is no bundle,
+// so its Integration branch never existed.
+func TestWire_ComposedLoop_AlreadyResolvedClosesIssue(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const num = "44"
+	writeLocalIssue(t, issuesDir, num, "seam 44", "", testLabels.InProgress)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	parent := lw.ResolveParent(num)
+	cf := lw.CodeForgeForIssue(num)
+
+	// No bundleFixtureCommit call: an already-resolved Box makes zero commits
+	// and relays no bundle, standing in for the Box having scouted the issue
+	// and found the work already done on the default branch.
+
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
+	}
+	s := settle.New(cfg, it, cf)
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: num, Landing: "agent/issue-44", Status: outcome.StatusAlreadyResolved, Note: "already fixed on main"},
+		},
+	}
+	s.Settle(dispatch.NewFake(), num, 0, result)
+
+	iss, err := it.Issue(num)
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", num, err)
+	}
+	if !containsLabel(iss.Labels, testLabels.Complete) {
+		t.Fatalf("issue %s labels = %v, want %s after settle", num, iss.Labels, testLabels.Complete)
+	}
+	if iss.State != forge.IssueClosed {
+		t.Fatalf("issue %s state = %v, want IssueClosed -- already-resolved closes directly, it never waits on reconcile", num, iss.State)
+	}
+
+	open, err := it.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+	for _, o := range open {
+		if o.Number == num {
+			t.Fatalf("ListOpenIssues = %v, want %s excluded -- the local status listing must show it closed", open, num)
+		}
+	}
+	complete, err := it.ListIssues(forge.Complete)
+	if err != nil {
+		t.Fatalf("ListIssues(Complete): %v", err)
+	}
+	for _, c := range complete {
+		if c.Number == num {
+			t.Fatalf("ListIssues(Complete) = %v, want %s excluded -- a closed issue must not look re-dispatchable", complete, num)
+		}
+	}
+
+	// reconcile.Run's ListOpenIssues no longer sees num at all -- settle
+	// already closed it directly -- so this sweep closes nothing new; it only
+	// confirms the real closer path leaves reconcile with no double-close.
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 0 {
+		t.Fatalf("reconcile.Run closed = %v, want none -- settle already closed %s directly", res.Closed, num)
+	}
+
+	// No bundle ever landed, so parent's Integration branch never existed.
+	// Surface collapses that into the neverLanded count (issue #1739) rather
+	// than a per-ticket "surfaced" or "held -- stuck landing" verdict.
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	wantVerdict := "surface: 1 broad ticket(s) skipped — no seam has landed yet"
+	if !strings.Contains(out.String(), wantVerdict) {
+		t.Errorf("Surface output = %q, want it to contain %q", out.String(), wantVerdict)
+	}
+	if strings.Contains(out.String(), "surfaced") {
+		t.Errorf("Surface output = %q, must not report %s as surfaced -- it never landed a bundle", out.String(), parent)
+	}
+}
