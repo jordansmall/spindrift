@@ -36,10 +36,27 @@ func getenvArtifact(key, def string) string {
 // never override what nix baked into the document (issue #2527). Its only
 // callers are the matching-document trust branches, not dispatchConfig (#2533).
 func docArtifact(key string) string {
+	v, _ := lookupDocArtifact(key)
+	return v
+}
+
+// lookupDocArtifact is docArtifact plus whether key is present at all.
+func lookupDocArtifact(key string) (string, bool) {
 	if loadedDoc == nil {
-		return ""
+		return "", false
 	}
-	return loadedDoc.Artifacts[key]
+	v, ok := loadedDoc.Artifacts[key]
+	return v, ok
+}
+
+// resolveChoreCatalog reads the CHORE_CATALOG artifact (lib/preambles.nix's
+// runArtifacts) for butlerPreflight's prompt-exists check.
+func resolveChoreCatalog() choreCatalog {
+	raw, ok := lookupDocArtifact("CHORE_CATALOG")
+	if !ok {
+		return choreCatalog{}
+	}
+	return choreCatalog{names: strings.Fields(raw), known: true}
 }
 
 // gitConfigLookup resolves a host git config key (e.g. "user.name"), the
