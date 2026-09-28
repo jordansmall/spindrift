@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
@@ -74,7 +75,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		return
 	}
 	backlink := fmt.Sprintf("Filed from research on #%s", num)
-	filed := fileIssueIntentsDetailed(r.it, num, result, "agent-research-finding", backlink)
+	filed := fileIssueIntentsDetailed(r.it, num, result, dispatchkind.Research.FindingLabel, backlink)
 	// Reported right after filing, not at the function's tail: the comment-post
 	// and verdict-apply branches below both return early, and filing has already
 	// happened by then, so the tally must still print (issue #3608).

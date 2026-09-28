@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -114,7 +115,7 @@ func TestMatchDedup_AcrossOldAndNewSeparatorStyle(t *testing.T) {
 		"<!-- spindrift-dedup: cmd/launcher/internal/runner/mount.go:mountParams.boxForgeAndIssueAccess -->"
 	index := make(map[string]string)
 	indexFindingIssues(index, []forge.Issue{
-		{Number: "9", Labels: []string{findingLabelReview}, Body: oldMarkerBody},
+		{Number: "9", Labels: []string{dispatchkind.Work.FindingLabel}, Body: oldMarkerBody},
 	})
 
 	ov := matchDedup(index, keys)
@@ -368,13 +369,13 @@ func TestMatchDedup_DeterministicRefsAcrossManyCoveredKeys(t *testing.T) {
 // carrying none of them -- the gate that keeps an ordinary backlog issue from
 // ever suppressing a filing.
 func TestIsFindingIssue(t *testing.T) {
-	if !isFindingIssue([]string{"bug", findingLabelReview}) {
+	if !isFindingIssue([]string{"bug", dispatchkind.Work.FindingLabel}) {
 		t.Error("isFindingIssue false for a review-finding-labeled issue")
 	}
-	if !isFindingIssue([]string{findingLabelResearch}) {
+	if !isFindingIssue([]string{dispatchkind.Research.FindingLabel}) {
 		t.Error("isFindingIssue false for a research-finding-labeled issue")
 	}
-	if !isFindingIssue([]string{findingLabelButler}) {
+	if !isFindingIssue([]string{dispatchkind.Butler.FindingLabel}) {
 		t.Error("isFindingIssue false for a butler-finding-labeled issue (ADR 0056)")
 	}
 	if isFindingIssue([]string{"bug", "ready-for-agent"}) {
@@ -429,20 +430,20 @@ func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
 		issues: map[forge.IssueState][]forge.Issue{
 			forge.IssueOpen: {
-				{Number: "9", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: race in settle -->"},
+				{Number: "9", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: race in settle -->"},
 			},
 		},
 	}
 	// A ListOpenIssues call would return this instead; its absence from the
 	// index proves the capability path, not the fallback, produced it.
-	stub.SetIssue(forge.Issue{Number: "1", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: from list open issues -->"})
+	stub.SetIssue(forge.Issue{Number: "1", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: from list open issues -->"})
 
 	index := backlogDedupIndex(stub, "100")
 
 	if len(stub.calls) != 2 {
 		t.Fatalf("ListIssuesWithLabels calls = %d, want 2 (one per state)", len(stub.calls))
 	}
-	want := []string{findingLabelReview, findingLabelResearch, findingLabelButler}
+	want := []string{dispatchkind.Work.FindingLabel, dispatchkind.Research.FindingLabel, dispatchkind.Butler.FindingLabel}
 	for _, state := range []forge.IssueState{forge.IssueOpen, forge.IssueClosed} {
 		call := stub.callFor(state)
 		if call == nil {
@@ -469,7 +470,7 @@ func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 // pre-#3609-review behavior forgejo/jira/local rely on.
 func TestBacklogDedupIndex_FallsBackToListOpenIssues(t *testing.T) {
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: race in settle -->"})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: race in settle -->"})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{"unrelated"}, Body: "<!-- spindrift-dedup: not a finding -->"})
 
 	index := backlogDedupIndex(fc, "100")
@@ -516,7 +517,7 @@ func TestBacklogDedupIndex_IndexesClosedFindingIssue(t *testing.T) {
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
 		issues: map[forge.IssueState][]forge.Issue{
 			forge.IssueClosed: {
-				{Number: "5", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: closed site -->"},
+				{Number: "5", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: closed site -->"},
 			},
 		},
 	}
@@ -536,7 +537,7 @@ func TestBacklogDedupIndex_IndexesClosedButlerFindingIssue(t *testing.T) {
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
 		issues: map[forge.IssueState][]forge.Issue{
 			forge.IssueClosed: {
-				{Number: "7", Labels: []string{findingLabelButler}, Body: "<!-- spindrift-dedup: closed butler site -->"},
+				{Number: "7", Labels: []string{dispatchkind.Butler.FindingLabel}, Body: "<!-- spindrift-dedup: closed butler site -->"},
 			},
 		},
 	}
@@ -575,10 +576,10 @@ func TestBacklogDedupIndex_OpenRefWinsOverClosedForSharedKey(t *testing.T) {
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
 		issues: map[forge.IssueState][]forge.Issue{
 			forge.IssueClosed: {
-				{Number: "5", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: shared site -->"},
+				{Number: "5", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: shared site -->"},
 			},
 			forge.IssueOpen: {
-				{Number: "9", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: shared site -->"},
+				{Number: "9", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: shared site -->"},
 			},
 		},
 	}
@@ -598,7 +599,7 @@ func TestBacklogDedupIndex_ClosedFailureWarnsAndKeepsOpenKeys(t *testing.T) {
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
 		issues: map[forge.IssueState][]forge.Issue{
 			forge.IssueOpen: {
-				{Number: "9", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: open site -->"},
+				{Number: "9", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: open site -->"},
 			},
 		},
 		errs: map[forge.IssueState]error{
@@ -626,7 +627,7 @@ func TestBacklogDedupIndex_OpenFailureWarnsAndKeepsClosedKeys(t *testing.T) {
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
 		issues: map[forge.IssueState][]forge.Issue{
 			forge.IssueClosed: {
-				{Number: "5", Labels: []string{findingLabelReview}, Body: "<!-- spindrift-dedup: closed site -->"},
+				{Number: "5", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: closed site -->"},
 			},
 		},
 		errs: map[forge.IssueState]error{

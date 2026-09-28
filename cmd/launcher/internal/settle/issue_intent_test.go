@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -2039,7 +2040,7 @@ func TestFileIssueIntentsDetailed_Dedup_QuotedMarkerNeverIndexed(t *testing.T) {
 	filedBody := fc.PostIssueCalls[0].Body
 
 	backlog := forge.NewFake()
-	backlog.SetIssue(forge.Issue{Number: "7", Labels: []string{findingLabelReview}, Body: filedBody})
+	backlog.SetIssue(forge.Issue{Number: "7", Labels: []string{dispatchkind.Work.FindingLabel}, Body: filedBody})
 	index := backlogDedupIndex(backlog, "100")
 
 	if len(index) != 0 {
