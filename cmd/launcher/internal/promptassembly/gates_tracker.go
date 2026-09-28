@@ -60,17 +60,13 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 		}
 	}
 	g["FILER_FILE_RELAY"] = filerFileRelay
-	// FILER_FILE_RELAY stays kind-agnostic because the relay mechanism is the
-	// same for work, research, and the butler. The label the launcher applies
-	// host-side is not: agent-review-finding for work, agent-research-finding
-	// for research, agent-butler-finding for the butler (ADR 0056), named in
-	// filer-label-relay*.md. researchForceRelay alone (AdviseOnly) cannot tell
-	// research and the butler apart -- both are advise-only -- so these three
-	// split further on Settle, the descriptor axis that does distinguish them
-	// (SettleVerdict vs SettleLedger), rather than a kind-string comparison.
-	g["FILER_FILE_RELAY_RESEARCH"] = researchForceRelay && e.descriptor().Settle == dispatchkind.SettleVerdict
-	g["FILER_FILE_RELAY_BUTLER"] = researchForceRelay && e.descriptor().Settle == dispatchkind.SettleLedger
-	g["FILER_FILE_RELAY_WORK"] = filerFileRelay && !researchForceRelay
+	// The relay mechanism is kind-agnostic, but the label prose it selects
+	// isn't (filer-label-relay*.md), so each kind gets its own gate, named by
+	// the descriptor's FilerRelayGate.
+	for _, kd := range dispatchkind.All {
+		g[kd.FilerRelayGate] = false
+	}
+	g[e.descriptor().FilerRelayGate] = filerFileRelay
 	g["FILER_FILE_DIRECT_GH"] = filerFileDirectGH
 	g["FILER_FILE_DIRECT_FORGEJO"] = filerFileDirectForgejo
 
