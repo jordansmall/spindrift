@@ -184,10 +184,9 @@ func (c *forgejoClient) listIssues(restState, label string) ([]forge.Issue, erro
 // durable triage decision the host must not refile. Forgejo's "labels" query
 // param is comma-separated, but its match semantics are not reliably "any
 // of" across Forgejo versions, so this queries once per label via listIssues
-// (already fully paginated, so the merge is never truncated) and merges by
-// number -- an issue carrying two of the labels would otherwise come back
-// twice. A per-label failure degrades rather than aborting the whole scan,
-// mirroring the github adapter: only a failure on every label propagates.
+// (already fully paginated, so the merge is never truncated); the merge,
+// dedup-by-number, and partial-failure handling live in
+// forge.MergeLabeledIssues.
 func (c *forgejoClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
 	var restState string
 	switch state {
@@ -196,37 +195,9 @@ func (c *forgejoClient) ListIssuesWithLabels(state forge.IssueState, labels []st
 	default:
 		return nil, fmt.Errorf("forgejo: unsupported issue state %q", state)
 	}
-	seen := make(map[string]bool)
-	var issues []forge.Issue
-	failures := 0
-	var lastErr error
-	for _, label := range labels {
-		got, err := c.listIssues(restState, label)
-		if err != nil {
-			lastErr = err
-			fmt.Fprintf(os.Stderr, "WARNING: forgejo issue list (label %s) failed: %v\n", label, err)
-			failures++
-			continue
-		}
-		for _, iss := range got {
-			if seen[iss.Number] {
-				continue
-			}
-			seen[iss.Number] = true
-			issues = append(issues, iss)
-		}
-	}
-	if len(labels) > 0 && failures == len(labels) {
-		return nil, fmt.Errorf("forgejo: issue list: all %d label(s) failed: %w", len(labels), lastErr)
-	}
-	// listIssues sorts each per-label page ascending; a merge of two of them
-	// does not, and the doc promises newest-first.
-	sort.Slice(issues, func(i, j int) bool {
-		ni, _ := strconv.Atoi(issues[i].Number)
-		nj, _ := strconv.Atoi(issues[j].Number)
-		return ni > nj
+	return forge.MergeLabeledIssues("forgejo: issue list", labels, func(label string) ([]forge.Issue, error) {
+		return c.listIssues(restState, label)
 	})
-	return issues, nil
 }
 
 // setLabels replaces the full label set on issue num. Forgejo's
