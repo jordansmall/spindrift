@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -256,8 +257,7 @@ func TestForgejoClient_ListLabels_ReturnsRepoLabels(t *testing.T) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/labels" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`[{"name":"ready-for-agent"},{"name":"agent-in-progress"}]`))
+		serveLabels(w, r, `[{"name":"ready-for-agent"},{"name":"agent-in-progress"}]`)
 	}))
 	defer srv.Close()
 
@@ -268,6 +268,105 @@ func TestForgejoClient_ListLabels_ReturnsRepoLabels(t *testing.T) {
 	}
 	if len(labels) != 2 || labels[0] != "ready-for-agent" || labels[1] != "agent-in-progress" {
 		t.Errorf("labels = %v", labels)
+	}
+}
+
+// forgejoLabelsPage renders count labels as a Forgejo labels-list JSON page,
+// named prefix0 through prefix<count-1>.
+func forgejoLabelsPage(prefix string, count int) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"name":"%s%d"}`, prefix, i)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// serveLabels writes body as /labels page 1 and an empty page after it.
+// ListLabels walks until an empty page, so a fake re-serving body for every
+// page would loop forever.
+func serveLabels(w http.ResponseWriter, r *http.Request, body string) {
+	w.WriteHeader(http.StatusOK)
+	if page := r.URL.Query().Get("page"); page != "" && page != "1" {
+		w.Write([]byte(`[]`))
+		return
+	}
+	w.Write([]byte(body))
+}
+
+// forgejoLabelsServerCap mirrors Forgejo's default MAX_RESPONSE_ITEMS page cap.
+const forgejoLabelsServerCap = 50
+
+// serveCappedLabelsPage renders a fake /labels endpoint that caps page 1 at
+// forgejoLabelsServerCap (named via prefix), serves page2Body on page 2, and an
+// empty page after that.
+func serveCappedLabelsPage(w http.ResponseWriter, r *http.Request, prefix, page2Body string) {
+	switch page := r.URL.Query().Get("page"); page {
+	case "1", "":
+		w.Write([]byte(forgejoLabelsPage(prefix, forgejoLabelsServerCap)))
+	case "2":
+		w.Write([]byte(page2Body))
+	default:
+		w.Write([]byte(`[]`))
+	}
+}
+
+// ListLabels must walk every page through rest.Client.Paginate until one
+// comes back empty (issue #2265, #3953): Forgejo caps the page size at
+// MAX_RESPONSE_ITEMS (default 50) whatever limit is requested, so a short
+// page 1 is not the last page and a label past it must still be seen.
+func TestForgejoClient_ListLabels_WalksAllPages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/labels" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		serveCappedLabelsPage(w, r, "page1-", `[{"name":"page2-extra"},{"name":"agent-review-finding"}]`)
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	labels, err := fc.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+
+	wantCount := forgejoLabelsServerCap + 2
+	if len(labels) != wantCount {
+		t.Fatalf("ListLabels returned %d labels, want %d (all pages merged despite the server-capped page size)", len(labels), wantCount)
+	}
+	if !slices.Contains(labels, "agent-review-finding") {
+		t.Fatalf("labels = %v, want the page-2 finding label present", labels)
+	}
+}
+
+// ListLabels must not loop forever against a server or proxy that ignores
+// the ?page query param and always re-serves the same non-empty page: a
+// repeated first label name across pages is the cheap tell it stops on.
+func TestForgejoClient_ListLabels_StopsOnRepeatedFirstLabelAcrossPages(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests > 5 {
+			t.Errorf("ListLabels made more than 5 requests, want the repeated-page guard to stop it")
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Write([]byte(`[{"name":"ready-for-agent"},{"name":"agent-in-progress"}]`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	labels, err := fc.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	want := []string{"ready-for-agent", "agent-in-progress"}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("ListLabels = %v, want %v with no duplicates from the repeated page", labels, want)
 	}
 }
 
@@ -707,12 +806,16 @@ func newForgejoLabelServer(t *testing.T, initial []string) (srv *httptest.Server
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"full_name":"owner/repo"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/labels":
+			// ListLabels walks until an empty page; serve one after page 1.
 			type labelOut struct {
 				Name string `json:"name"`
 			}
-			out := make([]labelOut, 0, len(labels))
-			for name := range labels {
-				out = append(out, labelOut{Name: name})
+			var out []labelOut
+			if page := r.URL.Query().Get("page"); page == "" || page == "1" {
+				out = make([]labelOut, 0, len(labels))
+				for name := range labels {
+					out = append(out, labelOut{Name: name})
+				}
 			}
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(out)

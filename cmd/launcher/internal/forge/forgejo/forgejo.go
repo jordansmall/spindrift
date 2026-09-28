@@ -433,13 +433,35 @@ func (c *forgejoClient) WalksAllPages() bool {
 	return true
 }
 
-// ListLabels returns the repository's defined label names.
+// ListLabels returns the repository's defined label names. It walks every
+// page (issue #2265, #3953) until one comes back empty: Forgejo caps the page
+// size at [api] MAX_RESPONSE_ITEMS (default 50) whatever limit is requested,
+// so a page shorter than forge.ResultPageLimit is not proof of the last one.
+// A page repeating the previous page's first label also ends the walk:
+// Paginate has no page bound, so a server ignoring ?page would loop forever.
 func (c *forgejoClient) ListLabels() ([]string, error) {
-	var payload []forgejoLabel
-	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/labels", nil, &payload); err != nil {
+	var names []string
+	var prevFirst string
+	err := c.rest.Paginate(func(page int) (bool, error) {
+		q := url.Values{
+			"limit": {strconv.Itoa(forge.ResultPageLimit)},
+			"page":  {strconv.Itoa(page)},
+		}
+		var payload []forgejoLabel
+		if err := c.rest.Do(http.MethodGet, c.repoPath()+"/labels?"+q.Encode(), nil, &payload); err != nil {
+			return false, err
+		}
+		if len(payload) == 0 || (page > 1 && payload[0].Name == prevFirst) {
+			return true, nil
+		}
+		prevFirst = payload[0].Name
+		names = append(names, labelNames(payload)...)
+		return false, nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	return labelNames(payload), nil
+	return names, nil
 }
 
 // CreateLabel creates a repository label. The color argument is a bare hex
