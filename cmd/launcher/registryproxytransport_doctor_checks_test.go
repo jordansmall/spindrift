@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -26,6 +27,13 @@ func TestMain(m *testing.M) {
 		return registrymanifest.NewUnixEndpoint(""), nil
 	}
 	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) { return nil, nil, func() {} }
+	// An ambient GH_HOST (e.g. a GHE dev shell) would otherwise flip every
+	// github.com-stubbed origin match, since checkoutIsTargetRepo follows it
+	// (issue #3912).
+	if err := os.Unsetenv("GH_HOST"); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: os.Unsetenv(GH_HOST): %v\n", err)
+		os.Exit(1)
+	}
 	os.Exit(m.Run())
 }
 

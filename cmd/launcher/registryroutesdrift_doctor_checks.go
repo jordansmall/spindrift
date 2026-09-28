@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/gitremote"
 	"spindrift.dev/launcher/internal/registrydiscover"
 	"spindrift.dev/launcher/internal/registryroutes"
@@ -67,9 +68,10 @@ func checkoutIsTargetRepo(root string, c config) bool {
 		if c.repoSlug == "" {
 			return false
 		}
+		// ParseHostSlug strips any port, so a GH_HOST carrying one never
+		// matches and the check skips itself.
 		host, slug := gitremote.ParseHostSlug(remote)
-		// GH_HOST-configured GitHub Enterprise hosts never match: skipped, not wrong.
-		return host == "github.com" && strings.EqualFold(slug, c.repoSlug)
+		return strings.EqualFold(host, github.Host()) && strings.EqualFold(slug, c.repoSlug)
 	case "forgejo":
 		if c.repoSlug == "" || c.forgejoBaseURL == "" {
 			return false
