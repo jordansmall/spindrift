@@ -34,6 +34,25 @@ const (
 	SettleLedger                // butler's one-shot run: files findings, writes the Ledger's done commit (ADR 0056)
 )
 
+// PromptContract is which shared contract block prompt assembly injects.
+// It starts at 1 so a Descriptor that omits Contract is detectably unset,
+// same idiom as LabelFamily.
+type PromptContract int
+
+const (
+	ContractLanding PromptContract = iota + 1 // work: shared comms, check, and outcome contract blocks
+	ContractVerdict                           // research: only the research-verdict contract
+	ContractInline                            // butler: nothing; butler-prompt.md carries its own OUTCOME section (ADR 0056)
+)
+
+// Tracker is which IssueTracker instance a kind's issues live on.
+type Tracker int
+
+const (
+	TrackerWork     Tracker = iota + 1 // the work IssueTracker instance
+	TrackerResearch                    // the separate tracker instance carrying the research label family (issue #1708)
+)
+
 // DaemonPriority is a kind's standing in the daemon's slotOrder preference.
 type DaemonPriority int
 
@@ -67,6 +86,11 @@ type Descriptor struct {
 	AdviseOnly     bool // read-only posture: never lands code (no branch/PR/merge); ignores blockers
 	ReadOnlyBox    bool // Box always runs read-only (guards, outbox relay), regardless of BOX_FORGE_AND_ISSUE_ACCESS
 	DaemonPriority DaemonPriority
+	FindingLabel   string         // provenance label settle applies to a filed finding
+	Contract       PromptContract // which shared contract block prompt assembly injects
+	FilerRelayGate string         // lib/fragments.nix gate selecting the kind's filer-label-relay*.md fragment
+	Tracker        Tracker        // which IssueTracker instance this kind's issues live on
+	AnnounceVerb   string         // verb of the Box start line (agent/entrypoint.sh); exported to the Box in a follow-up ticket
 }
 
 var (
@@ -77,6 +101,11 @@ var (
 		Labels:         LabelsConfigured,
 		Settle:         SettleMerge,
 		DaemonPriority: PriorityNormal,
+		FindingLabel:   "agent-review-finding",
+		Contract:       ContractLanding,
+		FilerRelayGate: "FILER_FILE_RELAY_WORK",
+		Tracker:        TrackerWork,
+		AnnounceVerb:   "implementing",
 	}
 	Research = &Descriptor{
 		Name:   "research",
@@ -90,6 +119,11 @@ var (
 		Settle:         SettleVerdict,
 		AdviseOnly:     true,
 		DaemonPriority: PriorityReserved,
+		FindingLabel:   "agent-research-finding",
+		Contract:       ContractVerdict,
+		FilerRelayGate: "FILER_FILE_RELAY_RESEARCH",
+		Tracker:        TrackerResearch,
+		AnnounceVerb:   "researching",
 	}
 	// Butler is the one-shot butler run (ADR 0056, #3870): it carries one
 	// Ledger Chore (ByChore), never a tracker issue, and files findings the
@@ -112,6 +146,11 @@ var (
 		AdviseOnly:     true,
 		ReadOnlyBox:    true, // issue #3906
 		DaemonPriority: PriorityIdle,
+		FindingLabel:   "agent-butler-finding",
+		Contract:       ContractInline,
+		FilerRelayGate: "FILER_FILE_RELAY_BUTLER",
+		Tracker:        TrackerWork, // butler files findings onto the work tracker; it has no lifecycle labels of its own
+		AnnounceVerb:   "sweeping",
 	}
 )
 
