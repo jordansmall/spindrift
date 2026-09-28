@@ -120,6 +120,9 @@ sweeps on upgrade.
 - **Writable Box that opens PRs for cheap fixes.** Mixes research-shaped
   and work-shaped settle in one run and raises the Box's trust bar. The
   work kind already does fixes; the butler only decides what is worth one.
+  [ADR 0057](0057-the-butler-lands-bounded-patches-through-the-host.md)
+  keeps this rejection and instead has the *host* land a bounded,
+  host-validated diff the Box only proposed.
 - **A dependency-update chore.** Detecting updates is deterministic and
   solved by Renovate, Dependabot, or a scheduled `nix flake update`. Bump
   PRs go through the normal flow; a failing one becomes an ordinary work
