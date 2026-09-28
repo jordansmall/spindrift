@@ -344,3 +344,18 @@ mixed mode draws both kinds from one bucket locally.
 
 A second app enters the Consumer CLI surface and its semver contract
 ([ADR 0010](0010-consumer-cli-surface-and-semver.md)).
+
+## Amendment (issue #3922): a running butler sibling doesn't mute the jam
+
+The wait policy table's "siblings running" column for exit 3, and "Only an
+otherwise-idle pool makes it a jam" above, now exclude a sibling running a
+butler Chore. A butler run never releases an issue a dispatch or research
+read found blocked or overlap-deferred, and a promoted finding (#3880) is
+new work, not a release, so a running butler sibling can't be the reason
+another kind's read found nothing dispatchable. A running research sibling
+still counts: a reject verdict closes the issue, so it can genuinely satisfy
+a blocker. Resolving and backing-off siblings still count too (#3571) — only
+the running-a-butler-child case is carved out. The trade-off: with
+auto-promotion (ADR 0056) on, a jam may fire shortly before a promoted
+finding makes work dispatchable again. The per-kind `checks[].jammed` status
+flag was never sibling-suppressed, and this amendment doesn't touch it.
