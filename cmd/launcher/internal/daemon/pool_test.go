@@ -1988,6 +1988,9 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
 		t.Fatalf("issues = %v, want [42]", snap.Slots[0].Issues)
 	}
+	if snap.Slots[0].Chore != "" {
+		t.Fatalf("chore = %q, want empty: an issue-keyed slot must never carry a Chore", snap.Slots[0].Chore)
+	}
 
 	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Issue: "99"}) // mutate the pool's copy after snapshotting
 

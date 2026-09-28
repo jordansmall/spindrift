@@ -45,6 +45,11 @@ type SlotStatus struct {
 	Kind     Kind     `json:"kind,omitempty"`
 	Revision string   `json:"revision,omitempty"`
 	Issues   []string `json:"issues,omitempty"`
+	// Chore names the Chore a butler slot's child last boxed (ADR 0056,
+	// issue #3923), kept apart from Issues as slotFlight.chore explains.
+	// Only the name: a Chore's class, allow-list disposition, and promotion
+	// budget live in the Box and host-side settle config, never the pool.
+	Chore string `json:"chore,omitempty"`
 }
 
 // Phase is one slot's own position in its iteration, published per slot

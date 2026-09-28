@@ -2067,6 +2067,9 @@ func TestLoopButlerBoxSettledCarryChoreNotIssue(t *testing.T) {
 	if len(statusReport.Status.Slots[0].Issues) != 0 {
 		t.Fatalf("in-flight issues = %v, want none: a Chore must never appear in SlotStatus.Issues", statusReport.Status.Slots[0].Issues)
 	}
+	if statusReport.Status.Slots[0].Chore != "bugs" {
+		t.Fatalf("in-flight chore = %q, want %q", statusReport.Status.Slots[0].Chore, "bugs")
+	}
 
 	events := wantEvents(t, &buf, []string{"child_start", "box", "settled", "child_finish", "halt"}, "")
 
