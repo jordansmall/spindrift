@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/rivo/uniseg"
+
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -32,11 +34,10 @@ type issueIntent struct {
 	// Class is the finding class the Box tagged, checked against the host's
 	// own allow-list; Concurrence is the in-Box reviewer's one-line
 	// agreement, empty when the reviewer dissented or never ran. Both are
-	// bounded and backtick-neutralized by parseIssueIntent before they ever
-	// reach host-authored note text; promotionNote quotes Concurrence inside
-	// a markdown code span. Neither field can promote anything on its own --
-	// the host-side policy passed to ButlerSettle's constructor decides
-	// that.
+	// bounded before they ever reach host-authored note text -- see
+	// sanitizeConcurrence for how Concurrence is neutralized. Neither field
+	// can promote anything on its own -- the host-side policy passed to
+	// ButlerSettle's constructor decides that.
 	Class       string `json:"class"`
 	Concurrence string `json:"concurrence"`
 }
@@ -75,22 +76,42 @@ var classSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // disallowed character would be.
 const maxClassLen = 40
 
-// maxConcurrenceLen bounds Concurrence, in runes, for the same reason
-// maxClassLen bounds Class: it is Box-supplied prose interpolated into
-// host-authored note text, and an unbounded value would let one finding's
-// note balloon arbitrarily.
-const maxConcurrenceLen = 200
+// maxConcurrenceLen bounds Concurrence in grapheme clusters, the
+// visible-length unit, so truncation never splits a user-perceived
+// character (an emoji ZWJ sequence, a base rune and its combining marks).
+// maxConcurrenceBytes is the cap that actually bounds size: a single
+// grapheme cluster can carry unboundedly many combining marks, so a
+// cluster count alone doesn't stop one finding's note from ballooning
+// arbitrarily -- the reason maxClassLen bounds Class applies here too, this
+// text is Box-supplied prose interpolated into a host-authored note. 1024
+// keeps the note a small slice of GitHub's 65,536-character issue-body cap.
+const (
+	maxConcurrenceLen   = 200
+	maxConcurrenceBytes = 1024
+)
 
-// sanitizeConcurrence truncates s to maxConcurrenceLen runes and neutralizes
-// backticks, which would otherwise let Box text open or close a markdown
-// code span inside the host-authored promotion note, spoofing its
-// formatting rather than merely being quoted within it.
+// sanitizeConcurrence truncates s to at most maxConcurrenceLen grapheme
+// clusters and at most maxConcurrenceBytes bytes, cutting only at a
+// grapheme-cluster boundary, and neutralizes backticks. Only an oversized
+// first cluster yields "", which fails closed: eligible rejects an empty
+// concurrence. An oversized later cluster just ends the result at the
+// preceding boundary, an ordinary truncated fragment. promotionNote quotes the
+// result inside a markdown code span; with every backtick gone the Box text
+// can't close that span early, so the span keeps swallowing whatever
+// formatting -- @mentions, links, emphasis, inline HTML -- the Box text
+// tries to spoof.
 func sanitizeConcurrence(s string) string {
 	s = strings.ReplaceAll(s, "`", "'")
-	if r := []rune(s); len(r) > maxConcurrenceLen {
-		s = string(r[:maxConcurrenceLen])
+	lastEnd := 0
+	gr := uniseg.NewGraphemes(s)
+	for n := 0; gr.Next(); n++ {
+		_, to := gr.Positions()
+		if n == maxConcurrenceLen || to > maxConcurrenceBytes {
+			break
+		}
+		lastEnd = to
 	}
-	return s
+	return s[:lastEnd]
 }
 
 // parseIssueIntent decodes one raw SPINDRIFT_ISSUE_INTENT payload, already
