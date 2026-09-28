@@ -40,9 +40,10 @@ Concretely:
   loads the fragment registry and renders the prompt, so writing the handoff
   alongside `Result.Handoff` costs it nothing new — every field Assemble
   itself computes (`SessionMode`, `Invoker`, `ReviewModel`/`ReviewEffort`
-  extracted from the roster's `reviewer` entry) or that arrives as pure
-  passthrough from its own flags (`--model`, `--driver`, `--max-slices`,
-  the `--argv-*` family, ...) lands in the same struct it writes to disk.
+  extracted from the roster's `reviewer` entry, `AdvisoryReviewer` from the
+  kind + `ORCHESTRATOR` gate) or that arrives as pure passthrough from its
+  own flags (`--model`, `--driver`, `--max-slices`, the `--argv-*` family,
+  ...) lands in the same struct it writes to disk.
   `driver-exec env-handoff` is the narrower second producer (issue #2975
   slice 2): the one Driver pass that runs before `assemble-prompt` ever
   executes — `phase_conflict_resolve`'s pre-work rebase-fixup pass — has no

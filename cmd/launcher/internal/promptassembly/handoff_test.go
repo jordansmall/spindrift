@@ -19,6 +19,7 @@ func TestLoadHandoffFileRoundTrip(t *testing.T) {
 		ReviewPromptFile: "/tmp/review-prompt.txt",
 		ReviewModel:      "review-model-x",
 		ReviewEffort:     "review-effort-x",
+		AdvisoryReviewer: true,
 		Model:            "model-x",
 		Effort:           "high",
 		Driver:           "claude",
