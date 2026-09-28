@@ -962,7 +962,8 @@ _Avoid_: kill, cancel, abort.
 **Reconcile**:
 The `local`-tracker bookkeeping sweep that makes a local issue's native
 open/closed axis match Code Forge reality — the sole authority that closes a
-local issue (ADR 0029). Observational: it never lands code. Per open issue it
+landed local issue (ADR 0029); settle closes an already-resolved one
+directly (issue #4017). Observational: it never lands code. Per open issue it
 closes the issue when its recorded landing PR is merged, discovers a PR by
 agent branch when no landing was recorded (a box that died before its outcome
 line), flags one whose PR was closed unmerged, and — only behind a composite

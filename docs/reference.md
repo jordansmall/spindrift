@@ -2581,11 +2581,14 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   already on the fetched default branch, it prints `status=already-resolved`
   naming the resolving commit or PR — no commits, no PR — and settle posts
   that note in a closing comment, swaps `agent-in-progress` straight to
-  `agent-complete`, and closes the issue itself with reason `completed`, since
-  there is no PR to carry `Closes #N`. It is the opposite of the research
-  lifecycle's `agent-research-reject`, which closes an issue as **not
-  planned**. Under `ISSUE_TRACKER=local` the issue gets `agent-complete` but
-  stays open: settle never writes the local `closed:` axis (ADR 0029).
+  `agent-complete`, and closes the issue itself, since there is no PR to carry
+  `Closes #N` — with reason `completed` on `github`, a plain close on
+  `forgejo`, which has no close reason. It is
+  the opposite of the research lifecycle's `agent-research-reject`, which
+  closes an issue as **not planned**. Under `ISSUE_TRACKER=local` settle
+  closes the issue itself too, setting the local `closed:` axis directly
+  (issue #4017) — nothing landed for reconcile to observe, so ADR 0029's
+  reconcile-only rule for `closed:` has this one exception.
 - **Stranded issues are recovered explicitly, never adopted automatically.** A
   bare `agent-in-progress` label carries no liveness signal — it cannot tell an
   issue a crashed launcher stranded apart from one a live runner (another Box,
@@ -3606,8 +3609,10 @@ landing: "https://github.com/owner/repo/pull/123"
 - `closed` is a boolean, local-only open/closed axis (ADR 0029), independent
   of `state`: absent or `false` means open; `true` excludes the issue from
   both `ListOpenIssues` and `ListIssues`, so it is never re-dispatched or
-  shown as outstanding. `reconcile` (below) is the sole authority that sets
-  `closed: true`.
+  shown as outstanding. `reconcile` (below) sets `closed: true` for every
+  landed issue; the one exception is settle closing an already-resolved
+  issue directly at settle time, since an already-resolved outcome has
+  nothing landed for reconcile to observe (issue #4017).
 - `landing` is the immutable landing reference (a PR URL, or a push-only
   branch ref under `CODE_FORGE=git`) the launcher writes after a work
   outcome line is parsed. It's a plain pointer, not cached merge-state — a
@@ -3637,8 +3642,10 @@ landing: "https://github.com/owner/repo/pull/123"
 #### `reconcile`: closing a local issue
 
 `spindrift reconcile` is the local-tracker bookkeeping sweep (ADR 0029): the
-sole authority that closes a local issue. It is observational — it never
-lands code. On `github`/`jira` it prints a plain "nothing to do" line instead
+authority that closes a local issue once it has landed. (Settle closes an
+already-resolved local issue directly, since that outcome has nothing landed
+for reconcile to observe — issue #4017.) It is observational — it never lands
+code. On `github`/`jira` it prints a plain "nothing to do" line instead
 of acting; `dispatch` also auto-invokes it as a final step whenever
 `ISSUE_TRACKER=local`, so the common loop (dispatch → immediate-merge → issue
 closes) needs no extra command.
@@ -3819,8 +3826,8 @@ its resolved key equals its own sanitized slug *and* at least one other issue
 resolves to that same key — unless excluding every such colliding issue
 would leave the group with none left, in which case none is excluded (issue
 #3439). An excluded issue neither gates the surface nor counts toward the
-surfaced seam count, and it is left open and untouched — `reconcile` remains
-the sole authority for the `closed:` field, so the operator never has to
+surfaced seam count, and it is left open and untouched — closing a landed
+issue's `closed:` field is `reconcile`'s job, so the operator never has to
 hand-set `closed:` on a broad ticket to get a surface. The surfaced branch
 still takes the sanitized parent key regardless of where the broad-ticket
 issue falls in `created:` order relative to its seams.

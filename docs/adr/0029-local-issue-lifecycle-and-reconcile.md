@@ -27,7 +27,9 @@ second, `local`-only axis stored as a boolean `closed:` frontmatter field
 Closed issues stay in the folder, excluded from `ListOpenIssues`/`ListIssues`.
 
 **Closing is driven by a new observational sweep, `reconcile`, which is the sole
-closing authority.** Reconcile is `local`-tracker-specific, auto-invoked at the
+closing authority.** (Amended by issue #4017: sole closer of anything that
+landed; settle closes an already-resolved issue directly — see the Amendment
+below.) Reconcile is `local`-tracker-specific, auto-invoked at the
 end of a `dispatch` run and available standalone (`spindrift reconcile`) for the
 between-runs cases — a runner that died, or a PR sitting in approval limbo. It
 **never lands code**. Per open local issue it:
@@ -86,7 +88,8 @@ on the Target repo.
   mode means "PR handed off to a human," not "merged," erasing the very
   distinction (agent-finished vs. PR-landed) reconcile exists to track.
 - **Inline close in the merge path + a separate reconcile sweep** — rejected in
-  favor of reconcile as the *sole* authority: one idempotent code path that
+  favor of reconcile as the *sole* authority (for landed work; see the issue
+  #4017 Amendment): one idempotent code path that
   covers immediate-merge, approval-limbo, and dead-runner uniformly, with no
   second close path to drift.
 - **Reconcile also merges mergeable PRs** (reusing recover's adopt-and-gate) —
@@ -105,3 +108,22 @@ on the Target repo.
 - Reconcile is observational and cheap (PRForge checks on open issues carrying a
   landing), so auto-invoking it per dispatch run and cronning the standalone
   verb are both safe.
+
+## Amendment (issue #4017): settle closes an already-resolved local issue directly
+
+`status=already-resolved` (issue #4015) is a Box outcome where scouting found
+the issue's change already on the default branch: zero commits, no PR, no
+merge. The run still records `landing: agent/issue-N` (the Box's own
+branch), but nothing landed — there is no PR and no merge for reconcile's
+close to key off. Settle now closes that issue directly through the
+tracker's `IssueCloser`, the one exception to reconcile being the sole
+closer described above. The merge path is unchanged: reconcile stays the
+sole closer of anything that landed.
+
+**Reconcile closing any `Complete`-with-no-landing issue** — rejected.
+`Complete` doesn't imply landed: a push-only forge under `MERGE_MODE=manual`
+goes `Complete` before the operator ever merges, and a `RecordLanding` failure
+after a real merge would also leave `Complete` with no `landing` recorded.
+Reconcile inferring a close from `Complete` alone would be guessing, not
+observing; closing already-resolved issues stays settle's job, done at the
+point that already knows there is no merge to wait for.
