@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/rest"
@@ -58,6 +59,11 @@ const defaultForgejoBaseURL = "https://codeberg.org"
 type forgejoClient struct {
 	cfg  ForgejoConfig
 	rest *rest.Client
+
+	// orgLabelsAuthWarnOnce gates ListLabels' missing-scope warning to once
+	// per client: ListLabels runs on every poll, and a token lacking
+	// read:organization fails the org lookup identically every time.
+	orgLabelsAuthWarnOnce sync.Once
 }
 
 // NewForgejoClient returns an IssueTracker backed by the Forgejo REST API.
@@ -80,6 +86,15 @@ func NewForgejoClient(cfg ForgejoConfig) forge.IssueTracker {
 
 func (c *forgejoClient) repoPath() string {
 	return "/api/v1/repos/" + c.cfg.Repo
+}
+
+// orgLabelsPath is the labels endpoint of cfg.Repo's owner. ForgejoConfig
+// has no org field, so the owner is the slug segment before the "/"; a
+// slash-less Repo yields the whole slug as owner, so its lookup resolves
+// that name as an org (a 404 there is absorbed as "no org labels").
+func (c *forgejoClient) orgLabelsPath() string {
+	owner, _, _ := strings.Cut(c.cfg.Repo, "/")
+	return "/api/v1/orgs/" + owner + "/labels"
 }
 
 type forgejoLabel struct {
@@ -190,11 +205,12 @@ func (c *forgejoClient) listIssues(restState, label string) ([]forge.Issue, erro
 const issueListSource = "forgejo: issue list"
 
 // definedLabels filters labels down to the ones ListLabels reports as defined
-// on the repo. The match is exact (case-sensitive) even though Forgejo's DB
-// name lookup can be case-insensitive on MySQL, so a configured label
-// differing only by case is treated as undefined. A ListLabels error is a
-// transient outage, not evidence the labels are absent, so it falls back to
-// treating every requested label as defined rather than returning none.
+// on the repo or its owning org. The match is exact (case-sensitive) even
+// though Forgejo's DB name lookup can be case-insensitive on MySQL, so a
+// configured label differing only by case is treated as undefined. A
+// ListLabels error is a transient outage, not evidence the labels are
+// absent, so it falls back to treating every requested label as defined
+// rather than returning none.
 func (c *forgejoClient) definedLabels(labels []string) []string {
 	defined, err := c.ListLabels()
 	if err != nil {
@@ -507,11 +523,56 @@ func walkPages[T any, K comparable](rc *rest.Client, path string, q url.Values, 
 	return items, nil
 }
 
-// ListLabels returns the repository's defined label names, walking every
-// page via walkPages (issue #2265, #3953).
+// ListLabels returns the names of every label defined on the repo or its
+// owning org, walking every page of both endpoints via walkPages (issue
+// #2265, #3953, #3997), repo names first, then any org-only names, with
+// duplicates dropped. Forgejo's issue list and label-replace endpoints
+// resolve both label sets, so a pre-check that only saw repo labels would
+// treat an org-only label as undefined.
 func (c *forgejoClient) ListLabels() ([]string, error) {
-	payload, err := walkPages(c.rest, c.repoPath()+"/labels", url.Values{}, func(l forgejoLabel) string { return l.Name })
+	repoPayload, err := walkPages(c.rest, c.repoPath()+"/labels", url.Values{}, func(l forgejoLabel) string { return l.Name })
 	if err != nil {
+		return nil, err
+	}
+	names := labelNames(repoPayload)
+
+	orgNames, err := c.orgLabels()
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(names))
+	for _, n := range names {
+		seen[n] = true
+	}
+	for _, n := range orgNames {
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	return names, nil
+}
+
+// orgLabels returns the owning org's label names. forge.ErrNotFound means a
+// user-owned repo, so there are none. forge.ErrAuthFailure means a token
+// without read:organization; the repo fetch already succeeded with it, and
+// failing ListLabels would newly fail doctor (any ListLabels error is
+// ErrConnectivity there) for deployments that work today, so it degrades to
+// repo labels only with a warning. The cost: for that token an org-only
+// label still reads as undefined, so ListIssues on it returns nothing (the
+// #3997 gap, now warned once per client). Any other error propagates.
+func (c *forgejoClient) orgLabels() ([]string, error) {
+	payload, err := walkPages(c.rest, c.orgLabelsPath(), url.Values{}, func(l forgejoLabel) string { return l.Name })
+	if err != nil {
+		if errors.Is(err, forge.ErrNotFound) {
+			return nil, nil
+		}
+		if errors.Is(err, forge.ErrAuthFailure) {
+			c.orgLabelsAuthWarnOnce.Do(func() {
+				fmt.Fprintf(os.Stderr, "WARNING: forgejo: org label lookup failed (%v); the token likely lacks the read:organization scope, so org-only labels are not seen by label pre-checks\n", err)
+			})
+			return nil, nil
+		}
 		return nil, err
 	}
 	return labelNames(payload), nil

@@ -2699,7 +2699,10 @@ generated `flake.nix`.
   instance, set via `FORGEJO_BASE_URL` (default `https://codeberg.org`, so a
   self-hosted Forgejo/Gitea instance just re-points it). `FORGEJO_TOKEN` is a
   secret env var alongside `GH_TOKEN`, a Forgejo/Gitea API token used with
-  the Bearer/`token` auth scheme.
+  the Bearer/`token` auth scheme. Label pre-checks also resolve labels
+  defined on the repo's owning org, not just the repo itself, which needs
+  the token's `read:organization` scope; without it, org-only labels go
+  unseen and the launcher warns once per client.
 
   Dispatch state uses the same label lifecycle as `github` (`ready-for-agent`
   / `agent-in-progress` / `agent-complete` / `agent-failed`, same

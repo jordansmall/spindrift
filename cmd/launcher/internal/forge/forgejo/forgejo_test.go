@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"slices"
 	"strconv"
@@ -254,6 +255,9 @@ func TestForgejoClient_PostIssue_AppliesLabels(t *testing.T) {
 
 func TestForgejoClient_ListLabels_ReturnsRepoLabels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveNoOrgLabels(w, r) {
+			return
+		}
 		if r.URL.Path != "/api/v1/repos/owner/repo/labels" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -284,6 +288,27 @@ func forgejoLabelsPage(prefix string, count int) string {
 	}
 	b.WriteByte(']')
 	return b.String()
+}
+
+// forgejoOrgLabelsPath is the org labels endpoint ListLabels queries
+// alongside the repo one (issue #3997), for the "owner/repo" fixture repo
+// every fake in this file uses. A fake that doesn't route it explicitly
+// falls through to whatever its own catch-all handles, most often an
+// /issues handler, so most fakes below route it via serveNoOrgLabels before
+// that catch-all; a few instead serve real org labels or a specific status
+// on this path directly.
+const forgejoOrgLabelsPath = "/api/v1/orgs/owner/labels"
+
+// serveNoOrgLabels 404s forgejoOrgLabelsPath — the no-owning-org case, which
+// must not add anything to ListLabels' union — and reports whether it
+// handled the request, so a fake can route it with "if serveNoOrgLabels(w,
+// r) { return }" ahead of its own catch-all.
+func serveNoOrgLabels(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path != forgejoOrgLabelsPath {
+		return false
+	}
+	w.WriteHeader(http.StatusNotFound)
+	return true
 }
 
 // serveLabels writes body as /labels page 1 and an empty page after it.
@@ -352,6 +377,9 @@ func serveCappedLabelsPage(w http.ResponseWriter, r *http.Request, prefix, page2
 // page 1 is not the last page and a label past it must still be seen.
 func TestForgejoClient_ListLabels_WalksAllPages(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveNoOrgLabels(w, r) {
+			return
+		}
 		if r.URL.Path != "/api/v1/repos/owner/repo/labels" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -380,6 +408,9 @@ func TestForgejoClient_ListLabels_WalksAllPages(t *testing.T) {
 func TestForgejoClient_ListLabels_StopsOnRepeatedFirstLabelAcrossPages(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveNoOrgLabels(w, r) {
+			return
+		}
 		requests++
 		if requests > 5 {
 			t.Errorf("ListLabels made more than 5 requests, want the repeated-page guard to stop it")
@@ -401,6 +432,162 @@ func TestForgejoClient_ListLabels_StopsOnRepeatedFirstLabelAcrossPages(t *testin
 	}
 }
 
+// ListLabels resolves the union of repo and org labels (issue #3997):
+// Forgejo's /issues label filter and PUT issue-labels replace both resolve
+// against that same union, so definedLabels' pre-check must see it too.
+func TestForgejoClient_ListLabels_UnionsRepoAndOrgLabels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/labels":
+			serveLabels(w, r, `[{"name":"ready-for-agent"},{"name":"shared-label"}]`)
+		case forgejoOrgLabelsPath:
+			serveLabels(w, r, `[{"name":"shared-label"},{"name":"org-only-label"}]`)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	labels, err := fc.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	want := []string{"ready-for-agent", "shared-label", "org-only-label"}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("ListLabels = %v, want %v (repo order first, then org-only names, deduplicated)", labels, want)
+	}
+}
+
+// captureStderr returns everything fn writes to os.Stderr, via a temp file
+// like main_test.go's captureStderrFile. Swapping the package-global
+// os.Stderr makes this unsafe under t.Parallel with any other
+// stderr-sensitive test.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatalf("os.CreateTemp: %v", err)
+	}
+	old := os.Stderr
+	os.Stderr = f
+	defer func() { os.Stderr = old }()
+	fn()
+	f.Close()
+	captured, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	return string(captured)
+}
+
+// A 404 on the org labels endpoint is the ordinary case for a user-owned
+// repo (no owning org): it must degrade to repo labels only, not fail
+// ListLabels, and not warn — the warning is reserved for the auth-failure
+// case below.
+func TestForgejoClient_ListLabels_OrgNotFoundYieldsRepoLabelsOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/labels":
+			serveLabels(w, r, `[{"name":"ready-for-agent"}]`)
+		case forgejoOrgLabelsPath:
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	var labels []string
+	var err error
+	stderr := captureStderr(t, func() {
+		labels, err = fc.ListLabels()
+	})
+	if err != nil {
+		t.Fatalf("ListLabels: %v, want nil — a user-owned repo's org lookup 404s and must degrade to repo labels only", err)
+	}
+	want := []string{"ready-for-agent"}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("ListLabels = %v, want %v", labels, want)
+	}
+	if strings.Contains(stderr, "WARNING") {
+		t.Errorf("stderr = %q, want no WARNING — 404 is the ordinary no-owning-org case", stderr)
+	}
+}
+
+// A 403 on the org labels endpoint means the token lacks read:organization
+// even though the repo fetch with the same token just succeeded. Failing
+// ListLabels here would newly break doctor (it maps any ListLabels error to
+// forge.ErrConnectivity) for existing fine-grained-token deployments, so
+// this degrades to repo labels only instead, the same as the 404 case, with
+// a warning — gated by sync.Once so a second ListLabels call on the same
+// client stays quiet.
+func TestForgejoClient_ListLabels_OrgAuthFailureYieldsRepoLabelsOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/labels":
+			serveLabels(w, r, `[{"name":"ready-for-agent"}]`)
+		case forgejoOrgLabelsPath:
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	var labels []string
+	var err error
+	stderr := captureStderr(t, func() {
+		labels, err = fc.ListLabels()
+		if err != nil {
+			return
+		}
+		// A second call on the same client must not warn again: the
+		// sync.Once gate is per-client, not per-call.
+		_, err = fc.ListLabels()
+	})
+	if err != nil {
+		t.Fatalf("ListLabels: %v, want nil — a token missing read:organization must degrade to repo labels only", err)
+	}
+	want := []string{"ready-for-agent"}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("ListLabels = %v, want %v", labels, want)
+	}
+	warnings := strings.Count(stderr, "WARNING")
+	if warnings != 1 {
+		t.Fatalf("stderr had %d WARNING lines across two ListLabels calls, want exactly 1 (sync.Once-gated): %q", warnings, stderr)
+	}
+	if !strings.Contains(stderr, "read:organization") {
+		t.Errorf("stderr = %q, want it to mention read:organization", stderr)
+	}
+}
+
+// Any other org error (a transient 5xx in real life) is not one of the two
+// expected degrade cases and must fail ListLabels: definedLabels already
+// falls back to an unfiltered query+client-side refilter on that error. 400
+// (not 500) keeps the rest client's transient-status retry/backoff out of
+// this test, the same reason TestForgejoClient_Probe_ServerError uses it.
+func TestForgejoClient_ListLabels_OrgOtherErrorFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/labels":
+			serveLabels(w, r, `[{"name":"ready-for-agent"}]`)
+		case forgejoOrgLabelsPath:
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	if _, err := fc.ListLabels(); err == nil {
+		t.Fatal("ListLabels: want error when the org lookup fails with neither 404 nor 403, got nil")
+	}
+}
+
 // ListIssuesWithLabels must see a finding label that only shows up on
 // /labels page 2 because the server caps the page size below
 // forge.ResultPageLimit (issue #3944): if ListLabels stopped as soon as a
@@ -411,6 +598,9 @@ func TestForgejoClient_ListIssuesWithLabels_SeesLabelOnServerCappedLabelsPage2(t
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
 			serveCappedLabelsPage(w, r, "page1-", `[{"name":"agent-review-finding"}]`)
+			return
+		}
+		if serveNoOrgLabels(w, r) {
 			return
 		}
 		issuesRequests = append(issuesRequests, r.URL.Query().Get("labels"))
@@ -696,6 +886,9 @@ func TestForgejoClient_ListIssues_SkipsLabelNotDefinedOnRepo(t *testing.T) {
 			serveLabels(w, r, `[{"name":"unrelated-label"}]`)
 			return
 		}
+		if serveNoOrgLabels(w, r) {
+			return
+		}
 		requested = true
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`[{"number":5,"title":"t","body":"b","state":"open","labels":[]}]`))
@@ -718,6 +911,42 @@ func TestForgejoClient_ListIssues_SkipsLabelNotDefinedOnRepo(t *testing.T) {
 	}
 }
 
+// Counterpart of the above: a label the repo doesn't define but the owning
+// org does (issue #3997) must still be treated as defined, since Forgejo's
+// /issues label filter and PUT issue-labels both resolve org labels too.
+func TestForgejoClient_ListIssues_SeesLabelDefinedOnlyOnOrg(t *testing.T) {
+	var gotLabelsParam string
+	requested := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/labels":
+			serveLabels(w, r, `[{"name":"unrelated-label"}]`)
+		case forgejoOrgLabelsPath:
+			serveLabels(w, r, `[{"name":"ready-for-agent"}]`)
+		default:
+			requested = true
+			gotLabelsParam = r.URL.Query().Get("labels")
+			serveIssues(w, r, `[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"ready-for-agent"}]}]`)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
+		BaseURL: srv.URL, Repo: "owner/repo", Token: "tok",
+		Labels: forge.DispatchLabels{Dispatchable: "ready-for-agent"},
+	})
+	issues, err := fc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	if !requested || gotLabelsParam != "ready-for-agent" {
+		t.Fatalf("want the /issues query sent with labels=ready-for-agent, got requested=%v labels=%q", requested, gotLabelsParam)
+	}
+	if len(issues) != 1 || issues[0].Number != "5" {
+		t.Fatalf("issues = %+v, want the org-only-labelled issue", issues)
+	}
+}
+
 // Forgejo silently drops an unresolved labels= filter and returns every
 // issue in state rather than erroring or returning none (issue #3952), so
 // ListIssues must re-filter client-side even when the label is defined and
@@ -727,6 +956,9 @@ func TestForgejoClient_ListIssues_FiltersServerIgnoredLabelsParam(t *testing.T) 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
 			serveLabels(w, r, `[{"name":"ready-for-agent"}]`)
+			return
+		}
+		if serveNoOrgLabels(w, r) {
 			return
 		}
 		gotLabelsParam = r.URL.Query().Get("labels")
@@ -784,6 +1016,9 @@ func TestForgejoClient_ListIssuesWithLabels_FiltersServerIgnoredLabelsParam(t *t
 			serveLabels(w, r, `[{"name":"agent-review-finding"}]`)
 			return
 		}
+		if serveNoOrgLabels(w, r) {
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write(mixedLabelFixture("agent-review-finding"))
 	}))
@@ -805,6 +1040,9 @@ func TestForgejoClient_ListIssuesWithLabels_ClosedStateAndLabelQuery(t *testing.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
 			serveLabels(w, r, `[{"name":"agent-review-finding"}]`)
+			return
+		}
+		if serveNoOrgLabels(w, r) {
 			return
 		}
 		q := r.URL.Query()
@@ -839,6 +1077,9 @@ func TestForgejoClient_ListIssuesWithLabels_MergesAndDedupsAcrossLabels(t *testi
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
 			serveLabels(w, r, `[{"name":"agent-review-finding"},{"name":"agent-research-finding"}]`)
+			return
+		}
+		if serveNoOrgLabels(w, r) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -886,6 +1127,9 @@ func TestForgejoClient_ListIssuesWithLabels_PartialFailureReturnsSucceededLabels
 			serveLabels(w, r, `[{"name":"agent-review-finding"},{"name":"agent-research-finding"}]`)
 			return
 		}
+		if serveNoOrgLabels(w, r) {
+			return
+		}
 		switch r.URL.Query().Get("labels") {
 		case "agent-review-finding":
 			w.WriteHeader(http.StatusOK)
@@ -912,6 +1156,9 @@ func TestForgejoClient_ListIssuesWithLabels_AllFailuresReturnsError(t *testing.T
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
 			serveLabels(w, r, `[{"name":"agent-review-finding"},{"name":"agent-research-finding"}]`)
+			return
+		}
+		if serveNoOrgLabels(w, r) {
 			return
 		}
 		w.WriteHeader(http.StatusBadRequest)
@@ -996,6 +1243,9 @@ func TestForgejoClient_ListIssuesWithLabels_SkipsLabelsNotDefinedOnRepo(t *testi
 					serveLabels(w, r, `[{"name":"agent-review-finding"}]`)
 					return
 				}
+				if serveNoOrgLabels(w, r) {
+					return
+				}
 				issuesRequests = append(issuesRequests, r.URL.Query().Get("labels"))
 				serveIssues(w, r, `[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`)
 			}))
@@ -1019,6 +1269,36 @@ func TestForgejoClient_ListIssuesWithLabels_SkipsLabelsNotDefinedOnRepo(t *testi
 	}
 }
 
+// Counterpart of the above: a label the repo doesn't define but the owning
+// org does (issue #3997) must still be queried, not skipped as undefined.
+func TestForgejoClient_ListIssuesWithLabels_SeesLabelDefinedOnlyOnOrg(t *testing.T) {
+	var issuesRequests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/labels":
+			serveLabels(w, r, `[]`)
+		case forgejoOrgLabelsPath:
+			serveLabels(w, r, `[{"name":"agent-review-finding"}]`)
+		default:
+			issuesRequests = append(issuesRequests, r.URL.Query().Get("labels"))
+			serveIssues(w, r, `[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	issues, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	if len(issuesRequests) != 2 || issuesRequests[0] != "agent-review-finding" || issuesRequests[1] != "agent-review-finding" {
+		t.Fatalf("issues requests = %+v, want exactly two, both for the org-only-defined label", issuesRequests)
+	}
+	if len(issues) != 1 || issues[0].Number != "5" {
+		t.Fatalf("issues = %+v", issues)
+	}
+}
+
 // When every requested label is undefined on the repo, skipping all of them
 // is lossless: the result is empty and no /issues request runs at all.
 func TestForgejoClient_ListIssuesWithLabels_AllLabelsUndefinedReturnsEmptyWithoutRequest(t *testing.T) {
@@ -1026,6 +1306,9 @@ func TestForgejoClient_ListIssuesWithLabels_AllLabelsUndefinedReturnsEmptyWithou
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
 			serveLabels(w, r, `[]`)
+			return
+		}
+		if serveNoOrgLabels(w, r) {
 			return
 		}
 		requested = true
@@ -1178,6 +1461,10 @@ func newForgejoLabelServer(t *testing.T, initial []string) (srv *httptest.Server
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/issues":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && r.URL.Path == forgejoOrgLabelsPath:
+			// This fixture repo has no owning org; 404 degrades ListLabels
+			// to repo labels only (issue #3997), same as real Forgejo.
+			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/labels":
 			var body map[string]any
 			json.NewDecoder(r.Body).Decode(&body)
