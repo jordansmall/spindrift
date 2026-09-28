@@ -30,6 +30,82 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
+func TestUsage_Add(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b usage.Usage
+		want usage.Usage
+	}{
+		{
+			name: "sums all eight fields",
+			a: usage.Usage{
+				InputTokens:              1,
+				OutputTokens:             2,
+				CacheReadInputTokens:     3,
+				CacheCreationInputTokens: 4,
+				TotalCostUSD:             5.5,
+				DurationMs:               6,
+				DurationApiMs:            7,
+				NumTurns:                 8,
+			},
+			b: usage.Usage{
+				InputTokens:              10,
+				OutputTokens:             20,
+				CacheReadInputTokens:     30,
+				CacheCreationInputTokens: 40,
+				TotalCostUSD:             50.5,
+				DurationMs:               60,
+				DurationApiMs:            70,
+				NumTurns:                 80,
+			},
+			want: usage.Usage{
+				InputTokens:              11,
+				OutputTokens:             22,
+				CacheReadInputTokens:     33,
+				CacheCreationInputTokens: 44,
+				TotalCostUSD:             56.0,
+				DurationMs:               66,
+				DurationApiMs:            77,
+				NumTurns:                 88,
+			},
+		},
+		{
+			name: "zero value is identity",
+			a: usage.Usage{
+				InputTokens:              1,
+				OutputTokens:             2,
+				CacheReadInputTokens:     3,
+				CacheCreationInputTokens: 4,
+				TotalCostUSD:             5.5,
+				DurationMs:               6,
+				DurationApiMs:            7,
+				NumTurns:                 8,
+			},
+			b: usage.Usage{},
+			want: usage.Usage{
+				InputTokens:              1,
+				OutputTokens:             2,
+				CacheReadInputTokens:     3,
+				CacheCreationInputTokens: 4,
+				TotalCostUSD:             5.5,
+				DurationMs:               6,
+				DurationApiMs:            7,
+				NumTurns:                 8,
+			},
+		},
+	}
+	for _, tc := range cases {
+		got := tc.a.Add(tc.b)
+		if diff := got.TotalCostUSD - tc.want.TotalCostUSD; diff > 0.0001 || diff < -0.0001 {
+			t.Errorf("%s: Add().TotalCostUSD = %v, want %v", tc.name, got.TotalCostUSD, tc.want.TotalCostUSD)
+		}
+		got.TotalCostUSD, tc.want.TotalCostUSD = 0, 0
+		if got != tc.want {
+			t.Errorf("%s: Add() = %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestModelUsage_Fields(t *testing.T) {
 	mu := usage.ModelUsage{
 		Model:                "claude-opus-4-8",

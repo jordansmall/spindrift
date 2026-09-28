@@ -38,6 +38,21 @@ func (u Usage) TotalTokens() int {
 	return u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
 }
 
+// Add returns the field-wise sum of u and o. Callers that need a different
+// rule for a field, such as a wall-clock span for DurationMs, override it after.
+func (u Usage) Add(o Usage) Usage {
+	return Usage{
+		InputTokens:              u.InputTokens + o.InputTokens,
+		OutputTokens:             u.OutputTokens + o.OutputTokens,
+		CacheReadInputTokens:     u.CacheReadInputTokens + o.CacheReadInputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens + o.CacheCreationInputTokens,
+		TotalCostUSD:             u.TotalCostUSD + o.TotalCostUSD,
+		DurationMs:               u.DurationMs + o.DurationMs,
+		DurationApiMs:            u.DurationApiMs + o.DurationApiMs,
+		NumTurns:                 u.NumTurns + o.NumTurns,
+	}
+}
+
 // UnknownModel is the Model value for a log that carried no model field.
 const UnknownModel = "unknown"
 
