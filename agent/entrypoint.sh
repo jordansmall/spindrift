@@ -533,18 +533,21 @@ phase_prefetch() {
     if [ "$_use_dev_shell" = "1" ]; then
       local _pf_wrapper
       _pf_wrapper="$(mktemp --suffix=.sh)"
-      # eval "$PREFETCH" so shell constructs in the hook are interpreted,
-      # matching the non-devShell path exactly. $PATH and $PREFETCH stay literal
-      # in the generated script.
+      # The wrapper evals $PREFETCH so shell constructs in the hook are
+      # interpreted; like the non-devShell path, it runs in a child bash and
+      # failures are non-fatal. $PATH and $PREFETCH stay literal in the
+      # generated script.
       # shellcheck disable=SC2016
       printf '#!/bin/bash\nexport PATH="%s:$PATH"\neval "$PREFETCH"\n' \
         "$_harness_path" > "$_pf_wrapper"
       chmod +x "$_pf_wrapper"
       # Prefetch failures are non-fatal, so the nix exit status is ignored.
-      nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_pf_wrapper" || true
+      WORK_DIR="$WORK_DIR" nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_pf_wrapper" || true
       rm -f "$_pf_wrapper"
     else
-      eval "$PREFETCH"
+      # A child bash, not eval (a failure/cd/set/exit would hit this shell) nor
+      # a ( subshell ) (inherits -u/pipefail) -- issue #3943.
+      WORK_DIR="$WORK_DIR" bash -c "$PREFETCH" || true
     fi
   fi
 }
