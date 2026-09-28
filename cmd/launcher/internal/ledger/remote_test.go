@@ -185,6 +185,64 @@ func TestRemoteAppendPushFailureRedactsCredentials(t *testing.T) {
 	}
 }
 
+// TestRemoteSnapshotDoesNotReFetch asserts that ledger.Snapshot syncs a
+// Remote exactly once: reads through the returned Reader keep seeing the tip
+// as of Snapshot even after a rival Append moves the remote ref, while a
+// fresh Remote.Read (which syncs per call) sees the new tip.
+func TestRemoteSnapshotDoesNotReFetch(t *testing.T) {
+	setGitIdentityEnv(t)
+	bare := newBareRepo(t)
+
+	r, err := ledger.NewRemote(t.TempDir(), bare)
+	if err != nil {
+		t.Fatalf("NewRemote: %v", err)
+	}
+	oldCommit, err := r.Append("chore-snapshot", "", ledger.State{Phase: ledger.Claimed}, time.Now())
+	if err != nil {
+		t.Fatalf("Append (seed old tip): %v", err)
+	}
+
+	snap, err := ledger.Snapshot(r)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	// A rival Remote over its own scratch clone moves the remote ref behind
+	// the snapshot.
+	rival, err := ledger.NewRemote(t.TempDir(), bare)
+	if err != nil {
+		t.Fatalf("NewRemote (rival): %v", err)
+	}
+	newCommit, err := rival.Append("chore-snapshot", oldCommit, ledger.State{Phase: ledger.Done}, time.Now())
+	if err != nil {
+		t.Fatalf("Append (rival, advance remote): %v", err)
+	}
+
+	tip, err := snap.Read("chore-snapshot")
+	if err != nil {
+		t.Fatalf("snapshot.Read: %v", err)
+	}
+	if tip.Commit != oldCommit {
+		t.Fatalf("snapshot.Read after remote advanced = %s, want the pre-Snapshot tip %s (no re-fetch)", tip.Commit, oldCommit)
+	}
+
+	entries, err := snap.History("chore-snapshot", time.Time{})
+	if err != nil {
+		t.Fatalf("snapshot.History: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Commit != oldCommit {
+		t.Fatalf("snapshot.History after remote advanced = %+v, want only the pre-Snapshot tip %s", entries, oldCommit)
+	}
+
+	freshTip, err := r.Read("chore-snapshot")
+	if err != nil {
+		t.Fatalf("r.Read (fresh, syncs per call): %v", err)
+	}
+	if freshTip.Commit != newCommit {
+		t.Fatalf("r.Read after remote advanced = %s, want the new tip %s", freshTip.Commit, newCommit)
+	}
+}
+
 // TestRemoteFetchBranch asserts that FetchBranch mirrors the remote's branch
 // head into the scratch repo, which the butler command needs to compute
 // butler.Head/butler.TrackedFiles against a local repo.

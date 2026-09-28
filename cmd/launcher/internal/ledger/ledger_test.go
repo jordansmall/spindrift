@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +69,20 @@ func TestDayTotalsAllEmpty(t *testing.T) {
 	}
 	if got != (ledger.Totals{}) {
 		t.Fatalf("DayTotalsAll(nil chores) = %+v, want zero value", got)
+	}
+}
+
+// TestSnapshotNonRemotePassesThrough asserts that Snapshot of a non-Remote
+// Backend (Local, or a test fake) returns it unchanged: only Remote has a
+// sync step worth amortizing.
+func TestSnapshotNonRemotePassesThrough(t *testing.T) {
+	b := fakeBackend{history: map[string][]ledger.Entry{"a": {{Commit: "c1"}}}}
+	got, err := ledger.Snapshot(b)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if !reflect.DeepEqual(got, ledger.Reader(b)) {
+		t.Fatalf("Snapshot(fakeBackend) = %+v, want the same fakeBackend unchanged", got)
 	}
 }
 

@@ -13,7 +13,9 @@ import (
 // Remote implements Backend against a hosted forge's Ledger ref by keeping a
 // host-side scratch bare repo (the working clone the state commits are built
 // in) in sync with a remote over push/fetch, rather than writing directly
-// into a shared bare repo the way Local does.
+// into a shared bare repo the way Local does. Read and History each sync
+// before reading, so every call sees the remote's current state; Snapshot
+// instead syncs once and hands back the scratch repo for a batch of reads.
 type Remote struct {
 	// Repo is the scratch bare repo's filesystem path. Read/History/ref/commit
 	// delegate to a Local built from it via local() (never embedded: embedding

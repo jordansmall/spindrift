@@ -75,24 +75,47 @@ type Entry struct {
 // found a different old value than expected.
 var ErrLostRace = errors.New("ledger: tip moved since it was read")
 
+// Reader is the read-only half of Backend: what Snapshot returns, and what
+// DayTotals/DayTotalsAll need, without exposing Append.
+type Reader interface {
+	// Read returns chore's current tip, or a zero Tip (Commit == "") if the
+	// Ledger has no commit yet.
+	Read(chore string) (Tip, error)
+	// History returns every state commit in chore's chain whose commit date
+	// is at or after since, newest first. Returns (nil, nil) if the Ledger
+	// has no commit yet.
+	History(chore string, since time.Time) ([]Entry, error)
+}
+
 // Backend is the storage adapter a Chore's Ledger is built on. The local
 // forge implements it directly against its own bare Accumulation repo
 // (Local); a hosted forge implements it against a client's working clone,
 // pushed to the remote (Remote).
 type Backend interface {
-	// Read returns chore's current tip, or a zero Tip (Commit == "") if the
-	// Ledger has no commit yet.
-	Read(chore string) (Tip, error)
+	Reader
 	// Append commits s as chore's new tip, parented on old (no parent if old
 	// == ""), and moves chore's ref from old to the new commit only if the
 	// ref still equals old (old == "" requires the ref not to exist yet). at
 	// becomes the commit's author and committer date. Returns ErrLostRace
 	// (wrapped or bare; test with errors.Is) if the compare-and-swap loses.
 	Append(chore, old string, s State, at time.Time) (string, error)
-	// History returns every state commit in chore's chain whose commit date
-	// is at or after since, newest first. Returns (nil, nil) if the Ledger
-	// has no commit yet.
-	History(chore string, since time.Time) ([]Entry, error)
+}
+
+// Snapshot syncs a Remote once and returns its scratch repo as a Reader, so a
+// batch of Read/History calls costs one fetch. The view is live, not a copy:
+// it holds only until the next call that syncs the same Remote (Read,
+// History, Append, or another Snapshot) moves the scratch refs. Any other
+// Backend (Local, test fakes) is returned unchanged. The Reader method set
+// leaves out the scratch Local's non-pushing Append — a caller needing a
+// fresh view or a compare-and-swap must go back through the Backend.
+func Snapshot(b Backend) (Reader, error) {
+	if r, ok := b.(Remote); ok {
+		if err := r.sync(); err != nil {
+			return nil, err
+		}
+		return r.local(), nil
+	}
+	return b, nil
 }
 
 // Claim appends a Claimed state on top of tip, conditional on tip being
@@ -146,7 +169,7 @@ type Totals struct {
 // split across its two commits: it counts toward Claims on the day its
 // Claimed commit was made, and toward Filed/Promoted/Dropped/Usage on the
 // (possibly later) day its Done commit lands.
-func DayTotals(b Backend, chore string, now time.Time) (Totals, error) {
+func DayTotals(b Reader, chore string, now time.Time) (Totals, error) {
 	loc := now.Location()
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	next := midnight.AddDate(0, 0, 1)
@@ -192,7 +215,7 @@ func (t Totals) add(o Totals) Totals {
 // now. Budgets (ADR 0056) are global across every enabled Chore, not
 // per-Chore, so the due check needs this cross-Chore total rather than any
 // single Chore's DayTotals.
-func DayTotalsAll(b Backend, chores []string, now time.Time) (Totals, error) {
+func DayTotalsAll(b Reader, chores []string, now time.Time) (Totals, error) {
 	var sum Totals
 	for _, chore := range chores {
 		t, err := DayTotals(b, chore, now)
