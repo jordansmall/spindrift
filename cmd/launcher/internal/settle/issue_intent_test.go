@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/signalwire"
 )
 
 // withEmptyMarker is the body a term-less intent actually files: the
@@ -36,8 +37,8 @@ func filedURLs(filed []filedIntent) []string {
 }
 
 // TestParseIssueIntent_ClassMustBeALowercaseSlug: a Class outside
-// classSlugRE's shape, or past maxClassLen, is cleared rather than rejecting
-// the whole intent (issue #3880 review finding) -- it is Box-supplied text
+// signalwire.ValidClass's shape is cleared rather than rejecting the whole
+// intent (issue #3880 review finding) -- it is Box-supplied text
 // interpolated unescaped into host-authored backlink/note strings, so
 // anything but a plain slug is treated the same as no claimed class at all.
 func TestParseIssueIntent_ClassMustBeALowercaseSlug(t *testing.T) {
@@ -56,15 +57,16 @@ func TestParseIssueIntent_ClassMustBeALowercaseSlug(t *testing.T) {
 		{"embedded newline rejected", "error\nhandling", ""},
 		{"backtick rejected", "error`handling", ""},
 		{"markdown-ish rejected", "**bold**", ""},
-		{"too long rejected", strings.Repeat("a", maxClassLen+1), ""},
-		{"exactly max length kept", strings.Repeat("a", maxClassLen), strings.Repeat("a", maxClassLen)},
+		{"too long rejected", strings.Repeat("a", signalwire.MaxClassLen+1), ""},
+		{"exactly max length kept", strings.Repeat("a", signalwire.MaxClassLen), strings.Repeat("a", signalwire.MaxClassLen)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// json.Marshal, not string concatenation, so a class containing a
 			// character JSON must escape (a literal newline, a quote) still
-			// produces well-formed input -- the test is about classSlugRE's
-			// shape check, not JSON's own escaping rules.
+			// produces well-formed input -- the test is about
+			// signalwire.ValidClass's shape check, not JSON's own escaping
+			// rules.
 			payload, err := json.Marshal(map[string]string{"title": "t", "class": tc.class})
 			if err != nil {
 				t.Fatalf("json.Marshal: %v", err)

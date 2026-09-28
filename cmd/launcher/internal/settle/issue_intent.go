@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/signalwire"
 )
 
 // issueIntent is the decoded shape of one SPINDRIFT_ISSUE_INTENT payload
@@ -65,26 +65,16 @@ func ensureTypeLabel(it forge.IssueTracker, typ string, existing []string) strin
 	return typ
 }
 
-// classSlugRE bounds the Box-supplied Class to a lowercase slug: it is
-// interpolated into host-authored backlink/note text unescaped (issue
-// #3880), so anything outside this shape would let the Box inject its own
-// formatting into a host string rather than merely naming a class.
-var classSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-
-// maxClassLen bounds Class's length; a finding class is a short slug, not
-// free text, and an unbounded value is as much an injection surface as a
-// disallowed character would be.
-const maxClassLen = 40
-
 // maxConcurrenceLen bounds Concurrence in grapheme clusters, the
 // visible-length unit, so truncation never splits a user-perceived
 // character (an emoji ZWJ sequence, a base rune and its combining marks).
 // maxConcurrenceBytes is the cap that actually bounds size: a single
 // grapheme cluster can carry unboundedly many combining marks, so a
 // cluster count alone doesn't stop one finding's note from ballooning
-// arbitrarily -- the reason maxClassLen bounds Class applies here too, this
-// text is Box-supplied prose interpolated into a host-authored note. 1024
-// keeps the note a small slice of GitHub's 65,536-character issue-body cap.
+// arbitrarily -- the reason signalwire.ValidClass bounds Class applies here
+// too, this text is Box-supplied prose interpolated into a host-authored
+// note. 1024 keeps the note a small slice of GitHub's 65,536-character
+// issue-body cap.
 const (
 	maxConcurrenceLen   = 200
 	maxConcurrenceBytes = 1024
@@ -116,11 +106,10 @@ func sanitizeConcurrence(s string) string {
 
 // parseIssueIntent decodes one raw SPINDRIFT_ISSUE_INTENT payload, already
 // base64-decoded and nonce-verified by outcome.AllIssueIntentLinesInLog.
-// Returns ok=false for malformed JSON or a blank title. A Class that isn't a
-// classSlugRE-shaped slug within maxClassLen is cleared rather than
-// rejecting the whole intent: it reads downstream as "no class claimed", so
-// it is simply never named and never promotable, the same as an
-// intentionally absent Class.
+// Returns ok=false for malformed JSON or a blank title. A Class that fails
+// signalwire.ValidClass is cleared rather than rejecting the whole intent:
+// it reads downstream as "no class claimed", so it is simply never named
+// and never promotable, the same as an intentionally absent Class.
 func parseIssueIntent(raw string) (issueIntent, bool) {
 	var in issueIntent
 	if err := json.Unmarshal([]byte(raw), &in); err != nil {
@@ -129,7 +118,7 @@ func parseIssueIntent(raw string) (issueIntent, bool) {
 	if strings.TrimSpace(in.Title) == "" {
 		return issueIntent{}, false
 	}
-	if len(in.Class) > maxClassLen || !classSlugRE.MatchString(in.Class) {
+	if !signalwire.ValidClass(in.Class) {
 		in.Class = ""
 	}
 	in.Concurrence = sanitizeConcurrence(in.Concurrence)
