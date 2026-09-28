@@ -1,5 +1,30 @@
 # Migration Guide
 
+## Custom worker prompts need the ALREADY RESOLVED gate for the new `already-resolved` status (issue #4015)
+
+The work kind's status set grew from `ready`/`blocked`/`ambiguous` to also
+include `already-resolved`. The default issue prompt
+(`templates/default/prompts/issue-prompt.md`) gained an ALREADY RESOLVED
+gate: after scouting, it runs `git fetch origin`, verifies the issue's
+change against `origin/<base>` rather than the branch it cut, and on a
+demonstrable match prints `SPINDRIFT_OUTCOME ... status=already-resolved
+note=<resolving commit/PR + proving check>` and stops — no commits, no
+push, no PR.
+
+Consumers running a custom or forked worker prompt — an override prompt
+directory supplied via `--prompt-dir` / `SPINDRIFT_PROMPT_DIR` /
+`perSystem.spindrift.agents.promptDir` — need to add an equivalent gate to
+their `issue-prompt.md`. Without it, a worker that lands on an already-done issue
+keeps reporting `status=blocked` instead, and the run settles `agent-failed`
+open for a human to close by hand rather than closing itself out.
+
+On the new status, the host (`settle`) posts a closing comment, transitions
+the issue to `agent-complete`, and closes it as `completed` (never "not
+planned"), since no PR carries a `Closes #N` for GitHub to catch on its
+own. Anything downstream that parses `SPINDRIFT_OUTCOME` status values —
+wrapper scripts matching against a fixed set of statuses, for instance —
+should accept `already-resolved` alongside `ready`/`blocked`/`ambiguous`.
+
 ## `spindrift butler` config failures now exit 6, not 1 (issue #3920)
 
 A `spindrift butler` run that fails config validation — the preflight
