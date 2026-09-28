@@ -104,6 +104,7 @@ if [ "${1:-}" = "outcome-backstop" ]; then
   repo="" ob_issue="" branch="" base="" kind="work"
   host_mediated_remote="" outbox_relay_capable=""
   write="" nonce="" recovery="" attempts="1" backoff="0" jitter="0"
+  prior_outcome_line=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --repo) repo="$2"; shift 2 ;;
@@ -119,6 +120,7 @@ if [ "${1:-}" = "outcome-backstop" ]; then
       --max-attempts) attempts="$2"; shift 2 ;;
       --backoff-secs) backoff="$2"; shift 2 ;;
       --jitter-secs) jitter="$2"; shift 2 ;;
+      --prior-outcome-line) prior_outcome_line="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -127,6 +129,31 @@ if [ "${1:-}" = "outcome-backstop" ]; then
   # force-push past them. The real Go verb uses `git -C` -- there is no shim
   # in production. (issue #2157)
   cd "$repo"
+
+  # A non-empty --prior-outcome-line means the driver did report an outcome, so
+  # this is the already-resolved demotion stand-in (issue #4016) for
+  # outcomebackstop.DemoteAlreadyResolved, not the no-outcome backstop below.
+  # Prints nothing unless the prior line claims status=already-resolved AND
+  # base..branch has commits.
+  if [ -n "$prior_outcome_line" ]; then
+    if [ "$kind" != "research" ] && [[ "$prior_outcome_line" == *"status=already-resolved"* ]]; then
+      demote_count="$(git rev-list --count "$base..$branch" 2>/dev/null)" || demote_count=0
+      if [ "$demote_count" -gt 0 ]; then
+        demote_note="agent reported already-resolved but ${demote_count} commits exist on ${branch}"
+        if [ -n "$host_mediated_remote" ]; then
+          demote_note="${demote_note}; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
+        elif [ -z "$write" ] && [ -n "$outbox_relay_capable" ]; then
+          demote_note="${demote_note}; branch relayed via outbox bundle (read-only Box)"
+        elif ! git push --force-with-lease origin "$branch" 2>/dev/null; then
+          demote_note="${demote_note}; push failed"
+        fi
+        printf 'SPINDRIFT_OUTCOME issue=%s landing=%s status=blocked synthetic=true note=%s\n' \
+          "$ob_issue" "$branch" "$demote_note"
+      fi
+    fi
+    exit 0
+  fi
+
   note="driver exited without emitting an outcome"
   [ -n "$recovery" ] && note="${note}; a resume attempt also produced no outcome"
   if [ "$kind" = "research" ]; then

@@ -345,3 +345,32 @@ EOF
   run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
   [ "$status" -eq 0 ]
 }
+
+# Already-resolved backstop (issue #4016): an agent that commits real work and
+# then claims status=already-resolved would otherwise skip review, CI, and the
+# merge gate yet still close the issue as complete. The commit-carrying claim
+# must be demoted to status=blocked in-box, with the commits preserved the same
+# way a genuinely blocked run's would be (push here; read-write github holds a
+# push token).
+@test "driver commits and reports status=already-resolved -> demoted to blocked and pushed" {
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_OUTCOME_STATUS=already-resolved
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local last_line
+  last_line="$(grep '^SPINDRIFT_OUTCOME ' <<<"$output" | tail -1)"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked synthetic=true note=.*already-resolved but 1 commits exist on agent/issue-7' <<<"$last_line"
+  git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
+}
+
+# No commits on the branch means the already-resolved claim is plausible, so
+# the demotion must leave it alone: no blocked line, and nothing pushed.
+@test "driver reports status=already-resolved with no commits -> claim left untouched" {
+  export FAKE_DRIVER_OUTCOME_STATUS=already-resolved
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=already-resolved note=fake$' <<<"$output"
+  run git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7"
+  [ -z "$output" ]
+}

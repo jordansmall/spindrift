@@ -128,3 +128,38 @@ setup() {
   [ "$status" -eq 17 ]
   [ ! -e "$OUTBOX_DIR" ]
 }
+
+# Already-resolved backstop (issue #4016), outbox-relay variant: a read-only
+# Box holds no push token, so a commit-carrying already-resolved claim must be
+# demoted and its commits relayed the same seam.bundle way every other
+# status=blocked-with-commits path uses, not silently dropped.
+@test "read-only github + status=already-resolved with commits -> demoted to blocked and bundled to outbox" {
+  unset CODE_FORGE            # default github
+  unset BOX_WRITE_ENABLED
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_OUTCOME_STATUS=already-resolved
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local last_line
+  last_line="$(grep '^SPINDRIFT_OUTCOME ' <<<"$output" | tail -1)"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked synthetic=true note=.*already-resolved but 1 commits exist on agent/issue-7.*relayed via outbox bundle (read-only Box)' <<<"$last_line"
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+  run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
+  [ "$status" -eq 0 ]
+}
+
+# Same demotion, CODE_FORGE=local variant: no writable remote at all, so the
+# already-resolved claim's commits must still reach the outbox bundle.
+@test "CODE_FORGE=local + status=already-resolved with commits -> demoted to blocked and bundled to outbox" {
+  export BOX_HOST_MEDIATED_REMOTE=1
+  export FAKE_DRIVER_COMMIT=1
+  export FAKE_DRIVER_OUTCOME_STATUS=already-resolved
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local last_line
+  last_line="$(grep '^SPINDRIFT_OUTCOME ' <<<"$output" | tail -1)"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked synthetic=true note=.*already-resolved but 1 commits exist on agent/issue-7.*relayed via outbox bundle (no writable remote under CODE_FORGE=local)' <<<"$last_line"
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+  run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
+  [ "$status" -eq 0 ]
+}
