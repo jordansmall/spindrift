@@ -396,7 +396,7 @@ in
     env = "BUTLER_CHORE_CLASSES";
     group = "dispatch";
     default = "bugs=error-handling,resource-leak refactor=dead-code docs-drift=stale-reference";
-    doc = "space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); the auto-promotion trust gate (issue #3880) -- still only acts when BUTLER_MAX_PROMOTIONS_PER_DAY > 0; the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes";
+    doc = "space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); the auto-promotion trust gate (issue #3880) -- still only acts when BUTLER_MAX_PROMOTIONS_PER_DAY > 0; the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes; each class must be a lowercase slug -- lowercase letters, digits, and '-', not starting with '-', at most 40 characters -- or `spindrift butler` preflight rejects it naming the class and the rule (issue #3986)";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "butler.choreClasses";
