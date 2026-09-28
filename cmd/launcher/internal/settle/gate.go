@@ -170,6 +170,21 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
 		s.transitionState(num, forge.InProgress, forge.Ambiguous, o.Note)
 		s.postUsageComment(num, d)
+	case outcome.StatusAlreadyResolved:
+		// The Box found the change already on the default branch: zero
+		// commits and no PR, yet a success (issue #4015). No PR carries a
+		// Closes #<N> here, so settle closes the issue itself.
+		msg := "Closing this issue as completed: the work it asks for is already complete on the default branch."
+		if o.Note != "" {
+			msg += "\n\n" + o.Note
+		}
+		if err := s.it.Comment(num, msg); err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: could not post already-resolved comment: %v\n", num, err)
+		}
+		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
+		s.transitionState(num, forge.InProgress, forge.Complete, o.Note)
+		s.closeIssue(num)
+		s.postUsageComment(num, d)
 	default:
 		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
 		s.postUsageComment(num, d)
@@ -322,9 +337,10 @@ func (s *Settle) recordLandingPass(num, landing string, passes []passmanifest.En
 
 // closeIssue closes num through the tracker's optional MergeCloser (issue
 // #1892), a backstop for github's merged-PR auto-close, which only fires when
-// the PR body carries a literal Closes #<N>. MergeCloser rather than
-// IssueCloser keeps this a no-op for local, whose closed: axis is reconcile's
-// sole write path (ADR 0029), even paired with a github Code Forge.
+// the PR body carries a literal Closes #<N>, and the sole close for a
+// status=already-resolved outcome (issue #4015), which has no PR. MergeCloser rather than IssueCloser keeps
+// this a no-op for local, whose closed: axis is reconcile's sole write path
+// (ADR 0029), even paired with a github Code Forge.
 func (s *Settle) closeIssue(num string) {
 	closer, ok := s.it.(forge.MergeCloser)
 	if !ok {

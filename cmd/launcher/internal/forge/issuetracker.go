@@ -244,13 +244,16 @@ type IssueCloser interface {
 }
 
 // MergeCloser is the optional IssueTracker capability for closing an issue as
-// settle's backstop (issue #1892) for a forge's merge-driven auto-close. Only
-// github and forgejo implement it. The method is not named CloseIssue because
-// ISSUE_TRACKER=local with CODE_FORGE=github is valid, and a shared name would
-// let settle drive the local closed: axis, a write only reconcile may make.
+// settle's backstop (issue #1892) for a forge's merge-driven auto-close, and
+// for settle's own close on a status=already-resolved outcome (issue #4015).
+// Only github and forgejo implement it. The method is not named CloseIssue
+// because ISSUE_TRACKER=local with CODE_FORGE=github is valid, and a shared
+// name would let settle drive the local closed: axis, a write only reconcile
+// may make.
 type MergeCloser interface {
 	// CloseMergedIssue closes issue num once settle has independently
-	// confirmed a genuine merge. Idempotent.
+	// confirmed either a genuine merge or that the work is already resolved
+	// (status=already-resolved, issue #4015). Idempotent.
 	CloseMergedIssue(num string) error
 }
 

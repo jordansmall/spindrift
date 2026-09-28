@@ -1667,6 +1667,9 @@ fi
 	if !strings.Contains(string(closeCall), "issue\nclose\n42") {
 		t.Errorf("last gh call = %q, want `gh issue close 42 ...`", closeCall)
 	}
+	if !strings.Contains(string(closeCall), "--reason\ncompleted") {
+		t.Errorf("last gh call = %q, want explicit `--reason completed` so the close is never \"not planned\"", closeCall)
+	}
 }
 
 // A real close failure must not be swallowed as if it were the idempotent
