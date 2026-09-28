@@ -40,6 +40,11 @@ const acquireGraceTotal = 50 * time.Millisecond
 // acquireGraceStep is the sleep between retries within acquireGraceTotal.
 const acquireGraceStep = 2 * time.Millisecond
 
+// acquireSleep is AcquireCheckoutLock's between-retry sleep, a var so a test
+// can release a simulated probe inside the retry window deterministically
+// instead of racing acquireGraceTotal on a loaded machine.
+var acquireSleep = time.Sleep
+
 // AcquireCheckoutLock takes a non-blocking exclusive lock on
 // filepath.Join(dir, "spindrift-daemon.lock") and stamps the holder's
 // identity into the file. dir is expected to already exist (the caller
@@ -67,7 +72,7 @@ func AcquireCheckoutLock(dir string, kinds []Kind) (*CheckoutLock, error) {
 		if flockErr == nil || !errors.Is(flockErr, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
 			break
 		}
-		time.Sleep(acquireGraceStep)
+		acquireSleep(acquireGraceStep)
 	}
 
 	if flockErr != nil {

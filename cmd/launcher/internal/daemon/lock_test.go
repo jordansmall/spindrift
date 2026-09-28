@@ -17,8 +17,9 @@ import (
 // LOCK_SH for a few syscalls then releases it, and a daemon starting in
 // that window must not mistake it for a second daemon. This simulates that
 // probe directly (LOCK_SH, not via AcquireCheckoutLock) and releases it
-// from a goroutine so AcquireCheckoutLock's retry has to actually win the
-// race rather than succeeding trivially on the first attempt.
+// from the first between-retry sleep, so the first attempt must fail and
+// the retry must win — with no wall-clock race against acquireGraceTotal,
+// which a loaded CI runner can lose.
 func TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, checkoutLockFileName)
@@ -31,20 +32,24 @@ func TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe(t *testing.T) {
 		t.Fatalf("take LOCK_SH for simulated probe: %v", err)
 	}
 
-	released := make(chan struct{})
-	go func() {
-		time.Sleep(acquireGraceStep)
-		_ = syscall.Flock(int(probeFile.Fd()), syscall.LOCK_UN)
-		_ = probeFile.Close()
-		close(released)
-	}()
-	t.Cleanup(func() { <-released })
+	sleeps := 0
+	acquireSleep = func(time.Duration) {
+		if sleeps == 0 {
+			_ = syscall.Flock(int(probeFile.Fd()), syscall.LOCK_UN)
+			_ = probeFile.Close()
+		}
+		sleeps++
+	}
+	t.Cleanup(func() { acquireSleep = time.Sleep })
 
 	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: want success once the simulated probe releases, got error: %v", err)
 	}
 	defer lock.Release()
+	if sleeps != 1 {
+		t.Fatalf("AcquireCheckoutLock slept %d times between attempts, want 1 (probe blocks the first attempt, the retry wins)", sleeps)
+	}
 }
 
 func TestAcquireCheckoutLock_WritesHolderIdentity(t *testing.T) {
