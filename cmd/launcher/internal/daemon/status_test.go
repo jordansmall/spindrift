@@ -67,6 +67,19 @@ func TestStatus_StateMarshalsAsPlainString(t *testing.T) {
 	}
 }
 
+// TestSlotStatus_ChoreMarshalsUnderChoreKey pins the "chore" key: the box,
+// settled, and child_finish events carry the Chore under that same key, and
+// docs/reference.md promises an operator can join the two on it.
+func TestSlotStatus_ChoreMarshalsUnderChoreKey(t *testing.T) {
+	data, err := json.Marshal(SlotStatus{Busy: true, Kind: KindButler, Chore: "bugs"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"chore":"bugs"`) {
+		t.Errorf("marshalled = %s, want it to contain %q", data, `"chore":"bugs"`)
+	}
+}
+
 func TestStatusWriter_StampsPidHostStartedTime(t *testing.T) {
 	dir := t.TempDir()
 	fixed := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)

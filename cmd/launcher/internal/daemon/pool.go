@@ -171,7 +171,8 @@ const (
 // box) must still move flightClaim's answer even though it adds nothing to
 // issues. chore is the Chore-keyed counterpart of last for a butler child
 // (ADR 0056, issue #3878): a Chore is never a tracker issue, so it is
-// tracked on its own field and never folded into issues/SlotStatus.Issues.
+// tracked on its own field — surfaced as SlotStatus.Chore — and never
+// folded into issues/SlotStatus.Issues.
 type slotFlight struct {
 	kind     Kind
 	revision string
@@ -380,14 +381,14 @@ func (p *pool) finishChild(slot int) {
 // the same claim continuing, not a second one (issue #3627's review
 // finding). A chore is never added to that list (issue #3878):
 // SlotStatus.Issues names tracker issues, and a Chore is not one —
-// flight.chore alone tracks it, for flightClaim to return. It emits the box
-// event unconditionally, dedup or not: a fix-pass box is a real thing that
-// happened, and only the status-file issue list collapses repeats, not the
-// event stream. Both in one mutate so the event and the status snapshot it
-// rides alongside always agree. A no-op — no state change, no event — if
-// slot is not currently running: the child reported after the slot cleared,
-// which can only be a race (RunChild already returned), not a state worth
-// publishing.
+// flight.chore alone tracks it, for flightClaim and SlotStatus.Chore to
+// read. It emits the box event unconditionally, dedup or not: a fix-pass
+// box is a real thing that happened, and only the status-file issue list
+// collapses repeats, not the event stream. Both in one mutate so the event
+// and the status snapshot it rides alongside always agree. A no-op — no
+// state change, no event — if slot is not currently running: the child
+// reported after the slot cleared, which can only be a race (RunChild
+// already returned), not a state worth publishing.
 func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 	p.mutate(func(s *state) []Event {
 		if s.slots[slot].phase != PhaseRunning {
@@ -1025,6 +1026,7 @@ func (p *pool) snapshotLocked() Status {
 		}
 		slots[i].Kind = ss.flight.kind
 		slots[i].Revision = ss.flight.revision
+		slots[i].Chore = ss.flight.chore
 		if len(ss.flight.issues) > 0 {
 			// A snapshot handed to a writer must not alias state this slot
 			// keeps appending to.
