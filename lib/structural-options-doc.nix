@@ -60,7 +60,7 @@
   };
 
   prefetch = {
-    doc = "Shell snippet the entrypoint runs after cloning to warm caches.";
+    doc = "Shell snippet the entrypoint runs after cloning to warm caches; failures are non-fatal.";
     docType = "shell snippet";
     docDefault = ''`""`'';
   };
