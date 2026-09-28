@@ -12,6 +12,15 @@ setup() {
   skills_template_dir="${SKILLS_TEMPLATE_DIR:-$BATS_TEST_DIRNAME/../templates/default/skills}"
 }
 
+# bats' recursive cleanup of BATS_TEST_TMPDIR fails on the read-only
+# directories these tests stage, so restore write permission first.
+teardown() {
+  [ -n "${HARNESS_SKILLS_DIR:-}" ] && [ -d "$HARNESS_SKILLS_DIR" ] && chmod -R u+w "$HARNESS_SKILLS_DIR"
+  [ -n "${OPERATOR_SKILLS_DIR:-}" ] && [ -d "$OPERATOR_SKILLS_DIR" ] && chmod -R u+w "$OPERATOR_SKILLS_DIR"
+  [[ "$HOME" == "$BATS_TEST_TMPDIR"/* ]] && [ -d "$HOME" ] && chmod -R u+w "$HOME"
+  true
+}
+
 # Regression test for issue #3242: every suite calling setup_entrypoint_env
 # inherits the skills-dir pin, so the Box's own baked skillset cannot reach a
 # fixture. A path under $BATS_TEST_TMPDIR is by construction neither default.
@@ -66,6 +75,62 @@ SKILL
   [ "$status" -eq 0 ]
   grep -q "skill discovered: auto-format" "$DRIVER_LOG"
   grep -q "skill discovered: my-skill" "$DRIVER_LOG"
+}
+
+# _populate_driver_skills_dir runs twice per Box (main and
+# phase_prompt_assembly). A plain `cp -r` from a read-only Nix-store-like
+# source (bwrap ro-binds /agent) carries the read-only mode bits onto the
+# copy, so the second call's cp over that copy used to fail EACCES under
+# `set -e` (issue #3941).
+@test "read-only harness skill survives two populate calls (issue #3941)" {
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR/ro-skill"
+  cat >"$HARNESS_SKILLS_DIR/ro-skill/SKILL.md" <<'SKILL'
+---
+name: ro-skill
+description: A read-only harness skill.
+---
+Do the read-only thing.
+SKILL
+  chmod 444 "$HARNESS_SKILLS_DIR/ro-skill/SKILL.md"
+  chmod 555 "$HARNESS_SKILLS_DIR/ro-skill"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "skill discovered: ro-skill" "$DRIVER_LOG"
+}
+
+# A harness and operator skill sharing a name are both read-only: within the
+# FIRST call, the operator cp must overwrite the harness cp's read-only copy.
+@test "read-only operator skill overrides same-named read-only harness skill (issue #3941)" {
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR/dup-skill"
+  cat >"$HARNESS_SKILLS_DIR/dup-skill/SKILL.md" <<'SKILL'
+---
+name: dup-skill
+description: The harness's version.
+---
+Harness content.
+SKILL
+  chmod 444 "$HARNESS_SKILLS_DIR/dup-skill/SKILL.md"
+  chmod 555 "$HARNESS_SKILLS_DIR/dup-skill"
+
+  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/operator-skills"
+  mkdir -p "$OPERATOR_SKILLS_DIR/dup-skill"
+  cat >"$OPERATOR_SKILLS_DIR/dup-skill/SKILL.md" <<'SKILL'
+---
+name: dup-skill
+description: The operator's version.
+---
+Operator content.
+SKILL
+  chmod 444 "$OPERATOR_SKILLS_DIR/dup-skill/SKILL.md"
+  chmod 555 "$OPERATOR_SKILLS_DIR/dup-skill"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "skill discovered: dup-skill" "$DRIVER_LOG"
+  grep -q "Operator content." "$HOME/.claude/skills/dup-skill/SKILL.md"
 }
 
 # Both the in-repo body and the probe flag follow from the skill's single
