@@ -997,3 +997,89 @@ func TestMainRun_RoutesSignal(t *testing.T) {
 		t.Fatalf("buffered comment = %q, want the stdin body", got.Body)
 	}
 }
+
+// rawFields must marshal a wire struct to the exact same bytes a hand-built
+// signalBody map would have -- keys sorted alphabetically by encoding/json,
+// omitempty fields dropped when zero/empty -- and it must preserve an
+// invalid UTF-8 byte unlaundered, the same guarantee rawString gives a
+// hand-built map today.
+func TestRawFields(t *testing.T) {
+	t.Run("all fields set", func(t *testing.T) {
+		got, err := json.Marshal(rawFields(signalwire.IssueIntent{
+			Title:       "t",
+			Body:        "b",
+			Type:        "bug",
+			DedupTerms:  []string{"a.go:Foo", "b.go:Bar"},
+			Class:       "flaky-test",
+			Concurrence: "confirmed",
+		}))
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		want := `{"body":"b","class":"flaky-test","concurrence":"confirmed","dedupTerms":["a.go:Foo","b.go:Bar"],"title":"t","type":"bug"}`
+		if string(got) != want {
+			t.Fatalf("rawFields marshaled = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("omitempty fields dropped when zero", func(t *testing.T) {
+		got, err := json.Marshal(rawFields(signalwire.IssueIntent{
+			Title: "t",
+			Body:  "b",
+			Type:  "bug",
+		}))
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		want := `{"body":"b","title":"t","type":"bug"}`
+		if string(got) != want {
+			t.Fatalf("rawFields marshaled = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("required fields without omitempty stay even when zero", func(t *testing.T) {
+		got, err := json.Marshal(rawFields(signalwire.Comment{}))
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		want := `{"body":""}`
+		if string(got) != want {
+			t.Fatalf("rawFields marshaled = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("invalid utf-8 survives as a raw byte", func(t *testing.T) {
+		got, err := json.Marshal(rawFields(signalwire.Comment{Body: "\xff"}))
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		want := "{\"body\":\"\xff\"}"
+		if string(got) != want {
+			t.Fatalf("rawFields marshaled = %q, want %q (raw 0xff, not U+FFFD)", got, want)
+		}
+		if utf8.ValidString(string(got)) {
+			t.Fatalf("marshaled body is valid utf-8, want the raw invalid byte preserved")
+		}
+	})
+
+	t.Run("unsupported field kind panics with the helpful message, not reflect's own", func(t *testing.T) {
+		type badWire struct {
+			Count int `json:"count,omitempty"`
+		}
+		defer func() {
+			r := recover()
+			msg, ok := r.(string)
+			if !ok {
+				t.Fatalf("recover() = %v (%T), want a string panic", r, r)
+			}
+			want := "rawFields: badWire.Count is int, not string or []string"
+			if msg != want {
+				t.Fatalf("panic = %q, want %q", msg, want)
+			}
+		}()
+		// Count is non-zero so the old omitempty-first ordering would have
+		// hit reflect.Value.Len's own panic on an int kind before ever
+		// reaching the type switch.
+		rawFields(badWire{Count: 1})
+	})
+}
