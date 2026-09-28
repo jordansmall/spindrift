@@ -2,7 +2,6 @@ package github
 
 import (
 	"bytes"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -59,11 +58,7 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 // resets any ambient helper, so the second -c is the only one in effect: the
 // launcher's own gh credential, the same one RelayBundle authenticates with.
 func GitRemote(repo string) (url string, gitArgs []string) {
-	host := os.Getenv("GH_HOST")
-	if host == "" {
-		host = "github.com"
-	}
-	return "https://" + host + "/" + repo + ".git",
+	return "https://" + Host() + "/" + repo + ".git",
 		[]string{"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"}
 }
 
