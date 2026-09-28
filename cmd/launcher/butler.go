@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +17,8 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 )
 
@@ -352,6 +356,17 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 	return nil
 }
 
+// choreCatalog is the baked CHORE_CATALOG artifact (rendered by
+// lib/preambles.nix's runArtifacts), parsed for butlerPreflight's
+// prompt-exists check. known is false when the artifact key is absent
+// entirely (no --input, or a document baked before it existed) -- skip the
+// check rather than fail on missing information. Present-but-empty (known
+// true, names nil) means every enabled chore's prompt is provably missing.
+type choreCatalog struct {
+	names []string
+	known bool
+}
+
 // butlerPreflight holds the guards cmdButler checks before it claims
 // anything. A malformed BUTLER_CHORE_CLASSES fails here, before any claim; a
 // Chore with no entry is fine, its allow-list is just empty. The Filer gate
@@ -362,20 +377,61 @@ func runOneButlerChore(backend ledger.Backend, it forge.IssueTracker, id butlerR
 // per-sweep cap above the day cap is also rejected here: left alone, every
 // run would trip internal/butler.Check's SweepFindingsExceedHeadroom at
 // Filed=0 and no run could ever start.
-func butlerPreflight(cfg config, chore string, filerEnabled bool) error {
+//
+// The chore name format and prompt-file-exists checks below catch a
+// malformed BUTLER_CHORES entry or missing chores/<name>.md here, before a
+// claim -- otherwise they'd only surface once runOneButlerChore's Box fails
+// in promptassembly.choreSection, leaving the claim standing for the full
+// claim timeout (issue #3905).
+func butlerPreflight(cfg config, chore string, filerEnabled bool, catalog choreCatalog) error {
 	row, ok := backendByName(cfg.codeForge)
 	if !ok || row.newLedger == nil {
 		return fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", cfg.codeForge, strings.Join(ledgerCapableNames(), ", "))
+	}
+	enabled := butler.Chores(cfg.butlerChores)
+	for _, c := range append([]string{chore}, enabled...) {
+		if c != "" && !promptassembly.ChoreNameRe.MatchString(c) {
+			return fmt.Errorf("butler: chore %q: invalid name format: must match %s", c, promptassembly.ChoreNameRe)
+		}
 	}
 	if chore != "" {
 		if !choreEnabled(cfg.butlerChores, chore) {
 			return fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", chore, cfg.butlerChores)
 		}
-	} else if len(butler.Chores(cfg.butlerChores)) == 0 {
+	} else if len(enabled) == 0 {
 		return fmt.Errorf("butler: %w", butler.ErrNoChores)
 	}
 	if _, err := butler.ParseClasses(cfg.butlerChoreClasses); err != nil {
 		return fmt.Errorf("butler: BUTLER_CHORE_CLASSES: %w", err)
+	}
+	// An override only takes effect when it names an existing directory
+	// (runner.IsDir), so an unset or bogus SPINDRIFT_PROMPT_DIR falls through
+	// to the baked catalog instead of silently skipping both.
+	var missingPrompt func(c string) error
+	switch {
+	case runner.IsDir(cfg.spindriftPromptDir):
+		missingPrompt = func(c string) error {
+			path := filepath.Join(cfg.spindriftPromptDir, "chores", c+".md")
+			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+				return nil
+			}
+			return fmt.Errorf("%s not found (SPINDRIFT_PROMPT_DIR)", path)
+		}
+	case catalog.known:
+		missingPrompt = func(c string) error {
+			if slices.Contains(catalog.names, c) {
+				return nil
+			}
+			return fmt.Errorf("chores/%s.md not in the image's baked choresDir (CHORE_CATALOG=%q)", c, strings.Join(catalog.names, " "))
+		}
+	}
+	// nil when there is neither an override dir nor a known catalog to check.
+	if missingPrompt != nil {
+		for _, c := range enabled {
+			if err := missingPrompt(c); err != nil {
+				return fmt.Errorf("butler: chore %q: prompt file missing: %w", c, err)
+			}
+		}
 	}
 	if !filerEnabled {
 		return fmt.Errorf("butler: needs a provisioned Filer to relay findings (set FILER_MODEL; DRIVER=opencode never provisions one)")
@@ -397,7 +453,7 @@ func cmdButler(lc *launchContext, chore string) int {
 	defer lc.cleanup()
 
 	filerEnabled := resolveAgentPresenceSignals(lc.config.driver).filerEnabled
-	if err := butlerPreflight(lc.config, chore, filerEnabled); err != nil {
+	if err := butlerPreflight(lc.config, chore, filerEnabled, resolveChoreCatalog()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}

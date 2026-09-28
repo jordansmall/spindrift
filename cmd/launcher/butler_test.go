@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -15,8 +16,10 @@ import (
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // testClaimTimeout is the claim timeout every test passes explicitly now
@@ -719,6 +722,78 @@ func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 	}
 }
 
+// assertNoButlerLedgerClaims fails the test if repo holds any ref under
+// ledger.RefPrefix -- proof a butlerPreflight rejection never reaches the
+// Ledger claim (issue #3905).
+func assertNoButlerLedgerClaims(t *testing.T, repo string) {
+	t.Helper()
+	out := runButlerGitOutput(t, repo, "for-each-ref", ledger.RefPrefix)
+	if len(strings.TrimSpace(string(out))) != 0 {
+		t.Errorf("for-each-ref %s = %q, want no claim refs", ledger.RefPrefix, out)
+	}
+}
+
+// testButlerLaunchContext builds an otherwise-complete launchContext for a
+// preflight-rejection test: every knob past butlerPreflight (BUTLER_EVERY,
+// BUTLER_CLAIM_TIMEOUT, DAEMON_AWAKE_WINDOW, a real *dispatch.Factory) is
+// filled in at its schema default, so that if the guard under test were
+// missing, cmdButler would actually reach ledger.Claim instead of failing
+// earlier at, say, parseButlerClaimTimeout on a zero-value config (issue
+// #3905).
+func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchContext {
+	t.Helper()
+	return &launchContext{
+		config: config{schemaConfig: schemaConfig{
+			codeForge:                    "local",
+			codeForgeAccumulationRepoDir: repo,
+			butlerChores:                 butlerChores,
+			butlerEvery:                  schemaDefault("BUTLER_EVERY"),
+			butlerClaimTimeout:           schemaDefault("BUTLER_CLAIM_TIMEOUT"),
+			daemonAwakeWindow:            schemaDefault("DAEMON_AWAKE_WINDOW"),
+			baseBranch:                   schemaDefault("BASE_BRANCH"),
+		}},
+		factory: testFactory(t, t.TempDir(), runner.NewFake()),
+		cleanup: func() {},
+	}
+}
+
+// (k2) cmdButler rejects a malformed BUTLER_CHORES entry before ever writing
+// a Ledger claim (issue #3905). "bad.name" is a legal git ref component (so a
+// claim would be writable if the name-format guard were missing) but fails
+// promptassembly.ChoreNameRe, which is what butlerPreflight must catch first.
+func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
+	t.Setenv("FILER_MODEL", "test-model")
+	repo, _ := newButlerTestRepo(t)
+	lc := testButlerLaunchContext(t, repo, "bad.name")
+	var code int
+	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
+	if code != 1 {
+		t.Errorf("cmdButler code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "invalid name format") {
+		t.Errorf("stderr = %q, want it to name the invalid format", stderr)
+	}
+	assertNoButlerLedgerClaims(t, repo)
+}
+
+// (k3) cmdButler rejects an enabled chore absent from the baked CHORE_CATALOG
+// before writing a Ledger claim, same guarantee as above (issue #3905).
+func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
+	t.Setenv("FILER_MODEL", "test-model")
+	withLoadedDoc(t, &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": "docs-drift"}})
+	repo, _ := newButlerTestRepo(t)
+	lc := testButlerLaunchContext(t, repo, "bugs")
+	var code int
+	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
+	if code != 1 {
+		t.Errorf("cmdButler code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "prompt file missing") {
+		t.Errorf("stderr = %q, want it to name the missing prompt", stderr)
+	}
+	assertNoButlerLedgerClaims(t, repo)
+}
+
 // cmdButler rejects a BUTLER_EVERY override naming a Chore not in
 // BUTLER_CHORES, so a misspelled key fails loudly instead of never firing.
 func TestCmdButler_RejectsOverrideForChoreNotEnabled(t *testing.T) {
@@ -788,25 +863,33 @@ func TestButlerPreflight(t *testing.T) {
 		butlerMaxPerDay    int
 		chore              string
 		filerEnabled       bool
+		catalogNames       []string
+		catalogKnown       bool
 		wantErr            string // substring of the error, checked in guard order; "" means no error
 	}{
-		{"all clear", "local", "bugs", "bugs=error-handling", 0, 0, "bugs", true, ""},
-		{"github clear", "github", "bugs", "", 0, 0, "bugs", true, ""},
-		{"forgejo clear", "forgejo", "bugs", "", 0, 0, "bugs", true, ""},
-		{"forge with no ledger rejected", "git", "bugs", "", 0, 0, "bugs", true, "cannot host a butler Ledger (supported: github, forgejo, local)"},
-		{"chore not enabled", "local", "other-chore", "", 0, 0, "bugs", true, "is not enabled"},
-		{"malformed classes rejected", "local", "bugs", "bugs", 0, 0, "bugs", true, "BUTLER_CHORE_CLASSES"},
-		{"filer not provisioned", "local", "bugs", "", 0, 0, "bugs", false, "needs a provisioned Filer"},
-		{"forge checked before chore", "git", "other-chore", "", 0, 0, "bugs", false, "cannot host a butler Ledger"},
-		{"chore checked before filer", "local", "other-chore", "", 0, 0, "bugs", false, "is not enabled"},
-		{"classes checked before filer", "local", "bugs", "bugs", 0, 0, "bugs", false, "BUTLER_CHORE_CLASSES"},
-		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", 0, 0, "tidy-deps", true, ""},
-		{"no chore: all clear with chores enabled", "local", "bugs", "", 0, 0, "", true, ""},
-		{"no chore: empty BUTLER_CHORES rejected", "local", "", "", 0, 0, "", true, "BUTLER_CHORES is empty"},
-		{"no chore: filer checked after empty-chores guard", "local", "", "", 0, 0, "", false, "BUTLER_CHORES is empty"},
-		{"sweep exceeds day rejected", "local", "bugs", "", 6, 5, "bugs", true, "BUTLER_MAX_FINDINGS_PER_SWEEP (6) exceeds BUTLER_MAX_FINDINGS_PER_DAY (5); no run could ever start"},
-		{"sweep equals day ok", "local", "bugs", "", 5, 5, "bugs", true, ""},
-		{"day zero with sweep set ok", "local", "bugs", "", 5, 0, "bugs", true, ""},
+		{"all clear", "local", "bugs", "bugs=error-handling", 0, 0, "bugs", true, nil, false, ""},
+		{"github clear", "github", "bugs", "", 0, 0, "bugs", true, nil, false, ""},
+		{"forgejo clear", "forgejo", "bugs", "", 0, 0, "bugs", true, nil, false, ""},
+		{"forge with no ledger rejected", "git", "bugs", "", 0, 0, "bugs", true, nil, false, "cannot host a butler Ledger (supported: github, forgejo, local)"},
+		{"chore not enabled", "local", "other-chore", "", 0, 0, "bugs", true, nil, false, "is not enabled"},
+		{"malformed classes rejected", "local", "bugs", "bugs", 0, 0, "bugs", true, nil, false, "BUTLER_CHORE_CLASSES"},
+		{"filer not provisioned", "local", "bugs", "", 0, 0, "bugs", false, nil, false, "needs a provisioned Filer"},
+		{"forge checked before chore", "git", "other-chore", "", 0, 0, "bugs", false, nil, false, "cannot host a butler Ledger"},
+		{"chore checked before filer", "local", "other-chore", "", 0, 0, "bugs", false, nil, false, "is not enabled"},
+		{"classes checked before filer", "local", "bugs", "bugs", 0, 0, "bugs", false, nil, false, "BUTLER_CHORE_CLASSES"},
+		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", 0, 0, "tidy-deps", true, nil, false, ""},
+		{"no chore: all clear with chores enabled", "local", "bugs", "", 0, 0, "", true, nil, false, ""},
+		{"no chore: empty BUTLER_CHORES rejected", "local", "", "", 0, 0, "", true, nil, false, "BUTLER_CHORES is empty"},
+		{"no chore: filer checked after empty-chores guard", "local", "", "", 0, 0, "", false, nil, false, "BUTLER_CHORES is empty"},
+		{"sweep exceeds day rejected", "local", "bugs", "", 6, 5, "bugs", true, nil, false, "BUTLER_MAX_FINDINGS_PER_SWEEP (6) exceeds BUTLER_MAX_FINDINGS_PER_DAY (5); no run could ever start"},
+		{"sweep equals day ok", "local", "bugs", "", 5, 5, "bugs", true, nil, false, ""},
+		{"day zero with sweep set ok", "local", "bugs", "", 5, 0, "bugs", true, nil, false, ""},
+		{"bad --chore name rejected", "local", "bugs", "", 0, 0, "bad name!", true, nil, false, "invalid name format"},
+		{"bad BUTLER_CHORES entry rejected", "local", "bad name!", "", 0, 0, "", true, nil, false, "invalid name format"},
+		{"chore missing from catalog rejected", "local", "bugs", "", 0, 0, "bugs", true, []string{"docs-drift"}, true, "prompt file missing"},
+		{"chore present in catalog passes", "local", "bugs", "", 0, 0, "bugs", true, []string{"bugs"}, true, ""},
+		{"empty known catalog rejected", "local", "bugs", "", 0, 0, "bugs", true, nil, true, "prompt file missing"},
+		{"catalog absent skips prompt check", "local", "bugs", "", 0, 0, "bugs", true, nil, false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -817,7 +900,8 @@ func TestButlerPreflight(t *testing.T) {
 				butlerMaxFindingsPerSweep: tc.butlerMaxPerSweep,
 				butlerMaxFindingsPerDay:   tc.butlerMaxPerDay,
 			}}
-			err := butlerPreflight(cfg, tc.chore, tc.filerEnabled)
+			catalog := choreCatalog{names: tc.catalogNames, known: tc.catalogKnown}
+			err := butlerPreflight(cfg, tc.chore, tc.filerEnabled, catalog)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("butlerPreflight(%+v): %v", tc, err)
@@ -829,6 +913,71 @@ func TestButlerPreflight(t *testing.T) {
 			}
 		})
 	}
+}
+
+// (m2) SPINDRIFT_PROMPT_DIR, when it names a real directory, overrides the
+// baked CHORE_CATALOG entirely for the prompt-exists check -- matching
+// internal/runner/mount.go's own candidateMount treatment of the same knob
+// (issue #3905).
+func TestButlerPreflight_PromptDirOverride(t *testing.T) {
+	cfgWith := func(promptDir string) config {
+		return config{schemaConfig: schemaConfig{
+			codeForge:          "local",
+			butlerChores:       "bugs",
+			spindriftPromptDir: promptDir,
+		}}
+	}
+	// A catalog that would reject "bugs" on its own, to prove the override
+	// directory -- not the catalog -- decides the outcome when it applies.
+	rejectingCatalog := choreCatalog{names: []string{"docs-drift"}, known: true}
+
+	t.Run("override dir with prompt present passes", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "chores"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "chores", "bugs.md"), []byte("prompt"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog); err != nil {
+			t.Errorf("butlerPreflight: %v, want nil", err)
+		}
+	})
+
+	t.Run("override dir missing prompt names the path", func(t *testing.T) {
+		dir := t.TempDir()
+		err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog)
+		wantPath := filepath.Join(dir, "chores", "bugs.md")
+		if err == nil || !strings.Contains(err.Error(), "prompt file missing") || !strings.Contains(err.Error(), wantPath) {
+			t.Errorf("butlerPreflight err = %v, want it to name %q", err, wantPath)
+		}
+	})
+
+	t.Run("override dir with prompt path a directory is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		// promptassembly.choreSection reads the prompt file with os.ReadFile,
+		// which fails on a directory -- butlerPreflight must reject this
+		// before the claim, not let os.Stat's IsDir-agnostic success through
+		// (issue #3905).
+		if err := os.MkdirAll(filepath.Join(dir, "chores", "bugs.md"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog)
+		if err == nil || !strings.Contains(err.Error(), "prompt file missing") {
+			t.Errorf("butlerPreflight err = %v, want prompt file missing", err)
+		}
+	})
+
+	t.Run("override dir set but not a directory falls back to the catalog", func(t *testing.T) {
+		file := filepath.Join(t.TempDir(), "not-a-dir")
+		if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := butlerPreflight(cfgWith(file), "bugs", true, rejectingCatalog)
+		if err == nil || !strings.Contains(err.Error(), "prompt file missing") || !strings.Contains(err.Error(), "CHORE_CATALOG") {
+			t.Errorf("butlerPreflight err = %v, want the catalog-based error", err)
+		}
+	})
 }
 
 // (n) parseButlerArgs: --chore is optional (an empty return means "pick a

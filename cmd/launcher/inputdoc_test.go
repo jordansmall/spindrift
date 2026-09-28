@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -148,5 +149,29 @@ func TestGetenvArtifact_PrecedenceEnvThenDocThenDefault(t *testing.T) {
 	os.Unsetenv("IMAGE_TAG")
 	if got := getenvArtifact("IMAGE_TAG", "from-default"); got != "from-default" {
 		t.Errorf("getenvArtifact = %q, want from-default (nothing else set)", got)
+	}
+}
+
+// An absent CHORE_CATALOG (older document, no --input) skips the prompt check,
+// but a present-yet-empty one is a real catalog that holds no chores.
+func TestResolveChoreCatalog_AbsentVersusEmpty(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  *inputdoc.Document
+		want choreCatalog
+	}{
+		{"no document", nil, choreCatalog{}},
+		{"key absent", &inputdoc.Document{Artifacts: map[string]string{}}, choreCatalog{}},
+		{"key empty", &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": ""}}, choreCatalog{known: true}},
+		{"names", &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": "bugs  docs-drift"}}, choreCatalog{names: []string{"bugs", "docs-drift"}, known: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withLoadedDoc(t, tc.doc)
+			got := resolveChoreCatalog()
+			if got.known != tc.want.known || !slices.Equal(got.names, tc.want.names) {
+				t.Errorf("resolveChoreCatalog() = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }

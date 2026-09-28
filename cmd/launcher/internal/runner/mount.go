@@ -69,12 +69,16 @@ type MountParams struct {
 	BoxForgeAndIssueAccess string
 }
 
+// IsDir reports whether path names an existing directory, following
+// symlinks. butlerPreflight shares it so its SPINDRIFT_PROMPT_DIR check
+// agrees with candidateMount on when the override applies (issue #3905).
+func IsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func candidateMount(source, target string, readOnly bool) (MountSpec, bool) {
-	if source == "" || target == "" {
-		return MountSpec{}, false
-	}
-	info, err := os.Stat(source)
-	if err != nil || !info.IsDir() {
+	if source == "" || target == "" || !IsDir(source) {
 		return MountSpec{}, false
 	}
 	return MountSpec{Source: source, Target: target, ReadOnly: readOnly}, true
