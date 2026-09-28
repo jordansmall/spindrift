@@ -169,10 +169,9 @@ func (c config) kind() *dispatchkind.Descriptor {
 }
 
 // effectiveBoxForgeAndIssueAccess is the effective BOX_FORGE_AND_ISSUE_ACCESS
-// the Box and the launcher's outbox mount must agree on: the raw knob, forced
-// "read-only" for a ReadOnlyBox kind (issue #3906). c.boxForgeAndIssueAccess
-// itself stays raw for the token/settle gates that key off the operator's
-// actual knob.
+// handed to dispatch: the raw knob, forced "read-only" for a ReadOnlyBox kind
+// (issue #3906). c.boxForgeAndIssueAccess itself stays raw for the
+// token/settle gates that key off the operator's actual knob.
 func (c config) effectiveBoxForgeAndIssueAccess() string {
 	if c.kind().ReadOnlyBox {
 		return "read-only"
@@ -395,7 +394,11 @@ func loadConfig() config {
 // capabilitySignals bundles the four capability bits nix resolves per
 // CODE_FORGE/ISSUE_TRACKER pairing (lib/backends/default.nix).
 type capabilitySignals struct {
-	hostMediatedRemote      bool
+	hostMediatedRemote bool
+	// outboxRelayCapable has no production reader: dispatch reads
+	// cfg.ForgeDescriptor.OutboxRelayCapable instead. Kept only so this
+	// struct mirrors the four rendered artifacts the doc-trust branch below
+	// needs all of (issue #2527).
 	outboxRelayCapable      bool
 	inBoxUnreachableTracker bool
 	fullyLocal              bool
@@ -749,13 +752,11 @@ func runnerConfig(c config) runner.Config {
 		SyscallFilterDrv:  c.syscallFilterDrv,
 		BwrapUnshareNet:   c.bwrapUnshareNet,
 		MountParams: runner.MountParams{
-			PromptDir:              c.spindriftPromptDir,
-			SkillsDir:              c.spindriftSkillsDir,
-			DriverSessionCacheDir:  c.driverSessionCacheDir,
-			HostMediatedRemote:     sig.hostMediatedRemote,
-			AccumulationRepoDir:    c.codeForgeAccumulationRepoDir,
-			OutboxRelayCapable:     sig.outboxRelayCapable,
-			BoxForgeAndIssueAccess: c.effectiveBoxForgeAndIssueAccess(),
+			PromptDir:             c.spindriftPromptDir,
+			SkillsDir:             c.spindriftSkillsDir,
+			DriverSessionCacheDir: c.driverSessionCacheDir,
+			HostMediatedRemote:    sig.hostMediatedRemote,
+			AccumulationRepoDir:   c.codeForgeAccumulationRepoDir,
 		},
 	}
 }

@@ -55,19 +55,11 @@ type MountParams struct {
 
 	// HostMediatedRemote reports whether this run's CODE_FORGE has no writable
 	// remote to push to in-box (ADR 0033: CODE_FORGE=local). It gates the
-	// read-only /repo mount and, with OutboxRelayCapable, the /outbox mount.
+	// read-only /repo mount.
 	HostMediatedRemote bool
 	// AccumulationRepoDir is the host path to the bare Accumulation repo
 	// (issue #1726), mounted read-only at /repo under HostMediatedRemote.
 	AccumulationRepoDir string
-	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets the
-	// outbox-relay treatment under BoxForgeAndIssueAccess=="read-only"
-	// (issue #1918).
-	OutboxRelayCapable bool
-	// BoxForgeAndIssueAccess is the effective BOX_FORGE_AND_ISSUE_ACCESS value,
-	// "read-write" or "read-only" — see config.effectiveBoxForgeAndIssueAccess
-	// (cmd/launcher/main.go) for how it's derived (issue #3906).
-	BoxForgeAndIssueAccess string
 }
 
 // IsDir reports whether path names an existing directory, following
@@ -123,10 +115,10 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 			specs = append(specs, spec)
 		}
 	}
-	if p.HostMediatedRemote || (p.OutboxRelayCapable && p.BoxForgeAndIssueAccess == "read-only") {
-		if spec, ok := candidateMount(box.OutboxDir, "/outbox", false); ok {
-			specs = append(specs, spec)
-		}
+	// No access or kind gate here: dispatch's needsOutbox already decided by
+	// setting box.OutboxDir, and a second copy of that rule could disagree.
+	if spec, ok := candidateMount(box.OutboxDir, "/outbox", false); ok {
+		specs = append(specs, spec)
 	}
 
 	for _, s := range box.Sockets {

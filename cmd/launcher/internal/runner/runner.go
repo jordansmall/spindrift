@@ -43,10 +43,13 @@ type Box struct {
 	// baked skills dir. Empty, or no declared dir, omits the mount.
 	DriverCacheDir string
 
-	// OutboxDir is a host path mounted writable at /outbox under
-	// CODE_FORGE=local (ADR 0033), empty-at-start and throwaway: the Box
-	// cannot push to the read-only /repo mount, so it writes its finished
-	// branch here as a git bundle for the launcher to relay. Empty omits it.
+	// OutboxDir is a host path mounted writable at /outbox, empty-at-start and
+	// throwaway: a Box with no writable remote writes its finished branch here
+	// as a git bundle for the launcher to relay. Dispatch's needsOutbox alone
+	// decides whether it is set (issue #3957): for a host-mediated remote
+	// forge unconditionally, or for an outbox-relay-capable forge under the
+	// kind-effective read-only access (a butler Box is always read-only).
+	// Empty omits the mount.
 	OutboxDir string
 
 	// RegistryProxy locates the launcher-side registry-credential proxy.
