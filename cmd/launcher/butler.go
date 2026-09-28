@@ -176,11 +176,13 @@ type butlerPolicy struct {
 // Classes and MaxFiles come straight from p, and Room -- when promotion is
 // on at all -- re-walks today's Ledger at settle time (backend, p.enabled,
 // now().In(p.zone)), the same call runButler makes at run start, so a
-// promotion whose done commit already landed is counted here. Like ADR
-// 0056's other budgets this is a soft cap, not a hard one: two runs settling
-// at the same moment can each read the same total and both spend it. A
-// DayTotalsAll error fails closed (0 room, a warning to stderr) rather than
-// promoting on a total it could not compute.
+// promotion whose done commit already landed is counted here. Room takes
+// its own fresh ledger.Snapshot each call rather than reusing runButler's,
+// since it must see promotions that landed between run start and settle.
+// Like ADR 0056's other budgets this is a soft cap, not a hard one: two runs
+// settling at the same moment can each read the same total and both spend
+// it. A Snapshot or DayTotalsAll error fails closed (0 room, a warning to
+// stderr) rather than promoting on a total it could not compute.
 func (p butlerPolicy) promotionPolicy(backend ledger.Backend, chore string, now func() time.Time) settle.PromotionPolicy {
 	pp := settle.PromotionPolicy{
 		Classes:  p.choreClasses[chore],
@@ -192,7 +194,11 @@ func (p butlerPolicy) promotionPolicy(backend ledger.Backend, chore string, now 
 	}
 	perDay := p.maxPromotionsPerDay
 	pp.Room = func() int {
-		totals, err := ledger.DayTotalsAll(backend, p.enabled, now().In(p.zone))
+		var totals ledger.Totals
+		snap, err := ledger.Snapshot(backend)
+		if err == nil {
+			totals, err = ledger.DayTotalsAll(snap, p.enabled, now().In(p.zone))
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "butler: promotion room: %s\n", err)
 			return 0
@@ -244,7 +250,13 @@ func parseButlerArgs(args []string) (chore string, noBuild bool, err error) {
 // when none was given. HEAD is read once up front, and the due check
 // (internal/butler.Check) takes a single now() reading shared across every
 // candidate, so the picture of "what's due" is consistent across the whole
-// pass rather than drifting chore to chore.
+// pass rather than drifting chore to chore. The due check -- today's totals
+// plus each candidate's Read/History -- shares one ledger.Snapshot, so a
+// Remote backend costs one fetch for the whole pass rather than one per
+// candidate; Claim and the post-settle read still go through backend
+// directly, so they see a fresh tip. The tip handed to runOneButlerChore is
+// the pass-start snapshot's, so a rival commit since then just loses the
+// Claim compare-and-swap (errQueueEmpty) rather than being overwritten.
 //
 // Returns errQueueEmpty, wrapped with the reason(s) each candidate was not
 // due, when nothing is due -- the same "nothing to do right now" signal
@@ -264,19 +276,24 @@ func runButler(backend ledger.Backend, it forge.IssueTracker, id butlerRun, chor
 	}
 	whenNow := now()
 
-	today, err := ledger.DayTotalsAll(backend, policy.enabled, whenNow.In(policy.zone))
+	snap, err := ledger.Snapshot(backend)
+	if err != nil {
+		return fmt.Errorf("butler: snapshot ledger: %w", err)
+	}
+
+	today, err := ledger.DayTotalsAll(snap, policy.enabled, whenNow.In(policy.zone))
 	if err != nil {
 		return fmt.Errorf("butler: total today's ledgers: %w", err)
 	}
 
 	var reasons []string
 	for _, chore := range chores {
-		tip, err := backend.Read(chore)
+		tip, err := snap.Read(chore)
 		if err != nil {
 			return fmt.Errorf("butler: read %s ledger: %w", chore, err)
 		}
 		interval := policy.every.For(chore)
-		recent, err := backend.History(chore, whenNow.Add(-interval))
+		recent, err := snap.History(chore, whenNow.Add(-interval))
 		if err != nil {
 			return fmt.Errorf("butler: read %s ledger history: %w", chore, err)
 		}
