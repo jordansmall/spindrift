@@ -150,15 +150,13 @@ let
     )
     ++ labels.triggerOnly;
   # The surfaces that write or create a label literal outside the
-  # registry-derived TriageLabelMeta path (issues #2528, #2749). Two more,
-  # settle/research.go's hard-coded "agent-research-finding" argument and
-  # settle/butler.go's "agent-butler-finding" one, are known and still
-  # uncovered. Each extract pulls the literal from its own known
-  # syntactic position, span-scanned so a reformat cannot hide it.
+  # registry-derived TriageLabelMeta path (issues #2528, #2749). Each extract
+  # pulls the literal from its own known syntactic position, span-scanned so a
+  # reformat cannot hide it.
   harnessSurfaces = {
-    "cmd/launcher/internal/settle/gate.go" = {
-      src = builtins.readFile ../../cmd/launcher/internal/settle/gate.go;
-      extract = extractFileIssueIntentsProvenanceLabel;
+    "cmd/launcher/internal/dispatchkind/dispatchkind.go" = {
+      src = builtins.readFile ../../cmd/launcher/internal/dispatchkind/dispatchkind.go;
+      extract = extractFindingLabelAxis;
     };
     "templates/default/prompts/fragments/filer-label-direct.md" = {
       src = builtins.readFile ../../templates/default/prompts/fragments/filer-label-direct.md;
@@ -173,37 +171,38 @@ let
       extract = src: extractResearchLabelNamesLiteral src ++ extractAmbiguousLabelNamesLiteral src;
     };
   };
-  # The literal is gate.go's fourth argument to fileIssueIntentsDetailed
-  # (issues #2590, #3608). Anchored to the call itself rather than to its first
-  # three argument names, so renaming gate.go's local num/result variables
-  # cannot false-negative this extractor. splitString has no notion of lines,
-  # so the whole span between the marker and the next ")" is split on ",",
-  # inert to a gofmt reformat.
-  extractFileIssueIntentsProvenanceLabel =
+  # The literal is each Descriptor's FindingLabel value (issue #3989), the one
+  # source settle's finding filers read. "FindingLabel:" carries the colon so
+  # the struct's field declaration never matches, and only whitespace may sit
+  # between the marker and the quote, so a reformat still extracts while an
+  # unrelated later string never does. One descriptor whose value stops
+  # extracting (say, a named constant) empties the whole result, so
+  # emptyOffenders fires instead of that label silently going uncovered.
+  extractFindingLabelAxis =
     src:
     let
-      marker = "fileIssueIntentsDetailed(";
-      labelFromCall =
+      marker = "FindingLabel:";
+      labelFromSegment =
         segment:
         let
-          call = builtins.head (splitString ")" segment);
-          args = splitString "," call;
+          quoteParts = splitString "\"" segment;
         in
-        if builtins.length args < 4 then
+        if builtins.length quoteParts < 2 then
           [ ]
         else
           let
-            quoteParts = splitString "\"" (builtins.elemAt args 3);
+            beforeQuote = builtins.head quoteParts;
+            value = builtins.elemAt quoteParts 1;
           in
-          if builtins.length quoteParts < 2 then
+          if builtins.match "[ \t\n]*" beforeQuote == null then
             [ ]
+          else if builtins.match "[a-z][a-z0-9-]*" value != null then
+            [ value ]
           else
-            let
-              value = builtins.elemAt quoteParts 1;
-            in
-            if builtins.match "[a-z][a-z0-9-]*" value != null then [ value ] else [ ];
+            [ ];
+      perSegment = map labelFromSegment (builtins.tail (splitString marker src));
     in
-    concatMap labelFromCall (builtins.tail (splitString marker src));
+    if elem [ ] perSegment then [ ] else concatMap (l: l) perSegment;
   # The literal is the shell bareword right after `label create `, unquoted
   # unlike the Go and JSON surfaces below.
   extractLabelCreateTokens =
@@ -406,13 +405,15 @@ in
   # regression would have had nothing to reject: the fail-open gap it closes.
   label-registry-covers-harness-writes-regression =
     let
-      doctoredGateSrc =
+      doctoredDispatchkindSrc =
         replaceStrings [ ''"agent-review-finding"'' ] [ ''"review-finding"'' ]
-          harnessSurfaces."cmd/launcher/internal/settle/gate.go".src;
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/settle/gate.go" = harnessSurfaces."cmd/launcher/internal/settle/gate.go" // {
-          src = doctoredGateSrc;
-        };
+        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
+          // {
+            src = doctoredDispatchkindSrc;
+          };
       };
       result = builtins.tryEval (assertHarnessWritesInRegistry {
         harnessSurfaces = doctoredHarnessSurfaces;
@@ -420,7 +421,7 @@ in
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with agent-review-finding de-prefixed to review-finding, but it evaluated successfully";
+      "label-registry-covers-harness-writes-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with agent-review-finding de-prefixed to review-finding, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-regression" { } "touch $out";
 
   # Proves extractLabelCreateTokens still catches an unregistered label once
@@ -504,20 +505,22 @@ in
       "label-registry-covers-harness-writes-json-spacing-regression: expected assertHarnessWritesInRegistry to reject a synthetic filer-label-direct-forgejo.md with a space after the \"name\" key's colon and the value renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-json-spacing-regression" { } "touch $out";
 
-  # Proves the emptyOffenders half fires when the anchored
-  # `fileIssueIntentsDetailed(` marker breaks on a rename of the call (issue
-  # #2528): splitString never finds the old marker, the surface extracts [ ],
-  # and before emptyOffenders the check passed while the harness kept writing
-  # labels unobserved.
-  label-registry-covers-harness-writes-call-rename-regression =
+  # Proves the emptyOffenders half fires when the anchored `FindingLabel:`
+  # marker breaks on a rename of the field (issue #2528, #3989): splitString
+  # never finds the old marker, the surface extracts [ ], and before
+  # emptyOffenders the check passed while the harness kept writing labels
+  # unobserved.
+  label-registry-covers-harness-writes-field-rename-regression =
     let
-      doctoredGateSrc =
-        replaceStrings [ "fileIssueIntentsDetailed(" ] [ "fileReviewFindingIntents(" ]
-          harnessSurfaces."cmd/launcher/internal/settle/gate.go".src;
+      doctoredDispatchkindSrc =
+        replaceStrings [ "FindingLabel:" ] [ "ProvenanceLabel:" ]
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/settle/gate.go" = harnessSurfaces."cmd/launcher/internal/settle/gate.go" // {
-          src = doctoredGateSrc;
-        };
+        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
+          // {
+            src = doctoredDispatchkindSrc;
+          };
       };
       result = builtins.tryEval (assertHarnessWritesInRegistry {
         harnessSurfaces = doctoredHarnessSurfaces;
@@ -525,8 +528,35 @@ in
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-call-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with fileIssueIntentsDetailed renamed to fileReviewFindingIntents, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-call-rename-regression" { } "touch $out";
+      "label-registry-covers-harness-writes-field-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with FindingLabel: renamed to ProvenanceLabel:, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-field-rename-regression" { } "touch $out";
+
+  # Proves one descriptor's FindingLabel moving to a named constant still
+  # fails closed: the other descriptors keep extracting, so without the
+  # all-or-nothing rule in extractFindingLabelAxis the surface stays non-empty
+  # and the butler's label goes uncovered.
+  label-registry-covers-harness-writes-named-constant-regression =
+    let
+      doctoredDispatchkindSrc =
+        replaceStrings [ ''FindingLabel:   "agent-butler-finding"'' ] [ "FindingLabel:   butlerFindingLabel" ]
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
+          // {
+            src = doctoredDispatchkindSrc;
+          };
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (doctoredDispatchkindSrc != harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src)
+      "label-registry-covers-harness-writes-named-constant-regression: the butler descriptor's FindingLabel literal no longer matches the doctoring pattern; update the replaceStrings needle";
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-named-constant-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with the butler's FindingLabel moved to a named constant, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-named-constant-regression" { } "touch $out";
 
   # Proves assertHarnessWritesInRegistry catches doctor.go's hand-written
   # ResearchLabelNames() literal drifting from lib/labels.nix's researchFinding
@@ -608,37 +638,38 @@ in
       "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with AmbiguousLabelNames()'s agent-ambiguous-spec literal renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-ambiguous-label-drift-regression" { } "touch $out";
 
-  # Proves the span-scanned extraction survives a gofmt multi-line reformat of
-  # the fileIssueIntentsDetailed(...) call arguments (issues #2528 AC1, #2590). A
-  # per-line scan would return [ ] the moment the literal lands on a different
-  # line than the marker, the fails-open direction, so this asserts the
-  # extractor finds the label, not merely that the assertion rejects it.
-  label-registry-covers-harness-writes-fileissueintents-multiline-regression =
+  # Proves the span-scanned extraction survives a gofmt reformat that moves
+  # the FindingLabel: value onto its own line with extra alignment (issues
+  # #2528 AC1, #2590, #3989). A per-line scan would return [ ] the moment the
+  # literal lands on a different line than the marker, the fails-open
+  # direction, so this asserts the extractor finds the label, not merely
+  # that the assertion rejects it.
+  label-registry-covers-harness-writes-finding-label-multiline-regression =
     let
-      doctoredGateSrc =
+      doctoredDispatchkindSrc =
         replaceStrings
-          [ ''fileIssueIntentsDetailed(s.it, num, result, "agent-review-finding", "")'' ]
-          [
-            "fileIssueIntentsDetailed(\n\t\ts.it,\n\t\tnum,\n\t\tresult,\n\t\t\"agent-unregistered-label\",\n\t\t\"\",\n\t)"
-          ]
-          harnessSurfaces."cmd/launcher/internal/settle/gate.go".src;
+          [ ''FindingLabel:   "agent-review-finding",'' ]
+          [ "FindingLabel:\n\t\t\t\"agent-unregistered-label\",\n" ]
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/settle/gate.go" = harnessSurfaces."cmd/launcher/internal/settle/gate.go" // {
-          src = doctoredGateSrc;
-        };
+        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
+          // {
+            src = doctoredDispatchkindSrc;
+          };
       };
       extractedLabels = labelsWrittenBy {
-        src = doctoredGateSrc;
-        extract = extractFileIssueIntentsProvenanceLabel;
+        src = doctoredDispatchkindSrc;
+        extract = extractFindingLabelAxis;
       };
       result = builtins.tryEval (assertHarnessWritesInRegistry {
         harnessSurfaces = doctoredHarnessSurfaces;
         registryLabels = allRegistryLabels;
       });
     in
-    assert assertMsg (extractedLabels == [ "agent-unregistered-label" ])
-      "label-registry-covers-harness-writes-fileissueintents-multiline-regression: expected extractFileIssueIntentsProvenanceLabel to find [ \"agent-unregistered-label\" ] on the multi-line-reformatted call (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
+    assert assertMsg (elem "agent-unregistered-label" extractedLabels)
+      "label-registry-covers-harness-writes-finding-label-multiline-regression: expected extractFindingLabelAxis to find \"agent-unregistered-label\" among ${builtins.toJSON extractedLabels} on the reformatted FindingLabel: assignment (value moved to its own line), but it didn't";
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-fileissueintents-multiline-regression: expected assertHarnessWritesInRegistry to reject a synthetic gate.go with the fileIssueIntentsDetailed(...) call gofmt-reformatted across multiple lines and its label argument swapped to agent-unregistered-label, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-fileissueintents-multiline-regression" { } "touch $out";
+      "label-registry-covers-harness-writes-finding-label-multiline-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with the FindingLabel: assignment gofmt-reformatted onto its own line and its value swapped to agent-unregistered-label, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-finding-label-multiline-regression" { } "touch $out";
 }
