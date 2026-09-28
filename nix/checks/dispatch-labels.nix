@@ -270,7 +270,7 @@ let
     in
     concatMap labelFromSegment (builtins.tail (splitString marker src));
   # doctor.go's ResearchLabelNames() literal (ADR 0041). The marker is unique in
-  # that file: its other append(names, ...) call has no quote after the comma.
+  # that file: its other append(names, ...) calls have no quote after the comma.
   extractResearchLabelNamesLiteral = labelLiteralAfterMarker ''append(names, "'';
   # doctor.go's AmbiguousLabelNames() literal (issue #2817). A separate
   # extractor because the two Go shapes differ and so need distinct markers.
