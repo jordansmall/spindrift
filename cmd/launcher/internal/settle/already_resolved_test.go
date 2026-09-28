@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
@@ -329,7 +330,7 @@ func TestSettle_AlreadyResolvedOutcome_SettledRecordStateComplete(t *testing.T) 
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	want := report.Record{Event: "settled", Issue: issNum, State: "complete", Note: note}
+	want := report.Record{Event: "settled", Key: dispatchkey.Issue(issNum), State: "complete", Note: note}
 	if recs[0] != want {
 		t.Errorf("record = %+v, want %+v", recs[0], want)
 	}

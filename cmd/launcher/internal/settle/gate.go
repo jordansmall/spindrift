@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -306,7 +307,7 @@ func (s *Settle) flushSettled(num string) {
 	}
 	s.settledMu.Unlock()
 	if ok {
-		report.Settled(num, rec.state, rec.note)
+		report.Settled(dispatchkey.Issue(num), rec.state, rec.note)
 	}
 }
 

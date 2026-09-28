@@ -391,27 +391,28 @@ func (p *pool) finishChild(slot int) {
 // reported after the slot cleared, which can only be a race (RunChild
 // already returned), not a state worth publishing.
 func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
+	issue, chore := rec.Key.Fields()
 	p.mutate(func(s *state) []Event {
 		if s.slots[slot].phase != PhaseRunning {
 			return nil
 		}
 		flight := &s.slots[slot].flight
-		if rec.Chore != "" {
-			flight.chore = rec.Chore
+		if chore != "" {
+			flight.chore = chore
 		} else {
-			flight.last = rec.Issue
+			flight.last = issue
 			seen := false
 			for _, existing := range flight.issues {
-				if existing == rec.Issue {
+				if existing == issue {
 					seen = true
 					break
 				}
 			}
 			if !seen {
-				flight.issues = append(flight.issues, rec.Issue)
+				flight.issues = append(flight.issues, issue)
 			}
 		}
-		return []Event{{Event: report.EventBox, Kind: kind, Revision: revision, Issue: rec.Issue, Chore: rec.Chore, Phase: rec.Phase, Slot: intPtr(slot)}}
+		return []Event{{Event: report.EventBox, Kind: kind, Revision: revision, Issue: issue, Chore: chore, Phase: rec.Phase, Slot: intPtr(slot)}}
 	})
 }
 
@@ -425,8 +426,9 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 // terminal outcome, true whether or not the slot still runs, and dropping
 // it would lose the one event that answers "what happened to #123".
 func (p *pool) noteSettled(slot int, kind Kind, revision string, rec Record) {
+	issue, chore := rec.Key.Fields()
 	p.mutate(func(*state) []Event {
-		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Issue: rec.Issue, Chore: rec.Chore, State: rec.State, Note: rec.Note, Slot: intPtr(slot)}}
+		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Issue: issue, Chore: chore, State: rec.State, Note: rec.Note, Slot: intPtr(slot)}}
 	})
 }
 

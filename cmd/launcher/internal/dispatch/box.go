@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/ecosystem"
@@ -243,11 +244,11 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 // wire shape must never carry that key as an Issue (issue #3878).
 func (d *Dispatch) announce(phase string) {
 	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.subject.title()))
+	key := dispatchkey.Issue(d.number)
 	if c, ok := d.subject.(choreSubject); ok {
-		report.ChoreBox(c.Chore.Name, phase)
-		return
+		key = dispatchkey.Chore(c.Chore.Name)
 	}
-	report.Box(d.number, phase)
+	report.Box(key, phase)
 }
 
 // humanPhase maps report's phase vocabulary onto announceLine's

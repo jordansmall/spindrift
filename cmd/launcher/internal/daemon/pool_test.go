@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -320,7 +321,7 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 			// could never join the barrier this test's whole premise
 			// depends on.
 			if req.OnRecord != nil {
-				req.OnRecord(Record{Event: report.EventBox, Issue: fmt.Sprintf("issue-%d", req.Slot)})
+				req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue(fmt.Sprintf("issue-%d", req.Slot))})
 			}
 			// Non-blocking, because the number of later calls is
 			// unbounded: a non-crossing slot races around through its
@@ -1844,7 +1845,7 @@ func TestPoolSnapshotState(t *testing.T) {
 					results:   []ChildResult{{Exit: 5}}, // host-tainted: halts promptly after the read
 					onStart: func(ctx context.Context, req ChildRequest) error {
 						clk.advanceBy(10 * time.Minute)
-						req.OnRecord(Record{Event: report.EventBox, Issue: "x"})
+						req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue("x")})
 						// onStart runs on a pool slot goroutine, not this
 						// test's own: a fatal read here would Goexit that
 						// goroutine mid-RunChild, and Loop's wg.Wait (called
@@ -1949,7 +1950,7 @@ func TestPoolSnapshotSlots(t *testing.T) {
 			return ctx.Err()
 		},
 		onStart: func(ctx context.Context, req ChildRequest) error {
-			req.OnRecord(Record{Event: report.EventBox, Issue: "7"})
+			req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue("7")})
 			st, readErr = readStatusErr(dir)
 			return nil
 		},
@@ -2027,7 +2028,7 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.startChild(0, KindDispatch, "rev1")
-	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Issue: "42"})
+	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("42")})
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
@@ -2037,7 +2038,7 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 		t.Fatalf("chore = %q, want empty: an issue-keyed slot must never carry a Chore", snap.Slots[0].Chore)
 	}
 
-	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Issue: "99"}) // mutate the pool's copy after snapshotting
+	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("99")}) // mutate the pool's copy after snapshotting
 
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
 		t.Fatalf("snapshot issues changed after mutating pool state: got %v, want [42]", snap.Slots[0].Issues)
@@ -2059,8 +2060,8 @@ func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.startChild(0, KindDispatch, "rev1")
-	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Issue: "123", Phase: "initial"})
-	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Issue: "123", Phase: "fix-pass-1"})
+	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "initial"})
+	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "fix-pass-1"})
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"123"}) {

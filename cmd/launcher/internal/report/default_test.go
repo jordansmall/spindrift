@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
 func TestInstallDefault_ForwardsAndRestores(t *testing.T) {
@@ -24,7 +26,7 @@ func TestInstallDefault_ForwardsAndRestores(t *testing.T) {
 		t.Fatalf("Default() after Install = %v, want %v", Default(), rep)
 	}
 
-	Box("42", "fix-pass-1")
+	Box(dispatchkey.Issue("42"), "fix-pass-1")
 	restore()
 	if Default() != nil {
 		t.Fatalf("Default() after restore = %v, want nil", Default())
@@ -39,13 +41,13 @@ func TestInstallDefault_ForwardsAndRestores(t *testing.T) {
 	if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	want := Record{Event: "box", Issue: "42", Phase: "fix-pass-1"}
+	want := Record{Event: "box", Key: dispatchkey.Issue("42"), Phase: "fix-pass-1"}
 	if rec != want {
 		t.Errorf("record = %+v, want %+v", rec, want)
 	}
 
 	// Package-level Settled/Box on a nil default must not panic.
-	Settled("1", "merged", "")
-	ChoreBox("bugs", "initial")
-	ChoreSettled("bugs", "complete", "")
+	Settled(dispatchkey.Issue("1"), "merged", "")
+	Box(dispatchkey.Chore("bugs"), "initial")
+	Settled(dispatchkey.Chore("bugs"), "complete", "")
 }

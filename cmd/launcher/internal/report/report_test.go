@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
 func getenvFor(vals map[string]string) func(string) string {
@@ -36,8 +38,8 @@ func TestFromEnv_RoundTrip(t *testing.T) {
 		t.Fatalf("unexpected stderr on success: %s", stderr.String())
 	}
 
-	rep.Box("3627", "initial")
-	rep.Settled("3627", "merged", "landed clean")
+	rep.Box(dispatchkey.Issue("3627"), "initial")
+	rep.Settled(dispatchkey.Issue("3627"), "merged", "landed clean")
 	w.Close()
 
 	scanner := bufio.NewScanner(r)
@@ -55,19 +57,20 @@ func TestFromEnv_RoundTrip(t *testing.T) {
 	if len(recs) != 2 {
 		t.Fatalf("got %d records, want 2: %+v", len(recs), recs)
 	}
-	wantBox := Record{Event: "box", Issue: "3627", Phase: "initial"}
+	wantBox := Record{Event: "box", Key: dispatchkey.Issue("3627"), Phase: "initial"}
 	if recs[0] != wantBox {
 		t.Errorf("box record = %+v, want %+v", recs[0], wantBox)
 	}
-	wantSettled := Record{Event: "settled", Issue: "3627", State: "merged", Note: "landed clean"}
+	wantSettled := Record{Event: "settled", Key: dispatchkey.Issue("3627"), State: "merged", Note: "landed clean"}
 	if recs[1] != wantSettled {
 		t.Errorf("settled record = %+v, want %+v", recs[1], wantSettled)
 	}
 }
 
-// TestFromEnv_ChoreRoundTrip pins ChoreBox/ChoreSettled's wire shape (issue
-// #3878): a Chore-keyed record carries "chore", never "issue" — Issue's
-// omitempty tag must actually elide the field, not just leave it "".
+// TestFromEnv_ChoreRoundTrip pins Box/Settled's Chore-keyed wire shape
+// (issue #3878, #3988): a Chore-keyed record carries "chore", never
+// "issue" — the wire's "issue" omitempty tag must actually elide the field,
+// not just leave it "".
 func TestFromEnv_ChoreRoundTrip(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -83,8 +86,8 @@ func TestFromEnv_ChoreRoundTrip(t *testing.T) {
 		t.Fatalf("FromEnv returned nil, stderr: %s", stderr.String())
 	}
 
-	rep.ChoreBox("bugs", "initial")
-	rep.ChoreSettled("bugs", "complete", "2 filed")
+	rep.Box(dispatchkey.Chore("bugs"), "initial")
+	rep.Settled(dispatchkey.Chore("bugs"), "complete", "2 filed")
 	w.Close()
 
 	scanner := bufio.NewScanner(r)
@@ -104,11 +107,11 @@ func TestFromEnv_ChoreRoundTrip(t *testing.T) {
 	if len(recs) != 2 {
 		t.Fatalf("got %d records, want 2: %+v", len(recs), recs)
 	}
-	wantBox := Record{Event: "box", Chore: "bugs", Phase: "initial"}
+	wantBox := Record{Event: "box", Key: dispatchkey.Chore("bugs"), Phase: "initial"}
 	if recs[0] != wantBox {
 		t.Errorf("box record = %+v, want %+v", recs[0], wantBox)
 	}
-	wantSettled := Record{Event: "settled", Chore: "bugs", State: "complete", Note: "2 filed"}
+	wantSettled := Record{Event: "settled", Key: dispatchkey.Chore("bugs"), State: "complete", Note: "2 filed"}
 	if recs[1] != wantSettled {
 		t.Errorf("settled record = %+v, want %+v", recs[1], wantSettled)
 	}
@@ -129,8 +132,8 @@ func TestFromEnv_Unset(t *testing.T) {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
 	// Nil-receiver methods must be no-ops, not panics.
-	rep.Box("1", "initial")
-	rep.Settled("1", "merged", "")
+	rep.Box(dispatchkey.Issue("1"), "initial")
+	rep.Settled(dispatchkey.Issue("1"), "merged", "")
 }
 
 func TestFromEnv_RegularFileRefused(t *testing.T) {
@@ -150,7 +153,7 @@ func TestFromEnv_RegularFileRefused(t *testing.T) {
 		t.Errorf("stderr = %q, want mention of 'not a pipe'", stderr.String())
 	}
 
-	rep.Box("1", "initial") // no-op on nil, must not touch the file
+	rep.Box(dispatchkey.Issue("1"), "initial") // no-op on nil, must not touch the file
 
 	got, err := os.ReadFile(f.Name())
 	if err != nil {
@@ -306,7 +309,7 @@ func TestSettled_LongNoteIsClippedToFitMaxLine(t *testing.T) {
 
 	rep := &Reporter{fd: int(w.Fd())}
 	note := strings.Repeat("a", 5000)
-	rep.Settled("123", "blocked", note)
+	rep.Settled(dispatchkey.Issue("123"), "blocked", note)
 	w.Close()
 
 	scanner := bufio.NewScanner(r)
@@ -323,7 +326,7 @@ func TestSettled_LongNoteIsClippedToFitMaxLine(t *testing.T) {
 	if err := json.Unmarshal(line, &rec); err != nil {
 		t.Fatalf("unmarshal %q: %v", line, err)
 	}
-	if rec.Event != "settled" || rec.Issue != "123" || rec.State != "blocked" {
+	if rec.Event != "settled" || rec.Key != dispatchkey.Issue("123") || rec.State != "blocked" {
 		t.Errorf("rec = %+v, want event=settled issue=123 state=blocked", rec)
 	}
 	if !strings.HasSuffix(rec.Note, "…") {
@@ -361,7 +364,7 @@ func assertMaximalClip(t *testing.T, rec Record) {
 	if err := json.Unmarshal(bytes.TrimSuffix(line, []byte("\n")), &got); err != nil {
 		t.Fatalf("unmarshal %q: %v", line, err)
 	}
-	if got.Event != rec.Event || got.Issue != rec.Issue || got.State != rec.State {
+	if got.Event != rec.Event || got.Key != rec.Key || got.State != rec.State {
 		t.Errorf("rec = %+v, want event/issue/state of %+v", got, rec)
 	}
 	if got.Note == "" {
@@ -397,7 +400,7 @@ func assertMaximalClip(t *testing.T, rec Record) {
 func TestSettled_NoteAllEscapedCharsStillFits(t *testing.T) {
 	assertMaximalClip(t, Record{
 		Event: EventSettled,
-		Issue: "123",
+		Key:   dispatchkey.Issue("123"),
 		State: "blocked",
 		Note:  strings.Repeat(`"`, 5000),
 	})
@@ -411,7 +414,7 @@ func TestSettled_NoteAllEscapedCharsStillFits(t *testing.T) {
 func TestSettled_LongNoteWithEscapedPunctuationKeepsMostOfIt(t *testing.T) {
 	assertMaximalClip(t, Record{
 		Event: EventSettled,
-		Issue: "123",
+		Key:   dispatchkey.Issue("123"),
 		State: "blocked",
 		Note:  strings.Repeat("checks failed: expected <div> & got <span>; retry aborted. ", 135),
 	})
@@ -429,7 +432,7 @@ func TestEmit_ShortRecordUnchanged(t *testing.T) {
 	t.Cleanup(func() { w.Close() })
 
 	rep := &Reporter{fd: int(w.Fd())}
-	rep.Settled("123", "merged", "landed clean")
+	rep.Settled(dispatchkey.Issue("123"), "merged", "landed clean")
 	w.Close()
 
 	got, err := io.ReadAll(r)
@@ -448,7 +451,7 @@ func TestEmit_ShortRecordUnchanged(t *testing.T) {
 // more room than the three-byte clip mark costs. An upper bound one rune too
 // low silently clips further than needed on exactly this shape.
 func TestClip_LastRuneOverflowKeepsAllButOne(t *testing.T) {
-	rec := Record{Event: EventSettled, Issue: "123", State: "blocked", Note: "<"}
+	rec := Record{Event: EventSettled, Key: dispatchkey.Issue("123"), State: "blocked", Note: "<"}
 	for {
 		l, err := json.Marshal(rec)
 		if err != nil {

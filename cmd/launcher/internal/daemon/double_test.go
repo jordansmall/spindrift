@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -229,7 +230,7 @@ func (r *scriptedRunner) releaseSlot(t *testing.T, slot int, res ChildResult) {
 func (r *scriptedRunner) announceEachSlot() {
 	r.onStart = func(ctx context.Context, req ChildRequest) error {
 		if req.OnRecord != nil {
-			req.OnRecord(Record{Event: report.EventBox, Issue: fmt.Sprintf("issue-%d", req.Slot)})
+			req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue(fmt.Sprintf("issue-%d", req.Slot))})
 		}
 		return nil
 	}
@@ -272,7 +273,7 @@ func (r *scriptedRunner) fireOnRecord(t *testing.T, slot int, rec Record) {
 // at every call.
 func (r *scriptedRunner) fireOnIssue(t *testing.T, slot int, issue string) {
 	t.Helper()
-	r.fireOnRecord(t, slot, Record{Event: report.EventBox, Issue: issue})
+	r.fireOnRecord(t, slot, Record{Event: report.EventBox, Key: dispatchkey.Issue(issue)})
 }
 
 func (r *scriptedRunner) resolveCount() int {
@@ -907,7 +908,7 @@ func TestScriptedRunnerFireOnIssueCallsCapturedHook(t *testing.T) {
 	var got string
 	r.holdSlots(1)
 	go func() {
-		_, _ = r.RunChild(context.Background(), ChildRequest{Slot: 0, OnRecord: func(rec Record) { got = rec.Issue }})
+		_, _ = r.RunChild(context.Background(), ChildRequest{Slot: 0, OnRecord: func(rec Record) { got, _ = rec.Key.Fields() }})
 	}()
 	r.awaitStart(t)
 	r.fireOnIssue(t, 0, "issue-42")

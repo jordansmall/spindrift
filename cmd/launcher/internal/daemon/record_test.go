@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -21,21 +22,21 @@ func TestParseRecord(t *testing.T) {
 			name:   "box",
 			line:   `{"event":"box","issue":"42","phase":"initial"}`,
 			kind:   KindDispatch,
-			want:   Record{Event: report.EventBox, Issue: "42", Phase: "initial"},
+			want:   Record{Event: report.EventBox, Key: dispatchkey.Issue("42"), Phase: "initial"},
 			wantOK: true,
 		},
 		{
 			name:   "box fix pass",
 			line:   `{"event":"box","issue":"42","phase":"fix-pass-2"}`,
 			kind:   KindDispatch,
-			want:   Record{Event: report.EventBox, Issue: "42", Phase: "fix-pass-2"},
+			want:   Record{Event: report.EventBox, Key: dispatchkey.Issue("42"), Phase: "fix-pass-2"},
 			wantOK: true,
 		},
 		{
 			name:   "settled",
 			line:   `{"event":"settled","issue":"42","state":"complete","note":"merged"}`,
 			kind:   KindDispatch,
-			want:   Record{Event: report.EventSettled, Issue: "42", State: "complete", Note: "merged"},
+			want:   Record{Event: report.EventSettled, Key: dispatchkey.Issue("42"), State: "complete", Note: "merged"},
 			wantOK: true,
 		},
 		{
@@ -80,21 +81,21 @@ func TestParseRecord(t *testing.T) {
 			name:   "issue at length cap",
 			line:   `{"event":"box","issue":"1234567890"}`,
 			kind:   KindDispatch,
-			want:   Record{Event: report.EventBox, Issue: "1234567890"},
+			want:   Record{Event: report.EventBox, Key: dispatchkey.Issue("1234567890")},
 			wantOK: true,
 		},
 		{
 			name:   "chore box",
 			line:   `{"event":"box","chore":"bugs","phase":"initial"}`,
 			kind:   KindButler,
-			want:   Record{Event: report.EventBox, Chore: "bugs", Phase: "initial"},
+			want:   Record{Event: report.EventBox, Key: dispatchkey.Chore("bugs"), Phase: "initial"},
 			wantOK: true,
 		},
 		{
 			name:   "chore settled",
 			line:   `{"event":"settled","chore":"bugs","state":"complete","note":"2 filed"}`,
 			kind:   KindButler,
-			want:   Record{Event: report.EventSettled, Chore: "bugs", State: "complete", Note: "2 filed"},
+			want:   Record{Event: report.EventSettled, Key: dispatchkey.Chore("bugs"), State: "complete", Note: "2 filed"},
 			wantOK: true,
 		},
 		{
@@ -113,7 +114,7 @@ func TestParseRecord(t *testing.T) {
 			name:   "chore at length cap",
 			line:   `{"event":"box","chore":"` + strings.Repeat("a", 64) + `"}`,
 			kind:   KindButler,
-			want:   Record{Event: report.EventBox, Chore: strings.Repeat("a", 64)},
+			want:   Record{Event: report.EventBox, Key: dispatchkey.Chore(strings.Repeat("a", 64))},
 			wantOK: true,
 		},
 		{

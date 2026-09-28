@@ -18,6 +18,8 @@ import (
 	// that would otherwise shadow the package name for the rest of their
 	// function body.
 	reportpkg "spindrift.dev/launcher/internal/report"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
 type runCall struct {
@@ -318,7 +320,7 @@ func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 		onStart: func(ctx context.Context, req ChildRequest) error {
 			calls++
 			if calls == 1 && req.OnRecord != nil {
-				req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "42"})
+				req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("42")})
 			}
 			return nil
 		},
@@ -343,8 +345,8 @@ func TestLoopEventStreamSequenceAndFields(t *testing.T) {
 		onStart: func(ctx context.Context, req ChildRequest) error {
 			calls++
 			if calls == 1 && req.OnRecord != nil {
-				req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "10"})
-				req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "11"})
+				req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("10")})
+				req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("11")})
 			}
 			return nil
 		},
@@ -1914,7 +1916,7 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 5}}, // host-tainted: Loop halts promptly after this call
 		onStart: func(ctx context.Context, req ChildRequest) error {
-			req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "42"})
+			req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("42")})
 			report, probeErr = ReadStatus(dir)
 			return nil
 		},
@@ -1974,15 +1976,15 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 5}}, // host-tainted: Loop halts promptly after this call
 		onStart: func(ctx context.Context, req ChildRequest) error {
-			req.OnRecord(Record{Event: reportpkg.EventBox, Issue: "42", Phase: "initial"})
+			req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("42"), Phase: "initial"})
 			// A live status read here is genuinely about the in-flight
 			// file, not the one left behind after the child returns.
 			report, probeErr = ReadStatus(dir)
 			// An event this daemon build doesn't recognise must produce
 			// neither an event nor an error — never crash the slot
 			// goroutine mid-run.
-			req.OnRecord(Record{Event: "heartbeat", Issue: "99"})
-			req.OnRecord(Record{Event: reportpkg.EventSettled, Issue: "42", State: "complete", Note: "merged clean"})
+			req.OnRecord(Record{Event: "heartbeat", Key: dispatchkey.Issue("99")})
+			req.OnRecord(Record{Event: reportpkg.EventSettled, Key: dispatchkey.Issue("42"), State: "complete", Note: "merged clean"})
 			return nil
 		},
 	}
@@ -2040,9 +2042,9 @@ func TestLoopButlerBoxSettledCarryChoreNotIssue(t *testing.T) {
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 5}}, // host-tainted: Loop halts promptly after this call
 		onStart: func(ctx context.Context, req ChildRequest) error {
-			req.OnRecord(Record{Event: reportpkg.EventBox, Chore: "bugs", Phase: "initial"})
+			req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Chore("bugs"), Phase: "initial"})
 			statusReport, probeErr = ReadStatus(dir)
-			req.OnRecord(Record{Event: reportpkg.EventSettled, Chore: "bugs", State: "complete", Note: "2 filed"})
+			req.OnRecord(Record{Event: reportpkg.EventSettled, Key: dispatchkey.Chore("bugs"), State: "complete", Note: "2 filed"})
 			return nil
 		},
 	}

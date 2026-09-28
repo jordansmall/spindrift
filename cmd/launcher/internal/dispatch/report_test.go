@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
@@ -32,7 +33,7 @@ func TestDispatch_Run_EmitsBoxRecordAndUnchangedHumanLine(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "box" || recs[0].Issue != "1" || recs[0].Phase != "initial" {
+	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Issue("1") || recs[0].Phase != "initial" {
 		t.Errorf("record = %+v, want event=box issue=1 phase=initial", recs[0])
 	}
 }
@@ -59,7 +60,7 @@ func TestDispatch_Run_ChoreDispatch_EmitsChoreBoxRecord(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "box" || recs[0].Chore != "bugs" || recs[0].Issue != "" || recs[0].Phase != "initial" {
+	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Chore("bugs") || recs[0].Phase != "initial" {
 		t.Errorf("record = %+v, want event=box chore=bugs issue=\"\" phase=initial", recs[0])
 	}
 }
@@ -81,7 +82,7 @@ func TestDispatch_Fix_EmitsBoxRecordWithFixPassPhase(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "box" || recs[0].Issue != "1" || recs[0].Phase != "fix-pass-2" {
+	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Issue("1") || recs[0].Phase != "fix-pass-2" {
 		t.Errorf("record = %+v, want event=box issue=1 phase=fix-pass-2", recs[0])
 	}
 }
@@ -103,7 +104,7 @@ func TestDispatch_ResolveConflict_EmitsBoxRecordWithConflictResolvePhase(t *test
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "box" || recs[0].Issue != "1" || recs[0].Phase != "conflict-resolve" {
+	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Issue("1") || recs[0].Phase != "conflict-resolve" {
 		t.Errorf("record = %+v, want event=box issue=1 phase=conflict-resolve", recs[0])
 	}
 }
@@ -175,7 +176,7 @@ func TestFD3ClosedAcrossDispatchSpawn(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			continue
 		}
-		if rec.Event == "box" && rec.Issue == "1" && rec.Phase == "initial" {
+		if rec.Event == "box" && rec.Key == dispatchkey.Issue("1") && rec.Phase == "initial" {
 			sawBox = true
 		}
 	}
