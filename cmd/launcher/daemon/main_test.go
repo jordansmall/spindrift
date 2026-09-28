@@ -75,6 +75,7 @@ func TestMainRun_BadAwakeWindow(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			clearKnobEnvT(t)
 			t.Setenv("DAEMON_AWAKE_WINDOW", tt.raw)
 			path := writeInputDocument(t, validKnobDocument())
 			var stdout, stderr bytes.Buffer
@@ -119,6 +120,7 @@ func TestMainRun_ValidAwakeWindowReachesRepoRoot(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+	clearKnobEnvT(t)
 	doc := validKnobDocument()
 	doc.Settings["DAEMON_AWAKE_WINDOW"] = "22:00-06:00 Europe/London"
 	// A bare invocation draws from both kinds, which makes
@@ -957,13 +959,17 @@ func writeInputDocT(t *testing.T, settings map[string]string) string {
 
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the
 // test, so an ambient export in the host/CI environment cannot shadow the
-// input document values these tests set up.
+// input document values these tests set up. It also clears the wrapper's
+// SPINDRIFT_DAEMON_PROGRAM, which is not a document knob, to keep mainRun's
+// self-change check off.
 func clearKnobEnvT(t *testing.T) {
 	t.Helper()
 	for _, v := range []string{
 		"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION",
 		"DAEMON_IDLE_FLOOR", "DAEMON_IDLE_CAP", "DAEMON_FAILURE_BACKOFF",
 		"DAEMON_BREAKER_THRESHOLD", "DAEMON_BREAKER_WINDOW", "BOX_SIGNAL_CARRIER",
+		"DAEMON_AWAKE_WINDOW", "BUTLER_CHORES", "DAEMON_SELF_APP",
+		"SPINDRIFT_DAEMON_PROGRAM",
 	} {
 		t.Setenv(v, "")
 	}
@@ -1126,6 +1132,7 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+	clearKnobEnvT(t)
 	root := t.TempDir()
 	gitRunT(t, root, "-c", "init.defaultBranch=main", "init")
 
@@ -2346,7 +2353,7 @@ func TestMainRun_DispatchChildGetsCapturedEnv(t *testing.T) {
 // "operator stopped this child" exit code childExitOnSecondSignal above
 // uses, but with a transcript instead of a bare counter so the test can
 // tell drain and escalation apart, not just count two signals. `: >"$0"`
-// arms the marker (waitForArmed's contract) once the trap is installed.
+// arms the marker file once the trap is installed.
 const childDrainThenEscalate = `
 n=0
 trap 'n=$((n+1)); if [ "$n" -eq 1 ]; then echo drain >>"$1"; else echo escalate >>"$1"; exit 7; fi' TERM INT
@@ -2392,9 +2399,10 @@ func TestMainRun_EndToEndSignalDrainsThenEscalates(t *testing.T) {
 	if _, err := exec.LookPath("/bin/sh"); err != nil {
 		t.Skip("/bin/sh not available")
 	}
-	// Disables the self-change check (SelfPath): unset, this configuration
-	// never reaches runnerEvalCommand, so there is nothing else to stub.
-	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "")
+	// Also disables the self-change check (SPINDRIFT_DAEMON_PROGRAM unset):
+	// this configuration then never reaches runnerEvalCommand, so there is
+	// nothing else to stub.
+	clearKnobEnvT(t)
 
 	dirConsumer := bareOriginConsumerT(t)
 
@@ -2455,7 +2463,21 @@ func TestMainRun_EndToEndSignalDrainsThenEscalates(t *testing.T) {
 		doneCh <- mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
 	}()
 
-	waitForArmed(t, armed)
+	// Not waitForArmed: mainRun could exit first (e.g. a failed fetch), and
+	// a plain armed-file poll would then time out naming the wrong cause.
+	func() {
+		for i := 0; i < 1000; i++ {
+			if _, err := os.Stat(armed); err == nil {
+				return
+			}
+			select {
+			case got := <-doneCh:
+				t.Fatalf("mainRun returned %d before the child armed; stderr=%s", got, stderr.String())
+			case <-time.After(2 * time.Millisecond):
+			}
+		}
+		t.Fatalf("child never started and armed its signal trap: %v", armed)
+	}()
 	close(stop)
 	waitForFileContains(t, transcript, "drain")
 	close(abort)
