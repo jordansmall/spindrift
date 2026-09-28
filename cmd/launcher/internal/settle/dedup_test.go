@@ -34,6 +34,13 @@ func TestNormalizeDedupKey(t *testing.T) {
 		{"trailing separator", "mount.go:", "mount:go"},
 		{"leading separator", "#3957", "3957"},
 		{"separator-only", "./_", ""},
+		{"dash-only", "-", ""},
+		{"dash-separator-dash", "-:-", ""},
+		{"dash-dot-dash with spaces", "- . -", ""},
+		{"dash dash", "- -", ""},
+		{"punctuation-only bangs", "!!", ""},
+		{"punctuation-only plus", "+", ""},
+		{"dash with letter kept", "-v", "-v"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -159,6 +166,16 @@ func TestSplitDedupTerms_SeparatorOnlyIsBlank(t *testing.T) {
 	}
 }
 
+// A term with no letter or digit -- dash-only or punctuation-only -- also
+// normalizes to blank, the same as a separator-only term: neither a key nor
+// a dropped-term warning.
+func TestSplitDedupTerms_PunctuationOnlyIsBlank(t *testing.T) {
+	keys, dropped := splitDedupTerms([]string{"-", "-:-", "!!", "-->", "---"})
+	if len(keys) != 0 || len(dropped) != 0 {
+		t.Errorf("splitDedupTerms = %v, %v; want no keys, no drops", keys, dropped)
+	}
+}
+
 // buildDedupMarker/parseDedupMarker round-trip: the terms recovered from a
 // body carrying the marker line match what went in, normalized (issue
 // #3609).
@@ -189,6 +206,14 @@ func TestDedupMarker_RoundTripsFoldsPunctuation(t *testing.T) {
 	want := []string{"pkg:file:go:type:field"}
 	if !slices.Equal(got, want) {
 		t.Errorf("parseDedupMarker = %v, want %v", got, want)
+	}
+}
+
+// Terms that are all punctuation-only (no letter or digit) normalize to
+// blank, so buildDedupMarker has nothing usable to carry and returns "".
+func TestDedupMarker_PunctuationOnlyTermsReturnsEmpty(t *testing.T) {
+	if got := buildDedupMarker([]string{"-", "-:-", "!!"}); got != "" {
+		t.Errorf("buildDedupMarker(punctuation-only) = %q, want empty", got)
 	}
 }
 
