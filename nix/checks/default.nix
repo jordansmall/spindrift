@@ -35,6 +35,8 @@ let
       vendorHash = buildConstants.launcherVendorHash;
     }).goModules;
 
+  goCheckEnv = import ./go-check-env.nix;
+
   common = {
     inherit
       pkgs
@@ -46,6 +48,7 @@ let
       launcherGoModules
       batsShards
       mkFragmentParity
+      goCheckEnv
       ;
   };
   sourceChecks =

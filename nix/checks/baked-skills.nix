@@ -3,7 +3,12 @@
 # nix/checks/schema-drift.nix (issue #2949). What stays here are the two
 # guards a per-row string-diff cannot express: a synthetic seventh row driven
 # through every renderer end to end, and a missing BEGIN marker that must throw.
-{ pkgs, launcherGoModules, ... }:
+{
+  pkgs,
+  launcherGoModules,
+  goCheckEnv,
+  ...
+}:
 let
   renderers = import ../../lib/renderers.nix;
   bakedSkills = import ../../lib/baked-skills.nix;
@@ -242,12 +247,7 @@ in
 
         cp "$testFile" src/cmd/launcher/driver-exec/bakedskillsaddrowguard_test.go
 
-        export GOPROXY=off
-        export GOFLAGS=-mod=vendor
-        export GONOSUMCHECK='*'
-        export GOMODCACHE="$TMPDIR/gomodcache"
-        export GOCACHE="$TMPDIR/gocache"
-        export CGO_ENABLED=0
+        ${goCheckEnv}
         cd src/cmd/launcher
         go vet ./...
         go build ./...
