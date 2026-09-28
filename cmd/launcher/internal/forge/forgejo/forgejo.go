@@ -411,31 +411,21 @@ type forgejoCommentPayload struct {
 
 // Comments implements forge.CommentLister, returning num's comments
 // oldest-first in Forgejo's own creation order, which is what forge.IssueText
-// assumes when it windows to the last 10. It walks every page (issue #2265):
-// Forgejo defaults to 30 per page, so a longer thread would otherwise render
-// a stale last 10 instead of the newest.
+// assumes when it windows to the last 10. The endpoint is unpaginated — it
+// ignores page/limit and returns every comment on every request (issue
+// #3978) — so Comments makes a single request rather than walking pages.
 func (c *forgejoClient) Comments(num string) ([]forge.Comment, error) {
-	var comments []forge.Comment
-	err := c.rest.Paginate(func(page int) (bool, error) {
-		q := url.Values{
-			"limit": {strconv.Itoa(forge.ResultPageLimit)},
-			"page":  {strconv.Itoa(page)},
-		}
-		var payload []forgejoCommentPayload
-		if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/comments?"+q.Encode(), nil, &payload); err != nil {
-			return false, err
-		}
-		for _, p := range payload {
-			comments = append(comments, forge.Comment{
-				Author:    p.User.Login,
-				CreatedAt: p.CreatedAt,
-				Body:      p.Body,
-			})
-		}
-		return len(payload) < forge.ResultPageLimit, nil
-	})
-	if err != nil {
+	var payload []forgejoCommentPayload
+	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/comments", nil, &payload); err != nil {
 		return nil, err
+	}
+	var comments []forge.Comment
+	for _, p := range payload {
+		comments = append(comments, forge.Comment{
+			Author:    p.User.Login,
+			CreatedAt: p.CreatedAt,
+			Body:      p.Body,
+		})
 	}
 	return comments, nil
 }
