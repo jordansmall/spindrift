@@ -298,6 +298,26 @@ func serveLabels(w http.ResponseWriter, r *http.Request, body string) {
 	w.Write([]byte(body))
 }
 
+// mixedLabelFixture is a two-issue /issues page: issue 5 carries label, issue
+// 6 carries nothing. Shared by the server-ignored-labels-param tests, whose
+// point is that the client-side re-filter (issue #3952) keeps 5 and drops 6
+// regardless of what Forgejo's labels= filtering actually did server-side.
+func mixedLabelFixture(label string) []byte {
+	return []byte(`[` +
+		`{"number":5,"title":"labelled","body":"","state":"open","labels":[{"name":"` + label + `"}]},` +
+		`{"number":6,"title":"unlabelled","body":"","state":"open","labels":[]}` +
+		`]`)
+}
+
+// assertOnlyIssue5 checks the mixedLabelFixture re-filter kept issue 5 and
+// dropped issue 6.
+func assertOnlyIssue5(t *testing.T, name string, issues []forge.Issue) {
+	t.Helper()
+	if len(issues) != 1 || issues[0].Number != "5" {
+		t.Fatalf("%s = %+v, want only the labelled issue", name, issues)
+	}
+}
+
 // forgejoLabelsServerCap mirrors Forgejo's default MAX_RESPONSE_ITEMS page cap.
 const forgejoLabelsServerCap = 50
 
@@ -587,6 +607,118 @@ func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
 	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
 		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
 	}
+}
+
+// A dispatch label absent from the repo's defined set gets no /issues request
+// at all (issue #3952): Forgejo's ListIssues handler drops an unresolved
+// labels filter entirely rather than erroring, so querying it would return
+// every open issue instead of none.
+func TestForgejoClient_ListIssues_SkipsLabelNotDefinedOnRepo(t *testing.T) {
+	requested := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[{"name":"unrelated-label"}]`)
+			return
+		}
+		requested = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"number":5,"title":"t","body":"b","state":"open","labels":[]}]`))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
+		BaseURL: srv.URL, Repo: "owner/repo", Token: "tok",
+		Labels: forge.DispatchLabels{Dispatchable: "ready-for-agent"},
+	})
+	issues, err := fc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("ListIssues(Dispatchable) = %+v, want empty", issues)
+	}
+	if requested {
+		t.Error("ListIssues(Dispatchable): want no /issues request when the label is undefined, got one")
+	}
+}
+
+// Forgejo silently drops an unresolved labels= filter and returns every
+// issue in state rather than erroring or returning none (issue #3952), so
+// ListIssues must re-filter client-side even when the label is defined and
+// the request goes out.
+func TestForgejoClient_ListIssues_FiltersServerIgnoredLabelsParam(t *testing.T) {
+	var gotLabelsParam string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[{"name":"ready-for-agent"}]`)
+			return
+		}
+		gotLabelsParam = r.URL.Query().Get("labels")
+		w.WriteHeader(http.StatusOK)
+		w.Write(mixedLabelFixture("ready-for-agent"))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
+		BaseURL: srv.URL, Repo: "owner/repo", Token: "tok",
+		Labels: forge.DispatchLabels{Dispatchable: "ready-for-agent"},
+	})
+	issues, err := fc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	if gotLabelsParam != "ready-for-agent" {
+		t.Fatalf("labels query param = %q, want %q sent even though the fake ignores it", gotLabelsParam, "ready-for-agent")
+	}
+	assertOnlyIssue5(t, "ListIssues(Dispatchable)", issues)
+}
+
+// A ListLabels failure must not become an empty result: it falls back to
+// querying /issues without the pre-check, the pre-existing behavior, relying
+// on the client-side re-filter (issue #3952) to keep the labelled issues and
+// drop the rest of whatever Forgejo actually returns.
+func TestForgejoClient_ListIssues_LabelsErrorFallsBackToQueryingAndFiltering(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(mixedLabelFixture("ready-for-agent"))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
+		BaseURL: srv.URL, Repo: "owner/repo", Token: "tok",
+		Labels: forge.DispatchLabels{Dispatchable: "ready-for-agent"},
+	})
+	issues, err := fc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	assertOnlyIssue5(t, "ListIssues(Dispatchable)", issues)
+}
+
+// ListIssuesWithLabels(...) queries per-label already, but must still shed a
+// mislabelled issue Forgejo returns anyway (issue #3952): same backstop,
+// different caller.
+func TestForgejoClient_ListIssuesWithLabels_FiltersServerIgnoredLabelsParam(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/owner/repo/labels" {
+			serveLabels(w, r, `[{"name":"agent-review-finding"}]`)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(mixedLabelFixture("agent-review-finding"))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.LabeledBacklogLister)
+	issues, err := fc.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-review-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	assertOnlyIssue5(t, "ListIssuesWithLabels", issues)
 }
 
 // ListIssuesWithLabels(IssueClosed, ...) must send state=closed, not the
