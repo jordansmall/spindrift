@@ -4,6 +4,7 @@
   fixtures,
   launcherGoModules,
   goCheckEnv,
+  imageNixCores,
   ...
 }:
 let
@@ -62,23 +63,30 @@ in
     touch $out
   '';
 
-  # go-check-env.nix's GOMAXPROCS bound (issue #3915).
-  go-check-env = pkgs.runCommand "go-check-env" { } ''
-    check() {
-      got=$(
-        ${goCheckEnv}
-        sh -c 'echo "$GOMAXPROCS"'
-      )
-      if [ "$got" != "$1" ]; then
-        echo "NIX_BUILD_CORES=''${NIX_BUILD_CORES-unset}: expected GOMAXPROCS=$1, got $got" >&2
-        exit 1
-      fi
-    }
-    (unset NIX_BUILD_CORES; check 4)
-    NIX_BUILD_CORES=0 check 4
-    NIX_BUILD_CORES=2 check 2
-    touch $out
-  '';
+  # go-check-env.nix's GOMAXPROCS bound (issue #3915), and its unset/0 fallback
+  # against lib/image.nix's baked nix.conf `cores` (issue #3965).
+  go-check-env =
+    let
+      # Spliced inside shell double quotes: without the \\` escapes a
+      # backtick would start command substitution.
+      drift = "nix/checks/go-check-env.nix's fallback literal must match lib/image.nix's nix.conf \\`cores = ${imageNixCores}\\`";
+    in
+    pkgs.runCommand "go-check-env" { } ''
+      check() {
+        got=$(
+          ${goCheckEnv}
+          sh -c 'echo "$GOMAXPROCS"'
+        )
+        if [ "$got" != "$1" ]; then
+          echo "NIX_BUILD_CORES=''${NIX_BUILD_CORES-unset}: expected GOMAXPROCS=$1, got $got''${2:+ -- $2}" >&2
+          exit 1
+        fi
+      }
+      (unset NIX_BUILD_CORES; check ${imageNixCores} "${drift}")
+      NIX_BUILD_CORES=0 check ${imageNixCores} "${drift}"
+      NIX_BUILD_CORES=2 check 2
+      touch $out
+    '';
 
   launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
     cp -r ${../../cmd/launcher} src
