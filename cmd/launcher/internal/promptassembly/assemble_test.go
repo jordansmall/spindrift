@@ -245,14 +245,8 @@ func TestAssembleCIFailureSummaryGate(t *testing.T) {
 	}
 }
 
-// promptsDirExceptSubdir builds a PromptsDir that symlinks the real tree
-// except for one top-level entry named omit, leaving the caller to populate
-// it. Shared by promptsDirMissingFragment (which then partially repopulates
-// "fragments" itself) and promptsDirWithChore (which replaces "chores"
-// wholesale) -- both need the same "mirror everything but one subdir" shape.
-// Returns the new dir plus realDir's absolute path, so a caller drilling
-// into the omitted subdir's real contents (as promptsDirMissingFragment
-// does) need not re-resolve promptsDir itself.
+// promptsDirExceptSubdir mirrors the real prompts tree except for the top-level
+// entry omit, returning the new dir and the real dir's absolute path.
 func promptsDirExceptSubdir(t *testing.T, omit string) (dir, realDir string) {
 	t.Helper()
 	dir = t.TempDir()
