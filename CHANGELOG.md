@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.20.0](https://github.com/jordansmall/spindrift/compare/v0.19.2...v0.20.0) (2026-09-28)
+
+
+### Features
+
+* **butler:** add the auto-promotion knobs ([3d9f476](https://github.com/jordansmall/spindrift/commit/3d9f4769b7415804474fbf60eaacbe67dbe1ac46)), closes [#3880](https://github.com/jordansmall/spindrift/issues/3880)
+* **butler:** add the daily budget knobs ([7f12f6f](https://github.com/jordansmall/spindrift/commit/7f12f6f211dba14b4aed6ab523ef53fb046f5bdf))
+* **butler:** add the interval and claim-timeout knobs ([c0e63a1](https://github.com/jordansmall/spindrift/commit/c0e63a12e12e76e3b415df31870ea47e6f370701))
+* **butler:** compute a run's scan scope ([aa468b9](https://github.com/jordansmall/spindrift/commit/aa468b96b06a4e356bb69f47a1583403aefd0715)), closes [#3875](https://github.com/jordansmall/spindrift/issues/3875)
+* **butler:** decide whether a Chore is due ([dea4d66](https://github.com/jordansmall/spindrift/commit/dea4d66447b631048a119f738fd574933ec7b9b2))
+* **butler:** drop findings past the per-sweep cap ([03e4182](https://github.com/jordansmall/spindrift/commit/03e418281595c846dc281d28d4238da4c5c8b73b))
+* **butler:** gate auto-promotion at settle ([7f8c987](https://github.com/jordansmall/spindrift/commit/7f8c987e11b38361e38d5760ecdbe3596d07635c)), closes [#3880](https://github.com/jordansmall/spindrift/issues/3880)
+* **butler:** gate the due check on daily budgets ([cd8cc47](https://github.com/jordansmall/spindrift/commit/cd8cc47bcf9cb1fdd3521fef7667f5093b6de0b3))
+* **butler:** give each Chore a class allow-list ([7d1b12f](https://github.com/jordansmall/spindrift/commit/7d1b12fc47b589e586c064eb6645c67b541a8a47)), closes [#3881](https://github.com/jordansmall/spindrift/issues/3881)
+* **butler:** route promotion candidates to a reviewer ([7090843](https://github.com/jordansmall/spindrift/commit/70908432f61729bf281d95edbcdf52d99da9104a)), closes [#3880](https://github.com/jordansmall/spindrift/issues/3880)
+* **butler:** run a Chore sweep inside the Box ([03d2d0a](https://github.com/jordansmall/spindrift/commit/03d2d0a339419dde223afd277bc633192040b63c)), closes [#3875](https://github.com/jordansmall/spindrift/issues/3875)
+* **butler:** ship refactor and docs-drift Chores ([f07d195](https://github.com/jordansmall/spindrift/commit/f07d195982623a85ae1b69fe92918355b579f24a)), closes [#3881](https://github.com/jordansmall/spindrift/issues/3881)
+* **daemon:** carry the Chore on butler events ([c24062e](https://github.com/jordansmall/spindrift/commit/c24062ef22abe8052b76ddcf6e306f7e6ae61709)), closes [#3878](https://github.com/jordansmall/spindrift/issues/3878)
+* **daemon:** drive the butler on idle slots ([45d13c4](https://github.com/jordansmall/spindrift/commit/45d13c42fecbbe8958929df4ab0d993dcd33e754)), closes [#3878](https://github.com/jordansmall/spindrift/issues/3878)
+* **dispatchkind:** declare the butler kind ([c9287f9](https://github.com/jordansmall/spindrift/commit/c9287f94907882678b4d3d2dfa5469b9906dd68c)), closes [#3875](https://github.com/jordansmall/spindrift/issues/3875)
+* **dispatch:** start a Box keyed by a Chore ([1e90b95](https://github.com/jordansmall/spindrift/commit/1e90b95f8fa8955b457e135af2ff5d339fe68411)), closes [#3875](https://github.com/jordansmall/spindrift/issues/3875)
+* **forge:** list finding issues by state everywhere ([e301d48](https://github.com/jordansmall/spindrift/commit/e301d48ada1ce1590c18263af6ac9c56ac6ed8e6)), closes [#3873](https://github.com/jordansmall/spindrift/issues/3873)
+* **launcher:** add the one-shot butler command ([f32d0f0](https://github.com/jordansmall/spindrift/commit/f32d0f038f87aa4afc44f1a626ec56af70697d91)), closes [#3875](https://github.com/jordansmall/spindrift/issues/3875)
+* **launcher:** run the butler on github and forgejo ([eb6a36a](https://github.com/jordansmall/spindrift/commit/eb6a36af4be6a6a307b9bd89a7b41ff6555e7124))
+* **launcher:** run the first due Chore ([65fb66e](https://github.com/jordansmall/spindrift/commit/65fb66e13f2304f1ea8f9e0cbe6c8580e2e32ffc))
+* **ledger:** add a butler Ledger on git refs ([8dd3fb4](https://github.com/jordansmall/spindrift/commit/8dd3fb48e23745a2093b332fe37132a6860106f5)), closes [#3874](https://github.com/jordansmall/spindrift/issues/3874)
+* **ledger:** add a push-to-remote Ledger backend ([727f2aa](https://github.com/jordansmall/spindrift/commit/727f2aae99ecc9c15a0d298cbff06a1ea9674fa7))
+* **ledger:** detect stale claims and total a day ([b2ba503](https://github.com/jordansmall/spindrift/commit/b2ba5034f2de6da6c1c482d83cebb0d6e21cbcaa)), closes [#3874](https://github.com/jordansmall/spindrift/issues/3874)
+* **report:** name the Chore on butler records ([d910fe7](https://github.com/jordansmall/spindrift/commit/d910fe7da0bd192b58279e36513b1b1e424c0dd3)), closes [#3878](https://github.com/jordansmall/spindrift/issues/3878)
+* **settle:** host dedup skips closed findings ([e6036ac](https://github.com/jordansmall/spindrift/commit/e6036ac9d3ea465cec98cc27c47c4626092576ce)), closes [#3873](https://github.com/jordansmall/spindrift/issues/3873)
+* **settle:** settle a butler run into its Ledger ([9954230](https://github.com/jordansmall/spindrift/commit/995423065e526900bca376cfacbac61fd9572210)), closes [#3875](https://github.com/jordansmall/spindrift/issues/3875)
+* **signal:** carry a finding's class and concurrence ([7c287f4](https://github.com/jordansmall/spindrift/commit/7c287f43797e73ae85f204b7eb74adfeb6f63b94)), closes [#3880](https://github.com/jordansmall/spindrift/issues/3880)
+* **waves:** report a lost claim race as a skip ([7028cf4](https://github.com/jordansmall/spindrift/commit/7028cf4d6d17e88d30e3a939fe57fe2127b5f8da)), closes [#3887](https://github.com/jordansmall/spindrift/issues/3887)
+
+
+### Bug Fixes
+
+* **dispatch:** claim the issue before Run touches disk ([1f98c98](https://github.com/jordansmall/spindrift/commit/1f98c98ae2f9e33a2b7b93da96b6b4633ff526e7)), closes [#3885](https://github.com/jordansmall/spindrift/issues/3885)
+* **forge:** refuse to claim an issue already in progress ([b323739](https://github.com/jordansmall/spindrift/commit/b32373948ec0c7a724f7c2f1039cb0729a1f5c41)), closes [#3887](https://github.com/jordansmall/spindrift/issues/3887)
+* **recover:** skip an issue whose Box is still live ([5df691d](https://github.com/jordansmall/spindrift/commit/5df691d61eb28055c2c1f047985b1ba225261c3b)), closes [#3885](https://github.com/jordansmall/spindrift/issues/3885)
+* **settle:** find a log moved mid-run by identity ([317c879](https://github.com/jordansmall/spindrift/commit/317c87941e8333163fed08c8256de54f9aa91960)), closes [#3886](https://github.com/jordansmall/spindrift/issues/3886)
+
+
+### Documentation
+
+* describe butler auto-promotion ([bfa25bd](https://github.com/jordansmall/spindrift/commit/bfa25bdd2faae20edd89b366446af2a510b82246)), closes [#3880](https://github.com/jordansmall/spindrift/issues/3880)
+* describe the butler daily budgets ([d53faeb](https://github.com/jordansmall/spindrift/commit/d53faebf85734030e321c529c0f2c6fc3f039fb0))
+* describe the butler due check ([2a552d6](https://github.com/jordansmall/spindrift/commit/2a552d66c80e3eef4db694c583e81556407d0fea))
+* describe the butler Ledger on hosted forges ([151079e](https://github.com/jordansmall/spindrift/commit/151079eea7080707dcfca2114da694b23582dc2b))
+* describe the butler on idle daemon slots ([de1ed32](https://github.com/jordansmall/spindrift/commit/de1ed32cd708f010b49ec0aedfed0d0b41f2e171)), closes [#3878](https://github.com/jordansmall/spindrift/issues/3878)
+* describe the one-shot butler command ([72611f3](https://github.com/jordansmall/spindrift/commit/72611f3efd2fc57c4ab0bfa6b90ee1d17592db8e)), closes [#3875](https://github.com/jordansmall/spindrift/issues/3875)
+* **reference:** describe closed-finding dedup ([2d0bbd8](https://github.com/jordansmall/spindrift/commit/2d0bbd8030efcf19a5736a3010ee5fab64a1b291)), closes [#3873](https://github.com/jordansmall/spindrift/issues/3873)
+* **release-notes:** add 0.20.0 highlights ([643acc5](https://github.com/jordansmall/spindrift/commit/643acc545610e06c8ba7fd0b875ed4105ace23a7))
+
+
+### Code Refactoring
+
+* **daemon:** read Dispatch kinds from descriptors ([17b6657](https://github.com/jordansmall/spindrift/commit/17b665757a93424a37702d748888d450b922429a)), closes [#3872](https://github.com/jordansmall/spindrift/issues/3872)
+* **entrypoint:** gate read-only on ADVISE_ONLY ([45a18d6](https://github.com/jordansmall/spindrift/commit/45a18d6b0934ee3a4921947699fb429da2a48ee6)), closes [#3872](https://github.com/jordansmall/spindrift/issues/3872)
+* **forgejo:** export the tokened git remote URL ([66c051d](https://github.com/jordansmall/spindrift/commit/66c051dfb5b45822734edca5d4a43713179c3602))
+* **launcher:** select kind behaviour by descriptor ([8d57936](https://github.com/jordansmall/spindrift/commit/8d57936bb4658c91f8f3700f0126e192062282d8)), closes [#3872](https://github.com/jordansmall/spindrift/issues/3872)
+* **ledger:** split state commit out of Append ([1894e5a](https://github.com/jordansmall/spindrift/commit/1894e5af1b18e9d623f8c0bf787a7ec042ed727d))
+* **promptassembly:** read the kind's prompt set ([e2c10d6](https://github.com/jordansmall/spindrift/commit/e2c10d60d7a1028c8d1fd058e084533be493680d)), closes [#3872](https://github.com/jordansmall/spindrift/issues/3872)
+
+
+### Tests
+
+* **butler:** cover each built-in Chore's prompt ([16921e6](https://github.com/jordansmall/spindrift/commit/16921e6c1525c733054998115279321b93e060b5)), closes [#3881](https://github.com/jordansmall/spindrift/issues/3881)
+* **settle:** pass a promotion policy in chore test ([f1e254a](https://github.com/jordansmall/spindrift/commit/f1e254a289a562dd09bf1dbdc13f061faadc2aeb))
+
+
+### Miscellaneous Chores
+
+* **dogfood:** enable the butler on the daemon ([cca8b0d](https://github.com/jordansmall/spindrift/commit/cca8b0da0251ec6f7e46dda8581178712db1046c))
+
 ## [0.19.2](https://github.com/jordansmall/spindrift/compare/v0.19.1...v0.19.2) (2026-09-27)
 
 
