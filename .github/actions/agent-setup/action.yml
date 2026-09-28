@@ -173,14 +173,17 @@ runs:
     # event-driven agent jobs read the warmed store without saving their own — CI
     # on main stays the sole writer, so concurrent dispatch/recover/research runs
     # never thrash or evict each other under the 10 GB repo cap. The key matches
-    # ci.yml exactly: an unchanged flake since the last main build is a full hit, a
-    # bumped flake.lock degrades to a prefix (partial) restore, and a total miss to
-    # the cold build below. Pure accelerator — a miss only costs the old cold time.
+    # ci.yml's x86_64-linux leg exactly (the arch of every GitHub caller, all
+    # ubuntu-latest; Forgejo callers never see a ci.yml-saved cache and always
+    # miss): an unchanged flake since the last main build is a full hit, a
+    # bumped flake.lock degrades to a prefix (partial) restore, and a total
+    # miss to the cold build below. Pure accelerator — a miss only costs the
+    # old cold time.
     - name: Restore the warmed nix store
       uses: nix-community/cache-nix-action/restore@v7
       with:
-        primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'go.sum') }}
-        restore-prefixes-first-match: nix-${{ runner.os }}-
+        primary-key: nix-x86_64-linux-${{ hashFiles('**/*.nix', '**/flake.lock', '**/go.sum') }}
+        restore-prefixes-first-match: nix-x86_64-linux-
 
     # ~2m40s cold (nixpkgs closure is substituted, not compiled); the restore
     # above turns an unchanged-flake run into a near-instant store hit.
