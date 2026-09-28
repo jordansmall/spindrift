@@ -3192,7 +3192,12 @@ smuggle an arbitrary label through this field.
 The relayed payload may also carry an optional `dedupTerms` array — one or
 more site keys (issue #3609). Unlike `labels`, which stays host-derived,
 `dedupTerms` is Box-supplied, the same as `type`. A term is normalized
-(trimmed, internal whitespace collapsed, lowercased) and dropped if it's
+(trimmed, internal whitespace collapsed, lowercased, and runs of `.`, `:`,
+`#`, `/`, `_` folded to a single `:`, so `Type.Field` and `Type:Field` key
+the same site; whitespace touching a separator is absorbed into the fold
+too, so `Type. Field` also keys as `type:field`; and any leading or
+trailing separator is trimmed, so a separator-only term normalizes to
+empty) and dropped if it's
 empty, contains `,` (the marker line's own field separator), or contains
 `--` (which would close the `<!-- spindrift-dedup: ... -->` HTML comment
 early) — an intent carrying no usable term after that filter has an empty
@@ -3214,7 +3219,11 @@ keys are only the terms recorded in its hidden
 `<!-- spindrift-dedup: ... -->` marker line — written by the Launcher itself
 at filing time — never its title: two distinct findings can share a
 formulaic conventional-commit title, and keying on prose would merge
-them. The Launcher appends that marker line to every issue it files,
+them. The marker records the folded form (e.g.
+`pkg:file:go:type:field`), so a literal body search for the raw site key
+— the Filer prompt's own `gh issue list --search` pre-check — may not
+match the marker text; the Launcher's host-side dedup is the backstop.
+The Launcher appends that marker line to every issue it files,
 empty (`<!-- spindrift-dedup:  -->`, which reads back as no keys) when
 the intent carried no usable term: the last marker line in a body wins,
 so always writing its own is what stops a finding that quotes the marker
