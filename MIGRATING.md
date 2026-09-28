@@ -1,5 +1,23 @@
 # Migration Guide
 
+## CI research runs fire from `agent-research-trigger`, not `agent-research` (issue #3603)
+
+Since v0.19.0, `agent-research.yml` fires on the `agent-research-trigger`
+label, not `agent-research`. After upgrading, applying `agent-research`
+alone no longer fires a CI research run; it only queues the issue for the
+daemon (`nix run .#daemon -- research`) or `spindrift research`. The claim
+strips `agent-research-trigger` so it self-clears; re-apply it to retry or
+re-research.
+
+Existing Target repos that created research labels from the old list must
+create `agent-research-trigger` before the CI path works again: see
+[Create the research labels on the Target
+repo](docs/reference.md#create-the-research-labels-on-the-target-repo).
+
+`spindrift doctor` never checks or creates `agent-research-trigger` (like
+`agent-trigger`, it is repo-local Actions trigger vocabulary), so a missing
+one will not show up in doctor's report.
+
 ## Custom worker prompts need the ALREADY RESOLVED gate for the new `already-resolved` status (issue #4015)
 
 The work kind's status set grew from `ready`/`blocked`/`ambiguous` to also
