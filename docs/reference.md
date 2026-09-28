@@ -4721,7 +4721,8 @@ The butler Box always runs the read-only posture, whatever
 `BOX_FORGE_AND_ISSUE_ACCESS` says (issue #3906): the launcher never sets
 `BOX_WRITE_ENABLED` for it, so the entrypoint installs the read-only guards
 (the `gh`/`fj` shims, plus the git push hook on an outbox-relay or
-host-mediated forge) and the launcher mounts the outbox to match. Research
+host-mediated forge) and dispatch's outbox decision (`needsOutbox`) applies
+the same forced read-only access, so the `/outbox` mount matches. Research
 does not get this treatment; under `read-write` it still posts its own
 verdict comment. Treat the guards as defense in depth on top of the prompt
 and the Filer relay, not as token-level enforcement: under `read-write` the

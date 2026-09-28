@@ -517,9 +517,10 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	args = append(args, "--ro-bind", agentFiles+"/home/agent", homeAgentStagingDir)
 	// buildMountSpecs computes the mount decisions (gates, existence guards,
 	// operator messages) once and shares them with the OCI adapter; bwrap only
-	// renders each spec into bind syntax. The driver-cache spec (issue #427) and
-	// the CODE_FORGE=local outbox spec (ADR 0033, issue #1697) are the only
-	// writable mounts it ever produces.
+	// renders each spec into bind syntax. The driver-cache spec (issue #427)
+	// and the /outbox spec (ADR 0033, issue #1697; set whenever dispatch hands
+	// a Box.OutboxDir, issue #3957) are the only writable mounts it ever
+	// produces.
 	for _, m := range a.mountSpecs(box) {
 		if m.Message != "" {
 			fmt.Print(m.Message)

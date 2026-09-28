@@ -3252,10 +3252,8 @@ func TestDispatchConfig_ForwardsSignalCarrierAndNetworkMode(t *testing.T) {
 
 // Butler's Box must run the read-only posture (guards, outbox relay)
 // regardless of BOX_FORGE_AND_ISSUE_ACCESS (issue #3906): a read-write
-// Consumer must not hand a butler Box write access. dispatchConfig and
-// runnerConfig must carry the same value: the Box's BOX_WRITE_ENABLED and the
-// launcher's outbox mount both key off it, and a mismatch desyncs the outbox.
-func TestDispatchAndRunnerConfig_BoxForgeAndIssueAccess_ButlerForcedReadOnly(t *testing.T) {
+// Consumer must not hand a butler Box write access.
+func TestDispatchConfig_BoxForgeAndIssueAccess_ButlerForcedReadOnly(t *testing.T) {
 	cases := []struct {
 		name    string
 		kind    *dispatchkind.Descriptor
@@ -3277,12 +3275,6 @@ func TestDispatchAndRunnerConfig_BoxForgeAndIssueAccess_ButlerForcedReadOnly(t *
 		{"butler read-write forgejo", dispatchkind.Butler, "read-write", "read-only", true},
 	}
 
-	// minimalValidConfig's codeForge/issueTracker ("github") is
-	// OutboxRelayCapable in the real registry, so runnerConfig's
-	// resolveCapabilitySignals lookup already sees it true; the caps
-	// argument below gives dispatchConfig the matching ForgeDescriptor so
-	// the two paths' OutboxRelayCapable values agree rather than one being
-	// a coincidental zero-value false.
 	githubCaps := forge.Capabilities{ForgeDescriptor: backend.Descriptor{OutboxRelayCapable: true}}
 	forgejoDescriptor, ok := backend.ByName("forgejo")
 	if !ok {
@@ -3305,20 +3297,9 @@ func TestDispatchAndRunnerConfig_BoxForgeAndIssueAccess_ButlerForcedReadOnly(t *
 			}
 
 			dc := dispatchConfig(c, it, testWired(it), cf, caps)
-			rc := runnerConfig(c)
 
 			if dc.BoxForgeAndIssueAccess != tc.want {
 				t.Errorf("dispatchConfig().BoxForgeAndIssueAccess = %q, want %q", dc.BoxForgeAndIssueAccess, tc.want)
-			}
-			if rc.MountParams.BoxForgeAndIssueAccess != tc.want {
-				t.Errorf("runnerConfig().MountParams.BoxForgeAndIssueAccess = %q, want %q", rc.MountParams.BoxForgeAndIssueAccess, tc.want)
-			}
-			if tc.forgejo && !rc.MountParams.OutboxRelayCapable {
-				t.Error("runnerConfig().MountParams.OutboxRelayCapable = false for forgejo, want true")
-			}
-			if dc.ForgeDescriptor.OutboxRelayCapable != rc.MountParams.OutboxRelayCapable {
-				t.Errorf("dispatchConfig().ForgeDescriptor.OutboxRelayCapable = %v, runnerConfig().MountParams.OutboxRelayCapable = %v, want agreement",
-					dc.ForgeDescriptor.OutboxRelayCapable, rc.MountParams.OutboxRelayCapable)
 			}
 		})
 	}
