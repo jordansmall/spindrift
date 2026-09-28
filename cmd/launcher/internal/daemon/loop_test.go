@@ -332,8 +332,8 @@ func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 	Loop(context.Background(), testConfig(1), r, em, clk)
 
 	events := wantEvents(t, &buf, []string{"child_start", "box", "child_finish", "backoff", "child_start", "child_finish", "halt"}, "")
-	if events[1].Issue != "42" {
-		t.Errorf("box event Issue = %q, want %q", events[1].Issue, "42")
+	if events[1].Key != dispatchkey.Issue("42") {
+		t.Errorf("box event Key = %v, want issue 42", events[1].Key)
 	}
 }
 
@@ -360,10 +360,10 @@ func TestLoopEventStreamSequenceAndFields(t *testing.T) {
 	events := wantEvents(t, &buf, []string{"child_start", "box", "box", "child_finish", "child_start", "child_finish", "halt"}, "")
 
 	box1, box2 := events[1], events[2]
-	if box1.Issue != "10" || box1.Revision != "rev1" {
+	if box1.Key != dispatchkey.Issue("10") || box1.Revision != "rev1" {
 		t.Errorf("first box event = %+v, want issue 10 at rev1", box1)
 	}
-	if box2.Issue != "11" || box2.Revision != "rev1" {
+	if box2.Key != dispatchkey.Issue("11") || box2.Revision != "rev1" {
 		t.Errorf("second box event = %+v, want issue 11 at rev1", box2)
 	}
 
@@ -2012,16 +2012,16 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 	events := wantEvents(t, &buf, []string{"child_start", "box", "settled", "child_finish", "halt"}, "")
 
 	box := events[1]
-	if box.Issue != "42" || box.Phase != "initial" {
+	if box.Key != dispatchkey.Issue("42") || box.Phase != "initial" {
 		t.Errorf("box event = %+v, want issue 42 phase initial", box)
 	}
 	settled := events[2]
-	if settled.Issue != "42" || settled.State != "complete" || settled.Note != "merged clean" {
+	if settled.Key != dispatchkey.Issue("42") || settled.State != "complete" || settled.Note != "merged clean" {
 		t.Errorf("settled event = %+v, want issue 42 state complete note %q", settled, "merged clean")
 	}
 	finish := events[3]
-	if finish.Issue != "42" {
-		t.Errorf("child_finish event Issue = %q, want %q", finish.Issue, "42")
+	if finish.Key != dispatchkey.Issue("42") {
+		t.Errorf("child_finish event Key = %v, want issue 42", finish.Key)
 	}
 }
 
@@ -2076,16 +2076,16 @@ func TestLoopButlerBoxSettledCarryChoreNotIssue(t *testing.T) {
 	events := wantEvents(t, &buf, []string{"child_start", "box", "settled", "child_finish", "halt"}, "")
 
 	box := events[1]
-	if box.Chore != "bugs" || box.Issue != "" || box.Phase != "initial" {
-		t.Errorf("box event = %+v, want chore bugs issue \"\" phase initial", box)
+	if box.Key != dispatchkey.Chore("bugs") || box.Phase != "initial" {
+		t.Errorf("box event = %+v, want chore bugs phase initial", box)
 	}
 	settled := events[2]
-	if settled.Chore != "bugs" || settled.Issue != "" || settled.State != "complete" || settled.Note != "2 filed" {
-		t.Errorf("settled event = %+v, want chore bugs issue \"\" state complete note %q", settled, "2 filed")
+	if settled.Key != dispatchkey.Chore("bugs") || settled.State != "complete" || settled.Note != "2 filed" {
+		t.Errorf("settled event = %+v, want chore bugs state complete note %q", settled, "2 filed")
 	}
 	finish := events[3]
-	if finish.Chore != "bugs" || finish.Issue != "" {
-		t.Errorf("child_finish event = %+v, want chore bugs issue \"\"", finish)
+	if finish.Key != dispatchkey.Chore("bugs") {
+		t.Errorf("child_finish event = %+v, want chore bugs", finish)
 	}
 }
 

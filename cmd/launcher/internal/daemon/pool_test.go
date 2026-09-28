@@ -2069,15 +2069,15 @@ func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 	}
 
 	events := wantEvents(t, &buf, []string{"child_start", "box", "box"}, "")
-	if events[1].Issue != "123" || events[1].Phase != "initial" {
+	if events[1].Key != dispatchkey.Issue("123") || events[1].Phase != "initial" {
 		t.Errorf("first box event = %+v, want issue 123 phase initial", events[1])
 	}
-	if events[2].Issue != "123" || events[2].Phase != "fix-pass-1" {
+	if events[2].Key != dispatchkey.Issue("123") || events[2].Phase != "fix-pass-1" {
 		t.Errorf("second box event = %+v, want issue 123 phase fix-pass-1", events[2])
 	}
 
-	if got, _ := p.flightClaim(0); got != "123" {
-		t.Errorf("flightClaim(0) issue = %q, want %q (the most recently boxed issue)", got, "123")
+	if got := p.flightClaim(0); got != dispatchkey.Issue("123") {
+		t.Errorf("flightClaim(0) = %v, want issue 123 (the most recently boxed issue)", got)
 	}
 }
 
