@@ -15,6 +15,10 @@ func TestLoad(t *testing.T) {
 		classes string
 		want    []Chore
 		wantErr string // substring; "" means no error
+		// wantErrEach, when set, asserts the error is non-nil and each of
+		// these substrings appears in it exactly once (used for cases where
+		// a problem must be deduplicated across repeated or multiple inputs).
+		wantErrEach []string
 	}{
 		{
 			name:    "full valid config",
@@ -44,7 +48,26 @@ func TestLoad(t *testing.T) {
 		{
 			name:   "empty BUTLER_CHORES",
 			chores: "",
-			want:   []Chore{},
+			want:   nil,
+		},
+		{
+			name:    "empty BUTLER_CHORES ignores a stale override",
+			chores:  "",
+			every:   "6h docs-drift=168h",
+			classes: "",
+			want:    nil,
+		},
+		{
+			name:   "empty BUTLER_CHORES ignores a malformed BUTLER_EVERY",
+			chores: "",
+			every:  "not-a-duration",
+			want:   nil,
+		},
+		{
+			name:    "empty BUTLER_CHORES ignores a non-built-in classes entry",
+			chores:  "",
+			classes: "notachore=error-handling",
+			want:    nil,
 		},
 		{
 			name:    "unknown override name",
@@ -106,24 +129,50 @@ func TestLoad(t *testing.T) {
 			wantErr: "invalid name format",
 		},
 		{
-			name:    "several problems across knobs each reported once",
-			chores:  "bugs bad/name",
-			every:   "unknown=1h",
-			classes: "alsobad=x",
-			wantErr: "MULTI", // checked specially below
+			name:        "repeated invalid chore name reported once",
+			chores:      "bad/name bad/name",
+			wantErrEach: []string{"bad/name"},
+		},
+		{
+			name:    "empty chore name in an override token",
+			chores:  "bugs",
+			every:   "=1h",
+			wantErr: "empty chore name",
+		},
+		{
+			name:    "negative override for an enabled chore",
+			chores:  "docs-drift",
+			every:   "docs-drift=-1h",
+			wantErr: "negative duration",
+		},
+		{
+			name:   "BUTLER_CHORES accepts tab and newline separators",
+			chores: "bugs\tdocs-drift\nrefactor",
+			want: []Chore{
+				{Name: "bugs", Every: DefaultEvery},
+				{Name: "docs-drift", Every: DefaultEvery},
+				{Name: "refactor", Every: DefaultEvery},
+			},
+		},
+		{
+			name:        "several problems across knobs each reported once",
+			chores:      "bugs bad/name",
+			every:       "unknown=1h",
+			classes:     "alsobad=x",
+			wantErrEach: []string{`"bad/name"`, `"unknown"`, `"alsobad"`},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Load(tc.chores, tc.every, tc.classes)
+			got, err := Load(Knobs{Chores: tc.chores, Every: tc.every, Classes: tc.classes})
 
-			if tc.wantErr == "MULTI" {
+			if tc.wantErrEach != nil {
 				if err == nil {
-					t.Fatalf("Load(%q, %q, %q): got nil error, want multiple problems", tc.chores, tc.every, tc.classes)
+					t.Fatalf("Load(%q, %q, %q): got nil error, want %v each exactly once", tc.chores, tc.every, tc.classes, tc.wantErrEach)
 				}
 				msg := err.Error()
-				for _, substr := range []string{`"bad/name"`, `"unknown"`, `"alsobad"`} {
+				for _, substr := range tc.wantErrEach {
 					if got := strings.Count(msg, substr); got != 1 {
 						t.Errorf("Load() err = %v, want substring %q exactly once, got %d", err, substr, got)
 					}

@@ -110,8 +110,21 @@ func parseArgs(args []string) (parsedArgs, error) {
 // --butler`. A `butler` selector named explicitly fails startup instead of
 // running nothing. A butler that survives this gate has the rest of its
 // config validated by that same `doctor --butler` (issue #3920).
-func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, butlerChores string) ([]daemon.Kind, error) {
-	if len(chore.Chores(butlerChores)) > 0 || !slices.Contains(kinds, daemon.KindButler) {
+// Without the butler among kinds the three knobs are never parsed, so a
+// dispatch- or research-only daemon never fails on butler config it does not
+// use. With the butler among kinds but knobs.Chores empty, chore.Load
+// itself short-circuits before touching BUTLER_EVERY or
+// BUTLER_CHORE_CLASSES, so only a chore.Load error with at least one Chore
+// enabled fails startup.
+func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knobs) ([]daemon.Kind, error) {
+	if !slices.Contains(kinds, daemon.KindButler) {
+		return kinds, nil
+	}
+	resolved, err := chore.Load(knobs)
+	if err != nil {
+		return nil, fmt.Errorf("daemon: butler: %w", err)
+	}
+	if len(resolved) > 0 {
 		return kinds, nil
 	}
 	if explicitSelector {
@@ -708,7 +721,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// ResolveOptional, like DAEMON_AWAKE_WINDOW: an empty BUTLER_CHORES is the
 	// default, not a configuration error.
 	butlerChores := doc.ResolveOptional("BUTLER_CHORES", stderr)
-	gatedKinds, err := gateButlerKind(args.Kinds, args.ExplicitSelector, butlerChores)
+	butlerEvery := doc.ResolveOptional("BUTLER_EVERY", stderr)
+	butlerChoreClasses := doc.ResolveOptional("BUTLER_CHORE_CLASSES", stderr)
+	gatedKinds, err := gateButlerKind(args.Kinds, args.ExplicitSelector, chore.Knobs{Chores: butlerChores, Every: butlerEvery, Classes: butlerChoreClasses})
 	if err != nil {
 		return fail(stderr, err)
 	}

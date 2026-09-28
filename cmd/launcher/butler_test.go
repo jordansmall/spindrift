@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,21 +27,43 @@ import (
 // that BUTLER_CLAIM_TIMEOUT is an operator knob rather than a package const.
 const testClaimTimeout = 6 * time.Hour
 
-// noEvery is a butlerEveryConfig with no bare default and no overrides: every
-// chore has interval zero, so IntervalNotElapsed never blocks a due check --
-// the shape most tests want when the interval itself isn't what's under test.
-var noEvery = butlerEveryConfig{}
+// noEvery is the zero Every: it never blocks a due check
+// (IntervalNotElapsed), the shape most tests want when the interval itself
+// isn't what's under test.
+const noEvery time.Duration = 0
+
+// testChores builds the []chore.Chore both runButler and testButlerPolicy
+// take: every name gets the same Every and no Classes -- the shape most
+// tests want when a per-chore interval or class allow-list isn't what's
+// under test.
+func testChores(every time.Duration, names ...string) []chore.Chore {
+	chores := make([]chore.Chore, len(names))
+	for i, name := range names {
+		chores[i] = chore.Chore{Name: name, Every: every}
+	}
+	return chores
+}
+
+// withClasses returns chores with classes attached to the entry named name,
+// the shape promotion tests build their policy.chores from.
+func withClasses(chores []chore.Chore, name string, classes ...string) []chore.Chore {
+	for i, c := range chores {
+		if c.Name == name {
+			chores[i].Classes = classes
+		}
+	}
+	return chores
+}
 
 // testButlerPolicy builds a butlerPolicy for tests that don't exercise
 // budgets or the day zone: testClaimTimeout, an unlimited (zero) Budgets,
-// UTC, and enabled set to chores -- everything but budget/zone tests, which
-// build their own butlerPolicy explicitly.
-func testButlerPolicy(every butlerEveryConfig, chores ...string) butlerPolicy {
+// UTC, and chores built by testChores -- everything but budget/zone tests,
+// which build their own butlerPolicy explicitly.
+func testButlerPolicy(every time.Duration, chores ...string) butlerPolicy {
 	return butlerPolicy{
-		every:        every,
+		chores:       testChores(every, chores...),
 		claimTimeout: testClaimTimeout,
 		zone:         time.UTC,
-		enabled:      chores,
 		label:        "ready-for-agent",
 	}
 }
@@ -271,7 +292,7 @@ func TestRunButler_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 			}
 
 			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{choreName}, testButlerPolicy(noEvery, choreName), newDispatcher, func() time.Time { return now })
+			err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), testChores(noEvery, choreName), testButlerPolicy(noEvery, choreName), newDispatcher, func() time.Time { return now })
 			if err != nil {
 				t.Fatalf("runButler: %v", err)
 			}
@@ -312,7 +333,7 @@ func TestRunButler_CrashedRunLeavesClaimStanding(t *testing.T) {
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return crashedDispatcher() }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
+	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if err == nil {
 		t.Fatal("runButler: got nil error, want one reporting the crashed run")
 	}
@@ -344,7 +365,7 @@ func TestRunButler_ClaimStartIsDueCheckInstant(t *testing.T) {
 		calls++
 		return first.Add(time.Duration(calls-1) * time.Hour)
 	}
-	_ = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, now)
+	_ = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher, now)
 
 	tip, err := backend.Read("bugs")
 	if err != nil {
@@ -374,7 +395,7 @@ func TestRunButler_LiveClaimReportsNoWork(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now.Add(time.Minute) })
+	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now.Add(time.Minute) })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -412,7 +433,7 @@ func TestRunButler_StaleClaimIsTakenOver(t *testing.T) {
 	}
 
 	now := start.Add(testClaimTimeout + time.Minute)
-	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
+	err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
@@ -468,7 +489,7 @@ func TestRunButler_StaleClaimTakeoverEndToEnd(t *testing.T) {
 	}
 
 	now := deadStart.Add(testClaimTimeout + time.Minute)
-	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
+	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
@@ -525,7 +546,7 @@ func TestRunButler_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 	}
 
 	now := start.Add(testClaimTimeout - time.Minute)
-	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
+	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -556,7 +577,7 @@ func TestRunButler_ClaimLostRaceReportsNoWork(t *testing.T) {
 	}
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -587,12 +608,9 @@ func TestRunButler_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	every, everr := parseButlerEvery("6h")
-	if everr != nil {
-		t.Fatalf("parseButlerEvery: %v", everr)
-	}
+	every := 6 * time.Hour
 	now := doneAt.Add(time.Hour) // well inside the 6h interval
-	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(every, "bugs"), newDispatcher, func() time.Time { return now })
+	err = runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), testChores(every, "bugs"), testButlerPolicy(every, "bugs"), newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -618,7 +636,7 @@ func TestRunButler_NamedChoreNothingToScanReportsWhy(t *testing.T) {
 	fc := forge.NewFake()
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now }); err != nil {
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("seed clean run: %v", err)
 	}
 
@@ -635,7 +653,7 @@ func TestRunButler_NamedChoreNothingToScanReportsWhy(t *testing.T) {
 		dispatched = true
 		return dispatch.NewFake()
 	}
-	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher2, func() time.Time { return now.Add(time.Hour) })
+	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher2, func() time.Time { return now.Add(time.Hour) })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -671,12 +689,9 @@ func TestRunButler_NoChorePicksFirstDueCandidate(t *testing.T) {
 		return readyDispatcher()
 	}
 
-	every, everr := parseButlerEvery("6h")
-	if everr != nil {
-		t.Fatalf("parseButlerEvery: %v", everr)
-	}
+	every := 6 * time.Hour
 	now := doneAt.Add(time.Hour)
-	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs", "refactor"}, testButlerPolicy(every, "bugs", "refactor"), newDispatcher, func() time.Time { return now })
+	err = runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), testChores(every, "bugs", "refactor"), testButlerPolicy(every, "bugs", "refactor"), newDispatcher, func() time.Time { return now })
 	if err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
@@ -720,12 +735,9 @@ func TestRunButler_NoChoreNoneDueReportsEachReason(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	every, everr := parseButlerEvery("6h")
-	if everr != nil {
-		t.Fatalf("parseButlerEvery: %v", everr)
-	}
+	every := 6 * time.Hour
 	now := doneAt.Add(time.Hour)
-	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs", "refactor"}, testButlerPolicy(every, "bugs", "refactor"), newDispatcher, func() time.Time { return now })
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), testChores(every, "bugs", "refactor"), testButlerPolicy(every, "bugs", "refactor"), newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -967,6 +979,8 @@ func TestButlerPreflight(t *testing.T) {
 		{"chore checked before filer", "local", "other-chore", "", 0, 0, "bugs", false, nil, false, "is not enabled"},
 		{"classes checked before filer", "local", "bugs", "bugs", 0, 0, "bugs", false, nil, false, "BUTLER_CHORE_CLASSES"},
 		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", 0, 0, "tidy-deps", true, nil, false, ""},
+		{"class-list entry naming an unknown non-built-in chore rejected", "local", "bugs", "notachore=error-handling", 0, 0, "bugs", true, nil, false, "is not enabled and not a built-in chore"},
+		{"dogfood-shaped config passes", "local", "bugs docs-drift", schemaDefault("BUTLER_CHORE_CLASSES"), 0, 0, "", true, nil, false, ""},
 		{"no chore: all clear with chores enabled", "local", "bugs", "", 0, 0, "", true, nil, false, ""},
 		{"no chore: empty BUTLER_CHORES rejected", "local", "", "", 0, 0, "", true, nil, false, "BUTLER_CHORES is empty"},
 		{"no chore: filer checked after empty-chores guard", "local", "", "", 0, 0, "", false, nil, false, "BUTLER_CHORES is empty"},
@@ -990,7 +1004,7 @@ func TestButlerPreflight(t *testing.T) {
 				butlerMaxFindingsPerDay:   tc.butlerMaxPerDay,
 			}}
 			catalog := choreCatalog{names: tc.catalogNames, known: tc.catalogKnown}
-			err := butlerPreflight(cfg, tc.chore, tc.filerEnabled, catalog)
+			_, err := butlerPreflight(cfg, tc.chore, tc.filerEnabled, catalog)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("butlerPreflight(%+v): %v", tc, err)
@@ -1031,14 +1045,14 @@ func TestButlerPreflight_PromptDirOverride(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "chores", "bugs.md"), []byte("prompt"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog); err != nil {
+		if _, err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog); err != nil {
 			t.Errorf("butlerPreflight: %v, want nil", err)
 		}
 	})
 
 	t.Run("override dir missing prompt names the path", func(t *testing.T) {
 		dir := t.TempDir()
-		err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog)
+		_, err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog)
 		wantPath := filepath.Join(dir, "chores", "bugs.md")
 		if err == nil || !strings.Contains(err.Error(), "prompt file missing") || !strings.Contains(err.Error(), wantPath) {
 			t.Errorf("butlerPreflight err = %v, want it to name %q", err, wantPath)
@@ -1054,7 +1068,7 @@ func TestButlerPreflight_PromptDirOverride(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, "chores", "bugs.md"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog)
+		_, err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog)
 		if err == nil || !strings.Contains(err.Error(), "prompt file missing") {
 			t.Errorf("butlerPreflight err = %v, want prompt file missing", err)
 		}
@@ -1065,7 +1079,7 @@ func TestButlerPreflight_PromptDirOverride(t *testing.T) {
 		if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		err := butlerPreflight(cfgWith(file), "bugs", true, rejectingCatalog)
+		_, err := butlerPreflight(cfgWith(file), "bugs", true, rejectingCatalog)
 		if err == nil || !strings.Contains(err.Error(), "prompt file missing") || !strings.Contains(err.Error(), "CHORE_CATALOG") {
 			t.Errorf("butlerPreflight err = %v, want the catalog-based error", err)
 		}
@@ -1110,90 +1124,19 @@ func TestParseButlerArgs(t *testing.T) {
 	}
 }
 
-func TestParseButlerEvery(t *testing.T) {
-	cases := []struct {
-		name       string
-		value      string
-		wantErr    bool
-		wantChores map[string]time.Duration // For(chore) results to check
-	}{
-		{"empty value falls back to the 6h default for everyone", "", false, map[string]time.Duration{"bugs": 6 * time.Hour, "other": 6 * time.Hour}},
-		{"bare default applies to every chore", "6h", false, map[string]time.Duration{"bugs": 6 * time.Hour, "other": 6 * time.Hour}},
-		{"override wins over default", "6h docs-drift=168h", false, map[string]time.Duration{"docs-drift": 168 * time.Hour, "bugs": 6 * time.Hour}},
-		{"override with no bare default falls back to the 6h default for others", "docs-drift=168h", false, map[string]time.Duration{"docs-drift": 168 * time.Hour, "bugs": 6 * time.Hour}},
-		{"zero duration is valid and does not fall back", "0s", false, map[string]time.Duration{"bugs": 0}},
-		{"two bare defaults is an error", "6h 12h", true, nil},
-		{"duplicate override is an error", "docs-drift=1h docs-drift=2h", true, nil},
-		{"empty chore name is an error", "=1h", true, nil},
-		{"unparseable duration is an error", "bogus", true, nil},
-		{"negative bare default is an error", "-1h", true, nil},
-		{"negative override is an error", "docs-drift=-1h", true, nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseButlerEvery(tc.value)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("parseButlerEvery(%q): got nil error, want one", tc.value)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("parseButlerEvery(%q): %v", tc.value, err)
-			}
-			for choreName, want := range tc.wantChores {
-				if d := got.For(choreName); d != want {
-					t.Errorf("parseButlerEvery(%q).For(%q) = %v, want %v", tc.value, choreName, d, want)
-				}
-			}
-		})
-	}
-}
-
-// butlerEveryDefault must match BUTLER_EVERY's schema default, or an unset
+// chore.DefaultEvery must match BUTLER_EVERY's schema default, or an unset
 // value and an overrides-only value would get different intervals.
 func TestButlerEveryDefaultMatchesSchema(t *testing.T) {
 	for _, f := range schemaFlags {
 		if f.env != "BUTLER_EVERY" {
 			continue
 		}
-		if d, err := time.ParseDuration(f.dflt); err != nil || d != butlerEveryDefault {
-			t.Errorf("schema default %q, want %v (butlerEveryDefault)", f.dflt, butlerEveryDefault)
+		if d, err := time.ParseDuration(f.dflt); err != nil || d != chore.DefaultEvery {
+			t.Errorf("schema default %q, want %v (chore.DefaultEvery)", f.dflt, chore.DefaultEvery)
 		}
 		return
 	}
 	t.Fatal("BUTLER_EVERY missing from schemaFlags")
-}
-
-func TestButlerEveryConfigCheckOverrides(t *testing.T) {
-	cases := []struct {
-		name         string
-		value        string
-		butlerChores string
-		wantErr      string // substring, or "" for nil
-	}{
-		{"no overrides", "6h", "bugs", ""},
-		{"override matches an enabled chore", "docs-drift=168h", "bugs docs-drift", ""},
-		{"override names a chore not enabled", "docs-drift=168h", "bugs", "docs-drift"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			every, err := parseButlerEvery(tc.value)
-			if err != nil {
-				t.Fatalf("parseButlerEvery(%q): %v", tc.value, err)
-			}
-			err = every.checkOverrides(tc.butlerChores)
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Errorf("checkOverrides(%q) = %v, want nil", tc.butlerChores, err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("checkOverrides(%q) = %v, want error containing %q", tc.butlerChores, err, tc.wantErr)
-			}
-		})
-	}
 }
 
 func TestParseButlerClaimTimeout(t *testing.T) {
@@ -1229,28 +1172,6 @@ func TestParseButlerClaimTimeout(t *testing.T) {
 	}
 }
 
-// choreEnabled is BUTLER_CHORES's membership test: space-separated, exact
-// name match.
-func TestChoreEnabled(t *testing.T) {
-	cases := []struct {
-		list  string
-		chore string
-		want  bool
-	}{
-		{"", "bugs", false},
-		{"bugs", "bugs", true},
-		{"bugs other", "other", true},
-		{"bugs other", "bug", false},
-	}
-	for i, tc := range cases {
-		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			if got := choreEnabled(tc.list, tc.chore); got != tc.want {
-				t.Errorf("choreEnabled(%q, %q) = %v, want %v", tc.list, tc.chore, got, tc.want)
-			}
-		})
-	}
-}
-
 // (j) Budgets are global across every enabled Chore, not per Chore (ADR
 // 0056): a sweep already claimed today on one enabled Chore spends the
 // shared day's sweep budget, so a distinct due candidate on another enabled
@@ -1274,7 +1195,7 @@ func TestRunButler_BudgetSpentByAnotherEnabledChore(t *testing.T) {
 
 	policy := testButlerPolicy(noEvery, "bugs", "refactor")
 	policy.budgets = chore.Budgets{MaxSweepsPerDay: 1}
-	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now })
+	err := runButler(backend, forge.NewFake().AsIssueFiler(), testButlerRun(repo), policy.chores, policy, newDispatcher, func() time.Time { return now })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -1327,7 +1248,7 @@ func TestRunButler_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 	t.Run("same NY day: budget still spent", func(t *testing.T) {
 		dispatched = false
 		now := time.Date(2026, 1, 10, 23, 50, 0, 0, loc)
-		err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now })
+		err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), policy.chores, policy, newDispatcher, func() time.Time { return now })
 		if !errors.Is(err, errQueueEmpty) {
 			t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 		}
@@ -1342,7 +1263,7 @@ func TestRunButler_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 	t.Run("next NY day: due again", func(t *testing.T) {
 		dispatched = false
 		now := time.Date(2026, 1, 11, 0, 10, 0, 0, loc)
-		if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+		if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), policy.chores, policy, newDispatcher, func() time.Time { return now }); err != nil {
 			t.Fatalf("runButler: %v", err)
 		}
 		if !dispatched {
@@ -1379,7 +1300,7 @@ func TestRunButler_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	policy := testButlerPolicy(noEvery, "bugs")
 	policy.budgets = chore.Budgets{MaxFindingsPerSweep: 1}
-	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), policy.chores, policy, newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
 
@@ -1432,12 +1353,12 @@ func TestRunButler_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 	}
 
 	policy := testButlerPolicy(noEvery, "bugs")
-	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
+	policy.chores = withClasses(policy.chores, "bugs", "error-handling")
 	policy.promotionMaxFiles = 3
 	// maxPromotionsPerDay left at its zero value -- the default -- on purpose.
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), policy.chores, policy, newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
 
@@ -1475,12 +1396,12 @@ func TestRunButler_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
 	}
 
 	policy := testButlerPolicy(noEvery, "bugs")
-	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
+	policy.chores = withClasses(policy.chores, "bugs", "error-handling")
 	policy.promotionMaxFiles = 3
 	policy.maxPromotionsPerDay = 1
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), policy.chores, policy, newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
 
@@ -1513,13 +1434,13 @@ func TestRunButler_PromotionUsesConfiguredWorkLabel(t *testing.T) {
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
 
 	policy := testButlerPolicy(noEvery, "bugs")
-	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
+	policy.chores = withClasses(policy.chores, "bugs", "error-handling")
 	policy.promotionMaxFiles = 3
 	policy.maxPromotionsPerDay = 1
 	policy.label = "agent-go"
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), policy.chores, policy, newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
 
@@ -1558,11 +1479,11 @@ func TestRunButler_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
 
 	policy := testButlerPolicy(noEvery, "bugs")
-	policy.choreClasses = map[string][]string{"bugs": {"error-handling"}}
+	policy.chores = withClasses(policy.chores, "bugs", "error-handling")
 	policy.promotionMaxFiles = 3
 	policy.maxPromotionsPerDay = 1
 
-	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), policy.chores, policy, newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
 
@@ -1589,15 +1510,16 @@ func TestRunButler_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testin
 	fc.PostIssueURL = "https://example.com/issues/9203"
 	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
 
-	policy := testButlerPolicy(noEvery, "bugs")
+	policy := testButlerPolicy(noEvery, "bugs", "refactor")
 	// error-handling is allow-listed for "refactor", not "bugs" -- the
 	// Chore this run actually sweeps.
-	policy.choreClasses = map[string][]string{"refactor": {"error-handling"}}
+	policy.chores = withClasses(policy.chores, "refactor", "error-handling")
 	policy.promotionMaxFiles = 3
 	policy.maxPromotionsPerDay = 1
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), []string{"bugs"}, policy, newDispatcher, func() time.Time { return now }); err != nil {
+	candidates := policy.chores[:1] // sweep only "bugs", which carries no Classes of its own
+	if err := runButler(backend, fc.AsIssueFiler(), testButlerRun(repo), candidates, policy, newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
 
@@ -1682,7 +1604,7 @@ func TestRunButler_RemoteBackendFetchesOnceForDueCheck(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	err = runButler(remote, forge.NewFake().AsIssueFiler(), testButlerRun(codeRepo), []string{"bugs", "docs-drift"}, testButlerPolicy(noEvery, "bugs", "docs-drift"), newDispatcher, func() time.Time { return now.Add(time.Minute) })
+	err = runButler(remote, forge.NewFake().AsIssueFiler(), testButlerRun(codeRepo), testChores(noEvery, "bugs", "docs-drift"), testButlerPolicy(noEvery, "bugs", "docs-drift"), newDispatcher, func() time.Time { return now.Add(time.Minute) })
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
 	}
@@ -1711,7 +1633,7 @@ func TestPromotionPolicy_RoomFetchesOnceAcrossEnabledChores(t *testing.T) {
 	policy := testButlerPolicy(noEvery, "bugs", "docs-drift")
 	policy.maxPromotionsPerDay = 1
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	pp := policy.promotionPolicy(remote, "bugs", func() time.Time { return now })
+	pp := policy.promotionPolicy(remote, policy.chores[0], func() time.Time { return now }) // chores[0] is "bugs"
 
 	trace := filepath.Join(t.TempDir(), "trace2.log")
 	t.Setenv("GIT_TRACE2_EVENT", trace)

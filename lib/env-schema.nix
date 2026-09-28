@@ -398,7 +398,7 @@ in
     env = "BUTLER_CHORE_CLASSES";
     group = "dispatch";
     default = choreCatalog.classesDefault;
-    doc = "space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); the auto-promotion trust gate (issue #3880) -- still only acts when BUTLER_MAX_PROMOTIONS_PER_DAY > 0; the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes; each class must be a lowercase slug -- lowercase letters, digits, and '-', not starting with '-', at most 40 characters -- or `spindrift butler` preflight rejects it naming the class and the rule (issue #3986)";
+    doc = "space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); the auto-promotion trust gate (issue #3880) -- still only acts when BUTLER_MAX_PROMOTIONS_PER_DAY > 0; the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes; each class must be a lowercase slug -- lowercase letters, digits, and '-', not starting with '-', at most 40 characters -- or `spindrift butler` preflight rejects it naming the class and the rule (issue #3986); an entry naming a Chore that is neither in BUTLER_CHORES nor a built-in is also rejected (a built-in not enabled is inert, since the default lists every built-in) -- checked at `spindrift butler` and daemon startup whenever BUTLER_CHORES enables a Chore";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "butler.choreClasses";
@@ -408,7 +408,7 @@ in
     env = "BUTLER_EVERY";
     group = "dispatch";
     default = "6h";
-    doc = "space-separated tokens controlling how often each enabled butler Chore is due: a bare Go time.ParseDuration string sets the default interval for every enabled Chore not otherwise overridden, and a `<chore>=<duration>` token overrides that interval for one Chore, e.g. BUTLER_EVERY=6h docs-drift=168h. The interval is measured from the Chore's last done Ledger commit; 0 means no interval (due whenever there is something to scan). With no bare default token, the default interval is 6h. An override naming a Chore not in BUTLER_CHORES is rejected. Validated by the launcher at `spindrift butler` time";
+    doc = "space-separated tokens controlling how often each enabled butler Chore is due: a bare Go time.ParseDuration string sets the default interval for every enabled Chore not otherwise overridden, and a `<chore>=<duration>` token overrides that interval for one Chore, e.g. BUTLER_EVERY=6h docs-drift=168h. The interval is measured from the Chore's last done Ledger commit; 0 means no interval (due whenever there is something to scan). With no bare default token, the default interval is 6h. An override naming a Chore not in BUTLER_CHORES is rejected. Validated by the launcher at `spindrift butler` and daemon startup whenever BUTLER_CHORES enables a Chore";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "butler.every";
