@@ -29,14 +29,16 @@ import (
 // issue, from claim to verdict, plus its driver-cache entry. Construct one
 // via Factory.New.
 type Dispatch struct {
-	number, title string
-	pwd           string
-	runner        runner.Runner
-	driver        driver.Driver
-	clock         Clock
-	cfg           Config
-	cacheDir      string
-	cache         *cache
+	// number is this Dispatch's log/lock/cache/BoxName key: always
+	// subject.key(), set once by Factory.newDispatch (issue #3954).
+	number   string
+	pwd      string
+	runner   runner.Runner
+	driver   driver.Driver
+	clock    Clock
+	cfg      Config
+	cacheDir string
+	cache    *cache
 
 	// nonce is this Dispatch's per-run nonce (issue #1937), minted by
 	// Factory.New, forwarded into every Box as RUN_NONCE, and kept here so
@@ -69,7 +71,8 @@ type Dispatch struct {
 
 	// subject is what this Dispatch's Box works (ADR 0056, issue #3875): an
 	// issueSubject for a tracker issue, or a choreSubject for a
-	// Factory.NewChore Dispatch. buildBoxEnv forwards a choreSubject as
+	// Factory.NewChore Dispatch, and the sole source of the Dispatch's key
+	// and title (issue #3954). buildBoxEnv forwards a choreSubject as
 	// CHORE_*/BASE_BRANCH in place of the issue-keyed
 	// ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT trio.
 	subject subject
@@ -239,7 +242,7 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 // instead: d.number is ChoreKey(Name), not a tracker issue, and the report
 // wire shape must never carry that key as an Issue (issue #3878).
 func (d *Dispatch) announce(phase string) {
-	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.title))
+	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.subject.title()))
 	if c, ok := d.subject.(choreSubject); ok {
 		report.ChoreBox(c.Chore.Name, phase)
 		return
