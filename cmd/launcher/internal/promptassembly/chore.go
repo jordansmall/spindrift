@@ -10,12 +10,19 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
-// ChoreNameRe is the ChoreName shape allowed to reach filepath.Join: letters,
-// digits, dash, and underscore only. No path separator or ".." can ever cross
-// this gate before choreSection builds the chores/<name>.md lookup path
-// (ADR 0056, issue #3875). internal/butler bounds BUTLER_CHORE_CLASSES names
-// with it too.
-var ChoreNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var choreNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// ChoreNameRule describes choreNameRe for error messages; keep the two in step.
+const ChoreNameRule = "must contain only letters, digits, '-', and '_'"
+
+// ValidChoreName reports whether s is one or more letters, digits, dash, and
+// underscore -- the one shape a ChoreName must satisfy before it can safely reach
+// filepath.Join. No path separator or ".." can ever cross this gate before
+// choreSection builds the chores/<name>.md lookup path (ADR 0056, issue
+// #3875). internal/butler bounds BUTLER_CHORE_CLASSES names with it too.
+func ValidChoreName(s string) bool {
+	return choreNameRe.MatchString(s)
+}
 
 // choreSection renders the ${CHORE_PROMPT} substitution value: the named
 // Chore's own prompt file under PromptsDir/chores/<name>.md. Every kind other
@@ -29,8 +36,8 @@ func choreSection(e Env) (string, error) {
 	if d.Keying != dispatchkind.ByChore {
 		return "", nil
 	}
-	if !ChoreNameRe.MatchString(e.ChoreName) {
-		return "", fmt.Errorf("promptassembly: invalid CHORE_NAME %q: must contain only letters, digits, '-', and '_'", e.ChoreName)
+	if !ValidChoreName(e.ChoreName) {
+		return "", fmt.Errorf("promptassembly: invalid CHORE_NAME %q: %s", e.ChoreName, ChoreNameRule)
 	}
 	path := filepath.Join(e.PromptsDir, "chores", e.ChoreName+".md")
 	data, err := os.ReadFile(path)

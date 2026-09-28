@@ -7,10 +7,6 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// nameRe is promptassembly's ChoreNameRe, the one source of truth for the
-// chore-name shape (ADR 0056, issue #3875); it bounds class names too.
-var nameRe = promptassembly.ChoreNameRe
-
 // ParseClasses parses BUTLER_CHORE_CLASSES (ADR 0056): a space-separated list
 // of "<chore>=<class>[,<class>...]" entries, the host-side allow-list of
 // finding classes each Chore may auto-promote. The Box never sees this value
@@ -23,8 +19,8 @@ func ParseClasses(s string) (map[string][]string, error) {
 		if !ok {
 			return nil, fmt.Errorf("invalid entry %q: missing '='", entry)
 		}
-		if !nameRe.MatchString(chore) {
-			return nil, fmt.Errorf("invalid chore name %q: must contain only letters, digits, '-', and '_'", chore)
+		if !promptassembly.ValidChoreName(chore) {
+			return nil, fmt.Errorf("invalid chore name %q: %s", chore, promptassembly.ChoreNameRule)
 		}
 		if _, dup := out[chore]; dup {
 			return nil, fmt.Errorf("duplicate chore %q", chore)
@@ -32,8 +28,8 @@ func ParseClasses(s string) (map[string][]string, error) {
 		classes := strings.Split(classesPart, ",")
 		seen := map[string]bool{}
 		for _, class := range classes {
-			if !nameRe.MatchString(class) {
-				return nil, fmt.Errorf("invalid class %q for chore %q: must contain only letters, digits, '-', and '_'", class, chore)
+			if !promptassembly.ValidChoreName(class) {
+				return nil, fmt.Errorf("invalid class %q for chore %q: %s", class, chore, promptassembly.ChoreNameRule)
 			}
 			if seen[class] {
 				return nil, fmt.Errorf("duplicate class %q for chore %q", class, chore)

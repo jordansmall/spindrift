@@ -101,10 +101,10 @@ func validIssue(s string) bool {
 	return true
 }
 
-// validChore reports whether s is a non-empty Chore name within
-// maxChoreLen, matching promptassembly.ChoreNameRe — the same regexp a
-// Chore name must already satisfy before it ever reaches a Box (ADR 0056).
-// maxChoreLen is an extra, wire-only bound the regexp itself doesn't impose.
+// validChore reports whether s is within maxChoreLen and passes
+// promptassembly.ValidChoreName — the same check a Chore name must already
+// satisfy before it ever reaches a Box (ADR 0056). maxChoreLen is an extra,
+// wire-only bound ValidChoreName itself doesn't impose.
 func validChore(s string) bool {
-	return s != "" && len(s) <= maxChoreLen && promptassembly.ChoreNameRe.MatchString(s)
+	return len(s) <= maxChoreLen && promptassembly.ValidChoreName(s)
 }

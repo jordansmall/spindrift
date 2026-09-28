@@ -390,8 +390,8 @@ func butlerPreflight(cfg config, chore string, filerEnabled bool, catalog choreC
 	}
 	enabled := butler.Chores(cfg.butlerChores)
 	for _, c := range append([]string{chore}, enabled...) {
-		if c != "" && !promptassembly.ChoreNameRe.MatchString(c) {
-			return fmt.Errorf("butler: chore %q: invalid name format: must match %s", c, promptassembly.ChoreNameRe)
+		if c != "" && !promptassembly.ValidChoreName(c) {
+			return fmt.Errorf("butler: chore %q: invalid name format: %s", c, promptassembly.ChoreNameRule)
 		}
 	}
 	if chore != "" {
