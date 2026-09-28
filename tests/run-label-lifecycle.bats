@@ -61,6 +61,17 @@ setup() {
   ! grep -q -- '--add-label agent-failed' "$GH_LOG"
 }
 
+@test "an already-resolved run swaps agent-in-progress -> agent-complete and closes the issue" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tOnly issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=already-resolved note=Already fixed by abc1234 on main."
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  grep -q -- 'issue close 1 --repo owner/repo --reason completed' "$GH_LOG"
+  ! grep -q -- '--add-label agent-failed' "$GH_LOG"
+}
+
 @test "IN_PROGRESS_LABEL and FAILED_LABEL env vars override the baked defaults" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_PODMAN_RUN_EXIT=1
