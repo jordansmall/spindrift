@@ -577,6 +577,15 @@ share the canonical Dispatch lifecycle; on the `github` tracker each kind
 maps the states to its own label family.
 _Avoid_: mode, dispatch type, pipeline.
 
+**Dispatch key**:
+The one value naming what a Dispatch works: an issue number for the `work`
+and `research` kinds, or a [[Chore]] name for the `butler` — never both,
+never neither. It renders as the bare issue number or `butler-` plus the
+Chore name, and that text is the Box name, log path, claim, and the outcome
+line's `issue=` field. `internal/dispatchkey` holds it; the report record,
+[[Daemon]] event, slot flight, and Box env builder all carry it.
+_Avoid_: issue number (for a butler run), Dispatch ID, subject.
+
 **Driving loop**:
 Whatever keeps invoking Dispatches against the queue unattended, across many
 invocations — the [[Daemon]] today, `dogfood.sh` before it. The thing that
