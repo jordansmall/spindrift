@@ -48,7 +48,36 @@ required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
 
 # SCOUT
 
-${SCOUT_DELEGATE_STEP}${SCOUT_ABSENT_STEP}# IMPLEMENT
+${SCOUT_DELEGATE_STEP}${SCOUT_ABSENT_STEP}# ALREADY RESOLVED
+
+After scouting, check whether the issue's change is already present on the
+*fetched* default branch — not merely on the branch you cut `${BRANCH}` from.
+Run `git fetch origin`, then verify directly against `origin/${BASE_BRANCH}`:
+does that ref already contain the fix, feature, or behavior the issue asks
+for?
+
+A partial or speculative match does not qualify — only a demonstrable one
+does. The change must be verifiably in place, ideally with the existing
+check or test that proves it named in the note. A plausible-looking commit
+message or adjacent code is not enough on its own; read the actual diff.
+
+If it is genuinely already resolved, do not implement anything — no commits,
+no push, no PR, no in-box comment, no in-box close: the launcher does the
+rest host-side once you exit. Name the resolving commit SHA or PR, and the
+check or test proving it, in the SPINDRIFT_OUTCOME line's `note=` field.
+
+Print exactly one line and stop — raw plain text, not wrapped in backticks,
+a code fence, or any other markdown formatting, nothing after it:
+
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=already-resolved note=<resolving commit or PR, plus the check/test that proves it>
+
+`status=already-resolved` is a distinct, successful, non-crash stop — never
+`status=blocked`, and never a signal that implementation itself failed.
+
+If the change is not already present, proceed straight into # IMPLEMENT
+below with no further comment about this gate.
+
+# IMPLEMENT
 
 ${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}A comment earns its place only by carrying something the code cannot state
 itself: the non-obvious why, a constraint, or a gotcha. Never write a
@@ -128,9 +157,11 @@ THE CHANGE above.)
 ${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
 spaces and `=`). The only valid `status` values here are `ready` and `blocked`
-— no other word belongs in that field (`status=ambiguous` is a distinct,
-earlier ISSUE COHERENCE GATE that exits the run before ever reaching
-this OUTCOME section, not a third option here).
+— no other word belongs in that field (`status=ambiguous` and
+`status=already-resolved` are each a distinct, earlier gate — the ISSUE
+COHERENCE GATE and the ALREADY RESOLVED gate, respectively — that exits the
+run before ever reaching this OUTCOME section, not a third or fourth option
+here).
 
 This grammar's leading token is load-bearing (ADR 0035): the in-box
 orchestrator's scanPassLog greps for it verbatim (via
