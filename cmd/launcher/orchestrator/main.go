@@ -69,9 +69,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	reviewPassEnabled := handoff.ReviewPromptFile != ""
 	// An incoherent cap pair warns rather than fails (issue #2460): the run
 	// proceeds with the review-round cap never firing, since maxSlices shadows
-	// it.
-	if err := validateCaps(handoff.Caps.MaxReviewRounds, handoff.Caps.MaxSlices, reviewPassEnabled); err != nil {
-		fmt.Fprintln(stderr, err)
+	// it. Under AdvisoryReviewer the loop reads no verdict at all (issue
+	// #3925), so that cap never fires whatever maxSlices is, and the warning's
+	// "raise -max-slices" advice would be wrong.
+	if !handoff.AdvisoryReviewer {
+		if err := validateCaps(handoff.Caps.MaxReviewRounds, handoff.Caps.MaxSlices, reviewPassEnabled); err != nil {
+			fmt.Fprintln(stderr, err)
+		}
 	}
 
 	// Both handoff producers reject a negative budget before writing the JSON, so
@@ -101,6 +105,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		dispositionsPath: *dispositionsPath,
 		decisionsPath:    *decisionsPath,
 		manifestPath:     *manifestPath,
+		advisoryReviewer: handoff.AdvisoryReviewer,
 		maxReviewRounds:  handoff.Caps.MaxReviewRounds,
 		maxSlices:        handoff.Caps.MaxSlices,
 		maxBudgetTokens:  maxBudgetTokens,

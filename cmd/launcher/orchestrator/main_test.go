@@ -133,6 +133,54 @@ exit 0
 	}
 }
 
+// TestMainRunThreadsAdvisoryReviewerFromHandoff pins the issue #3925 wiring:
+// handoff.AdvisoryReviewer must reach config.advisoryReviewer, so a legacy-loop
+// pass whose only "verdict" is an inline reviewer subagent's tool result stops
+// "no verdict" on pass 1 instead of reading it as a pass-level BLOCK and
+// looping again. The caps are an incoherent pair on purpose: the cap-pair
+// warning must stay silent, since the review-round cap can never fire here.
+func TestMainRunThreadsAdvisoryReviewerFromHandoff(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONVerdictLine("VERDICT: BLOCK")+`' > "$DRIVER_LOG_PATH"
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	handoffFile := writeHandoffFile(t, dir, promptassembly.Handoff{
+		Driver:           "claude",
+		DriverBin:        "claude",
+		AdvisoryReviewer: true,
+		Caps:             promptassembly.Caps{MaxReviewRounds: 3, MaxSlices: 2},
+	})
+
+	var stdout, stderr bytes.Buffer
+	rc := mainRun([]string{
+		"-handoff-file", handoffFile,
+		"-prompt-file", filepath.Join(dir, "prompt.txt"),
+		"-log-path", filepath.Join(dir, "stream.log"),
+		"-state-file", filepath.Join(dir, "run-state.json"),
+	}, &stdout, &stderr)
+
+	if rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"no verdict"`) {
+		t.Errorf("stdout = %q, want a stop/\"no verdict\" decision, proving Handoff.AdvisoryReviewer threaded into config.advisoryReviewer", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "cannot reach") {
+		t.Errorf("stderr = %q, want no cap-pair warning under AdvisoryReviewer", stderr.String())
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	if len(bytes.TrimSpace(calls)) == 0 {
+		t.Fatal("driver-exec was never invoked")
+	}
+}
+
 // TestMainRunToleratesNegativeBudgetCaps proves mainRun clamps a negative
 // budget cap to 0 and runs the Box to completion rather than aborting (issues
 // #2694, #2975). Caps arrive already typed from the handoff, so a malformed

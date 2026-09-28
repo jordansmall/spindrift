@@ -1996,9 +1996,13 @@ artifact, not a growing transcript:
   pass. Without a review pass (the legacy single-loop path, reached only
   when `ReviewPromptFile` is empty), each pass folds its own review in
   inline instead of splitting implement/review into separate invocations,
-  so the minimum is one less than half: `N + 2`. The shipped defaults sit
-  exactly at the review-pass loop's minimum for `N=3`: `--max-slices=9` is
-  `2*3+3`. When both caps are non-zero and `--max-slices` falls below
+  so the minimum is one less than half: `N + 2`. When the handoff's
+  `AdvisoryReviewer` field is set (the butler under `ORCHESTRATOR`, whose
+  inline reviewer only advises), the legacy loop reads no verdict at all: a
+  pass without an outcome stops with "no verdict", `--max-review-rounds`
+  never fires, and the cap-pair warning is skipped (issue #3925). The
+  shipped defaults sit exactly at the review-pass loop's minimum for
+  `N=3`: `--max-slices=9` is `2*3+3`. When both caps are non-zero and `--max-slices` falls below
   whichever minimum applies, the orchestrator surfaces the incoherence as a
   warning printed to stderr naming the minimum `--max-slices` the given
   `--max-review-rounds` needs — the run still proceeds, with

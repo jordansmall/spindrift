@@ -1422,6 +1422,71 @@ func TestRunEmitsDecisionMarkerOnStdout(t *testing.T) {
 	}
 }
 
+// TestRunAdvisoryReviewerDiscardsInlineReviewerVerdict pins the issue #3925
+// fix: under cfg.advisoryReviewer, a butler-style kind's own inline reviewer
+// subagent posts a "-> [reviewer] VERDICT: ..." tool result that is advisory
+// prose inside the pass, not a pass-level verdict. A pass with no outcome and
+// no other verdict source must stop "no verdict" on pass 1, never read the
+// subagent's BLOCK/APPROVE as its own and start a second pass.
+func TestRunAdvisoryReviewerDiscardsInlineReviewerVerdict(t *testing.T) {
+	for _, verdict := range []string{"BLOCK", "APPROVE"} {
+		t.Run(verdict, func(t *testing.T) {
+			dir := t.TempDir()
+			callLog := filepath.Join(dir, "calls.log")
+			body := fmt.Sprintf(`printf '%%s' '%s' > "$DRIVER_LOG_PATH"
+exit 0
+`, streamJSONVerdictLine("VERDICT: "+verdict))
+			writeFakeDriverExec(t, dir, callLog, body)
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			promptFile := filepath.Join(dir, "prompt.txt")
+			if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			stateFile := filepath.Join(dir, "run-state.json")
+
+			cfg := config{
+				promptFile:       promptFile,
+				logPath:          filepath.Join(dir, "stream.log"),
+				stateFile:        stateFile,
+				maxReviewRounds:  3,
+				maxSlices:        5,
+				advisoryReviewer: true,
+			}
+
+			var stdout bytes.Buffer
+			if _, err := run(cfg, &stdout); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+
+			calls, err := os.ReadFile(callLog)
+			if err != nil {
+				t.Fatalf("read callLog: %v", err)
+			}
+			lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+			if len(lines) != 1 {
+				t.Fatalf("driver-exec invocation count = %d, want 1 -- the inline reviewer's %s must not start a second pass", len(lines), verdict)
+			}
+
+			out := stdout.String()
+			if !strings.Contains(out, `"op":"decision","decision":"stop","reason":"no verdict"`) {
+				t.Errorf("stdout = %q, want a stop decision marker with reason %q", out, "no verdict")
+			}
+			if strings.Contains(out, `"op":"verdict"`) {
+				t.Errorf("stdout = %q, want no verdict op emitted for an advisory-reviewer pass", out)
+			}
+
+			got, err := runstate.ReadRunState(stateFile)
+			if err != nil {
+				t.Fatalf("ReadRunState: %v", err)
+			}
+			if got.LastVerdict != "" {
+				t.Errorf("LastVerdict = %q, want empty -- the inline reviewer's verdict must never seed run-state", got.LastVerdict)
+			}
+		})
+	}
+}
+
 // runReviewLoopFixture builds the two-round review-pass loop fixture shared by
 // TestRunDecisionOpsAlwaysHaveNonEmptyReason and
 // TestRunWithReviewPassAccumulatesDecisionsAcrossRoundsInDecisionsLog: a temp
