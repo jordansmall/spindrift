@@ -4367,7 +4367,7 @@ of a Dockerfile. The trade-offs:
 - **Reproducible toolchain by construction** via the pinned flake, rather than a
   floating language-runtime base image.
 
-See [`docs/adr/`](adr/) for the full architectural decision records (0001–0055),
+See [`docs/adr/`](adr/) for the full architectural decision records,
 including the Go launcher ([ADR 0007](adr/0007-runtime-logic-is-a-nix-built-go-binary.md)),
 the pluggable OCI/bwrap runner ([ADR 0006](adr/0006-box-isolation-is-a-pluggable-runner.md)),
 and nix-in-the-box ([ADR 0008](adr/0008-nix-is-a-first-class-default-in-the-box.md)).
