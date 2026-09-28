@@ -772,18 +772,27 @@ checkedMerge {
   # meant to source (issue #3698). A third assert covers a separate invariant
   # the same axis implies: a launcherIgnores knob must also set flakeOption,
   # since its settings path is all warnAmbientKnobEnv has left to suggest.
+  # The remaining asserts pin docs/reference.md's `### Advanced tuning` table
+  # to the same axis, in both directions, and require the inert-flag aside on
+  # every clause-bearing row, so a hand-edited row can't drift from the schema
+  # silently (issue #3855).
   launcher-ignores-doc-consistency =
     let
       schema = import ../../lib/env-schema.nix;
       inherit (pkgs.lib)
         assertMsg
         hasInfix
+        hasPrefix
         filter
         attrNames
         sort
         concatStringsSep
+        splitString
+        listToAttrs
+        elemAt
         ;
       clause = "the launcher itself ignores it";
+      inertFlagClause = "(its `--flag` is accepted but inert)";
       axisSet = n: schema.${n}.launcherIgnores or false;
       docSet = n: hasInfix clause schema.${n}.doc;
       names = attrNames schema;
@@ -795,6 +804,45 @@ checkedMerge {
       noFlakeOption = sort builtins.lessThan (
         filter (n: axisSet n && !(schema.${n}.flakeOption or false)) names
       );
+
+      # docs/reference.md's `### Advanced tuning` table, sliced from that
+      # heading to the next one (any level) — a renamed heading trips the
+      # sectionFound assert below rather than leaving the check vacuous.
+      docSrc = builtins.readFile ../../docs/reference.md;
+      heading = "### Advanced tuning";
+      headingSplit = splitString "\n${heading}\n" docSrc;
+      sectionFound = builtins.length headingSplit > 1;
+      sectionBody =
+        if sectionFound then builtins.head (splitString "\n#" (elemAt headingSplit 1)) else "";
+      rowLines = filter (l: hasPrefix "| `" l) (splitString "\n" sectionBody);
+      rowEnv = l: elemAt (splitString "`" l) 1;
+      rowsWithClause = filter (l: hasInfix clause l) rowLines;
+      docEnvsWithClause = map rowEnv rowsWithClause;
+      # Keyed on env name, so two knobs sharing one would silently collapse
+      # (listToAttrs keeps the first); the sharedEnvs assert rules that out.
+      envByName = listToAttrs (
+        map (n: {
+          name = schema.${n}.env;
+          value = n;
+        }) names
+      );
+      envGroups = builtins.groupBy (n: schema.${n}.env) names;
+      sharedEnvs = filter (e: builtins.length envGroups.${e} > 1) (attrNames envGroups);
+
+      # (a) axis knobs whose docs/reference.md row never states the clause.
+      axisNames = filter axisSet names;
+      docMissingClause = sort builtins.lessThan (
+        filter (env: !(builtins.elem env docEnvsWithClause)) (map (n: schema.${n}.env) axisNames)
+      );
+      # (b) clause-bearing rows whose knob doesn't set the axis (or whose env
+      # name doesn't resolve to a schema knob at all).
+      docStaleClause = sort builtins.lessThan (
+        filter (env: !(envByName ? ${env} && axisSet envByName.${env})) docEnvsWithClause
+      );
+      # (c) each clause-bearing row must also carry the inert-flag aside.
+      rowsMissingInertFlag = sort builtins.lessThan (
+        map rowEnv (filter (l: !(hasInfix inertFlagClause l)) rowsWithClause)
+      );
     in
     assert assertMsg (missingAxis == [ ])
       "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " missingAxis} ] doc says \"${clause}\" but do not set launcherIgnores = true (issue #3698)";
@@ -802,6 +850,18 @@ checkedMerge {
       "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " staleAxis} ] set launcherIgnores = true but their doc no longer says \"${clause}\" (issue #3698)";
     assert assertMsg (noFlakeOption == [ ])
       "lib/env-schema.nix: knob(s) [ ${concatStringsSep " " noFlakeOption} ] set launcherIgnores = true without flakeOption = true, leaving warnAmbientKnobEnv no settings path to suggest in place of the inert flag (issue #3698)";
+    assert assertMsg sectionFound
+      "docs/reference.md: could not find the \"${heading}\" section — has it been renamed or removed (issue #3855)?";
+    assert assertMsg (sharedEnvs == [ ])
+      "lib/env-schema.nix: env name(s) [ ${
+        concatStringsSep "; " (map (e: "${e}: ${concatStringsSep " " envGroups.${e}}") sharedEnvs)
+      } ] shared by more than one knob, so an Advanced tuning row would resolve against the wrong knob (issue #3855)";
+    assert assertMsg (docMissingClause == [ ])
+      "docs/reference.md: Advanced tuning table has no row saying \"${clause}\" for launcherIgnores knob(s) [ ${concatStringsSep " " docMissingClause} ] (issue #3855)";
+    assert assertMsg (docStaleClause == [ ])
+      "docs/reference.md: Advanced tuning table row(s) for [ ${concatStringsSep " " docStaleClause} ] say \"${clause}\" but the knob doesn't set launcherIgnores = true (issue #3855)";
+    assert assertMsg (rowsMissingInertFlag == [ ])
+      "docs/reference.md: Advanced tuning table row(s) for [ ${concatStringsSep " " rowsMissingInertFlag} ] say \"${clause}\" but omit \"${inertFlagClause}\" (issue #3855)";
     pkgs.runCommand "launcher-ignores-doc-consistency" { } "touch $out";
 
   # A knob's `choices` must be a non-empty list of strings and its `default` a
