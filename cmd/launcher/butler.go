@@ -459,46 +459,70 @@ func butlerPreflight(cfg config, chore string, filerEnabled bool, catalog choreC
 	return nil
 }
 
+// butlerSettings is resolveButlerSettings's parsed result.
+type butlerSettings struct {
+	every        butlerEveryConfig
+	claimTimeout time.Duration
+	window       *daemon.Window
+	choreClasses map[string][]string
+}
+
+// resolveButlerSettings runs every butler config check -- butlerPreflight's
+// guards, then BUTLER_EVERY (and its per-chore overrides),
+// BUTLER_CLAIM_TIMEOUT, and DAEMON_AWAKE_WINDOW -- before any Ledger claim.
+func resolveButlerSettings(cfg config, chore string) (butlerSettings, error) {
+	filerEnabled := resolveAgentPresenceSignals(cfg.driver).filerEnabled
+	if err := butlerPreflight(cfg, chore, filerEnabled, resolveChoreCatalog()); err != nil {
+		return butlerSettings{}, err
+	}
+	// butlerPreflight already validated this string; parsing again here (once,
+	// not per Chore run) turns it into the map runOneButlerChore's
+	// promotionPolicy indexes by chore.
+	choreClasses, err := butler.ParseClasses(cfg.butlerChoreClasses)
+	if err != nil {
+		return butlerSettings{}, fmt.Errorf("butler: BUTLER_CHORE_CLASSES: %w", err)
+	}
+	every, err := parseButlerEvery(cfg.butlerEvery)
+	if err != nil {
+		return butlerSettings{}, err
+	}
+	if err := every.checkOverrides(cfg.butlerChores); err != nil {
+		return butlerSettings{}, err
+	}
+	claimTimeout, err := parseButlerClaimTimeout(cfg.butlerClaimTimeout)
+	if err != nil {
+		return butlerSettings{}, err
+	}
+	window, err := daemon.ParseWindow(cfg.daemonAwakeWindow)
+	if err != nil {
+		return butlerSettings{}, err
+	}
+	return butlerSettings{every: every, claimTimeout: claimTimeout, window: window, choreClasses: choreClasses}, nil
+}
+
 // cmdButler is the `butler [--chore <name>]` subcommand (ADR 0056, issue
 // #3875, #3877, #3880): it sweeps the first due Chore among the one named on
 // --chore, or else every BUTLER_CHORES entry in order, and reports "no work"
 // with each candidate's reason if none is due. Each swept Chore's finding is
 // auto-promoted to ready-for-agent when it clears every host-side gate
 // (allow-listed class, file limit, reviewer concurrence, and daily
-// promotion room); BUTLER_MAX_PROMOTIONS_PER_DAY defaults to 0, off.
+// promotion room); BUTLER_MAX_PROMOTIONS_PER_DAY defaults to 0, off. A
+// resolveButlerSettings failure exits exitConfigInvalid (6) rather than 1,
+// so the daemon's shared breaker (internal/daemon/outcome.go) never treats a
+// config problem as an unclassified error (issue #3920).
 func cmdButler(lc *launchContext, chore string) int {
 	defer lc.cleanup()
 
-	filerEnabled := resolveAgentPresenceSignals(lc.config.driver).filerEnabled
-	if err := butlerPreflight(lc.config, chore, filerEnabled, resolveChoreCatalog()); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-
-	every, err := parseButlerEvery(lc.config.butlerEvery)
+	settings, err := resolveButlerSettings(lc.config, chore)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	if err := every.checkOverrides(lc.config.butlerChores); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	claimTimeout, err := parseButlerClaimTimeout(lc.config.butlerClaimTimeout)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return exitConfigInvalid
 	}
 	budgets := butler.Budgets{
 		MaxSweepsPerDay:     lc.config.butlerMaxSweepsPerDay,
 		MaxFindingsPerDay:   lc.config.butlerMaxFindingsPerDay,
 		MaxFindingsPerSweep: lc.config.butlerMaxFindingsPerSweep,
 		DailyTokenCeiling:   lc.config.butlerDailyTokenCeiling,
-	}
-	window, err := daemon.ParseWindow(lc.config.daemonAwakeWindow)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
 	}
 
 	// Unlike internal/daemon/lock.go and status.go, which fall back to
@@ -527,22 +551,13 @@ func cmdButler(lc *launchContext, chore string) int {
 		chores = enabled
 	}
 
-	// butlerPreflight already validated BUTLER_CHORE_CLASSES; parsing again
-	// here (once, not per Chore run) turns the validated string into the
-	// map runOneButlerChore's promotionPolicy indexes by chore.
-	choreClasses, err := butler.ParseClasses(lc.config.butlerChoreClasses)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-
 	policy := butlerPolicy{
-		every:               every,
-		claimTimeout:        claimTimeout,
+		every:               settings.every,
+		claimTimeout:        settings.claimTimeout,
 		budgets:             budgets,
-		zone:                window.Location(),
+		zone:                settings.window.Location(),
 		enabled:             enabled,
-		choreClasses:        choreClasses,
+		choreClasses:        settings.choreClasses,
 		promotionMaxFiles:   lc.config.butlerPromotionMaxFiles,
 		maxPromotionsPerDay: lc.config.butlerMaxPromotionsPerDay,
 		label:               lc.config.configuredWorkLabel,

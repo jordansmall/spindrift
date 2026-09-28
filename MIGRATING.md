@@ -1,5 +1,17 @@
 # Migration Guide
 
+## `spindrift butler` config failures now exit 6, not 1 (issue #3920)
+
+A `spindrift butler` run that fails config validation — the preflight
+checks (Filer, `DRIVER`, `CODE_FORGE` Ledger, `BUTLER_CHORE_CLASSES`, the
+sweep-vs-day cap relationship), or a malformed `BUTLER_EVERY`,
+`BUTLER_CLAIM_TIMEOUT`, or `DAEMON_AWAKE_WINDOW` — now exits 6
+(config-invalid) instead of 1. A wrapper script branching on exit 1 to
+detect a butler config problem needs to check for 6 instead. The daemon's
+own startup preflight (`spindrift doctor --butler`) picks this up too: a
+misconfigured butler now halts daemon startup outright rather than
+counting each idle slot's config failure toward the shared breaker.
+
 ## The `dogfood-stop` devShell alias is gone along with `dogfood.sh` (issue #3548)
 
 `./dogfood.sh` is deleted — the daemon (`nix run .#daemon`) is the only
