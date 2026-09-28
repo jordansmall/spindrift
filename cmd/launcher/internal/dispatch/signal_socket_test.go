@@ -219,7 +219,7 @@ func TestRunOnce_SignalCarrierSocket_TCPVerdictUnderNoHostLoopback_Fails(t *test
 
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 
-	env, err := buildBoxEnv(d.cfg, d.number, d.subject, 0, "", d.nonce)
+	env, err := buildBoxEnv(d.cfg, d.subject, 0, "", d.nonce)
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestRunOnce_SignalCarrierSocket_TransportProbeErrorsAbortsDispatch(t *testi
 
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 
-	env, err := buildBoxEnv(d.cfg, d.number, d.subject, 0, "", d.nonce)
+	env, err := buildBoxEnv(d.cfg, d.subject, 0, "", d.nonce)
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}

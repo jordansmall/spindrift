@@ -45,16 +45,24 @@ type Chore struct {
 }
 
 // subject is what a Dispatch's Box works: a tracker issue (issueSubject) or a
-// one-shot butler Chore (choreSubject, ADR 0056). The unexported isSubject
-// seals it, so no third variant can reach buildBoxEnv's or announce's switch.
-type subject interface{ isSubject() }
+// one-shot butler Chore (choreSubject, ADR 0056). key and title supply the
+// Dispatch's log/lock/cache key and its human-facing title (issue #3954).
+// Being unexported, they keep out only other packages' types; a third
+// in-package variant is caught by buildBoxEnv's unknown-subject error.
+type subject interface {
+	key() string
+	title() string
+}
 
 type issueSubject struct{ Number, Title string }
 
 type choreSubject struct{ Chore Chore }
 
-func (issueSubject) isSubject() {}
-func (choreSubject) isSubject() {}
+func (s issueSubject) key() string   { return s.Number }
+func (s issueSubject) title() string { return s.Title }
+
+func (s choreSubject) key() string   { return ChoreKey(s.Chore.Name) }
+func (s choreSubject) title() string { return "butler: " + s.Chore.Name }
 
 // Config carries the subset of launcher config a Dispatch needs to build a
 // Box's env and drive its retry policy.
@@ -191,14 +199,14 @@ func (c Config) boxAccessForKind() string {
 // templates promise the Box an injected ISSUE_TEXT section. It fires before any
 // box runs, so the empty-log check surfaces it on Result.Err (issue #3119).
 //
-// subj is a choreSubject only for a Factory.NewChore Dispatch (ADR 0056): key
-// is then ChoreKey(subj.Chore.Name), not a tracker issue number, so this skips
-// ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT and the BASE_BRANCH entry of the
-// ResolveEnv loop entirely (CODE_FORGE=local's localBaseBranchResolver, the
-// only ResolveEnv caller that reads the key, would otherwise run an
+// subj is a choreSubject only for a Factory.NewChore Dispatch (ADR 0056):
+// subj.key() is then ChoreKey(subj.Chore.Name), not a tracker issue number,
+// so this skips ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT and the BASE_BRANCH entry
+// of the ResolveEnv loop entirely (CODE_FORGE=local's localBaseBranchResolver,
+// the only ResolveEnv caller that reads the key, would otherwise run an
 // issue-tracker lookup against a chore key that names no issue) and forwards
 // CHORE_* plus BASE_BRANCH from the Chore directly instead.
-func buildBoxEnv(cfg Config, key string, subj subject, fixPass int, ciFailureSummary string, nonce string) (map[string]string, error) {
+func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string, nonce string) (map[string]string, error) {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
 		resolve = func(_, name string) string { return os.Getenv(name) }
@@ -207,6 +215,7 @@ func buildBoxEnv(cfg Config, key string, subj subject, fixPass int, ciFailureSum
 	if _, isIssue := subj.(issueSubject); !isChore && !isIssue {
 		return nil, fmt.Errorf("unknown dispatch subject %T", subj)
 	}
+	key := subj.key()
 	env := make(map[string]string)
 	for _, name := range strings.Fields(cfg.BoxEnvVars) {
 		if isChore && name == "BASE_BRANCH" {
