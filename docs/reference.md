@@ -258,9 +258,13 @@ Three paths to discover which options exist and what they do:
    full flag table grouped by domain.  Every schema-generated flake option
    maps 1:1 to a `--<flag>` in the same domain heading, so the CLI reference
    doubles as a guide to what is settable in the flake for schema-generated
-   knobs. Structural options (`roster`, `skills`, `driver`, ...) are flake-only
-   and have no CLI flag counterpart; conversely some flags (e.g.
-   `--skills-dir`) have no flake option at all.
+   knobs. The mapping does not mean every flag acts at the launcher, though:
+   a flag whose `--help` text says the launcher itself ignores it is
+   daemon-only, accepted and silently inert there, so set that knob through
+   `settings` / `perSystem.spindrift.dispatch.*` instead (see
+   [Advanced tuning](#advanced-tuning)). Structural options (`roster`,
+   `skills`, `driver`, ...) are flake-only and have no CLI flag counterpart;
+   conversely some flags (e.g. `--skills-dir`) have no flake option at all.
 
 `issues.labels.inProgress`/`issues.labels.failed`/`issues.labels.complete`
 drive the [label lifecycle](#how-a-run-works); `git.merge.policy` is the
