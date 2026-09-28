@@ -15,7 +15,7 @@ import (
 // here means buildBoxEnv itself broke, not the thing under test.
 func mustBuildBoxEnv(t *testing.T, cfg Config, number, title string, fixPass int, ciFailureSummary, nonce string) map[string]string {
 	t.Helper()
-	env, err := buildBoxEnv(cfg, number, issueSubject{Number: number, Title: title}, fixPass, ciFailureSummary, nonce)
+	env, err := buildBoxEnv(cfg, issueSubject{Number: number, Title: title}, fixPass, ciFailureSummary, nonce)
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
 // a Box launched without it has no recourse. An unreadable subject issue
 // fails the dispatch outright, with no retry (see buildBoxEnv's doc).
 func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
-	env, err := buildBoxEnv(Config{}, "3", issueSubject{Number: "3", Title: "T"}, 0, "", "")
+	env, err := buildBoxEnv(Config{}, issueSubject{Number: "3", Title: "T"}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 
 	env, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "the issue body", nil },
-	}, "3", issueSubject{Number: "3", Title: "T"}, 0, "", "")
+	}, issueSubject{Number: "3", Title: "T"}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 	// dispatch never produces.
 	env, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "", nil },
-	}, "3", issueSubject{Number: "3", Title: "T"}, 0, "", "")
+	}, issueSubject{Number: "3", Title: "T"}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 
 	_, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "", errors.New("boom") },
-	}, "3", issueSubject{Number: "3", Title: "T"}, 0, "", "")
+	}, issueSubject{Number: "3", Title: "T"}, 0, "", "")
 	if err == nil {
 		t.Fatal("buildBoxEnv: want a non-nil error when Config.IssueTextFor errors")
 	}
@@ -398,11 +398,12 @@ func TestBuildBoxEnvForwardsScoutProvisioned(t *testing.T) {
 // straight from the Chore, and never the issue-keyed trio, since a chore key
 // names no tracker issue.
 func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
-	var resolveEnvCalls []string
+	var resolveEnvCalls, gotKeys []string
 	cfg := Config{
 		BoxEnvVars: "BASE_BRANCH MODEL",
-		ResolveEnv: func(_, name string) string {
+		ResolveEnv: func(num, name string) string {
 			resolveEnvCalls = append(resolveEnvCalls, name)
+			gotKeys = append(gotKeys, num)
 			if name == "MODEL" {
 				return "from-resolver"
 			}
@@ -423,7 +424,7 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 		},
 		Classes: []string{"flaky-test", "dead-code"},
 	}
-	env, err := buildBoxEnv(cfg, "butler-lint-sweep", choreSubject{Chore: chore}, 0, "", "the-nonce")
+	env, err := buildBoxEnv(cfg, choreSubject{Chore: chore}, 0, "", "the-nonce")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -460,13 +461,18 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 	if got := env["MODEL"]; got != "from-resolver" {
 		t.Errorf("MODEL: got %q, want %q (other BoxEnvVars still resolve normally)", got, "from-resolver")
 	}
+	for _, got := range gotKeys {
+		if want := ChoreKey("lint-sweep"); got != want {
+			t.Errorf("ResolveEnv key: got %q, want %q (subj.key(), issue #3954)", got, want)
+		}
+	}
 }
 
 // A chore whose Scope carries no Head/DiffRange/Slice (the first run over an
 // empty tree, in principle) forwards none of CHORE_HEAD/CHORE_DIFF_RANGE/
 // CHORE_SLICE, matching every other optional field's absent-when-empty shape.
 func TestBuildBoxEnv_ChoreOmitsEmptyScopeFields(t *testing.T) {
-	env, err := buildBoxEnv(Config{}, "butler-empty", choreSubject{Chore: Chore{Name: "empty", Branch: "b"}}, 0, "", "")
+	env, err := buildBoxEnv(Config{}, choreSubject{Chore: Chore{Name: "empty", Branch: "b"}}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -482,7 +488,7 @@ func TestBuildBoxEnv_ChoreOmitsEmptyScopeFields(t *testing.T) {
 // given) omits CHORE_CLASSES entirely, the same absent-when-empty shape as
 // every other optional Chore field.
 func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
-	env, err := buildBoxEnv(Config{}, "butler-empty", choreSubject{Chore: Chore{Name: "empty", Branch: "b"}}, 0, "", "")
+	env, err := buildBoxEnv(Config{}, choreSubject{Chore: Chore{Name: "empty", Branch: "b"}}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -500,10 +506,45 @@ func TestBuildBoxEnv_NilSubjectErrors(t *testing.T) {
 		BoxEnvVars: "BASE_BRANCH",
 		ResolveEnv: func(_, _ string) string { resolved = true; return "" },
 	}
-	if _, err := buildBoxEnv(cfg, "7", nil, 0, "", ""); err == nil {
+	if _, err := buildBoxEnv(cfg, nil, 0, "", ""); err == nil {
 		t.Fatal("buildBoxEnv(nil subject): want error, got nil")
 	}
 	if resolved {
 		t.Error("buildBoxEnv(nil subject) called ResolveEnv before rejecting the subject")
+	}
+}
+
+// Issue #3954: buildBoxEnv's key comes from subj.key()/subj.title() rather
+// than a caller-supplied pair, so both must return what New/NewChore already
+// derive.
+func TestSubjectKeyAndTitle(t *testing.T) {
+	cases := []struct {
+		name      string
+		subj      subject
+		wantKey   string
+		wantTitle string
+	}{
+		{
+			name:      "issue",
+			subj:      issueSubject{Number: "42", Title: "Fix the thing"},
+			wantKey:   "42",
+			wantTitle: "Fix the thing",
+		},
+		{
+			name:      "chore",
+			subj:      choreSubject{Chore: Chore{Name: "lint-sweep"}},
+			wantKey:   ChoreKey("lint-sweep"),
+			wantTitle: "butler: lint-sweep",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.subj.key(); got != c.wantKey {
+				t.Errorf("key(): got %q, want %q", got, c.wantKey)
+			}
+			if got := c.subj.title(); got != c.wantTitle {
+				t.Errorf("title(): got %q, want %q", got, c.wantTitle)
+			}
+		})
 	}
 }

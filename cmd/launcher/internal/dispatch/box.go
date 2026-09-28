@@ -188,7 +188,7 @@ func (d *Dispatch) Run() Result {
 				return quarantineErr{err: fmt.Errorf("mark run lineage: %w", err)}
 			}
 		}
-		env, err := buildBoxEnv(d.cfg, d.number, d.subject, 0, "", d.nonce)
+		env, err := buildBoxEnv(d.cfg, d.subject, 0, "", d.nonce)
 		if err != nil {
 			return err
 		}
@@ -206,7 +206,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		d.announce(report.PhaseFixPass(pass))
-		env, err := buildBoxEnv(d.cfg, d.number, d.subject, pass, ciFailureSummary, d.nonce)
+		env, err := buildBoxEnv(d.cfg, d.subject, pass, ciFailureSummary, d.nonce)
 		if err != nil {
 			return err
 		}
@@ -221,7 +221,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 // without the main agent prompt, so it needs neither retry nor driver cache.
 func (d *Dispatch) ResolveConflict(pr string) error {
 	d.announce(report.PhaseConflictResolve)
-	env, err := buildBoxEnv(d.cfg, d.number, d.subject, 0, "", d.nonce)
+	env, err := buildBoxEnv(d.cfg, d.subject, 0, "", d.nonce)
 	if err != nil {
 		return err
 	}
