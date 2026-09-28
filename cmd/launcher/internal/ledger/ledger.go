@@ -170,7 +170,7 @@ func DayTotals(b Backend, chore string, now time.Time) (Totals, error) {
 			t.Filed += len(e.State.Filed)
 			t.Promoted += len(e.State.Promoted)
 			t.Dropped += e.State.Dropped
-			t.Usage = addUsage(t.Usage, e.State.Usage)
+			t.Usage = t.Usage.Add(e.State.Usage)
 		}
 	}
 	return t, nil
@@ -184,7 +184,7 @@ func (t Totals) add(o Totals) Totals {
 		Filed:    t.Filed + o.Filed,
 		Promoted: t.Promoted + o.Promoted,
 		Dropped:  t.Dropped + o.Dropped,
-		Usage:    addUsage(t.Usage, o.Usage),
+		Usage:    t.Usage.Add(o.Usage),
 	}
 }
 
@@ -202,19 +202,4 @@ func DayTotalsAll(b Backend, chores []string, now time.Time) (Totals, error) {
 		sum = sum.add(t)
 	}
 	return sum, nil
-}
-
-// addUsage sums two Usage snapshots field-by-field, for DayTotals folding a
-// day's Done commits into one running total.
-func addUsage(a, b usage.Usage) usage.Usage {
-	return usage.Usage{
-		InputTokens:              a.InputTokens + b.InputTokens,
-		OutputTokens:             a.OutputTokens + b.OutputTokens,
-		CacheReadInputTokens:     a.CacheReadInputTokens + b.CacheReadInputTokens,
-		CacheCreationInputTokens: a.CacheCreationInputTokens + b.CacheCreationInputTokens,
-		TotalCostUSD:             a.TotalCostUSD + b.TotalCostUSD,
-		DurationMs:               a.DurationMs + b.DurationMs,
-		DurationApiMs:            a.DurationApiMs + b.DurationApiMs,
-		NumTurns:                 a.NumTurns + b.NumTurns,
-	}
 }
