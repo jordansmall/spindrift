@@ -246,3 +246,44 @@ unchanged and remains the sole rescue for the narrower case this mechanical
 check cannot reach at all: a driver killed or crashed before the backstop
 verb itself ever ran (`claude_rc != 0`, or the container never reached the
 hand-off).
+
+## Amendment (issue #4015): `already-resolved` is a successful work status, not a `blocked`
+
+A new work status, `already-resolved`, names a successful, non-crash stop
+distinct from both `ready` and `blocked`: the Box, after scouting, found the
+issue's change already present on the fetched default branch. It makes zero
+commits and opens no PR, and names the resolving commit or PR and the
+check/test that proves it in `note=`. The prompt gate lives in the ALREADY
+RESOLVED section of `templates/default/prompts/issue-prompt.md`, run
+immediately after scouting and before IMPLEMENT.
+
+`blocked` was the wrong home for this claim. `blocked` settles
+`agent-failed`, leaves the issue open, and needs a human to close it —
+issue #3939 showed exactly that shape for an issue whose work had already
+landed. A success reported through the failure path pollutes the human
+triage queue with nothing left to do.
+
+Host behaviour (`settle`, `cmd/launcher/internal/settle/gate.go`'s
+`case outcome.StatusAlreadyResolved`): posts a host-side closing comment
+carrying the note, transitions `agent-in-progress` → `agent-complete`
+(`forge.Complete`), and closes the issue itself as `completed` — never "not
+planned" (contrast `agent-research-reject`'s close), since no PR carries a
+`Closes #N` here for GitHub's own auto-close to catch. Under
+`ISSUE_TRACKER=local` the issue reaches `agent-complete` but, for now,
+stays open: settle never writes the local tracker's `closed:` axis (ADR
+0029); issue #4017 tracks giving that path a close.
+
+In keeping with this ADR's Decision — the host decides from evidence, the
+Box only advises — the claim is honored only when the host's own evidence
+agrees there is nothing to land. An `already-resolved` claim that arrives
+alongside commits or an outbox bundle contradicts itself, and the host
+demotes it to `blocked` rather than trust the driver's bare assertion, so
+real work is never closed out silently as already done.
+
+No outcome-line grammar change: this adds a value to the work kind's status
+set (`lib/prompt-contract.nix`'s `outcomeStatusSets`, generated into
+`cmd/launcher/internal/outcome/status_gen.go`'s `WorkStatuses`), not a new
+field on the outcome line, consistent with the original Decision's "No
+outcome-line grammar change" bullet above. Precedent: issue #2275's
+`ambiguous` status, which likewise added a successful non-crash stop as a
+new status value without touching the grammar.
