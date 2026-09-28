@@ -15,7 +15,7 @@ import (
 // here means buildBoxEnv itself broke, not the thing under test.
 func mustBuildBoxEnv(t *testing.T, cfg Config, number, title string, fixPass int, ciFailureSummary, nonce string) map[string]string {
 	t.Helper()
-	env, err := buildBoxEnv(cfg, number, title, fixPass, ciFailureSummary, nonce, nil)
+	env, err := buildBoxEnv(cfg, number, issueSubject{Number: number, Title: title}, fixPass, ciFailureSummary, nonce)
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
 // a Box launched without it has no recourse. An unreadable subject issue
 // fails the dispatch outright, with no retry (see buildBoxEnv's doc).
 func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
-	env, err := buildBoxEnv(Config{}, "3", "T", 0, "", "", nil)
+	env, err := buildBoxEnv(Config{}, "3", issueSubject{Number: "3", Title: "T"}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 
 	env, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "the issue body", nil },
-	}, "3", "T", 0, "", "", nil)
+	}, "3", issueSubject{Number: "3", Title: "T"}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 	// dispatch never produces.
 	env, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "", nil },
-	}, "3", "T", 0, "", "", nil)
+	}, "3", issueSubject{Number: "3", Title: "T"}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 
 	_, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "", errors.New("boom") },
-	}, "3", "T", 0, "", "", nil)
+	}, "3", issueSubject{Number: "3", Title: "T"}, 0, "", "")
 	if err == nil {
 		t.Fatal("buildBoxEnv: want a non-nil error when Config.IssueTextFor errors")
 	}
@@ -373,7 +373,7 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 			return "", nil
 		},
 	}
-	chore := &Chore{
+	chore := Chore{
 		Name:   "lint-sweep",
 		Branch: "butler/lint-sweep",
 		Scope: butler.Scope{
@@ -383,7 +383,7 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 		},
 		Classes: []string{"flaky-test", "dead-code"},
 	}
-	env, err := buildBoxEnv(cfg, "butler-lint-sweep", "unused title", 0, "", "the-nonce", chore)
+	env, err := buildBoxEnv(cfg, "butler-lint-sweep", choreSubject{Chore: chore}, 0, "", "the-nonce")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 // empty tree, in principle) forwards none of CHORE_HEAD/CHORE_DIFF_RANGE/
 // CHORE_SLICE, matching every other optional field's absent-when-empty shape.
 func TestBuildBoxEnv_ChoreOmitsEmptyScopeFields(t *testing.T) {
-	env, err := buildBoxEnv(Config{}, "butler-empty", "T", 0, "", "", &Chore{Name: "empty", Branch: "b"})
+	env, err := buildBoxEnv(Config{}, "butler-empty", choreSubject{Chore: Chore{Name: "empty", Branch: "b"}}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestBuildBoxEnv_ChoreOmitsEmptyScopeFields(t *testing.T) {
 // given) omits CHORE_CLASSES entirely, the same absent-when-empty shape as
 // every other optional Chore field.
 func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
-	env, err := buildBoxEnv(Config{}, "butler-empty", "T", 0, "", "", &Chore{Name: "empty", Branch: "b"})
+	env, err := buildBoxEnv(Config{}, "butler-empty", choreSubject{Chore: Chore{Name: "empty", Branch: "b"}}, 0, "", "")
 	if err != nil {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}

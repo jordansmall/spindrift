@@ -44,6 +44,18 @@ type Chore struct {
 	Classes []string
 }
 
+// subject is what a Dispatch's Box works: a tracker issue (issueSubject) or a
+// one-shot butler Chore (choreSubject, ADR 0056). The unexported isSubject
+// seals it, so no third variant can reach buildBoxEnv's or announce's switch.
+type subject interface{ isSubject() }
+
+type issueSubject struct{ Number, Title string }
+
+type choreSubject struct{ Chore Chore }
+
+func (issueSubject) isSubject() {}
+func (choreSubject) isSubject() {}
+
 // Config carries the subset of launcher config a Dispatch needs to build a
 // Box's env and drive its retry policy.
 type Config struct {
@@ -166,47 +178,52 @@ func (c Config) signalCarrierSocket() bool {
 // templates promise the Box an injected ISSUE_TEXT section. It fires before any
 // box runs, so the empty-log check surfaces it on Result.Err (issue #3119).
 //
-// chore is non-nil only for a Factory.NewChore Dispatch (ADR 0056): number is
-// then "butler-"+chore.Name, not a tracker issue number, so this skips
+// subj is a choreSubject only for a Factory.NewChore Dispatch (ADR 0056): key
+// is then ChoreKey(subj.Chore.Name), not a tracker issue number, so this skips
 // ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT and the BASE_BRANCH entry of the
 // ResolveEnv loop entirely (CODE_FORGE=local's localBaseBranchResolver, the
-// only ResolveEnv caller that keys off number, would otherwise run an
+// only ResolveEnv caller that reads the key, would otherwise run an
 // issue-tracker lookup against a chore key that names no issue) and forwards
-// CHORE_* plus BASE_BRANCH from chore directly instead.
-func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string, nonce string, chore *Chore) (map[string]string, error) {
+// CHORE_* plus BASE_BRANCH from the Chore directly instead.
+func buildBoxEnv(cfg Config, key string, subj subject, fixPass int, ciFailureSummary string, nonce string) (map[string]string, error) {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
 		resolve = func(_, name string) string { return os.Getenv(name) }
 	}
+	_, isChore := subj.(choreSubject)
+	if _, isIssue := subj.(issueSubject); !isChore && !isIssue {
+		return nil, fmt.Errorf("unknown dispatch subject %T", subj)
+	}
 	env := make(map[string]string)
 	for _, name := range strings.Fields(cfg.BoxEnvVars) {
-		if chore != nil && name == "BASE_BRANCH" {
+		if isChore && name == "BASE_BRANCH" {
 			continue
 		}
-		env[name] = resolve(number, name)
+		env[name] = resolve(key, name)
 	}
-	if chore != nil {
-		env["CHORE_NAME"] = chore.Name
-		env["BASE_BRANCH"] = chore.Branch
-		if chore.Scope.Head != "" {
-			env["CHORE_HEAD"] = chore.Scope.Head
+	switch s := subj.(type) {
+	case choreSubject:
+		env["CHORE_NAME"] = s.Chore.Name
+		env["BASE_BRANCH"] = s.Chore.Branch
+		if s.Chore.Scope.Head != "" {
+			env["CHORE_HEAD"] = s.Chore.Scope.Head
 		}
-		if chore.Scope.DiffRange != "" {
-			env["CHORE_DIFF_RANGE"] = chore.Scope.DiffRange
+		if s.Chore.Scope.DiffRange != "" {
+			env["CHORE_DIFF_RANGE"] = s.Chore.Scope.DiffRange
 		}
-		if len(chore.Scope.Slice) > 0 {
-			env["CHORE_SLICE"] = strings.Join(chore.Scope.Slice, "\n")
+		if len(s.Chore.Scope.Slice) > 0 {
+			env["CHORE_SLICE"] = strings.Join(s.Chore.Scope.Slice, "\n")
 		}
-		if len(chore.Classes) > 0 {
-			env["CHORE_CLASSES"] = strings.Join(chore.Classes, " ")
+		if len(s.Chore.Classes) > 0 {
+			env["CHORE_CLASSES"] = strings.Join(s.Chore.Classes, " ")
 		}
-	} else {
-		env["ISSUE_NUMBER"] = number
-		env["ISSUE_TITLE"] = title
+	case issueSubject:
+		env["ISSUE_NUMBER"] = s.Number
+		env["ISSUE_TITLE"] = s.Title
 		if cfg.IssueTextFor != nil {
-			text, err := cfg.IssueTextFor(number)
+			text, err := cfg.IssueTextFor(s.Number)
 			if err != nil {
-				return nil, fmt.Errorf("issue text for #%s: %w", number, err)
+				return nil, fmt.Errorf("issue text for #%s: %w", s.Number, err)
 			}
 			if text != "" {
 				env["ISSUE_TEXT"] = text
