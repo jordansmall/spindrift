@@ -1137,6 +1137,33 @@ func TestAssembleSelfContainedRequiresSubMode(t *testing.T) {
 	}
 }
 
+// A descriptor built outside the real kinds with no Contract set must fail
+// loudly rather than silently inject no contract block.
+func TestAssembleUnknownContractRejected(t *testing.T) {
+	synth := &dispatchkind.Descriptor{
+		Name:   "synthetic-no-contract",
+		Verb:   "synthetic",
+		Keying: dispatchkind.ByIssue,
+		Labels: dispatchkind.LabelsConfigured,
+		Prompts: dispatchkind.Prompts{
+			Base: "issue-prompt.md",
+		},
+	}
+	dispatchkind.All = append(dispatchkind.All, synth)
+	t.Cleanup(func() {
+		dispatchkind.All = dispatchkind.All[:len(dispatchkind.All)-1]
+	})
+
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.DispatchKind = synth.Name
+
+	_, err := Assemble(env, reg)
+	if err == nil || !strings.Contains(err.Error(), "unknown prompt contract") {
+		t.Fatalf("Assemble error = %v, want unknown prompt contract", err)
+	}
+}
+
 // Pins the tolerance that deleting checkCoveredCell's IssueTracker and
 // CodeForge arms left behind (issue #2540). Axis resolution lives in nix
 // now (issue #2533), so a bogus value renders without error and only

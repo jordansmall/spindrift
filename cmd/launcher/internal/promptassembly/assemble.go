@@ -389,31 +389,33 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		return promptBodies{}, fmt.Errorf("read %s: %w", baseName, err)
 	}
 
-	// Research injects only research-verdict; the butler injects nothing at
-	// all (its OUTCOME section is self-contained in butler-prompt.md, and the
-	// work-shaped comms/check blocks below assume a landing branch/PR the
-	// butler never cuts, ADR 0056); every other cell injects comms, then
-	// check, then outcome, in that order. For issue-prompt.md this is a
-	// no-op: those markers are sliced from issue-prompt.md itself, so the
-	// already-contains-marker guard always fires. The code-comments policy is
-	// inlined verbatim in the templates themselves (issue #3505), so it is
-	// not part of this injection list.
-	switch {
-	case d.Settle == dispatchkind.SettleVerdict:
-		// The verdict contract is the prompt half of the verdict settle.
+	// ContractVerdict (research) injects only research-verdict;
+	// ContractInline (butler) injects nothing at all (its OUTCOME section is
+	// self-contained in butler-prompt.md, and the work-shaped comms/check
+	// blocks below assume a landing branch/PR the butler never cuts, ADR
+	// 0056); ContractLanding (work) injects comms, then check, then outcome,
+	// in that order. For issue-prompt.md this is a no-op: those markers are
+	// sliced from issue-prompt.md itself, so the already-contains-marker
+	// guard always fires. The code-comments policy is inlined verbatim in
+	// the templates themselves (issue #3505), so it is not part of this
+	// injection list.
+	switch d.Contract {
+	case dispatchkind.ContractVerdict:
 		base, err = injectSharedBlockSegments(base, e.ResearchOutcomeContractFile, vars)
 		if err != nil {
 			return promptBodies{}, err
 		}
-	case d.Settle == dispatchkind.SettleLedger:
+	case dispatchkind.ContractInline:
 		// No shared-block injection for the butler (ADR 0056): nothing to do.
-	default:
+	case dispatchkind.ContractLanding:
 		for _, contractFile := range []string{e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile} {
 			base, err = injectSharedBlockSegments(base, contractFile, vars)
 			if err != nil {
 				return promptBodies{}, err
 			}
 		}
+	default:
+		return promptBodies{}, fmt.Errorf("kind %q: unknown prompt contract %d", d.Name, d.Contract)
 	}
 
 	// Issue-text section (issue #3445): appended after every other base-body
