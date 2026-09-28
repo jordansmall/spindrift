@@ -1390,6 +1390,44 @@ func TestCmdStatus_GarbageStatusFileStillReportsLiveness(t *testing.T) {
 	}
 }
 
+// TestSummarizeSlot covers summarizeSlot's forms, including a butler slot
+// naming its Chore (issue #3923).
+func TestSummarizeSlot(t *testing.T) {
+	cases := []struct {
+		name string
+		in   daemon.SlotStatus
+		want string
+	}{
+		{
+			name: "idle",
+			in:   daemon.SlotStatus{Slot: 0, Busy: false},
+			want: "0:idle",
+		},
+		{
+			name: "busy with issues",
+			in:   daemon.SlotStatus{Slot: 1, Busy: true, Kind: daemon.KindDispatch, Issues: []string{"101"}},
+			want: "1:busy(dispatch #101)",
+		},
+		{
+			name: "busy with no issues",
+			in:   daemon.SlotStatus{Slot: 2, Busy: true, Kind: daemon.KindDispatch},
+			want: "2:busy(dispatch)",
+		},
+		{
+			name: "busy butler slot names its Chore",
+			in:   daemon.SlotStatus{Slot: 3, Busy: true, Kind: daemon.KindButler, Chore: "bugs"},
+			want: "3:busy(butler bugs)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := summarizeSlot(tc.in); got != tc.want {
+				t.Errorf("summarizeSlot(%+v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSummarizeStatus_LockHeldDistinguishesNoStatusFromUncorrelated pins the
 // review finding that the LockHeld branch used one wording ("has not
 // published its status yet") even when a status file was present but named

@@ -358,10 +358,14 @@ func cmdStatus(wd string, stdout, stderr io.Writer) int {
 // summarizeSlot renders one SlotStatus compactly for summarizeStatus's
 // stderr line: idle slots need only their number, a busy slot names its
 // kind and, when the child has announced any, the issues it is in flight
-// on.
+// on — or, for a butler slot, the Chore its child last boxed instead of an
+// issue.
 func summarizeSlot(s daemon.SlotStatus) string {
 	if !s.Busy {
 		return fmt.Sprintf("%d:idle", s.Slot)
+	}
+	if s.Chore != "" {
+		return fmt.Sprintf("%d:busy(%s %s)", s.Slot, s.Kind, s.Chore)
 	}
 	if len(s.Issues) == 0 {
 		return fmt.Sprintf("%d:busy(%s)", s.Slot, s.Kind)
