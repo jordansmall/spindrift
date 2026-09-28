@@ -761,6 +761,219 @@ func TestRun_UnresolvedBlockOverridesOutboxRelay(t *testing.T) {
 	}
 }
 
+// alreadyResolvedLine builds a minimal already-resolved SPINDRIFT_OUTCOME line
+// for feeding to DemoteAlreadyResolved as priorOutcomeLine.
+func alreadyResolvedLine() string {
+	return outcome.Outcome{Issue: "42", Landing: "none", Status: outcome.StatusAlreadyResolved}.Line()
+}
+
+// Issue #4016: a claimed already-resolved run with no actual commits on the
+// branch leaves the claim alone — the #4015 zero-commits path already covers
+// that case, so DemoteAlreadyResolved must write nothing and never push.
+func TestDemoteAlreadyResolved_ZeroCommitsNoOp(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "0\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
+		t.Fatalf("DemoteAlreadyResolved: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+	if git.countCalls("push") != 0 {
+		t.Fatalf("expected no push, got %v", git.calls)
+	}
+}
+
+// Issue #4016: 3 commits ahead on a writable remote demotes to blocked, tries
+// to preserve the work with a push, and names the commit count and branch in
+// the note.
+func TestDemoteAlreadyResolved_CommitsExistPushesAndDemotes(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "3\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
+		t.Fatalf("DemoteAlreadyResolved: %v", err)
+	}
+	if git.countCalls("push") != 1 {
+		t.Fatalf("expected exactly one push, got %v", git.calls)
+	}
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected exactly one output line, got %q", buf.String())
+	}
+	line := lines[0]
+	o, err := outcome.Parse(line)
+	if err != nil {
+		t.Fatalf("outcome.Parse(%q): %v", line, err)
+	}
+	if !o.Synthetic {
+		t.Fatalf("expected Synthetic == true, got %+v", o)
+	}
+	if o.Status != outcome.StatusBlocked {
+		t.Fatalf("expected Status == blocked, got %+v", o)
+	}
+	if o.Landing != cfg.Branch {
+		t.Fatalf("expected Landing == %q, got %+v", cfg.Branch, o)
+	}
+	if !strings.Contains(o.Note, "3 commits") || !strings.Contains(o.Note, cfg.Branch) {
+		t.Fatalf("expected note naming '3 commits' and the branch, got %q", o.Note)
+	}
+}
+
+// Issue #4016: under a read-only outbox-relay Box, the commits still exist so
+// the claim still demotes, but there is no push token to preserve them with —
+// the later bundle-out step relays instead.
+func TestDemoteAlreadyResolved_ReadOnlyOutboxRelayNoPush(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "3\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = false
+	cfg.OutboxRelayCapable = true
+
+	var buf bytes.Buffer
+	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
+		t.Fatalf("DemoteAlreadyResolved: %v", err)
+	}
+	if git.countCalls("push") != 0 {
+		t.Fatalf("expected no push, got %v", git.calls)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked, got %q", line)
+	}
+	if !strings.Contains(line, "branch relayed via outbox bundle (read-only Box)") {
+		t.Fatalf("expected relay note, got %q", line)
+	}
+}
+
+// Issue #4016: under CODE_FORGE=local's host-mediated remote there is no
+// writable remote in-box at all, so no push, same as Run's own mode split.
+func TestDemoteAlreadyResolved_HostMediatedRemoteNoPush(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stdout: "3\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.HostMediatedRemote = true
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
+		t.Fatalf("DemoteAlreadyResolved: %v", err)
+	}
+	if git.countCalls("push") != 0 {
+		t.Fatalf("expected no push, got %v", git.calls)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked, got %q", line)
+	}
+	if !strings.Contains(line, "branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)") {
+		t.Fatalf("expected relay note, got %q", line)
+	}
+}
+
+// Issue #4016: a prior line whose status isn't already-resolved (ready here)
+// leaves the claim untouched — nothing to demote.
+func TestDemoteAlreadyResolved_PriorReadyNoOp(t *testing.T) {
+	git := &fakeGit{}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+
+	priorLine := outcome.Outcome{Issue: "42", Landing: cfg.Branch, Status: "ready"}.Line()
+
+	var buf bytes.Buffer
+	if err := DemoteAlreadyResolved(cfg, priorLine, &buf); err != nil {
+		t.Fatalf("DemoteAlreadyResolved: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+	if len(git.calls) != 0 {
+		t.Fatalf("expected no git calls, got %v", git.calls)
+	}
+}
+
+// Issue #4016: an unparseable or empty prior line also leaves the claim
+// untouched, same as a non-already-resolved status.
+func TestDemoteAlreadyResolved_UnparseablePriorLineNoOp(t *testing.T) {
+	git := &fakeGit{}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := DemoteAlreadyResolved(cfg, "", &buf); err != nil {
+		t.Fatalf("DemoteAlreadyResolved: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+}
+
+// Issue #4016: an unresolvable commit count fails closed — the claim demotes
+// anyway rather than let an unresolvable count wave the already-resolved
+// claim through.
+func TestDemoteAlreadyResolved_CommitCountErrorDemotes(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {err: fmt.Errorf("bad revision")},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
+		t.Fatalf("DemoteAlreadyResolved: %v", err)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked, got %q", line)
+	}
+	if !strings.Contains(line, "could not be counted") {
+		t.Fatalf("expected a could-not-be-counted note, got %q", line)
+	}
+	if git.countCalls("push") != 1 {
+		t.Fatalf("expected a push attempt on the fail-closed path, got %v", git.calls)
+	}
+}
+
+// Issue #4016: an advise-only dispatch kind (research) never cuts a branch,
+// so DemoteAlreadyResolved must never touch git for it, mirroring Run's own
+// advise-only short-circuit.
+func TestDemoteAlreadyResolved_AdviseOnlyKindNoOp(t *testing.T) {
+	git := &fakeGit{}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.Kind = "research"
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
+		t.Fatalf("DemoteAlreadyResolved: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output, got %q", buf.String())
+	}
+	if len(git.calls) != 0 {
+		t.Fatalf("expected no git calls, got %v", git.calls)
+	}
+}
+
 func TestRun_NegativeBackoffJitterClampsAndDoesNotPanic(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},

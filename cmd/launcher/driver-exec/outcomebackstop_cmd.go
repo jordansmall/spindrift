@@ -31,6 +31,7 @@ type outcomeBackstopFlags struct {
 	backoffSecs        *int
 	jitterSecs         *int
 	runStateFile       *string
+	priorOutcomeLine   *string
 }
 
 // Registering the flags without parsing them lets a test read a flag's default
@@ -51,6 +52,7 @@ func newOutcomeBackstopFlagSet() (*flag.FlagSet, *outcomeBackstopFlags) {
 		backoffSecs:        fs.Int("backoff-secs", 0, "linear backoff unit, in seconds, between push retries"),
 		jitterSecs:         fs.Int("jitter-secs", 0, "linear backoff jitter, in seconds, added to each push retry wait"),
 		runStateFile:       fs.String("run-state-file", "/tmp/run-state.json", "path to the run-state handoff artifact recording the reviewer's last verdict (issue #2459); empty or unreadable degrades to no-verdict-known"),
+		priorOutcomeLine:   fs.String("prior-outcome-line", "", "the agent's own SPINDRIFT_OUTCOME line, verbatim; when non-empty and status=already-resolved, demotes to blocked instead of running the always-emit backstop (issue #4016)"),
 	}
 	return fs, flags
 }
@@ -68,7 +70,7 @@ func runOutcomeBackstop(args []string, stdout io.Writer) int {
 		return 1
 	}
 
-	err := outcomebackstop.Run(outcomebackstop.Config{
+	cfg := outcomebackstop.Config{
 		Repo:               *flags.repo,
 		Issue:              *flags.issue,
 		Branch:             *flags.branch,
@@ -83,7 +85,17 @@ func runOutcomeBackstop(args []string, stdout io.Writer) int {
 		Jitter:             time.Duration(*flags.jitterSecs) * time.Second,
 		Clock:              retry.RealClock(),
 		RunStateFilePath:   *flags.runStateFile,
-	}, stdout)
+	}
+
+	// A non-empty -prior-outcome-line means the driver did emit an outcome, so
+	// this is the already-resolved demotion check (issue #4016), not the
+	// no-outcome-at-all backstop the rest of this verb otherwise runs.
+	var err error
+	if *flags.priorOutcomeLine != "" {
+		err = outcomebackstop.DemoteAlreadyResolved(cfg, *flags.priorOutcomeLine, stdout)
+	} else {
+		err = outcomebackstop.Run(cfg, stdout)
+	}
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec outcome-backstop:", err)
 		return 1
