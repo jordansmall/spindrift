@@ -73,6 +73,7 @@ let
     // (import ./research-verdicts.nix common)
     // (import ./jira-status-mapping.nix common)
     // (import ./awake-window.nix common)
+    // (import ./chore-catalog.nix common)
     // (import ./read-only-capability.nix common)
     // (import ./network-mode.nix common)
     // (import ./prompts.nix common)

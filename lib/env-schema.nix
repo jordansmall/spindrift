@@ -7,6 +7,8 @@ let
   backends = import ./backends/default.nix;
   # Shared by the three butler daily budget knobs below (ADR 0056).
   butlerBudgetGateClause = "gates only starting a run, never stopping one; totals are walked from today's Ledger commits across every Chore enabled in BUTLER_CHORES (a Chore dropped from the list stops counting), over a day that runs midnight to midnight in DAEMON_AWAKE_WINDOW's zone (UTC when unset)";
+  # Single source of the built-in Chore catalog (issue #3991).
+  choreCatalog = import ./chore-catalog.nix;
 in
 {
   label = {
@@ -395,7 +397,7 @@ in
   butlerChoreClasses = {
     env = "BUTLER_CHORE_CLASSES";
     group = "dispatch";
-    default = "bugs=error-handling,resource-leak refactor=dead-code docs-drift=stale-reference";
+    default = choreCatalog.classesDefault;
     doc = "space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side allow-list of finding classes (ADR 0056); the auto-promotion trust gate (issue #3880) -- still only acts when BUTLER_MAX_PROMOTIONS_PER_DAY > 0; the default covers the built-in catalog; setting it replaces the whole default, so restate any built-in entry you want to keep; a Chore with no entry (for example a Consumer-declared one) has an empty allow-list and never promotes; each class must be a lowercase slug -- lowercase letters, digits, and '-', not starting with '-', at most 40 characters -- or `spindrift butler` preflight rejects it naming the class and the rule (issue #3986)";
     flakeOption = true;
     legacySettingsExempt = true;
