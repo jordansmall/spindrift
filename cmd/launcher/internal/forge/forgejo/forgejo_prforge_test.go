@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -275,11 +276,14 @@ func TestOpenPRForBranch_WalksAllPages(t *testing.T) {
 		case 1:
 			w.Write([]byte(forgejoPullsPage(1, pageSize)))
 		case 2:
-			// A short page (2 < pageSize) is how the server tells Paginate the
-			// walk is done.
+			// A short page (2 < pageSize) is not proof of the last page on a
+			// server that caps MAX_RESPONSE_ITEMS below forge.ResultPageLimit
+			// (issue #3978): the walk must request one more page.
 			w.Write([]byte(forgejoPullsPage(pageSize+1, 2)))
+		case 3:
+			w.Write([]byte(`[]`))
 		default:
-			t.Errorf("server received request for page %d, want no request beyond the short page 2", page)
+			t.Errorf("server received request for page %d, want no request beyond the empty page 3", page)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
@@ -307,8 +311,56 @@ func TestOpenPRForBranch_WalksAllPages(t *testing.T) {
 	if got.URL != wantURL {
 		t.Fatalf("OpenPRForBranch(...) URL = %q, want %q", got.URL, wantURL)
 	}
-	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
-		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
+	if len(gotPages) != 3 || gotPages[0] != "1" || gotPages[1] != "2" || gotPages[2] != "3" {
+		t.Fatalf("server saw page requests %v, want exactly [1 2 3]", gotPages)
+	}
+}
+
+// Stock Forgejo caps limit at [api] MAX_RESPONSE_ITEMS (default 50) on the
+// pulls listing endpoint no matter what limit the client requests (issue
+// #3978): the target branch here sits on page 3, past two full
+// server-capped pages, so finding it proves the walk didn't stop at the
+// first short-relative-to-100-but-still-capped-at-50 page.
+func TestOpenPRForBranch_WalksPastServerCappedPageSize(t *testing.T) {
+	const total = 110
+	var gotPages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/pulls" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		gotPages = append(gotPages, r.URL.Query().Get("page"))
+		serveCappedNumbered(w, r, total, forgejoPullsPage)
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+		BaseURL:      srv.URL,
+		Repo:         "owner/repo",
+		Token:        "tok",
+		BranchPrefix: "agent/issue-",
+	}, nil, "unused")
+	pr, ok := cf.(prReader)
+	if !ok {
+		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
+	}
+
+	got, ok, err := pr.OpenPRForBranch("branch-" + strconv.Itoa(total))
+	if err != nil {
+		t.Fatalf("OpenPRForBranch(...) unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("OpenPRForBranch(...) ok = false, want true (branch is on the third, server-capped page)")
+	}
+	wantURL := "https://forge.test/owner/repo/pulls/" + strconv.Itoa(total)
+	if got.URL != wantURL {
+		t.Fatalf("OpenPRForBranch(...) URL = %q, want %q", got.URL, wantURL)
+	}
+	// listPulls walks every page before searching (it doesn't stop early on
+	// a match), so a genuine full walk fetches pages 1-3 (110 pulls over a
+	// 50-cap) plus the terminating empty page 4 — not just page 3 where the
+	// match happened to land.
+	if want := []string{"1", "2", "3", "4"}; !slices.Equal(gotPages, want) {
+		t.Fatalf("server saw page requests %v, want exactly %v", gotPages, want)
 	}
 }
 

@@ -298,6 +298,20 @@ func serveLabels(w http.ResponseWriter, r *http.Request, body string) {
 	w.Write([]byte(body))
 }
 
+// serveIssues writes body as /issues page 1 and an empty page after it, the
+// same shape as serveLabels: listIssues now walks until an empty page
+// (issue #3978), so a fake asserting an exact request count per label needs
+// page 2 to end the walk rather than repeat page 1 and rely on the
+// repeated-first-item guard's extra round trip.
+func serveIssues(w http.ResponseWriter, r *http.Request, body string) {
+	w.WriteHeader(http.StatusOK)
+	if page := r.URL.Query().Get("page"); page != "" && page != "1" {
+		w.Write([]byte(`[]`))
+		return
+	}
+	w.Write([]byte(body))
+}
+
 // mixedLabelFixture is a two-issue /issues page: issue 5 carries label, issue
 // 6 carries nothing. Shared by the server-ignored-labels-param tests, whose
 // point is that the client-side re-filter (issue #3952) keeps 5 and drops 6
@@ -318,16 +332,13 @@ func assertOnlyIssue5(t *testing.T, name string, issues []forge.Issue) {
 	}
 }
 
-// forgejoLabelsServerCap mirrors Forgejo's default MAX_RESPONSE_ITEMS page cap.
-const forgejoLabelsServerCap = 50
-
 // serveCappedLabelsPage renders a fake /labels endpoint that caps page 1 at
-// forgejoLabelsServerCap (named via prefix), serves page2Body on page 2, and an
-// empty page after that.
+// forgejoServerPageCap, serves page2Body on page 2, and an empty page after
+// that.
 func serveCappedLabelsPage(w http.ResponseWriter, r *http.Request, prefix, page2Body string) {
 	switch page := r.URL.Query().Get("page"); page {
 	case "1", "":
-		w.Write([]byte(forgejoLabelsPage(prefix, forgejoLabelsServerCap)))
+		w.Write([]byte(forgejoLabelsPage(prefix, forgejoServerPageCap)))
 	case "2":
 		w.Write([]byte(page2Body))
 	default:
@@ -354,7 +365,7 @@ func TestForgejoClient_ListLabels_WalksAllPages(t *testing.T) {
 		t.Fatalf("ListLabels: %v", err)
 	}
 
-	wantCount := forgejoLabelsServerCap + 2
+	wantCount := forgejoServerPageCap + 2
 	if len(labels) != wantCount {
 		t.Fatalf("ListLabels returned %d labels, want %d (all pages merged despite the server-capped page size)", len(labels), wantCount)
 	}
@@ -403,8 +414,7 @@ func TestForgejoClient_ListIssuesWithLabels_SeesLabelOnServerCappedLabelsPage2(t
 			return
 		}
 		issuesRequests = append(issuesRequests, r.URL.Query().Get("labels"))
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`))
+		serveIssues(w, r, `[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`)
 	}))
 	defer srv.Close()
 
@@ -413,8 +423,12 @@ func TestForgejoClient_ListIssuesWithLabels_SeesLabelOnServerCappedLabelsPage2(t
 	if err != nil {
 		t.Fatalf("ListIssuesWithLabels: %v", err)
 	}
-	if len(issuesRequests) != 1 || issuesRequests[0] != "agent-review-finding" {
-		t.Fatalf("issues requests = %+v, want exactly one for the page-2 label", issuesRequests)
+	// listIssues walks until an empty page (issue #3978), so a single-label
+	// query is 2 requests here: the non-empty page 1 and the empty page 2
+	// that ends the walk. Both must carry the page-2 finding label, never a
+	// second, different label.
+	if len(issuesRequests) != 2 || issuesRequests[0] != "agent-review-finding" || issuesRequests[1] != "agent-review-finding" {
+		t.Fatalf("issues requests = %+v, want exactly two, both for the page-2 label", issuesRequests)
 	}
 	if len(issues) != 1 || issues[0].Number != "5" {
 		t.Fatalf("issues = %+v", issues)
@@ -548,8 +562,9 @@ func forgejoIssuesPage(start, count int) string {
 
 // listIssues must walk every page through rest.Client.Paginate rather than
 // fetch a single bounded page (issue #2265). Page 1 is full and numbered
-// descending so the final ascending sort has to be real; the short page 2
-// signals the end of the walk.
+// descending so the final ascending sort has to be real; page 2 is short but
+// non-empty (a server-capped page, issue #3978), so only the empty page 3
+// ends the walk.
 func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
 	const pageSize = forge.ResultPageLimit
 	var gotPages []string
@@ -581,8 +596,14 @@ func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
 			w.Write([]byte(b.String()))
 		case 2:
 			w.Write([]byte(forgejoIssuesPage(1, 5)))
+		case 3:
+			// A short page 2 is not proof of the last page on a server that
+			// caps MAX_RESPONSE_ITEMS below forge.ResultPageLimit (issue
+			// #3978): the walk must request one more page and stop only on
+			// the empty one.
+			w.Write([]byte(`[]`))
 		default:
-			t.Errorf("server received request for page %d, want no request beyond the short page 2", page)
+			t.Errorf("server received request for page %d, want no request beyond the empty page 3", page)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
@@ -604,8 +625,63 @@ func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
 			t.Fatalf("issues[%d].Number = %q, want %q (ascending order across merged pages)", i, iss.Number, wantNum)
 		}
 	}
-	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
-		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
+	if len(gotPages) != 3 || gotPages[0] != "1" || gotPages[1] != "2" || gotPages[2] != "3" {
+		t.Fatalf("server saw page requests %v, want exactly [1 2 3]", gotPages)
+	}
+}
+
+// Stock Forgejo caps limit at [api] MAX_RESPONSE_ITEMS (default 50) on the
+// issues listing endpoint no matter what limit the client requests (issue
+// #3978), so a walk that stopped on len(payload) < forge.ResultPageLimit
+// would give up after page 1 and silently drop every issue past the server's
+// own cap.
+func TestForgejoClient_ListOpenIssues_WalksPastServerCappedPageSize(t *testing.T) {
+	const total = 120
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/issues" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if limit := r.URL.Query().Get("limit"); limit != strconv.Itoa(forge.ResultPageLimit) {
+			t.Errorf("limit query param = %q, want %q", limit, strconv.Itoa(forge.ResultPageLimit))
+		}
+		serveCappedNumbered(w, r, total, forgejoIssuesPage)
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	issues, err := fc.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+	if len(issues) != total {
+		t.Fatalf("ListOpenIssues returned %d issues, want %d (every server-capped page merged)", len(issues), total)
+	}
+}
+
+// listIssues must not loop forever against a server or proxy that ignores the
+// ?page query param and always re-serves the same non-empty page: a repeated
+// first issue number across pages is the cheap tell it stops on, mirroring
+// ListLabels' guard (#3953).
+func TestForgejoClient_ListOpenIssues_StopsOnRepeatedFirstIssueAcrossPages(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests > 5 {
+			t.Errorf("ListOpenIssues made more than 5 requests, want the repeated-page guard to stop it")
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Write([]byte(forgejoIssuesPage(1, 2)))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	issues, err := fc.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("ListOpenIssues = %+v, want 2 issues with no duplicates from the repeated page", issues)
 	}
 }
 
@@ -921,8 +997,7 @@ func TestForgejoClient_ListIssuesWithLabels_SkipsLabelsNotDefinedOnRepo(t *testi
 					return
 				}
 				issuesRequests = append(issuesRequests, r.URL.Query().Get("labels"))
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(`[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`))
+				serveIssues(w, r, `[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`)
 			}))
 			defer srv.Close()
 
@@ -931,8 +1006,11 @@ func TestForgejoClient_ListIssuesWithLabels_SkipsLabelsNotDefinedOnRepo(t *testi
 			if err != nil {
 				t.Fatalf("ListIssuesWithLabels: %v", err)
 			}
-			if len(issuesRequests) != 1 || issuesRequests[0] != "agent-review-finding" {
-				t.Fatalf("issues requests = %+v, want exactly one for the defined label", issuesRequests)
+			// listIssues walks until an empty page (issue #3978): the
+			// defined label's query is the non-empty page 1 plus the empty
+			// page 2 that ends the walk, both for the same label.
+			if len(issuesRequests) != 2 || issuesRequests[0] != "agent-review-finding" || issuesRequests[1] != "agent-review-finding" {
+				t.Fatalf("issues requests = %+v, want exactly two, both for the defined label", issuesRequests)
 			}
 			if len(issues) != 1 || issues[0].Number != "5" {
 				t.Fatalf("issues = %+v", issues)
@@ -981,8 +1059,7 @@ func TestForgejoClient_ListIssuesWithLabels_LabelsErrorFallsBackToQueryingAllLab
 			return
 		}
 		issuesRequests = append(issuesRequests, r.URL.Query().Get("labels"))
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`))
+		serveIssues(w, r, `[{"number":5,"title":"t","body":"b","state":"open","labels":[{"name":"agent-review-finding"}]}]`)
 	}))
 	defer srv.Close()
 
@@ -991,8 +1068,15 @@ func TestForgejoClient_ListIssuesWithLabels_LabelsErrorFallsBackToQueryingAllLab
 	if err != nil {
 		t.Fatalf("ListIssuesWithLabels: %v", err)
 	}
-	if len(issuesRequests) != 2 {
-		t.Fatalf("issues requests = %+v, want both labels queried unfiltered", issuesRequests)
+	// listIssues walks until an empty page (issue #3978), so each label's
+	// query is 2 requests (a non-empty page 1, an empty page 2), 4 total
+	// across the two labels queried unfiltered.
+	seen := map[string]int{}
+	for _, l := range issuesRequests {
+		seen[l]++
+	}
+	if len(issuesRequests) != 4 || seen["agent-review-finding"] != 2 || seen["agent-research-finding"] != 2 {
+		t.Fatalf("issues requests = %+v, want both labels queried unfiltered, 2 requests each", issuesRequests)
 	}
 	if len(issues) != 1 || issues[0].Number != "5" {
 		t.Fatalf("issues = %+v", issues)
@@ -1000,8 +1084,7 @@ func TestForgejoClient_ListIssuesWithLabels_LabelsErrorFallsBackToQueryingAllLab
 }
 
 // forgejoCommentsPage renders count comments as a Forgejo comments-list JSON
-// page, each body reading "comment <n>" so a test can assert order across
-// merged pages.
+// page, each body reading "comment <n>" so a test can assert order.
 func forgejoCommentsPage(start, count int) string {
 	var b strings.Builder
 	b.WriteByte('[')
