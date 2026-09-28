@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -132,6 +133,45 @@ func addButlerCommit(t *testing.T, repo, name, content string) string {
 	commit := strings.TrimSpace(string(commitOut))
 	runButlerGit(t, repo, "update-ref", "refs/heads/main", commit)
 	return commit
+}
+
+// fetchCmdCount counts top-level `git fetch` processes recorded in a
+// GIT_TRACE2_EVENT log at path: one "cmd_name" event per git process, so a
+// fetch's own upload-pack child (its own cmd_name "upload-pack") never
+// counts as a second fetch.
+func fetchCmdCount(t *testing.T, path string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read trace2 log %s: %v", path, err)
+	}
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev struct {
+			Event string `json:"event"`
+			Name  string `json:"name"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("parse trace2 line %q: %v", line, err)
+		}
+		if ev.Event == "cmd_name" && ev.Name == "fetch" {
+			count++
+		}
+	}
+	return count
+}
+
+// newButlerLedgerURL builds a fresh bare repo at a temp path to stand in for
+// a Remote ledger's URL, separate from the scratch repo Remote syncs into.
+func newButlerLedgerURL(t *testing.T) string {
+	t.Helper()
+	url := filepath.Join(t.TempDir(), "ledger.git")
+	runButlerGit(t, "", "init", "--bare", "-q", url)
+	runButlerGit(t, url, "config", "gc.auto", "0")
+	return url
 }
 
 func runButlerGitOutput(t *testing.T, repo string, args ...string) []byte {
@@ -1557,5 +1597,78 @@ func TestButlerPromotionKnobsParseFromSchema(t *testing.T) {
 	}
 	if cfg.butlerPromotionMaxFiles != 9 {
 		t.Errorf("butlerPromotionMaxFiles = %d, want 9", cfg.butlerPromotionMaxFiles)
+	}
+}
+
+// (s) Against a ledger.Remote, runButler's due check costs exactly one `git
+// fetch` for the whole pass, not one per candidate Chore: the shared
+// ledger.Snapshot syncs once up front and every candidate's Read/History
+// goes through that one synced view (issue #3918). A ledger.Local or fake
+// backend can't tell this apart -- Snapshot hands one back unchanged -- so
+// this needs a real Remote with a fetch-counting trace.
+func TestRunButler_RemoteBackendFetchesOnceForDueCheck(t *testing.T) {
+	codeRepo, _ := newButlerTestRepo(t)
+	ledgerURL := newButlerLedgerURL(t)
+
+	remote, err := ledger.NewRemote(t.TempDir(), ledgerURL)
+	if err != nil {
+		t.Fatalf("NewRemote: %v", err)
+	}
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, chore := range []string{"bugs", "docs-drift"} {
+		if _, err := ledger.Claim(remote, chore, ledger.Tip{}, ledger.ClaimedBy{Host: "other-host", Start: now}); err != nil {
+			t.Fatalf("seed Claim %s: %v", chore, err)
+		}
+	}
+
+	trace := filepath.Join(t.TempDir(), "trace2.log")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+
+	dispatched := false
+	newDispatcher := func(c dispatch.Chore) dispatch.Dispatcher {
+		dispatched = true
+		return dispatch.NewFake()
+	}
+
+	err = runButler(remote, forge.NewFake().AsIssueFiler(), testButlerRun(codeRepo), []string{"bugs", "docs-drift"}, testButlerPolicy(noEvery, "bugs", "docs-drift"), newDispatcher, func() time.Time { return now.Add(time.Minute) })
+	if !errors.Is(err, errQueueEmpty) {
+		t.Fatalf("runButler err = %v, want errQueueEmpty", err)
+	}
+	if dispatched {
+		t.Error("newDispatcher was called; want no Box dispatched against live claims")
+	}
+
+	if got := fetchCmdCount(t, trace); got != 1 {
+		t.Errorf("fetch count = %d, want exactly 1 for the whole due check", got)
+	}
+}
+
+// (t) promotionPolicy's Room re-walks the Ledger fresh each call (unlike
+// runButler's shared Snapshot, per its own doc comment), but still costs
+// exactly one fetch for that one call, however many Chores are enabled --
+// ledger.Snapshot inside Room, not a raw DayTotalsAll(backend, ...) that
+// would sync once per enabled Chore (issue #3918).
+func TestPromotionPolicy_RoomFetchesOnceAcrossEnabledChores(t *testing.T) {
+	ledgerURL := newButlerLedgerURL(t)
+
+	remote, err := ledger.NewRemote(t.TempDir(), ledgerURL)
+	if err != nil {
+		t.Fatalf("NewRemote: %v", err)
+	}
+
+	policy := testButlerPolicy(noEvery, "bugs", "docs-drift")
+	policy.maxPromotionsPerDay = 1
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pp := policy.promotionPolicy(remote, "bugs", func() time.Time { return now })
+
+	trace := filepath.Join(t.TempDir(), "trace2.log")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+
+	if got := pp.Room(); got != 1 {
+		t.Errorf("Room() = %d, want 1 (no promotions yet)", got)
+	}
+	if got := fetchCmdCount(t, trace); got != 1 {
+		t.Errorf("fetch count = %d, want exactly 1 for one Room() call", got)
 	}
 }
