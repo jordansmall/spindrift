@@ -145,6 +145,29 @@ func TestLauncherChecks_RepoSlug_SelfContainedResearchGithubTrackerStillFails(t 
 	}
 }
 
+// The butler is advise-only like research but files onto the work tracker,
+// so it must not take research's repo-slug exemption (issue #3989).
+func TestLauncherCheckConfig_ResearchDispatch_TracksResearchTracker(t *testing.T) {
+	cases := []struct {
+		name string
+		kind *dispatchkind.Descriptor
+		want bool
+	}{
+		{"work", dispatchkind.Work, false},
+		{"research", dispatchkind.Research, true},
+		{"butler", dispatchkind.Butler, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := applyDispatchKind(minimalValidConfig(), tc.kind)
+			got := launcherCheckConfig(c).ResearchDispatch
+			if got != tc.want {
+				t.Errorf("launcherCheckConfig(%s).ResearchDispatch = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLauncherChecks_GitUserName_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.gitUserName = ""
