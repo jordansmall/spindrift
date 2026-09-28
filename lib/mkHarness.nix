@@ -219,15 +219,15 @@ let
   # Mirrors fragmentsSourceDir's alias, for choresDir (ADR 0056, issue #3875).
   choresSourceDir = choresDir;
 
-  # The CHORE_CATALOG run artifact (issue #3905): the `<name>.md` stems
-  # lib/image.nix bakes under chores/.
-  choreCatalog = lib.concatStringsSep " " (
-    lib.pipe (builtins.readDir choresSourceDir) [
-      (lib.filterAttrs (name: type: (type == "regular" || type == "symlink") && lib.hasSuffix ".md" name))
-      builtins.attrNames
-      (map (lib.removeSuffix ".md"))
-    ]
-  );
+  # The `<name>.md` stems lib/image.nix bakes under chores/, shared by the
+  # CHORE_CATALOG run artifact (issue #3905) and butlerChoresPromptOk below
+  # (issue #3991) so both read choresSourceDir once.
+  choreStems = lib.pipe (builtins.readDir choresSourceDir) [
+    (lib.filterAttrs (name: type: (type == "regular" || type == "symlink") && lib.hasSuffix ".md" name))
+    builtins.attrNames
+    (map (lib.removeSuffix ".md"))
+  ];
+  choreCatalog = lib.concatStringsSep " " choreStems;
 
   # The SPINDRIFT_OUTCOME contract is harness-owned (issue #419): a Consumer
   # `prompt` that drops it ships an agent that never emits the outcome line,
@@ -1581,6 +1581,24 @@ let
   daemonAwakeWindowOk = builtins.seq (awakeWindow.parse (
     mergedDefaults.daemonAwakeWindow or ""
   )) true;
+
+  # A Chore named in BUTLER_CHORES with no matching <name>.md would otherwise
+  # go unnoticed until a Box claims its Ledger and finds nothing to run
+  # (issue #3991) -- catch a typo at eval time instead, naming the offender.
+  # Splits on runs of space, tab, CR and LF (close to Go's strings.Fields,
+  # which also splits on \v, \f and Unicode spaces) against the same
+  # choreStems already read for choreCatalog above.
+  butlerChoresTokens = lib.filter (s: s != "") (
+    lib.splitString " " (
+      lib.replaceStrings [ "\t" "\n" "\r" ] [ " " " " " " ] (mergedDefaults.butlerChores or "")
+    )
+  );
+  butlerChoresMissingPrompt = lib.filter (name: !(lib.elem name choreStems)) butlerChoresTokens;
+  butlerChoresPromptOk =
+    if butlerChoresMissingPrompt == [ ] then
+      true
+    else
+      throw "mkHarness: BUTLER_CHORES enables chore(s) with no prompt file in choresDir: ${lib.concatStringsSep ", " butlerChoresMissingPrompt}; each needs <name>.md in the chores directory";
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
@@ -1594,6 +1612,7 @@ else
   assert readOnlyCapabilityOk;
   assert jiraStatusMappingOk;
   assert daemonAwakeWindowOk;
+  assert butlerChoresPromptOk;
   warnAll {
     inherit
       image
