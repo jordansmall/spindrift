@@ -514,9 +514,8 @@ func TestBuildBoxEnv_NilSubjectErrors(t *testing.T) {
 	}
 }
 
-// Issue #3954: buildBoxEnv's key comes from subj.key()/subj.title() rather
-// than a caller-supplied pair, so both must return what New/NewChore already
-// derive.
+// subject is the single source of a Dispatch's key and title (issue #3954):
+// newDispatch sets d.number from key(), and announce prints title().
 func TestSubjectKeyAndTitle(t *testing.T) {
 	cases := []struct {
 		name      string
