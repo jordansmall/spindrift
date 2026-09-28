@@ -31,6 +31,7 @@ type hostRunner struct {
 	nixSystem     string
 	env           []string // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
 	knobs         []string // keys of the Launcher input document's settings map, stripped from env before a child sees it
+	butler        bool     // the butler kind survived gateButlerKind; RunDoctor then adds doctor --butler (issue #3920)
 
 	// flightMu guards flight below, plus the Moved baseline and the
 	// self-path memo fields further down: resolveTipOnce is the sole leader
@@ -84,6 +85,7 @@ type hostRunnerConfig struct {
 	nixSystem     string
 	env           []string
 	knobs         []string
+	butler        bool
 }
 
 // newHostRunner rejects a nil cfg.env. childEnv
@@ -104,6 +106,7 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 		nixSystem:     cfg.nixSystem,
 		env:           cfg.env,
 		knobs:         cfg.knobs,
+		butler:        cfg.butler,
 	}, nil
 }
 
@@ -498,7 +501,7 @@ var runnerDoctorCommand = exec.CommandContext
 // running) tears the child down instead of hanging until SIGKILL — same
 // reasoning as evalSelfPath/fetchRevision above.
 func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error) {
-	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs, FeatureBranch: r.featureBranch})
+	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs, FeatureBranch: r.featureBranch, Butler: r.butler})
 	if err != nil {
 		return 0, err
 	}

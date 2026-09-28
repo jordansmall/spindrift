@@ -290,6 +290,21 @@ func TestDoctorCommand(t *testing.T) {
 			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", FeatureBranch: "feat/thing"},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor", "--base-branch", "feat/thing"},
 		},
+		{
+			name: "butler appends --butler after doctor",
+			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Butler: true},
+			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor", "--butler"},
+		},
+		{
+			name: "butler and feature branch: --butler before --base-branch",
+			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Butler: true, FeatureBranch: "feat/thing"},
+			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor", "--butler", "--base-branch", "feat/thing"},
+		},
+		{
+			name: "no butler: no --butler flag",
+			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Butler: false},
+			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

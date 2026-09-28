@@ -1833,6 +1833,59 @@ func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
 	}
 }
 
+// TestRunDoctor_ButlerAppendsFlag asserts a runner constructed with the
+// butler kind in play threads "--butler" into the doctor argv (issue #3920):
+// the startup preflight must also run the butler's own config checks
+// whenever the butler is one of the gated kinds, never only when explicitly
+// requested at the command line.
+func TestRunDoctor_ButlerAppendsFlag(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+
+	var gotArgs []string
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		gotArgs = append([]string(nil), args...)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), butler: true})
+	if _, err := r.RunDoctor(context.Background(), revision); err != nil {
+		t.Fatalf("RunDoctor() unexpected error: %v", err)
+	}
+
+	joined := strings.Join(gotArgs, " ")
+	if !strings.HasSuffix(joined, "-- doctor --butler") {
+		t.Errorf("argv %v does not end in %q", gotArgs, "-- doctor --butler")
+	}
+}
+
+// TestRunDoctor_NoButlerOmitsFlag asserts the converse: a runner built
+// without the butler kind in play never passes --butler, so an explicit
+// dispatch/research selector is never refused over butler-only config.
+func TestRunDoctor_NoButlerOmitsFlag(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+
+	var gotArgs []string
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		gotArgs = append([]string(nil), args...)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	if _, err := r.RunDoctor(context.Background(), revision); err != nil {
+		t.Fatalf("RunDoctor() unexpected error: %v", err)
+	}
+
+	for _, tok := range gotArgs {
+		if tok == "--butler" {
+			t.Errorf("argv %v carries --butler, want none (butler not in play)", gotArgs)
+		}
+	}
+}
+
 // TestRunDoctor_HealthyPreflightEmitsNothing stubs the doctor seam with a
 // script that exits 0 printing nothing on either stream, mirroring what
 // quiet-by-default doctor (#3777) does on a healthy machine, and asserts the

@@ -105,10 +105,11 @@ func parseArgs(args []string) (parsedArgs, error) {
 }
 
 // gateButlerKind drops the butler from a bare invocation's kinds when
-// BUTLER_CHORES enables no Chore: the butler child (butlerPreflight,
-// cmd/launcher/butler.go) exits 1 then, which would trip the failure breaker
-// on every idle moment. A `butler` selector named explicitly fails startup
-// instead of running nothing.
+// BUTLER_CHORES enables no Chore, so a bare daemon without Chores runs the
+// other kinds rather than being refused by startupPreflight's `doctor
+// --butler`. A `butler` selector named explicitly fails startup instead of
+// running nothing. A butler that survives this gate has the rest of its
+// config validated by that same `doctor --butler` (issue #3920).
 func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, butlerChores string) ([]daemon.Kind, error) {
 	if len(butler.Chores(butlerChores)) > 0 || !slices.Contains(kinds, daemon.KindButler) {
 		return kinds, nil
@@ -784,6 +785,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		// entry and this line calls os.Setenv, so it's still a startup capture.
 		env:   os.Environ(),
 		knobs: strippedKeys,
+		// A butler gateButlerKind dropped, or an explicit dispatch/research
+		// selector, must never refuse startup over butler config.
+		butler: slices.Contains(args.Kinds, daemon.KindButler),
 	})
 	if err != nil {
 		return fail(stderr, err)
