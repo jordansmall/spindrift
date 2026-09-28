@@ -41,6 +41,7 @@ func RunContract(t *testing.T, newHarness func(t *testing.T) Harness) {
 	t.Run("DoneOverClaim", func(t *testing.T) { testDoneOverClaim(t, newHarness(t)) })
 	t.Run("StaleClaim", func(t *testing.T) { testStaleClaim(t, newHarness(t)) })
 	t.Run("DayTotals", func(t *testing.T) { testDayTotals(t, newHarness(t)) })
+	t.Run("Reserve", func(t *testing.T) { testReserve(t, newHarness(t)) })
 }
 
 // requireNoBranchesMoved fails t if h's refs/heads/* snapshot at call time
@@ -493,6 +494,157 @@ func testDayTotals(t *testing.T, h Harness) {
 			t.Fatalf("History[%d]: got commit %s, want %s (newest first)", i, e.Commit, wantOrder[i])
 		}
 	}
+
+	requireNoBranchesMoved(t, h, before)
+}
+
+// testReserve exercises ledger.Reserve directly: a reservation counts toward
+// DayTotals' Promoted unless a Done lands directly on top of it, it is
+// itself never a Claim, and it obeys the same compare-and-swap as Claim and
+// Finish.
+func testReserve(t *testing.T, h Harness) {
+	before := h.Branches(t)
+	b := h.Backend()
+	day := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+
+	t.Run("FinishedNoDoubleCount", func(t *testing.T) {
+		const chore = "chore-reserve-finished"
+		by := ledger.ClaimedBy{Host: "w", Start: day}
+		claim, err := ledger.Claim(b, chore, ledger.Tip{}, by)
+		if err != nil {
+			t.Fatalf("Claim: %v", err)
+		}
+		reserved, err := ledger.Reserve(b, chore, claim, 2, day.Add(time.Minute))
+		if err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+		if _, err := ledger.Finish(b, chore, reserved, ledger.State{
+			Promoted: []string{"url"},
+		}, day.Add(2*time.Minute)); err != nil {
+			t.Fatalf("Finish: %v", err)
+		}
+		got, err := ledger.DayTotals(b, chore, day)
+		if err != nil {
+			t.Fatalf("DayTotals: %v", err)
+		}
+		if got.Promoted != 1 {
+			t.Fatalf("DayTotals.Promoted: got %d, want 1 (no double count)", got.Promoted)
+		}
+		if got.Claims != 1 {
+			t.Fatalf("DayTotals.Claims: got %d, want 1 (reservation is not a claim)", got.Claims)
+		}
+	})
+
+	t.Run("InFlight", func(t *testing.T) {
+		const chore = "chore-reserve-inflight"
+		by := ledger.ClaimedBy{Host: "w", Start: day}
+		claim, err := ledger.Claim(b, chore, ledger.Tip{}, by)
+		if err != nil {
+			t.Fatalf("Claim: %v", err)
+		}
+		if _, err := ledger.Reserve(b, chore, claim, 2, day.Add(time.Minute)); err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+		got, err := ledger.DayTotals(b, chore, day)
+		if err != nil {
+			t.Fatalf("DayTotals: %v", err)
+		}
+		if got.Promoted != 2 {
+			t.Fatalf("DayTotals.Promoted: got %d, want 2 (in-flight reservation counts)", got.Promoted)
+		}
+		if got.Claims != 1 {
+			t.Fatalf("DayTotals.Claims: got %d, want 1", got.Claims)
+		}
+	})
+
+	t.Run("TakeoverCounts", func(t *testing.T) {
+		const chore = "chore-reserve-takeover"
+		by := ledger.ClaimedBy{Host: "w", Start: day}
+		claim, err := ledger.Claim(b, chore, ledger.Tip{}, by)
+		if err != nil {
+			t.Fatalf("Claim: %v", err)
+		}
+		reserved, err := ledger.Reserve(b, chore, claim, 2, day.Add(time.Minute))
+		if err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+		takeover, err := ledger.Claim(b, chore, reserved, ledger.ClaimedBy{Host: "w2", Start: day.Add(2 * time.Minute)})
+		if err != nil {
+			t.Fatalf("takeover Claim: %v", err)
+		}
+		if _, err := ledger.Finish(b, chore, takeover, ledger.State{
+			Promoted: []string{},
+		}, day.Add(3*time.Minute)); err != nil {
+			t.Fatalf("takeover Finish: %v", err)
+		}
+		got, err := ledger.DayTotals(b, chore, day)
+		if err != nil {
+			t.Fatalf("DayTotals: %v", err)
+		}
+		if got.Promoted != 2 {
+			t.Fatalf("DayTotals.Promoted: got %d, want 2 (lost reservation still counts)", got.Promoted)
+		}
+		if got.Claims != 2 {
+			t.Fatalf("DayTotals.Claims: got %d, want 2 (original claim + takeover claim)", got.Claims)
+		}
+	})
+
+	t.Run("LostRace", func(t *testing.T) {
+		const chore = "chore-reserve-lostrace"
+		by := ledger.ClaimedBy{Host: "w", Start: day}
+		claim, err := ledger.Claim(b, chore, ledger.Tip{}, by)
+		if err != nil {
+			t.Fatalf("Claim: %v", err)
+		}
+		// Move the tip out from under claim.
+		if _, err := ledger.Finish(b, chore, claim, ledger.State{}, day.Add(time.Minute)); err != nil {
+			t.Fatalf("Finish: %v", err)
+		}
+		if _, err := ledger.Reserve(b, chore, claim, 2, day.Add(2*time.Minute)); !errors.Is(err, ledger.ErrLostRace) {
+			t.Fatalf("Reserve on stale tip: got err %v, want ErrLostRace", err)
+		}
+	})
+
+	t.Run("CarriesClaimFields", func(t *testing.T) {
+		const chore = "chore-reserve-carry"
+		by := ledger.ClaimedBy{Host: "w", Slot: 4, Start: day}
+		claim, err := ledger.Claim(b, chore, ledger.Tip{}, by)
+		if err != nil {
+			t.Fatalf("Claim: %v", err)
+		}
+		claim.State.LastSwept = "swept-marker"
+		claim.State.Cursor = "cursor-marker"
+		bumped, err := ledger.Finish(b, chore, claim, ledger.State{
+			LastSwept: "swept-marker",
+			Cursor:    "cursor-marker",
+		}, day.Add(time.Minute))
+		if err != nil {
+			t.Fatalf("Finish (to plant LastSwept/Cursor): %v", err)
+		}
+		claim2, err := ledger.Claim(b, chore, bumped, ledger.ClaimedBy{Host: "w2", Slot: 5, Start: day.Add(2 * time.Minute)})
+		if err != nil {
+			t.Fatalf("Claim: %v", err)
+		}
+		reserved, err := ledger.Reserve(b, chore, claim2, 3, day.Add(3*time.Minute))
+		if err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+		if reserved.State.Phase != ledger.Claimed {
+			t.Fatalf("Reserve: got Phase %q, want %q", reserved.State.Phase, ledger.Claimed)
+		}
+		if reserved.State.ClaimedBy == nil || *reserved.State.ClaimedBy != *claim2.State.ClaimedBy {
+			t.Fatalf("Reserve: got ClaimedBy %+v, want %+v", reserved.State.ClaimedBy, claim2.State.ClaimedBy)
+		}
+		if reserved.State.LastSwept != "swept-marker" {
+			t.Fatalf("Reserve: got LastSwept %q, want %q", reserved.State.LastSwept, "swept-marker")
+		}
+		if reserved.State.Cursor != "cursor-marker" {
+			t.Fatalf("Reserve: got Cursor %q, want %q", reserved.State.Cursor, "cursor-marker")
+		}
+		if reserved.State.Reserved != 3 {
+			t.Fatalf("Reserve: got Reserved %d, want 3", reserved.State.Reserved)
+		}
+	})
 
 	requireNoBranchesMoved(t, h, before)
 }

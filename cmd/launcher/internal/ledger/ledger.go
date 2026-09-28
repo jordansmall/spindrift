@@ -45,6 +45,10 @@ type State struct {
 	Promoted  []string    `json:"promoted,omitempty"`
 	Dropped   int         `json:"dropped,omitempty"`
 	Usage     usage.Usage `json:"usage"`
+	// Reserved is set only on a reservation commit (see Reserve): promotion
+	// slots a Claimed-phase entry holds against the day's budget before its
+	// Done lands.
+	Reserved int `json:"reserved,omitempty"`
 }
 
 // StaleClaim reports whether s is a claim old enough that the worker holding
@@ -150,10 +154,28 @@ func Finish(b Backend, chore string, claim Tip, s State, at time.Time) (Tip, err
 	return Tip{Commit: commit, State: s}, nil
 }
 
+// Reserve appends a reservation on top of claim, conditional on claim being
+// unchanged: a copy of claim.State (Phase, ClaimedBy, LastSwept, and Cursor
+// carried unchanged, so StaleClaim and a live-claim check still see a normal
+// claim) with Reserved set to n. settle calls this before promoting, so the
+// slots are counted by DayTotals even if the Finish that follows never lands
+// (a CAS loss or a push error). The caller Finishes on top of the returned
+// Tip.
+func Reserve(b Backend, chore string, claim Tip, n int, at time.Time) (Tip, error) {
+	s := claim.State
+	s.Reserved = n
+	commit, err := b.Append(chore, claim.Commit, s, at)
+	if err != nil {
+		return Tip{}, err
+	}
+	return Tip{Commit: commit, State: s}, nil
+}
+
 // Totals sums a Chore's Ledger activity over a local day: budgets (ADR 0056
 // "Budgets") gate starting only, so Claims — runs started — is what they
 // check against, while Filed/Promoted/Dropped/Usage are the day's completed
-// work.
+// work. Promoted also includes any in-flight or lost-race reservation (see
+// Reserve), so an unfinished Finish still counts against the day's budget.
 type Totals struct {
 	Claims   int
 	Filed    int
@@ -169,25 +191,42 @@ type Totals struct {
 // split across its two commits: it counts toward Claims on the day its
 // Claimed commit was made, and toward Filed/Promoted/Dropped/Usage on the
 // (possibly later) day its Done commit lands.
+//
+// A Claimed entry with Reserved > 0 is a reservation (see Reserve), not a
+// claim: it never adds to Claims. It adds Reserved to Promoted unless its
+// child in the chain (the next-newer entry) is a Done — that Done's own
+// Promoted is the accurate count, so counting both would double-count a
+// successful run. A reservation with no child yet, or whose child is a
+// takeover Claim (its own Finish having been lost to the same race Reserve
+// guards against), counts Reserved.
 func DayTotals(b Reader, chore string, now time.Time) (Totals, error) {
 	loc := now.Location()
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	next := midnight.AddDate(0, 0, 1)
 
 	// History's since is only a fetch bound; the [midnight, next) window is
-	// owned here.
+	// owned here. entries is newest first, so entries[i-1] is entries[i]'s
+	// child — kept indexed (not filtered) so an in-window reservation can
+	// still look up its child's phase.
 	entries, err := b.History(chore, midnight)
 	if err != nil {
 		return Totals{}, err
 	}
 
 	var t Totals
-	for _, e := range entries {
+	for i, e := range entries {
 		if e.At.Before(midnight) || !e.At.Before(next) {
 			continue
 		}
 		switch e.State.Phase {
 		case Claimed:
+			if e.State.Reserved > 0 {
+				if i > 0 && entries[i-1].State.Phase == Done {
+					continue
+				}
+				t.Promoted += e.State.Reserved
+				continue
+			}
 			t.Claims++
 		case Done:
 			t.Filed += len(e.State.Filed)
