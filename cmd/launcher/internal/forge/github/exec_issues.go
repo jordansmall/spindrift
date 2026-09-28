@@ -410,9 +410,11 @@ func (e *execClient) TouchesOf(num string) ([]string, error) {
 }
 
 // CloseMergedIssue closes issue num as a backstop for a merged agent PR whose
-// Closes #<N> keyword GitHub's auto-close missed (issue #1892). It checks state
-// first so the common already-closed case is a true no-op instead of leaning on
-// gh's exit code for a redundant close.
+// Closes #<N> keyword GitHub's auto-close missed (issue #1892), and as the
+// close for a status=already-resolved outcome (issue #4015), which must never
+// read as "not planned". It checks state first so the common already-closed
+// case is a true no-op instead of leaning on gh's exit code for a redundant
+// close.
 func (e *execClient) CloseMergedIssue(num string) error {
 	iss, err := e.Issue(num)
 	if err != nil {
@@ -421,7 +423,7 @@ func (e *execClient) CloseMergedIssue(num string) error {
 	if iss.State == forge.IssueClosed {
 		return nil
 	}
-	cmd := exec.Command("gh", "issue", "close", num, "--repo", e.repo)
+	cmd := exec.Command("gh", "issue", "close", num, "--repo", e.repo, "--reason", "completed")
 	if _, err := cmd.Output(); err != nil {
 		return ghCommandErr(fmt.Sprintf("gh issue close %s", num), err)
 	}
