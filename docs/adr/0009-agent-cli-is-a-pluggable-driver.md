@@ -12,10 +12,9 @@
 > `docs/reference.md`.
 >
 > The decision text and Consequences below were refreshed in place under the
-> same issue, so they read as a record of what shipped. An inline
-> *Amended by issue #3490* marks only where what shipped **diverges** from what
-> this ADR decided; text that merely caught up to shipped detail carries no
-> marker of its own and is covered by this note.
+> same issue, so they read as a record of what shipped; inline markers follow
+> the amendment convention in
+> [CONTRIBUTING.md](../../CONTRIBUTING.md#decisions--the-public-contract).
 
 Until now the Box ran exactly one agent CLI — `claude -p … --dangerously-skip-permissions` — and Claude-specific assumptions leaked into six places: the invocation, the auth env, the `stream-json` outcome extraction, the `--agents` subagent JSON, skill discovery, and the launcher's Anthropic-specific transient classifier. To add **opencode** (with GitHub Copilot as a model *provider*), the agent CLI becomes a *Driver* seam: a swappable in-box tool selected at build time, exactly analogous to the `runtime` runner seam (ADR 0006). `claude` stays the default; `opencode` is the second Driver. `Driver` started as a provisional name, but it stuck: it now names shipped surface — the `DRIVER` artifact value the launcher reads (`getenvArtifact` — nix-computed plumbing, not an operator knob), the `lib/drivers/` registry, and the `driver` flake option.
 
