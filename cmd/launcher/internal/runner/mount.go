@@ -64,8 +64,9 @@ type MountParams struct {
 	// outbox-relay treatment under BoxForgeAndIssueAccess=="read-only"
 	// (issue #1918).
 	OutboxRelayCapable bool
-	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value,
-	// "read-write" or "read-only".
+	// BoxForgeAndIssueAccess is the effective BOX_FORGE_AND_ISSUE_ACCESS value,
+	// "read-write" or "read-only" — see config.effectiveBoxForgeAndIssueAccess
+	// (cmd/launcher/main.go) for how it's derived (issue #3906).
 	BoxForgeAndIssueAccess string
 }
 

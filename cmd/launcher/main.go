@@ -168,6 +168,18 @@ func (c config) kind() *dispatchkind.Descriptor {
 	return c.dispatchKind
 }
 
+// effectiveBoxForgeAndIssueAccess is the effective BOX_FORGE_AND_ISSUE_ACCESS
+// the Box and the launcher's outbox mount must agree on: the raw knob, forced
+// "read-only" for a ReadOnlyBox kind (issue #3906). c.boxForgeAndIssueAccess
+// itself stays raw for the token/settle gates that key off the operator's
+// actual knob.
+func (c config) effectiveBoxForgeAndIssueAccess() string {
+	if c.kind().ReadOnlyBox {
+		return "read-only"
+	}
+	return c.boxForgeAndIssueAccess
+}
+
 // applyDispatchKind sets c's dispatchKind and swaps the four lifecycle label
 // fields to kind's label family via forge.FamilyLabels. Only work's family is
 // operator-configurable; research's is fixed, since its CI workflow and prompt
@@ -743,7 +755,7 @@ func runnerConfig(c config) runner.Config {
 			HostMediatedRemote:     sig.hostMediatedRemote,
 			AccumulationRepoDir:    c.codeForgeAccumulationRepoDir,
 			OutboxRelayCapable:     sig.outboxRelayCapable,
-			BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
+			BoxForgeAndIssueAccess: c.effectiveBoxForgeAndIssueAccess(),
 		},
 	}
 }
@@ -872,7 +884,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		SelfContained:          c.selfContained,
 		ForgeDescriptor:        caps.ForgeDescriptor,
 		TrackerDescriptor:      caps.TrackerDescriptor,
-		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
+		BoxForgeAndIssueAccess: c.effectiveBoxForgeAndIssueAccess(),
 		TrackerAxisRead:        trackerAxisRead,
 		TrackerAxisWrite:       trackerAxisWrite,
 		TrackerAxisFiler:       trackerAxisFiler,
