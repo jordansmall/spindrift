@@ -78,8 +78,10 @@ type ButlerSettle struct {
 var _ Settler = (*ButlerSettle)(nil)
 
 // NewButlerSettle constructs a ButlerSettle for one Chore run. claim is the
-// Ledger tip Claim produced at the start of this run (ledger.Finish's
-// compare-and-swap parent); scope is the run's computed Scope
+// Ledger tip Claim produced at the start of this run -- ledger.Finish's
+// compare-and-swap parent, unless Settle first reserves promotion slots
+// (issue #3926), in which case the reservation commit takes over as parent;
+// scope is the run's computed Scope
 // (internal/butler.NextScope), whose Head/NextCursor become the done
 // commit's lastSwept/cursor on success. maxFindingsPerSweep caps how many
 // well-formed findings Settle will file in one sweep; 0 means no cap. policy
@@ -117,13 +119,45 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	// Room is evaluated at most once per Settle, and only when this Chore
 	// has an allow-list at all -- a Chore with no Classes can never promote,
 	// so spending a Ledger walk on Room for it would be waste. Evaluating at
-	// settle time rather than at run start means a promotion whose done
-	// commit already landed is counted here; it is still a soft cap like
-	// ADR 0056's other budgets, not a hard one -- two runs settling at the
-	// same moment can each read the same total and both spend it.
+	// settle time rather than at run start means a promotion whose
+	// reservation commit already landed is counted here; it is still a soft
+	// cap like ADR 0056's other budgets, not a hard one -- two runs settling
+	// at the same moment can each read the same total and both spend it.
 	remaining := 0
 	if len(b.policy.Classes) > 0 && b.policy.Room != nil {
 		remaining = b.policy.Room()
+	}
+
+	// Reserve the slots this run intends to spend before filing anything
+	// (issue #3926): if the done commit below never lands -- the claim was
+	// lost to a takeover, or the push itself fails -- the reservation still
+	// counts against DayTotals, so a lost Finish can never let a Chore
+	// promote past the day's budget. finishParent moves to the reservation
+	// tip on success so the done commit's own CAS is checked against it, not
+	// the stale claim.
+	finishParent := b.claim
+	if remaining > 0 {
+		eligible := 0
+		for _, raw := range capped.IssueIntents {
+			in, ok := parseIssueIntent(raw)
+			if !ok {
+				continue
+			}
+			if b.policy.eligible(in, butlerFiles(in.DedupTerms)) {
+				eligible++
+			}
+		}
+		n := min(remaining, eligible)
+		if n > 0 {
+			reserved, err := ledger.Reserve(b.ledger, b.chore, b.claim, n, b.now())
+			if err != nil {
+				fmt.Printf("    #%s  status=promotion-reserve-failed  !! %v\n", num, err)
+				remaining = 0
+			} else {
+				remaining = n
+				finishParent = reserved
+			}
+		}
 	}
 
 	filed := fileIssueIntentsDetailedFunc(b.it, num, capped, "agent-butler-finding", func(in issueIntent) (string, []string, func()) {
@@ -166,7 +200,7 @@ func (b *ButlerSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 		Usage:     d.CumulativeUsage(),
 		Dropped:   dropped,
 	}
-	if _, err := ledger.Finish(b.ledger, b.chore, b.claim, state, b.now()); err != nil {
+	if _, err := ledger.Finish(b.ledger, b.chore, finishParent, state, b.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
 		report.ChoreSettled(b.chore, forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err))
 		return
