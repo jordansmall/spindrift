@@ -24,9 +24,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
-	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/signalwire"
@@ -94,7 +92,7 @@ func (b *Buffer) AcceptComment(c signalwire.Comment) (signalwire.Receipt, *signa
 	if rej := b.checkKind(signalwire.KindComment); rej != nil {
 		return partial, rej
 	}
-	if rej := validate(fields{{"body", c.Body}}); rej != nil {
+	if rej := signalwire.CheckFields(signalwire.Field{Name: "body", Value: c.Body}); rej != nil {
 		return partial, rej
 	}
 
@@ -115,7 +113,10 @@ func (b *Buffer) AcceptPRIntent(p signalwire.PRIntent) (signalwire.Receipt, *sig
 	if rej := b.checkKind(signalwire.KindPRIntent); rej != nil {
 		return partial, rej
 	}
-	if rej := validate(fields{{"title", p.Title}, {"body", p.Body}}); rej != nil {
+	if rej := signalwire.CheckFields(
+		signalwire.Field{Name: "title", Value: p.Title},
+		signalwire.Field{Name: "body", Value: p.Body},
+	); rej != nil {
 		return partial, rej
 	}
 
@@ -137,12 +138,10 @@ func (b *Buffer) AcceptIssueIntent(i signalwire.IssueIntent) (signalwire.Receipt
 	// the relay path (settle/dedup.go's splitDedupTerms/buildDedupMarker)
 	// just drops a blank term and files normally. The two carriers must not
 	// disagree about whether a blank term is fatal, so drop whitespace-only
-	// terms up front -- before Bytes/Hash and before validate -- and carry
-	// only the survivors into the stored intent. A non-blank term keeps
-	// every check it has today (UTF-8, oversize).
-	i.DedupTerms = slices.DeleteFunc(slices.Clone(i.DedupTerms), func(t string) bool {
-		return strings.TrimSpace(t) == ""
-	})
+	// terms up front -- before Bytes/Hash and before i.ValidateTypeRequired()
+	// -- and carry only the survivors into the stored intent. A non-blank
+	// term keeps every check it has today (UTF-8, oversize).
+	i = i.PruneBlankDedupTerms()
 
 	total := len(i.Title) + len(i.Body) + len(i.Type) + len(i.Class) + len(i.Concurrence)
 	for _, term := range i.DedupTerms {
@@ -156,20 +155,7 @@ func (b *Buffer) AcceptIssueIntent(i signalwire.IssueIntent) (signalwire.Receipt
 	if rej := b.checkKind(signalwire.KindIssueIntent); rej != nil {
 		return partial, rej
 	}
-	fs := fields{{"title", i.Title}, {"body", i.Body}, {"type", i.Type}}
-	for idx, term := range i.DedupTerms {
-		fs = append(fs, field{fmt.Sprintf("dedupTerms[%d]", idx), term})
-	}
-	// Class and Concurrence are optional (issue #3880): validate's first
-	// pass rejects an empty field outright, so an unset one is left out of
-	// fs entirely rather than validated as present-but-blank.
-	if i.Class != "" {
-		fs = append(fs, field{"class", i.Class})
-	}
-	if i.Concurrence != "" {
-		fs = append(fs, field{"concurrence", i.Concurrence})
-	}
-	if rej := validate(fs); rej != nil {
+	if rej := i.ValidateTypeRequired(); rej != nil {
 		return partial, rej
 	}
 	if _, ok := doctor.FindingTypeLabels[i.Type]; !ok {
@@ -262,60 +248,6 @@ func (b *Buffer) checkKind(k signalwire.Kind) *signalwire.Reject {
 		Status: "kind_not_consumed",
 		Reason: "this dispatch does not consume " + string(k) + " signals",
 		Code:   http.StatusConflict,
-	}
-}
-
-// field is one content field: its wire name and its value. Every field is
-// bounded by signalwire.MaxBodyBytes -- title and type included, not just
-// body -- because the alternative is a per-field guess: without it a title is
-// held only by MaxRequestBytes, seven times the limit any tracker accepts.
-type field struct {
-	name  string
-	value string
-}
-
-type fields []field
-
-// validate runs the content checks in their pinned order -- empty, then
-// UTF-8, then size -- across every field, so a signal wrong in two ways
-// always reports the same fault. The UTF-8 pass is unreachable from the HTTP
-// path, since decode already rejects invalid UTF-8 on the raw request bytes
-// before any field exists; it stays for direct callers of the Buffer API,
-// which the Dispatch wiring will be.
-func validate(fs fields) *signalwire.Reject {
-	for _, f := range fs {
-		if strings.TrimSpace(f.value) == "" {
-			return &signalwire.Reject{
-				Status: "empty",
-				Reason: f.name + " is empty",
-				Code:   http.StatusBadRequest,
-			}
-		}
-	}
-	for _, f := range fs {
-		if !utf8.ValidString(f.value) {
-			return invalidUTF8Reject(f.name)
-		}
-	}
-	for _, f := range fs {
-		if len(f.value) > signalwire.MaxBodyBytes {
-			return &signalwire.Reject{
-				Status: "oversize",
-				Reason: fmt.Sprintf("%s exceeds the %d-byte limit", f.name, signalwire.MaxBodyBytes),
-				Code:   http.StatusRequestEntityTooLarge,
-			}
-		}
-	}
-	return nil
-}
-
-// invalidUTF8Reject is the package's one invalid_utf8 reject: the buffer names
-// the offending field, the handler names the raw body.
-func invalidUTF8Reject(what string) *signalwire.Reject {
-	return &signalwire.Reject{
-		Status: "invalid_utf8",
-		Reason: what + " is not valid utf-8",
-		Code:   http.StatusBadRequest,
 	}
 }
 
