@@ -35,8 +35,8 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
 
 `agent-dispatch.yml` and `agent-recover.yml` authenticate to GitHub by minting a
 short-lived **GitHub App installation token** per run (`actions/create-github-app-token`
-from the worker App secrets `SPINDRIFT_AGENT_WORKER_APP_ID` /
-`SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY`), not the long-lived `SPINDRIFT_GH_TOKEN`
+from the worker App's repository variable `SPINDRIFT_AGENT_WORKER_APP_ID` and repository
+secret `SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY`), not the long-lived `SPINDRIFT_GH_TOKEN`
 fine-grained PAT. The App installation has its own rate-limit bucket, isolated
 from any personal PAT — the fix for the 403 / secondary rate limiting hit during
 dispatch, CI polling, and merge. The composite `agent-setup` action is unchanged;
@@ -92,10 +92,10 @@ missing research label never fails the check. To create them manually — see
 labels](docs/reference.md#create-the-research-labels-on-the-target-repo).
 The workflow authenticates with an optional least-privilege research GitHub App
 (Issues RW, Contents R, Metadata R) — set the
-`SPINDRIFT_AGENT_RESEARCH_APP_ID` / `SPINDRIFT_AGENT_RESEARCH_APP_PRIVATE_KEY`
-repository secrets and `agent-research.yml` mints a short-lived installation
-token per run, falling back to the main `SPINDRIFT_GH_TOKEN` when the App is
-unset — see [Research
+`SPINDRIFT_AGENT_RESEARCH_APP_ID` repository variable and the
+`SPINDRIFT_AGENT_RESEARCH_APP_PRIVATE_KEY` repository secret, and
+`agent-research.yml` mints a short-lived installation token per run, falling
+back to the main `SPINDRIFT_GH_TOKEN` when the App is unset — see [Research
 token](docs/reference.md#research-token-least-privilege-optional). To drive
 research continuously instead of a one-off `spindrift research`, run the
 daemon (`nix run .#daemon`) with the `research` kind selector — `nix run
