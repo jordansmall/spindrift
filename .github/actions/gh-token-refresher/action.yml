@@ -68,8 +68,11 @@ runs:
             -H "Authorization: Bearer $jwt" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/app/installations/$INSTALLATION_ID/access_tokens" \
-            | jq -er '.token')
-          printf '%s' "$token" > "$token_file.tmp"
+            | jq -er '.token') || return 1
+          # jq -e only rejects `null`/`false`, not `""`, so a token field
+          # present but empty would otherwise pass through to the file.
+          [ -n "$token" ] || return 1
+          printf '%s' "$token" > "$token_file.tmp" || return 1
           mv "$token_file.tmp" "$token_file"
         }
 
@@ -80,9 +83,12 @@ runs:
         # mint (network blip, transient API error) logs and retries in 5m
         # rather than waiting out the full 45m cycle — the gap between a
         # failure and the next attempt must stay well inside the ~1h token
-        # lifetime it's protecting. `mint_token || …` keeps that failure
-        # from tripping this script's errexit (GitHub Actions runs `run:`
-        # under `set -e -o pipefail`).
+        # lifetime it's protecting. `if mint_token` suspends this script's
+        # errexit (GitHub Actions runs `run:` under `set -e -o pipefail`)
+        # for the duration of the call, so any step that could otherwise
+        # reach the token file on failure (the curl/jq fetch, the empty
+        # check, the write) must `return 1` explicitly; the trailing mv's
+        # status is the return value.
         (
           trap 'rm -f "$key_file"' EXIT
           sleep_secs=2700 # 45m: comfortably inside the ~1h installation-token lifetime
