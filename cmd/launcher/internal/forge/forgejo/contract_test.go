@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
@@ -40,16 +41,22 @@ type forgejoIssueRecord struct {
 // implements both forgetest.NativeCapable and forgetest.NativeFailureIsolatable,
 // mirroring the github/Fake harnesses.
 type forgejoHarness struct {
-	mu     sync.Mutex
-	order  []string
-	issues map[string]*forgejoIssueRecord
+	mu            sync.Mutex
+	order         []string
+	issues        map[string]*forgejoIssueRecord
+	definedLabels map[string]bool // sticky registry: stays defined after an issue drops it, like real Forgejo
 
 	srv *httptest.Server
 	tr  forge.IssueTracker
 }
 
 func newForgejoHarness(t *testing.T) *forgejoHarness {
-	h := &forgejoHarness{issues: map[string]*forgejoIssueRecord{}}
+	h := &forgejoHarness{issues: map[string]*forgejoIssueRecord{}, definedLabels: map[string]bool{}}
+	for _, l := range []string{testLabels.Dispatchable, testLabels.InProgress, testLabels.Complete, testLabels.Failed} {
+		if l != "" {
+			h.definedLabels[l] = true
+		}
+	}
 	h.srv = httptest.NewServer(http.HandlerFunc(h.handle))
 	t.Cleanup(h.srv.Close)
 	h.tr = forgejo.NewForgejoClient(forgejo.ForgejoConfig{
@@ -76,6 +83,9 @@ func (h *forgejoHarness) SeedIssue(iss forge.Issue) {
 		title:  iss.Title,
 		body:   iss.Body,
 		labels: append([]string(nil), iss.Labels...),
+	}
+	for _, l := range iss.Labels {
+		h.definedLabels[l] = true
 	}
 }
 
@@ -209,6 +219,9 @@ func (h *forgejoHarness) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewDecoder(r.Body).Decode(&body)
 		rec.labels = body.Labels
+		for _, l := range body.Labels {
+			h.definedLabels[l] = true
+		}
 		w.WriteHeader(http.StatusOK)
 		return
 
@@ -236,7 +249,23 @@ func (h *forgejoHarness) handle(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case r.Method == http.MethodGet && labelsListRe.MatchString(r.URL.Path):
-		json.NewEncoder(w).Encode([]map[string]any{})
+		// Sticky, like real Forgejo: a label seeded or ever attached to an
+		// issue stays defined even after every issue drops it. Every label
+		// fits on page 1; later pages come back empty to end ListLabels' walk.
+		if p := r.URL.Query().Get("page"); p != "" && p != "1" {
+			json.NewEncoder(w).Encode([]map[string]any{})
+			return
+		}
+		names := make([]string, 0, len(h.definedLabels))
+		for l := range h.definedLabels {
+			names = append(names, l)
+		}
+		sort.Strings(names)
+		out := make([]map[string]any, len(names))
+		for i, n := range names {
+			out[i] = map[string]any{"name": n}
+		}
+		json.NewEncoder(w).Encode(out)
 		return
 
 	case r.Method == http.MethodGet && repoRootRe.MatchString(r.URL.Path):

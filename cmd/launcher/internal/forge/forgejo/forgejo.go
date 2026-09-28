@@ -132,8 +132,13 @@ func (c *forgejoClient) Issue(num string) (forge.Issue, error) {
 
 // ListIssues returns open issues carrying state's configured label, ascending
 // by issue number. A state with no configured label applies no label filter.
+// A configured label the repo doesn't define matches nothing and sends no
+// query (issue #3952), for the same reason ListIssuesWithLabels skips one.
 func (c *forgejoClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	label := c.cfg.Labels.Label(state)
+	if label != "" && len(c.definedLabels([]string{label})) == 0 {
+		return nil, nil
+	}
 	return c.listIssues("open", label)
 }
 
@@ -164,7 +169,15 @@ func (c *forgejoClient) listIssues(restState, label string) ([]forge.Issue, erro
 			return false, err
 		}
 		for _, p := range payload {
-			issues = append(issues, toForgeIssue(p))
+			iss := toForgeIssue(p)
+			// Lossless backstop for label != "": Forgejo silently drops an
+			// unresolved labels= filter and returns everything (issue #3952),
+			// so re-check client-side (definedLabels documents the exact,
+			// case-sensitive match semantics).
+			if label != "" && !slices.Contains(iss.Labels, label) {
+				continue
+			}
+			issues = append(issues, iss)
 		}
 		return len(payload) < forge.ResultPageLimit, nil
 	})
@@ -179,8 +192,30 @@ func (c *forgejoClient) listIssues(restState, label string) ([]forge.Issue, erro
 	return issues, nil
 }
 
-// issueListSource tags ListIssuesWithLabels' errors and warnings.
+// issueListSource tags ListIssues and ListIssuesWithLabels' errors and
+// warnings.
 const issueListSource = "forgejo: issue list"
+
+// definedLabels filters labels down to the ones ListLabels reports as defined
+// on the repo. The match is exact (case-sensitive) even though Forgejo's DB
+// name lookup can be case-insensitive on MySQL, so a configured label
+// differing only by case is treated as undefined. A ListLabels error is a
+// transient outage, not evidence the labels are absent, so it falls back to
+// treating every requested label as defined rather than returning none.
+func (c *forgejoClient) definedLabels(labels []string) []string {
+	defined, err := c.ListLabels()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: %s: ListLabels failed, querying all %d requested label(s) without the existence pre-check: %v\n", issueListSource, len(labels), err)
+		return labels
+	}
+	var present []string
+	for _, l := range labels {
+		if slices.Contains(defined, l) {
+			present = append(present, l)
+		}
+	}
+	return present
+}
 
 // ListIssuesWithLabels implements forge.LabeledBacklogLister (issue #3873):
 // state scopes the scan to open or closed issues, since a closed finding is a
@@ -207,19 +242,7 @@ func (c *forgejoClient) ListIssuesWithLabels(state forge.IssueState, labels []st
 		return nil, nil
 	}
 
-	var present []string
-	if defined, err := c.ListLabels(); err != nil {
-		// A transient labels outage must not become an empty dedup index:
-		// fall back to querying every requested label unfiltered.
-		fmt.Fprintf(os.Stderr, "WARNING: %s: ListLabels failed, querying all %d requested label(s) unfiltered: %v\n", issueListSource, len(labels), err)
-		present = labels
-	} else {
-		for _, l := range labels {
-			if slices.Contains(defined, l) {
-				present = append(present, l)
-			}
-		}
-	}
+	present := c.definedLabels(labels)
 
 	return forge.MergeLabeledIssues(issueListSource, present, func(label string) ([]forge.Issue, error) {
 		return c.listIssues(restState, label)
