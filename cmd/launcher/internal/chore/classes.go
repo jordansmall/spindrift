@@ -8,12 +8,13 @@ import (
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// ParseClasses parses BUTLER_CHORE_CLASSES (ADR 0056): a space-separated list
+// parseClasses parses BUTLER_CHORE_CLASSES (ADR 0056): a space-separated list
 // of "<chore>=<class>[,<class>...]" entries, the host-side allow-list of
 // finding classes each Chore may auto-promote. The Box never sees this value
 // (schema key butlerChoreClasses has boxEnv = false) and cannot influence it.
-// "" parses to an empty map.
-func ParseClasses(s string) (map[string][]string, error) {
+// "" parses to an empty map. Load cross-checks the result against
+// BUTLER_CHORES.
+func parseClasses(s string) (map[string][]string, error) {
 	out := map[string][]string{}
 	for _, entry := range strings.Fields(s) {
 		chore, classesPart, ok := strings.Cut(entry, "=")

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
@@ -315,7 +316,15 @@ func TestParseArgs(t *testing.T) {
 // #3878): butler drops out of a bare "every kind" default when
 // BUTLER_CHORES is empty, survives when it isn't, an explicit butler
 // selector with no chores enabled fails instead of dropping silently, and a
-// kind set that never had butler in it is untouched either way.
+// kind set that never had butler in it is untouched either way -- including
+// when BUTLER_EVERY/BUTLER_CHORE_CLASSES are themselves malformed, since a
+// research/dispatch-only daemon must never fail on butler config it never
+// parses (issue #3991). With BUTLER_CHORES empty, chore.Load short-circuits
+// before it ever looks at BUTLER_EVERY/BUTLER_CHORE_CLASSES, so a bare
+// invocation drops the butler even with a leftover or malformed value in
+// either -- an explicit `butler` selector still fails, since it wants the
+// butler regardless of what got it there. Once a Chore is actually enabled,
+// a chore.Load error fails startup outright.
 func TestGateButlerKind(t *testing.T) {
 	every := []daemon.Kind{daemon.KindDispatch, daemon.KindResearch, daemon.KindButler}
 	tests := []struct {
@@ -323,8 +332,11 @@ func TestGateButlerKind(t *testing.T) {
 		kinds            []daemon.Kind
 		explicitSelector bool
 		butlerChores     string
+		butlerEvery      string
+		butlerClasses    string
 		want             []daemon.Kind
 		wantErr          bool
+		wantErrIs        error // when set, err must wrap it
 	}{
 		{
 			name:  "bare default with no chores drops butler",
@@ -362,21 +374,62 @@ func TestGateButlerKind(t *testing.T) {
 			explicitSelector: true,
 			want:             []daemon.Kind{daemon.KindDispatch},
 		},
+		{
+			name:        "butler not in kinds with broken BUTLER_EVERY passes untouched",
+			kinds:       []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			butlerEvery: "not-a-duration",
+			want:        []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+		},
+		{
+			name:         "butler in kinds with a Load error fails",
+			kinds:        every,
+			butlerChores: "bugs",
+			butlerEvery:  "not-a-duration",
+			wantErr:      true,
+		},
+		{
+			name:          "bare default with empty chores and a stale override drops butler",
+			kinds:         every,
+			butlerChores:  "",
+			butlerEvery:   "6h docs-drift=168h",
+			butlerClasses: "",
+			want:          []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+		},
+		{
+			name:         "bare default with empty chores and malformed every drops butler",
+			kinds:        every,
+			butlerChores: "",
+			butlerEvery:  "not-a-duration",
+			want:         []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+		},
+		{
+			name:             "explicit butler selector with empty chores fails on no chores, not the malformed every",
+			kinds:            []daemon.Kind{daemon.KindButler},
+			explicitSelector: true,
+			butlerChores:     "",
+			butlerEvery:      "not-a-duration",
+			wantErr:          true,
+			wantErrIs:        chore.ErrNoChores,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := gateButlerKind(tt.kinds, tt.explicitSelector, tt.butlerChores)
+			knobs := chore.Knobs{Chores: tt.butlerChores, Every: tt.butlerEvery, Classes: tt.butlerClasses}
+			got, err := gateButlerKind(tt.kinds, tt.explicitSelector, knobs)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("gateButlerKind(%v, %v, %q) = %v, nil; want an error", tt.kinds, tt.explicitSelector, tt.butlerChores, got)
+					t.Fatalf("gateButlerKind(%v, %v, %+v) = %v, nil; want an error", tt.kinds, tt.explicitSelector, knobs, got)
+				}
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Fatalf("gateButlerKind(%v, %v, %+v) error = %v; want it to wrap %v", tt.kinds, tt.explicitSelector, knobs, err, tt.wantErrIs)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("gateButlerKind(%v, %v, %q) unexpected error: %v", tt.kinds, tt.explicitSelector, tt.butlerChores, err)
+				t.Fatalf("gateButlerKind(%v, %v, %+v) unexpected error: %v", tt.kinds, tt.explicitSelector, knobs, err)
 			}
 			if !slices.Equal(got, tt.want) {
-				t.Fatalf("gateButlerKind(%v, %v, %q) = %v, want %v", tt.kinds, tt.explicitSelector, tt.butlerChores, got, tt.want)
+				t.Fatalf("gateButlerKind(%v, %v, %+v) = %v, want %v", tt.kinds, tt.explicitSelector, knobs, got, tt.want)
 			}
 		})
 	}
@@ -965,8 +1018,8 @@ var daemonKnobEnvVars = []string{
 	"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION",
 	"DAEMON_IDLE_FLOOR", "DAEMON_IDLE_CAP", "DAEMON_FAILURE_BACKOFF",
 	"DAEMON_BREAKER_THRESHOLD", "DAEMON_BREAKER_WINDOW", "BOX_SIGNAL_CARRIER",
-	"DAEMON_AWAKE_WINDOW", "BUTLER_CHORES", "DAEMON_SELF_APP",
-	"SPINDRIFT_DAEMON_PROGRAM",
+	"DAEMON_AWAKE_WINDOW", "BUTLER_CHORES", "BUTLER_EVERY", "BUTLER_CHORE_CLASSES",
+	"DAEMON_SELF_APP", "SPINDRIFT_DAEMON_PROGRAM",
 }
 
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the

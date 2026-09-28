@@ -49,24 +49,24 @@ func TestParseClasses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ParseClasses(tc.in)
+			got, err := parseClasses(tc.in)
 			if tc.wantErr == "" {
 				if err != nil {
-					t.Fatalf("ParseClasses(%q): %v", tc.in, err)
+					t.Fatalf("parseClasses(%q): %v", tc.in, err)
 				}
 				if !reflect.DeepEqual(got, tc.want) {
-					t.Errorf("ParseClasses(%q) = %#v, want %#v", tc.in, got, tc.want)
+					t.Errorf("parseClasses(%q) = %#v, want %#v", tc.in, got, tc.want)
 				}
 				return
 			}
 			if err == nil {
-				t.Fatalf("ParseClasses(%q): got nil error, want substring %q", tc.in, tc.wantErr)
+				t.Fatalf("parseClasses(%q): got nil error, want substring %q", tc.in, tc.wantErr)
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("ParseClasses(%q) err = %v, want substring %q", tc.in, err, tc.wantErr)
+				t.Errorf("parseClasses(%q) err = %v, want substring %q", tc.in, err, tc.wantErr)
 			}
 			if tc.wantRule && !strings.Contains(err.Error(), signalwire.ClassRule) {
-				t.Errorf("ParseClasses(%q) err = %v, want it to contain signalwire.ClassRule %q", tc.in, err, signalwire.ClassRule)
+				t.Errorf("parseClasses(%q) err = %v, want it to contain signalwire.ClassRule %q", tc.in, err, signalwire.ClassRule)
 			}
 		})
 	}

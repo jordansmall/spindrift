@@ -104,7 +104,7 @@ func TestRunButler_AgainstRemoteLedger(t *testing.T) {
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	id := butlerRun{repo: repo, branch: "main", host: "test-host"}
-	if err := runButler(backend, fc.AsIssueFiler(), id, []string{"bugs"}, testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now }); err != nil {
+	if err := runButler(backend, fc.AsIssueFiler(), id, testChores(noEvery, "bugs"), testButlerPolicy(noEvery, "bugs"), newDispatcher, func() time.Time { return now }); err != nil {
 		t.Fatalf("runButler: %v", err)
 	}
 

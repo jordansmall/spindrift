@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -23,28 +22,40 @@ type Chore struct {
 	Classes []string      // BUTLER_CHORE_CLASSES allow-list; nil when the Chore has no entry.
 }
 
-// Load resolves BUTLER_CHORES, BUTLER_EVERY and BUTLER_CHORE_CLASSES into
-// one Chore per enabled name, in BUTLER_CHORES order; an empty BUTLER_CHORES
-// yields none, and whether that is an error (ErrNoChores) is the caller's
-// call. Every problem is returned together via errors.Join, each prefixed
-// with its knob. A knob's grammar reports only its first fault, since its
-// parser stops there; the cross-checks report every offender. A
-// BUTLER_CHORE_CLASSES entry may name a built-in Chore that is not enabled:
-// the schema default lists every built-in, so such an entry is inert rather
-// than a typo.
-func Load(chores, every, classes string) ([]Chore, error) {
+// Knobs is the three raw butler settings (ADR 0056): BUTLER_CHORES,
+// BUTLER_EVERY and BUTLER_CHORE_CLASSES, unparsed.
+type Knobs struct {
+	Chores, Every, Classes string
+}
+
+// Load resolves Knobs into one Chore per enabled name, in BUTLER_CHORES
+// order. When BUTLER_CHORES enables no Chore, Load returns (nil, nil)
+// immediately without parsing or cross-checking BUTLER_EVERY or
+// BUTLER_CHORE_CLASSES: with no Chore enabled, those knobs configure
+// nothing, so a leftover or malformed value in either is not a startup
+// error. Otherwise every problem is returned together via errors.Join, each
+// prefixed with its knob. A knob's grammar reports only its first fault,
+// since its parser stops there; the cross-checks report every offender,
+// once per offender. A BUTLER_CHORE_CLASSES entry may name a built-in
+// Chore that is not enabled: the schema default lists every built-in, so
+// such an entry is inert rather than a typo.
+func Load(k Knobs) ([]Chore, error) {
+	names := strings.Fields(k.Chores)
+	if len(names) == 0 {
+		return nil, nil
+	}
+
 	var errs []error
 
-	names := Chores(chores)
 	enabled := make(map[string]bool, len(names))
 	for _, name := range names {
-		if !promptassembly.ValidChoreName(name) {
+		if !enabled[name] && !promptassembly.ValidChoreName(name) {
 			errs = append(errs, fmt.Errorf("BUTLER_CHORES: chore %q: invalid name format: %s", name, promptassembly.ChoreNameRule))
 		}
 		enabled[name] = true
 	}
 
-	everyCfg, everyErr := parseEvery(every)
+	everyCfg, everyErr := parseEvery(k.Every)
 	if everyErr != nil {
 		errs = append(errs, fmt.Errorf("BUTLER_EVERY: %w", everyErr))
 	} else {
@@ -52,27 +63,27 @@ func Load(chores, every, classes string) ([]Chore, error) {
 		for name := range everyCfg.overrides {
 			overrideNames = append(overrideNames, name)
 		}
-		sort.Strings(overrideNames)
+		slices.Sort(overrideNames)
 		for _, name := range overrideNames {
 			if !enabled[name] {
-				errs = append(errs, fmt.Errorf("BUTLER_EVERY: override for chore %q, which is not enabled (BUTLER_CHORES=%q)", name, chores))
+				errs = append(errs, fmt.Errorf("BUTLER_EVERY: override for chore %q, which is not enabled (BUTLER_CHORES=%q)", name, k.Chores))
 			}
 		}
 	}
 
-	classesMap, classesErr := ParseClasses(classes)
+	classesMap, classesErr := parseClasses(k.Classes)
 	if classesErr != nil {
 		errs = append(errs, fmt.Errorf("BUTLER_CHORE_CLASSES: %w", classesErr))
 	} else {
 		// classesErr == nil means every entry in classes already parsed
 		// cleanly, so re-splitting it here for token order (a map has none)
 		// can't fail.
-		for _, entry := range strings.Fields(classes) {
+		for _, entry := range strings.Fields(k.Classes) {
 			name, _, _ := strings.Cut(entry, "=")
-			if enabled[name] || slices.Contains(Builtins, name) {
+			if enabled[name] || slices.Contains(builtinChores, name) {
 				continue
 			}
-			errs = append(errs, fmt.Errorf("BUTLER_CHORE_CLASSES: chore %q is not enabled and not a built-in chore (BUTLER_CHORES=%q)", name, chores))
+			errs = append(errs, fmt.Errorf("BUTLER_CHORE_CLASSES: chore %q is not enabled and not a built-in chore (BUTLER_CHORES=%q)", name, k.Chores))
 		}
 	}
 
@@ -107,13 +118,14 @@ func (c everyConfig) For(name string) time.Duration {
 	return c.dflt
 }
 
-// parseEvery parses BUTLER_EVERY's grammar (ADR 0056): space-separated tokens, each either a
-// bare Go time.ParseDuration string (the default interval for every enabled
-// Chore not otherwise overridden) or "<chore>=<duration>" (a per-Chore
-// override), e.g. "6h docs-drift=168h". A value with no bare token falls
-// back to DefaultEvery. Rejects an unparseable or negative duration, more
-// than one bare default token, a duplicate override for the same Chore, and
-// an empty chore name in a "=<duration>" token.
+// parseEvery parses BUTLER_EVERY's grammar (ADR 0056): space-separated
+// tokens, each either a bare Go time.ParseDuration string (the default
+// interval for every enabled Chore not otherwise overridden) or
+// "<chore>=<duration>" (a per-Chore override), e.g. "6h docs-drift=168h". A
+// value with no bare token falls back to DefaultEvery. Rejects an
+// unparseable or negative duration, more than one bare default token, a
+// duplicate override for the same Chore, and an empty chore name in a
+// "=<duration>" token.
 func parseEvery(value string) (everyConfig, error) {
 	cfg := everyConfig{overrides: make(map[string]time.Duration)}
 	haveDefault := false
