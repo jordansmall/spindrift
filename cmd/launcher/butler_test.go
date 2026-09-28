@@ -760,7 +760,8 @@ func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchCon
 // (k2) cmdButler rejects a malformed BUTLER_CHORES entry before ever writing
 // a Ledger claim (issue #3905). "bad.name" is a legal git ref component (so a
 // claim would be writable if the name-format guard were missing) but fails
-// promptassembly.ChoreNameRe, which is what butlerPreflight must catch first.
+// promptassembly.ValidChoreName, which is what butlerPreflight must catch
+// first.
 func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
 	t.Setenv("FILER_MODEL", "test-model")
 	repo, _ := newButlerTestRepo(t)
