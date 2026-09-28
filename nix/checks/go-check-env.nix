@@ -5,8 +5,8 @@
 # runtime/cgo into the build and fails with "gcc not found". GOMAXPROCS bounds
 # Go by NIX_BUILD_CORES, which Go never reads itself: an unsandboxed build sees
 # every host CPU, and the Box's cgroup pids limit counts each Go process's
-# threads (issue #3915). Unset and 0 fall back to 4, matching lib/image.nix's
-# nix.conf `cores`.
+# threads (issue #3915). Unset and 0 fall back to lib/image.nix's nix.conf
+# `cores`; go.nix's `go-check-env` check fails if the two drift (issue #3965).
 ''
   export GOPROXY=off
   export GOFLAGS=-mod=vendor
