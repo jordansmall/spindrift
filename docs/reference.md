@@ -5571,7 +5571,17 @@ subcommand exactly once (`startupPreflight`, `cmd/launcher/daemon/main.go`)
 the first child will run at, so the preflight validates the build about to
 actually run rather than the operator's possibly-stale working tree. When
 `--feature-branch` is set (**Feature branch** above), doctor's own argv
-gets the same `--base-branch` flag every child does. The
+gets the same `--base-branch` flag every child does. When the butler kind
+survived `gateButlerKind` (**Daemon** above) — a bare invocation with a
+non-empty `BUTLER_CHORES`, or an explicit `butler` selector — doctor's argv
+also gets `--butler`, so the preflight validates the butler's own config
+(a Filer, `DRIVER` not `opencode`, a `CODE_FORGE` with a Ledger,
+`BUTLER_CHORE_CLASSES`, the sweep-vs-day cap relationship, `BUTLER_EVERY`)
+up front; a butler that cannot run then refuses daemon startup as a
+preflight halt instead of halting the pool on its first butler slot (exit
+6, config-invalid) after the pool has already started. An explicit `dispatch`/`research`
+selector never adds the flag, so butler-only misconfiguration never
+refuses a daemon that was never going to run the butler. The
 daemon passes no verbosity flag, so doctor's quiet-by-default behavior
 (`--verbose`/`-v` opts back into the full report) governs the preflight: a
 healthy start adds no doctor report at all to the daemon's own stderr, and a

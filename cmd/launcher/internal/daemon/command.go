@@ -244,6 +244,9 @@ type DoctorSpec struct {
 	// FeatureBranch is the branch the preflight targets via --base-branch;
 	// see appendFeatureBranch.
 	FeatureBranch string
+	// Butler adds "--butler" so the preflight also runs the butler's own
+	// config checks, when the butler kind is in play after gating.
+	Butler bool
 }
 
 // DoctorCommand builds the Command for the daemon's own startup preflight:
@@ -264,6 +267,10 @@ func DoctorCommand(s DoctorSpec) (Command, error) {
 	if err != nil {
 		return Command{}, err
 	}
-	argv := appendFeatureBranch([]string{"nix", "run", flakeref, "--", "doctor"}, s.FeatureBranch)
+	argv := []string{"nix", "run", flakeref, "--", "doctor"}
+	if s.Butler {
+		argv = append(argv, "--butler")
+	}
+	argv = appendFeatureBranch(argv, s.FeatureBranch)
 	return Command{Argv: argv, Env: withoutKeys(withoutKeys(s.Env, s.Knobs), []string{reportFDEnv})}, nil
 }

@@ -2303,6 +2303,68 @@ func TestMainRun_FeatureBranchPrintsStartupLineAndReachesDoctor(t *testing.T) {
 	}
 }
 
+// TestMainRun_ButlerInPlayReachesDoctorAsButlerFlag pins issue #3920: a
+// butler that survives gateButlerKind must reach the doctor preflight's
+// argv as --butler, whichever verb form put it in play, and a gated-out or
+// never-selected butler must not.
+func TestMainRun_ButlerInPlayReachesDoctorAsButlerFlag(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		overrides  map[string]string
+		wantButler bool
+	}{
+		{
+			name:       "bare daemon with chores enabled carries --butler",
+			args:       nil,
+			overrides:  map[string]string{"BUTLER_CHORES": "bugs", "RESEARCH_RESERVATION": "0"},
+			wantButler: true,
+		},
+		{
+			name:       "bare daemon with no chores drops --butler",
+			args:       nil,
+			overrides:  map[string]string{"RESEARCH_RESERVATION": "0"},
+			wantButler: false,
+		},
+		{
+			name:       "explicit dispatch selector never carries --butler",
+			args:       []string{"dispatch"},
+			overrides:  map[string]string{"BUTLER_CHORES": "bugs"},
+			wantButler: false,
+		},
+		{
+			name:       "explicit butler selector carries --butler",
+			args:       []string{"butler"},
+			overrides:  map[string]string{"BUTLER_CHORES": "bugs"},
+			wantButler: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := capturedEnvFixtureT(t, tt.overrides)
+
+			origDoctor := runnerDoctorCommand
+			t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+			var gotArgv []string
+			runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+				gotArgv = append([]string{name}, args...)
+				return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+			}
+
+			var stdout, stderr bytes.Buffer
+			got := mainRun(append([]string{"--input", path}, tt.args...), &stdout, &stderr)
+			if got != daemon.ExitPreflightFailed {
+				t.Fatalf("mainRun() = %d, want %d (daemon.ExitPreflightFailed); stderr = %q", got, daemon.ExitPreflightFailed, stderr.String())
+			}
+
+			hasButler := slices.Contains(gotArgv, "--butler")
+			if hasButler != tt.wantButler {
+				t.Errorf("doctor argv %v has --butler = %v, want %v", gotArgv, hasButler, tt.wantButler)
+			}
+		})
+	}
+}
+
 // TestMainRun_DoctorChildGetsCapturedEnv is the regression test for the bug
 // where newHostRunner's call site never set env/knobs, so RunDoctor exec'd
 // children with an EMPTY environment (no PATH, no HOME) — dogfood's doctor
