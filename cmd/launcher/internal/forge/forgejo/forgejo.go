@@ -6,6 +6,7 @@ package forgejo
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -149,40 +150,32 @@ func (c *forgejoClient) ListOpenIssues() ([]forge.Issue, error) {
 }
 
 // listIssues walks every page of the issue listing in restState, "open" or
-// "closed" (issue #2265). It sorts the merged pages by numeric issue number
-// because Forgejo guarantees no order of its own, and merging pages preserves
-// none either.
+// "closed" (issue #2265, #3978), via walkPages. It sorts the merged pages by
+// numeric issue number because Forgejo guarantees no order of its own, and
+// merging pages preserves none either.
 func (c *forgejoClient) listIssues(restState, label string) ([]forge.Issue, error) {
-	var issues []forge.Issue
-	err := c.rest.Paginate(func(page int) (bool, error) {
-		q := url.Values{
-			"state": {restState},
-			"type":  {"issues"},
-			"limit": {strconv.Itoa(forge.ResultPageLimit)},
-			"page":  {strconv.Itoa(page)},
-		}
-		if label != "" {
-			q.Set("labels", label)
-		}
-		var payload []forgejoIssuePayload
-		if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues?"+q.Encode(), nil, &payload); err != nil {
-			return false, err
-		}
-		for _, p := range payload {
-			iss := toForgeIssue(p)
-			// Lossless backstop for label != "": Forgejo silently drops an
-			// unresolved labels= filter and returns everything (issue #3952),
-			// so re-check client-side (definedLabels documents the exact,
-			// case-sensitive match semantics).
-			if label != "" && !slices.Contains(iss.Labels, label) {
-				continue
-			}
-			issues = append(issues, iss)
-		}
-		return len(payload) < forge.ResultPageLimit, nil
-	})
+	q := url.Values{
+		"state": {restState},
+		"type":  {"issues"},
+	}
+	if label != "" {
+		q.Set("labels", label)
+	}
+	payload, err := walkPages(c.rest, c.repoPath()+"/issues", q, func(p forgejoIssuePayload) int { return p.Number })
 	if err != nil {
 		return nil, err
+	}
+	var issues []forge.Issue
+	for _, p := range payload {
+		iss := toForgeIssue(p)
+		// Lossless backstop for label != "": Forgejo silently drops an
+		// unresolved labels= filter and returns everything (issue #3952),
+		// so re-check client-side (definedLabels documents the exact,
+		// case-sensitive match semantics).
+		if label != "" && !slices.Contains(iss.Labels, label) {
+			continue
+		}
+		issues = append(issues, iss)
 	}
 	sort.Slice(issues, func(i, j int) bool {
 		ni, _ := strconv.Atoi(issues[i].Number)
@@ -476,41 +469,62 @@ func (c *forgejoClient) StateLabels() forge.DispatchLabels {
 }
 
 // WalksAllPages implements forge.FullyPaginated. listIssues walks every page
-// (#2265), so results are never truncated at forge.ResultPageLimit and a
-// caller's page-limit fail-safe can treat a full-looking result as complete.
+// until one comes back empty (#2265, #3978), so results are never truncated
+// at the server's own page cap or at forge.ResultPageLimit, and a caller's
+// page-limit fail-safe can treat a full-looking result as complete.
 func (c *forgejoClient) WalksAllPages() bool {
 	return true
 }
 
-// ListLabels returns the repository's defined label names. It walks every
-// page (issue #2265, #3953) until one comes back empty: Forgejo caps the page
-// size at [api] MAX_RESPONSE_ITEMS (default 50) whatever limit is requested,
-// so a page shorter than forge.ResultPageLimit is not proof of the last one.
-// A page repeating the previous page's first label also ends the walk:
-// Paginate has no page bound, so a server ignoring ?page would loop forever.
-func (c *forgejoClient) ListLabels() ([]string, error) {
-	var names []string
-	var prevFirst string
-	err := c.rest.Paginate(func(page int) (bool, error) {
-		q := url.Values{
-			"limit": {strconv.Itoa(forge.ResultPageLimit)},
-			"page":  {strconv.Itoa(page)},
-		}
-		var payload []forgejoLabel
-		if err := c.rest.Do(http.MethodGet, c.repoPath()+"/labels?"+q.Encode(), nil, &payload); err != nil {
+// walkPages fetches every page of a Forgejo list endpoint at path, merging
+// pages until one comes back empty: Forgejo caps the page size at [api]
+// MAX_RESPONSE_ITEMS (default 50) whatever limit is requested (issue #2265,
+// #3953, #3978), so a page shorter than forge.ResultPageLimit is never proof
+// it's the last one. A page whose first item's key repeats the previous
+// page's first key also ends the walk: rest.Client.Paginate has no page
+// bound of its own, so a server or proxy that ignores ?page and re-serves
+// the same page would otherwise loop forever. q is the caller's base query;
+// walkPages clones it before adding "limit" and "page" so the caller's
+// url.Values is never mutated; a nil q is treated as empty.
+func walkPages[T any, K comparable](rc *rest.Client, path string, q url.Values, key func(T) K) ([]T, error) {
+	q = maps.Clone(q)
+	if q == nil {
+		q = url.Values{}
+	}
+	var items []T
+	var prevFirst K
+	q.Set("limit", strconv.Itoa(forge.ResultPageLimit))
+	err := rc.Paginate(func(page int) (bool, error) {
+		q.Set("page", strconv.Itoa(page))
+		var payload []T
+		if err := rc.Do(http.MethodGet, path+"?"+q.Encode(), nil, &payload); err != nil {
 			return false, err
 		}
-		if len(payload) == 0 || (page > 1 && payload[0].Name == prevFirst) {
+		if len(payload) == 0 {
 			return true, nil
 		}
-		prevFirst = payload[0].Name
-		names = append(names, labelNames(payload)...)
+		first := key(payload[0])
+		if page > 1 && first == prevFirst {
+			return true, nil
+		}
+		prevFirst = first
+		items = append(items, payload...)
 		return false, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return names, nil
+	return items, nil
+}
+
+// ListLabels returns the repository's defined label names, walking every
+// page via walkPages (issue #2265, #3953).
+func (c *forgejoClient) ListLabels() ([]string, error) {
+	payload, err := walkPages(c.rest, c.repoPath()+"/labels", url.Values{}, func(l forgejoLabel) string { return l.Name })
+	if err != nil {
+		return nil, err
+	}
+	return labelNames(payload), nil
 }
 
 // CreateLabel creates a repository label. The color argument is a bare hex

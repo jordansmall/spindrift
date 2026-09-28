@@ -144,26 +144,10 @@ func (f *forgejoCodeForge) Mergeable(prURL string) (forge.MergeableState, error)
 
 // listPulls walks every page of the pulls listing in the given state ("open" or
 // "all"), rather than fetching one page bounded by forge.ResultPageLimit
-// (issue #2265).
+// (issue #2265, #3978).
 func (f *forgejoCodeForge) listPulls(state string) ([]forgejoPullPayload, error) {
-	var pulls []forgejoPullPayload
-	err := f.rest.Paginate(func(page int) (bool, error) {
-		q := url.Values{
-			"state": {state},
-			"limit": {strconv.Itoa(forge.ResultPageLimit)},
-			"page":  {strconv.Itoa(page)},
-		}
-		var payload []forgejoPullPayload
-		if err := f.rest.Do(http.MethodGet, f.repoPath()+"/pulls?"+q.Encode(), nil, &payload); err != nil {
-			return false, err
-		}
-		pulls = append(pulls, payload...)
-		return len(payload) < forge.ResultPageLimit, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return pulls, nil
+	q := url.Values{"state": {state}}
+	return walkPages(f.rest, f.repoPath()+"/pulls", q, func(p forgejoPullPayload) int { return p.Number })
 }
 
 // OpenPRForBranch returns the open pull whose head matches branch, draft or not

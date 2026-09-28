@@ -148,35 +148,9 @@ func (h *forgejoHarness) handle(w http.ResponseWriter, r *http.Request) {
 
 		// Genuinely paginate on page/limit (issue #2265). Production code always
 		// sends both, 1-indexed, so an out-of-range page must come back as an
-		// empty page rather than an error, matching the real Forgejo API and
-		// letting listIssues' short-page "done" detection work here.
-		page := 1
-		if p := r.URL.Query().Get("page"); p != "" {
-			if v, err := strconv.Atoi(p); err == nil && v > 0 {
-				page = v
-			}
-		}
-		limit := len(out)
-		if l := r.URL.Query().Get("limit"); l != "" {
-			if v, err := strconv.Atoi(l); err == nil && v > 0 {
-				limit = v
-			}
-		}
-		var windowed []map[string]any
-		if limit > 0 {
-			start := (page - 1) * limit
-			if start < len(out) {
-				end := start + limit
-				if end > len(out) {
-					end = len(out)
-				}
-				windowed = out[start:end]
-			}
-		}
-		if windowed == nil {
-			windowed = []map[string]any{}
-		}
-		json.NewEncoder(w).Encode(windowed)
+		// empty page rather than an error, matching the real Forgejo API: an
+		// empty page is what stops walkPages' walk.
+		json.NewEncoder(w).Encode(windowPage(r, out))
 		return
 
 	case r.Method == http.MethodGet && issueDepsRe.MatchString(r.URL.Path):

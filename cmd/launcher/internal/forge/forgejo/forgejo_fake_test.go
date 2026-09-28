@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -294,18 +295,32 @@ func (f *fakeForgejo) handleRepoRoot(w http.ResponseWriter, _ *http.Request) {
 func (f *fakeForgejo) handlePullsList(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	f.mu.Lock()
-	var out []map[string]any
-	for _, p := range f.pulls {
+	var nums []string
+	for num, p := range f.pulls {
 		if state == "open" && p.State != "open" {
 			continue
 		}
-		out = append(out, pullPayload(p))
+		nums = append(nums, num)
+	}
+	// Deterministic order matters here: listPulls walks pages until one
+	// repeats the previous page's first item (issue #3978), and Go's
+	// randomized map iteration order would otherwise make "first item" flap
+	// between requests and defeat that guard, looping forever.
+	sort.Slice(nums, func(i, j int) bool {
+		ni, _ := strconv.Atoi(nums[i])
+		nj, _ := strconv.Atoi(nums[j])
+		return ni < nj
+	})
+	out := make([]map[string]any, len(nums))
+	for i, num := range nums {
+		out[i] = pullPayload(f.pulls[num])
 	}
 	f.mu.Unlock()
-	if out == nil {
-		out = []map[string]any{}
-	}
-	json.NewEncoder(w).Encode(out)
+
+	// Paginate like the real server so a test's full pull set (always under
+	// forgejoServerPageCap here) is served on page 1 and every subsequent
+	// page comes back empty, ending listPulls' walk.
+	json.NewEncoder(w).Encode(windowPage(r, out))
 }
 
 func (f *fakeForgejo) handleGetPull(w http.ResponseWriter, _ *http.Request, num string) {
