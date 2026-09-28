@@ -338,9 +338,9 @@ func (s *Settle) recordLandingPass(num, landing string, passes []passmanifest.En
 // closeIssue closes num through the tracker's optional MergeCloser (issue
 // #1892), a backstop for github's merged-PR auto-close, which only fires when
 // the PR body carries a literal Closes #<N>, and the sole close for a
-// status=already-resolved outcome (issue #4015), which has no PR. MergeCloser rather than IssueCloser keeps
-// this a no-op for local, whose closed: axis is reconcile's sole write path
-// (ADR 0029), even paired with a github Code Forge.
+// status=already-resolved outcome (issue #4015), which has no PR. MergeCloser
+// rather than IssueCloser keeps this a no-op for local, whose closed: axis is
+// reconcile's sole write path (ADR 0029), even paired with a github Code Forge.
 func (s *Settle) closeIssue(num string) {
 	closer, ok := s.it.(forge.MergeCloser)
 	if !ok {
