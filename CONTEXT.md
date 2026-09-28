@@ -622,13 +622,14 @@ Box-side tracker write. Verdicts are a closed set carried by `Complete`:
 positive, not worth doing, or duplicate — reason in the comment; also the
 natural close for a survey-style ticket whose deliverable was its filings),
 `unclear` (relevance needs answers only a human has; answer, then re-apply
-the trigger label to re-research). Filing is orthogonal to the verdict — any
-verdict may carry filings, enumerated in the verdict comment. A crashed or
-verdict-less Box is `Failed`, never a verdict; a filing failure never is —
-the finding falls back inline into the comment. On `github` the label family
-is `agent-research` (dual-role: standing state and trigger) →
-`agent-research-in-progress` → terminals `agent-research-recommend` /
-`-reject` / `-unclear` / `-failed`.
+`agent-research-trigger` to re-research). Filing is orthogonal to the
+verdict — any verdict may carry filings, enumerated in the verdict comment.
+A crashed or verdict-less Box is `Failed`, never a verdict; a filing
+failure never is — the finding falls back inline into the comment. On
+`github` the label family is `agent-research-trigger` (fires one run; the
+claim self-clears it) plus the standing `agent-research` queue label (also
+stripped on claim) → `agent-research-in-progress` → terminals
+`agent-research-recommend` / `-reject` / `-unclear` / `-failed`.
 _Avoid_: triage (the human action on `Failed` issues), scout (the in-box
 subagent role).
 

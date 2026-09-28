@@ -5060,10 +5060,17 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 	}
 	line := regexp.MustCompile(`gh label create (\S+)\s+--repo owner/repo --color (\S+) --description "([^"]*)"`)
 	matches := line.FindAllStringSubmatch(string(raw), -1)
+	// Repo-local Actions trigger label (#3936): lives outside lib/labels.nix
+	// and doctor.TriageLabelMeta on purpose, so it's exempt from the
+	// unknown-label check below, unlike every triage label doctor manages.
+	docOnly := map[string]bool{"agent-research-trigger": true}
 	seen := map[string]int{}
 	for _, m := range matches {
 		name, color, description := m[1], m[2], m[3]
 		seen[name]++
+		if docOnly[name] {
+			continue
+		}
 		want, ok := doctor.TriageLabelMeta[name]
 		if !ok {
 			t.Errorf("docs/reference.md snippet creates unknown label %q", name)

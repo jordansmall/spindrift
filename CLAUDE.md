@@ -53,16 +53,22 @@ setup, required App permissions, and how the refresh mechanism works.
 
 A second, disjoint label family (ADR 0022; see `.github/workflows/agent-research.yml`)
 drives the advise-only research Dispatch kind — never the work path above.
-Claiming a research issue strips only the dispatch/verdict labels below
-(`agent-research-finding` is a provenance label the claim step never
-touches), so a work lifecycle label (`ready-for-agent`, `agent-in-progress`,
-...) survives a research claim untouched, and an issue may legitimately wear
-one label from each family at once:
+Claiming a research issue strips the trigger, the standing `agent-research`,
+and the verdict/failed labels below (`agent-research-finding` is a
+provenance label the claim step never touches), so a work lifecycle label
+(`ready-for-agent`, `agent-in-progress`, ...) survives a research claim
+untouched, and an issue may legitimately wear one label from each family at
+once:
 
-- `agent-research` — dual-role: standing state and trigger. Apply it to fire
-  one research dispatch; re-apply it to retry (crash) or re-research (after
-  answering an `unclear` verdict's questions) — the same gesture as
-  `agent-trigger`.
+- `agent-research-trigger` — applying it fires one research run in CI;
+  re-apply it to retry (crash) or re-research (after answering an
+  `unclear` verdict's questions) — the same gesture as `agent-trigger`. The
+  claim strips it before any build work, so it self-clears and never
+  re-fires on its own.
+- `agent-research` — the standing research queue: `spindrift research` and
+  the daemon (`nix run .#daemon -- research`) draw from it. Every claim
+  (CI's or the launcher's) strips it too, so a claimed issue drops out of
+  the queue while a Box works it.
 - `agent-research-in-progress` — a Box is reviewing the issue against the
   Target repo and will post a single structured verdict comment.
 - `agent-research-recommend` — relevant and enriched with context for a
@@ -75,7 +81,8 @@ one label from each family at once:
   *successful* conclusion (`Complete`), never `agent-research-failed`.
 - `agent-research-unclear` — relevance needs an answer only a human has —
   answer the researcher's questions in the comment, then re-apply
-  `agent-research`.
+  `agent-research-trigger` (CI) or `agent-research` (daemon /
+  `spindrift research` queue).
 - `agent-research-failed` — the Box crashed or produced no verdict; a human
   triage queue distinct from `agent-research-reject`, so crash-retry and
   verdict-review never mix.
@@ -87,8 +94,10 @@ one label from each family at once:
 Research never opens a PR, watches CI, or merges — it posts one comment and
 stops. `spindrift doctor` checks and, in interactive mode, offers to create
 these labels too, but treats them as advisory: unlike the triage labels, a
-missing research label never fails the check. To create them manually — see
-[Create the research
+missing research label never fails the check. Doctor does not check or
+create `agent-research-trigger` — like `agent-trigger`, it is repo-local
+Actions trigger vocabulary, not a doctor-managed label — so create it
+manually for the CI path; see [Create the research
 labels](docs/reference.md#create-the-research-labels-on-the-target-repo).
 The workflow authenticates with an optional least-privilege research GitHub App
 (Issues RW, Contents R, Metadata R) — set the

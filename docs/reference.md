@@ -2927,9 +2927,9 @@ lifecycle](#label-lifecycle) section and the [GitHub App installation
 token](#github-app-installation-token-recommended) / [Research
 token](#research-token-least-privilege-optional) sections above — same
 `issues: labeled` trigger, same label vocabulary (`agent-trigger` fires
-dispatch, `agent-recover` fires recover, `agent-research` fires research,
-`agent-research-reject` closes the rejected issue; the same lifecycle and
-research label families apply unchanged). What
+dispatch, `agent-recover` fires recover, `agent-research-trigger` fires
+research, `agent-research-reject` closes the rejected issue; the same
+lifecycle and research label families apply unchanged). What
 differs is authentication: Forgejo has no GitHub App model, so there is no
 worker-App mint and no `gh-token-refresher` on this backend ([ADR
 0038](adr/0038-the-forgejo-backend-decision-set.md)) — each workflow
@@ -3327,20 +3327,25 @@ gh label create agent-failed      --repo owner/repo --color d93f0b --description
 
 #### Create the research labels on the Target repo
 
-The standing/trigger and crash-triage labels (`agent-research`,
+The standing-queue, in-progress, and crash-triage labels (`agent-research`,
 `agent-research-in-progress`, `agent-research-failed`) are a fixed,
-non-configurable vocabulary — `agent-research.yml` keys off these names
-directly. The three verdict-terminal labels below them are the compiled
-*default* vocabulary; see [Configuring the research verdict vocabulary
+non-configurable vocabulary — `agent-research.yml` keys off
+`agent-research-trigger` plus these names directly. The three
+verdict-terminal labels below them are the compiled *default* vocabulary;
+see [Configuring the research verdict vocabulary
 (`RESEARCH_VERDICTS`)](#configuring-the-research-verdict-vocabulary-research_verdicts)
 to change the verdicts and their labels. `spindrift doctor` checks and, in
 interactive mode, offers to create these too, but treats them as advisory:
 unlike the four triage labels above, a missing research label never fails
 the check (so CI `doctor` runs stay green for deployments that don't use
-research yet). To create the default set manually:
+research yet). `agent-research-trigger` is a separate case: doctor never
+checks or creates it at all — like `agent-trigger`, it is repo-local
+Actions trigger vocabulary, not a doctor-managed label — so create it
+manually below for the CI path. To create the default set manually:
 
 ```sh
-gh label create agent-research             --repo owner/repo --color fbca04 --description "Apply to fire a research dispatch"
+gh label create agent-research-trigger     --repo owner/repo --color e99695 --description "Apply to fire one research run in CI"
+gh label create agent-research             --repo owner/repo --color fbca04 --description "Standing research queue; spindrift research and the daemon draw from it"
 gh label create agent-research-in-progress --repo owner/repo --color bfd4f2 --description "A Box is reviewing this issue"
 gh label create agent-research-recommend   --repo owner/repo --color 2cbe4e --description "Relevant and enriched — promote it"
 gh label create agent-research-reject      --repo owner/repo --color e11d21 --description "False positive, not worth it, or a duplicate — close it"
@@ -4505,18 +4510,20 @@ issue can legitimately wear both a work label and a research label at once:
 
 | label | meaning |
 |-------|---------|
-| `agent-research` | dual-role: standing state and trigger — apply it to fire a research dispatch |
+| `agent-research-trigger` | applying it fires one research run in CI; the claim strips it, so it self-clears and never re-fires on its own |
+| `agent-research` | the standing research queue — `spindrift research` and the daemon (`nix run .#daemon -- research`) draw from it; every claim (CI's or the launcher's) strips it too, so a claimed issue drops out of the queue while a Box works it |
 | `agent-research-in-progress` | a Box is reviewing the issue |
 | `agent-research-recommend` | relevant and enriched — promote it |
 | `agent-research-reject` | false positive, not worth doing, or a duplicate (named in the comment) — applying it closes the issue as not planned, automatically (see [Closing a rejected research issue](#closing-a-rejected-research-issue)) |
-| `agent-research-unclear` | relevance needs an answer only a human has — answer, then re-apply `agent-research` |
+| `agent-research-unclear` | relevance needs an answer only a human has — answer, then re-apply `agent-research-trigger` (CI) or `agent-research` (daemon / `spindrift research` queue) |
 | `agent-research-failed` | the Box crashed or produced no verdict — a human triage queue, distinct from `agent-research-reject` (a *successful* "this is a false positive" conclusion is `Complete`, never `Failed`) |
 | `agent-research-finding` | filed by the Filer from a research finding (ADR 0041) — never carries a dispatch label; a human promotes it to `ready-for-agent` like any other issue |
 
 Settle is strictly one-shot: parse the Outcome line, apply exactly one
 terminal label, done — no CI watch, no self-heal fix passes, no merge, since
 research never lands code. Retry is the same gesture as `dispatch`:
-re-applying `agent-research`. Research dispatches also ignore blocker edges
+re-applying `agent-research-trigger` (CI) or `agent-research` (daemon /
+`spindrift research` queue). Research dispatches also ignore blocker edges
 entirely (enriching an issue is useful *especially* while it waits on a
 blocker) and are homogeneous in kind — `research` and `dispatch` never mix
 issues within one invocation. See the **Dispatch kind** / **Research
@@ -4524,9 +4531,10 @@ dispatch** glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full
 vocabulary.
 
 On GitHub, `.github/workflows/agent-research.yml` mirrors `agent-dispatch.yml`:
-applying `agent-research` to an issue fires exactly one research dispatch,
-claiming the issue (only the research-family labels above — a work lifecycle
-label like `ready-for-agent` survives the claim untouched), building, then
+applying `agent-research-trigger` to an issue fires exactly one research
+dispatch, claiming the issue (the trigger, the standing `agent-research`,
+and the verdict/failed labels above — a work lifecycle label like
+`ready-for-agent` survives the claim untouched), building, then
 running `spindrift research` against that issue. It serializes per
 `agent-research-<issue-number>`, so re-labeling the same issue queues behind
 itself but a research run on an issue never queues behind (or blocks) a work
