@@ -179,6 +179,9 @@ func (c *forgejoClient) listIssues(restState, label string) ([]forge.Issue, erro
 	return issues, nil
 }
 
+// issueListSource tags ListIssuesWithLabels' errors and warnings.
+const issueListSource = "forgejo: issue list"
+
 // ListIssuesWithLabels implements forge.LabeledBacklogLister (issue #3873):
 // state scopes the scan to open or closed issues, since a closed finding is a
 // durable triage decision the host must not refile. Forgejo's "labels" query
@@ -186,7 +189,10 @@ func (c *forgejoClient) listIssues(restState, label string) ([]forge.Issue, erro
 // of" across Forgejo versions, so this queries once per label via listIssues
 // (already fully paginated, so the merge is never truncated); the merge,
 // dedup-by-number, and partial-failure handling live in
-// forge.MergeLabeledIssues.
+// forge.MergeLabeledIssues. A label the repo doesn't define is skipped before
+// querying (issue #3944): Forgejo's ListIssues handler resolves "labels=" names
+// to IDs and drops the filter entirely when none resolve, so querying an
+// absent label would scan every issue in state instead of finding nothing.
 func (c *forgejoClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
 	var restState string
 	switch state {
@@ -195,7 +201,27 @@ func (c *forgejoClient) ListIssuesWithLabels(state forge.IssueState, labels []st
 	default:
 		return nil, fmt.Errorf("forgejo: unsupported issue state %q", state)
 	}
-	return forge.MergeLabeledIssues("forgejo: issue list", labels, func(label string) ([]forge.Issue, error) {
+	if len(labels) == 0 {
+		// Only spares a /labels round-trip: MergeLabeledIssues also returns
+		// nil, nil for empty input.
+		return nil, nil
+	}
+
+	var present []string
+	if defined, err := c.ListLabels(); err != nil {
+		// A transient labels outage must not become an empty dedup index:
+		// fall back to querying every requested label unfiltered.
+		fmt.Fprintf(os.Stderr, "WARNING: %s: ListLabels failed, querying all %d requested label(s) unfiltered: %v\n", issueListSource, len(labels), err)
+		present = labels
+	} else {
+		for _, l := range labels {
+			if slices.Contains(defined, l) {
+				present = append(present, l)
+			}
+		}
+	}
+
+	return forge.MergeLabeledIssues(issueListSource, present, func(label string) ([]forge.Issue, error) {
 		return c.listIssues(restState, label)
 	})
 }
