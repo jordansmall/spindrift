@@ -3,6 +3,7 @@
   config,
   fixtures,
   launcherGoModules,
+  goCheckEnv,
   ...
 }:
 let
@@ -45,6 +46,7 @@ in
       ${./equivalence.nix} \
       ${./fragment-pairs.nix} \
       ${./gh-token-intervals.nix} \
+      ${./go-check-env.nix} \
       ${./go.nix} \
       ${./image.nix} \
       ${./jira-status-mapping.nix} \
@@ -59,19 +61,29 @@ in
     touch $out
   '';
 
-  # CGO_ENABLED=0 avoids needing a C toolchain: the jira forge adapter imports
-  # net/http, which otherwise pulls runtime/cgo into the build and fails with
-  # "gcc not found". Every derivation below sets it for the same reason.
+  # go-check-env.nix's GOMAXPROCS bound (issue #3915).
+  go-check-env = pkgs.runCommand "go-check-env" { } ''
+    check() {
+      got=$(
+        ${goCheckEnv}
+        sh -c 'echo "$GOMAXPROCS"'
+      )
+      if [ "$got" != "$1" ]; then
+        echo "NIX_BUILD_CORES=''${NIX_BUILD_CORES-unset}: expected GOMAXPROCS=$1, got $got" >&2
+        exit 1
+      fi
+    }
+    (unset NIX_BUILD_CORES; check 4)
+    NIX_BUILD_CORES=0 check 4
+    NIX_BUILD_CORES=2 check 2
+    touch $out
+  '';
+
   launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
     cp -r ${../../cmd/launcher} src
     chmod -R +w src
     cp -r ${launcherGoModules} src/vendor
-    export GOPROXY=off
-    export GOFLAGS=-mod=vendor
-    export GONOSUMCHECK='*'
-    export GOMODCACHE="$TMPDIR/gomodcache"
-    export GOCACHE="$TMPDIR/gocache"
-    export CGO_ENABLED=0
+    ${goCheckEnv}
     cd src
     go vet ./...
     touch $out
@@ -101,12 +113,7 @@ in
         cp -r ${../../lib} src/lib
         chmod -R +w src
         cp -r ${launcherGoModules} src/cmd/launcher/vendor
-        export GOPROXY=off
-        export GOFLAGS=-mod=vendor
-        export GONOSUMCHECK='*'
-        export GOMODCACHE="$TMPDIR/gomodcache"
-        export GOCACHE="$TMPDIR/gocache"
-        export CGO_ENABLED=0
+        ${goCheckEnv}
         mkdir -p "$TMPDIR/fakebin"
         cat > "$TMPDIR/fakebin/bwrap" <<'EOF'
         #!/bin/sh
@@ -120,20 +127,15 @@ in
         touch $out
       '';
 
-  # CGO_ENABLED=0 also makes the pure-Go darwin cross-builds work without a C
-  # cross-toolchain.
+  # go-check-env.nix's CGO_ENABLED=0 lets these pure-Go darwin cross-builds run
+  # without a C cross-toolchain.
   launcher-cross-build =
     pkgs.runCommand "launcher-cross-build" { nativeBuildInputs = [ pkgs.go ]; }
       ''
         cp -r ${../../cmd/launcher} src
         chmod -R +w src
         cp -r ${launcherGoModules} src/vendor
-        export GOPROXY=off
-        export GOFLAGS=-mod=vendor
-        export GONOSUMCHECK='*'
-        export GOMODCACHE="$TMPDIR/gomodcache"
-        export GOCACHE="$TMPDIR/gocache"
-        export CGO_ENABLED=0
+        ${goCheckEnv}
         cd src
         go build -o "$TMPDIR/launcher-linux" .
         GOOS=darwin GOARCH=amd64 go build -o "$TMPDIR/launcher-darwin-amd64" .
@@ -165,12 +167,7 @@ in
         cp -r ${../../cmd/launcher} src
         chmod -R +w src
         cp -r ${launcherGoModules} src/vendor
-        export GOPROXY=off
-        export GOFLAGS=-mod=vendor
-        export GONOSUMCHECK='*'
-        export GOMODCACHE="$TMPDIR/gomodcache"
-        export GOCACHE="$TMPDIR/gocache"
-        export CGO_ENABLED=0
+        ${goCheckEnv}
         cd src
         for pkg in $guardedPackages; do
           if ! deps=$(go list -deps "./internal/$pkg" 2>&1); then
