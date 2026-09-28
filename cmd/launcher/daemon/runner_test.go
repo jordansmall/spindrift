@@ -18,6 +18,7 @@ import (
 
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -51,7 +52,7 @@ func TestRunChild_ExitCode(t *testing.T) {
 	// TestRunChild_ChildInOwnProcessGroup, TestRunChild_ChildStartedAfterBothLatchesClosedSeesBothKinds,
 	// TestRunDoctor_CancelledContextTearsDownChild.
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestRunChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
 	var got []daemon.Record
 	req := daemon.ChildRequest{
 		Slot:     0,
-		Kind:     daemon.KindDispatch,
+		Kind:     daemon.KindOf(dispatchkind.Work),
 		Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) {
 			mu.Lock()
@@ -183,7 +184,7 @@ func TestRunChild_UnknownEventIgnored(t *testing.T) {
 	readStderr := captureStderr(t)
 	var got []daemon.Record
 	req := daemon.ChildRequest{
-		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	result, err := r.RunChild(context.Background(), req)
@@ -219,7 +220,7 @@ func TestRunChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
 	readStderr := captureStderr(t)
 	var got []daemon.Record
 	req := daemon.ChildRequest{
-		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	if _, err := r.RunChild(context.Background(), req); err != nil {
@@ -253,7 +254,7 @@ func TestRunChild_KindMismatchReportedPastMalformedLine(t *testing.T) {
 	readStderr := captureStderr(t)
 	var got []daemon.Record
 	req := daemon.ChildRequest{
-		Slot: 0, Kind: daemon.KindButler, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Butler), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	if _, err := r.RunChild(context.Background(), req); err != nil {
@@ -294,7 +295,7 @@ func TestRunChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
 	readStderr := captureStderr(t)
 	var got []daemon.Record
 	req := daemon.ChildRequest{
-		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	if _, err := r.RunChild(context.Background(), req); err != nil {
@@ -360,7 +361,7 @@ func TestRunChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 	readStderr := captureStderr(t)
 	var got []daemon.Record
 	req := daemon.ChildRequest{
-		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	if _, err := r.RunChild(context.Background(), req); err != nil {
@@ -401,7 +402,7 @@ func TestRunChild_StdoutRelayedUnchanged(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	readStderr := captureStderr(t)
 	req := daemon.ChildRequest{
-		Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) {
 			t.Errorf("OnRecord called with %+v, want none (nothing written to the report pipe)", rec)
 		},
@@ -433,7 +434,7 @@ func TestRunChild_CleanExitNoRecords(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	var got []daemon.Record
 	req := daemon.ChildRequest{
-		Slot: 0, Kind: daemon.KindResearch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Research), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	result, err := r.RunChild(context.Background(), req)
@@ -490,7 +491,7 @@ func TestRunChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 		env:        []string{"MODEL=from-shell", "PATH=/bin:/usr/bin", "GH_TOKEN=super-secret"},
 		knobs:      []string{"MODEL"},
 	})
-	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
@@ -525,7 +526,7 @@ func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+		if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
 			t.Errorf("RunChild() unexpected error: %v", err)
 		}
 	}()
@@ -575,7 +576,7 @@ func TestRunChild_StdinIsDevNull(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+	if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
 
@@ -845,7 +846,7 @@ func startChild(t *testing.T, r *hostRunner, stop, abort <-chan struct{}) (<-cha
 	resultCh := make(chan daemon.ChildResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop, Abort: abort})
+		got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop, Abort: abort})
 		if err != nil {
 			errCh <- err
 			return
@@ -949,7 +950,7 @@ func TestRunChild_StopSignalsEveryConcurrentChild(t *testing.T) {
 	errCh := make(chan error, nChildren)
 	for slot := 0; slot < nChildren; slot++ {
 		go func(slot int) {
-			got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: slot, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
+			got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: slot, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
 			if err != nil {
 				errCh <- err
 				return
@@ -1174,7 +1175,7 @@ func TestRunChild_ForwardingStopsAfterChildExits(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 
 	stop := make(chan struct{})
-	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
+	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
@@ -1207,7 +1208,7 @@ func TestRunChild_NilStopAbortRunsNormally(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
 		t.Fatalf("RunChild() unexpected error: %v", err)
 	}
@@ -2127,7 +2128,7 @@ func TestRunChild_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 			}
 
 			r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: tt.featureBranch, selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-			if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindDispatch, Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+			if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
 				t.Fatalf("RunChild() unexpected error: %v", err)
 			}
 

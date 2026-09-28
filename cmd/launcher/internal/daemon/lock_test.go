@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe pins the
@@ -42,7 +44,7 @@ func TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe(t *testing.T) {
 	}
 	t.Cleanup(func() { acquireSleep = time.Sleep })
 
-	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: want success once the simulated probe releases, got error: %v", err)
 	}
@@ -55,7 +57,7 @@ func TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe(t *testing.T) {
 func TestAcquireCheckoutLock_WritesHolderIdentity(t *testing.T) {
 	dir := t.TempDir()
 
-	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -77,7 +79,7 @@ func TestAcquireCheckoutLock_SecondAcquireInSameProcessRefused(t *testing.T) {
 	// conflicts. That makes this a cheap, in-process refusal test.
 	dir := t.TempDir()
 
-	first, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	first, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("first AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -89,7 +91,7 @@ func TestAcquireCheckoutLock_SecondAcquireInSameProcessRefused(t *testing.T) {
 	// (with slack for scheduling), not a magic duration, so the test
 	// keeps tracking whatever the const is tuned to.
 	start := time.Now()
-	_, err = AcquireCheckoutLock(dir, []Kind{KindResearch})
+	_, err = AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Research)})
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("second AcquireCheckoutLock: want error, got nil")
@@ -110,7 +112,7 @@ func TestAcquireCheckoutLock_SecondAcquireInSameProcessRefused(t *testing.T) {
 func TestCheckoutLock_ReleaseAllowsFreshAcquireSameProcess(t *testing.T) {
 	dir := t.TempDir()
 
-	first, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	first, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("first AcquireCheckoutLock: unexpected error: %v", err)
 	}
@@ -118,7 +120,7 @@ func TestCheckoutLock_ReleaseAllowsFreshAcquireSameProcess(t *testing.T) {
 		t.Fatalf("Release: unexpected error: %v", err)
 	}
 
-	second, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	second, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("second AcquireCheckoutLock after release: unexpected error: %v", err)
 	}
@@ -140,7 +142,7 @@ func TestCheckoutLockHolderHelper(t *testing.T) {
 		return
 	}
 
-	lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+	lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "helper: AcquireCheckoutLock: %v\n", err)
 		os.Exit(1)
@@ -195,7 +197,7 @@ func TestAcquireCheckoutLock_ReleasedAfterHolderKilled(t *testing.T) {
 	}
 
 	// Sanity: helper genuinely holds the lock now.
-	if _, err := AcquireCheckoutLock(dir, []Kind{KindDispatch}); err == nil {
+	if _, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)}); err == nil {
 		t.Fatalf("AcquireCheckoutLock: want refusal while helper holds lock, got nil error")
 	}
 
@@ -217,7 +219,7 @@ func TestAcquireCheckoutLock_ReleasedAfterHolderKilled(t *testing.T) {
 	acquired := make(chan struct{})
 	acquireErr := make(chan error, 1)
 	go func() {
-		lock, err := AcquireCheckoutLock(dir, []Kind{KindDispatch})
+		lock, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
 		if err != nil {
 			acquireErr <- err
 			return

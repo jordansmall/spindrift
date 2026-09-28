@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -485,11 +486,11 @@ func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
 		reportingKind Kind
 		wantJam       bool
 	}{
-		{"running butler sibling, dispatch reports", PhaseRunning, KindButler, KindDispatch, true},
-		{"running butler sibling, research reports", PhaseRunning, KindButler, KindResearch, true},
-		{"running research sibling, dispatch reports", PhaseRunning, KindResearch, KindDispatch, false},
-		{"resolving sibling (no kind), dispatch reports", PhaseResolving, "", KindDispatch, false},
-		{"backing-off sibling (no kind), dispatch reports", PhaseBackingOff, "", KindDispatch, false},
+		{"running butler sibling, dispatch reports", PhaseRunning, KindOf(dispatchkind.Butler), KindOf(dispatchkind.Work), true},
+		{"running butler sibling, research reports", PhaseRunning, KindOf(dispatchkind.Butler), KindOf(dispatchkind.Research), true},
+		{"running research sibling, dispatch reports", PhaseRunning, KindOf(dispatchkind.Research), KindOf(dispatchkind.Work), false},
+		{"resolving sibling (no kind), dispatch reports", PhaseResolving, "", KindOf(dispatchkind.Work), false},
+		{"backing-off sibling (no kind), dispatch reports", PhaseBackingOff, "", KindOf(dispatchkind.Work), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -497,7 +498,7 @@ func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
 			nw := newNotifyWriter()
 			em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 			cfg := testConfig(2)
-			cfg.Kinds = []Kind{KindDispatch, KindResearch, KindButler}
+			cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)}
 			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 			defer p.cancel()
 
@@ -831,7 +832,7 @@ func TestIdleSleepClampsSliceToRemainingWait(t *testing.T) {
 	// One no-work jammed result gates dispatch until now+3ms (IdleFloor);
 	// advancing 2ms leaves exactly 1ms before that deadline, less than a
 	// full slice.
-	p.markNoWork(KindDispatch, clk.Now(), true)
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), true)
 	clk.advanceBy(2 * time.Millisecond)
 
 	resolveTip := p.idleSleep(pctx, 0)
@@ -1051,7 +1052,7 @@ func TestJamIgnoresSiblingAwaitingWindow(t *testing.T) {
 	// what siblingsEngaged must see as unengaged.
 	p.noteAwakeClose(1, time.Hour)
 
-	p.noteWaitResult(0, KindDispatch, "rev1", true)
+	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true)
 
 	events := decodeEvents(t, &buf)
 	foundJam := false
@@ -1102,7 +1103,7 @@ func TestBatonParkPublishesIdle(t *testing.T) {
 		t.Fatalf("phase while parked on the baton = %q, want %q", got, PhaseIdle)
 	}
 
-	p.noteWaitResult(0, KindDispatch, "rev1", true)
+	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true)
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 	foundJam := false
@@ -1220,8 +1221,8 @@ func TestNoteTipMovedStampsJammedKinds(t *testing.T) {
 		jam  []Kind
 		want []Kind
 	}{
-		{"only dispatch jammed", []Kind{KindDispatch}, []Kind{KindDispatch}},
-		{"both kinds jammed", []Kind{KindDispatch, KindResearch}, []Kind{KindDispatch, KindResearch}},
+		{"only dispatch jammed", []Kind{KindOf(dispatchkind.Work)}, []Kind{KindOf(dispatchkind.Work)}},
+		{"both kinds jammed", []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}, []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1274,7 +1275,7 @@ func TestIdleSleepFirstJamWaitResolvesNothingExtra(t *testing.T) {
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
 
-	p.markNoWork(KindDispatch, clk.Now(), true) // first no-work result: wait = IdleFloor exactly
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), true) // first no-work result: wait = IdleFloor exactly
 
 	if resolveTip := p.idleSleep(pctx, 0); resolveTip {
 		t.Fatalf("resolveTip = true, want false: a first no-work wait of exactly one IdleFloor must resolve nothing extra")
@@ -1338,7 +1339,7 @@ func TestResolveTipPostPickKindSiteReportsMoved(t *testing.T) {
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
 
-	p.markNoWork(KindDispatch, clk.Now(), true) // dispatch jammed; research untouched, still runnable
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), true) // dispatch jammed; research untouched, still runnable
 
 	tip, err := p.resolveTip(pctx, 0)
 	if err != nil {
@@ -1358,10 +1359,10 @@ func TestResolveTipPostPickKindSiteReportsMoved(t *testing.T) {
 	if tipMoved == nil {
 		t.Fatalf("events = %v, want a tip_moved event from the post-pickKind resolve site", eventNames(events))
 	}
-	if !reflect.DeepEqual(tipMoved.Kinds, []Kind{KindDispatch}) {
+	if !reflect.DeepEqual(tipMoved.Kinds, []Kind{KindOf(dispatchkind.Work)}) {
 		t.Fatalf("tip_moved kinds = %v, want [dispatch]", tipMoved.Kinds)
 	}
-	if p.st.kinds[KindDispatch].jammedNow() {
+	if p.st.kinds[KindOf(dispatchkind.Work)].jammedNow() {
 		t.Fatalf("dispatch still jammedNow after a post-pickKind resolve observed Moved=true, want the gate cleared")
 	}
 }
@@ -1427,7 +1428,7 @@ func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
-	p.markNoWork(KindDispatch, clk.Now(), true) // dispatch jammed before either slot starts; research left runnable
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), true) // dispatch jammed before either slot starts; research left runnable
 
 	var wg sync.WaitGroup
 	wg.Add(slots)
@@ -1460,13 +1461,13 @@ func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 	if tipMovedCount != 1 {
 		t.Fatalf("tip_moved events = %d, want exactly 1: %v", tipMovedCount, eventNames(events))
 	}
-	if !reflect.DeepEqual(tipMoved.Kinds, []Kind{KindDispatch}) {
+	if !reflect.DeepEqual(tipMoved.Kinds, []Kind{KindOf(dispatchkind.Work)}) {
 		t.Fatalf("tip_moved kinds = %v, want [dispatch]", tipMoved.Kinds)
 	}
 
 	// pickKind, not a bare p.st read, is the lock-respecting way to observe
 	// dispatch's gate cleared.
-	if kind, ok := p.pickKind(0); !ok || kind != KindDispatch {
+	if kind, ok := p.pickKind(0); !ok || kind != KindOf(dispatchkind.Work) {
 		t.Fatalf("pickKind(0) after the resolve = (%q, %v), want (dispatch, true): dispatch's gate must be cleared", kind, ok)
 	}
 
@@ -1478,9 +1479,9 @@ func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 
 // TestSlotOrderDerivesFromKinds pins slotOrder to the kinds argument rather
 // than a hardcoded two-kind pair (issue #3541 review finding): a slot below
-// the reservation puts KindResearch first and keeps every other kind in its
+// the reservation puts KindOf(dispatchkind.Research) first and keeps every other kind in its
 // given relative order, a slot at or above the reservation keeps kinds in
-// its given order with KindResearch moved last, and the input slice must
+// its given order with KindOf(dispatchkind.Research) moved last, and the input slice must
 // never be mutated.
 func TestSlotOrderDerivesFromKinds(t *testing.T) {
 	const kindOther Kind = "other"
@@ -1494,48 +1495,48 @@ func TestSlotOrderDerivesFromKinds(t *testing.T) {
 	}{
 		{
 			name:        "single kind unchanged",
-			kinds:       []Kind{KindDispatch},
+			kinds:       []Kind{KindOf(dispatchkind.Work)},
 			reservation: 0,
 			slot:        0,
-			want:        []Kind{KindDispatch},
+			want:        []Kind{KindOf(dispatchkind.Work)},
 		},
 		{
 			name:        "two kinds below reservation prefers research",
-			kinds:       []Kind{KindDispatch, KindResearch},
+			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
 			reservation: 1,
 			slot:        0,
-			want:        []Kind{KindResearch, KindDispatch},
+			want:        []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work)},
 		},
 		{
 			name:        "two kinds at reservation prefers work",
-			kinds:       []Kind{KindDispatch, KindResearch},
+			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
 			reservation: 1,
 			slot:        1,
-			want:        []Kind{KindDispatch, KindResearch},
+			want:        []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
 		},
 		{
 			name:        "three kinds below reservation keeps non-research relative order",
-			kinds:       []Kind{kindOther, KindDispatch, KindResearch},
+			kinds:       []Kind{kindOther, KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
 			reservation: 1,
 			slot:        0,
-			want:        []Kind{KindResearch, kindOther, KindDispatch},
+			want:        []Kind{KindOf(dispatchkind.Research), kindOther, KindOf(dispatchkind.Work)},
 		},
 		{
 			// A reserved slot in a research-less set must not invent a
 			// preference for a kind the pool has no backoff entry for —
 			// pickKind would nil-deref on it.
 			name:        "no research kind below reservation keeps given order",
-			kinds:       []Kind{KindDispatch, kindOther},
+			kinds:       []Kind{KindOf(dispatchkind.Work), kindOther},
 			reservation: 1,
 			slot:        0,
-			want:        []Kind{KindDispatch, kindOther},
+			want:        []Kind{KindOf(dispatchkind.Work), kindOther},
 		},
 		{
 			name:        "three kinds at reservation keeps given order with research last",
-			kinds:       []Kind{KindResearch, kindOther, KindDispatch},
+			kinds:       []Kind{KindOf(dispatchkind.Research), kindOther, KindOf(dispatchkind.Work)},
 			reservation: 1,
 			slot:        1,
-			want:        []Kind{kindOther, KindDispatch, KindResearch},
+			want:        []Kind{kindOther, KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
 		},
 	}
 
@@ -1570,31 +1571,31 @@ func TestSlotOrderIdleTierAlwaysLast(t *testing.T) {
 	}{
 		{
 			name:        "below reservation: reserved, normal, idle",
-			kinds:       []Kind{KindDispatch, KindResearch, KindButler},
+			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)},
 			reservation: 1,
 			slot:        0,
-			want:        []Kind{KindResearch, KindDispatch, KindButler},
+			want:        []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
 		},
 		{
 			name:        "at/above reservation: normal, reserved, idle",
-			kinds:       []Kind{KindDispatch, KindResearch, KindButler},
+			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)},
 			reservation: 1,
 			slot:        1,
-			want:        []Kind{KindDispatch, KindResearch, KindButler},
+			want:        []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)},
 		},
 		{
 			name:        "no reservation at all: normal, idle",
-			kinds:       []Kind{KindDispatch, KindButler},
+			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
 			reservation: 0,
 			slot:        0,
-			want:        []Kind{KindDispatch, KindButler},
+			want:        []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
 		},
 		{
 			name:        "idle given first in config keeps tier, not position",
-			kinds:       []Kind{KindButler, KindResearch, KindDispatch},
+			kinds:       []Kind{KindOf(dispatchkind.Butler), KindOf(dispatchkind.Research), KindOf(dispatchkind.Work)},
 			reservation: 1,
 			slot:        0,
-			want:        []Kind{KindResearch, KindDispatch, KindButler},
+			want:        []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
 		},
 	}
 	for _, tc := range tests {
@@ -1751,12 +1752,12 @@ func TestPoolSnapshotState(t *testing.T) {
 				r := &scriptedRunner{
 					revisions: []string{"rev1"},
 					byKind: map[Kind][]ChildResult{
-						KindDispatch: {{Exit: 2}},
-						KindResearch: {{Exit: 2}},
+						KindOf(dispatchkind.Work):     {{Exit: 2}},
+						KindOf(dispatchkind.Research): {{Exit: 2}},
 					},
 				}
 				cfg := testConfig(1)
-				cfg.Kinds = []Kind{KindDispatch, KindResearch}
+				cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 				cfg.Status = sw
 				var buf bytes.Buffer
 				em := newTestEmitter(&buf)
@@ -1789,12 +1790,12 @@ func TestPoolSnapshotState(t *testing.T) {
 				r := &scriptedRunner{
 					revisions: []string{"rev1"},
 					byKind: map[Kind][]ChildResult{
-						KindDispatch: {{Exit: 3}},
-						KindResearch: {{Exit: 2}},
+						KindOf(dispatchkind.Work):     {{Exit: 3}},
+						KindOf(dispatchkind.Research): {{Exit: 2}},
 					},
 				}
 				cfg := testConfig(1)
-				cfg.Kinds = []Kind{KindDispatch, KindResearch}
+				cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 				cfg.Status = sw
 				var buf bytes.Buffer
 				em := newTestEmitter(&buf)
@@ -1994,7 +1995,7 @@ func TestPoolSnapshotSlots(t *testing.T) {
 	if len(st.Slots) != 2 {
 		t.Fatalf("slots = %d, want 2", len(st.Slots))
 	}
-	if !st.Slots[0].Busy || st.Slots[0].Kind != KindDispatch || st.Slots[0].Revision != "rev1" {
+	if !st.Slots[0].Busy || st.Slots[0].Kind != KindOf(dispatchkind.Work) || st.Slots[0].Revision != "rev1" {
 		t.Fatalf("slot 0 = %+v, want busy dispatch@rev1", st.Slots[0])
 	}
 	if st.Slots[0].Phase != PhaseRunning {
@@ -2027,8 +2028,8 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
-	p.startChild(0, KindDispatch, "rev1")
-	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("42")})
+	p.startChild(0, KindOf(dispatchkind.Work), "rev1")
+	p.noteBox(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("42")})
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
@@ -2038,7 +2039,7 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 		t.Fatalf("chore = %q, want empty: an issue-keyed slot must never carry a Chore", snap.Slots[0].Chore)
 	}
 
-	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("99")}) // mutate the pool's copy after snapshotting
+	p.noteBox(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("99")}) // mutate the pool's copy after snapshotting
 
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
 		t.Fatalf("snapshot issues changed after mutating pool state: got %v, want [42]", snap.Slots[0].Issues)
@@ -2059,9 +2060,9 @@ func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
-	p.startChild(0, KindDispatch, "rev1")
-	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "initial"})
-	p.noteBox(0, KindDispatch, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "fix-pass-1"})
+	p.startChild(0, KindOf(dispatchkind.Work), "rev1")
+	p.noteBox(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "initial"})
+	p.noteBox(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "fix-pass-1"})
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"123"}) {
@@ -2090,19 +2091,19 @@ func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 func TestPoolSnapshotCopiesKindsSlice(t *testing.T) {
 	clk := &testClock{}
 	cfg := testConfig(1)
-	cfg.Kinds = []Kind{KindDispatch, KindResearch}
+	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	snap := p.snapshot()
-	if !reflect.DeepEqual(snap.Kinds, []Kind{KindDispatch, KindResearch}) {
+	if !reflect.DeepEqual(snap.Kinds, []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}) {
 		t.Fatalf("kinds = %v, want [dispatch research]", snap.Kinds)
 	}
 
 	cfg.Kinds[0] = "mutated" // mutate the caller's slice after snapshotting
 
-	if !reflect.DeepEqual(snap.Kinds, []Kind{KindDispatch, KindResearch}) {
+	if !reflect.DeepEqual(snap.Kinds, []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}) {
 		t.Fatalf("snapshot kinds changed after mutating caller's slice: got %v, want [dispatch research]", snap.Kinds)
 	}
 }
@@ -2125,11 +2126,11 @@ func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindResearch: {{Exit: 2}},
+			KindOf(dispatchkind.Research): {{Exit: 2}},
 		},
 		results: []ChildResult{{Exit: 0}},
 		onStart: func(ctx context.Context, req ChildRequest) error {
-			if req.Kind == KindDispatch {
+			if req.Kind == KindOf(dispatchkind.Work) {
 				once.Do(func() {
 					cancel()
 					st = readStatus(t, dir)
@@ -2139,7 +2140,7 @@ func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
 		},
 	}
 	cfg := testConfig(1)
-	cfg.Kinds = []Kind{KindResearch, KindDispatch}
+	cfg.Kinds = []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work)}
 	cfg.ResearchReservation = 1
 	cfg.Status = sw
 	var buf bytes.Buffer
@@ -2149,7 +2150,7 @@ func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
 	if st == nil {
 		t.Fatalf("onStart never captured a status")
 	}
-	if len(st.Checks) != 2 || st.Checks[0].Kind != KindResearch || st.Checks[1].Kind != KindDispatch {
+	if len(st.Checks) != 2 || st.Checks[0].Kind != KindOf(dispatchkind.Research) || st.Checks[1].Kind != KindOf(dispatchkind.Work) {
 		t.Fatalf("checks = %+v, want research then dispatch", st.Checks)
 	}
 	if st.Checks[0].NextCheck == "" {
@@ -2178,7 +2179,7 @@ func TestPoolSnapshotElapsedGateReadsAsCheckingNotWaiting(t *testing.T) {
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
-	wait := p.markNoWork(KindDispatch, clk.Now(), false)
+	wait := p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
 	clk.advanceBy(wait + time.Millisecond) // past the deadline
 
 	snap := p.snapshot()
@@ -2218,7 +2219,7 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 	cfg := testConfig(slots)
-	cfg.Kinds = []Kind{KindDispatch, KindResearch}
+	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
 
@@ -2226,8 +2227,8 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	// configured, an ungated research would have slot 0's own loop retry
 	// it the moment dispatch backs off, rather than parking in idleSleep —
 	// this test's synchronization point.
-	p.markNoWork(KindResearch, clk.Now(), false)
-	p.startChild(1, KindResearch, "rev1")
+	p.markNoWork(KindOf(dispatchkind.Research), clk.Now(), false)
+	p.startChild(1, KindOf(dispatchkind.Research), "rev1")
 
 	done := make(chan struct{})
 	go func() {
@@ -2244,7 +2245,7 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	// rather than a sample taken mid-iteration.
 	<-clk.sleepSignal
 
-	if !p.st.kinds[KindDispatch].jammedNow() {
+	if !p.st.kinds[KindOf(dispatchkind.Work)].jammedNow() {
 		t.Fatalf("dispatch jammedNow = false with a sibling occupied, want true (exit 3 alone gates this)")
 	}
 
@@ -2252,7 +2253,7 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	// sibling has to clear before the state under test is observable.
 	p.finishChild(1)
 
-	if !p.st.kinds[KindDispatch].jammedNow() {
+	if !p.st.kinds[KindOf(dispatchkind.Work)].jammedNow() {
 		t.Fatalf("dispatch jammedNow = false after the sibling cleared, want still true")
 	}
 	if s := p.snapshot().State; s != StateJammed {
@@ -2286,12 +2287,12 @@ func TestPoolSnapshotChecksCarryPerKindJammed(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindDispatch: {{Exit: 3}},
-			KindResearch: {{Exit: 2}},
+			KindOf(dispatchkind.Work):     {{Exit: 3}},
+			KindOf(dispatchkind.Research): {{Exit: 2}},
 		},
 	}
 	cfg := testConfig(1)
-	cfg.Kinds = []Kind{KindDispatch, KindResearch}
+	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 	cfg.Status = sw
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -2303,9 +2304,9 @@ func TestPoolSnapshotChecksCarryPerKindJammed(t *testing.T) {
 	var dispatch, research KindCheck
 	for _, kc := range st.Checks {
 		switch kc.Kind {
-		case KindDispatch:
+		case KindOf(dispatchkind.Work):
 			dispatch = kc
-		case KindResearch:
+		case KindOf(dispatchkind.Research):
 			research = kc
 		}
 	}
@@ -2398,7 +2399,7 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 			name:      "shut window outranks an earlier backoff deadline",
 			window:    "22:00-06:00 UTC",
 			awakeShut: true,
-			gate:      []Kind{KindDispatch},
+			gate:      []Kind{KindOf(dispatchkind.Work)},
 			want:      []string{reopen, reopen},
 			wantState: StateAsleep,
 		},
@@ -2407,7 +2408,7 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 			window:    "22:00-06:00 UTC",
 			awakeShut: true,
 			floor:     longFloor,
-			gate:      []Kind{KindDispatch},
+			gate:      []Kind{KindOf(dispatchkind.Work)},
 			want:      []string{farLater, reopen},
 			wantState: StateAsleep,
 		},
@@ -2415,7 +2416,7 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 			name:      "open window leaves each kind's own deadline",
 			window:    "06:00-22:00 UTC",
 			floor:     longFloor,
-			gate:      []Kind{KindDispatch},
+			gate:      []Kind{KindOf(dispatchkind.Work)},
 			want:      []string{farLater, ""},
 			wantState: StateChecking,
 		},
@@ -2423,7 +2424,7 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 			name:      "nil always-awake window leaves each kind's own deadline",
 			window:    "",
 			floor:     longFloor,
-			gate:      []Kind{KindDispatch},
+			gate:      []Kind{KindOf(dispatchkind.Work)},
 			want:      []string{farLater, ""},
 			wantState: StateChecking,
 		},
@@ -2437,7 +2438,7 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 			}
 			clk := &testClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)}
 			cfg := testConfig(1)
-			cfg.Kinds = []Kind{KindDispatch, KindResearch}
+			cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 			cfg.Awake = w
 			if tc.floor > 0 {
 				cfg.IdleFloor = tc.floor

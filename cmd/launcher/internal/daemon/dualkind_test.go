@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // dualKindConfig is testConfig's issue #3541 sibling: both kinds, plus the
@@ -14,7 +16,7 @@ import (
 // reservation are the two things each test below actually varies.
 func dualKindConfig(slots, reservation int) Config {
 	cfg := testConfig(slots)
-	cfg.Kinds = []Kind{KindDispatch, KindResearch}
+	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 	cfg.ResearchReservation = reservation
 	return cfg
 }
@@ -158,8 +160,8 @@ func TestPoolReservedSlotPrefersResearchWhileResearchHasWork(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindDispatch: {{Exit: 0}},
-			KindResearch: {{Exit: 0}},
+			KindOf(dispatchkind.Work):     {{Exit: 0}},
+			KindOf(dispatchkind.Research): {{Exit: 0}},
 		},
 	}
 	gate := &kindGate{
@@ -197,11 +199,11 @@ func TestPoolReservedSlotPrefersResearchWhileResearchHasWork(t *testing.T) {
 		perSlot[c.Slot]++
 		switch c.Slot {
 		case 0:
-			if c.Kind != KindResearch {
+			if c.Kind != KindOf(dispatchkind.Research) {
 				t.Errorf("slot 0 ran kind %q, want every slot-0 child to be research", c.Kind)
 			}
 		case 1, 2:
-			if c.Kind != KindDispatch {
+			if c.Kind != KindOf(dispatchkind.Work) {
 				t.Errorf("slot %d ran kind %q, want every slot-1/2 child to be dispatch", c.Slot, c.Kind)
 			}
 		default:
@@ -225,8 +227,8 @@ func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindResearch: {{Exit: 2}},
-			KindDispatch: {{Exit: 0}},
+			KindOf(dispatchkind.Research): {{Exit: 2}},
+			KindOf(dispatchkind.Work):     {{Exit: 0}},
 		},
 	}
 	gate := &kindGate{
@@ -240,7 +242,7 @@ func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 		cancelWhen: func(r *scriptedRunner) bool {
 			seen := map[int]bool{}
 			for _, c := range r.calls() {
-				if c.Kind == KindDispatch {
+				if c.Kind == KindOf(dispatchkind.Work) {
 					seen[c.Slot] = true
 				}
 			}
@@ -258,10 +260,10 @@ func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 	// Only slot 0 (the reserved one) ever prefers research, and its single
 	// empty result gates it for good (the fake clock never advances here),
 	// so research must be tried exactly once.
-	if got := r.kindCount(KindResearch); got != 1 {
+	if got := r.kindCount(KindOf(dispatchkind.Research)); got != 1 {
 		t.Fatalf("research calls = %d, want exactly 1: its first empty result should gate it for the rest of the run", got)
 	}
-	if seen := slotsSeen(r.calls(), KindDispatch); !seen[0] || !seen[1] {
+	if seen := slotsSeen(r.calls(), KindOf(dispatchkind.Work)); !seen[0] || !seen[1] {
 		t.Fatalf("dispatch slots seen = %v, want both slot 0 and slot 1 (research emptying should burst work into the whole pool)", seen)
 	}
 }
@@ -274,8 +276,8 @@ func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindDispatch: {{Exit: 2}},
-			KindResearch: {{Exit: 0}},
+			KindOf(dispatchkind.Work):     {{Exit: 2}},
+			KindOf(dispatchkind.Research): {{Exit: 0}},
 		},
 	}
 	gate := &kindGate{
@@ -286,7 +288,7 @@ func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 		cancelWhen: func(r *scriptedRunner) bool {
 			seen := map[int]bool{}
 			for _, c := range r.calls() {
-				if c.Kind == KindResearch {
+				if c.Kind == KindOf(dispatchkind.Research) {
 					seen[c.Slot] = true
 				}
 			}
@@ -301,10 +303,10 @@ func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 	Loop(ctx, dualKindConfig(2, 1), r, em, clk)
 	gate.requireGoalMet(t)
 
-	if got := r.kindCount(KindDispatch); got != 1 {
+	if got := r.kindCount(KindOf(dispatchkind.Work)); got != 1 {
 		t.Fatalf("dispatch calls = %d, want exactly 1: its first empty result should gate it for the rest of the run", got)
 	}
-	if seen := slotsSeen(r.calls(), KindResearch); !seen[0] || !seen[1] {
+	if seen := slotsSeen(r.calls(), KindOf(dispatchkind.Research)); !seen[0] || !seen[1] {
 		t.Fatalf("research slots seen = %v, want both slot 0 and slot 1 (work emptying should burst research into the whole pool)", seen)
 	}
 }
@@ -318,8 +320,8 @@ func TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindDispatch: {{Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 2}},
-			KindResearch: {{Exit: 0}},
+			KindOf(dispatchkind.Work):     {{Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 2}},
+			KindOf(dispatchkind.Research): {{Exit: 0}},
 		},
 	}
 	gate := &kindGate{
@@ -329,7 +331,7 @@ func TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers(t *testing.T) {
 		// Goal: research (which never gates) has run 5 times, i.e. exactly
 		// filling out the 10-call trace this test asserts on.
 		cancelWhen: func(r *scriptedRunner) bool {
-			return r.kindCount(KindResearch) >= 5
+			return r.kindCount(KindOf(dispatchkind.Research)) >= 5
 		},
 	}
 	r.onStart = gate.onStart
@@ -345,12 +347,12 @@ func TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers(t *testing.T) {
 		t.Fatalf("run calls = %d, want 10 (the test's own limit)", len(calls))
 	}
 	for i := 0; i < 5; i++ {
-		if calls[i].Kind != KindDispatch {
+		if calls[i].Kind != KindOf(dispatchkind.Work) {
 			t.Fatalf("calls[%d] = %q, want dispatch (work has queued work through its 5th check)", i, calls[i].Kind)
 		}
 	}
 	for i := 5; i < 10; i++ {
-		if calls[i].Kind != KindResearch {
+		if calls[i].Kind != KindOf(dispatchkind.Research) {
 			t.Fatalf("calls[%d] = %q, want research (only reached once work gated itself empty)", i, calls[i].Kind)
 		}
 	}
@@ -367,8 +369,8 @@ func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindResearch: {{Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 2}},
-			KindDispatch: {{Exit: 0}},
+			KindOf(dispatchkind.Research): {{Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 2}},
+			KindOf(dispatchkind.Work):     {{Exit: 0}},
 		},
 	}
 	gate := &kindGate{
@@ -381,7 +383,7 @@ func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
 		cancelWhen: func(r *scriptedRunner) bool {
 			seen := map[int]bool{}
 			for _, c := range r.calls() {
-				if c.Kind == KindDispatch {
+				if c.Kind == KindOf(dispatchkind.Work) {
 					seen[c.Slot] = true
 				}
 			}
@@ -396,10 +398,10 @@ func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
 	Loop(ctx, dualKindConfig(slots, slots), r, em, clk)
 	gate.requireGoalMet(t)
 
-	if got := r.kindCount(KindResearch); got < 3 {
+	if got := r.kindCount(KindOf(dispatchkind.Research)); got < 3 {
 		t.Fatalf("research calls = %d, want at least 3: research's queued work must run before any burst to work", got)
 	}
-	if seen := slotsSeen(r.calls(), KindDispatch); !seen[0] || !seen[1] {
+	if seen := slotsSeen(r.calls(), KindOf(dispatchkind.Work)); !seen[0] || !seen[1] {
 		t.Fatalf("dispatch slots seen = %v, want both slot 0 and slot 1 once research's queue empties", seen)
 	}
 }
@@ -418,8 +420,8 @@ func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindDispatch: {{Exit: 2}},
-			KindResearch: {{Exit: 0}},
+			KindOf(dispatchkind.Work):     {{Exit: 2}},
+			KindOf(dispatchkind.Research): {{Exit: 0}},
 		},
 	}
 	gate := &kindGate{r: r, limit: gateLimit, cancelFn: cancel}
@@ -430,10 +432,10 @@ func TestLoopEmptyWorkQueueDoesNotSlowResearchDown(t *testing.T) {
 
 	Loop(ctx, dualKindConfig(1, 0), r, em, clk)
 
-	if got := r.kindCount(KindDispatch); got != 1 {
+	if got := r.kindCount(KindOf(dispatchkind.Work)); got != 1 {
 		t.Fatalf("dispatch calls = %d, want exactly 1: it should gate itself once and never be retried against a clock that never advances", got)
 	}
-	if got := r.kindCount(KindResearch); got != gateLimit-1 {
+	if got := r.kindCount(KindOf(dispatchkind.Research)); got != gateLimit-1 {
 		t.Fatalf("research calls = %d, want %d: it must keep being dispatched every remaining iteration", got, gateLimit-1)
 	}
 	if clk.waitCount() != 0 {
@@ -457,8 +459,8 @@ func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindDispatch: {{Exit: 2}},
-			KindResearch: {{Exit: 2}},
+			KindOf(dispatchkind.Work):     {{Exit: 2}},
+			KindOf(dispatchkind.Research): {{Exit: 2}},
 		},
 	}
 	var buf bytes.Buffer
@@ -473,7 +475,7 @@ func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("run calls = %v, want exactly 2: one check per kind before the pool idles", calls)
 	}
-	if calls[0].Kind != KindDispatch || calls[1].Kind != KindResearch {
+	if calls[0].Kind != KindOf(dispatchkind.Work) || calls[1].Kind != KindOf(dispatchkind.Research) {
 		t.Fatalf("run calls = %v, want [dispatch research] (work-first order at ResearchReservation 0)", calls)
 	}
 	if clk.waitCount() != 1 || clk.waits()[0] != testIdleFloor {
@@ -498,27 +500,27 @@ func TestPoolPerKindBackoffGrowsIndependently(t *testing.T) {
 
 	wantWork := []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond, 8 * time.Millisecond}
 	for i, want := range wantWork {
-		got := p.markNoWork(KindDispatch, clk.Now(), false)
+		got := p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
 		if got != want {
 			t.Fatalf("dispatch markNoWork()[%d] = %v, want %v", i, got, want)
 		}
 		// Research dispatching (Continue -> reset) between each of dispatch's
 		// empty checks must never touch dispatch's own streak.
-		p.resetKind(KindResearch)
-		if until, gated := p.st.kinds[KindResearch].readyAt(clk.Now()); gated || !until.IsZero() {
+		p.resetKind(KindOf(dispatchkind.Research))
+		if until, gated := p.st.kinds[KindOf(dispatchkind.Research)].readyAt(clk.Now()); gated || !until.IsZero() {
 			t.Fatalf("research readyAt() = (%v, %v) after reset, want (zero, false)", until, gated)
 		}
 	}
 
-	if got := p.markNoWork(KindDispatch, clk.Now(), false); got != 16*time.Millisecond {
+	if got := p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false); got != 16*time.Millisecond {
 		t.Fatalf("dispatch markNoWork() after 4 prior checks and interleaved research resets = %v, want 16ms (research's timer never advanced dispatch's)", got)
 	}
 }
 
 // TestLoopSingleKindConfigurationsNeverRunTheOtherKind pins issue #3541's
-// backward-compatible edge: Kinds: {KindDispatch} alone must never produce a
+// backward-compatible edge: Kinds: {KindOf(dispatchkind.Work)} alone must never produce a
 // research child, whatever ResearchReservation is set to (it only has
-// meaning once a second kind exists), and Kinds: {KindResearch} alone must
+// meaning once a second kind exists), and Kinds: {KindOf(dispatchkind.Research)} alone must
 // never produce a dispatch child.
 func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 	t.Run("dispatch-only", func(t *testing.T) {
@@ -532,7 +534,7 @@ func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 		Loop(context.Background(), cfg, r, em, clk)
 
 		for _, c := range r.calls() {
-			if c.Kind != KindDispatch {
+			if c.Kind != KindOf(dispatchkind.Work) {
 				t.Fatalf("run calls = %v, want every call to be dispatch", r.calls())
 			}
 		}
@@ -540,7 +542,7 @@ func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 
 	t.Run("research-only", func(t *testing.T) {
 		cfg := testConfig(1)
-		cfg.Kinds = []Kind{KindResearch}
+		cfg.Kinds = []Kind{KindOf(dispatchkind.Research)}
 		cfg.ResearchReservation = 0
 		r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
 		clk := &testClock{}
@@ -550,7 +552,7 @@ func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 		Loop(context.Background(), cfg, r, em, clk)
 
 		for _, c := range r.calls() {
-			if c.Kind != KindResearch {
+			if c.Kind != KindOf(dispatchkind.Research) {
 				t.Fatalf("run calls = %v, want every call to be research", r.calls())
 			}
 		}
@@ -567,8 +569,8 @@ func TestLoopEventsCarryKindOnEveryTransition(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindDispatch: {{Exit: 0}, {Exit: 2}},
-			KindResearch: {{Exit: 0}},
+			KindOf(dispatchkind.Work):     {{Exit: 0}, {Exit: 2}},
+			KindOf(dispatchkind.Research): {{Exit: 0}},
 		},
 	}
 	gate := &kindGate{r: r, limit: gateLimit, cancelFn: cancel}
@@ -589,17 +591,17 @@ func TestLoopEventsCarryKindOnEveryTransition(t *testing.T) {
 				t.Fatalf("%s event missing kind: %+v", ev.Event, ev)
 			}
 			kindsInOrder = append(kindsInOrder, ev.Kind)
-			if ev.Event == "child_start" && ev.Kind == KindResearch {
+			if ev.Event == "child_start" && ev.Kind == KindOf(dispatchkind.Research) {
 				sawResearchStart = true
 			}
-			if ev.Event == "child_start" && ev.Kind == KindDispatch {
+			if ev.Event == "child_start" && ev.Kind == KindOf(dispatchkind.Work) {
 				sawDispatchStart = true
 			}
 		case "idle":
 			if ev.Kind == "" {
 				t.Fatalf("idle event missing kind: %+v", ev)
 			}
-			if ev.Kind == KindDispatch {
+			if ev.Kind == KindOf(dispatchkind.Work) {
 				sawDispatchIdle = true
 			}
 		}
@@ -608,7 +610,7 @@ func TestLoopEventsCarryKindOnEveryTransition(t *testing.T) {
 		t.Fatalf("kinds seen on child_start/child_finish = %v, want both dispatch and research", kindsInOrder)
 	}
 	if !sawDispatchIdle {
-		t.Fatalf("no idle event carried kind %q (its own backoff transition)", KindDispatch)
+		t.Fatalf("no idle event carried kind %q (its own backoff transition)", KindOf(dispatchkind.Work))
 	}
 
 	// Genuine interleaving, not "every dispatch event then every research
@@ -644,7 +646,7 @@ func (f *fatalRecorder) Fatalf(format string, args ...any) {
 func runNTimes(t *testing.T, r *scriptedRunner, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		if _, err := r.RunChild(context.Background(), ChildRequest{Kind: KindResearch, Slot: 0}); err != nil {
+		if _, err := r.RunChild(context.Background(), ChildRequest{Kind: KindOf(dispatchkind.Research), Slot: 0}); err != nil {
 			t.Fatalf("RunChild: %v", err)
 		}
 	}
@@ -657,7 +659,7 @@ func runNTimes(t *testing.T, r *scriptedRunner, n int) {
 // regression requireGoalMet exists to catch.
 func TestKindGateRequireGoalMet(t *testing.T) {
 	t.Run("cancelWhen nil: reaching limit is not a failure", func(t *testing.T) {
-		r := &scriptedRunner{byKind: map[Kind][]ChildResult{KindResearch: {{Exit: 0}}}}
+		r := &scriptedRunner{byKind: map[Kind][]ChildResult{KindOf(dispatchkind.Research): {{Exit: 0}}}}
 		gate := &kindGate{r: r, limit: 3}
 		r.onStart = gate.onStart
 		runNTimes(t, r, 3)
@@ -670,7 +672,7 @@ func TestKindGateRequireGoalMet(t *testing.T) {
 	})
 
 	t.Run("cancelWhen set and never satisfied: requireGoalMet fails", func(t *testing.T) {
-		r := &scriptedRunner{byKind: map[Kind][]ChildResult{KindResearch: {{Exit: 0}}}}
+		r := &scriptedRunner{byKind: map[Kind][]ChildResult{KindOf(dispatchkind.Research): {{Exit: 0}}}}
 		gate := &kindGate{r: r, limit: 3, cancelWhen: func(r *scriptedRunner) bool { return false }}
 		r.onStart = gate.onStart
 		runNTimes(t, r, 3)

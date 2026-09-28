@@ -460,14 +460,15 @@ func (s *state) working() bool {
 // in indefinitely while genuinely doing nothing, which is exactly the
 // "every sibling parked" case the jam alarm exists to catch.
 //
-// One exception: a sibling PhaseRunning a butler child never counts. A
-// butler run never releases an issue a dispatch/research read found blocked
-// or overlap-deferred — a promoted finding (#3880) is new work, not a
-// release — so it can't explain a none-dispatchable read (#3922). A
-// resolving or backing-off sibling carries no kind (only PhaseRunning
-// does), so it always counts. The skip ignores the reporting kind, which
-// is safe only while the butler never exits 3 (exitCodeFor maps 3 solely
-// from waves.ErrOpenNoneDispatchable) and so never reports a jam itself.
+// One exception: a sibling PhaseRunning a chore-keyed (butler) child never
+// counts. A chore-keyed run carries no issue, so it never releases an issue
+// a dispatch/research read found blocked or overlap-deferred — a promoted
+// finding (#3880) is new work, not a release — so it can't explain a
+// none-dispatchable read (#3922). A resolving or backing-off sibling
+// carries no kind (only PhaseRunning does), so it always counts. The skip
+// ignores the reporting kind, which is safe only while the butler never
+// exits 3 (exitCodeFor maps 3 solely from waves.ErrOpenNoneDispatchable)
+// and so never reports a jam itself.
 func (s *state) siblingsEngaged(slot int) bool {
 	for sl, ss := range s.slots {
 		if sl == slot {
@@ -476,7 +477,7 @@ func (s *state) siblingsEngaged(slot int) bool {
 		if ss.phase == PhaseIdle || ss.phase == PhaseAwaitingWindow {
 			continue
 		}
-		if ss.phase == PhaseRunning && ss.flight.kind == KindButler {
+		if ss.phase == PhaseRunning && ss.flight.kind.choreKeyed() {
 			continue
 		}
 		return true

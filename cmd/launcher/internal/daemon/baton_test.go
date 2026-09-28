@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // awaitHalt waits for Loop to return, releasing any further child that
@@ -368,7 +370,7 @@ func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 	const slots = 2
 	cfg := testConfig(slots)
-	cfg.Kinds = []Kind{KindDispatch, KindResearch}
+	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
 	clk := &testClock{}
@@ -413,7 +415,7 @@ func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 func TestPoolBatonPassesOnNoneDispatchableChildEnd(t *testing.T) {
 	const slots = 2
 	cfg := testConfig(slots)
-	cfg.Kinds = []Kind{KindDispatch, KindResearch}
+	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
 	clk := &testClock{}
@@ -843,7 +845,7 @@ func TestPoolBatonPassesWhenNoKindIsRunnable(t *testing.T) {
 
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
-	p.markNoWork(KindDispatch, clk.Now(), false)
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
 	r.holdSlots(slots)
 
 	var wg sync.WaitGroup
@@ -1053,7 +1055,7 @@ func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 }
 
 // TestPoolOneKindPoolBehavesAsBefore pins issue #3684's AC2 for the
-// single-Kind half: a multi-slot pool restricted to just KindDispatch
+// single-Kind half: a multi-slot pool restricted to just KindOf(dispatchkind.Work)
 // (testConfig's default) still fills every slot with that one kind — the
 // baton only serializes *discovery*, it must never leave a slot starved
 // just because there is nothing else to pick.
@@ -1080,8 +1082,8 @@ func TestPoolOneKindPoolBehavesAsBefore(t *testing.T) {
 	}
 
 	for _, call := range r.calls() {
-		if call.Kind != KindDispatch {
-			t.Fatalf("RunChild call %+v used kind %q, want only %q for a one-kind pool", call, call.Kind, KindDispatch)
+		if call.Kind != KindOf(dispatchkind.Work) {
+			t.Fatalf("RunChild call %+v used kind %q, want only %q for a one-kind pool", call, call.Kind, KindOf(dispatchkind.Work))
 		}
 	}
 

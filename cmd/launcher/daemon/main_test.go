@@ -18,6 +18,7 @@ import (
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
 
@@ -201,27 +202,27 @@ func TestParseArgs(t *testing.T) {
 			name:      "no positional verb defaults to every kind",
 			args:      []string{"--input", "/tmp/in.json"},
 			wantPath:  "/tmp/in.json",
-			wantKinds: []daemon.Kind{daemon.KindDispatch, daemon.KindResearch, daemon.KindButler},
+			wantKinds: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler)},
 		},
 		{
 			name:                 "explicit dispatch is work-only",
 			args:                 []string{"--input", "/tmp/in.json", "dispatch"},
 			wantPath:             "/tmp/in.json",
-			wantKinds:            []daemon.Kind{daemon.KindDispatch},
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
 			wantExplicitSelector: true,
 		},
 		{
 			name:                 "explicit research",
 			args:                 []string{"--input", "/tmp/in.json", "research"},
 			wantPath:             "/tmp/in.json",
-			wantKinds:            []daemon.Kind{daemon.KindResearch},
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Research)},
 			wantExplicitSelector: true,
 		},
 		{
 			name:                 "explicit butler",
 			args:                 []string{"--input", "/tmp/in.json", "butler"},
 			wantPath:             "/tmp/in.json",
-			wantKinds:            []daemon.Kind{daemon.KindButler},
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Butler)},
 			wantExplicitSelector: true,
 		},
 		{
@@ -243,7 +244,7 @@ func TestParseArgs(t *testing.T) {
 			name:              "feature branch alone",
 			args:              []string{"--input", "/tmp/in.json", "--feature-branch", "feature-x"},
 			wantPath:          "/tmp/in.json",
-			wantKinds:         []daemon.Kind{daemon.KindDispatch, daemon.KindResearch, daemon.KindButler},
+			wantKinds:         []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler)},
 			wantFeatureBranch: "feature-x",
 		},
 		{
@@ -251,7 +252,7 @@ func TestParseArgs(t *testing.T) {
 			name:                 "feature branch before kind selector",
 			args:                 []string{"--input", "/tmp/in.json", "--feature-branch", "feature-x", "dispatch"},
 			wantPath:             "/tmp/in.json",
-			wantKinds:            []daemon.Kind{daemon.KindDispatch},
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
 			wantExplicitSelector: true,
 			wantFeatureBranch:    "feature-x",
 		},
@@ -261,7 +262,7 @@ func TestParseArgs(t *testing.T) {
 			name:                 "feature branch after kind selector",
 			args:                 []string{"--input", "/tmp/in.json", "dispatch", "--feature-branch", "feature-x"},
 			wantPath:             "/tmp/in.json",
-			wantKinds:            []daemon.Kind{daemon.KindDispatch},
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
 			wantExplicitSelector: true,
 			wantFeatureBranch:    "feature-x",
 		},
@@ -326,7 +327,7 @@ func TestParseArgs(t *testing.T) {
 // butler regardless of what got it there. Once a Chore is actually enabled,
 // a chore.Load error fails startup outright.
 func TestGateButlerKind(t *testing.T) {
-	every := []daemon.Kind{daemon.KindDispatch, daemon.KindResearch, daemon.KindButler}
+	every := []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler)}
 	tests := []struct {
 		name             string
 		kinds            []daemon.Kind
@@ -341,13 +342,13 @@ func TestGateButlerKind(t *testing.T) {
 		{
 			name:  "bare default with no chores drops butler",
 			kinds: every,
-			want:  []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			want:  []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
 		},
 		{
 			name:         "bare default with whitespace-only chores drops butler",
 			kinds:        every,
 			butlerChores: "  ",
-			want:         []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			want:         []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
 		},
 		{
 			name:         "bare default with chores enabled keeps butler",
@@ -357,28 +358,28 @@ func TestGateButlerKind(t *testing.T) {
 		},
 		{
 			name:             "explicit butler with no chores fails",
-			kinds:            []daemon.Kind{daemon.KindButler},
+			kinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Butler)},
 			explicitSelector: true,
 			wantErr:          true,
 		},
 		{
 			name:             "explicit butler with chores enabled keeps it",
-			kinds:            []daemon.Kind{daemon.KindButler},
+			kinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Butler)},
 			explicitSelector: true,
 			butlerChores:     "bugs",
-			want:             []daemon.Kind{daemon.KindButler},
+			want:             []daemon.Kind{daemon.KindOf(dispatchkind.Butler)},
 		},
 		{
 			name:             "kind set without butler is untouched",
-			kinds:            []daemon.Kind{daemon.KindDispatch},
+			kinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
 			explicitSelector: true,
-			want:             []daemon.Kind{daemon.KindDispatch},
+			want:             []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
 		},
 		{
 			name:        "butler not in kinds with broken BUTLER_EVERY passes untouched",
-			kinds:       []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			kinds:       []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
 			butlerEvery: "not-a-duration",
-			want:        []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			want:        []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
 		},
 		{
 			name:         "butler in kinds with a Load error fails",
@@ -393,18 +394,18 @@ func TestGateButlerKind(t *testing.T) {
 			butlerChores:  "",
 			butlerEvery:   "6h docs-drift=168h",
 			butlerClasses: "",
-			want:          []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			want:          []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
 		},
 		{
 			name:         "bare default with empty chores and malformed every drops butler",
 			kinds:        every,
 			butlerChores: "",
 			butlerEvery:  "not-a-duration",
-			want:         []daemon.Kind{daemon.KindDispatch, daemon.KindResearch},
+			want:         []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
 		},
 		{
 			name:             "explicit butler selector with empty chores fails on no chores, not the malformed every",
-			kinds:            []daemon.Kind{daemon.KindButler},
+			kinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Butler)},
 			explicitSelector: true,
 			butlerChores:     "",
 			butlerEvery:      "not-a-duration",
@@ -1200,7 +1201,7 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 
 	// Hold the lock ourselves, in-process, standing in for "another daemon
 	// already running against this checkout".
-	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindDispatch})
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: %v", err)
 	}
@@ -1333,7 +1334,7 @@ func TestCmdStatus_Live(t *testing.T) {
 		t.Fatalf("gitDir(%q): %v", root, err)
 	}
 
-	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindDispatch})
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: %v", err)
 	}
@@ -1343,7 +1344,7 @@ func TestCmdStatus_Live(t *testing.T) {
 	if err := sw.Write(daemon.Status{
 		State: daemon.StateWorking,
 		Slots: []daemon.SlotStatus{
-			{Slot: 0, Busy: true, Kind: daemon.KindDispatch, Issues: []string{"101"}},
+			{Slot: 0, Busy: true, Kind: daemon.KindOf(dispatchkind.Work), Issues: []string{"101"}},
 		},
 	}); err != nil {
 		t.Fatalf("StatusWriter.Write: %v", err)
@@ -1426,7 +1427,7 @@ func TestCmdStatus_GarbageStatusFileStillReportsLiveness(t *testing.T) {
 		t.Fatalf("gitDir(%q): %v", root, err)
 	}
 
-	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindDispatch})
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindOf(dispatchkind.Work)})
 	if err != nil {
 		t.Fatalf("AcquireCheckoutLock: %v", err)
 	}
@@ -1462,17 +1463,17 @@ func TestSummarizeSlot(t *testing.T) {
 		},
 		{
 			name: "busy with issues",
-			in:   daemon.SlotStatus{Slot: 1, Busy: true, Kind: daemon.KindDispatch, Issues: []string{"101"}},
+			in:   daemon.SlotStatus{Slot: 1, Busy: true, Kind: daemon.KindOf(dispatchkind.Work), Issues: []string{"101"}},
 			want: "1:busy(dispatch #101)",
 		},
 		{
 			name: "busy with no issues",
-			in:   daemon.SlotStatus{Slot: 2, Busy: true, Kind: daemon.KindDispatch},
+			in:   daemon.SlotStatus{Slot: 2, Busy: true, Kind: daemon.KindOf(dispatchkind.Work)},
 			want: "2:busy(dispatch)",
 		},
 		{
 			name: "busy butler slot names its Chore",
-			in:   daemon.SlotStatus{Slot: 3, Busy: true, Kind: daemon.KindButler, Chore: "bugs"},
+			in:   daemon.SlotStatus{Slot: 3, Busy: true, Kind: daemon.KindOf(dispatchkind.Butler), Chore: "bugs"},
 			want: "3:busy(butler bugs)",
 		},
 	}
@@ -1608,7 +1609,7 @@ func TestPublishHaltedStatus(t *testing.T) {
 	sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
 	var stderr bytes.Buffer
 
-	publishHaltedStatus(&stderr, sw, []daemon.Kind{daemon.KindDispatch}, "preflight: doctor-config-invalid")
+	publishHaltedStatus(&stderr, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, "preflight: doctor-config-invalid")
 
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty on a successful write", stderr.String())
@@ -1626,7 +1627,7 @@ func TestPublishHaltedStatus(t *testing.T) {
 	if report.Status.Reason != "preflight: doctor-config-invalid" {
 		t.Errorf("reason = %q, want %q", report.Status.Reason, "preflight: doctor-config-invalid")
 	}
-	if len(report.Status.Kinds) != 1 || report.Status.Kinds[0] != daemon.KindDispatch {
+	if len(report.Status.Kinds) != 1 || report.Status.Kinds[0] != daemon.KindOf(dispatchkind.Work) {
 		t.Errorf("kinds = %v, want [dispatch]", report.Status.Kinds)
 	}
 }
@@ -1988,7 +1989,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 
 		dir := t.TempDir()
 		sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
-		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindDispatch}, h); got != daemon.ExitPreflightFailed {
+		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h); got != daemon.ExitPreflightFailed {
 			t.Errorf("finish() = %d, want %d", got, daemon.ExitPreflightFailed)
 		}
 		if got := countHalts(t, &buf, h); got != 1 {
@@ -2013,7 +2014,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 
 		dir := t.TempDir()
 		sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
-		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindDispatch}, h); got != 0 {
+		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h); got != 0 {
 			t.Errorf("finish() = %d, want 0", got)
 		}
 		if got := countHalts(t, &buf, h); got != 1 {
@@ -2027,7 +2028,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 		h := daemon.Halt{Class: daemon.HaltInstanceLock, Detail: "held by pid 123"}
 
 		dir := t.TempDir()
-		if got := finish(&stderr, em, nil, []daemon.Kind{daemon.KindDispatch}, h); got != 1 {
+		if got := finish(&stderr, em, nil, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h); got != 1 {
 			t.Errorf("finish() = %d, want 1", got)
 		}
 		if got := countHalts(t, &buf, h); got != 1 {

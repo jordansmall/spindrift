@@ -12,23 +12,27 @@ import (
 // loop drives them all.
 type Kind string
 
-// KindDispatch, KindResearch, and KindButler are dispatchkind.Work/Research/
-// Butler's verbs (issue #3872): the descriptors are the source of truth,
-// these are just the daemon's own Kind-typed aliases for them.
-var (
-	KindDispatch = Kind(dispatchkind.Work.Verb)
-	KindResearch = Kind(dispatchkind.Research.Verb)
-	KindButler   = Kind(dispatchkind.Butler.Verb)
-)
+// KindOf is d's daemon Kind: its Verb, the string the daemon's bookkeeping
+// and Event JSON carry.
+func KindOf(d *dispatchkind.Descriptor) Kind {
+	return Kind(d.Verb)
+}
 
-// ParseKind parses a CLI/config kind string. "" defaults to KindDispatch so
+// choreKeyed reports whether k's records key by Ledger Chore rather than
+// tracker issue; false for a Kind that names no descriptor.
+func (k Kind) choreKeyed() bool {
+	d, ok := dispatchkind.ByVerb(string(k))
+	return ok && d.Keying == dispatchkind.ByChore
+}
+
+// ParseKind parses a CLI/config kind string. "" defaults to work dispatch so
 // existing dispatch-only callers need not pass a kind at all.
 func ParseKind(s string) (Kind, error) {
 	if s == "" {
-		return KindDispatch, nil
+		return KindOf(dispatchkind.Work), nil
 	}
 	if d, ok := dispatchkind.ByVerb(s); ok {
-		return Kind(d.Verb), nil
+		return KindOf(d), nil
 	}
 	return "", fmt.Errorf("daemon: unknown kind %q", s)
 }
@@ -44,12 +48,12 @@ func ParseKinds(s string) ([]Kind, error) {
 	if s == "" {
 		kinds := make([]Kind, 0, len(dispatchkind.All))
 		for _, d := range dispatchkind.All {
-			kinds = append(kinds, Kind(d.Verb))
+			kinds = append(kinds, KindOf(d))
 		}
 		return kinds, nil
 	}
 	if d, ok := dispatchkind.ByVerb(s); ok {
-		return []Kind{Kind(d.Verb)}, nil
+		return []Kind{KindOf(d)}, nil
 	}
 	return nil, fmt.Errorf("daemon: unknown kind %q", s)
 }

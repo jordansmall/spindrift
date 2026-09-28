@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -17,7 +18,7 @@ import (
 // research, butler — dispatchkind.All's declaration order).
 func triKindConfig(slots, reservation int) Config {
 	cfg := testConfig(slots)
-	cfg.Kinds = []Kind{KindDispatch, KindResearch, KindButler}
+	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)}
 	cfg.ResearchReservation = reservation
 	return cfg
 }
@@ -33,9 +34,9 @@ func TestPoolButlerStartsOnlyOnceDispatchAndResearchBothBackOff(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindDispatch: {{Exit: 2}},            // permanently no work
-			KindResearch: {{Exit: 0}, {Exit: 2}}, // one dispatchable check, then it backs off too
-			KindButler:   {{Exit: 0}},
+			KindOf(dispatchkind.Work):     {{Exit: 2}},            // permanently no work
+			KindOf(dispatchkind.Research): {{Exit: 0}, {Exit: 2}}, // one dispatchable check, then it backs off too
+			KindOf(dispatchkind.Butler):   {{Exit: 0}},
 		},
 	}
 	gate := &kindGate{
@@ -43,7 +44,7 @@ func TestPoolButlerStartsOnlyOnceDispatchAndResearchBothBackOff(t *testing.T) {
 		limit:    gateLimit,
 		cancelFn: cancel,
 		cancelWhen: func(r *scriptedRunner) bool {
-			return r.kindCount(KindButler) >= 1
+			return r.kindCount(KindOf(dispatchkind.Butler)) >= 1
 		},
 	}
 	r.onStart = gate.onStart
@@ -60,7 +61,7 @@ func TestPoolButlerStartsOnlyOnceDispatchAndResearchBothBackOff(t *testing.T) {
 	// Exactly dispatch, then research twice (one dispatchable, one empty),
 	// then butler — the precise single-slot interleaving the idle tier
 	// promises: butler is tried dead last, and only once, every check.
-	wantKinds := []Kind{KindDispatch, KindResearch, KindResearch, KindButler}
+	wantKinds := []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)}
 	calls := r.calls()
 	if len(calls) != len(wantKinds) {
 		t.Fatalf("run calls = %v, want exactly %v", calls, wantKinds)
@@ -92,8 +93,8 @@ func TestPoolRunningButlerChildIsNeverPreempted(t *testing.T) {
 	// Seed dispatch and research backed off before the slot ever picks, so
 	// its very first pick is forced into the idle tier — otherwise there is
 	// nothing running for a "work appears" moment to try to preempt.
-	p.markNoWork(KindDispatch, clk.Now(), false)
-	p.markNoWork(KindResearch, clk.Now(), false)
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
+	p.markNoWork(KindOf(dispatchkind.Research), clk.Now(), false)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -105,12 +106,12 @@ func TestPoolRunningButlerChildIsNeverPreempted(t *testing.T) {
 	if slot := r.awaitStart(t); slot != 0 {
 		t.Fatalf("started slot = %d, want 0", slot)
 	}
-	if calls := r.calls(); len(calls) != 1 || calls[0].Kind != KindButler {
+	if calls := r.calls(); len(calls) != 1 || calls[0].Kind != KindOf(dispatchkind.Butler) {
 		t.Fatalf("first call = %v, want exactly one butler call", calls)
 	}
 
 	// "Work appears" while the butler child is still in flight.
-	p.resetKind(KindDispatch)
+	p.resetKind(KindOf(dispatchkind.Work))
 	if pctx.Err() != nil {
 		t.Fatalf("pool ctx = %v, want nil: a running butler child must never be cancelled by another kind regaining work", pctx.Err())
 	}
@@ -124,7 +125,7 @@ func TestPoolRunningButlerChildIsNeverPreempted(t *testing.T) {
 	if slot := r.awaitStart(t); slot != 0 {
 		t.Fatalf("started slot = %d, want 0", slot)
 	}
-	if calls := r.calls(); len(calls) != 2 || calls[1].Kind != KindDispatch {
+	if calls := r.calls(); len(calls) != 2 || calls[1].Kind != KindOf(dispatchkind.Work) {
 		t.Fatalf("second call = %v, want dispatch", calls)
 	}
 
@@ -152,8 +153,8 @@ func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
 	// Same forcing as the single-slot test: dispatch and research both
 	// backed off before slot 0 ever picks, so its first pick lands on the
 	// idle tier.
-	p.markNoWork(KindDispatch, clk.Now(), false)
-	p.markNoWork(KindResearch, clk.Now(), false)
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
+	p.markNoWork(KindOf(dispatchkind.Research), clk.Now(), false)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -165,12 +166,12 @@ func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
 	if slot := r.awaitStart(t); slot != 0 {
 		t.Fatalf("started slot = %d, want 0", slot)
 	}
-	if calls := r.calls(); len(calls) != 1 || calls[0].Kind != KindButler {
+	if calls := r.calls(); len(calls) != 1 || calls[0].Kind != KindOf(dispatchkind.Butler) {
 		t.Fatalf("first call = %v, want exactly one butler call", calls)
 	}
 
 	// "Work appears" while slot 0's butler child is still in flight.
-	p.resetKind(KindDispatch)
+	p.resetKind(KindOf(dispatchkind.Work))
 	if pctx.Err() != nil {
 		t.Fatalf("pool ctx = %v, want nil: a running butler child must never be cancelled by another kind regaining work", pctx.Err())
 	}
@@ -189,7 +190,7 @@ func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
 	if slot := r.awaitStart(t); slot != 1 {
 		t.Fatalf("started slot = %d, want 1", slot)
 	}
-	if calls := r.calls(); len(calls) != 2 || calls[1].Kind != KindDispatch {
+	if calls := r.calls(); len(calls) != 2 || calls[1].Kind != KindOf(dispatchkind.Work) {
 		t.Fatalf("second call = %v, want dispatch on slot 1", calls)
 	}
 	if pctx.Err() != nil {
@@ -231,13 +232,13 @@ func TestPoolButlerBackoffGrowsIndependently(t *testing.T) {
 
 	wantButler := []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
 	for i, want := range wantButler {
-		got := p.markNoWork(KindButler, clk.Now(), false)
+		got := p.markNoWork(KindOf(dispatchkind.Butler), clk.Now(), false)
 		if got != want {
 			t.Fatalf("butler markNoWork()[%d] = %v, want %v", i, got, want)
 		}
 		// Dispatch resetting in between must never touch butler's own streak.
-		p.resetKind(KindDispatch)
-		if until, gated := p.st.kinds[KindDispatch].readyAt(clk.Now()); gated || !until.IsZero() {
+		p.resetKind(KindOf(dispatchkind.Work))
+		if until, gated := p.st.kinds[KindOf(dispatchkind.Work)].readyAt(clk.Now()); gated || !until.IsZero() {
 			t.Fatalf("dispatch readyAt() = (%v, %v) after reset, want (zero, false)", until, gated)
 		}
 	}

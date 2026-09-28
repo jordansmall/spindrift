@@ -117,7 +117,7 @@ func parseArgs(args []string) (parsedArgs, error) {
 // BUTLER_CHORE_CLASSES, so only a chore.Load error with at least one Chore
 // enabled fails startup.
 func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knobs) ([]daemon.Kind, error) {
-	if !slices.Contains(kinds, daemon.KindButler) {
+	if !slices.Contains(kinds, daemon.KindOf(dispatchkind.Butler)) {
 		return kinds, nil
 	}
 	resolved, err := chore.Load(knobs)
@@ -130,7 +130,7 @@ func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knob
 	if explicitSelector {
 		return nil, fmt.Errorf("daemon: butler selected but %w", chore.ErrNoChores)
 	}
-	return slices.DeleteFunc(slices.Clone(kinds), func(k daemon.Kind) bool { return k == daemon.KindButler }), nil
+	return slices.DeleteFunc(slices.Clone(kinds), func(k daemon.Kind) bool { return k == daemon.KindOf(dispatchkind.Butler) }), nil
 }
 
 // settingsKeys returns doc's settings keys, sorted, so the warning loop and
@@ -802,7 +802,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		knobs: strippedKeys,
 		// A butler gateButlerKind dropped, or an explicit dispatch/research
 		// selector, must never refuse startup over butler config.
-		butler: slices.Contains(args.Kinds, daemon.KindButler),
+		butler: slices.Contains(args.Kinds, daemon.KindOf(dispatchkind.Butler)),
 	})
 	if err != nil {
 		return fail(stderr, err)
