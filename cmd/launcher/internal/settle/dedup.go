@@ -3,6 +3,7 @@ package settle
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -38,12 +39,22 @@ const (
 	dedupMarkerSuffix = " -->"
 )
 
+// dedupPunctRun matches a run of site-key separators plus any touching space,
+// so "Type.Field", "Type:Field", "type#field", "type_field", and
+// "Type. Field" fold alike.
+var dedupPunctRun = regexp.MustCompile(` ?[.:#/_][ .:#/_]*`)
+
 // normalizeDedupKey folds s into a comparison key: trimmed, internal
-// whitespace runs collapsed to one space, lowercased. Returns "" for a blank
-// or whitespace-only s. Pure normalization only -- normalizeDedupTerm is the
+// whitespace runs collapsed to one space, lowercased, each dedupPunctRun
+// folded to one ":" (issue #3977), and any leading/trailing ":" trimmed.
+// The fold target is never "-": "a-:b" would become "a--b", which
+// normalizeDedupTerm rejects. Returns "" for a blank, whitespace-only, or
+// separator-only s. Pure normalization only -- normalizeDedupTerm is the
 // one to call when the result must also be safe to carry as a marker term.
 func normalizeDedupKey(s string) string {
-	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+	k := strings.ToLower(strings.Join(strings.Fields(s), " "))
+	k = dedupPunctRun.ReplaceAllString(k, ":")
+	return strings.Trim(k, ":")
 }
 
 // normalizeDedupTerm normalizes s per normalizeDedupKey and reports whether

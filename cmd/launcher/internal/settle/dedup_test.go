@@ -2,6 +2,7 @@ package settle
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,8 +10,11 @@ import (
 )
 
 // normalizeDedupKey trims, collapses internal whitespace runs to one space,
-// and lowercases -- the three normalizations the dedup key comparison relies
-// on to treat "different prose, same site" as one key (issue #3609).
+// lowercases, folds ".", ":", "#", "/", "_" runs to a single ":", and trims
+// any leading/trailing ":" left by the fold -- the normalizations the dedup
+// key comparison relies on to treat "different prose, same site" as one key
+// (issue #3609), including a site named with a different punctuation style
+// (issue #3977).
 func TestNormalizeDedupKey(t *testing.T) {
 	cases := []struct {
 		name string
@@ -22,6 +26,14 @@ func TestNormalizeDedupKey(t *testing.T) {
 		{"tab as whitespace", "Tab\tSeparated", "tab separated"},
 		{"empty", "", ""},
 		{"whitespace only", "   ", ""},
+		{"dot-separated", "pkg/file.go:Type.Field", "pkg:file:go:type:field"},
+		{"colon-separated", "pkg/file.go:Type:Field", "pkg:file:go:type:field"},
+		{"hash-separated", "pkg/file.go:type#field", "pkg:file:go:type:field"},
+		{"underscore-separated", "pkg/file.go:type_field", "pkg:file:go:type:field"},
+		{"space around separator", "Type. Field", "type:field"},
+		{"trailing separator", "mount.go:", "mount:go"},
+		{"leading separator", "#3957", "3957"},
+		{"separator-only", "./_", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -49,6 +61,7 @@ func TestNormalizeDedupTerm(t *testing.T) {
 		{"comma dropped", "a.go:F, misc", "", false},
 		{"arrow-comment dropped", "closes -->  the comment", "", false},
 		{"bare double-dash dropped", "a--b", "", false},
+		{"separator-only dropped", "._/", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -57,6 +70,49 @@ func TestNormalizeDedupTerm(t *testing.T) {
 				t.Errorf("normalizeDedupTerm(%q) = (%q, %v), want (%q, %v)", c.in, got, ok, c.want, c.wantOK)
 			}
 		})
+	}
+}
+
+// Punctuation folding must never manufacture a "--": folding onto "-"
+// instead of ":" would turn a term already carrying a hyphen next to a
+// folded separator into a rejected term. Folding onto ":" keeps both terms
+// accepted, with no "--" anywhere in the normalized form.
+func TestNormalizeDedupTerm_PunctuationFoldNeverManufacturesDoubleDash(t *testing.T) {
+	for _, in := range []string{"a-:-b", "a- . -b"} {
+		got, ok := normalizeDedupTerm(in)
+		if !ok {
+			t.Errorf("normalizeDedupTerm(%q) ok = false, want true", in)
+		}
+		if strings.Contains(got, "--") {
+			t.Errorf("normalizeDedupTerm(%q) = %q, contains \"--\"", in, got)
+		}
+	}
+}
+
+// A site named with "." in one filing and ":" in another (issue
+// #3957/#3958's exact pair) normalizes to the same dedup key, so
+// splitDedupTerms' new-intent key set matches an old-style marker already
+// sitting in the backlog via parseDedupMarker/backlogDedupIndex/matchDedup.
+func TestMatchDedup_AcrossOldAndNewSeparatorStyle(t *testing.T) {
+	newIntentTerm := "cmd/launcher/internal/runner/mount.go:mountParams:boxForgeAndIssueAccess"
+	keys, dropped := splitDedupTerms([]string{newIntentTerm})
+	if len(dropped) != 0 {
+		t.Fatalf("splitDedupTerms dropped = %v, want none", dropped)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("splitDedupTerms keys = %v, want exactly one", keys)
+	}
+
+	oldMarkerBody := "some finding body\n\n" +
+		"<!-- spindrift-dedup: cmd/launcher/internal/runner/mount.go:mountParams.boxForgeAndIssueAccess -->"
+	index := make(map[string]string)
+	indexFindingIssues(index, []forge.Issue{
+		{Number: "9", Labels: []string{findingLabelReview}, Body: oldMarkerBody},
+	})
+
+	ov := matchDedup(index, keys)
+	if !ov.full || len(ov.refs) != 1 || ov.refs[0] != "#9" {
+		t.Errorf("matchDedup = %+v, want full match against #9", ov)
 	}
 }
 
@@ -94,6 +150,15 @@ func TestSplitDedupTerms_CommaTermDropped(t *testing.T) {
 	}
 }
 
+// A separator-only term normalizes to blank, so it yields neither a key nor
+// a dropped-term warning: it carried no information to lose.
+func TestSplitDedupTerms_SeparatorOnlyIsBlank(t *testing.T) {
+	keys, dropped := splitDedupTerms([]string{"./_"})
+	if len(keys) != 0 || len(dropped) != 0 {
+		t.Errorf("splitDedupTerms = %v, %v; want no keys, no drops", keys, dropped)
+	}
+}
+
 // buildDedupMarker/parseDedupMarker round-trip: the terms recovered from a
 // body carrying the marker line match what went in, normalized (issue
 // #3609).
@@ -112,6 +177,18 @@ func TestDedupMarker_RoundTrips(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("parseDedupMarker[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+// A punctuated term round-trips through buildDedupMarker/parseDedupMarker
+// already folded (issue #3977): the marker carries the normalized key, not
+// the raw punctuation.
+func TestDedupMarker_RoundTripsFoldsPunctuation(t *testing.T) {
+	marker := buildDedupMarker([]string{"pkg/file.go:Type.Field"})
+	got := parseDedupMarker(marker)
+	want := []string{"pkg:file:go:type:field"}
+	if !slices.Equal(got, want) {
+		t.Errorf("parseDedupMarker = %v, want %v", got, want)
 	}
 }
 
