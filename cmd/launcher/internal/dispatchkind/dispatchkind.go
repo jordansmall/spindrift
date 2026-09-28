@@ -65,6 +65,7 @@ type Descriptor struct {
 	Prompts        Prompts
 	Settle         Settle
 	AdviseOnly     bool // read-only posture: never lands code (no branch/PR/merge); ignores blockers
+	ReadOnlyBox    bool // Box always runs read-only (guards, outbox relay), regardless of BOX_FORGE_AND_ISSUE_ACCESS
 	DaemonPriority DaemonPriority
 }
 
@@ -109,6 +110,7 @@ var (
 		},
 		Settle:         SettleLedger,
 		AdviseOnly:     true,
+		ReadOnlyBox:    true, // issue #3906
 		DaemonPriority: PriorityIdle,
 	}
 )

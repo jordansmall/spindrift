@@ -240,6 +240,42 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 	}
 }
 
+// Issue #3906: a butler (ReadOnlyBox kind) Dispatch must get the outbox-relay
+// treatment even under a raw read-write BoxForgeAndIssueAccess, since
+// needsOutbox and buildBoxEnv's BOX_WRITE_ENABLED gate must never desync —
+// this pins the OutboxRelayCapable side of that shared fail-closed check.
+func TestRun_PopulatesBoxOutboxDir_ButlerReadWrite(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{
+		Kind:                   "butler",
+		ForgeDescriptor:        backend.Descriptor{OutboxRelayCapable: true},
+		BoxForgeAndIssueAccess: "read-write",
+	}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("82", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	outboxDir := fr.RunCalls[0].OutboxDir
+	if outboxDir == "" {
+		t.Fatal("Box.OutboxDir: got empty, want the per-issue outbox dir for a butler Dispatch")
+	}
+	info, err := os.Stat(outboxDir)
+	if err != nil || !info.IsDir() {
+		t.Errorf("Box.OutboxDir %q: want an existing directory, stat err=%v", outboxDir, err)
+	}
+}
+
 // Forgejo's backendRow carries OutboxRelayCapable: true (issue #2927), so it
 // gets github's outbox-relay treatment (issue #1918). The descriptor comes
 // from the real backend.Forgejo registry row rather than a hand-built

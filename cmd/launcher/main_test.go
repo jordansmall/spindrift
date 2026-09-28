@@ -3250,6 +3250,80 @@ func TestDispatchConfig_ForwardsSignalCarrierAndNetworkMode(t *testing.T) {
 	}
 }
 
+// Butler's Box must run the read-only posture (guards, outbox relay)
+// regardless of BOX_FORGE_AND_ISSUE_ACCESS (issue #3906): a read-write
+// Consumer must not hand a butler Box write access. dispatchConfig and
+// runnerConfig must carry the same value: the Box's BOX_WRITE_ENABLED and the
+// launcher's outbox mount both key off it, and a mismatch desyncs the outbox.
+func TestDispatchAndRunnerConfig_BoxForgeAndIssueAccess_ButlerForcedReadOnly(t *testing.T) {
+	cases := []struct {
+		name    string
+		kind    *dispatchkind.Descriptor
+		knob    string
+		want    string
+		forgejo bool
+	}{
+		{"work read-write", dispatchkind.Work, "read-write", "read-write", false},
+		{"work read-only", dispatchkind.Work, "read-only", "read-only", false},
+		{"research read-write", dispatchkind.Research, "read-write", "read-write", false},
+		{"research read-only", dispatchkind.Research, "read-only", "read-only", false},
+		{"butler read-write", dispatchkind.Butler, "read-write", "read-only", false},
+		{"butler read-only", dispatchkind.Butler, "read-only", "read-only", false},
+		// Issue #3906 review finding: the github-only table above never
+		// exercised a second backend, so a forgejo-specific regression in
+		// either resolveCapabilitySignals or the registry lookup could slip
+		// through. codeForge=forgejo with the real registry descriptor pins
+		// the same forcing and agreement for that backend too.
+		{"butler read-write forgejo", dispatchkind.Butler, "read-write", "read-only", true},
+	}
+
+	// minimalValidConfig's codeForge/issueTracker ("github") is
+	// OutboxRelayCapable in the real registry, so runnerConfig's
+	// resolveCapabilitySignals lookup already sees it true; the caps
+	// argument below gives dispatchConfig the matching ForgeDescriptor so
+	// the two paths' OutboxRelayCapable values agree rather than one being
+	// a coincidental zero-value false.
+	githubCaps := forge.Capabilities{ForgeDescriptor: backend.Descriptor{OutboxRelayCapable: true}}
+	forgejoDescriptor, ok := backend.ByName("forgejo")
+	if !ok {
+		t.Fatal("backend.ByName(\"forgejo\") not found in registry")
+	}
+	forgejoCaps := forge.Capabilities{ForgeDescriptor: forgejoDescriptor}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cf := forge.NewFake()
+			it := forge.NewFake()
+			c := applyDispatchKind(minimalValidConfig(), tc.kind)
+			c.boxForgeAndIssueAccess = tc.knob
+			caps := githubCaps
+			if tc.forgejo {
+				c.codeForge = "forgejo"
+				c.forgejoBaseURL = "https://codeberg.org"
+				c.forgejoToken = "tok"
+				caps = forgejoCaps
+			}
+
+			dc := dispatchConfig(c, it, testWired(it), cf, caps)
+			rc := runnerConfig(c)
+
+			if dc.BoxForgeAndIssueAccess != tc.want {
+				t.Errorf("dispatchConfig().BoxForgeAndIssueAccess = %q, want %q", dc.BoxForgeAndIssueAccess, tc.want)
+			}
+			if rc.MountParams.BoxForgeAndIssueAccess != tc.want {
+				t.Errorf("runnerConfig().MountParams.BoxForgeAndIssueAccess = %q, want %q", rc.MountParams.BoxForgeAndIssueAccess, tc.want)
+			}
+			if tc.forgejo && !rc.MountParams.OutboxRelayCapable {
+				t.Error("runnerConfig().MountParams.OutboxRelayCapable = false for forgejo, want true")
+			}
+			if dc.ForgeDescriptor.OutboxRelayCapable != rc.MountParams.OutboxRelayCapable {
+				t.Errorf("dispatchConfig().ForgeDescriptor.OutboxRelayCapable = %v, runnerConfig().MountParams.OutboxRelayCapable = %v, want agreement",
+					dc.ForgeDescriptor.OutboxRelayCapable, rc.MountParams.OutboxRelayCapable)
+			}
+		})
+	}
+}
+
 // Pins issue #3062: a loaded document whose Settings match the resolved names
 // but whose Artifacts contradict the caps argument must not reach
 // dispatchConfig's Capabilities. resolveCapabilitySignals trusts that

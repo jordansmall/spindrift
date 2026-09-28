@@ -621,7 +621,7 @@ func signalSocketDir() (string, error) {
 // post-driver (issue #2082) for the launcher's BundleRelay to pick up.
 func needsOutbox(cfg Config) bool {
 	return cfg.ForgeDescriptor.HostMediatedRemote ||
-		(cfg.ForgeDescriptor.OutboxRelayCapable && cfg.BoxForgeAndIssueAccess == "read-only")
+		(cfg.ForgeDescriptor.OutboxRelayCapable && cfg.boxAccessForKind() == "read-only")
 }
 
 // resetOutboxDir empties dir and recreates it: the writable outbox mount must

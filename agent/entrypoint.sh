@@ -1193,7 +1193,9 @@ main() {
   # leaves the launcher's hostMediateDraftPR with nothing to relay. Scoped to a
   # genuine status=ready (issue #2448). The scan lives in the marker-gate verb,
   # $RUN_NONCE anchoring against a mid-sentence mention included (issue #1937).
-  if [ "$claude_rc" -eq 0 ] && _is_readonly_outbox_relay; then
+  # Guarded on !_is_advise_only too (issue #3906): an advise-only kind (butler,
+  # research) never opens a PR, so a missing marker there is not a gap to nudge.
+  if [ "$claude_rc" -eq 0 ] && ! _is_advise_only && _is_readonly_outbox_relay; then
     local _pr_intent_gate_json
     _pr_intent_gate_json="$(driver-exec marker-gate --phase nudge --marker pr-intent \
       --nonce "${RUN_NONCE:-}" --original-outcome-line "$_last_outcome_line" \

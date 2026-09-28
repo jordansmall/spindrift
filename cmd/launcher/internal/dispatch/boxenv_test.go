@@ -167,6 +167,46 @@ func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
 	if _, ok := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
 		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess is empty/malformed")
 	}
+	// Issue #3906: a ReadOnlyBox kind (butler) must never see
+	// BOX_WRITE_ENABLED, even given a raw read-write value directly on
+	// Config — buildBoxEnv's own fail-closed check, independent of main.go's
+	// upstream forcing.
+	if _, ok := mustBuildBoxEnv(t, Config{Kind: "butler", BoxForgeAndIssueAccess: "read-write"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
+		t.Error("BOX_WRITE_ENABLED should be absent for a butler Config even when BoxForgeAndIssueAccess=read-write")
+	}
+	// A non-ReadOnlyBox kind is unaffected by the #3906 check.
+	if _, ok := mustBuildBoxEnv(t, Config{Kind: "work", BoxForgeAndIssueAccess: "read-write"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; !ok {
+		t.Error("BOX_WRITE_ENABLED should still be set for a work Config with BoxForgeAndIssueAccess=read-write")
+	}
+}
+
+// Issue #3906: BOX_FORGE_AND_ISSUE_ACCESS is boxEnv=true (lib/env-schema.nix),
+// so it reaches the Box through the BoxEnvVars forwarding loop as a raw
+// value. A butler Config must forward the forced "read-only" there too, not
+// the raw knob, or the Box sees a write-capable BOX_FORGE_AND_ISSUE_ACCESS
+// alongside an absent BOX_WRITE_ENABLED.
+func TestBuildBoxEnvForcesForgeAndIssueAccessForReadOnlyBoxKind(t *testing.T) {
+	cfg := Config{
+		Kind:                   "butler",
+		BoxEnvVars:             "BOX_FORGE_AND_ISSUE_ACCESS",
+		BoxForgeAndIssueAccess: "read-write",
+		ResolveEnv: func(_, name string) string {
+			if name == "BOX_FORGE_AND_ISSUE_ACCESS" {
+				return "read-write"
+			}
+			return ""
+		},
+	}
+	if got := mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")["BOX_FORGE_AND_ISSUE_ACCESS"]; got != "read-only" {
+		t.Errorf("BOX_FORGE_AND_ISSUE_ACCESS: got %q, want %q", got, "read-only")
+	}
+
+	// Any other kind forwards the resolver's value untouched.
+	cfg.Kind = "research"
+	cfg.BoxForgeAndIssueAccess = ""
+	if got := mustBuildBoxEnv(t, cfg, "3", "T", 0, "", "")["BOX_FORGE_AND_ISSUE_ACCESS"]; got != "read-write" {
+		t.Errorf("BOX_FORGE_AND_ISSUE_ACCESS for research: got %q, want %q", got, "read-write")
+	}
 }
 
 // Issue #3063: Config carries the two resolved backend.Descriptor rows

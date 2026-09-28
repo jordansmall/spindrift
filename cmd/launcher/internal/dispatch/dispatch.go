@@ -106,8 +106,11 @@ type Config struct {
 	ForgeDescriptor   backend.Descriptor
 	TrackerDescriptor backend.Descriptor
 
-	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value,
-	// "read-write" or "read-only".
+	// BoxForgeAndIssueAccess is the effective BOX_FORGE_AND_ISSUE_ACCESS value,
+	// "read-write" or "read-only" — see config.effectiveBoxForgeAndIssueAccess
+	// (main.go) for how it's derived (issue #3906). Config.boxAccessForKind
+	// below re-checks it against Kind in-package, for callers that only hold
+	// a Config.
 	BoxForgeAndIssueAccess string
 
 	// SignalCarrier is the BOX_SIGNAL_CARRIER knob value (issue #3725). An
@@ -172,6 +175,16 @@ func (c Config) signalCarrierSocket() bool {
 	return c.SignalCarrier == "socket"
 }
 
+// boxAccessForKind re-applies main.go's ReadOnlyBox forcing (issue #3906) so
+// buildBoxEnv and needsOutbox fail closed, and agree, even for a Config built
+// from the raw knob.
+func (c Config) boxAccessForKind() string {
+	if d, ok := dispatchkind.ByName(c.Kind); ok && d.ReadOnlyBox {
+		return "read-only"
+	}
+	return c.BoxForgeAndIssueAccess
+}
+
 // buildBoxEnv assembles the Box env from the schema boxEnv=true vars, the
 // per-issue vars, and nonce as RUN_NONCE (issue #1937). An IssueTextFor error
 // fails the dispatch rather than being dropped (issue #3445): the prompt
@@ -200,6 +213,13 @@ func buildBoxEnv(cfg Config, key string, subj subject, fixPass int, ciFailureSum
 			continue
 		}
 		env[name] = resolve(key, name)
+	}
+	if _, ok := env["BOX_FORGE_AND_ISSUE_ACCESS"]; ok {
+		if d, ok := dispatchkind.ByName(cfg.Kind); ok && d.ReadOnlyBox {
+			// The schema forwards the raw knob; keep the Box's copy consistent
+			// with a ReadOnlyBox kind's forced posture (issue #3906).
+			env["BOX_FORGE_AND_ISSUE_ACCESS"] = "read-only"
+		}
 	}
 	switch s := subj.(type) {
 	case choreSubject:
@@ -248,7 +268,7 @@ func buildBoxEnv(cfg Config, key string, subj subject, fixPass int, ciFailureSum
 	// Exact match, never != "read-only" (issue #1951): an unset, typo'd, or
 	// forwarding-glitched value must not fall open into the write-capable
 	// prompt path.
-	if cfg.BoxForgeAndIssueAccess == "read-write" {
+	if cfg.boxAccessForKind() == "read-write" {
 		env["BOX_WRITE_ENABLED"] = "1"
 	}
 	// Forwarded so the in-box `driver-exec outcome-backstop` verb keys its
