@@ -27,11 +27,11 @@ import (
 //     default), so runDoctor prints the fixed token-gate no-op line
 //     (cmd/launcher/doctor.go:108) and skips both read-only-token gates, which
 //     would otherwise make a live network call.
-//   - f.Labels carries every triage, research, priority, and ambiguous-spec
-//     label name the doctor.Run label check enumerates, so every label row
-//     reads "ok:" and the run ends on the single all-present summary line
-//     instead of a MISSING/advisory row whose count could drift with the
-//     label sets those helpers return.
+//   - f.Labels carries every triage and advisory-tier label name
+//     (doctor.AdvisoryLabelNames) the doctor.Run label check enumerates, so
+//     every label row reads "ok:" and the run ends on the single all-present
+//     summary line instead of a MISSING/advisory row whose count could drift
+//     with the label sets those helpers return.
 //   - f.SetBranchProtected pins the branch-protection probe to "protected",
 //     so that row is also a fixed "ok:" line rather than depending on the
 //     fake's zero-value map.
@@ -133,10 +133,7 @@ func healthyGoldenFixture() (*forge.Fake, config) {
 	c.runtime = ""
 
 	f.Labels = append([]string{c.label, c.inProgressLabel, c.failedLabel, c.completeLabel},
-		doctor.ResearchLabelNames()...)
-	f.Labels = append(f.Labels, doctor.PriorityLabelNames()...)
-	f.Labels = append(f.Labels, doctor.AmbiguousLabelNames()...)
-	f.Labels = append(f.Labels, doctor.ButlerLabelNames()...)
+		doctor.AdvisoryLabelNames()...)
 
 	return f, c
 }

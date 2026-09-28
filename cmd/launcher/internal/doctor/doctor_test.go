@@ -889,8 +889,7 @@ func TestRun_Verbose_Interactive_NoDuplicateAdvisoryRecap(t *testing.T) {
 func TestRun_Quiet_Interactive_NoAdvisoryMissing_NoRecap(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	f.Labels = append([]string{"ready-for-agent"},
-		append(append(append(ResearchLabelNames(), PriorityLabelNames()...), AmbiguousLabelNames()...), ButlerLabelNames()...)...)
+	f.Labels = append([]string{"ready-for-agent"}, AdvisoryLabelNames()...)
 	// agent-in-progress, agent-failed, agent-complete missing; every advisory
 	// label present.
 

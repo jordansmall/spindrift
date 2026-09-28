@@ -4239,6 +4239,23 @@ func defaultLabelConfig() config {
 	}
 }
 
+// advisoryLabelsExcept returns every advisory-tier label except those in
+// exclude, so a fixture scoped to "every advisory tier but one" stays correct
+// as advisoryTiers grows a new tier — no fixture edit needed (issue #3908).
+func advisoryLabelsExcept(exclude []string) []string {
+	drop := make(map[string]bool, len(exclude))
+	for _, name := range exclude {
+		drop[name] = true
+	}
+	var out []string
+	for _, name := range doctor.AdvisoryLabelNames() {
+		if !drop[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // doctor prints an "ok" line naming the configured runtime when it resolves to
 // a binary on PATH, using defaultLabelConfig()'s "echo", which the runner
 // package can genuinely LookPath.
@@ -4418,11 +4435,7 @@ func TestDoctor_RecoverableCount_ZeroWhenLabelUnmapped(t *testing.T) {
 func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	research := doctor.ResearchLabelNames()
-	priority := doctor.PriorityLabelNames()
-	ambiguous := doctor.AmbiguousLabelNames()
-	butler := doctor.ButlerLabelNames()
-	f.Labels = append(append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...), butler...)
+	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, doctor.AdvisoryLabelNames()...)
 
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
@@ -4549,13 +4562,11 @@ func TestDoctor_TTY_Decline(t *testing.T) {
 func TestDoctor_TTY_Decline_PromptShowsTierBreakdown(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	priority := doctor.PriorityLabelNames()
-	ambiguous := doctor.AmbiguousLabelNames()
-	butler := doctor.ButlerLabelNames()
-	// Two work labels missing (agent-failed, agent-complete) and all seven
-	// research labels missing; priority, ambiguous-spec, and butler present so
-	// the advisory count is scoped to research alone.
-	f.Labels = append(append(append([]string{"ready-for-agent", "agent-in-progress"}, priority...), ambiguous...), butler...)
+	research := doctor.ResearchLabelNames()
+	// Two work labels missing (agent-failed, agent-complete) and all research
+	// labels missing; every other advisory tier present so the advisory
+	// count is scoped to research alone.
+	f.Labels = append([]string{"ready-for-agent", "agent-in-progress"}, advisoryLabelsExcept(research)...)
 
 	var buf bytes.Buffer
 	c := defaultLabelConfig()
@@ -4614,19 +4625,16 @@ func TestDoctor_TTY_Decline_PromptOmitsConsequenceWhenNoRequiredMissing(t *testi
 func TestDoctor_TTY_Confirm(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	research := doctor.ResearchLabelNames()
-	priority := doctor.PriorityLabelNames()
-	ambiguous := doctor.AmbiguousLabelNames()
-	butler := doctor.ButlerLabelNames()
-	// Two work labels missing: agent-failed and agent-complete. Research,
-	// priority, ambiguous-spec, and butler labels are all present throughout,
-	// so this test stays scoped to work label creation.
-	f.Labels = append(append(append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...), ambiguous...), butler...)
+	advisory := doctor.AdvisoryLabelNames()
+	// Two work labels missing: agent-failed and agent-complete. Every
+	// advisory label is present throughout, so this test stays scoped to
+	// work label creation.
+	f.Labels = append([]string{"ready-for-agent", "agent-in-progress"}, advisory...)
 	// After creation the fake doesn't auto-add to Labels, so script the
 	// second ListLabels call (re-verify) to return all four work labels.
 	f.LabelsSeq = [][]string{
-		append(append(append(append([]string{"ready-for-agent", "agent-in-progress"}, research...), priority...), ambiguous...), butler...),                                   // first check
-		append(append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...), butler...), // re-verify
+		append([]string{"ready-for-agent", "agent-in-progress"}, advisory...),                                   // first check
+		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, advisory...), // re-verify
 	}
 
 	var buf bytes.Buffer
@@ -4663,16 +4671,13 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	f.ProbeRepo = "owner/repo"
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	research := doctor.ResearchLabelNames()
-	priority := doctor.PriorityLabelNames()
-	ambiguous := doctor.AmbiguousLabelNames()
-	butler := doctor.ButlerLabelNames()
-	// All work, priority, ambiguous-spec, and butler labels present; all
-	// seven research labels missing, so this test stays scoped to research
-	// label creation.
-	f.Labels = append(append(append(append([]string{}, work...), priority...), ambiguous...), butler...)
+	// Every advisory tier except research present; all research labels
+	// missing, so this test stays scoped to research label creation.
+	otherAdvisory := advisoryLabelsExcept(research)
+	f.Labels = append(append([]string{}, work...), otherAdvisory...)
 	f.LabelsSeq = [][]string{
-		append(append(append(append([]string{}, work...), priority...), ambiguous...), butler...),
-		append(append(append(append(append([]string{}, work...), priority...), ambiguous...), butler...), research...), // re-verify: research now created too
+		append(append([]string{}, work...), otherAdvisory...),
+		append(append(append([]string{}, work...), otherAdvisory...), research...), // re-verify: research now created too
 	}
 
 	var buf bytes.Buffer
@@ -4746,11 +4751,7 @@ func TestDoctor_TTY_Confirm_RenamedLifecycleLabel_UsesCorrectMeta(t *testing.T) 
 			renamed := "custom-" + tt.role
 			tt.renameCfg(&cfg, renamed)
 
-			research := doctor.ResearchLabelNames()
-			priority := doctor.PriorityLabelNames()
-			ambiguous := doctor.AmbiguousLabelNames()
-			butler := doctor.ButlerLabelNames()
-			present := append(append(append(append(append([]string{}, tt.otherLive...), research...), priority...), ambiguous...), butler...)
+			present := append(append([]string{}, tt.otherLive...), doctor.AdvisoryLabelNames()...)
 			f.Labels = present
 			f.LabelsSeq = [][]string{
 				present,
@@ -4818,7 +4819,7 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
 		}
 	}
-	if strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
+	if strings.Contains(out, "ok: all triage,") {
 		t.Errorf("must not print success message when research labels are still missing, got:\n%s", out)
 	}
 }
@@ -4861,17 +4862,14 @@ func TestDoctor_TTY_Confirm_PriorityLabels(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-	research := doctor.ResearchLabelNames()
 	priority := doctor.PriorityLabelNames()
-	ambiguous := doctor.AmbiguousLabelNames()
-	butler := doctor.ButlerLabelNames()
-	// All work, research, ambiguous-spec, and butler labels present; all
-	// three priority labels missing, so this test stays scoped to priority
-	// label creation.
-	f.Labels = append(append(append(append([]string{}, work...), research...), ambiguous...), butler...)
+	// Every advisory tier except priority present; all priority labels
+	// missing, so this test stays scoped to priority label creation.
+	otherAdvisory := advisoryLabelsExcept(priority)
+	f.Labels = append(append([]string{}, work...), otherAdvisory...)
 	f.LabelsSeq = [][]string{
-		append(append(append(append([]string{}, work...), research...), ambiguous...), butler...),
-		append(append(append(append(append([]string{}, work...), research...), ambiguous...), butler...), priority...), // re-verify: priority now created too
+		append(append([]string{}, work...), otherAdvisory...),
+		append(append(append([]string{}, work...), otherAdvisory...), priority...), // re-verify: priority now created too
 	}
 
 	var buf bytes.Buffer
@@ -4935,7 +4933,7 @@ func TestDoctor_TTY_Confirm_PriorityStillMissing_Advisory(t *testing.T) {
 			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
 		}
 	}
-	if strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
+	if strings.Contains(out, "ok: all triage,") {
 		t.Errorf("must not print success message when priority labels are still missing, got:\n%s", out)
 	}
 }
@@ -4964,9 +4962,19 @@ func TestDoctor_NoTTY_AmbiguousLabelMissing_ExitZero(t *testing.T) {
 			t.Errorf("ambiguous-spec label %q must not render with the fatal MISSING prefix, got:\n%s", label, out)
 		}
 	}
-	wantAdvisory := "advisory: " + strconv.Itoa(len(doctor.AmbiguousLabelNames())) + " ambiguous-spec label(s) missing"
-	if !strings.Contains(out, wantAdvisory) {
-		t.Errorf("want advisory line %q, got:\n%s", wantAdvisory, out)
+	// Exact match, not Contains: ambiguous-spec's ref is "" (no ADR citation),
+	// so this is the one advisory-tier line that would show a double space
+	// before the em dash if refSuffix's empty-ref branch ever regressed.
+	wantAdvisory := "advisory: " + strconv.Itoa(len(doctor.AmbiguousLabelNames())) + " ambiguous-spec label(s) missing — does not fail this check"
+	var gotAdvisory string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "advisory: ") && strings.Contains(line, "ambiguous-spec label(s) missing") {
+			gotAdvisory = line
+			break
+		}
+	}
+	if gotAdvisory != wantAdvisory {
+		t.Errorf("want advisory line %q, got %q in:\n%s", wantAdvisory, gotAdvisory, out)
 	}
 }
 
@@ -4978,17 +4986,15 @@ func TestDoctor_TTY_Confirm_AmbiguousLabel(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-	research := doctor.ResearchLabelNames()
-	priority := doctor.PriorityLabelNames()
 	ambiguous := doctor.AmbiguousLabelNames()
-	butler := doctor.ButlerLabelNames()
-	// All work, research, priority, and butler labels present; the
-	// ambiguous-spec label missing, so this test stays scoped to
-	// ambiguous-spec label creation.
-	f.Labels = append(append(append(append([]string{}, work...), research...), priority...), butler...)
+	// Every advisory tier except ambiguous-spec present; the ambiguous-spec
+	// label missing, so this test stays scoped to ambiguous-spec label
+	// creation.
+	otherAdvisory := advisoryLabelsExcept(ambiguous)
+	f.Labels = append(append([]string{}, work...), otherAdvisory...)
 	f.LabelsSeq = [][]string{
-		append(append(append(append([]string{}, work...), research...), priority...), butler...),
-		append(append(append(append(append([]string{}, work...), research...), priority...), butler...), ambiguous...), // re-verify: ambiguous-spec now created too
+		append(append([]string{}, work...), otherAdvisory...),
+		append(append(append([]string{}, work...), otherAdvisory...), ambiguous...), // re-verify: ambiguous-spec now created too
 	}
 
 	var buf bytes.Buffer
@@ -5038,22 +5044,27 @@ func TestDoctor_TTY_Confirm_AmbiguousStillMissing_Advisory(t *testing.T) {
 		t.Fatalf("ambiguous-spec label still missing after creation must not fail doctor, got: %v", err)
 	}
 	out := buf.String()
+	// Exact match, not HasPrefix: ambiguous-spec's ref is "" (no ADR
+	// citation), so this is the one still-missing line that would show a
+	// double space before the em dash if refSuffix's empty-ref branch ever
+	// regressed.
+	const wantAdvisoryLine = "advisory: 1 ambiguous-spec label(s) still missing after creation — does not fail this check: agent-ambiguous-spec"
 	var advisoryLine string
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "advisory: 1 ambiguous-spec label(s) still missing after creation") {
+		if line == wantAdvisoryLine {
 			advisoryLine = line
 			break
 		}
 	}
 	if advisoryLine == "" {
-		t.Fatalf("want advisory summary after incomplete ambiguous-spec creation, got:\n%s", out)
+		t.Fatalf("want exact advisory summary line %q after incomplete ambiguous-spec creation, got:\n%s", wantAdvisoryLine, out)
 	}
 	for _, name := range doctor.AmbiguousLabelNames() {
 		if !strings.Contains(advisoryLine, name) {
 			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
 		}
 	}
-	if strings.Contains(out, "ok: all triage, research, priority, and ambiguous-spec labels present") {
+	if strings.Contains(out, "ok: all triage,") {
 		t.Errorf("must not print success message when ambiguous-spec label is still missing, got:\n%s", out)
 	}
 }

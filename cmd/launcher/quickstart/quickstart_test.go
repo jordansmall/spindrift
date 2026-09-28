@@ -1886,19 +1886,15 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
-	research := doctor.ResearchLabelNames()
-	priority := doctor.PriorityLabelNames()
-	ambiguous := doctor.AmbiguousLabelNames()
-	butler := doctor.ButlerLabelNames()
+	advisory := doctor.AdvisoryLabelNames()
 	f := forge.NewFake()
 	f.ProbeRepo = "jordansmall/spindrift"
 	f.SetBranchProtected(defaultBaseBranch, true)
-	// Three work labels are missing; the research, priority, ambiguous-spec,
-	// and butler labels are all present.
-	f.Labels = append(append(append(append([]string{"ready-for-agent"}, research...), priority...), ambiguous...), butler...)
+	// Three work labels are missing; every advisory label is present.
+	f.Labels = append([]string{"ready-for-agent"}, advisory...)
 	f.LabelsSeq = [][]string{
-		append(append(append(append([]string{"ready-for-agent"}, research...), priority...), ambiguous...), butler...),
-		append(append(append(append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), priority...), ambiguous...), butler...),
+		append([]string{"ready-for-agent"}, advisory...),
+		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, advisory...),
 	}
 	runner := &fakeCommandRunner{}
 
