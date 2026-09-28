@@ -639,15 +639,19 @@ _handoff_field() {
 # into DRIVER_SKILLS_DIR (issue #2489), so an operator skill wins a name
 # collision but a harness skill the operator didn't override survives. The driver
 # discovers skills only at DRIVER_SKILLS_DIR, so every call site that spawns a
-# driver invocation naming a skill must run this first. Idempotent (issue #2706).
+# driver invocation naming a skill must run this first. Idempotent (issue #2706)
+# only because each cp is followed by chmod -R u+w: cp -r carries a read-only
+# source's mode bits (bwrap ro-binds /agent from the Nix store), so an unwritable
+# copy would break the very next cp over it (issue #3941). A blanket chmod -R is safe here, unlike in _populate_home_agent_files:
+# nothing is bind-mounted under DRIVER_SKILLS_DIR.
 _populate_driver_skills_dir() {
+  local _src
   mkdir -p "$DRIVER_SKILLS_DIR"
-  if [ -d "$HARNESS_SKILLS_DIR" ]; then
-    cp -r "$HARNESS_SKILLS_DIR"/. "$DRIVER_SKILLS_DIR"/
-  fi
-  if [ -d "$OPERATOR_SKILLS_DIR" ]; then
-    cp -r "$OPERATOR_SKILLS_DIR"/. "$DRIVER_SKILLS_DIR"/
-  fi
+  for _src in "$HARNESS_SKILLS_DIR" "$OPERATOR_SKILLS_DIR"; do
+    [ -d "$_src" ] || continue
+    cp -r "$_src"/. "$DRIVER_SKILLS_DIR"/
+    chmod -R u+w "$DRIVER_SKILLS_DIR"
+  done
 }
 
 # _populate_home_agent_files copies HARNESS_HOME_AGENT_DIR's staged content into
