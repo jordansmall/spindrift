@@ -437,6 +437,104 @@ setup_rebase_conflict_generated() {
   export FAKE_GH_PR_LIST_7="https://github.com/owner/repo/pull/7"
 }
 
+# CODE_FORGE=forgejo has PRs, but never on github.com and the Box carries no
+# GH_TOKEN, so gh must never be consulted (issue #3942) -- the exact same
+# start-fresh-no-gh contract as CODE_FORGE=local, just over a Forgejo remote.
+@test "CODE_FORGE=forgejo starts fresh and calls no gh, even with a stale origin branch" {
+  local forge_root="$BATS_TEST_TMPDIR/forge"
+  mkdir -p "$forge_root/owner"
+  git init --bare -q "$forge_root/owner/repo.git"
+  local fseed="$BATS_TEST_TMPDIR/forge-seed"
+  git clone -q "$forge_root/owner/repo.git" "$fseed"
+  (
+    cd "$fseed" || exit 1
+    echo "# forge repo" >README.md
+    git add -A
+    git commit -q -m "chore: seed forge remote"
+    git push -q origin HEAD:main
+  )
+  git config --global "url.file://$forge_root/.insteadOf" "https://fjtok@forge.test/"
+
+  local stale_seed="$BATS_TEST_TMPDIR/forge-stale-seed"
+  git clone -q "$forge_root/owner/repo.git" "$stale_seed"
+  (
+    cd "$stale_seed" || exit 1
+    git checkout -q -b agent/issue-7
+    echo "stale" >stale.txt
+    git add -A
+    git commit -q -m "chore: stale prior attempt"
+    git push -q origin agent/issue-7
+  )
+  local before_sha
+  before_sha="$(git --git-dir="$forge_root/owner/repo.git" rev-parse refs/heads/agent/issue-7)"
+
+  export CODE_FORGE="forgejo"
+  export BOX_FORGE_BACKEND=FORGEJO
+  export FORGEJO_BASE_URL="https://forge.test"
+  export FORGEJO_TOKEN="fjtok"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -s "$GH_LOG" ]
+  run git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD
+  [ "$status" -eq 0 ]
+  [ "$output" = "agent/issue-7" ]
+  [ ! -f "$WORK_DIR/stale.txt" ]
+
+  # No force-reset publish: the stale remote branch is left untouched.
+  local after_sha
+  after_sha="$(git --git-dir="$forge_root/owner/repo.git" rev-parse refs/heads/agent/issue-7)"
+  [ "$before_sha" = "$after_sha" ]
+}
+
+# CODE_FORGE=git is a plain push-only remote with no PR concept at all (ADR
+# 0013), so gh must never be consulted here either (issue #3942).
+@test "CODE_FORGE=git starts fresh and never calls gh pr list, even with a stale origin branch" {
+  local other_remote="$BATS_TEST_TMPDIR/other-remote.git"
+  git init --bare -q "$other_remote"
+  local seed="$BATS_TEST_TMPDIR/seed-other"
+  git clone -q "$other_remote" "$seed"
+  (
+    cd "$seed" || exit 1
+    echo "# other repo" >README.md
+    git add -A
+    git commit -q -m "chore: seed other remote"
+    git push -q origin HEAD:main
+  )
+
+  local stale_seed="$BATS_TEST_TMPDIR/other-stale-seed"
+  git clone -q "$other_remote" "$stale_seed"
+  (
+    cd "$stale_seed" || exit 1
+    git checkout -q -b agent/issue-7
+    echo "stale" >stale.txt
+    git add -A
+    git commit -q -m "chore: stale prior attempt"
+    git push -q origin agent/issue-7
+  )
+  local before_sha
+  before_sha="$(git --git-dir="$other_remote" rev-parse refs/heads/agent/issue-7)"
+
+  export CODE_FORGE="git"
+  export CODE_FORGE_REMOTE_URL="$other_remote"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # clone_repo still runs gh auth setup-git for CODE_FORGE=git; only the PR
+  # query is ruled out here.
+  run grep -q "pr list" "$GH_LOG"
+  [ "$status" -eq 1 ]
+  run git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD
+  [ "$status" -eq 0 ]
+  [ "$output" = "agent/issue-7" ]
+  [ ! -f "$WORK_DIR/stale.txt" ]
+
+  # No force-reset publish: the stale remote branch is left untouched.
+  local after_sha
+  after_sha="$(git --git-dir="$other_remote" rev-parse refs/heads/agent/issue-7)"
+  [ "$before_sha" = "$after_sha" ]
+}
+
 @test "pre-work rebase conflict on generated file: regenerates instead of hand-merging" {
   setup_rebase_conflict_generated
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
