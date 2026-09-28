@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"time"
 
-	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/ecosystem"
@@ -31,7 +30,7 @@ import (
 // via Factory.New.
 type Dispatch struct {
 	// number is this Dispatch's log/lock/cache/BoxName key: always
-	// subject.key(), set once by Factory.newDispatch (issue #3954).
+	// subject.key.String(), set once by Factory.newDispatch (issue #3954).
 	number   string
 	pwd      string
 	runner   runner.Runner
@@ -70,12 +69,11 @@ type Dispatch struct {
 	// reclaimAttemptLog can find it after a mid-run rename (issue #3886).
 	attemptLog os.FileInfo
 
-	// subject is what this Dispatch's Box works (ADR 0056, issue #3875): an
-	// issueSubject for a tracker issue, or a choreSubject for a
-	// Factory.NewChore Dispatch, and the sole source of the Dispatch's key
-	// and title (issue #3954). buildBoxEnv forwards a choreSubject as
-	// CHORE_*/BASE_BRANCH in place of the issue-keyed
-	// ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT trio.
+	// subject is what this Dispatch's Box works (ADR 0056, issue #3875): a
+	// tracker issue, or a Factory.NewChore Dispatch's Chore, and the sole
+	// source of the Dispatch's key and title (issue #3954, #3988).
+	// buildBoxEnv reads subject.key.IsChore() to forward CHORE_*/BASE_BRANCH
+	// in place of the issue-keyed ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT trio.
 	subject subject
 }
 
@@ -238,17 +236,10 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 // the report vocabulary spelled once in report.PhaseInitial,
 // report.PhaseConflictResolve, and report.PhaseFixPass; humanPhase maps it
 // onto announceLine's own vocabulary here rather than at the two call sites,
-// so a phase name only needs to be spelled once per caller. A choreSubject
-// (a Factory.NewChore Dispatch, ADR 0056) reports the Chore-keyed record
-// instead: d.number is ChoreKey(Name), not a tracker issue, and the report
-// wire shape must never carry that key as an Issue (issue #3878).
+// so a phase name only needs to be spelled once per caller.
 func (d *Dispatch) announce(phase string) {
-	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.subject.title()))
-	key := dispatchkey.Issue(d.number)
-	if c, ok := d.subject.(choreSubject); ok {
-		key = dispatchkey.Chore(c.Chore.Name)
-	}
-	report.Box(key, phase)
+	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.subject.title))
+	report.Box(d.subject.key, phase)
 }
 
 // humanPhase maps report's phase vocabulary onto announceLine's

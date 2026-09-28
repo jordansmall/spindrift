@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/chore"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -204,27 +205,27 @@ func TestFactory_SetsSubject(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("7", "Test issue")
-	if got := d.subject; got != (issueSubject{Number: "7", Title: "Test issue"}) {
-		t.Errorf("subject: got %+v, want issueSubject{7, Test issue}", got)
+	wantSubj := issueSubject("7", "Test issue")
+	if !reflect.DeepEqual(d.subject, wantSubj) {
+		t.Errorf("subject: got %+v, want %+v", d.subject, wantSubj)
 	}
-	if d.number != d.subject.key() || d.number != "7" {
-		t.Errorf("New: d.number = %q, want %q (== subject.key())", d.number, d.subject.key())
+	if d.number != d.subject.key.String() || d.number != "7" {
+		t.Errorf("New: d.number = %q, want %q (== subject.key.String())", d.number, d.subject.key.String())
 	}
-	if got := d.subject.title(); got != "Test issue" {
-		t.Errorf("New: subject.title() = %q, want %q", got, "Test issue")
+	if got := d.subject.title; got != "Test issue" {
+		t.Errorf("New: subject.title = %q, want %q", got, "Test issue")
 	}
 
 	c := Chore{Name: "lint-sweep", Branch: "butler/lint-sweep"}
 	cd := f.NewChore(c)
-	gotChore, ok := cd.subject.(choreSubject)
-	if !ok || !reflect.DeepEqual(gotChore.Chore, c) {
-		t.Errorf("NewChore subject: got %+v (ok=%v), want choreSubject{%+v}", cd.subject, ok, c)
+	if !cd.subject.key.IsChore() || !reflect.DeepEqual(cd.subject.chore, c) {
+		t.Errorf("NewChore subject: got %+v, want chore %+v", cd.subject, c)
 	}
-	if want := ChoreKey("lint-sweep"); cd.number != cd.subject.key() || cd.number != want {
-		t.Errorf("NewChore: d.number = %q, want %q (== subject.key())", cd.number, want)
+	if want := dispatchkey.Chore("lint-sweep").String(); cd.number != cd.subject.key.String() || cd.number != want {
+		t.Errorf("NewChore: d.number = %q, want %q (== subject.key.String())", cd.number, want)
 	}
-	if got, want := cd.subject.title(), "butler: lint-sweep"; got != want {
-		t.Errorf("NewChore: subject.title() = %q, want %q", got, want)
+	if got, want := cd.subject.title, "butler: lint-sweep"; got != want {
+		t.Errorf("NewChore: subject.title = %q, want %q", got, want)
 	}
 }
 
