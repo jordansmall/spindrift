@@ -113,7 +113,9 @@ jobs:
       # off agent-recover, so without this it would sit silently on
       # agent-in-progress with nothing running. The comment and label swap run
       # through the forgejo-label-swap composite (Forgejo REST); `fj` has no
-      # label verb and is not guaranteed on the runner.
+      # label verb and is not guaranteed on the runner. Inlining the untrusted
+      # recover-reason into `comment:` is safe only because the composite hands
+      # it to its script via env (SWAP_COMMENT), never a shell expansion.
       - name: Park if nothing to recover
         if: always() && steps.recover.outcome == 'failure'
         uses: ./.github/actions/forgejo-label-swap
@@ -126,10 +128,10 @@ jobs:
           remove-labels: agent-in-progress
           comment: >-
             ⚠️ `spindrift recover` could not adopt anything for
-            `agent/issue-${{ github.event.issue.number }}` — no open PR, or
-            recover errored (see the run logs). Parked to `agent-failed`;
-            re-label `agent-recover` once an open PR exists, or
-            `ready-for-agent` to re-dispatch from scratch.
+            `agent/issue-${{ github.event.issue.number }}`:
+            ${{ steps.recover.outputs.recover-reason || 'unknown error — see run logs' }}.
+            Parked to `agent-failed`; re-label `agent-recover` once an open PR
+            exists, or `ready-for-agent` to re-dispatch from scratch.
 
       - name: Upload run logs
         if: always()
