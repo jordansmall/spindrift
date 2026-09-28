@@ -35,7 +35,7 @@ jobs:
       - name: Restore and save the nix store
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-${{ matrix.nix-system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'go.sum') }}
+          primary-key: nix-${{ matrix.nix-system }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/go.sum') }}
           restore-prefixes-first-match: nix-${{ matrix.nix-system }}-
           gc-max-store-size-linux: 5G
 
@@ -80,7 +80,7 @@ jobs:
       - name: Restore and save the nix store
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'go.sum') }}
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/go.sum') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           gc-max-store-size-macos: 5G
 
