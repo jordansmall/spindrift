@@ -98,6 +98,35 @@ if a finding shows the change belongs elsewhere.
 If `/tmp/brief.md` isn't there, explore the repo yourself as usual — that's
 not an error.
 
+# ALREADY RESOLVED
+
+After scouting, check whether the issue's change is already present on the
+*fetched* default branch — not merely on the branch you cut `agent/issue-7` from.
+Run `git fetch origin`, then verify directly against `origin/main`:
+does that ref already contain the fix, feature, or behavior the issue asks
+for?
+
+A partial or speculative match does not qualify — only a demonstrable one
+does. The change must be verifiably in place, ideally with the existing
+check or test that proves it named in the note. A plausible-looking commit
+message or adjacent code is not enough on its own; read the actual diff.
+
+If it is genuinely already resolved, do not implement anything — no commits,
+no push, no PR, no in-box comment, no in-box close: the launcher does the
+rest host-side once you exit. Name the resolving commit SHA or PR, and the
+check or test proving it, in the SPINDRIFT_OUTCOME line's `note=` field.
+
+Print exactly one line and stop — raw plain text, not wrapped in backticks,
+a code fence, or any other markdown formatting, nothing after it:
+
+SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=already-resolved note=<resolving commit or PR, plus the check/test that proves it>
+
+`status=already-resolved` is a distinct, successful, non-crash stop — never
+`status=blocked`, and never a signal that implementation itself failed.
+
+If the change is not already present, proceed straight into # IMPLEMENT
+below with no further comment about this gate.
+
 # IMPLEMENT
 
 A `worker` subagent is provisioned this run, so run IMPLEMENT as its
@@ -378,9 +407,11 @@ SPINDRIFT_OUTCOME issue=7 landing=<pr-url> status=ready note=<short reason>
 Grammar: `SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=<status> note=<short reason>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
 spaces and `=`). The only valid `status` values here are `ready` and `blocked`
-— no other word belongs in that field (`status=ambiguous` is a distinct,
-earlier ISSUE COHERENCE GATE that exits the run before ever reaching
-this OUTCOME section, not a third option here).
+— no other word belongs in that field (`status=ambiguous` and
+`status=already-resolved` are each a distinct, earlier gate — the ISSUE
+COHERENCE GATE and the ALREADY RESOLVED gate, respectively — that exits the
+run before ever reaching this OUTCOME section, not a third or fourth option
+here).
 
 This grammar's leading token is load-bearing (ADR 0035): the in-box
 orchestrator's scanPassLog greps for it verbatim (via

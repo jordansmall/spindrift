@@ -218,9 +218,11 @@ SPINDRIFT_OUTCOME issue=7 landing=<pr-url> status=ready note=<short reason>
 Grammar: `SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=<status> note=<short reason>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
 spaces and `=`). The only valid `status` values here are `ready` and `blocked`
-— no other word belongs in that field (`status=ambiguous` is a distinct,
-earlier ISSUE COHERENCE GATE that exits the run before ever reaching
-this OUTCOME section, not a third option here).
+— no other word belongs in that field (`status=ambiguous` and
+`status=already-resolved` are each a distinct, earlier gate — the ISSUE
+COHERENCE GATE and the ALREADY RESOLVED gate, respectively — that exits the
+run before ever reaching this OUTCOME section, not a third or fourth option
+here).
 
 This grammar's leading token is load-bearing (ADR 0035): the in-box
 orchestrator's scanPassLog greps for it verbatim (via

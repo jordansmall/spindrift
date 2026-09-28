@@ -148,6 +148,44 @@ setup() {
   grep -qF '# SCOUT' <<<"$section"
 }
 
+@test "ALREADY RESOLVED gate sits after SCOUT and before IMPLEMENT" {
+  # issue #4015: a change already present on the fetched default branch is a
+  # distinct, successful, non-crash stop — mirrors the ISSUE COHERENCE GATE
+  # test above, one obligation per grep.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local section
+  section="$(sed -n '/# ALREADY RESOLVED$/,/^# IMPLEMENT$/p' "$prompt")"
+  [ -n "$section" ]
+  # Verified against the fetched default branch, not the worker's own seed.
+  grep -qi 'git fetch origin' <<<"$section"
+  grep -qF 'origin/${BASE_BRANCH}' <<<"$section"
+  # A partial or speculative match does not qualify.
+  grep -qi 'partial' <<<"$section"
+  grep -qi 'speculative' <<<"$section"
+  grep -qi 'does not qualify' <<<"$section"
+  # Name the resolving commit or PR, ideally with the proving check/test.
+  grep -qi 'commit' <<<"$section"
+  grep -qi 'PR' <<<"$section"
+  grep -qi 'check or test' <<<"$section"
+  # No commits, no push, no PR, no in-box comment, no in-box close — the
+  # launcher does the rest host-side.
+  grep -qi 'no commits' <<<"$section"
+  grep -qi 'no push' <<<"$section"
+  grep -qi 'no PR' <<<"$section"
+  grep -qi 'no.*comment' <<<"$section"
+  grep -qi 'no.*close' <<<"$section"
+  grep -qi 'host-side' <<<"$section"
+  grep -qF 'SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=already-resolved note=' <<<"$section"
+  grep -qi 'raw plain text' <<<"$section"
+  grep -qi 'backticks' <<<"$section"
+  grep -qi 'nothing after it' <<<"$section"
+  # status=already-resolved is a distinct successful stop, never status=blocked.
+  grep -qi 'non-crash stop' <<<"$section"
+  grep -qF 'status=blocked' <<<"$section"
+  grep -qF '# IMPLEMENT' <<<"$section"
+}
+
 @test "COMMS section establishes machine-log voice with human-prose carve-outs" {
   # Output is a machine-parsed log, not a conversation, except on the parts
   # that stay human prose (commits, PR body, IF BLOCKED comment, outcome
@@ -358,6 +396,8 @@ setup() {
   [ -n "$section" ]
   grep -qF 'SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason>' <<<"$section"
   grep -q 'valid `status` values here are `ready` and `blocked`' <<<"$section"
+  grep -qi 'already-resolved' <<<"$section"
+  grep -qi 'ALREADY RESOLVED gate' <<<"$section"
 }
 
 @test "OUTCOME section marks a trailing-colon fragment as invalid" {
