@@ -3,7 +3,7 @@
 # the shared two-surface rationale. There is no verbatim comparison: CLAUDE.md's
 # section is longer, cites things the skill never mentions, and wraps narrower,
 # so this asserts only the vocabulary any faithful rewording would keep.
-{ pkgs, ... }:
+{ pkgs, imageNixCores, ... }:
 let
   inherit (pkgs.lib)
     assertMsg
@@ -134,34 +134,16 @@ let
       pkgs.runCommand "nix-checks-lore-parity-clause-${c.name}" { } "touch $out";
   };
 
-  # The Box's baked cores bound is single-sourced in lib/image.nix's
-  # nixConfigFile, and both lore texts quote the number in prose, so a bump
-  # there can silently leave one of them citing a stale N. Requiring exactly
-  # one whole-line "cores = N" match keeps the scan honest about which line
-  # nixConfigFile bakes; a second one would win or lose by position alone.
-  imageNixText = builtins.readFile ../../lib/image.nix;
-  imageNixLines = builtins.filter builtins.isString (builtins.split "\n" imageNixText);
-  coresLineMatches = builtins.filter (
-    l: builtins.match "[[:space:]]*cores = [0-9]+[[:space:]]*" l != null
-  ) imageNixLines;
-  coresValue =
-    if coresLineMatches == [ ] then
-      throw "nix/checks/nix-checks-lore-parity.nix: no \"cores = N\" line found anywhere in lib/image.nix -- has nixConfigFile been renamed or restructured?"
-    else if builtins.length coresLineMatches > 1 then
-      throw "nix/checks/nix-checks-lore-parity.nix: found ${toString (builtins.length coresLineMatches)} \"cores = N\" lines in lib/image.nix -- this check can no longer tell which one nixConfigFile bakes."
-    else
-      builtins.head (
-        builtins.match "[[:space:]]*cores = ([0-9]+)[[:space:]]*" (builtins.head coresLineMatches)
-      );
-
-  coresNeedle = "cores = ${coresValue}";
+  # Lore texts quote the baked cores bound in prose, so a bump can leave one
+  # stale.
+  coresNeedle = "cores = ${imageNixCores}";
 in
 builtins.listToAttrs (map clauseCheck sharedClauses)
 // {
   nix-checks-lore-cores-matches-nix-conf =
     assert assertMsg (hasInfix coresNeedle skillText)
-      "nix-checks lore drift: ${skillDesc} does not quote \"cores = ${coresValue}\", the value lib/image.nix's nixConfigFile actually bakes -- update the skill's prose to match the baked bound.";
+      "nix-checks lore drift: ${skillDesc} does not quote \"cores = ${imageNixCores}\", the value lib/image.nix's nixConfigFile actually bakes -- update the skill's prose to match the baked bound.";
     assert assertMsg (hasInfix coresNeedle nixEditsText)
-      "nix-checks lore drift: ${claudeDesc} does not quote \"cores = ${coresValue}\", the value lib/image.nix's nixConfigFile actually bakes -- update CLAUDE.md's prose to match the baked bound.";
+      "nix-checks lore drift: ${claudeDesc} does not quote \"cores = ${imageNixCores}\", the value lib/image.nix's nixConfigFile actually bakes -- update CLAUDE.md's prose to match the baked bound.";
     pkgs.runCommand "nix-checks-lore-cores-matches-nix-conf" { } "touch $out";
 }
