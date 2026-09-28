@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -85,7 +86,7 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		if err != nil {
 			return signalFail(stdout, err)
 		}
-		return postSignal(stdout, client, base, secret, kind, signalBody{"body": rawString(body)})
+		return postSignal(stdout, client, base, secret, kind, rawFields(signalwire.Comment{Body: body}))
 
 	case "pr-intent":
 		fs := signalFlagSet(kind, stdout)
@@ -105,7 +106,7 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		if err != nil {
 			return signalFail(stdout, err)
 		}
-		return postSignal(stdout, client, base, secret, kind, signalBody{"title": rawString(*title), "body": rawString(body)})
+		return postSignal(stdout, client, base, secret, kind, rawFields(signalwire.PRIntent{Title: *title, Body: body}))
 
 	case "issue-intent":
 		fs := signalFlagSet(kind, stdout)
@@ -133,21 +134,17 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		if err != nil {
 			return signalFail(stdout, err)
 		}
-		payload := signalBody{"title": rawString(*title), "body": rawString(body), "type": rawString(*issueType)}
-		// Omitted entirely rather than sent empty: -dedup is optional (issue
-		// #3609, filing is best-effort and a rejected intent loses the
-		// finding), and a term-less call's wire body must stay byte-identical
-		// to what it was before this field existed.
-		if len(dedup) > 0 {
-			payload["dedupTerms"] = rawStringSlice(dedup)
-		}
-		if *class != "" {
-			payload["class"] = rawString(*class)
-		}
-		if *concurrence != "" {
-			payload["concurrence"] = rawString(*concurrence)
-		}
-		return postSignal(stdout, client, base, secret, kind, payload)
+		// dedupTerms/class/concurrence stay omitempty on the struct: a
+		// term-less, class-less call's wire body must stay byte-identical to
+		// what it was before these fields existed.
+		return postSignal(stdout, client, base, secret, kind, rawFields(signalwire.IssueIntent{
+			Title:       *title,
+			Body:        body,
+			Type:        *issueType,
+			DedupTerms:  dedup,
+			Class:       *class,
+			Concurrence: *concurrence,
+		}))
 
 	case "status":
 		fs := signalFlagSet(kind, stdout)
@@ -325,6 +322,37 @@ func readLimitedBody(r io.Reader, source string) (string, error) {
 // is json.Marshaler rather than rawString directly so a field like
 // dedupTerms, an array rather than a single string, can share the map.
 type signalBody map[string]json.Marshaler
+
+// rawFields builds a signalBody from a signalwire wire struct, keyed by its
+// json tags with encoding/json's omitempty rule, so the verb posts the same
+// shape the socket and settle decode rather than a hand-built copy of it.
+// Wire structs carry only string and []string fields; anything else panics.
+func rawFields(v any) signalBody {
+	rv := reflect.ValueOf(v)
+	rt := rv.Type()
+	out := make(signalBody, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		name, opts, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
+		fv := rv.Field(i)
+		// Length checks live inside the cases so an unsupported kind reaches
+		// the panic below, not reflect's own Len() panic.
+		switch x := fv.Interface().(type) {
+		case string:
+			if opts == "omitempty" && len(x) == 0 {
+				continue
+			}
+			out[name] = rawString(x)
+		case []string:
+			if opts == "omitempty" && len(x) == 0 {
+				continue
+			}
+			out[name] = rawStringSlice(x)
+		default:
+			panic(fmt.Sprintf("rawFields: %s.%s is %T, not string or []string", rt.Name(), rt.Field(i).Name, x))
+		}
+	}
+	return out
+}
 
 // rawString marshals byte for byte, where encoding/json's own string encoder
 // substitutes U+FFFD for invalid UTF-8. Laundering the bytes here would hand
