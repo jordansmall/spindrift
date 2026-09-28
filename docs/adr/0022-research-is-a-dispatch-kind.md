@@ -32,15 +32,20 @@ state and trigger) → `agent-research-in-progress` → verdict terminals
 `agent-research-failed` strictly meaning the Box crashed or produced no
 verdict — a concluded false positive is `Complete` with verdict `reject`,
 never `Failed`, so crash-retry and verdict-review stay separate human queues.
+(Amended by issue #3603: the trigger role moved to a new
+`agent-research-trigger` label; `agent-research` is now only the standing
+queue the daemon and `spindrift research` draw from.)
 The three verdicts are the closed set that routes to three distinct human
 actions: `recommend` → promote, `reject` (false positive / not worth it /
 duplicate-of-#N, reason in the comment) → close, `unclear` → answer the
-researcher's questions and re-apply the label. Settle is one-shot: parse the
-outcome line, apply the verdict label, done — no fix passes, no session
-resume; every retry is the universal re-label gesture. Blocker edges do not
-gate research (it lands no code), and label families never interact at claim
-time — an issue legitimately wears `agent-research-recommend` and
-`ready-for-agent` at once.
+researcher's questions and re-apply the label (Amended by issue #3603:
+the CI path re-applies `agent-research-trigger`; the daemon and
+`spindrift research` queue re-apply `agent-research`). Settle is
+one-shot: parse the outcome line, apply the verdict label, done — no fix
+passes, no session resume; every retry is the universal re-label gesture.
+Blocker edges do not gate research (it lands no code), and label families
+never interact at claim time — an issue legitimately wears
+`agent-research-recommend` and `ready-for-agent` at once.
 
 The Box reports its verdict through the existing Outcome line, reinterpreted
 per kind: `status` carries the verdict and `landing` carries the
@@ -105,6 +110,9 @@ or merge — the blast radius collapses to a bad comment a human reads anyway.
 - Applying `agent-research` always fires CI immediately; there is no quiet
   "research later" queue state. If batch research becomes real, a trigger
   label is added beside the standing label exactly as `agent-trigger` was.
+  (Amended by issue #3603: this is the future that landed —
+  `agent-research-trigger` was added beside the standing label, so
+  applying `agent-research` alone now only queues.)
 - `research` is an additive subcommand (MINOR under ADR 0010); `dispatch`
   is untouched.
 - The `pr=` → `landing=` rename sweeps the outcome package, prompt
