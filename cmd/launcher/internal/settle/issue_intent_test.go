@@ -85,6 +85,17 @@ func TestParseIssueIntent_ClassMustBeALowercaseSlug(t *testing.T) {
 // promotion note as Class, so it gets the same treatment: capped length and
 // no backticks that could open/close a markdown code span in that note.
 func TestParseIssueIntent_ConcurrenceIsBoundedAndBacktickNeutralized(t *testing.T) {
+	// family and eCombining are each a single grapheme cluster made of
+	// multiple runes -- a ZWJ emoji sequence and a base rune plus a
+	// combining mark, respectively. The "as last kept grapheme stays whole"
+	// cases place one straddling the maxConcurrenceLen boundary: a
+	// rune-boundary cut would split it, corrupting the last visible
+	// character, while a grapheme-boundary cut keeps it whole. The "past
+	// limit dropped whole" cases pin that nothing of a cluster past the
+	// limit leaks into the result, whichever cut made the call.
+	const family = "👩‍👩‍👧‍👦"
+	const eCombining = "é"
+
 	cases := []struct {
 		name        string
 		concurrence string
@@ -93,7 +104,42 @@ func TestParseIssueIntent_ConcurrenceIsBoundedAndBacktickNeutralized(t *testing.
 		{"plain text kept", "looks good", "looks good"},
 		{"backtick neutralized", "agreed, `rm -rf /` is safe", "agreed, 'rm -rf /' is safe"},
 		{"exactly max length kept", strings.Repeat("a", maxConcurrenceLen), strings.Repeat("a", maxConcurrenceLen)},
-		{"too long truncated", strings.Repeat("a", maxConcurrenceLen+50), strings.Repeat("a", maxConcurrenceLen)},
+		{"too long truncated to max graphemes", strings.Repeat("a", maxConcurrenceLen+50), strings.Repeat("a", maxConcurrenceLen)},
+		{
+			"emoji ZWJ sequence as last kept grapheme stays whole",
+			strings.Repeat("a", maxConcurrenceLen-1) + family,
+			strings.Repeat("a", maxConcurrenceLen-1) + family,
+		},
+		{
+			"emoji ZWJ sequence past limit dropped whole",
+			strings.Repeat("a", maxConcurrenceLen) + family,
+			strings.Repeat("a", maxConcurrenceLen),
+		},
+		{
+			"combining mark sequence as last kept grapheme stays whole",
+			strings.Repeat("a", maxConcurrenceLen-1) + eCombining,
+			strings.Repeat("a", maxConcurrenceLen-1) + eCombining,
+		},
+		{
+			"combining mark sequence past limit dropped whole",
+			strings.Repeat("a", maxConcurrenceLen) + eCombining,
+			strings.Repeat("a", maxConcurrenceLen),
+		},
+		{
+			"single grapheme cluster over byte cap dropped whole, fails closed to empty",
+			"a" + strings.Repeat("\u0301", 100000),
+			"",
+		},
+		{
+			"oversized cluster after short clusters truncates to the last kept boundary",
+			"ok " + "a" + strings.Repeat("\u0301", 100000),
+			"ok ",
+		},
+		{
+			"byte cap reached before grapheme cap, multibyte clusters",
+			strings.Repeat(family, 100),
+			strings.Repeat(family, maxConcurrenceBytes/len(family)),
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,6 +153,11 @@ func TestParseIssueIntent_ConcurrenceIsBoundedAndBacktickNeutralized(t *testing.
 			}
 			if in.Concurrence != tc.want {
 				t.Errorf("Concurrence = %q, want %q", in.Concurrence, tc.want)
+			}
+			// promotionNote re-sanitizes an already-parsed value, so a
+			// second pass must change nothing.
+			if again := sanitizeConcurrence(in.Concurrence); again != in.Concurrence {
+				t.Errorf("sanitizeConcurrence not idempotent: %q -> %q", in.Concurrence, again)
 			}
 		})
 	}
