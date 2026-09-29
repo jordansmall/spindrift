@@ -2577,18 +2577,25 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   never blocks the fix pass, it just falls back to the fix box rediscovering
   the failure itself (`gh run view --log-failed`, the pre-#426 behavior).
 - **`agent-complete` also covers an already-resolved issue, closed as
-  completed.** When a Box finds, after scouting, that the issue's change is
+  completed where the tracker can close it.** When a Box finds, after scouting, that the issue's change is
   already on the fetched default branch, it prints `status=already-resolved`
   naming the resolving commit or PR — no commits, no PR — and settle posts
   that note in a closing comment, swaps `agent-in-progress` straight to
-  `agent-complete`, and closes the issue itself, since there is no PR to carry
-  `Closes #N` — with reason `completed` on `github`, a plain close on
-  `forgejo`, which has no close reason. It is
+  `agent-complete`, and closes the issue itself where the tracker supports a
+  close, since there is no PR to carry `Closes #N` — with reason `completed`
+  on `github`, a plain close on `forgejo`, which has no close reason. It is
   the opposite of the research lifecycle's `agent-research-reject`, which
   closes an issue as **not planned**. Under `ISSUE_TRACKER=local` settle
   closes the issue itself too, setting the local `closed:` axis directly
   (issue #4017) — nothing landed for reconcile to observe, so ADR 0029's
-  reconcile-only rule for `closed:` has this one exception.
+  reconcile-only rule for `closed:` has this one exception. Under
+  `ISSUE_TRACKER=jira` settle does not close the issue itself — the Jira
+  adapter implements no close — so the issue closes only when the
+  `complete` entry of `JIRA_STATUS_MAPPING` moves it to a Done-category
+  status (see [Issue Tracker backends](#issue-tracker-backends) below).
+  With that entry unmapped or its transition unavailable, the issue stays
+  open wearing `agent-complete`, even though settle's comment says it is
+  closing it.
   The claim only stands with no work behind it. If the branch carries
   commits ahead of its base, the Box's harness demotes it to
   `status=blocked` ("agent reported already-resolved but N commits exist on
@@ -2654,6 +2661,15 @@ generated `flake.nix`.
   mapped status or the fallback label, so issues stuck on the label are never
   lost, and orders results by Jira's `created` timestamp (the canonical order
   for this backend, in place of GitHub's issue-number order).
+
+  The adapter implements no close, so for a merged PR and an
+  already-resolved outcome alike the `complete` entry decides whether the
+  issue closes. Map it to a Done-category status and the transition closes
+  the issue. Map it to a status outside the Done category (say
+  `"In Review"`) and the issue moves there and stays open, without
+  `agent-complete` — a successful native transition adds no fallback
+  label. Leave it unmapped, or its transition unavailable, and the label
+  fallback above leaves it open wearing `agent-complete`.
 
   Dependencies resolve from **native Jira issue links** (the built-in
   `Blocks` link type's "is blocked by" direction) rather than prose parsing.
