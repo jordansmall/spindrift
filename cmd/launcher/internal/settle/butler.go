@@ -27,23 +27,14 @@ func (in issueIntent) finding() Finding {
 // filing: an optional Backlink appended to its body, any ExtraLabels beyond
 // the provenance label, and an OnFiled hook run only after PostIssue
 // succeeds -- never on a failed or skipped intent (see
-// fileIssueIntentsDetailedFunc's decorate contract) -- so a callback that
-// spends shared state (like promotion room) can defer committing that spend
-// until the filing it was for is real.
+// fileIssueIntentsDetailedFunc's decorate contract), and handed the filed
+// issue's own URL -- so a callback that spends shared state (like promotion
+// room) can defer committing that spend, and record which URL it was spent
+// on, until the filing it was for is real.
 type Decoration struct {
 	Backlink    string
 	ExtraLabels []string
-	OnFiled     func()
-}
-
-// FiledFinding is one successful filing -- never a failed or dedup-skipped
-// one, since a caller acting on Filed (e.g. a Ledger done commit) must only
-// ever record what actually landed: a failed filing's dedup key never
-// reached the backlog, so recording it would suppress a later rotation's
-// refile for good.
-type FiledFinding struct {
-	URL         string
-	ExtraLabels []string
+	OnFiled     func(url string)
 }
 
 // LogRejectedSignals warns about result's rejected signal lines (see
@@ -64,7 +55,7 @@ func LogRejectedSignals(num string, result dispatch.Result) {
 // The "agent-butler-finding" literal stays here, not a parameter:
 // nix/checks/dispatch-labels.nix's comment names this file's occurrence of
 // it by source text.
-func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, plan func(kept []Finding) func(Finding) Decoration) (filed []FiledFinding, dropped int) {
+func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, plan func(kept []Finding) func(Finding) Decoration) (filed []string, dropped int) {
 	kept, dropped := capIntents(result.IssueIntents, maxPerSweep)
 	capped := result
 	capped.IssueIntents = kept
@@ -79,7 +70,7 @@ func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Resul
 	}
 	decide := plan(findings)
 
-	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, "agent-butler-finding", func(in issueIntent) (string, []string, func()) {
+	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, "agent-butler-finding", func(in issueIntent) (string, []string, func(string)) {
 		d := decide(in.finding())
 		return d.Backlink, d.ExtraLabels, d.OnFiled
 	})
@@ -92,7 +83,7 @@ func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Resul
 		if f.Failed || f.Skipped {
 			continue
 		}
-		filed = append(filed, FiledFinding{URL: f.URL, ExtraLabels: f.ExtraLabels})
+		filed = append(filed, f.URL)
 	}
 	return filed, dropped
 }

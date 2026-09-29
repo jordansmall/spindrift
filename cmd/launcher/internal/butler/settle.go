@@ -2,7 +2,6 @@ package butler
 
 import (
 	"fmt"
-	"slices"
 	"time"
 
 	"spindrift.dev/launcher/internal/chore"
@@ -81,6 +80,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	}
 
 	finishParent := s.claim
+	var promoted []string
 	filed, dropped := settle.FileButlerFindings(s.it, num, result, s.maxFindingsPerSweep, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// Room is evaluated at most once per settle, and only when this Chore
 		// has an allow-list at all -- a Chore with no Classes can never
@@ -131,22 +131,17 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 			note := promotionNote(s.chore, f, s.policy, len(files))
 			// Spend the slot only in OnFiled, after PostIssue succeeds, so a
 			// failed post frees it back to the rest of the sweep.
-			return settle.Decoration{Backlink: backlink + "\n\n" + note, ExtraLabels: []string{s.policy.Label}, OnFiled: func() { remaining-- }}
+			return settle.Decoration{Backlink: backlink + "\n\n" + note, ExtraLabels: []string{s.policy.Label}, OnFiled: func(url string) {
+				remaining--
+				promoted = append(promoted, url)
+			}}
 		}
 	})
-
-	var urls, promoted []string
-	for _, f := range filed {
-		urls = append(urls, f.URL)
-		if s.policy.Label != "" && slices.Contains(f.ExtraLabels, s.policy.Label) {
-			promoted = append(promoted, f.URL)
-		}
-	}
 
 	state := ledger.State{
 		LastSwept: s.scope.Head,
 		Cursor:    s.scope.NextCursor,
-		Filed:     urls,
+		Filed:     filed,
 		Promoted:  promoted,
 		Usage:     d.CumulativeUsage(),
 		Dropped:   dropped,
@@ -157,9 +152,9 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		return settled{}
 	}
 
-	note := fmt.Sprintf("%d filed", len(urls))
+	note := fmt.Sprintf("%d filed", len(filed))
 	if len(promoted) > 0 {
-		note = fmt.Sprintf("%d filed, %d promoted", len(urls), len(promoted))
+		note = fmt.Sprintf("%d filed, %d promoted", len(filed), len(promoted))
 	}
 	if dropped > 0 {
 		note = fmt.Sprintf("%s, %d dropped", note, dropped)
@@ -167,7 +162,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	report.Settled(dispatchkey.Chore(s.chore), forge.Complete.String(), note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
 
-	return settled{done: true, filed: len(urls), promoted: len(promoted), dropped: dropped}
+	return settled{done: true, filed: len(filed), promoted: len(promoted), dropped: dropped}
 }
 
 // fail prints a status=failed line and reports the run failed. It applies no
