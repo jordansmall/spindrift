@@ -66,13 +66,18 @@ type UsageReport struct {
 const MaxBodyBytes = 64 * 1024
 
 // MaxRequestBytes bounds a request body before it is decoded. It sits well
-// above MaxBodyBytes because a legal max-size body field does not serialise to
+// above MaxBodyBytes because a legal max-size field does not serialise to
 // MaxBodyBytes bytes: the JSON envelope adds braces, keys and quotes, and
 // string escaping can turn one content byte into six (a control byte encodes
-// as a six-character \u escape). The slack carries that worst case, so the
-// buffer's own limit -- which reports the precise "oversize" fault -- stays
-// the binding one for any body a Box could legitimately send.
-const MaxRequestBytes = 6*MaxBodyBytes + 64*1024
+// as a six-character \u escape). Sized for two worst-case-escaped fields, not
+// one -- an issue-intent request can carry both a max-size body and a
+// max-size patch (ADR 0057, issue #4072) at once, so a single field's
+// six-times slack is not enough headroom. The slack carries that worst case,
+// so the buffer's own per-field limit -- which reports the precise "oversize"
+// fault naming the offending field -- stays the binding one for any request a
+// Box could legitimately send. The trade-off: every request kind, patch field
+// or not, may now buffer up to this doubled bound before decoding.
+const MaxRequestBytes = 12*MaxBodyBytes + 64*1024
 
 // SecretHeader is the signal socket's own TCP bearer header. It is
 // deliberately NOT registrymanifest.TCPSecretHeader: separate listeners,
@@ -101,7 +106,10 @@ type PRIntent struct {
 // Concurrence is the in-Box reviewer subagent's one-line agreement, empty
 // when it dissented or never ran. Neither can promote anything by itself --
 // the host holds the allow-list and the daily budget, and the Box cannot
-// change either.
+// change either. Patch (ADR 0057, issue #4072) is an optional unified diff of
+// modification hunks only, no binary content; the host alone decides
+// whether it is ever applied, and only for a finding whose Class is on the
+// host's own patch allow-list -- the Box merely carries it.
 type IssueIntent struct {
 	Title       string   `json:"title"`
 	Body        string   `json:"body"`
@@ -109,6 +117,7 @@ type IssueIntent struct {
 	DedupTerms  []string `json:"dedupTerms,omitempty"`
 	Class       string   `json:"class,omitempty"`
 	Concurrence string   `json:"concurrence,omitempty"`
+	Patch       string   `json:"patch,omitempty"`
 }
 
 // PruneBlankDedupTerms returns i with every whitespace-only DedupTerms entry
@@ -154,11 +163,19 @@ func (i IssueIntent) validate(typeRequired bool) *Reject {
 	if i.Concurrence != "" {
 		fs = append(fs, Field{"concurrence", i.Concurrence})
 	}
+	if i.Patch != "" {
+		fs = append(fs, Field{"patch", i.Patch})
+	}
 	if rej := CheckFields(fs...); rej != nil {
 		return rej
 	}
 	if i.Class != "" && !ValidClass(i.Class) {
 		return &Reject{Status: "invalid_class", Reason: "class " + ClassRule, Code: http.StatusBadRequest}
+	}
+	if i.Patch != "" {
+		if err := ValidateUnifiedDiff(i.Patch); err != nil {
+			return &Reject{Status: "invalid_patch", Reason: err.Error(), Code: http.StatusBadRequest}
+		}
 	}
 	return nil
 }
@@ -184,7 +201,7 @@ type Reject struct {
 // Field is one content field: its wire name and its value. Every field is
 // bounded by MaxBodyBytes -- title and type included, not just body --
 // because the alternative is a per-field guess: without it a title is held
-// only by MaxRequestBytes, seven times the limit any tracker accepts.
+// only by MaxRequestBytes, thirteen times the limit any tracker accepts.
 type Field struct {
 	Name  string
 	Value string

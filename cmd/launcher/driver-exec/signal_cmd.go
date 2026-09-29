@@ -117,6 +117,7 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		fs.Var(&dedup, "dedup", "site key for dedup, e.g. path/to/file.go:Symbol; repeat for more than one")
 		class := fs.String("class", "", "promotion-candidate class (issue #3880); omit unless the finding is on CHORE_CLASSES")
 		concurrence := fs.String("concurrence", "", "the reviewer subagent's one-line agreement (issue #3880); omit on dissent or if it never ran")
+		patchFile := fs.String("patch-file", "", "file holding a unified diff (ADR 0057, issue #4072); omit unless the finding's class is on the host's CHORE_PATCH_CLASSES")
 		if !parseSignalFlags(fs, rest, kind, stdout) {
 			return 1
 		}
@@ -134,9 +135,17 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		if err != nil {
 			return signalFail(stdout, err)
 		}
-		// dedupTerms/class/concurrence stay omitempty on the struct: a
-		// term-less, class-less call's wire body must stay byte-identical to
-		// what it was before these fields existed.
+		var patch string
+		if *patchFile != "" {
+			b, err := os.ReadFile(*patchFile)
+			if err != nil {
+				return signalFail(stdout, err)
+			}
+			patch = string(b)
+		}
+		// dedupTerms/class/concurrence/patch stay omitempty on the struct: a
+		// term-less, class-less, patch-less call's wire body must stay
+		// byte-identical to what it was before these fields existed.
 		return postSignal(stdout, client, base, secret, kind, rawFields(signalwire.IssueIntent{
 			Title:       *title,
 			Body:        body,
@@ -144,6 +153,7 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 			DedupTerms:  dedup,
 			Class:       *class,
 			Concurrence: *concurrence,
+			Patch:       patch,
 		}))
 
 	case "status":
