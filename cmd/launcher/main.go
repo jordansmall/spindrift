@@ -150,14 +150,6 @@ type config struct {
 	// label (an unconfigured family) is left out, and a label two families
 	// share is listed once.
 	otherFamilyInProgressLabels []string
-
-	// configuredWorkLabel is work's own Dispatchable label (LABEL,
-	// Consumer-configurable), captured before applyDispatchKind's swap
-	// regardless of which kind actually runs (issue #3880). The butler
-	// kind's own family carries no Dispatchable label of its own
-	// (LabelsNone), so a promoted finding needs this to name the label the
-	// work path will actually pick it up on.
-	configuredWorkLabel string
 }
 
 // kind is c.dispatchKind, reading a nil one (doctor, reconcile, preview,
@@ -195,8 +187,6 @@ func applyDispatchKind(c config, kind *dispatchkind.Descriptor) config {
 		Complete:     c.completeLabel,
 		Failed:       c.failedLabel,
 	}
-
-	c.configuredWorkLabel = configuredWork.Dispatchable
 
 	ownFamily := c.kind().Labels
 	own := forge.FamilyLabels(ownFamily, configuredWork)
