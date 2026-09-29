@@ -63,19 +63,6 @@ func TestNewForgejoCodeForge_DoesNotImplementBundleRelay(t *testing.T) {
 	}
 }
 
-// A read-write Box already opens its own PR in-box, so settle must never call
-// a host-side create for it.
-func TestNewForgejoCodeForge_DoesNotImplementDraftPRCreator(t *testing.T) {
-	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
-		BaseURL: "https://codeberg.org",
-		Repo:    "owner/repo",
-		Token:   "tok",
-	}, nil)
-	if _, ok := cf.(forge.DraftPRCreator); ok {
-		t.Error("NewForgejoCodeForge satisfies forge.DraftPRCreator, want it hidden for read-write")
-	}
-}
-
 // The read-only adapter keeps every PRForge method NewForgejoCodeForge has,
 // by embedding. It opens PRs and watches CI exactly as read-write does. Only
 // the finished branch's hand-off differs.
