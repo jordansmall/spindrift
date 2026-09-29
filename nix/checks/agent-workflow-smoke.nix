@@ -14,6 +14,13 @@
 # The Forgejo `comment: >-` copies of the recover-park and dispatch-blocked
 # comments are hand-maintained against the GitHub `--body` originals and have
 # drifted before (issue #4010), so their normalized text is pinned equal too.
+#
+# `forgejo-label-swap-comment-safety` pins the forgejo-label-swap composite's
+# injection-safety contract: the .forgejo workflows feed untrusted step outputs
+# (recover-reason, blockers) into its `comment:` input, which is safe only
+# while action.yml hands it to label-swap.sh via env and the script encodes it
+# with `jq --arg` (#4030). The jq assert below pins only that one encoding
+# line, not every use of `$comment` in label-swap.sh.
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
@@ -22,6 +29,8 @@ let
     filter
     findFirst
     hasInfix
+    hasSuffix
+    removeSuffix
     replaceStrings
     sublist
     trim
@@ -29,6 +38,7 @@ let
   inherit (pkgs.lib.lists) findFirstIndex;
   setupSrc = builtins.readFile ../../.github/actions/agent-setup/action.yml;
   swapSrc = builtins.readFile ../../.github/actions/forgejo-label-swap/label-swap.sh;
+  swapActionSrc = builtins.readFile ../../.github/actions/forgejo-label-swap/action.yml;
   githubWorkflows = {
     "agent-dispatch.yml" = builtins.readFile ../../.github/workflows/agent-dispatch.yml;
     "agent-recover.yml" = builtins.readFile ../../.github/workflows/agent-recover.yml;
@@ -44,6 +54,18 @@ let
   setupForgeRoutes = hasInfix "inputs.forge != 'forgejo'" setupSrc;
 
   swapHitsForgejoRest = hasInfix "/api/v1/repos" swapSrc;
+
+  swapCommentEnvLine = "SWAP_COMMENT: \${{ inputs.comment }}";
+  swapCommentBoundViaEnv = hasInfix swapCommentEnvLine swapActionSrc;
+  swapCommentOnlyInEnvBinding =
+    !(hasInfix "inputs.comment" (replaceStrings [ swapCommentEnvLine ] [ "" ] swapActionSrc));
+  swapCommentJsonEncoded = hasInfix "jq -n --arg b \"\$comment\"" swapSrc;
+  # The step's only run: line, matched exactly — blocks a `${{ env.SWAP_COMMENT }}`
+  # or `${{ inputs.comment }}` expression inlined into run:, a plain-scalar
+  # continuation line, or an extra run step.
+  swapRunLine = "run: bash \"\$GITHUB_ACTION_PATH/label-swap.sh\"\n";
+  swapRunLineIsOnly =
+    hasSuffix swapRunLine swapActionSrc && !hasInfix "run:" (removeSuffix swapRunLine swapActionSrc);
 
   wiresSetup = src: hasInfix "uses: ./.github/actions/agent-setup" src;
 
@@ -80,19 +102,19 @@ let
   ) (builtins.attrNames allWorkflows);
   # The strip above cannot see a `.spindrift/log/` typo in the marker path, so
   # pin the blocked-release step's test and read positively.
-  badBlockedMarker = filter (
-    name:
-    let
-      src = allWorkflows.${name};
-    in
-    !(
-      hasInfix "-f .spindrift/logs/blocked.txt" src
-      && hasInfix "cat .spindrift/logs/blocked.txt" src
-    )
-  ) [
-    "agent-dispatch.yml"
-    "forgejo/agent-dispatch.yml"
-  ];
+  badBlockedMarker =
+    filter
+      (
+        name:
+        let
+          src = allWorkflows.${name};
+        in
+        !(hasInfix "-f .spindrift/logs/blocked.txt" src && hasInfix "cat .spindrift/logs/blocked.txt" src)
+      )
+      [
+        "agent-dispatch.yml"
+        "forgejo/agent-dispatch.yml"
+      ];
 
   # Forgejo folds a `comment: >-` block, so line breaks collapse to spaces;
   # fold GitHub's copy the same way before comparing. Same normalizer as
@@ -175,7 +197,9 @@ let
   commentPairs = map (row: {
     inherit (row) name file;
     ghNorm = collapseWs (
-      replaceStrings (map (s: s.from) row.subst) (map (s: s.to) row.subst) (unescapeShell (ghBody row.file githubWorkflows.${row.file}))
+      replaceStrings (map (s: s.from) row.subst) (map (s: s.to) row.subst) (
+        unescapeShell (ghBody row.file githubWorkflows.${row.file})
+      )
     );
     fjNorm = collapseWs (fjComment "forgejo/${row.file}" forgejoWorkflows."forgejo/${row.file}");
   }) commentRows;
@@ -189,21 +213,28 @@ in
       "agent-setup/action.yml no longer forge-routes on `inputs.forge != 'forgejo'` — the GitHub-only smoke/claim steps are no longer skippable, so the forgejo templates cannot reuse this action.";
     assert assertMsg swapHitsForgejoRest
       "forgejo-label-swap/label-swap.sh no longer drives the Forgejo REST label API (`/api/v1/repos`) — the forgejo claim/undo path is broken.";
-    assert assertMsg (
-      githubMissingWire == [ ]
-    ) "github agent workflow(s) no longer call ./.github/actions/agent-setup, so they skip the rate-limit smoke test: ${concatStringsSep ", " githubMissingWire}";
-    assert assertMsg (
-      forgejoBroken == [ ]
-    ) "forgejo agent workflow(s) do not reach the build via agent-setup with `forge: forgejo` and a forgejo-label-swap claim — they would fall back onto the gh-shaped smoke/claim and fail on api.github.com: ${concatStringsSep ", " forgejoBroken}";
+    assert assertMsg (githubMissingWire == [ ])
+      "github agent workflow(s) no longer call ./.github/actions/agent-setup, so they skip the rate-limit smoke test: ${concatStringsSep ", " githubMissingWire}";
+    assert assertMsg (forgejoBroken == [ ])
+      "forgejo agent workflow(s) do not reach the build via agent-setup with `forge: forgejo` and a forgejo-label-swap claim — they would fall back onto the gh-shaped smoke/claim and fail on api.github.com: ${concatStringsSep ", " forgejoBroken}";
     pkgs.runCommand "agent-workflows-control-plane-wiring" { } "touch $out";
 
+  forgejo-label-swap-comment-safety =
+    assert assertMsg swapCommentBoundViaEnv
+      "forgejo-label-swap/action.yml no longer binds `comment` via `SWAP_COMMENT: \${{ inputs.comment }}` env, character for character — untrusted step outputs (recover-reason, blockers) reaching `comment:` need the env indirection, not a shell expansion. A reformatted but equally safe binding (e.g. quoted) also trips this; if intentionally changed, update this check rather than hunting a regression.";
+    assert assertMsg swapCommentOnlyInEnvBinding
+      "forgejo-label-swap/action.yml references `inputs.comment` outside the SWAP_COMMENT env binding — any other reference could expand the untrusted value into a script body (run:, a `with: script:`, ...); if it is a safe use such as an `if:` test, update this check.";
+    assert assertMsg swapCommentJsonEncoded
+      "forgejo-label-swap/label-swap.sh no longer JSON-encodes the comment with `jq -n --arg b \"\$comment\"` — an untrusted comment could break out of the request body.";
+    assert assertMsg swapRunLineIsOnly
+      "forgejo-label-swap/action.yml's only run: must be its last line, exactly `run: bash \"\$GITHUB_ACTION_PATH/label-swap.sh\"` — so no `\${{ }}` expression (env.SWAP_COMMENT, inputs['comment'], ...) reaches a shell; if intentionally changed, update this check.";
+    pkgs.runCommand "forgejo-label-swap-comment-safety" { } "touch $out";
+
   agent-workflows-log-dir =
-    assert assertMsg (
-      badLogsDir == [ ]
-    ) "agent workflow(s) do not upload `.spindrift/logs/` or still reference a stale `logs/` dir — the launcher writes to `.spindrift/logs/` (dispatch.HostLogDirFor, issue #3934): ${concatStringsSep ", " badLogsDir}";
-    assert assertMsg (
-      badBlockedMarker == [ ]
-    ) "agent dispatch workflow(s) no longer test and read `.spindrift/logs/blocked.txt` — a dependency-blocked issue would never be released (issue #3934): ${concatStringsSep ", " badBlockedMarker}";
+    assert assertMsg (badLogsDir == [ ])
+      "agent workflow(s) do not upload `.spindrift/logs/` or still reference a stale `logs/` dir — the launcher writes to `.spindrift/logs/` (dispatch.HostLogDirFor, issue #3934): ${concatStringsSep ", " badLogsDir}";
+    assert assertMsg (badBlockedMarker == [ ])
+      "agent dispatch workflow(s) no longer test and read `.spindrift/logs/blocked.txt` — a dependency-blocked issue would never be released (issue #3934): ${concatStringsSep ", " badBlockedMarker}";
     pkgs.runCommand "agent-workflows-log-dir" { } "touch $out";
 
   agent-workflows-comment-parity =

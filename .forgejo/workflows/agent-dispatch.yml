@@ -125,6 +125,10 @@ jobs:
             echo "blocked=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Inlining the untrusted steps.blocked.outputs.blockers into `comment:` is
+      # safe only because the forgejo-label-swap composite hands it to its
+      # script via env (SWAP_COMMENT), never a shell expansion;
+      # nix/checks/agent-workflow-smoke.nix pins that (#4030).
       - name: Release the claim if blocked
         if: always() && steps.blocked.outputs.blocked == 'true'
         uses: ./.github/actions/forgejo-label-swap
