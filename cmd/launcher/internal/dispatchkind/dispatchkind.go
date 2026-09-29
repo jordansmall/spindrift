@@ -14,6 +14,14 @@ const (
 	ByChore               // the butler (ADR 0056, #3870) carries one Ledger Chore
 )
 
+// String is the DISPATCH_KEYING wire value (issue #3996).
+func (k Keying) String() string {
+	if k == ByChore {
+		return "chore"
+	}
+	return "issue"
+}
+
 // LabelFamily is the set of triage labels a kind's lifecycle moves through.
 // It starts at 1 so a Descriptor that omits Labels hits forge.FamilyLabels'
 // unknown-family panic rather than silently taking work's family.
@@ -77,7 +85,7 @@ type Prompts struct {
 // Descriptor is everything that used to be a separate switch on a kind
 // string, gathered into one value per kind.
 type Descriptor struct {
-	Name           string // DISPATCH_KIND value, Box env, prompt assembly, outcome: "work" / "research"
+	Name           string // DISPATCH_KIND value, Box env (display-only there — the Box never branches on it), prompt assembly, outcome: "work" / "research"
 	Verb           string // CLI subcommand and daemon kind selector: "dispatch" / "research"
 	Keying         Keying
 	Labels         LabelFamily
@@ -90,7 +98,7 @@ type Descriptor struct {
 	Contract       PromptContract // which shared contract block prompt assembly injects
 	FilerRelayGate string         // lib/fragments.nix gate selecting the kind's filer-label-relay*.md fragment
 	Tracker        Tracker        // which IssueTracker instance this kind's issues live on
-	AnnounceVerb   string         // verb of the Box start line (agent/entrypoint.sh); exported to the Box in a follow-up ticket
+	AnnounceVerb   string         // verb of the Box start line (agent/entrypoint.sh); exported to the Box as DISPATCH_ANNOUNCE_VERB (issue #3996)
 }
 
 var (

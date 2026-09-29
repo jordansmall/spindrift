@@ -95,6 +95,21 @@
     kind = "string";
   }
   {
+    field = "DispatchKey";
+    env = "DISPATCH_KEY";
+    kind = "string";
+  }
+  {
+    field = "DispatchKeying";
+    env = "DISPATCH_KEYING";
+    kind = "string";
+  }
+  {
+    field = "DispatchAnnounceVerb";
+    env = "DISPATCH_ANNOUNCE_VERB";
+    kind = "string";
+  }
+  {
     field = "SignalCarrier";
     env = "BOX_SIGNAL_CARRIER";
     kind = "string";

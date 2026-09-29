@@ -260,6 +260,7 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		"COMPLETE_LABEL":       e.CompleteLabel,
 		"RUN_NONCE":            e.RunNonce,
 		"RESEARCH_STATUS_ENUM": e.ResearchStatusEnum,
+		"DISPATCH_KEY":         e.DispatchKey,
 	}
 
 	// vars is the segment-attributed twin of allowlist: same keys, bodies
