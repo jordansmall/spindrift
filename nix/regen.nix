@@ -1,8 +1,8 @@
 # One-shot regenerator (issue #402): `nix run .#regen` renders every
 # schema-generated artifact from its Nix source and writes it into the working
-# tree. It calls the same renderers (lib/renderers.nix) as the nix/checks.nix
-# drift guards, so resolving a source-edit conflict is: fix the Nix source,
-# run this, commit.
+# tree. It calls the same renderers (lib/renderers.nix) as the
+# nix/checks/schema-drift.nix drift guards, so resolving a source-edit
+# conflict is: fix the Nix source, run this, commit.
 
 # This is spindrift's own dev workflow, not a consumer-facing option: it is
 # not wired into env-schema.nix or the generated flake-options reference.
