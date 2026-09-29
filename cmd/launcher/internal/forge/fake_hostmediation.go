@@ -44,6 +44,13 @@ type HostMediationFake struct {
 	// test scripts one intent among several to fail while its siblings still
 	// succeed (issue #3875), which PostIssueErr alone cannot express.
 	PostIssueErrForTitle map[string]error
+	// PostIssueURLForTitle overrides PostIssueURL for the PostIssue call
+	// whose title is a key here, checked after PostIssueErrForTitle/
+	// PostIssueErr but before the blanket PostIssueURL: a test filing
+	// several findings in one sweep needs each its own URL to tell which
+	// finding a Ledger's Patched/Promoted entry names (issue #4074), which
+	// the single PostIssueURL field cannot express.
+	PostIssueURLForTitle map[string]string
 	LandingRefValue      string
 	LandingRefErr        error
 	LandingRefCallCount  int
@@ -197,6 +204,9 @@ func (hm *HostMediationFake) postIssue(title, body string, labels []string) (str
 	}
 	if hm.PostIssueErr != nil {
 		return "", hm.PostIssueErr
+	}
+	if url, ok := hm.PostIssueURLForTitle[title]; ok {
+		return url, nil
 	}
 	return hm.PostIssueURL, nil
 }

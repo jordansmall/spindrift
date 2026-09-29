@@ -64,7 +64,7 @@ func TestSettleRun_FilesFindingsWithProvenanceLabelAndBacklink(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
 
 	result := readyResult(
 		`{"title":"bug in a.go","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -108,7 +108,7 @@ func TestSettleRun_DoneCommitContents(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -164,7 +164,7 @@ func TestSettleRun_ReportsChoreSettledNotIssue(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
 
 	s.settle(dispatch.NewFake(), readyResult())
 
@@ -192,7 +192,7 @@ func TestSettleRun_PartialFilingFailure_RecordsOnlyWhatFiled(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -226,7 +226,7 @@ func TestSettleRun_CapDropsOverflowAndRecordsDropped(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{Findings: 2}, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{Findings: 2}, promotion{}, patchRung{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -277,7 +277,7 @@ func TestSettleRun_LogCarrierHonoursCapOfTwelve(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{Findings: 12}, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{Findings: 12}, promotion{}, patchRung{})
 
 	const n = 13
 	intents := make([]string, n)
@@ -319,7 +319,7 @@ func TestSettleRun_ZeroCapFilesEverything(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -352,7 +352,7 @@ func TestSettleRun_MalformedPayloadDoesNotCountTowardCap(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{Findings: 1}, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{Findings: 1}, promotion{}, patchRung{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -421,7 +421,7 @@ func TestSettleRun_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
 			fc := forge.NewFake()
 			scope := chore.Scope{Head: "newhead", NextCursor: "newcursor"}
 			now := start.Add(3 * time.Minute)
-			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{})
+			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
 
 			got := s.settle(dispatch.NewFake(), tc.result)
 			if got.done {
@@ -463,7 +463,7 @@ func TestSettleRun_CrashedRun_StillWarnsAboutRejectedSignals(t *testing.T) {
 	fc := forge.NewFake()
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
 
 	result := dispatch.Result{
 		Success:              false,
@@ -509,7 +509,7 @@ func TestSettleRun_Promotion_AllGatesPass(t *testing.T) {
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent"}
 	room := chore.Room{Promotions: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(`{"title":"promotable bug","body":"repro","dedupTerms":["a.go:Foo"],"class":"error-handling","concurrence":"looks like a real bug, agreed"}`)
 	got := s.settle(dispatch.NewFake(), result)
@@ -552,7 +552,7 @@ func TestSettleRun_Promotion_CustomLabel(t *testing.T) {
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "agent-go"}
 	room := chore.Room{Promotions: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(`{"title":"promotable bug","body":"repro","dedupTerms":["a.go:Foo"],"class":"error-handling","concurrence":"looks like a real bug, agreed"}`)
 	s.settle(dispatch.NewFake(), result)
@@ -648,7 +648,7 @@ func TestSettleRun_Promotion_AnyGateFailingFilesUnlabelled(t *testing.T) {
 
 			scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 			now := start.Add(time.Minute)
-			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, tc.room, tc.policy)
+			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, tc.room, tc.policy, patchRung{})
 
 			result := readyResult(tc.payload)
 			s.settle(dispatch.NewFake(), result)
@@ -685,7 +685,7 @@ func TestSettleRun_Promotion_RoomOfOnePromotesOnlyFirst(t *testing.T) {
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
 	room := chore.Room{Promotions: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(
 		`{"title":"first eligible","body":"b1","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed one"}`,
@@ -724,7 +724,7 @@ func TestSettleRun_Promotion_FailedPostReturnsRoomToLaterFinding(t *testing.T) {
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
 	room := chore.Room{Promotions: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(
 		`{"title":"first eligible","body":"b1","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed one"}`,
@@ -758,7 +758,7 @@ func TestSettleRun_Promotion_PayloadCannotWidenPolicy(t *testing.T) {
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
 	room := chore.Room{Promotions: 5}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(
 		`{"title":"sneaky payload","body":"b","dedupTerms":["a.go:X"],"class":"dead-code","concurrence":"agreed","classes":["dead-code"],"maxFiles":999,"labels":["ready-for-agent"]}`,
@@ -792,7 +792,7 @@ func TestSettleRun_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
 	room := chore.Room{Promotions: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(`{"title":"multi-line concurrence","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed,\n\nbut also:\n- one\n- two"}`)
 	s.settle(dispatch.NewFake(), result)
@@ -1083,7 +1083,7 @@ func TestPromotionNote_ConcurrenceMarkdownNeutralized(t *testing.T) {
 			now := start.Add(time.Minute)
 			policy := promotion{enabled: true, classes: []string{"cls"}, maxFiles: 1, label: "ready-for-agent"}
 			room := chore.Room{Promotions: 1}
-			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 			payload := `{"title":"t","body":"b","dedupTerms":["a.go:X"],"class":"cls","concurrence":` + jsonQuote(c.raw) + `}`
 			result := readyResult(payload)
@@ -1154,7 +1154,7 @@ func TestSettleRun_Promotion_ReserveCountsDespiteDoneAppendFailure(t *testing.T)
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
 	room := chore.Room{Promotions: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	got := s.settle(dispatch.NewFake(), result)
@@ -1192,7 +1192,7 @@ func TestSettleRun_Promotion_ReserveCountsDespiteTakeoverBeforeDone(t *testing.T
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
 	room := chore.Room{Promotions: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	s.settle(dispatch.NewFake(), result)
@@ -1226,7 +1226,7 @@ func TestSettleRun_Promotion_StaleClaimReserveFailsNeverPromotes(t *testing.T) {
 	now := start.Add(time.Hour)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
 	room := chore.Room{Promotions: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", staleClaim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", staleClaim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	got := s.settle(dispatch.NewFake(), result)
@@ -1264,7 +1264,7 @@ func TestSettleRun_Promotion_SuccessNoDoubleCount(t *testing.T) {
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
 	room := chore.Room{Promotions: 1}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	got := s.settle(dispatch.NewFake(), result)
@@ -1295,7 +1295,7 @@ func TestSettleRun_Promotion_NoReservationCommitWhenNothingEligible(t *testing.T
 	now := start.Add(time.Minute)
 	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
 	room := chore.Room{}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{})
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	s.settle(dispatch.NewFake(), result)
@@ -1347,5 +1347,42 @@ func TestButlerBacklink_AllJunkTermsOmitsFilesSentence(t *testing.T) {
 	got := butlerBacklink("bugs", f)
 	if strings.Contains(got, "Files:") {
 		t.Errorf("butlerBacklink = %q, want no Files: sentence for all-junk dedup terms", got)
+	}
+}
+
+// TestPatchCommitSubject pins two invariants (issue #4074) on top of the
+// ordinary prefix-if-not-conventional behavior: a breaking-change "!" must
+// never survive into the squash/PR title, and the subject is capped rather
+// than left to whatever length a Box happened to title the finding.
+func TestPatchCommitSubject(t *testing.T) {
+	cases := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{"already conventional, used as-is", "fix(butler): typo in comment", "fix(butler): typo in comment"},
+		{"non-conventional gets prefixed", "typo in comment", "chore(butler): typo in comment"},
+		{"breaking bang stripped, no scope", "feat!: change api", "feat: change api"},
+		{"breaking bang stripped, with scope", "fix(api)!: change contract", "fix(api): change contract"},
+		{"non-conventional title's own bang is untouched", "fix this!: nothing", "chore(butler): fix this!: nothing"},
+		{
+			// "fix(butler): " is 13 runes; 72-1 (the trailing "…") - 13 = 58
+			// x's survive the cut.
+			"long conventional title truncated with ellipsis",
+			"fix(butler): " + strings.Repeat("x", 100),
+			"fix(butler): " + strings.Repeat("x", 58) + "…",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := patchCommitSubject(tc.title)
+			if got != tc.want {
+				t.Errorf("patchCommitSubject(%q) = %q, want %q", tc.title, got, tc.want)
+			}
+			if r := []rune(got); len(r) > patchSubjectMaxLen {
+				t.Errorf("patchCommitSubject(%q) len = %d runes, want <= %d", tc.title, len(r), patchSubjectMaxLen)
+			}
+		})
 	}
 }

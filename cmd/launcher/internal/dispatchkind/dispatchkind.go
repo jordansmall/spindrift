@@ -95,6 +95,7 @@ type Descriptor struct {
 	ReadOnlyBox    bool // Box always runs read-only (guards, outbox relay), regardless of BOX_FORGE_AND_ISSUE_ACCESS
 	DaemonPriority DaemonPriority
 	FindingLabel   string         // provenance label settle applies to a filed finding
+	PatchLabel     string         // provenance label joining FindingLabel on a finding the host lands as a patch PR (ADR 0057); butler-only
 	Contract       PromptContract // which shared contract block prompt assembly injects
 	FilerRelayGate string         // lib/fragments.nix gate selecting the kind's filer-label-relay*.md fragment
 	Tracker        Tracker        // which IssueTracker instance this kind's issues live on
@@ -155,6 +156,7 @@ var (
 		ReadOnlyBox:    true, // issue #3906
 		DaemonPriority: PriorityIdle,
 		FindingLabel:   "agent-butler-finding",
+		PatchLabel:     "agent-butler-patch",
 		Contract:       ContractInline,
 		FilerRelayGate: "FILER_FILE_RELAY_BUTLER",
 		Tracker:        TrackerWork, // butler files findings onto the work tracker; it has no lifecycle labels of its own

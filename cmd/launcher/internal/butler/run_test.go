@@ -1,6 +1,7 @@
 package butler
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"reflect"
@@ -1195,12 +1196,14 @@ func TestSweep_PatchRungOffByDefaultOmitsPatchClasses(t *testing.T) {
 	}
 }
 
-// (q) With MaxPatchesPerDay > 0, today's patch room untouched, and
-// promotion also enabled with room, the Box is told its own Chore's
-// host-side patch allow-list, the patch rung's sibling of
+// (q) With MaxPatchesPerDay > 0, a configured patchForge, today's patch room
+// untouched, and promotion also enabled with room, the Box is told its own
+// Chore's host-side patch allow-list, the patch rung's sibling of
 // TestSweep_PromotionEnabledPromotesAllowedFinding (issue #4072, ADR 0057).
 // This slice only forwards the fact -- landing a patch itself is out of
-// scope here.
+// scope here. WithPatchForge matters to this test now (issue #4074): a nil
+// patchForge must withhold PatchClasses regardless of budget, per
+// TestSweep_NoPatchForgeOmitsPatchClassesFromBox.
 func TestSweep_PatchRungOnWithRoomForwardsPatchClasses(t *testing.T) {
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
@@ -1220,8 +1223,9 @@ func TestSweep_PatchRungOnWithRoomForwardsPatchClasses(t *testing.T) {
 	policy.Budgets.MaxPromotionsPerDay = 1
 	policy.Budgets.MaxPatchesPerDay = 1
 
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf)
 	if _, err := r.Sweep([]string{"bugs"}); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -1394,5 +1398,573 @@ func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
 	remoteHead := strings.TrimSpace(string(runRepoGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")))
 	if remoteHead != head {
 		t.Errorf("remote refs/heads/main moved to %q, want unchanged %q", remoteHead, head)
+	}
+}
+
+// testPatchDiff is a minimal unified diff that clears signalwire's
+// ValidateUnifiedDiff -- what every patch-rung test below embeds as an
+// issue-intent's "patch" field (its own contents are never actually applied:
+// fakeTree.CommitPatch answers a scripted PatchCommit/error, not a real git
+// apply).
+const testPatchDiff = "--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
+
+// patchableDispatcher is promotableDispatcher's patch-rung sibling: its one
+// relayed finding also carries a Patch, so it clears decide's patch gate
+// (class on the patch allow-list, concurrence, patch room) whenever the host
+// policy allows it.
+func patchableDispatcher(class string) *dispatch.Fake {
+	d := dispatch.NewFake()
+	d.RunResult = dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["a.go:Foo"],"class":%q,"concurrence":"agreed","patch":%q}`, class, testPatchDiff),
+		},
+	}
+	return d
+}
+
+// patchableDispatcherN is patchableDispatcher's multi-finding sibling: n
+// findings, same class, each with its own title/dedup term/patch so a test
+// can pit them against one sweep's shared patch room (issue #4074).
+func patchableDispatcherN(class string, n int) *dispatch.Fake {
+	d := dispatch.NewFake()
+	intents := make([]string, n)
+	for i := range intents {
+		intents[i] = fmt.Sprintf(`{"title":"fix typo %d","body":"repro","dedupTerms":["a%d.go:Foo"],"class":%q,"concurrence":"agreed","patch":%q}`, i, i, class, testPatchDiff)
+	}
+	d.RunResult = dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents:      intents,
+	}
+	return d
+}
+
+// fakePushCall/fakeDraftCall record one fakePatchForge.PushBranch/CreateDraftPR
+// invocation.
+type fakePushCall struct{ srcDir, localRef, branch string }
+type fakeDraftCall struct{ title, body, base, head string }
+
+// fakePatchForge is PatchForge's test double: AgentBranch is prefix+num,
+// PushBranch/CreateDraftPR each record their call and answer a scripted
+// error, or -- on CreateDraftPR -- the scripted draftURL. AddLabels is
+// promoted straight through from the embedded forge.IssueLabeler (issue
+// #4074), normally the same fc.AsIssueFiler() fake the test's own
+// IssueTracker is, so a fallback assertion against fc.AddLabelsCalls sees
+// the call whichever path it came through.
+type fakePatchForge struct {
+	prefix string
+	forge.IssueLabeler
+
+	pushCalls []fakePushCall
+	pushErr   error
+
+	draftCalls []fakeDraftCall
+	draftURL   string
+	draftErr   error
+}
+
+func (f *fakePatchForge) AgentBranch(num string) string { return f.prefix + num }
+
+func (f *fakePatchForge) PushBranch(srcDir, localRef, branch string) error {
+	f.pushCalls = append(f.pushCalls, fakePushCall{srcDir, localRef, branch})
+	return f.pushErr
+}
+
+func (f *fakePatchForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+	f.draftCalls = append(f.draftCalls, fakeDraftCall{title, body, base, head})
+	if f.draftErr != nil {
+		return "", false, f.draftErr
+	}
+	return f.draftURL, true, nil
+}
+
+// patchTestPolicy builds a Policy with both the promotion and patch rungs on
+// for the "docs-drift" class on "bugs" -- the shape every patch-rung Sweep
+// test below starts from, tuning only what its own case cares about.
+func patchTestPolicy() Policy {
+	policy := testRunPolicy(noRunEvery, "bugs")
+	policy.Chores = withClasses(policy.Chores, "bugs", "docs-drift")
+	policy.Chores = withPatchClasses(policy.Chores, "bugs", "docs-drift")
+	policy.PromotionMaxFiles = 3
+	policy.Budgets.MaxPromotionsPerDay = 1
+	policy.Budgets.MaxPatchesPerDay = 1
+	return policy
+}
+
+// TestSweep_NoPatchForgeOmitsPatchClassesFromBox pins that room.Patches
+// derives from the Consumer's raw BUTLER_MAX_PATCHES_PER_DAY budget alone
+// (chore.Room), so it stays positive even with no WithPatchForge -- run()
+// must still withhold PatchClasses from the Box, or a non-write-capable
+// host would tell the Box to spend its diff budget on patch classes the
+// host can never land (issue #4074).
+func TestSweep_NoPatchForgeOmitsPatchClassesFromBox(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
+
+	var got dispatch.Chore
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		got = c
+		return readyDispatcher()
+	}
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	// No .WithPatchForge(...): r.patchForge stays nil.
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now })
+	if _, err := r.Sweep([]string{"bugs"}); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(got.PatchClasses) != 0 {
+		t.Errorf("PatchClasses = %v, want none: a nil patchForge must keep the rung off for the Box too", got.PatchClasses)
+	}
+	if len(got.Classes) == 0 {
+		t.Fatalf("Classes = %v, want the promotion class list still on", got.Classes)
+	}
+}
+
+// (r) A patch-eligible finding lands as a draft PR (ADR 0057, issue #4074):
+// filed with agent-butler-finding + agent-butler-patch and no dispatch
+// label, pushed to the Consumer's own AgentBranch, and opened as a draft PR
+// onto the policy branch whose body closes the finding issue and quotes the
+// reviewer's concurrence. The Ledger done commit records the PR URL in
+// Patched, not Promoted.
+func TestSweep_PatchedFindingLandsDraftPR(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9400"
+	fc.SetIssue(forge.Issue{Number: "9400"})
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/1"}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Filed != 1 || out.Promoted != 0 || out.Patched != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Filed=1 Promoted=0 Patched=1", out)
+	}
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	labels := fc.PostIssueCalls[0].Labels
+	if !slices.Contains(labels, "agent-butler-finding") || !slices.Contains(labels, "agent-butler-patch") {
+		t.Fatalf("PostIssue labels = %v, want agent-butler-finding and agent-butler-patch", labels)
+	}
+	if slices.Contains(labels, "ready-for-agent") {
+		t.Errorf("PostIssue labels = %v, want no dispatch label", labels)
+	}
+
+	wantBranch := pf.prefix + "9400"
+	if len(pf.pushCalls) != 1 || pf.pushCalls[0].branch != wantBranch {
+		t.Fatalf("pushCalls = %+v, want exactly one push to %q", pf.pushCalls, wantBranch)
+	}
+	if len(pf.draftCalls) != 1 {
+		t.Fatalf("draftCalls = %+v, want 1", pf.draftCalls)
+	}
+	dc := pf.draftCalls[0]
+	if dc.base != "main" || dc.head != wantBranch {
+		t.Errorf("draft base/head = %q/%q, want main/%q", dc.base, dc.head, wantBranch)
+	}
+	if !strings.Contains(dc.body, "Closes #9400") {
+		t.Errorf("draft body = %q, want Closes #9400", dc.body)
+	}
+	if !strings.Contains(dc.body, "agreed") {
+		t.Errorf("draft body = %q, want the reviewer's concurrence quoted", dc.body)
+	}
+	if !strings.Contains(dc.body, "**Patched**") {
+		t.Errorf("draft body = %q, want the patched note", dc.body)
+	}
+	if !strings.Contains(dc.body, fc.PostIssueURL) {
+		t.Errorf("draft body = %q, want the filed finding's URL %q", dc.body, fc.PostIssueURL)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Patched, []string{pf.draftURL}) {
+		t.Errorf("Patched = %v, want [%s]", tip.State.Patched, pf.draftURL)
+	}
+	if len(tip.State.Promoted) != 0 {
+		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+	}
+}
+
+// (r2) A diff that no longer applies to the current base head (CommitPatch
+// fails) falls back to exactly what decide would return with no Patch at
+// all: promoted here, since promotion is on and otherwise eligible. No push
+// or PR is attempted.
+func TestSweep_PatchDiffNoLongerAppliesFallsBackToPromote(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatchErr: errors.New("does not apply")}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9401"
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/2"}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=1", out)
+	}
+	if len(pf.pushCalls) != 0 || len(pf.draftCalls) != 0 {
+		t.Errorf("pushCalls = %v draftCalls = %v, want none: the patch was never committed", pf.pushCalls, pf.draftCalls)
+	}
+
+	labels := fc.PostIssueCalls[0].Labels
+	if !slices.Contains(labels, "ready-for-agent") || slices.Contains(labels, "agent-butler-patch") {
+		t.Fatalf("PostIssue labels = %v, want ready-for-agent and no agent-butler-patch", labels)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Patched) != 0 {
+		t.Errorf("Patched = %v, want none", tip.State.Patched)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want [%s]", tip.State.Promoted, fc.PostIssueURL)
+	}
+}
+
+// (r3) The same stale-diff fallback with promotion off: the finding still
+// files, just plain -- no dispatch label, no patch label.
+func TestSweep_PatchDiffNoLongerAppliesFilesPlainWithPromotionOff(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatchErr: errors.New("does not apply")}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9402"
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	policy := patchTestPolicy()
+	policy.Budgets.MaxPromotionsPerDay = 0 // promotion off; the patch rung stays on
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 0 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=0", out)
+	}
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+	}
+	labels := fc.PostIssueCalls[0].Labels
+	if slices.Contains(labels, "ready-for-agent") || slices.Contains(labels, "agent-butler-patch") {
+		t.Fatalf("PostIssue labels = %v, want neither ready-for-agent nor agent-butler-patch", labels)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Patched) != 0 {
+		t.Errorf("Patched = %v, want none", tip.State.Patched)
+	}
+}
+
+// (r4) A patch that commits cleanly but fails to land -- CreateDraftPR
+// errors after the push succeeded -- falls back to promoting the
+// already-filed issue via IssueLabeler.AddLabels, since PostIssue already
+// ran and cannot be redone with different labels. The finding keeps its
+// agent-butler-patch provenance label; ready-for-agent is added on top.
+func TestSweep_PatchPRCreateFailsFallsBackToPromoteViaAddLabels(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9403"
+	fc.SetIssue(forge.Issue{Number: "9403"})
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom")}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=1", out)
+	}
+
+	if len(fc.AddLabelsCalls) != 1 || fc.AddLabelsCalls[0].Num != "9403" || !slices.Contains(fc.AddLabelsCalls[0].Labels, "ready-for-agent") {
+		t.Fatalf("AddLabelsCalls = %+v, want one call adding ready-for-agent to 9403", fc.AddLabelsCalls)
+	}
+	labels := fc.PostIssueCalls[0].Labels
+	if !slices.Contains(labels, "agent-butler-patch") {
+		t.Errorf("PostIssue labels = %v, want agent-butler-patch (filed as a patch candidate before the PR failed)", labels)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Patched) != 0 {
+		t.Errorf("Patched = %v, want none", tip.State.Patched)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want [%s]", tip.State.Promoted, fc.PostIssueURL)
+	}
+	if tip.State.Phase != ledger.Done {
+		t.Errorf("Phase = %q, want %q (the fallback still writes the done commit)", tip.State.Phase, ledger.Done)
+	}
+}
+
+// (r5) Per-sweep patch budget (issue #4074): two patch-eligible findings
+// compete for one sweep's single patch slot. The first spends it; decide's
+// own patch gate then sees zero Patches left for the second and falls
+// straight through to decidePromote, so it promotes instead of patching.
+func TestSweep_PatchBudgetSpendsOncePerSweep(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	// Distinct per-finding URLs (issue #4074): a shared PostIssueURL could
+	// not tell the Ledger's Patched entry apart from its Promoted one, since
+	// both findings would then file to the same URL.
+	fc.PostIssueURLForTitle = map[string]string{
+		"fix typo 0": "https://example.com/issues/9500",
+		"fix typo 1": "https://example.com/issues/9501",
+	}
+	fc.SetIssue(forge.Issue{Number: "9500"})
+	fc.SetIssue(forge.Issue{Number: "9501"})
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/9"}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcherN("docs-drift", 2) }
+
+	policy := patchTestPolicy()
+	policy.Budgets.MaxPromotionsPerDay = 2 // headroom for the second finding to promote instead
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 1 || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=1 Promoted=1", out)
+	}
+	if len(pf.pushCalls) != 1 || len(pf.draftCalls) != 1 {
+		t.Fatalf("pushCalls = %+v draftCalls = %+v, want exactly one of each", pf.pushCalls, pf.draftCalls)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Patched, []string{pf.draftURL}) {
+		t.Errorf("Patched = %v, want [%s]", tip.State.Patched, pf.draftURL)
+	}
+	// The first finding ("fix typo 0") spent the patch slot; the second
+	// ("fix typo 1") is the one promoted once patch room ran out.
+	if !slices.Equal(tip.State.Promoted, []string{"https://example.com/issues/9501"}) {
+		t.Errorf("Promoted = %v, want [https://example.com/issues/9501] (the second finding)", tip.State.Promoted)
+	}
+}
+
+// (r6) A push failure (the branch never reaches the forge) is landPatch's
+// other error path, distinct from a failed CreateDraftPR: no draft PR is
+// ever attempted, and the finding falls back to promoting the already-filed
+// issue.
+func TestSweep_PatchPushFailsFallsBackToPromote(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9501"
+	fc.SetIssue(forge.Issue{Number: "9501"})
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, pushErr: errors.New("push boom")}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=1", out)
+	}
+	if len(pf.draftCalls) != 0 {
+		t.Errorf("draftCalls = %+v, want none: a failed push must never reach CreateDraftPR", pf.draftCalls)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Patched) != 0 {
+		t.Errorf("Patched = %v, want none", tip.State.Patched)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want [%s]", tip.State.Promoted, fc.PostIssueURL)
+	}
+	if tip.State.Phase != ledger.Done {
+		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
+	}
+}
+
+// (r8) fallBackToPromote where AddLabels itself errors: no promotion is
+// counted -- the label never actually landed -- and no promotion comment is
+// posted, since that comment only makes sense once the label add succeeded.
+func TestSweep_PatchFallbackAddLabelsFailsCountsNoPromotion(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9503"
+	fc.SetIssue(forge.Issue{Number: "9503"})
+	fc.AddLabelsErr = errors.New("label boom")
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom")}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 0 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=0", out)
+	}
+	if len(fc.AddLabelsCalls) != 1 {
+		t.Fatalf("AddLabelsCalls = %+v, want 1", fc.AddLabelsCalls)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("CommentCalls = %+v, want none: a failed AddLabels must never post the promotion note", fc.CommentCalls)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Promoted) != 0 {
+		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+	}
+	if tip.State.Phase != ledger.Done {
+		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
+	}
+}
+
+// (r9) fallBackToPromote where the label add succeeds but the trailing
+// Comment errors: the promotion itself still counts -- the label already
+// landed -- only the note comment is lost, exactly as promotionNote's other
+// best-effort callers behave.
+func TestSweep_PatchFallbackCommentFailsStillCountsPromotion(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9504"
+	fc.SetIssue(forge.Issue{Number: "9504"})
+	fc.CommentErr = errors.New("comment boom")
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom")}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=1", out)
+	}
+	if len(fc.AddLabelsCalls) != 1 || !slices.Contains(fc.AddLabelsCalls[0].Labels, "ready-for-agent") {
+		t.Fatalf("AddLabelsCalls = %+v, want one call adding ready-for-agent", fc.AddLabelsCalls)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want [%s]", tip.State.Promoted, fc.PostIssueURL)
+	}
+	if tip.State.Phase != ledger.Done {
+		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
+	}
+}
+
+// (r10) ISSUE_TRACKER=local paired with a patch-capable CODE_FORGE (issue
+// #4074): the local tracker's PostIssue returns "local:"+slug, not a forge
+// issue URL, so issueNumberFromURL must reject it before ever reaching
+// patchForge -- no push, no draft PR. OnFiled returns as soon as
+// issueNumberFromURL errors, before it would otherwise call
+// fallBackToPromote, so no promotion happens either; the sweep still reaches
+// its done commit. In production butlerPatchForge never hands ISSUE_TRACKER=
+// local a PatchForge at all (it has no IssueLabeler), so this pins
+// issueNumberFromURL's own guard as defense in depth, not the only thing
+// standing between local and a patch attempt.
+func TestSweep_PatchLocalTrackerIssueURLLeavesFindingFiled(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "local:fix-typo"
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsLocalIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 0 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=0: a local-tracker URL can never patch or promote", out)
+	}
+	if len(pf.pushCalls) != 0 {
+		t.Errorf("pushCalls = %+v, want none: a local-tracker URL must never reach PushBranch", pf.pushCalls)
+	}
+	if len(pf.draftCalls) != 0 {
+		t.Errorf("draftCalls = %+v, want none: a local-tracker URL must never reach CreateDraftPR", pf.draftCalls)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Patched) != 0 {
+		t.Errorf("Patched = %v, want none", tip.State.Patched)
+	}
+	if len(tip.State.Promoted) != 0 {
+		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+	}
+	if tip.State.Phase != ledger.Done {
+		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
 	}
 }
