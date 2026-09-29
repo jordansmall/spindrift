@@ -10,9 +10,13 @@
    `driver-exec signal issue-intent` call. Omit the concurrence entirely
    when you were not handed one.
 
-   When the finding's class is one the host has put on its patch
-   allow-list, and only then, you may also carry a `"patch"` key: a unified
-   diff of modification hunks only, no binary content, under the same
-   per-field size cap as every other key. The host, never you, decides
-   whether it is ever applied. Omit the key entirely otherwise.
+   When you were handed a patch alongside the finding, carry it verbatim
+   into the filing call — never invent or edit one. On the log carrier,
+   add a `"patch"` key to the `SPINDRIFT_ISSUE_INTENT` JSON payload: a
+   unified diff of modification hunks only, no binary content, under the
+   same per-field size cap as every other key. On the socket carrier,
+   write the diff to a file and add `-patch-file <file>` to the
+   `driver-exec signal issue-intent` call. The host, never you, decides
+   whether it is ever applied. Omit the patch entirely when you were not
+   handed one.
 

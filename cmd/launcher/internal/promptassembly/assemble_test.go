@@ -3759,6 +3759,52 @@ func TestAssembleButlerReviewerKeptAndRendersButlerReviewPrompt(t *testing.T) {
 	}
 }
 
+// The reviewer's "Exact" rubric line (ADR 0057, issue #4073) only belongs
+// in the rendered prompt on a run that can actually hand the reviewer a
+// diff: CHORE_PATCH_CLASSES gates butler-review-patch.md exactly like it
+// gates butler-patch.md (assemble_test.go's butlerEnv leaves it blank).
+func TestAssembleButlerReviewerPromptCarriesExactRubricOnlyWithPatchClasses(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	renderReviewerPrompt := func(t *testing.T, env Env) string {
+		t.Helper()
+		env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
+		env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		var parsed map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
+			t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
+		}
+		var reviewer struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := json.Unmarshal(parsed["reviewer"], &reviewer); err != nil {
+			t.Fatalf("unmarshal reviewer entry: %v", err)
+		}
+		return reviewer.Prompt
+	}
+
+	t.Run("without CHORE_PATCH_CLASSES", func(t *testing.T) {
+		prompt := renderReviewerPrompt(t, butlerEnv())
+		if strings.Contains(prompt, "**Exact**") {
+			t.Errorf("reviewer.prompt = %q, want no Exact rubric line without CHORE_PATCH_CLASSES", prompt)
+		}
+	})
+
+	t.Run("with CHORE_PATCH_CLASSES", func(t *testing.T) {
+		env := butlerEnv()
+		env.ChorePatchClasses = "docs-drift"
+		prompt := renderReviewerPrompt(t, env)
+		if !strings.Contains(prompt, "**Exact**") {
+			t.Errorf("reviewer.prompt = %q, want the Exact rubric line with CHORE_PATCH_CLASSES set", prompt)
+		}
+	})
+}
+
 // A kind with no reviewer prompt of its own (work, research) never sets
 // AdvisoryReviewer, even under ORCHESTRATOR: its inline reviewer subagent is
 // dropped there, so no advisory verdict exists to suppress (issue #3925).

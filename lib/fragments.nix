@@ -363,6 +363,14 @@ let
       fragment = "butler-patch.md";
       var = "BUTLER_PATCH_STEP";
     }
+    # The butler reviewer's patch rubric line (ADR 0057, issue #4073): same
+    # gate as the row above, so the "Exact" rubric item only renders into
+    # the reviewer prompt on a run that can actually hand it a diff.
+    {
+      gate = "CHORE_PATCH_CLASSES";
+      fragment = "butler-review-patch.md";
+      var = "BUTLER_REVIEW_PATCH_STEP";
+    }
     {
       gate = "AUTO_FORMAT";
       fragment = "auto-format.md";
