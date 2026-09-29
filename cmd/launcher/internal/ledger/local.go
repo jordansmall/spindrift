@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // RefPrefix is prepended to a Chore's name to get its Ledger ref, e.g.
@@ -39,17 +41,6 @@ func (l Local) ref(chore string) (string, error) {
 	return ref, nil
 }
 
-// outputErr wraps err from a git command run with Output(), keeping the
-// stderr Output() captured on *exec.ExitError.
-func outputErr(err error, format string, args ...any) error {
-	msg := fmt.Sprintf(format, args...)
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-		return fmt.Errorf("ledger: %s: %w: %s", msg, err, bytes.TrimSpace(exitErr.Stderr))
-	}
-	return fmt.Errorf("ledger: %s: %w", msg, err)
-}
-
 // resolve returns ref's commit sha, or ok == false if the ref does not exist
 // yet.
 func (l Local) resolve(ref string) (sha string, ok bool, err error) {
@@ -61,7 +52,7 @@ func (l Local) resolve(ref string) (sha string, ok bool, err error) {
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return "", false, nil
 		}
-		return "", false, outputErr(err, "resolve %s", ref)
+		return "", false, gitexec.OutputErr("ledger", err, "resolve %s", ref)
 	}
 	return strings.TrimSpace(string(out)), true, nil
 }
@@ -70,7 +61,7 @@ func (l Local) resolve(ref string) (sha string, ok bool, err error) {
 func (l Local) state(sha string) (State, error) {
 	blob, err := exec.Command("git", "-C", l.Repo, "cat-file", "blob", sha+":"+stateFile).Output()
 	if err != nil {
-		return State{}, outputErr(err, "read %s at %s", stateFile, sha)
+		return State{}, gitexec.OutputErr("ledger", err, "read %s at %s", stateFile, sha)
 	}
 	var s State
 	if err := json.Unmarshal(blob, &s); err != nil {
@@ -116,7 +107,7 @@ func (l Local) History(chore string, since time.Time) ([]Entry, error) {
 
 	logOut, err := exec.Command("git", "-C", l.Repo, "log", "--format=%H %ct", ref).Output()
 	if err != nil {
-		return nil, outputErr(err, "log %s", ref)
+		return nil, gitexec.OutputErr("ledger", err, "log %s", ref)
 	}
 
 	var entries []Entry
@@ -160,7 +151,7 @@ func (l Local) commit(chore, old string, s State, at time.Time) (string, error) 
 	hashCmd.Stdin = bytes.NewReader(body)
 	blobOut, err := hashCmd.Output()
 	if err != nil {
-		return "", outputErr(err, "hash-object")
+		return "", gitexec.OutputErr("ledger", err, "hash-object")
 	}
 	blob := strings.TrimSpace(string(blobOut))
 
@@ -168,7 +159,7 @@ func (l Local) commit(chore, old string, s State, at time.Time) (string, error) 
 	mktreeCmd.Stdin = strings.NewReader(fmt.Sprintf("100644 blob %s\t%s\n", blob, stateFile))
 	treeOut, err := mktreeCmd.Output()
 	if err != nil {
-		return "", outputErr(err, "mktree")
+		return "", gitexec.OutputErr("ledger", err, "mktree")
 	}
 	tree := strings.TrimSpace(string(treeOut))
 
