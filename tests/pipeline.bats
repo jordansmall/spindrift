@@ -22,6 +22,7 @@ setup() {
   export BASE_BRANCH="main"
   export BRANCH_PREFIX="agent/issue-"
   export ISSUE_NUMBER="3"
+  set_dispatch_kind work
   export ISSUE_TITLE="Ship it"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
 }

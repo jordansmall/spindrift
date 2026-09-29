@@ -18,8 +18,8 @@ setup() {
 # fixture stand-in.
 set_butler_env() {
   unset ISSUE_NUMBER ISSUE_TITLE
-  export DISPATCH_KIND="butler"
   export CHORE_NAME="bugs"
+  set_dispatch_kind butler
   export CHORE_HEAD="deadbeef"
   export CHORE_DIFF_RANGE=""
   export CHORE_SLICE="agent/entrypoint.sh"

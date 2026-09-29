@@ -206,7 +206,7 @@ _assert_npmrc_rewritten_and_hidden() {
   # right after intree_binding_apply. Under a work dispatch the final file
   # would be the re-apply's output, so this test could pass with the first
   # apply broken. Research still clones and still applies.
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   _start_stand_in_forwarder
 
   _seed_cargo_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
