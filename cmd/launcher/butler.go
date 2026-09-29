@@ -242,7 +242,7 @@ func (h hostPatchForge) AgentBranch(num string) string { return h.cf.AgentBranch
 // ISSUE_TRACKER=forgejo with CODE_FORGE=github would otherwise close an
 // unrelated GitHub issue N on merge, the hazard ensureClosesReference guards
 // on the work path (#2341). nil whenever any leg is missing:
-// WithPatchForge(nil) is "never opted in", so the rung stays off (issue
+// WithPatchForge(nil, nil) is "never opted in", so the rung stays off (issue
 // #4074).
 func butlerPatchForge(cf forge.CodeForge, caps forge.Capabilities) butler.PatchForge {
 	if !caps.HostCanOpenPR() || caps.IssueLabeler == nil {
@@ -317,7 +317,7 @@ func cmdButler(lc *launchContext, choreName string) int {
 		PromotionLabel:    lc.config.workLabel,
 	}
 
-	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities))
+	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities), lc.patchGate())
 	o, err := sweeper.Sweep(candidates)
 	if err == nil {
 		err = butlerOutcomeErr(o)

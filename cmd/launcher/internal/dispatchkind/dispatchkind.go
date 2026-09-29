@@ -100,6 +100,7 @@ type Descriptor struct {
 	FilerRelayGate string         // lib/fragments.nix gate selecting the kind's filer-label-relay*.md fragment
 	Tracker        Tracker        // which IssueTracker instance this kind's issues live on
 	AnnounceVerb   string         // verb of the Box start line (agent/entrypoint.sh); exported to the Box as DISPATCH_ANNOUNCE_VERB (issue #3996)
+	UnclaimedGate  bool           // merge gate settles a PR on an issue the kind never claimed: no fix passes, and a merge completes it through the configured work Complete label (ADR 0057, issue #4076); butler-only
 }
 
 var (
@@ -161,6 +162,7 @@ var (
 		FilerRelayGate: "FILER_FILE_RELAY_BUTLER",
 		Tracker:        TrackerWork, // butler files findings onto the work tracker; it has no lifecycle labels of its own
 		AnnounceVerb:   "sweeping",
+		UnclaimedGate:  true,
 	}
 )
 

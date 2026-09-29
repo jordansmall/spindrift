@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -163,6 +164,19 @@ func (lc *launchContext) workSettle() settle.WorkSettler {
 		panic("lc.settle does not implement settle.WorkSettler (bootstrap wiring bug)")
 	}
 	return ws
+}
+
+// patchGate asserts that lc.settle satisfies butler.PatchGate, the merge gate
+// cmdButler hands a landed patch PR to (issue #4076). Only cmdButler
+// bootstraps with dispatchkind.Butler, whose newSettle falls through to
+// settle.New configured Unclaimed, so a clear panic beats a generic interface
+// conversion one if that invariant is ever broken.
+func (lc *launchContext) patchGate() butler.PatchGate {
+	pg, ok := lc.settle.(butler.PatchGate)
+	if !ok {
+		panic("lc.settle does not implement butler.PatchGate (bootstrap wiring bug)")
+	}
+	return pg
 }
 
 // seedAccumulationRepoIfHostMediated seeds the bare Accumulation repo (ADR 0033)

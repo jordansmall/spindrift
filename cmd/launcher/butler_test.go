@@ -20,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
@@ -122,7 +123,7 @@ type pushDraftForge struct {
 // the tracker and forge descriptors name the same backend, so the issue
 // number both "Closes #N" and "agent/issue-N" carry actually names an issue
 // on that forge (issue #4074); any one of the four missing keeps the rung
-// off exactly as WithPatchForge(nil) does.
+// off exactly as WithPatchForge(nil, nil) does.
 func TestButlerPatchForge(t *testing.T) {
 	cf := forge.NewFake()
 	cf.BranchPrefix = "agent/issue-"
@@ -795,7 +796,11 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 		}, workLabel: "agent-go"},
 		factory:      testFactory(t, t.TempDir(), fr),
 		issueTracker: fc.AsIssueFiler(),
-		cleanup:      func() {},
+		// This test never runs the patch rung (no PatchForge is wired), so
+		// the Fake's SettleAdopted is never called; it only needs to satisfy
+		// butler.PatchGate for lc.patchGate() (issue #4076).
+		settle:  settle.NewFake(),
+		cleanup: func() {},
 	}
 
 	code := cmdButler(lc, "bugs")

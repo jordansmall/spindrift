@@ -61,15 +61,23 @@ type settleRun struct {
 	patch patchRung
 }
 
-// patchRung is the three fields the patch rung needs (ADR 0057, issue
-// #4074): tree commits a candidate's diff on top of the fresh base head,
-// forge pushes the committed branch and opens the draft PR (and, on a
-// failed push/PR-create, labels the already-filed issue for the fallback
-// promote), and base is the branch both target.
+// patchRung is what the patch rung needs (ADR 0057, issue #4074/#4076): tree
+// commits a candidate's diff on top of the fresh base head, forge pushes the
+// committed branch and opens the draft PR (and, on a failed push/PR-create,
+// labels the already-filed issue for the fallback promote), base is the
+// branch both target, and gate is the work merge gate each landed PR is
+// handed to after the Chore's Done commit lands (issue #4076).
 type patchRung struct {
 	tree  Tree
 	forge PatchForge
 	base  string
+	gate  PatchGate
+}
+
+// patchLanding pairs one landed patch's finding issue number with its PR
+// URL -- the two things settle's post-Finish gate calls need (issue #4076).
+type patchLanding struct {
+	issueNum, prURL string
 }
 
 // newSettleRun constructs a settleRun for one Chore run. claim is the Ledger
@@ -115,7 +123,11 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	}
 
 	finishParent := s.claim
-	var promoted, patched []string
+	var promoted []string
+	// landings pairs each landed patch's issue number with its PR URL for the
+	// gate calls after ledger.Finish below; the Ledger's Patched URLs derive
+	// from it.
+	var landings []patchLanding
 	filed, dropped := settle.FileButlerFindings(s.it, num, result, s.room.Findings, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// An unconfigured/off policy can never promote, so it reserves none
 		// of the day's shared promotion room. room.Promotions is Sweep's own
@@ -205,7 +217,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 								return
 							}
 							patchesLeft--
-							patched = append(patched, prURL)
+							landings = append(landings, patchLanding{issueNum: issueNum, prURL: prURL})
 						},
 					}
 				}
@@ -223,6 +235,10 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		}
 	})
 
+	patched := make([]string, len(landings))
+	for i, l := range landings {
+		patched[i] = l.prURL
+	}
 	state := ledger.State{
 		LastSwept: s.scope.Head,
 		Cursor:    s.scope.NextCursor,
@@ -250,6 +266,13 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	}
 	report.Settled(dispatchkey.Chore(s.chore), forge.Complete.String(), note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
+
+	// Only now, after the Done commit above has actually landed, hand each
+	// patch to the work merge gate: a crash while polling CI must never
+	// leave the Chore's claim standing (issue #4076).
+	for _, l := range landings {
+		s.patch.gate.SettleAdopted(nil, l.issueNum, 0, l.prURL)
+	}
 
 	return settled{done: true, filed: len(filed), promoted: len(promoted), dropped: dropped, patched: len(patched)}
 }

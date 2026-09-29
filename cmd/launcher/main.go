@@ -187,7 +187,9 @@ func (c config) effectiveBoxForgeAndIssueAccess() string {
 // configuredWork is captured before the swap overwrites it, since the other
 // family's in-progress label (issue #3541) may be the configured one; it also
 // becomes c.workLabel, so a label-less family (butler) still has the
-// configured work label available after its own c.label goes blank.
+// configured work label available after its own c.label goes blank. An
+// UnclaimedGate kind keeps the configured completeLabel: its merged patch PR
+// completes the finding like any work PR (ADR 0057, issue #4076).
 func applyDispatchKind(c config, kind *dispatchkind.Descriptor) config {
 	c.dispatchKind = kind
 	configuredWork := forge.DispatchLabels{
@@ -205,6 +207,10 @@ func applyDispatchKind(c config, kind *dispatchkind.Descriptor) config {
 	c.inProgressLabel = own.InProgress
 	c.completeLabel = own.Complete
 	c.failedLabel = own.Failed
+
+	if c.kind().UnclaimedGate {
+		c.completeLabel = configuredWork.Complete
+	}
 
 	c.otherFamilyInProgressLabels = nil
 	for _, d := range dispatchkind.All {
@@ -961,6 +967,7 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 		MergePollInterval: c.mergePollInterval,
 		MergePollTimeout:  c.mergePollTimeout,
 		MaxFixAttempts:    c.maxFixAttempts,
+		Unclaimed:         c.kind().UnclaimedGate,
 		MaxRebaseAttempts: c.maxRebaseAttempts,
 		// Policy reuses dispatch's transient-retry tuning rather than a second
 		// knob pair (issue #2095, #2325, #2928); it covers the rebase-push
@@ -997,8 +1004,9 @@ func localloopConfig(c config) localloop.Config {
 
 // newSettle constructs the Settler for one dispatch entry point, reused across
 // every issue in it: research's one-shot ResearchSettle, or work's merge gate.
-// The butler kind falls through to the merge gate too; its verb never reads
-// lc.settle (internal/butler's Runner settles its own run, issue #3990).
+// The butler kind falls through to the merge gate too, configured via
+// settleConfig's Unclaimed (issue #4076): cmdButler drives it as the PatchGate
+// a landed patch PR settles through, fix-pass-free.
 func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Settler {
 	switch c.kind().Settle {
 	case dispatchkind.SettleVerdict:
