@@ -20,12 +20,16 @@ type Finding struct {
 	// through unexamined: whether it is ever applied is the host's own
 	// later decision, gated on Class, never this plan callback's.
 	Patch string
+	// Title is the issue-intent's own title, carried through for a landed
+	// patch's commit subject/PR title (issue #4074) -- unexamined here, same
+	// as Patch.
+	Title string
 }
 
 // finding is in's promotion-relevant view, the projection both FileButlerFindings
 // call sites (the plan callback and its per-finding decorate) need.
 func (in issueIntent) finding() Finding {
-	return Finding{Class: in.Class, Concurrence: in.Concurrence, DedupTerms: in.DedupTerms, Patch: in.Patch}
+	return Finding{Class: in.Class, Concurrence: in.Concurrence, DedupTerms: in.DedupTerms, Patch: in.Patch, Title: in.Title}
 }
 
 // Decoration is what a plan's per-finding callback adds to one finding's

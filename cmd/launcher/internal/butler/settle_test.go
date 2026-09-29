@@ -816,7 +816,9 @@ func TestSettleRun_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
 // file-count gate (both directions -- zero files and over the limit),
 // missing/blank reviewer concurrence, no room left, and the promote case
 // itself, asserting the labels it hands back (issue #3993). No case here
-// hands decide a room closure -- room is a plain int argument now.
+// hands decide a room closure -- room is a plain chore.Room argument, and
+// no case here sets Patch, so decide never reaches its patch branch (see
+// TestPromotion_DecidePatch for that).
 func TestPromotion_Decide(t *testing.T) {
 	base := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent"}
 	baseFinding := settle.Finding{Class: "error-handling", DedupTerms: []string{"a.go:X"}, Concurrence: "agreed"}
@@ -825,28 +827,28 @@ func TestPromotion_Decide(t *testing.T) {
 		name    string
 		policy  promotion
 		finding settle.Finding
-		room    int
+		room    chore.Room
 		want    decisionKind
 	}{
 		{
 			"promotion off",
 			func() promotion { p := base; p.enabled = false; return p }(),
 			baseFinding,
-			1,
+			chore.Room{Promotions: 1},
 			skip,
 		},
 		{
 			"class not allow-listed",
 			base,
 			func() settle.Finding { f := baseFinding; f.Class = "dead-code"; return f }(),
-			1,
+			chore.Room{Promotions: 1},
 			skip,
 		},
 		{
 			"empty class",
 			base,
 			func() settle.Finding { f := baseFinding; f.Class = ""; return f }(),
-			1,
+			chore.Room{Promotions: 1},
 			skip,
 		},
 		{
@@ -857,56 +859,56 @@ func TestPromotion_Decide(t *testing.T) {
 				f.DedupTerms = []string{"a.go:X", "b.go:Y", "c.go:Z"}
 				return f
 			}(),
-			1,
+			chore.Room{Promotions: 1},
 			skip,
 		},
 		{
 			"zero files",
 			base,
 			func() settle.Finding { f := baseFinding; f.DedupTerms = nil; return f }(),
-			1,
+			chore.Room{Promotions: 1},
 			skip,
 		},
 		{
 			"only junk dedup terms",
 			base,
 			func() settle.Finding { f := baseFinding; f.DedupTerms = []string{"-", "!!"}; return f }(),
-			1,
+			chore.Room{Promotions: 1},
 			skip,
 		},
 		{
 			"junk term alongside a real one still leaves room",
 			func() promotion { p := base; p.maxFiles = 1; return p }(),
 			func() settle.Finding { f := baseFinding; f.DedupTerms = []string{"a.go:X", "-"}; return f }(),
-			1,
+			chore.Room{Promotions: 1},
 			promote,
 		},
 		{
 			"missing concurrence",
 			base,
 			func() settle.Finding { f := baseFinding; f.Concurrence = ""; return f }(),
-			1,
+			chore.Room{Promotions: 1},
 			skip,
 		},
 		{
 			"whitespace-only concurrence",
 			base,
 			func() settle.Finding { f := baseFinding; f.Concurrence = "   \n\t "; return f }(),
-			1,
+			chore.Room{Promotions: 1},
 			skip,
 		},
 		{
 			"no room",
 			base,
 			baseFinding,
-			0,
+			chore.Room{Promotions: 0},
 			skip,
 		},
 		{
 			"promote",
 			base,
 			baseFinding,
-			1,
+			chore.Room{Promotions: 1},
 			promote,
 		},
 	}
@@ -923,6 +925,100 @@ func TestPromotion_Decide(t *testing.T) {
 				}
 			} else if got.labels != nil {
 				t.Errorf("decide().labels = %v, want nil on skip", got.labels)
+			}
+		})
+	}
+}
+
+// (i2) promotion.decide's patch branch (ADR 0057, issue #4074): the patch
+// case itself, then every way a single patch gate can fail -- rung off,
+// blank patch, class outside the patch allow-list, missing concurrence, no
+// patch room -- each asserted to fall through to exactly what decidePromote
+// returns for the same finding with Patch cleared, under both a
+// promotion-on policy (falls through to promote) and a promotion-off one
+// (falls through to skip). That equivalence is the point: a failed patch
+// gate must never change what promote/skip decide reaches.
+func TestPromotion_DecidePatch(t *testing.T) {
+	patchable := promotion{
+		enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent",
+		patchEnabled: true, patchClasses: []string{"error-handling"},
+	}
+	baseFinding := settle.Finding{
+		Class: "error-handling", DedupTerms: []string{"a.go:X"}, Concurrence: "agreed",
+		Patch: "--- a/a.go\n+++ b/a.go\n",
+	}
+	room := chore.Room{Promotions: 1, Patches: 1}
+
+	t.Run("patch", func(t *testing.T) {
+		got := patchable.decide(baseFinding, room)
+		if got.kind != patch {
+			t.Fatalf("decide().kind = %v, want patch (reason %q)", got.kind, got.reason)
+		}
+		if got.labels != nil {
+			t.Errorf("decide().labels = %v, want nil on patch", got.labels)
+		}
+	})
+
+	// Each mutator below breaks exactly one patch gate, leaving the
+	// finding/policy otherwise patch-eligible.
+	failingGates := []struct {
+		name    string
+		mutate  func(p promotion, f settle.Finding) (promotion, settle.Finding)
+		mutRoom func(r chore.Room) chore.Room
+	}{
+		{"rung off", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			p.patchEnabled = false
+			return p, f
+		}, nil},
+		{"blank patch", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = ""
+			return p, f
+		}, nil},
+		{"class outside patch classes", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			p.patchClasses = []string{"dead-code"}
+			return p, f
+		}, nil},
+		{"missing concurrence", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Concurrence = ""
+			return p, f
+		}, nil},
+		{"no patch room", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			return p, f
+		}, func(r chore.Room) chore.Room { r.Patches = 0; return r }},
+	}
+
+	for _, g := range failingGates {
+		t.Run(g.name, func(t *testing.T) {
+			r := room
+			if g.mutRoom != nil {
+				r = g.mutRoom(r)
+			}
+			for _, policyBase := range []struct {
+				name   string
+				policy promotion
+			}{
+				{"promotion on", patchable},
+				{"promotion off", func() promotion { p := patchable; p.enabled = false; return p }()},
+			} {
+				t.Run(policyBase.name, func(t *testing.T) {
+					p, f := g.mutate(policyBase.policy, baseFinding)
+
+					got := p.decide(f, r)
+
+					noPatch := f
+					noPatch.Patch = ""
+					want := p.decide(noPatch, r)
+
+					if got.kind != want.kind {
+						t.Fatalf("decide().kind = %v, want %v (same as Patch=\"\")", got.kind, want.kind)
+					}
+					if !slices.Equal(got.labels, want.labels) {
+						t.Errorf("decide().labels = %v, want %v (same as Patch=\"\")", got.labels, want.labels)
+					}
+					if got.reason != want.reason {
+						t.Errorf("decide().reason = %q, want %q (same as Patch=\"\")", got.reason, want.reason)
+					}
+				})
 			}
 		})
 	}
@@ -948,7 +1044,7 @@ func TestNewPromotion_Enabled(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := newPromotion(tc.classes, 2, tc.perDay, tc.label)
+			got := newPromotion(tc.classes, 2, tc.perDay, tc.label, nil, 0)
 			if got.enabled != tc.want {
 				t.Errorf("newPromotion(...).enabled = %v, want %v", got.enabled, tc.want)
 			}
