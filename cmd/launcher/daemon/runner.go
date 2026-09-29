@@ -88,7 +88,7 @@ type hostRunnerConfig struct {
 	butler        bool
 }
 
-// newHostRunner rejects a nil cfg.env. childEnv
+// newHostRunner rejects a nil cfg.env. withoutKeys
 // (internal/daemon/command.go) returns a non-nil slice either way, so past
 // this constructor an uncaptured nil and an explicitly empty environment
 // are indistinguishable — and the nil is never "inherit the parent", it
@@ -348,9 +348,10 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	}
 
 	cmd := runnerExecCommand(childCmd.Argv[0], childCmd.Argv[1:]...)
-	// Knob-stripped env, not the raw process environment — see childEnv.
-	// ChildCommand already set SPINDRIFT_REPORT_FD=3 in it; the pipe below
-	// is what makes that promise true.
+	// Knob-stripped env, not the raw process environment — see withoutKeys
+	// (internal/daemon/command.go). ChildCommand already set
+	// SPINDRIFT_REPORT_FD=3 in it; the pipe below is what makes that
+	// promise true.
 	cmd.Env = childCmd.Env
 	// A terminal Ctrl-C delivers SIGINT to the whole foreground process
 	// group (daemon, nix run, launcher); the daemon only treats SIGTERM as

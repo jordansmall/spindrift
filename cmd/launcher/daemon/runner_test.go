@@ -2072,8 +2072,9 @@ func TestRunDoctor_SignalKilledIsSeamFailure(t *testing.T) {
 
 // TestNewHostRunner_RejectsNilEnv pins the fix for the silent-empty-env bug
 // of #3692: a nil cfg.env — an uncaptured environment, not "empty on
-// purpose" — is rejected at construction rather than reaching childEnv,
-// which can't tell the two apart (both come out non-nil).
+// purpose" — is rejected at construction rather than reaching withoutKeys
+// (internal/daemon/command.go), which can't tell the two apart (both come
+// out non-nil).
 func TestNewHostRunner_RejectsNilEnv(t *testing.T) {
 	_, err := newHostRunner(hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: nil})
 	if err == nil {

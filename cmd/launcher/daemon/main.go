@@ -157,7 +157,8 @@ func settingsKeys(doc *inputdoc.Document) []string {
 // exported-but-empty knob is not "set" here either). This is distinct from
 // Lookup's deprecation warning: that one flags the daemon itself still
 // honouring an ambient override; this one flags a key that a child will
-// never see at all, because childEnv strips it before exec.
+// never see at all, because withoutKeys (internal/daemon/command.go)
+// strips it before exec.
 func warnStrippedChildEnv(keys []string, stderr io.Writer) {
 	for _, key := range keys {
 		if v := os.Getenv(key); v != "" {
@@ -363,9 +364,9 @@ func cmdStatus(wd string, stdout, stderr io.Writer) int {
 
 	// 0 whenever an answer was produced, including "no daemon running":
 	// the JSON's `live` field is the answer a scripting caller reads, not
-	// the exit code, and this binary's own exit-code taxonomy
-	// (exitCodeFor) already spends 1 on a genuine failure — reusing it
-	// here for "nothing is running" would conflate the two.
+	// the exit code, and fail (like daemon.Halt's ExitCode) already spends
+	// 1 on a genuine failure — reusing it here for "nothing is running"
+	// would conflate the two.
 	return 0
 }
 
