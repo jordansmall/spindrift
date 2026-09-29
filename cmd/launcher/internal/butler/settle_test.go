@@ -2,6 +2,7 @@ package butler
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -930,22 +931,26 @@ func TestPromotion_Decide(t *testing.T) {
 	}
 }
 
-// (i2) promotion.decide's patch branch (ADR 0057, issue #4074): the patch
-// case itself, then every way a single patch gate can fail -- rung off,
-// blank patch, class outside the patch allow-list, missing concurrence, no
-// patch room -- each asserted to fall through to exactly what decidePromote
-// returns for the same finding with Patch cleared, under both a
-// promotion-on policy (falls through to promote) and a promotion-off one
-// (falls through to skip). That equivalence is the point: a failed patch
-// gate must never change what promote/skip decide reaches.
+// (i2) promotion.decide's patch branch (ADR 0057, issue #4074/#4075): the
+// patch case itself, then every way a single patch gate can fail -- class,
+// diff shape (added/deleted/renamed/mode-change/binary), file cap, line cap,
+// patchPaths, site keys, missing concurrence, no patch room, plus the two
+// gates that gate patchBlocker's own call (rung off, blank patch) -- each
+// asserted to fall through to exactly what decidePromote returns for the
+// same finding with Patch cleared, under both a promotion-on policy (falls
+// through to promote) and a promotion-off one (falls through to skip). That
+// equivalence is the point: a failed patch gate must never change what
+// promote/skip decide reaches. wantSkip additionally pins that the failing
+// gate names itself in decision.patchSkip (empty for the two gates decide
+// checks before ever calling patchBlocker).
 func TestPromotion_DecidePatch(t *testing.T) {
-	patchable := promotion{
-		enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent",
-		patchEnabled: true, patchClasses: []string{"error-handling"},
-	}
+	patchable := newPromotion(
+		[]string{"error-handling"}, 4, 1, "ready-for-agent",
+		patchPolicy{classes: []string{"error-handling"}, perDay: 1, paths: DefaultPatchPaths, maxFiles: 3, maxLines: 20},
+	)
 	baseFinding := settle.Finding{
-		Class: "error-handling", DedupTerms: []string{"a.go:X"}, Concurrence: "agreed",
-		Patch: "--- a/a.go\n+++ b/a.go\n",
+		Class: "error-handling", DedupTerms: []string{"docs/a.md:Intro"}, Concurrence: "agreed",
+		Patch: testPatchDiff, // docs/a.md, clears patchPaths and matches the site key above
 	}
 	room := chore.Room{Promotions: 1, Patches: 1}
 
@@ -957,34 +962,142 @@ func TestPromotion_DecidePatch(t *testing.T) {
 		if got.labels != nil {
 			t.Errorf("decide().labels = %v, want nil on patch", got.labels)
 		}
+		if got.patchSkip != "" {
+			t.Errorf("decide().patchSkip = %q, want empty on patch", got.patchSkip)
+		}
 	})
 
+	// oneMod is a clean single-hunk modification of path, clearing every
+	// patchBlocker gate on its own.
+	oneMod := func(path string) string {
+		return fmt.Sprintf("--- a/%s\n+++ b/%s\n@@ -1 +1 @@\n-old\n+new\n", path, path)
+	}
+
+	// (i2) The file cap counts distinct paths, not diff entries: the same
+	// path split across two sections (e.g. two separate hunks git chose to
+	// emit as their own "--- "/"+++ " pairs) still spends only one of the
+	// cap's slots.
+	t.Run("same path split across two sections counts once against the file cap", func(t *testing.T) {
+		p := newPromotion(
+			[]string{"error-handling"}, 4, 1, "ready-for-agent",
+			patchPolicy{classes: []string{"error-handling"}, perDay: 1, paths: DefaultPatchPaths, maxFiles: 1, maxLines: 20},
+		)
+		f := settle.Finding{
+			Class: "error-handling", DedupTerms: []string{"docs/a.md:Intro"}, Concurrence: "agreed",
+			Patch: oneMod("docs/a.md") + oneMod("docs/a.md"),
+		}
+		got := p.decide(f, room)
+		if got.kind != patch {
+			t.Fatalf("decide().kind = %v, want patch (reason %q, patchSkip %q)", got.kind, got.reason, got.patchSkip)
+		}
+
+		// The line cap, unlike the file cap, sums every section: each
+		// section's lines are real changes, however they are split.
+		p.patchMaxLines = 3 // two oneMod sections, 2 lines each
+		got = p.decide(f, room)
+		if got.kind == patch || !strings.Contains(got.patchSkip, "line cap") {
+			t.Fatalf("decide() = %v (patchSkip %q), want a line cap fall-through", got.kind, got.patchSkip)
+		}
+	})
+
+	// fourFiles/twentyOneLines below each build a diff that clears every
+	// gate but the one under test.
+	fourFiles := oneMod("docs/b.md") + oneMod("docs/c.md") + oneMod("docs/d.md") + oneMod("docs/e.md")
+	fourFilesDedup := []string{"docs/b.md:X", "docs/c.md:X", "docs/d.md:X", "docs/e.md:X"}
+	twentyOneLines := "--- a/docs/big.md\n+++ b/docs/big.md\n@@ -1,11 +1,10 @@\n" +
+		strings.Repeat("-x\n", 11) + strings.Repeat("+y\n", 10)
+
 	// Each mutator below breaks exactly one patch gate, leaving the
-	// finding/policy otherwise patch-eligible.
+	// finding/policy otherwise patch-eligible. Rows run in patchBlocker's own
+	// evaluation order.
 	failingGates := []struct {
-		name    string
-		mutate  func(p promotion, f settle.Finding) (promotion, settle.Finding)
-		mutRoom func(r chore.Room) chore.Room
+		name     string
+		mutate   func(p promotion, f settle.Finding) (promotion, settle.Finding)
+		mutRoom  func(r chore.Room) chore.Room
+		wantSkip string // substring decision.patchSkip must contain; "" means it must be empty
 	}{
 		{"rung off", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
 			p.patchEnabled = false
 			return p, f
-		}, nil},
+		}, nil, ""},
 		{"blank patch", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
 			f.Patch = ""
 			return p, f
-		}, nil},
+		}, nil, ""},
 		{"class outside patch classes", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
 			p.patchClasses = []string{"dead-code"}
 			return p, f
-		}, nil},
+		}, nil, "class not on patch allow-list"},
+		{"legacy Files ... differ binary marker falls through as unparseable", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			// Attack from review finding on issue #4075: without the fix,
+			// this binary section's unrecognised line is dropped instead of
+			// rejected, so ParseUnifiedDiff would report only the ordinary
+			// docs/a.md entry and every gate below would clear it.
+			f.Patch = "diff --git a/CLAUDE.md b/CLAUDE.md\nindex 1111111..2222222 100644\nFiles a/CLAUDE.md and b/CLAUDE.md differ\ndiff --git a/docs/a.md b/docs/a.md\nindex 1111111..2222222 100644\n--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1 @@\n-p\n+q\n"
+			return p, f
+		}, nil, "diff does not parse"},
+		{"legacy rename old/new headers fall through as a rename", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			// Attack from review finding on issue #4075: unrecognised, the
+			// "rename old "/"rename new " section was dropped and only the
+			// docs/a.md entry reached the gates.
+			f.Patch = "diff --git a/CLAUDE.md b/docs/evil.md\nrename old CLAUDE.md\nrename new docs/evil.md\ndiff --git a/docs/a.md b/docs/a.md\nindex 1111111..2222222 100644\n--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1 @@\n-p\n+q\n"
+			return p, f
+		}, nil, "renamed"},
+		{"added file", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = "--- /dev/null\n+++ b/docs/added.md\n@@ -0,0 +1,1 @@\n+new\n"
+			return p, f
+		}, nil, "added"},
+		{"deleted file", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = "--- a/docs/deleted.md\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-old\n"
+			return p, f
+		}, nil, "deleted"},
+		{"renamed file", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = "diff --git a/docs/old.md b/docs/new.md\nsimilarity index 90%\nrename from docs/old.md\nrename to docs/new.md\n--- a/docs/old.md\n+++ b/docs/new.md\n@@ -1 +1 @@\n-x\n+y\n"
+			return p, f
+		}, nil, "renamed"},
+		{"mode change", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = "diff --git a/docs/mode.md b/docs/mode.md\nold mode 100644\nnew mode 100755\n--- a/docs/mode.md\n+++ b/docs/mode.md\n@@ -1 +1 @@\n-x\n+y\n"
+			return p, f
+		}, nil, "mode change"},
+		{"binary hunk", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = "diff --git a/docs/img.png b/docs/img.png\nindex 1111111..2222222 100644\nBinary files a/docs/img.png and b/docs/img.png differ\n"
+			return p, f
+		}, nil, "binary"},
+		{"over patch file cap", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = fourFiles
+			f.DedupTerms = fourFilesDedup
+			return p, f
+		}, nil, "file cap"},
+		{"over patch line cap", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = twentyOneLines
+			f.DedupTerms = []string{"docs/big.md:X"}
+			return p, f
+		}, nil, "line cap"},
+		{"path outside patchPaths", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = oneMod("CLAUDE.md")
+			f.DedupTerms = []string{"CLAUDE.md:X"}
+			return p, f
+		}, nil, "outside patch paths"},
+		{"CLAUDE.md smuggled behind a second header pair under one diff --git section", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			// A second "--- "/"+++ " pair under one "diff --git" section is
+			// its own file to `git apply`; ParseUnifiedDiff must surface it
+			// as its own entry so the smuggled CLAUDE.md still hits the
+			// patchPaths gate rather than riding along under the admitted
+			// docs/a.md path.
+			f.Patch = "diff --git a/CLAUDE.md b/CLAUDE.md\nindex 1111111..2222222 100644\n--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1 @@\n-x\n+y\n--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1 @@\n-p\n+q\n"
+			return p, f
+		}, nil, "outside patch paths"},
+		{"path not among site keys", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = oneMod("docs/extra.md") // admitted by patchPaths, but not in DedupTerms
+			return p, f
+		}, nil, "site keys"},
 		{"missing concurrence", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
 			f.Concurrence = ""
 			return p, f
-		}, nil},
+		}, nil, "concurrence"},
 		{"no patch room", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
 			return p, f
-		}, func(r chore.Room) chore.Room { r.Patches = 0; return r }},
+		}, func(r chore.Room) chore.Room { r.Patches = 0; return r }, "no patch room"},
 	}
 
 	for _, g := range failingGates {
@@ -1018,6 +1131,13 @@ func TestPromotion_DecidePatch(t *testing.T) {
 					if got.reason != want.reason {
 						t.Errorf("decide().reason = %q, want %q (same as Patch=\"\")", got.reason, want.reason)
 					}
+					if g.wantSkip == "" {
+						if got.patchSkip != "" {
+							t.Errorf("decide().patchSkip = %q, want empty", got.patchSkip)
+						}
+					} else if !strings.Contains(got.patchSkip, g.wantSkip) {
+						t.Errorf("decide().patchSkip = %q, want it to contain %q", got.patchSkip, g.wantSkip)
+					}
 				})
 			}
 		})
@@ -1044,7 +1164,7 @@ func TestNewPromotion_Enabled(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := newPromotion(tc.classes, 2, tc.perDay, tc.label, nil, 0)
+			got := newPromotion(tc.classes, 2, tc.perDay, tc.label, patchPolicy{})
 			if got.enabled != tc.want {
 				t.Errorf("newPromotion(...).enabled = %v, want %v", got.enabled, tc.want)
 			}

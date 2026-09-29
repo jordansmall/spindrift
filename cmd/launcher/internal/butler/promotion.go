@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/chore"
+	"spindrift.dev/launcher/internal/glob"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/signalwire"
 )
 
 // promotion is the host-side auto-promotion gate for one Chore's findings
@@ -43,27 +45,72 @@ type promotion struct {
 	// patch branch gates on patchClasses alone (ADR 0057) -- classes plays
 	// no part in it; classes only gates the ordinary promote branch.
 	patchClasses []string
+	// patchPathAllow/patchPathDeny are BUTLER_PATCH_PATHS' comma-separated
+	// glob list split into its plain and "!"-prefixed entries (ADR 0057): a
+	// diff path is admitted only when it matches at least one allow entry
+	// and no deny entry -- see patchPathAdmitted.
+	patchPathAllow, patchPathDeny []string
+	// patchMaxFiles/patchMaxLines are BUTLER_PATCH_MAX_FILES/
+	// BUTLER_PATCH_MAX_LINES: the host limits on how many files a patch
+	// candidate's diff may touch and how many lines (added plus removed) it
+	// may change in total, checked independently of maxFiles/the promote
+	// branch's own file count.
+	patchMaxFiles, patchMaxLines int
+}
+
+// patchPolicy is the patch rung's own inputs to newPromotion (ADR 0057):
+// BUTLER_PATCH_CLASSES, BUTLER_MAX_PATCHES_PER_DAY, BUTLER_PATCH_PATHS,
+// BUTLER_PATCH_MAX_FILES and BUTLER_PATCH_MAX_LINES.
+type patchPolicy struct {
+	classes  []string
+	perDay   int
+	paths    string
+	maxFiles int
+	maxLines int
 }
 
 // newPromotion builds a promotion from a Chore's allow-listed classes, the
 // host's per-finding file limit, its per-day promotion budget, the
-// Consumer's work dispatch label, and the patch rung's own allow-listed
-// classes and per-day budget. enabled requires all three of a positive
-// per-day budget, a configured label, and at least one allow-listed class:
-// any one of them unset reads as "promotion off", never as "trust whatever
-// the unset one happens to be". patchEnabled mirrors that same rule for the
-// patch rung, independently: patchClasses and patchesPerDay are BUTLER_PATCH_
-// CLASSES/BUTLER_MAX_PATCHES_PER_DAY, and patching needs neither enabled nor
-// maxFiles -- those bounds land in a later ticket.
-func newPromotion(classes []string, maxFiles, perDay int, label string, patchClasses []string, patchesPerDay int) promotion {
+// Consumer's work dispatch label, and the patch rung's own patchPolicy.
+// enabled requires all three of a positive per-day budget, a configured
+// label, and at least one allow-listed class: any one of them unset reads as
+// "promotion off", never as "trust whatever the unset one happens to be".
+// patchEnabled mirrors that same rule for the patch rung, independently, off
+// patch.classes and patch.perDay alone; the bounds gate individual findings
+// in patchBlocker, not this on/off derivation.
+func newPromotion(classes []string, maxFiles, perDay int, label string, patch patchPolicy) promotion {
+	allow, deny := parsePatchPaths(patch.paths)
 	return promotion{
-		enabled:      perDay > 0 && label != "" && len(classes) > 0,
-		classes:      classes,
-		maxFiles:     maxFiles,
-		label:        label,
-		patchEnabled: patchesPerDay > 0 && len(patchClasses) > 0,
-		patchClasses: patchClasses,
+		enabled:        perDay > 0 && label != "" && len(classes) > 0,
+		classes:        classes,
+		maxFiles:       maxFiles,
+		label:          label,
+		patchEnabled:   patch.perDay > 0 && len(patch.classes) > 0,
+		patchClasses:   patch.classes,
+		patchPathAllow: allow,
+		patchPathDeny:  deny,
+		patchMaxFiles:  patch.maxFiles,
+		patchMaxLines:  patch.maxLines,
 	}
+}
+
+// parsePatchPaths splits BUTLER_PATCH_PATHS' comma-separated glob list into
+// its plain (allow) and "!"-prefixed (deny) entries, trimming whitespace
+// around each and dropping blank ones -- the schema doc's own grammar for
+// the field (issue #4075).
+func parsePatchPaths(paths string) (allow, deny []string) {
+	for _, entry := range strings.Split(paths, ",") {
+		entry = strings.TrimSpace(entry)
+		switch {
+		case entry == "":
+			continue
+		case strings.HasPrefix(entry, "!"):
+			deny = append(deny, strings.TrimPrefix(entry, "!"))
+		default:
+			allow = append(allow, entry)
+		}
+	}
+	return allow, deny
 }
 
 // decisionKind names what decide chose for one finding: skip it, promote it
@@ -84,23 +131,112 @@ type decision struct {
 	labels []string // only set when kind is promote
 	reason string   // short; read only by test failure messages
 	files  int      // file count off the finding's dedup terms; only set when kind is promote
+	// patchSkip is the first patch gate patchBlocker found failing, only set
+	// when the rung was on and f.Patch was non-blank (so a finding that was
+	// never patch-eligible to begin with produces no skip noise) -- settle
+	// logs it verbatim (ADR 0057, issue #4075).
+	patchSkip string
 }
 
-// decide is the promotion gate for one finding. The patch gate (rung on,
-// f.Patch present, class on the patch allow-list, reviewer concurrence,
-// patch room left) is checked first and in full: only when every one of
-// those holds does decide return patch, and it never touches promote's own
-// gates or room to do so (patching needs no promotion.enabled, no file
-// limit -- those bounds land in a later ticket). Any single patch gate
+// decide is the promotion gate for one finding. Once the rung is on and
+// f.Patch is non-blank, the patch gate (patchBlocker) is checked first and
+// in full: only when every one of its gates holds does decide return patch,
+// and it never touches promote's own gates or room to do so (patching needs
+// no promotion.enabled and no promotion file limit). Any single patch gate
 // failing falls straight through to decidePromote, so a finding whose Patch
-// happens to be unusable is judged exactly as if it had none. room is this
-// sweep's shared budget, not a field on p -- the settle step tracks it
-// across findings in one sweep, spending it as findings promote or patch.
+// happens to be unusable is judged exactly as if it had none, with only
+// patchSkip added to name the failing gate. room is this sweep's shared
+// budget, not a field on p -- the settle step tracks it across findings in
+// one sweep, spending it as findings promote or patch.
 func (p promotion) decide(f settle.Finding, room chore.Room) decision {
-	if p.patchEnabled && f.Patch != "" && p.patchClassListed(f) && p.concurred(f) && room.Patches > 0 {
-		return decision{kind: patch, reason: "patched"}
+	if p.patchEnabled && f.Patch != "" {
+		blocker := p.patchBlocker(f, room)
+		if blocker == "" {
+			return decision{kind: patch, reason: "patched"}
+		}
+		dec := p.decidePromote(f, room.Promotions)
+		dec.patchSkip = blocker
+		return dec
 	}
 	return p.decidePromote(f, room.Promotions)
+}
+
+// patchBlocker runs the patch rung's own gate chain, in order: class on the
+// patch allow-list, the diff parses and every file is a plain modification
+// (no add, delete, rename, mode change, or binary content), the file cap,
+// the line cap, every path admitted by patchPaths, every path among the
+// finding's own site-key paths (butlerFiles), reviewer concurrence, then
+// patch room. Returns the first gate's reason, one short line naming it, or
+// "" once every gate clears. Called only from decide, which has already
+// confirmed the rung is on and f.Patch is non-blank -- neither check is
+// repeated or named here.
+func (p promotion) patchBlocker(f settle.Finding, room chore.Room) string {
+	if !p.patchClassListed(f) {
+		return "class not on patch allow-list"
+	}
+	files, err := signalwire.ParseUnifiedDiff(f.Patch)
+	if err != nil {
+		return "diff does not parse: " + oneLine(err.Error())
+	}
+	for _, df := range files {
+		if df.Change != "" {
+			return fmt.Sprintf("diff is not modification-only: %s %s", oneLine(df.Path), df.Change)
+		}
+	}
+	paths := make(map[string]struct{}, len(files))
+	for _, df := range files {
+		paths[df.Path] = struct{}{}
+	}
+	if len(paths) > p.patchMaxFiles {
+		return fmt.Sprintf("diff touches %d files, over patch file cap %d", len(paths), p.patchMaxFiles)
+	}
+	lines := 0
+	for _, df := range files {
+		lines += df.Added + df.Removed
+	}
+	if lines > p.patchMaxLines {
+		return fmt.Sprintf("diff changes %d lines, over patch line cap %d", lines, p.patchMaxLines)
+	}
+	for _, df := range files {
+		if !p.patchPathAdmitted(df.Path) {
+			return fmt.Sprintf("%s outside patch paths", oneLine(df.Path))
+		}
+	}
+	site := butlerFiles(f.DedupTerms)
+	for _, df := range files {
+		if !slices.Contains(site, df.Path) {
+			return fmt.Sprintf("%s not among the finding's site keys", oneLine(df.Path))
+		}
+	}
+	if !p.concurred(f) {
+		return "no reviewer concurrence"
+	}
+	if room.Patches <= 0 {
+		return "no patch room"
+	}
+	return ""
+}
+
+// patchPathAdmitted reports whether path clears BUTLER_PATCH_PATHS: it must
+// match at least one plain (allow) entry and no "!"-prefixed (deny) entry.
+// An empty allow list (BUTLER_PATCH_PATHS unset or all-deny) admits nothing.
+func (p promotion) patchPathAdmitted(path string) bool {
+	matched := false
+	for _, pat := range p.patchPathAllow {
+		if glob.Match(pat, path) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return false
+	}
+	for _, pat := range p.patchPathDeny {
+		if glob.Match(pat, path) {
+			return false
+		}
+	}
+	return true
 }
 
 // decidePromote is the promote/skip gate, checked in order: on/off, the
