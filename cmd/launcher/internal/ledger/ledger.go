@@ -79,8 +79,8 @@ type Entry struct {
 // found a different old value than expected.
 var ErrLostRace = errors.New("ledger: tip moved since it was read")
 
-// Reader is the read-only half of Backend: what Snapshot returns, and what
-// DayTotals/DayTotalsAll need, without exposing Append.
+// Reader is the read-only half of Backend: what DayTotals/DayTotalsAll need,
+// without exposing Append.
 type Reader interface {
 	// Read returns chore's current tip, or a zero Tip (Commit == "") if the
 	// Ledger has no commit yet.
@@ -103,23 +103,6 @@ type Backend interface {
 	// becomes the commit's author and committer date. Returns ErrLostRace
 	// (wrapped or bare; test with errors.Is) if the compare-and-swap loses.
 	Append(chore, old string, s State, at time.Time) (string, error)
-}
-
-// Snapshot syncs a Remote once and returns its scratch repo as a Reader, so a
-// batch of Read/History calls costs one fetch. The view is live, not a copy:
-// it holds only until the next call that syncs the same Remote (Read,
-// History, Append, or another Snapshot) moves the scratch refs. Any other
-// Backend (Local, test fakes) is returned unchanged. The Reader method set
-// leaves out the scratch Local's non-pushing Append — a caller needing a
-// fresh view or a compare-and-swap must go back through the Backend.
-func Snapshot(b Backend) (Reader, error) {
-	if r, ok := b.(Remote); ok {
-		if err := r.sync(); err != nil {
-			return nil, err
-		}
-		return r.local(), nil
-	}
-	return b, nil
 }
 
 // Claim appends a Claimed state on top of tip, conditional on tip being

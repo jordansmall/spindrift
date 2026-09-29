@@ -1,11 +1,8 @@
 package butler
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -150,45 +147,6 @@ func addRunCommit(t *testing.T, repo, name, content string) string {
 	commit := strings.TrimSpace(string(commitOut))
 	runRepoGit(t, repo, "update-ref", "refs/heads/main", commit)
 	return commit
-}
-
-// fetchCmdCount counts top-level `git fetch` processes recorded in a
-// GIT_TRACE2_EVENT log at path: one "cmd_name" event per git process, so a
-// fetch's own upload-pack child (its own cmd_name "upload-pack") never
-// counts as a second fetch.
-func fetchCmdCount(t *testing.T, path string) int {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read trace2 log %s: %v", path, err)
-	}
-	count := 0
-	for _, line := range strings.Split(string(data), "\n") {
-		if line == "" {
-			continue
-		}
-		var ev struct {
-			Event string `json:"event"`
-			Name  string `json:"name"`
-		}
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			t.Fatalf("parse trace2 line %q: %v", line, err)
-		}
-		if ev.Event == "cmd_name" && ev.Name == "fetch" {
-			count++
-		}
-	}
-	return count
-}
-
-// newRunLedgerURL builds a fresh bare repo at a temp path to stand in for a
-// Remote ledger's URL, separate from the scratch repo Remote syncs into.
-func newRunLedgerURL(t *testing.T) string {
-	t.Helper()
-	url := filepath.Join(t.TempDir(), "ledger.git")
-	runRepoGit(t, "", "init", "--bare", "-q", url)
-	runRepoGit(t, url, "config", "gc.auto", "0")
-	return url
 }
 
 // readyDispatcher builds a dispatch.Fake whose Run() reports a ready outcome
@@ -1141,54 +1099,6 @@ func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T)
 	}
 }
 
-// (s) Against a ledger.Remote, Sweep's due check costs exactly one `git
-// fetch` for the whole pass, not one per candidate Chore: the shared
-// ledger.Snapshot syncs once up front and every candidate's Read/History
-// goes through that one synced view (issue #3918). A ledger.Local or fake
-// backend can't tell this apart -- Snapshot hands one back unchanged -- so
-// this needs a real Remote with a fetch-counting trace.
-func TestSweep_RemoteBackendFetchesOnceForDueCheck(t *testing.T) {
-	codeRepo, _ := newRunTestRepo(t)
-	ledgerURL := newRunLedgerURL(t)
-
-	remote, err := ledger.NewRemote(t.TempDir(), ledgerURL)
-	if err != nil {
-		t.Fatalf("NewRemote: %v", err)
-	}
-
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, choreName := range []string{"bugs", "docs-drift"} {
-		if _, err := ledger.Claim(remote, choreName, ledger.Tip{}, ledger.ClaimedBy{Host: "other-host", Start: now}); err != nil {
-			t.Fatalf("seed Claim %s: %v", choreName, err)
-		}
-	}
-
-	trace := filepath.Join(t.TempDir(), "trace2.log")
-	t.Setenv("GIT_TRACE2_EVENT", trace)
-
-	dispatched := false
-	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
-		dispatched = true
-		return dispatch.NewFake()
-	}
-
-	r := New(remote, GitTree{Repo: codeRepo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs", "docs-drift"), func() time.Time { return now.Add(time.Minute) })
-	out, err := r.Sweep([]string{"bugs", "docs-drift"})
-	if err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
-	if out.Kind != NotDue {
-		t.Fatalf("Kind = %v, want NotDue: %+v", out.Kind, out)
-	}
-	if dispatched {
-		t.Error("newBox was called; want no Box dispatched against live claims")
-	}
-
-	if got := fetchCmdCount(t, trace); got != 1 {
-		t.Errorf("fetch count = %d, want exactly 1 for the whole due check", got)
-	}
-}
-
 // TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape drives a full Sweep
 // against a Remote Ledger backend built the same way a hosted-forge backend
 // row (github, forgejo) wires one -- ledger.NewRemote's scratch repo, then
@@ -1235,36 +1145,5 @@ func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
 	remoteHead := strings.TrimSpace(string(runRepoGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")))
 	if remoteHead != head {
 		t.Errorf("remote refs/heads/main moved to %q, want unchanged %q", remoteHead, head)
-	}
-}
-
-// TestPromotion_RoomFetchesOnceAcrossEnabledChores pins that dayRoom.remaining
-// re-walks the Ledger fresh each call (unlike Sweep's shared Snapshot, per
-// its own doc comment), but still costs exactly one fetch for that one
-// call, however many Chores are enabled -- remaining calls ledger.Snapshot
-// inside itself, not a raw DayTotalsAll(backend, ...) that would sync once
-// per enabled Chore (issue #3918), migrated from cmd/launcher's retired
-// TestPromotionPolicy_RoomFetchesOnceAcrossEnabledChores (issue #3990).
-func TestPromotion_RoomFetchesOnceAcrossEnabledChores(t *testing.T) {
-	ledgerURL := newRunLedgerURL(t)
-
-	remote, err := ledger.NewRemote(t.TempDir(), ledgerURL)
-	if err != nil {
-		t.Fatalf("NewRemote: %v", err)
-	}
-
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	policy := testRunPolicy(noRunEvery, "bugs", "docs-drift")
-	policy.MaxPromotionsPerDay = 1
-	room := newDayRoom(policy)
-
-	trace := filepath.Join(t.TempDir(), "trace2.log")
-	t.Setenv("GIT_TRACE2_EVENT", trace)
-
-	if got := room.remaining(remote, now); got != 1 {
-		t.Errorf("remaining() = %d, want 1 (no promotions yet)", got)
-	}
-	if got := fetchCmdCount(t, trace); got != 1 {
-		t.Errorf("fetch count = %d, want exactly 1 for one remaining() call", got)
 	}
 }

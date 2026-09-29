@@ -15,14 +15,20 @@ import (
 )
 
 // Harness lets RunContract drive a ledger.Backend without knowing which
-// storage adapter it is.
+// storage adapter it is. Each Backend()/Rival() call opens a fresh handle
+// that sees the store as of that call (a Remote syncs its mirror once, at
+// construction), and a handle's Append must be given a tip read through that
+// same handle or returned by it -- reading through one handle and Appending
+// through another built earlier can hand it a tip its own mirror has never
+// seen.
 type Harness interface {
 	// Backend returns the handle under test.
 	Backend() ledger.Backend
 	// Rival returns a second, independent handle on the same Ledger store
 	// (for Local, another Local over the same repo; for Remote, a second
 	// scratch clone against the same remote), so a test can simulate two
-	// workers racing to claim the same Chore.
+	// workers racing to claim the same Chore. Call it at the point the
+	// rival's "run" starts -- after any writes it must see -- not up front.
 	Rival() ledger.Backend
 	// Branches snapshots every refs/heads/* in the underlying store, sha
 	// keyed by ref name, so a case can assert the Ledger never moves one. It
@@ -37,6 +43,7 @@ func RunContract(t *testing.T, newHarness func(t *testing.T) Harness) {
 	t.Run("EmptyLedger", func(t *testing.T) { testEmptyLedger(t, newHarness(t)) })
 	t.Run("Claim", func(t *testing.T) { testClaim(t, newHarness(t)) })
 	t.Run("LostRace", func(t *testing.T) { testLostRace(t, newHarness(t)) })
+	t.Run("StaleMirror", func(t *testing.T) { testStaleMirror(t, newHarness(t)) })
 	t.Run("LostRaceOnEmpty", func(t *testing.T) { testLostRaceOnEmpty(t, newHarness(t)) })
 	t.Run("DoneOverClaim", func(t *testing.T) { testDoneOverClaim(t, newHarness(t)) })
 	t.Run("StaleClaim", func(t *testing.T) { testStaleClaim(t, newHarness(t)) })
@@ -127,7 +134,6 @@ func testClaim(t *testing.T, h Harness) {
 func testLostRace(t *testing.T, h Harness) {
 	before := h.Branches(t)
 	backend := h.Backend()
-	rival := h.Rival()
 	const chore = "chore-race"
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -139,6 +145,10 @@ func testLostRace(t *testing.T, h Harness) {
 	if err != nil {
 		t.Fatalf("seed Finish: %v", err)
 	}
+
+	// Rival is obtained only now, after the seed writes it must see: its
+	// handle's view is fixed as of this call.
+	rival := h.Rival()
 
 	// Both sides read the same tip before either claims it.
 	staleFromBackend, err := backend.Read(chore)
@@ -169,6 +179,60 @@ func testLostRace(t *testing.T, h Harness) {
 	}
 	if !reflect.DeepEqual(got, winner) {
 		t.Fatalf("Read after race: got %+v, want the winner's tip %+v", got, winner)
+	}
+
+	requireNoBranchesMoved(t, h, before)
+}
+
+// testStaleMirror covers the shape testLostRace doesn't: the loser's own
+// view (not just a freshly-read tip handed to it) is out of date when it
+// tries to Claim. backend reads tip before rival exists, so rival wins the
+// Claim it makes right after; backend then Claims against that very tip --
+// stale the moment rival won -- and must lose the race rather than
+// succeeding against a view of the store that no longer matches. A Remote's
+// mirror only refreshes on that loss, so this is also the case that proves
+// the loser's next Read reflects the winner rather than repeating its own
+// stale view.
+func testStaleMirror(t *testing.T, h Harness) {
+	before := h.Branches(t)
+	const chore = "chore-stale-mirror"
+
+	backend := h.Backend()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seed, err := ledger.Claim(backend, chore, ledger.Tip{}, ledger.ClaimedBy{Host: "seed", Start: start})
+	if err != nil {
+		t.Fatalf("seed Claim: %v", err)
+	}
+	seedDone, err := ledger.Finish(backend, chore, seed, ledger.State{}, start.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("seed Finish: %v", err)
+	}
+
+	tip, err := backend.Read(chore)
+	if err != nil {
+		t.Fatalf("Read before race: %v", err)
+	}
+	if !reflect.DeepEqual(tip, seedDone) {
+		t.Fatalf("Read before race: got %+v, want the seeded tip %+v", tip, seedDone)
+	}
+
+	rival := h.Rival()
+	rivalClaim, err := ledger.Claim(rival, chore, tip, ledger.ClaimedBy{Host: "rival", Start: start.Add(2 * time.Minute)})
+	if err != nil {
+		t.Fatalf("rival Claim: %v", err)
+	}
+
+	_, err = ledger.Claim(backend, chore, tip, ledger.ClaimedBy{Host: "loser", Start: start.Add(2 * time.Minute)})
+	if !errors.Is(err, ledger.ErrLostRace) {
+		t.Fatalf("stale-mirror Claim: got err %v, want errors.Is(err, ledger.ErrLostRace)", err)
+	}
+
+	got, err := backend.Read(chore)
+	if err != nil {
+		t.Fatalf("Read after losing on a stale mirror: %v", err)
+	}
+	if !reflect.DeepEqual(got, rivalClaim) {
+		t.Fatalf("Read after losing on a stale mirror: got %+v, want the rival's claim %+v", got, rivalClaim)
 	}
 
 	requireNoBranchesMoved(t, h, before)
@@ -220,7 +284,6 @@ func testLostRaceOnEmpty(t *testing.T, h Harness) {
 func testDoneOverClaim(t *testing.T, h Harness) {
 	before := h.Branches(t)
 	backend := h.Backend()
-	rival := h.Rival()
 	const chore = "chore-done"
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -256,7 +319,9 @@ func testDoneOverClaim(t *testing.T, h Harness) {
 	}
 
 	// A Finish against a stale claim tip (someone else already re-claimed
-	// the chore) must lose the race rather than clobber the re-claim.
+	// the chore) must lose the race rather than clobber the re-claim. rival
+	// is obtained only now, after done, so its handle's view includes it.
+	rival := h.Rival()
 	rivalClaim, err := ledger.Claim(rival, chore, done, ledger.ClaimedBy{Host: "rival", Start: start.Add(2 * time.Minute)})
 	if err != nil {
 		t.Fatalf("rival re-Claim: %v", err)
@@ -280,7 +345,6 @@ func testDoneOverClaim(t *testing.T, h Harness) {
 func testStaleClaim(t *testing.T, h Harness) {
 	before := h.Branches(t)
 	b := h.Backend()
-	rival := h.Rival()
 	const chore = "chore-stale"
 
 	seedStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -321,7 +385,9 @@ func testStaleClaim(t *testing.T, h Harness) {
 	}
 
 	// A Rival takes over the stale claim, carrying LastSwept/Cursor forward
-	// from the done state that preceded the crashed claim.
+	// from the done state that preceded the crashed claim. rival is obtained
+	// only now, after the crashed claim, so its handle's view includes it.
+	rival := h.Rival()
 	takeover, err := ledger.Claim(rival, chore, claim, ledger.ClaimedBy{Host: "rescuer", Start: t0.Add(timeout).Add(time.Second)})
 	if err != nil {
 		t.Fatalf("takeover Claim: %v", err)

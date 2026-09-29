@@ -1,6 +1,7 @@
 package ledger_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -12,6 +13,33 @@ import (
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 )
+
+// fetchCmdCount counts top-level `git fetch` cmd_name events in the
+// GIT_TRACE2_EVENT log at path.
+func fetchCmdCount(t *testing.T, path string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read trace2 log %s: %v", path, err)
+	}
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev struct {
+			Event string `json:"event"`
+			Name  string `json:"name"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("parse trace2 line %q: %v", line, err)
+		}
+		if ev.Event == "cmd_name" && ev.Name == "fetch" {
+			count++
+		}
+	}
+	return count
+}
 
 // remoteHarness is the ledgertest.Harness for Remote: the "remote" is a bare
 // repo shared by Backend and Rival, each of which is a Remote over its own
@@ -65,28 +93,21 @@ func TestRemoteLedgerContract(t *testing.T) {
 	ledgertest.RunContract(t, newRemoteHarness)
 }
 
-// TestRemotePushFailureNotLostRace asserts that a push failing for a reason
-// other than the lease losing (the remote URL is unreachable) surfaces as a
-// plain error, never ErrLostRace: the discrimination in Remote.Append must
-// query the remote's actual ref value, not just infer a lost race from any
-// push failure.
-func TestRemotePushFailureNotLostRace(t *testing.T) {
+// TestNewRemoteUnreachableNotLostRace asserts that NewRemote's own sync
+// failing (the remote URL is unreachable) surfaces as a plain error, never
+// ErrLostRace: NewRemote now owns the routine fetch, so an unreachable
+// remote fails there rather than ever reaching Append's push.
+func TestNewRemoteUnreachableNotLostRace(t *testing.T) {
 	setGitIdentityEnv(t)
 	scratch := t.TempDir()
-	// A path with no repo at all: git fails to even connect, well before it
-	// could evaluate the lease against the ref's current value.
+	// A path with no repo at all: git fails to even connect.
 	unreachable := t.TempDir() + "/does-not-exist.git"
-	r, err := ledger.NewRemote(scratch, unreachable)
-	if err != nil {
-		t.Fatalf("NewRemote: %v", err)
-	}
-
-	_, err = r.Append("chore-unreachable", "", ledger.State{Phase: ledger.Claimed}, time.Now())
+	_, err := ledger.NewRemote(scratch, unreachable)
 	if err == nil {
-		t.Fatal("Append against an unreachable remote: got nil error, want one")
+		t.Fatal("NewRemote against an unreachable remote: got nil error, want one")
 	}
 	if errors.Is(err, ledger.ErrLostRace) {
-		t.Fatalf("Append against an unreachable remote: got ErrLostRace, want a plain error: %v", err)
+		t.Fatalf("NewRemote against an unreachable remote: got ErrLostRace, want a plain error: %v", err)
 	}
 }
 
@@ -124,8 +145,8 @@ func TestRemoteAppendAppliedDespitePushError(t *testing.T) {
 	}
 }
 
-// TestRemoteRedactsCredentials asserts that a Remote error never leaks a
-// token carried as URL userinfo (the Forgejo tokened URL shape).
+// TestRemoteRedactsCredentials asserts that NewRemote's own sync error never
+// leaks a token carried as URL userinfo (the Forgejo tokened URL shape).
 func TestRemoteRedactsCredentials(t *testing.T) {
 	setGitIdentityEnv(t)
 	scratch := t.TempDir()
@@ -133,17 +154,12 @@ func TestRemoteRedactsCredentials(t *testing.T) {
 	// (not a DNS failure, which some environments intercept), and the
 	// userinfo is included right in the connection error text if unredacted.
 	tokened := "https://user:secret@127.0.0.1:1/x.git"
-	r, err := ledger.NewRemote(scratch, tokened)
-	if err != nil {
-		t.Fatalf("NewRemote: %v", err)
-	}
-
-	_, err = r.Append("chore-redact", "", ledger.State{Phase: ledger.Claimed}, time.Now())
+	_, err := ledger.NewRemote(scratch, tokened)
 	if err == nil {
-		t.Fatal("Append against an unreachable remote: got nil error, want one")
+		t.Fatal("NewRemote against an unreachable remote: got nil error, want one")
 	}
 	if strings.Contains(err.Error(), "secret") {
-		t.Fatalf("Append error leaked the URL's credential: %v", err)
+		t.Fatalf("NewRemote error leaked the URL's credential: %v", err)
 	}
 }
 
@@ -183,13 +199,61 @@ func TestRemoteAppendPushFailureRedactsCredentials(t *testing.T) {
 	if strings.Contains(err.Error(), "secret") {
 		t.Fatalf("Append error leaked the URL's credential: %v", err)
 	}
+
+	// The mirror committed before the push was rejected; that phantom commit
+	// must not outlive the Append, or a later Read reports a claim the
+	// remote never received.
+	tip, err := r.Read("chore-push-redact")
+	if err != nil {
+		t.Fatalf("Read after rejected push: %v", err)
+	}
+	if tip.Commit != "" {
+		t.Fatalf("Read after rejected push = %+v, want the remote's zero Tip", tip)
+	}
 }
 
-// TestRemoteSnapshotDoesNotReFetch asserts that ledger.Snapshot syncs a
-// Remote exactly once: reads through the returned Reader keep seeing the tip
-// as of Snapshot even after a rival Append moves the remote ref, while a
-// fresh Remote.Read (which syncs per call) sees the new tip.
-func TestRemoteSnapshotDoesNotReFetch(t *testing.T) {
+// TestRemoteReadHistoryNoFetch asserts that the only routine fetch is
+// NewRemote's own construction-time sync: Read and History afterwards serve
+// from the mirror with no network round-trip at all.
+func TestRemoteReadHistoryNoFetch(t *testing.T) {
+	setGitIdentityEnv(t)
+	bare := newBareRepo(t)
+
+	seed, err := ledger.NewRemote(t.TempDir(), bare)
+	if err != nil {
+		t.Fatalf("NewRemote (seed): %v", err)
+	}
+	if _, err := seed.Append("chore-no-refetch", "", ledger.State{Phase: ledger.Claimed}, time.Now()); err != nil {
+		t.Fatalf("Append (seed): %v", err)
+	}
+
+	trace := filepath.Join(t.TempDir(), "trace2.log")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+
+	r, err := ledger.NewRemote(t.TempDir(), bare)
+	if err != nil {
+		t.Fatalf("NewRemote: %v", err)
+	}
+	if got := fetchCmdCount(t, trace); got != 1 {
+		t.Fatalf("fetch count after NewRemote = %d, want exactly 1", got)
+	}
+
+	if _, err := r.Read("chore-no-refetch"); err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if _, err := r.History("chore-no-refetch", time.Time{}); err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	if got := fetchCmdCount(t, trace); got != 1 {
+		t.Errorf("fetch count after Read/History = %d, want still 1 (no re-fetch)", got)
+	}
+}
+
+// TestRemoteStaleMirrorInvisibleUntilRace asserts that an already-open
+// Remote's mirror does not pick up a rival's push just because the rival
+// pushed: only losing its own compare-and-swap against the remote triggers
+// the mirror's next sync.
+func TestRemoteStaleMirrorInvisibleUntilRace(t *testing.T) {
 	setGitIdentityEnv(t)
 	bare := newBareRepo(t)
 
@@ -197,48 +261,39 @@ func TestRemoteSnapshotDoesNotReFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRemote: %v", err)
 	}
-	oldCommit, err := r.Append("chore-snapshot", "", ledger.State{Phase: ledger.Claimed}, time.Now())
-	if err != nil {
-		t.Fatalf("Append (seed old tip): %v", err)
-	}
-
-	snap, err := ledger.Snapshot(r)
-	if err != nil {
-		t.Fatalf("Snapshot: %v", err)
-	}
-
-	// A rival Remote over its own scratch clone moves the remote ref behind
-	// the snapshot.
 	rival, err := ledger.NewRemote(t.TempDir(), bare)
 	if err != nil {
 		t.Fatalf("NewRemote (rival): %v", err)
 	}
-	newCommit, err := rival.Append("chore-snapshot", oldCommit, ledger.State{Phase: ledger.Done}, time.Now())
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	rivalTip, err := ledger.Claim(rival, "chore-stale-mirror", ledger.Tip{}, ledger.ClaimedBy{Host: "rival", Start: start})
 	if err != nil {
-		t.Fatalf("Append (rival, advance remote): %v", err)
+		t.Fatalf("Claim (rival): %v", err)
 	}
 
-	tip, err := snap.Read("chore-snapshot")
+	// r's mirror was synced (empty) before rival's push landed, so it still
+	// sees an empty tip.
+	tip, err := r.Read("chore-stale-mirror")
 	if err != nil {
-		t.Fatalf("snapshot.Read: %v", err)
+		t.Fatalf("Read: %v", err)
 	}
-	if tip.Commit != oldCommit {
-		t.Fatalf("snapshot.Read after remote advanced = %s, want the pre-Snapshot tip %s (no re-fetch)", tip.Commit, oldCommit)
+	if tip.Commit != "" {
+		t.Fatalf("Read before losing a race = %q, want \"\" (mirror unchanged by rival's push)", tip.Commit)
 	}
 
-	entries, err := snap.History("chore-snapshot", time.Time{})
-	if err != nil {
-		t.Fatalf("snapshot.History: %v", err)
-	}
-	if len(entries) != 1 || entries[0].Commit != oldCommit {
-		t.Fatalf("snapshot.History after remote advanced = %+v, want only the pre-Snapshot tip %s", entries, oldCommit)
+	// r's own Claim, built against its stale (empty) tip, loses the race;
+	// only that failure resyncs the mirror. A distinct ClaimedBy.Host from
+	// rival's keeps the two commits from coincidentally hashing the same.
+	_, err = ledger.Claim(r, "chore-stale-mirror", ledger.Tip{}, ledger.ClaimedBy{Host: "loser", Start: start})
+	if !errors.Is(err, ledger.ErrLostRace) {
+		t.Fatalf("Claim against a stale mirror: got err %v, want errors.Is(err, ledger.ErrLostRace)", err)
 	}
 
-	freshTip, err := r.Read("chore-snapshot")
+	tip, err = r.Read("chore-stale-mirror")
 	if err != nil {
-		t.Fatalf("r.Read (fresh, syncs per call): %v", err)
+		t.Fatalf("Read after losing the race: %v", err)
 	}
-	if freshTip.Commit != newCommit {
-		t.Fatalf("r.Read after remote advanced = %s, want the new tip %s", freshTip.Commit, newCommit)
+	if tip.Commit != rivalTip.Commit {
+		t.Fatalf("Read after losing the race = %q, want the rival's commit %q (lost race resynced the mirror)", tip.Commit, rivalTip.Commit)
 	}
 }
