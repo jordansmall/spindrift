@@ -2,12 +2,14 @@
 # lib/env-schema.nix's butlerChoreClasses default, the generated Go builtins
 # list (cmd/launcher/internal/chore/builtins_gen.go), and docs all derive from
 # this one list. List order is load-bearing: it fixes classesDefault's byte
-# layout, which the generated docs and flag table render verbatim.
+# layout, which the generated docs and flag table render verbatim. This list
+# declares names and default classes only -- prompt files resolve by name
+# from mkHarness's choresDir (read by, e.g., the BUTLER_CHORES eval assertion
+# and the image copy), which a Consumer may replace.
 let
   chores = [
     {
       name = "bugs";
-      prompt = ../templates/default/prompts/chores/bugs.md;
       classes = [
         "error-handling"
         "resource-leak"
@@ -15,12 +17,10 @@ let
     }
     {
       name = "refactor";
-      prompt = ../templates/default/prompts/chores/refactor.md;
       classes = [ "dead-code" ];
     }
     {
       name = "docs-drift";
-      prompt = ../templates/default/prompts/chores/docs-drift.md;
       classes = [ "stale-reference" ];
     }
   ];
@@ -30,5 +30,5 @@ let
   );
 in
 {
-  inherit chores names classesDefault;
+  inherit names classesDefault;
 }
