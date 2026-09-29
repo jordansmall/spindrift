@@ -71,12 +71,14 @@ func AmbiguousLabelNames() []string {
 	return []string{"agent-ambiguous-spec"}
 }
 
-// ButlerLabelNames returns the single fixed butler-finding-tier label name
-// (ADR 0056), checked advisory the same way agent-research-finding is: the
-// butler kind carries no lifecycle labels of its own (claims live in the
-// Ledger), so this finding label is its only doctor-visible one.
+// ButlerLabelNames returns the two fixed butler-tier label names, checked
+// advisory the same way agent-research-finding is: the butler kind carries no
+// lifecycle labels of its own (claims live in the Ledger), so these are its
+// only doctor-visible labels. agent-butler-finding (ADR 0056) marks every
+// Chore finding the host files; agent-butler-patch (ADR 0057) joins it on a
+// finding the host lands as a patch PR.
 func ButlerLabelNames() []string {
-	return []string{"agent-butler-finding"}
+	return []string{"agent-butler-finding", "agent-butler-patch"}
 }
 
 // labelTier is one advisory label family. Only the work tier is Required, and

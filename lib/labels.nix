@@ -158,6 +158,20 @@ in
     }
   ];
 
+  # Butler-patch provenance (ADR 0057): the label the host applies alongside
+  # butlerFinding's when it lands the finding itself as a patch PR rather than
+  # leaving it for a worker to promote. Same doctor-visible, advisory
+  # treatment as butlerFinding. Its color must stay distinct from every other
+  # TriageLabelMeta color or TestTriageLabelMeta_ColorsAreDistinct trips.
+  butlerPatch = [
+    {
+      role = "ButlerPatch";
+      name = "agent-butler-patch";
+      color = "5319e7";
+      description = "Butler finding the host landed as a patch PR (ADR 0057)";
+    }
+  ];
+
   # A local-only frontmatter marker, never a real created GitHub/Forgejo label:
   # forge.DispatchLabels.AllLabels() (cmd/launcher/internal/forge/dispatch.go)
   # excludes it, and the Go renderer must not emit it into TriageLabelMeta or
