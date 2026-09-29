@@ -70,6 +70,8 @@ func TestNormalizeDedupTerm(t *testing.T) {
 		{"arrow-comment dropped", "closes -->  the comment", "", false},
 		{"bare double-dash dropped", "a--b", "", false},
 		{"separator-only dropped", "._/", "", false},
+		{"lone hyphen dropped", "-", "", false},
+		{"punctuation-only dropped", "!!", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -78,6 +80,17 @@ func TestNormalizeDedupTerm(t *testing.T) {
 				t.Errorf("normalizeDedupTerm(%q) = (%q, %v), want (%q, %v)", c.in, got, ok, c.want, c.wantOK)
 			}
 		})
+	}
+}
+
+// UsableDedupTerm is exactly normalizeDedupTerm's ok, so a caller outside
+// settle keeps the same terms splitDedupTerms does (issue #4036).
+func TestUsableDedupTerm_AgreesWithNormalizeDedupTerm(t *testing.T) {
+	for _, in := range []string{"a.go:Foo", "-", "!!", "a.go:F, misc", "a--b", ""} {
+		_, ok := normalizeDedupTerm(in)
+		if got := UsableDedupTerm(in); got != ok {
+			t.Errorf("UsableDedupTerm(%q) = %v, want %v", in, got, ok)
+		}
 	}
 }
 
