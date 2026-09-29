@@ -10,15 +10,23 @@
 #
 # It also pins both agent workflow sets to `.spindrift/logs/`, where the launcher
 # writes (HostLogDirFor): a repo-root `logs/` is always empty (#3934).
+#
+# The Forgejo `comment: >-` copies of the recover-park and dispatch-blocked
+# comments are hand-maintained against the GitHub `--body` originals and have
+# drifted before (issue #4010), so their normalized text is pinned equal too.
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
     assertMsg
     concatStringsSep
     filter
+    findFirst
     hasInfix
     replaceStrings
+    sublist
+    trim
     ;
+  inherit (pkgs.lib.lists) findFirstIndex;
   setupSrc = builtins.readFile ../../.github/actions/agent-setup/action.yml;
   swapSrc = builtins.readFile ../../.github/actions/forgejo-label-swap/label-swap.sh;
   githubWorkflows = {
@@ -85,6 +93,93 @@ let
     "agent-dispatch.yml"
     "forgejo/agent-dispatch.yml"
   ];
+
+  # Forgejo folds a `comment: >-` block, so line breaks collapse to spaces;
+  # fold GitHub's copy the same way before comparing. Same normalizer as
+  # lib/renderers.nix's `oneLine`, which that file does not export.
+  collapseWs =
+    s:
+    concatStringsSep " " (filter (x: x != "") (filter builtins.isString (builtins.split "[ \t\n]+" s)));
+
+  singleCapture =
+    pattern: what: file: src:
+    let
+      matches = filter builtins.isList (builtins.split pattern src);
+    in
+    assert assertMsg (
+      builtins.length matches == 1
+    ) "expected exactly one ${what} in ${file}, found ${toString (builtins.length matches)}";
+    builtins.head (builtins.head matches);
+
+  # `[^"\\]`/`[^\n]*`, not `.*` (newline semantics differ across regex libs); the
+  # `\n` must be a "" escape — a `''`-quoted string passes a literal `\` and `n`.
+  # The `\\.` alternative keeps an escaped `\"` from ending the payload early.
+  ghBody = singleCapture "--body \"(([^\"\\\\]|\\\\.)*)\"" "`--body \"…\"` payload";
+  ghRecoverReason = singleCapture "RECOVER_REASON: ([^\n]*)" "`RECOVER_REASON:` env line";
+
+  # GitHub shell-escapes backticks and double quotes as \` and \" inside a
+  # `--body "…"` double-quoted string; undo both before comparing prose.
+  unescapeShell = replaceStrings [ "\\`" "\\\"" ] [ "`" "\"" ];
+
+  # Approximates YAML `>-` folding: join the block's lines with a single space,
+  # trimming each. As in YAML, a blank line does not end the block; only the
+  # first non-blank line shallower than the block's first non-blank line does.
+  # Unlike YAML, a blank line folds to a space rather than a newline, so a
+  # Forgejo-only paragraph break does not register as drift.
+  fjComment =
+    what: src:
+    let
+      splitOnMarker = builtins.split "comment: >-\n" src;
+      markerMatches = filter builtins.isList splitOnMarker;
+      rest =
+        assert assertMsg (
+          builtins.length markerMatches == 1
+        ) "expected exactly one `comment: >-` in ${what}";
+        builtins.elemAt splitOnMarker 2;
+      lines = filter builtins.isString (builtins.split "\n" rest);
+      indent = builtins.head (builtins.match "( *).*" (findFirst (l: trim l != "") "" lines));
+      hasIndent = l: builtins.substring 0 (builtins.stringLength indent) l == indent;
+      endIdx = findFirstIndex (l: trim l != "" && !hasIndent l) (builtins.length lines) lines;
+    in
+    concatStringsSep " " (map trim (sublist 0 endIdx lines));
+
+  # Each row names the comment, the shared basename both forges' workflow file
+  # is keyed under, and the substring substitutions (zero or more) needed to
+  # line up the GitHub `--body` prose with the Forgejo `comment: >-` prose.
+  # The recover row reads its `to` from the GitHub env line, so the fallback
+  # literal is pinned too; the dispatch row's `blockers` has no GitHub-side
+  # expression to read, so its Forgejo expression is written out here.
+  commentRows = [
+    {
+      name = "recover park comment";
+      file = "agent-recover.yml";
+      subst = [
+        {
+          from = "$RECOVER_REASON";
+          to = ghRecoverReason "agent-recover.yml" githubWorkflows."agent-recover.yml";
+        }
+      ];
+    }
+    {
+      name = "dispatch blocked-release comment";
+      file = "agent-dispatch.yml";
+      subst = [
+        {
+          from = "\${blockers}";
+          to = "\${{ steps.blocked.outputs.blockers }}";
+        }
+      ];
+    }
+  ];
+
+  commentPairs = map (row: {
+    inherit (row) name file;
+    ghNorm = collapseWs (
+      replaceStrings (map (s: s.from) row.subst) (map (s: s.to) row.subst) (unescapeShell (ghBody row.file githubWorkflows.${row.file}))
+    );
+    fjNorm = collapseWs (fjComment "forgejo/${row.file}" forgejoWorkflows."forgejo/${row.file}");
+  }) commentRows;
+  commentMismatches = filter (p: p.ghNorm != p.fjNorm) commentPairs;
 in
 {
   agent-workflows-control-plane-wiring =
@@ -110,4 +205,15 @@ in
       badBlockedMarker == [ ]
     ) "agent dispatch workflow(s) no longer test and read `.spindrift/logs/blocked.txt` — a dependency-blocked issue would never be released (issue #3934): ${concatStringsSep ", " badBlockedMarker}";
     pkgs.runCommand "agent-workflows-log-dir" { } "touch $out";
+
+  agent-workflows-comment-parity =
+    assert assertMsg (commentMismatches == [ ]) (
+      concatStringsSep "; " (
+        map (
+          p:
+          "${p.name} drifted between .github/workflows/${p.file} and .forgejo/workflows/${p.file} (issue #4010): github=\"${p.ghNorm}\" forgejo=\"${p.fjNorm}\""
+        ) commentMismatches
+      )
+    );
+    pkgs.runCommand "agent-workflows-comment-parity" { } "touch $out";
 }
