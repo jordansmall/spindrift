@@ -30,7 +30,9 @@ Promotion classes for this run (blank when promotion is off):
 
 ${CHORE_CLASSES}
 
-Tag every finding with a class: a short lowercase slug naming its kind.
+Tag every finding with a class naming its kind: a lowercase slug of
+letters, digits, and `-`, not starting with `-`, at most 40 characters. A
+class outside that shape is rejected, and the finding with it.
 Prefer a promotion class when one genuinely fits; never stretch a finding
 to fit one just to make it a candidate.
 

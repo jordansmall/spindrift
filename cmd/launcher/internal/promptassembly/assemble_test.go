@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/signalwire"
 )
 
 // The real templates/default/prompts tree, resolved relative to this
@@ -3458,6 +3459,26 @@ func TestAssembleButlerKindRendersButlerPrompt(t *testing.T) {
 	}
 	if result.Handoff.SessionMode != "initial" {
 		t.Errorf("Handoff.SessionMode = %q, want %q", result.Handoff.SessionMode, "initial")
+	}
+}
+
+// The butler prompt's class rule must track signalwire.ValidClass: a Box
+// reporting a class outside it loses the whole finding (issue #4040). The
+// needle derives from ClassRule, itself pinned to MaxClassLen, so a grammar
+// change fails here instead of leaving the prompt stale.
+func TestButlerPromptStatesClassSlugRule(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(promptsDir, "butler-prompt.md"))
+	if err != nil {
+		t.Fatalf("reading butler-prompt.md: %v", err)
+	}
+	prompt := strings.Join(strings.Fields(string(b)), " ")
+
+	rule := strings.TrimPrefix(signalwire.ClassRule, "must be ")
+	rule = strings.ReplaceAll(rule, "'-'", "`-`")
+	for _, want := range []string{rule, "rejected, and the finding with it"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("butler-prompt.md missing %q", want)
+		}
 	}
 }
 
