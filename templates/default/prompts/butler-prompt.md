@@ -54,6 +54,9 @@ candidate.
 
 # FILE FINDINGS
 
+Relay at most ${CHORE_MAX_FINDINGS} findings this run, the most important
+first — the launcher may refuse or drop any beyond that.
+
 ${BUTLER_FILE_ISSUES_RELAY_STEP}${BUTLER_FILE_ISSUES_RELAY_SOCKET_STEP}Never push, never open a PR, never commit, never edit an issue, add or
 remove a label, or file an issue yourself, and never write to the Ledger —
 the launcher records this sweep's own done commit once you exit. Comments

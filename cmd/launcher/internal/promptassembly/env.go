@@ -183,10 +183,18 @@ type Env struct {
 	// ChoreClasses is the Chore's promotion-candidate class allow-list
 	// (issue #3880), space-joined; empty whenever the host has promotion
 	// off (dispatch.Chore.Classes, set by internal/butler's Runner only
-	// when BUTLER_MAX_PROMOTIONS_PER_DAY > 0). It is informational for the
-	// Box's prompt only -- settle re-checks a finding's class against the
-	// host's own allow-list regardless of what this string says.
+	// while today's promotion room is > 0 -- off, or spent for the day,
+	// leaves it empty). It is informational for the Box's prompt only --
+	// settle re-checks a finding's class against the host's own
+	// allow-list regardless of what this string says.
 	ChoreClasses string // dispatch.go: $CHORE_CLASSES
+
+	// ChoreMaxFindings is the run's decimal cap on relayed findings (issue
+	// #3994): dispatch.go's buildBoxEnv always sets it, for every Chore
+	// Box, to the sweep's own findings room when positive, else the
+	// signal socket's fixed default -- so the Box's prompt can name the
+	// run's actual cap rather than the socket's fallback alone.
+	ChoreMaxFindings string // dispatch.go: $CHORE_MAX_FINDINGS
 }
 
 // kind is the DispatchKind fallback every reader of the field must apply

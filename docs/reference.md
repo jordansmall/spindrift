@@ -4716,9 +4716,10 @@ run; see the [Daemon](#daemon) section's **Startup preflight** description
 host-side allow-list of finding classes — the trust gate for auto-promotion
 (issue #3880, below); the default covers the three built-ins, and a Chore
 with no entry never promotes. The Box never controls this list: it only
-ever sees it read-only, as `CHORE_CLASSES`, and only while promotion is
-actually on (`BUTLER_MAX_PROMOTIONS_PER_DAY` > 0), so a Box whose findings
-can never promote never spends reviewer turns on candidates it cannot win.
+ever sees it read-only, as `CHORE_CLASSES`, and only while today's
+promotion budget still has room left (never while promotion is off or
+the day's promotions are spent), so a Box whose findings can never
+promote never spends reviewer turns on candidates it cannot win.
 Every class, configured or Box-reported, shares one grammar (issue #3986):
 a lowercase slug of letters, digits, and `-`, not starting with `-`, at most
 40 characters; a configured class that isn't one fails `spindrift butler`
@@ -4760,18 +4761,22 @@ and it stops counting): `BUTLER_MAX_SWEEPS_PER_DAY` (default `8`) caps runs
 started, `BUTLER_MAX_FINDINGS_PER_DAY` (default `10`) caps findings filed,
 and `BUTLER_DAILY_TOKEN_CEILING` (default `0`) caps the tokens completed runs
 spent, as a backstop. `BUTLER_MAX_FINDINGS_PER_SWEEP` (default `5`) caps one
-run: findings past it are dropped at settle and recorded as `dropped` in the
-Ledger, and a run does not start while fewer than that remain in the day's
-finding budget — bounding one run's contribution, though two Chores claimed
-on separate slots at once can each pass that check and jointly overshoot the
-day's budget. This headroom gate only applies when
-`BUTLER_MAX_FINDINGS_PER_DAY` is non-zero, and `BUTLER_MAX_FINDINGS_PER_SWEEP`
-must not exceed it — `spindrift butler` rejects that combination up front.
-With the defaults (day `10`, sweep `5`), a day that has already filed `6` or
-more refuses to start any further run, so part of the day's budget can go
-unused. `0` means no limit. Budgets gate only starting a run; a run already
+run: the Box's prompt names the cap, the Signal socket refuses findings
+past it, and settle drops any that still arrive past it — from either
+carrier — recording them as `dropped` in the Ledger. A run does not start
+while fewer than that remain in the day's finding budget — bounding one
+run's contribution, though two Chores claimed on separate slots at once can
+each pass that check and jointly overshoot the day's budget. This headroom
+gate only applies when `BUTLER_MAX_FINDINGS_PER_DAY` is non-zero, and
+`BUTLER_MAX_FINDINGS_PER_SWEEP` must not exceed it — `spindrift butler`
+rejects that combination up front. With the defaults (day `10`, sweep `5`),
+a day that has already filed `6` or more refuses to start any further run,
+so part of the day's budget can go unused. `0` means no limit. For
+`BUTLER_MAX_FINDINGS_PER_SWEEP`, that only removes the per-sweep cap — a
+run is still capped at the day's remaining `BUTLER_MAX_FINDINGS_PER_DAY`
+headroom when that is set. Budgets gate only starting a run; a run already
 under way is never stopped. The totals are walked from today's Ledger
-commits each time, with no second store, and "today" runs midnight to
+commits once per run, with no second store, and "today" runs midnight to
 midnight in `DAEMON_AWAKE_WINDOW`'s zone (UTC when that knob is unset).
 
 Each run scans two things: `lastSwept..HEAD` of the base branch (what changed

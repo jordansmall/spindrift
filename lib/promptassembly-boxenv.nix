@@ -209,4 +209,9 @@
     env = "CHORE_CLASSES";
     kind = "string";
   }
+  {
+    field = "ChoreMaxFindings";
+    env = "CHORE_MAX_FINDINGS";
+    kind = "string";
+  }
 ]
