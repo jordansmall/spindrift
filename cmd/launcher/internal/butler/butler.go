@@ -102,13 +102,12 @@ func New(backend ledger.Backend, tree Tree, it forge.IssueTracker, newBox func(d
 // front, and the due check (internal/chore.Check) shares a single now()
 // reading across every candidate, so the picture of "what's due" is
 // consistent across the whole pass rather than drifting chore to chore. The
-// due check -- today's totals plus each candidate's Read/History -- shares
-// one ledger.Snapshot, so a Remote backend costs one fetch for the whole pass
-// rather than one per candidate; the Claim and the settle step still go
-// through the backend directly, so they see a fresh tip. The tip handed to
-// the run is the snapshot's, so a rival commit since then just loses the
-// Claim compare-and-swap (Outcome{Kind: LostRace}) rather than being
-// overwritten.
+// due check -- today's totals plus each candidate's Read/History -- reads
+// the backend's own view, which for a hosted Ledger is the mirror the
+// factory fetched once at run start (issue #3995), so it costs no fetch. A
+// rival's commit since then is invisible here but still wins the remote's
+// compare-and-swap, so this run's Claim reports Outcome{Kind: LostRace}
+// rather than overwriting it.
 func (r *Runner) Sweep(chores []string) (Outcome, error) {
 	if len(chores) == 0 {
 		return Outcome{}, errors.New("butler: no chores to check")
@@ -128,23 +127,18 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 	}
 	whenNow := r.now()
 
-	snap, err := ledger.Snapshot(r.backend)
-	if err != nil {
-		return Outcome{}, fmt.Errorf("butler: snapshot ledger: %w", err)
-	}
-
-	today, err := ledger.DayTotalsAll(snap, r.policy.choreNames(), whenNow.In(r.policy.Zone))
+	today, err := ledger.DayTotalsAll(r.backend, r.policy.choreNames(), whenNow.In(r.policy.Zone))
 	if err != nil {
 		return Outcome{}, fmt.Errorf("butler: total today's ledgers: %w", err)
 	}
 
 	var reasons []string
 	for _, c := range candidates {
-		tip, err := snap.Read(c.Name)
+		tip, err := r.backend.Read(c.Name)
 		if err != nil {
 			return Outcome{}, fmt.Errorf("butler: read %s ledger: %w", c.Name, err)
 		}
-		recent, err := snap.History(c.Name, whenNow.Add(-c.Every))
+		recent, err := r.backend.History(c.Name, whenNow.Add(-c.Every))
 		if err != nil {
 			return Outcome{}, fmt.Errorf("butler: read %s ledger history: %w", c.Name, err)
 		}

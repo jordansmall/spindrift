@@ -8,12 +8,12 @@ import (
 	"spindrift.dev/launcher/internal/ledger"
 )
 
-// dayRoom is the day's shared promotion budget, re-walked fresh from the
-// Ledger each remaining call rather than carried as a stale snapshot: a
-// promotion whose done commit landed between run start and settle must
-// still count. Like ADR 0056's other budgets this is a soft cap, not a hard
-// one -- two runs settling at the same moment can each read the same total
-// and both spend it.
+// dayRoom is the day's shared promotion budget, re-walked from the Ledger
+// each remaining call rather than carried as a value computed at run start:
+// a promotion whose done commit this run landed between run start and
+// settle must still count. A hosted Ledger's view is the run's mirror
+// (issue #3995), so a rival's promotions since run start go uncounted; like
+// ADR 0056's other budgets this is a soft cap, not a hard one.
 type dayRoom struct {
 	perDay int
 	chores []string
@@ -26,18 +26,11 @@ func newDayRoom(policy Policy) dayRoom {
 	return dayRoom{perDay: policy.MaxPromotionsPerDay, chores: policy.choreNames(), zone: policy.Zone}
 }
 
-// remaining takes its own fresh ledger.Snapshot of backend (rather than
-// reusing any snapshot a caller already holds), since it must see
-// promotions that landed since that earlier snapshot was taken, then sums
-// today's totals across d.chores in d.zone. A Snapshot or DayTotalsAll
-// error fails closed (0 room, a warning to stderr) rather than promoting on
-// a total it could not compute.
+// remaining sums today's totals across d.chores in d.zone from backend. A
+// DayTotalsAll error fails closed (0 room, a warning to stderr) rather than
+// promoting on a total it could not compute.
 func (d dayRoom) remaining(backend ledger.Backend, now time.Time) int {
-	var totals ledger.Totals
-	snap, err := ledger.Snapshot(backend)
-	if err == nil {
-		totals, err = ledger.DayTotalsAll(snap, d.chores, now.In(d.zone))
-	}
+	totals, err := ledger.DayTotalsAll(backend, d.chores, now.In(d.zone))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "butler: promotion room: %s\n", err)
 		return 0
