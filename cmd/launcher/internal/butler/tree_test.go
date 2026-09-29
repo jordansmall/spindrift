@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
+	"spindrift.dev/launcher/internal/signalwire"
 )
 
 // newTreeBareRepo builds a bare repo with one commit on "main" holding the
@@ -196,7 +197,7 @@ func TestGitTreeCommitPatch_CommitsCleanDiffOnTip(t *testing.T) {
 	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// patched\n")
 
 	tree := GitTree{Repo: bare, Name: "Butler Bot", Email: "butler@example.com"}
-	pc, err := tree.CommitPatch("main", diff, "apply butler patch")
+	pc, err := tree.CommitPatch("main", ScannedCommit(tip), diff, "apply butler patch")
 	if err != nil {
 		t.Fatalf("CommitPatch: %v", err)
 	}
@@ -230,21 +231,48 @@ func TestGitTreeCommitPatch_CommitsCleanDiffOnTip(t *testing.T) {
 }
 
 // TestGitTreeCommitPatch_StaleDiffErrorsAndWritesNoRef advances branch past
-// the tip the diff was built against, so the diff's context no longer
-// matches: CommitPatch must fail with a "does not apply" error and must
-// leave patchRef untouched (never partially write it).
+// the tip the diff was built against, so the diff's context still matches
+// scanned (the diff's own origin) but no longer matches the base head gate:
+// CommitPatch must fail with an error naming "base head" and must leave
+// patchRef untouched (never partially write it).
 func TestGitTreeCommitPatch_StaleDiffErrorsAndWritesNoRef(t *testing.T) {
 	bare, tip := newTreeBareRepo(t)
 	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// patched\n")
 	advanceBranch(t, bare, "main", "a.go", "package a\n\n// unrelated upstream change\n")
 
 	tree := GitTree{Repo: bare, Name: "Butler Bot", Email: "butler@example.com"}
-	_, err := tree.CommitPatch("main", diff, "apply butler patch")
+	_, err := tree.CommitPatch("main", ScannedCommit(tip), diff, "apply butler patch")
 	if err == nil {
 		t.Fatal("CommitPatch on a stale diff: got nil error, want one")
 	}
-	if !strings.Contains(err.Error(), "does not apply") {
-		t.Fatalf("CommitPatch error = %v, want it to mention %q", err, "does not apply")
+	if !strings.Contains(err.Error(), "base head") {
+		t.Fatalf("CommitPatch error = %v, want it to mention %q", err, "base head")
+	}
+
+	if _, err := exec.Command("git", "-C", bare, "rev-parse", patchRef).Output(); err == nil {
+		t.Fatal("patchRef resolved after a failed CommitPatch, want it unwritten")
+	}
+}
+
+// TestGitTreeCommitPatch_FailsWhenDiffDoesNotApplyToScannedCommit pins the
+// other half of ADR 0057's ordered gate: a diff that applies cleanly to the
+// current base head but not to the scanned commit it was actually built
+// against (an older commit here) must still fail -- named "scanned commit"
+// -- and must leave patchRef untouched. Guards against a diff that only
+// happens to still apply to wherever the base head drifted, which was never
+// what the Box actually reviewed.
+func TestGitTreeCommitPatch_FailsWhenDiffDoesNotApplyToScannedCommit(t *testing.T) {
+	bare, scanned := newTreeBareRepo(t)
+	tip := advanceBranch(t, bare, "main", "a.go", "package a\n\n// upstream unrelated\n")
+	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// upstream unrelated\n\n// patched\n")
+
+	tree := GitTree{Repo: bare, Name: "Butler Bot", Email: "butler@example.com"}
+	_, err := tree.CommitPatch("main", ScannedCommit(scanned), diff, "apply butler patch")
+	if err == nil {
+		t.Fatal("CommitPatch with a diff that only applies to the base head: got nil error, want one")
+	}
+	if !strings.Contains(err.Error(), "scanned commit") {
+		t.Fatalf("CommitPatch error = %v, want it to mention %q", err, "scanned commit")
 	}
 
 	if _, err := exec.Command("git", "-C", bare, "rev-parse", patchRef).Output(); err == nil {
@@ -256,9 +284,11 @@ func TestGitTreeCommitPatch_StaleDiffErrorsAndWritesNoRef(t *testing.T) {
 // URL is set (as FetchTree sets it), re-fetches branch's tip rather than
 // trusting scratch's ref from an earlier FetchTree call: an upstream commit
 // landing between FetchTree and CommitPatch is the parent CommitPatch
-// commits on top of.
+// commits on top of. The advance touches only b.go, leaving a.go -- the
+// diff's own file -- matching between scanned (origTip) and the refetched
+// tip, so the scanned gate and the refetch are each pinned independently.
 func TestGitTreeCommitPatch_RefetchesBeforeApplying(t *testing.T) {
-	upstream, _ := newTreeBareRepo(t)
+	upstream, origTip := newTreeBareRepo(t, "a.go", "b.go")
 	scratch := ledgertest.NewRepo(t)
 
 	tree, err := FetchTree(scratch, upstream, "main")
@@ -267,10 +297,10 @@ func TestGitTreeCommitPatch_RefetchesBeforeApplying(t *testing.T) {
 	}
 	tree.Name, tree.Email = "Butler Bot", "butler@example.com"
 
-	newTip := advanceBranch(t, upstream, "main", "a.go", "package a\n\n// upstream advanced\n")
-	diff := makeDiff(t, upstream, newTip, "a.go", "package a\n\n// upstream advanced\n\n// patched\n")
+	diff := makeDiff(t, upstream, origTip, "a.go", "a.go\n\n// patched\n")
+	newTip := advanceBranch(t, upstream, "main", "b.go", "b.go\n\n// upstream advanced\n")
 
-	pc, err := tree.CommitPatch("main", diff, "apply butler patch")
+	pc, err := tree.CommitPatch("main", ScannedCommit(origTip), diff, "apply butler patch")
 	if err != nil {
 		t.Fatalf("CommitPatch: %v", err)
 	}
@@ -288,11 +318,72 @@ func TestGitTreeCommitPatch_MissingIdentityErrors(t *testing.T) {
 	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// patched\n")
 
 	tree := GitTree{Repo: bare}
-	if _, err := tree.CommitPatch("main", diff, "apply butler patch"); err == nil {
+	if _, err := tree.CommitPatch("main", ScannedCommit(tip), diff, "apply butler patch"); err == nil {
 		t.Fatal("CommitPatch with no identity: got nil error, want one")
 	}
 	if _, err := exec.Command("git", "-C", bare, "rev-parse", patchRef).Output(); err == nil {
 		t.Fatal("patchRef resolved despite missing identity, want it unwritten")
+	}
+}
+
+// modHunk is an ordinary docs/x.md modification hunk, unrelated to whatever
+// attack section precedes it in the two reviewer-attack diffs below.
+const modHunk = `diff --git a/docs/x.md b/docs/x.md
+index 1111111..2222222 100644
+--- a/docs/x.md
++++ b/docs/x.md
+@@ -1,2 +1,2 @@
+ line1
+-line2
++line2changed
+`
+
+// TestVerifyDiffMatchesGit_RefusesReviewerAttacks pins the defense-in-depth
+// gate itself, independent of whatever the parser currently does with these
+// bytes: each diff smuggles a write to CLAUDE.md past a section signalwire's
+// old (pre-fix) parser silently dropped -- attack A via a binary-looking
+// "Files ... differ" line, attack B via the legacy "rename old"/"rename new"
+// header pair -- so entries here is what that old parser returned: just the
+// unrelated docs/x.md entry, with no sign CLAUDE.md was ever touched. git's
+// own numstat/summary reading of the bytes disagrees (it reports the
+// CLAUDE.md section too), and verifyDiffMatchesGit must refuse on that
+// disagreement alone, whatever entries a parser handed it (issue #4075).
+func TestVerifyDiffMatchesGit_RefusesReviewerAttacks(t *testing.T) {
+	bare, _ := newTreeBareRepo(t)
+	entries := []signalwire.DiffFile{{Path: "docs/x.md", Added: 1, Removed: 1}}
+
+	tests := map[string]string{
+		"binary-looking Files differ line": "diff --git a/CLAUDE.md b/CLAUDE.md\n" +
+			"index 1111111..2222222 100644\n" +
+			"Files a/CLAUDE.md and b/CLAUDE.md differ\n" +
+			modHunk,
+		"legacy rename old/new pair": "diff --git a/CLAUDE.md b/docs/evil.md\n" +
+			"rename old CLAUDE.md\n" +
+			"rename new docs/evil.md\n" +
+			modHunk,
+	}
+	for name, diff := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := verifyDiffMatchesGit(nil, bare, diff, entries); err == nil {
+				t.Fatal("verifyDiffMatchesGit: got nil error, want one")
+			}
+		})
+	}
+}
+
+// TestVerifyDiffMatchesGit_AcceptsMatchingModification pins the non-attack
+// case: a plain modification whose parsed entries actually match git's own
+// numstat reading must not be refused.
+func TestVerifyDiffMatchesGit_AcceptsMatchingModification(t *testing.T) {
+	bare, tip := newTreeBareRepo(t)
+	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// patched\n")
+
+	entries, err := signalwire.ParseUnifiedDiff(diff)
+	if err != nil {
+		t.Fatalf("ParseUnifiedDiff: %v", err)
+	}
+	if err := verifyDiffMatchesGit(nil, bare, diff, entries); err != nil {
+		t.Fatalf("verifyDiffMatchesGit: %v, want nil", err)
 	}
 }
 

@@ -1666,7 +1666,11 @@ func TestSweep_PatchDiffNoLongerAppliesFallsBackToPromote(t *testing.T) {
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
-	out, err := r.Sweep([]string{"bugs"})
+	var out Outcome
+	var err error
+	stdout := captureStdout(t, func() {
+		out, err = r.Sweep([]string{"bugs"})
+	})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -1680,6 +1684,16 @@ func TestSweep_PatchDiffNoLongerAppliesFallsBackToPromote(t *testing.T) {
 	labels := fc.PostIssueCalls[0].Labels
 	if !slices.Contains(labels, "ready-for-agent") || slices.Contains(labels, "agent-butler-patch") {
 		t.Fatalf("PostIssue labels = %v, want ready-for-agent and no agent-butler-patch", labels)
+	}
+
+	// status=patch-apply-failed (not patch-skipped, which names only the
+	// decide-time gate refusal above) so an operator grepping the token can
+	// tell a CommitPatch failure from a gate refusal.
+	if !strings.Contains(stdout, "status=patch-apply-failed") || !strings.Contains(stdout, "does not apply") {
+		t.Errorf("settle log = %q, want a status=patch-apply-failed line naming the CommitPatch error", stdout)
+	}
+	if strings.Contains(stdout, "status=patch-skipped") {
+		t.Errorf("settle log = %q, want no status=patch-skipped line: no gate refused this finding", stdout)
 	}
 
 	tip, err := backend.Read("bugs")
@@ -2402,5 +2416,131 @@ func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
 
 	if !strings.Contains(stdout, "status=patch-skipped") || !strings.Contains(stdout, "outside patch paths") {
 		t.Errorf("settle log = %q, want a status=patch-skipped line naming the patchPaths gate", stdout)
+	}
+}
+
+// patchableTopLevelDispatcher is patchableDispatcher's sibling for a
+// top-level file path (issue #4075): the two Sweep-level scanned-gate tests
+// below need a real on-disk repo, and git mktree -- ledgertest.NewRepo's own
+// fixture builder (see makeDiff's doc) -- only builds flat, single-segment
+// trees, so their tracked file can't live under docs/.
+func patchableTopLevelDispatcher(path, diff string) *dispatch.Fake {
+	d := dispatch.NewFake()
+	d.RunResult = dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":[%q],"class":"docs-drift","concurrence":"agreed","patch":%q}`, path+":Foo", diff),
+		},
+	}
+	return d
+}
+
+// TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough is the Sweep-
+// level acceptance case for ADR 0057's ordered apply-check (issue #4075):
+// newBox's closure advances the temp repo's branch only after Sweep has
+// already captured the scanned commit (butler.go's r.tree.Head, read before
+// newBox runs), so the diff applies to the moved base head but not to what
+// was actually scanned -- CommitPatch's scanned-commit gate must still
+// reject it, falling through to promote exactly as any other stale-diff
+// candidate does, and the settle log names the gate it failed. Runs over a
+// real GitTree/CommitPatch round trip, not fakeTree's scripted answer.
+func TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	bare, _ := newTreeBareRepo(t, "a.md")
+	advanceBranch(t, bare, "main", "a.md", "different content\n")
+	tree := GitTree{Repo: bare, Name: "Butler Bot", Email: "butler@example.com"}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9700"
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	diff := patchDiffFor("a.md")
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		// Base moves while the Box "works": only now does a.md's content
+		// match the diff's own context.
+		advanceBranch(t, bare, "main", "a.md", "old\n")
+		return patchableTopLevelDispatcher("a.md", diff)
+	}
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
+
+	var out Outcome
+	var err error
+	logs := captureStdout(t, func() {
+		out, err = r.Sweep([]string{"bugs"})
+	})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=1", out)
+	}
+	if len(pf.pushCalls) != 0 || len(pf.draftCalls) != 0 {
+		t.Errorf("pushCalls = %v draftCalls = %v, want none: the scanned gate must reject before any push/PR", pf.pushCalls, pf.draftCalls)
+	}
+	if !strings.Contains(logs, "scanned commit") {
+		t.Errorf("settle log = %q, want it to name the scanned commit gate", logs)
+	}
+}
+
+// TestSweep_PatchAppliesToScannedAndMovedBaseHeadLands is the Sweep-level
+// acceptance case's other half: a diff that applies to both the scanned
+// commit and the (moved) base head lands as a real patch commit and draft
+// PR, over a real GitTree/CommitPatch round trip rather than fakeTree's
+// scripted answer.
+func TestSweep_PatchAppliesToScannedAndMovedBaseHeadLands(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	bare, _ := newTreeBareRepo(t, "a.md", "other.md")
+	advanceBranch(t, bare, "main", "a.md", "old\n")
+	tree := GitTree{Repo: bare, Name: "Butler Bot", Email: "butler@example.com"}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9701"
+	fc.SetIssue(forge.Issue{Number: "9701"})
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/3"}
+	diff := patchDiffFor("a.md")
+	var movedHead string
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		// Base moves while the Box "works", touching an already-tracked but
+		// unrelated file so a.md still matches the diff's own context.
+		movedHead = advanceBranch(t, bare, "main", "other.md", "unrelated\n")
+		return patchableTopLevelDispatcher("a.md", diff)
+	}
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 1 || out.Promoted != 0 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=1 Promoted=0", out)
+	}
+
+	if len(pf.pushCalls) != 1 {
+		t.Fatalf("pushCalls = %+v, want exactly one", pf.pushCalls)
+	}
+	push := pf.pushCalls[0]
+	if push.srcDir != bare || push.localRef != patchRef {
+		t.Errorf("push srcDir/localRef = %q/%q, want %q/%q", push.srcDir, push.localRef, bare, patchRef)
+	}
+
+	commit := resolveRef(t, bare, patchRef)
+	if parent := resolveRef(t, bare, commit+"^"); parent != movedHead {
+		t.Errorf("patch commit parent = %s, want moved base head %s", parent, movedHead)
+	}
+	got, err := exec.Command("git", "-C", bare, "show", commit+":a.md").Output()
+	if err != nil {
+		t.Fatalf("show patched a.md: %v", err)
+	}
+	if string(got) != "new\n" {
+		t.Errorf("patched a.md = %q, want %q", string(got), "new\n")
 	}
 }

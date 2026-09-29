@@ -32,7 +32,7 @@ type fakeTree struct {
 func (f fakeTree) Head(branch string) (string, error)           { return f.head, f.headErr }
 func (f fakeTree) TrackedFiles(commit string) ([]string, error) { return f.files, f.filesErr }
 
-func (f fakeTree) CommitPatch(branch, diff, message string) (PatchCommit, error) {
+func (f fakeTree) CommitPatch(branch string, scanned ScannedCommit, diff, message string) (PatchCommit, error) {
 	if f.commitPatchCalls != nil {
 		*f.commitPatchCalls++
 	}

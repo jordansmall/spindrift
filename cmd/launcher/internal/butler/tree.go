@@ -10,20 +10,29 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitexec"
+	"spindrift.dev/launcher/internal/signalwire"
 )
+
+// ScannedCommit is the commit a finding was scanned against -- its own type
+// so CommitPatch's branch and scanned arguments cannot be swapped silently.
+type ScannedCommit string
 
 // Tree is the checkout a Butler scans -- a seam over a local repo's
 // Head/TrackedFiles so Sweep is testable without a real repo.
 type Tree interface {
 	Head(branch string) (string, error)
 	TrackedFiles(commit string) ([]string, error)
-	// CommitPatch fetches branch's current tip, checks that diff applies
-	// cleanly to it, and commits it on top as message under the launcher
-	// identity, returning a PatchCommit naming the repo dir and the local
-	// ref holding that commit -- exactly what
+	// CommitPatch first refuses diff unless git's own reading of it matches
+	// signalwire.ParseUnifiedDiff(diff), so the parser the gates decided on
+	// is never the only thing between an untrusted diff and a commit. It
+	// then checks that diff applies
+	// cleanly to scanned (the commit the finding was scanned against) and to
+	// branch's current tip, in that order, then commits it on top of the tip
+	// as message under the launcher identity, returning a PatchCommit naming
+	// the repo dir and the local ref holding that commit -- exactly what
 	// forge.BranchPusher.PushBranch(srcDir, localRef, branch) takes (issue
 	// #4074).
-	CommitPatch(branch, diff, message string) (PatchCommit, error)
+	CommitPatch(branch string, scanned ScannedCommit, diff, message string) (PatchCommit, error)
 }
 
 // PatchCommit is CommitPatch's result: srcDir and localRef, ready to hand
@@ -117,25 +126,28 @@ func fetchBranchTip(gitArgs []string, repo, url, branch string) error {
 }
 
 // CommitPatch implements Tree. See the Tree interface doc for the contract;
-// the mechanics: re-fetch branch's tip when g.URL is set (see fetchBranchTip
-// above), stage that tip into a throwaway index file (GIT_INDEX_FILE --
-// Repo is bare, so there is no working tree to stage into), apply diff
-// against it -- a stale/rebased diff fails here with gitexec.OutputErr's own
-// wrap around git's own error, not a separate check pass -- write the
-// resulting tree, commit it under the configured identity, and point
-// patchRef at the new commit.
-func (g GitTree) CommitPatch(branch, diff, message string) (PatchCommit, error) {
+// the mechanics: first, verifyDiffMatchesGit (below) refuses diff unless
+// git's own reading of it agrees with signalwire.ParseUnifiedDiff(diff) --
+// then gate on scanned (ADR 0057) -- read-tree it into a throwaway index and
+// `apply --cached --check` diff against it, a dry run that writes nothing --
+// then re-fetch branch's tip when g.URL is set (see fetchBranchTip above),
+// stage that tip into the same index (GIT_INDEX_FILE -- Repo is bare, so
+// there is no working tree to stage into), apply diff against it for real --
+// a stale/rebased diff fails here with gitexec.OutputErr's own wrap around
+// git's own error -- write the resulting tree, commit it under the
+// configured identity, and point patchRef at the new commit. The scanned
+// check catches a diff that never matched what the Box reviewed, even when
+// it happens to apply to the tip.
+func (g GitTree) CommitPatch(branch string, scanned ScannedCommit, diff, message string) (PatchCommit, error) {
 	if g.Name == "" || g.Email == "" {
 		return PatchCommit{}, fmt.Errorf("butler: CommitPatch: no launcher identity configured for %s", g.Repo)
 	}
 
-	if g.URL != "" {
-		if err := fetchBranchTip(g.GitArgs, g.Repo, g.URL, branch); err != nil {
-			return PatchCommit{}, err
-		}
-	}
-	tip, err := g.Head(branch)
+	entries, err := signalwire.ParseUnifiedDiff(diff)
 	if err != nil {
+		return PatchCommit{}, fmt.Errorf("butler: CommitPatch: diff does not parse: %w", err)
+	}
+	if err := verifyDiffMatchesGit(g.GitArgs, g.Repo, diff, entries); err != nil {
 		return PatchCommit{}, err
 	}
 
@@ -160,11 +172,28 @@ func (g GitTree) CommitPatch(branch, diff, message string) (PatchCommit, error) 
 		return strings.TrimSpace(string(out)), err
 	}
 
+	if _, err := run([]string{indexEnv}, "", "read-tree", string(scanned)); err != nil {
+		return PatchCommit{}, gitexec.OutputErr("butler", err, "read-tree scanned commit %s", scanned)
+	}
+	if _, err := run([]string{indexEnv}, diff, "apply", "--cached", "--check", "-"); err != nil {
+		return PatchCommit{}, gitexec.OutputErr("butler", err, "diff does not apply to scanned commit %s", scanned)
+	}
+
+	if g.URL != "" {
+		if err := fetchBranchTip(g.GitArgs, g.Repo, g.URL, branch); err != nil {
+			return PatchCommit{}, err
+		}
+	}
+	tip, err := g.Head(branch)
+	if err != nil {
+		return PatchCommit{}, err
+	}
+
 	if _, err := run([]string{indexEnv}, "", "read-tree", tip); err != nil {
 		return PatchCommit{}, gitexec.OutputErr("butler", err, "read-tree %s", tip)
 	}
 	if _, err := run([]string{indexEnv}, diff, "apply", "--cached", "-"); err != nil {
-		return PatchCommit{}, gitexec.OutputErr("butler", err, "diff does not apply to %s", tip)
+		return PatchCommit{}, gitexec.OutputErr("butler", err, "diff does not apply to base head %s", tip)
 	}
 	newTree, err := run([]string{indexEnv}, "", "write-tree")
 	if err != nil {
@@ -185,4 +214,45 @@ func (g GitTree) CommitPatch(branch, diff, message string) (PatchCommit, error) 
 	}
 
 	return PatchCommit{Dir: g.Repo, Ref: patchRef}, nil
+}
+
+// verifyDiffMatchesGit refuses diff unless git's own reading of it (`git
+// apply --numstat --summary`, a report-only dry run) matches entries
+// exactly: same paths, order and +/- counts, and no create/delete/rename/
+// copy/mode summary line. The gates decide on our parser's entries; this
+// keeps a parser gap from letting git apply something they never saw.
+func verifyDiffMatchesGit(gitArgs []string, repo, diff string, entries []signalwire.DiffFile) error {
+	want := make([]string, len(entries))
+	for i, f := range entries {
+		want[i] = fmt.Sprintf("%d\t%d\t%s", f.Added, f.Removed, f.Path)
+	}
+
+	cmd := gitexec.Cmd(gitArgs, "-C", repo, "apply", "--numstat", "--summary", "-")
+	cmd.Stdin = strings.NewReader(diff)
+	out, err := cmd.Output()
+	if err != nil {
+		return gitexec.OutputErr("butler", err, "git's own reading of the diff")
+	}
+
+	var numstat []string
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		switch {
+		case line == "":
+			continue
+		case strings.HasPrefix(line, " "):
+			return fmt.Errorf("butler: CommitPatch: git's reading of the diff disagrees with the parsed one: git reports a summary line %q", line)
+		default:
+			numstat = append(numstat, line)
+		}
+	}
+
+	if len(numstat) != len(want) {
+		return fmt.Errorf("butler: CommitPatch: git's reading of the diff disagrees with the parsed one: git reports %d file(s), parsed %d", len(numstat), len(want))
+	}
+	for i := range want {
+		if numstat[i] != want[i] {
+			return fmt.Errorf("butler: CommitPatch: git's reading of the diff disagrees with the parsed one: git reports %q, parsed %q", numstat[i], want[i])
+		}
+	}
+	return nil
 }
