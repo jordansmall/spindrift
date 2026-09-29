@@ -1,13 +1,14 @@
 package chore
 
 import (
+	"fmt"
 	"time"
 
 	"spindrift.dev/launcher/internal/ledger"
 )
 
-// DueConfig bounds Check's two time-based rules, both per-Chore, plus the
-// Budgets that gate starting across every enabled Chore.
+// DueConfig bounds Check's two time-based rules, both per-Chore. The budget
+// gate is a Room, computed once per Sweep rather than carried here.
 type DueConfig struct {
 	// Every is the interval that must elapse since the last Done commit
 	// before a Chore is due again. Zero means no interval: a Chore with no
@@ -16,9 +17,6 @@ type DueConfig struct {
 	// ClaimTimeout is the age past which a live claim is treated as stale
 	// (ledger.State.StaleClaim) and taken over rather than left blocking.
 	ClaimTimeout time.Duration
-	// Budgets caps how much a day's runs may claim and file, checked against
-	// the day's ledger.Totals across every enabled Chore (ADR 0056).
-	Budgets Budgets
 }
 
 // Budgets caps a local day's butler activity. A zero field means that
@@ -35,13 +33,30 @@ type Budgets struct {
 	MaxFindingsPerDay int
 	// MaxFindingsPerSweep caps how many findings a single sweep may file.
 	// Combined with MaxFindingsPerDay it bounds one run's contribution to the
-	// day (see Check's headroom comment for the rationale); when
-	// MaxFindingsPerDay is 0 this field never gates starting a run, and only
-	// settle's own per-sweep cap applies.
+	// day (see Room's doc for the rationale); when MaxFindingsPerDay is 0
+	// this field never gates starting a run, and only settle's own
+	// per-sweep cap applies. When this field is 0 but MaxFindingsPerDay is
+	// set, the sweep is still capped at the day's remaining headroom
+	// (Room.Findings): 0 means no per-sweep limit, not an uncapped run.
 	MaxFindingsPerSweep int
 	// DailyTokenCeiling caps a local day's total token usage
 	// (usage.Usage.TotalTokens), across every Chore.
 	DailyTokenCeiling int
+	// MaxPromotionsPerDay caps how many findings a local day may
+	// auto-promote, across every Chore. 0 means promotion is off, not
+	// unlimited -- unlike this struct's other fields, so it is never a start
+	// gate (see Room.Promotions).
+	MaxPromotionsPerDay int
+}
+
+// Validate rejects a Budgets combination that could never let a run start:
+// a per-sweep cap above the day cap would trip Room's
+// SweepFindingsExceedHeadroom at Filed=0 every time.
+func (b Budgets) Validate() error {
+	if b.MaxFindingsPerSweep > 0 && b.MaxFindingsPerDay > 0 && b.MaxFindingsPerSweep > b.MaxFindingsPerDay {
+		return fmt.Errorf("butler: BUTLER_MAX_FINDINGS_PER_SWEEP (%d) exceeds BUTLER_MAX_FINDINGS_PER_DAY (%d); no run could ever start", b.MaxFindingsPerSweep, b.MaxFindingsPerDay)
+	}
+	return nil
 }
 
 // NotDue names why Check found a Chore not due to run. The zero value, Due,
@@ -68,7 +83,7 @@ const (
 	FindingBudgetSpent
 	// SweepFindingsExceedHeadroom means today's remaining finding headroom
 	// (MaxFindingsPerDay - today.Filed) is less than MaxFindingsPerSweep (see
-	// Check's headroom comment for the rationale).
+	// Budgets.Room's rationale).
 	SweepFindingsExceedHeadroom
 	// TokenCeilingReached means today's total token usage already reached
 	// Budgets.DailyTokenCeiling.
@@ -103,17 +118,17 @@ func (r NotDue) String() string {
 
 // Check decides whether a Chore is due to run right now: its interval has
 // elapsed since its last Done, there is something to scan, no live claim
-// holds it, and today's cross-Chore Budgets (cfg.Budgets) still have
-// headroom. It is a pure function of tip (the Ledger's current head), recent
-// (the caller's ledger.Backend.History(chore, now.Add(-cfg.Every)), newest
-// first), head (the repo's current commit), now, today (the day's totals
-// across every enabled Chore, e.g. ledger.DayTotalsAll), and cfg — no I/O.
+// holds it, and room (today's cross-Chore budget headroom, computed once per
+// Sweep by Budgets.Room) still allows starting. It is a pure function of tip
+// (the Ledger's current head), recent (the caller's
+// ledger.Backend.History(chore, now.Add(-cfg.Every)), newest first), head
+// (the repo's current commit), now, room, and cfg — no I/O.
 //
 // recent is expected to already be windowed to now.Add(-cfg.Every), but Check
 // re-checks each entry's age itself (now.Sub(e.At) < cfg.Every) rather than
 // trusting the caller's window precisely, so a caller that over-fetches
 // doesn't change the result.
-func Check(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, today ledger.Totals, cfg DueConfig) NotDue {
+func Check(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, room Room, cfg DueConfig) NotDue {
 	// A live (non-stale) claim blocks the run outright; a stale one is
 	// taken over, so it falls through to the checks below rather than
 	// blocking. Claim carries LastSwept/Cursor forward from the tip it was
@@ -130,25 +145,8 @@ func Check(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, to
 		}
 	}
 
-	b := cfg.Budgets
-	if b.MaxSweepsPerDay > 0 && today.Claims >= b.MaxSweepsPerDay {
-		return SweepBudgetSpent
-	}
-	if b.MaxFindingsPerDay > 0 && today.Filed >= b.MaxFindingsPerDay {
-		return FindingBudgetSpent
-	}
-	// A full sweep could file up to MaxFindingsPerSweep more; if today's
-	// remaining headroom is less than that, don't start it. This bounds a
-	// single run, not concurrent ones: a claim already in flight hasn't
-	// landed its Filed count in today yet, so two Chores claimed on separate
-	// slots at once can each pass this check and jointly overshoot
-	// MaxFindingsPerDay. When MaxFindingsPerDay is 0 this check never fires;
-	// MaxFindingsPerSweep then only caps at settle, not at start.
-	if b.MaxFindingsPerDay > 0 && b.MaxFindingsPerSweep > 0 && b.MaxFindingsPerDay-today.Filed < b.MaxFindingsPerSweep {
-		return SweepFindingsExceedHeadroom
-	}
-	if b.DailyTokenCeiling > 0 && today.Usage.TotalTokens() >= b.DailyTokenCeiling {
-		return TokenCeilingReached
+	if room.Reason != Due {
+		return room.Reason
 	}
 
 	// Fully rotated (cursor back at the top) with no new commits since the

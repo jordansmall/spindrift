@@ -151,10 +151,23 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, catalog ch
 	if !filerEnabled {
 		return nil, fmt.Errorf("butler: needs a provisioned Filer to relay findings (set FILER_MODEL; DRIVER=opencode never provisions one)")
 	}
-	if cfg.butlerMaxFindingsPerSweep > 0 && cfg.butlerMaxFindingsPerDay > 0 && cfg.butlerMaxFindingsPerSweep > cfg.butlerMaxFindingsPerDay {
-		return nil, fmt.Errorf("butler: BUTLER_MAX_FINDINGS_PER_SWEEP (%d) exceeds BUTLER_MAX_FINDINGS_PER_DAY (%d); no run could ever start", cfg.butlerMaxFindingsPerSweep, cfg.butlerMaxFindingsPerDay)
+	if err := butlerBudgets(cfg).Validate(); err != nil {
+		return nil, err
 	}
 	return chores, nil
+}
+
+// butlerBudgets builds a chore.Budgets from cfg's BUTLER_MAX_* knobs, the
+// single spot both butlerPreflight's Validate check and cmdButler's Policy
+// build from, so the two never drift.
+func butlerBudgets(cfg config) chore.Budgets {
+	return chore.Budgets{
+		MaxSweepsPerDay:     cfg.butlerMaxSweepsPerDay,
+		MaxFindingsPerDay:   cfg.butlerMaxFindingsPerDay,
+		MaxFindingsPerSweep: cfg.butlerMaxFindingsPerSweep,
+		DailyTokenCeiling:   cfg.butlerDailyTokenCeiling,
+		MaxPromotionsPerDay: cfg.butlerMaxPromotionsPerDay,
+	}
 }
 
 // butlerSettings is resolveButlerSettings's parsed result.
@@ -206,12 +219,7 @@ func cmdButler(lc *launchContext, choreName, workLabel string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return exitConfigInvalid
 	}
-	budgets := chore.Budgets{
-		MaxSweepsPerDay:     lc.config.butlerMaxSweepsPerDay,
-		MaxFindingsPerDay:   lc.config.butlerMaxFindingsPerDay,
-		MaxFindingsPerSweep: lc.config.butlerMaxFindingsPerSweep,
-		DailyTokenCeiling:   lc.config.butlerDailyTokenCeiling,
-	}
+	budgets := butlerBudgets(lc.config)
 
 	// Unlike internal/daemon/lock.go and status.go, which fall back to
 	// "unknown" on a Hostname failure, Host here is the claim's owner

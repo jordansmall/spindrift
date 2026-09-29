@@ -131,6 +131,7 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, fmt.Errorf("butler: total today's ledgers: %w", err)
 	}
+	room := r.policy.Budgets.Room(today)
 
 	var reasons []string
 	for _, c := range candidates {
@@ -142,7 +143,7 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 		if err != nil {
 			return Outcome{}, fmt.Errorf("butler: read %s ledger history: %w", c.Name, err)
 		}
-		verdict := chore.Check(tip, recent, head, whenNow, today, chore.DueConfig{Every: c.Every, ClaimTimeout: r.policy.ClaimTimeout, Budgets: r.policy.Budgets})
+		verdict := chore.Check(tip, recent, head, whenNow, room, chore.DueConfig{Every: c.Every, ClaimTimeout: r.policy.ClaimTimeout})
 		if verdict != chore.Due {
 			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", c.Name, verdict))
 			continue

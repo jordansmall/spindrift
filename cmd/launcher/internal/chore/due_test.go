@@ -1,6 +1,7 @@
 package chore_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ func TestCheck(t *testing.T) {
 		tip    ledger.Tip
 		recent []ledger.Entry
 		head   string
-		today  ledger.Totals
+		room   chore.Room
 		cfg    chore.DueConfig
 		want   chore.NotDue
 	}{
@@ -163,81 +164,81 @@ func TestCheck(t *testing.T) {
 			want: chore.Due,
 		},
 		{
-			name:  "sweep budget spent",
-			tip:   ledger.Tip{},
-			head:  "h1",
-			today: ledger.Totals{Claims: 3},
-			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{MaxSweepsPerDay: 3}},
-			want:  chore.SweepBudgetSpent,
+			name: "sweep budget spent",
+			tip:  ledger.Tip{},
+			head: "h1",
+			room: chore.Budgets{MaxSweepsPerDay: 3}.Room(ledger.Totals{Claims: 3}),
+			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
+			want: chore.SweepBudgetSpent,
 		},
 		{
-			name:  "sweep budget just under limit is due",
-			tip:   ledger.Tip{},
-			head:  "h1",
-			today: ledger.Totals{Claims: 2},
-			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{MaxSweepsPerDay: 3}},
-			want:  chore.Due,
-		},
-		{
-			name:  "finding budget spent",
-			tip:   ledger.Tip{},
-			head:  "h1",
-			today: ledger.Totals{Filed: 5},
-			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{MaxFindingsPerDay: 5}},
-			want:  chore.FindingBudgetSpent,
-		},
-		{
-			name:  "finding budget just under limit is due",
-			tip:   ledger.Tip{},
-			head:  "h1",
-			today: ledger.Totals{Filed: 4},
-			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{MaxFindingsPerDay: 5}},
-			want:  chore.Due,
-		},
-		{
-			name:  "a full sweep would exceed today's finding headroom",
-			tip:   ledger.Tip{},
-			head:  "h1",
-			today: ledger.Totals{Filed: 8},
-			cfg: chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{
-				MaxFindingsPerDay: 10, MaxFindingsPerSweep: 3,
-			}},
-			want: chore.SweepFindingsExceedHeadroom,
-		},
-		{
-			name:  "headroom exactly covers a full sweep is due",
-			tip:   ledger.Tip{},
-			head:  "h1",
-			today: ledger.Totals{Filed: 7},
-			cfg: chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{
-				MaxFindingsPerDay: 10, MaxFindingsPerSweep: 3,
-			}},
+			name: "sweep budget just under limit is due",
+			tip:  ledger.Tip{},
+			head: "h1",
+			room: chore.Budgets{MaxSweepsPerDay: 3}.Room(ledger.Totals{Claims: 2}),
+			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
 			want: chore.Due,
 		},
 		{
-			name:  "daily token ceiling reached",
-			tip:   ledger.Tip{},
-			head:  "h1",
-			today: ledger.Totals{Usage: usage.Usage{InputTokens: 1000}},
-			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{DailyTokenCeiling: 1000}},
-			want:  chore.TokenCeilingReached,
+			name: "finding budget spent",
+			tip:  ledger.Tip{},
+			head: "h1",
+			room: chore.Budgets{MaxFindingsPerDay: 5}.Room(ledger.Totals{Filed: 5}),
+			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
+			want: chore.FindingBudgetSpent,
 		},
 		{
-			name:  "just under the daily token ceiling is due",
-			tip:   ledger.Tip{},
-			head:  "h1",
-			today: ledger.Totals{Usage: usage.Usage{InputTokens: 999}},
-			cfg:   chore.DueConfig{ClaimTimeout: time.Hour, Budgets: chore.Budgets{DailyTokenCeiling: 1000}},
-			want:  chore.Due,
+			name: "finding budget just under limit is due",
+			tip:  ledger.Tip{},
+			head: "h1",
+			room: chore.Budgets{MaxFindingsPerDay: 5}.Room(ledger.Totals{Filed: 4}),
+			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
+			want: chore.Due,
+		},
+		{
+			name: "a full sweep would exceed today's finding headroom",
+			tip:  ledger.Tip{},
+			head: "h1",
+			room: chore.Budgets{
+				MaxFindingsPerDay: 10, MaxFindingsPerSweep: 3,
+			}.Room(ledger.Totals{Filed: 8}),
+			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
+			want: chore.SweepFindingsExceedHeadroom,
+		},
+		{
+			name: "headroom exactly covers a full sweep is due",
+			tip:  ledger.Tip{},
+			head: "h1",
+			room: chore.Budgets{
+				MaxFindingsPerDay: 10, MaxFindingsPerSweep: 3,
+			}.Room(ledger.Totals{Filed: 7}),
+			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
+			want: chore.Due,
+		},
+		{
+			name: "daily token ceiling reached",
+			tip:  ledger.Tip{},
+			head: "h1",
+			room: chore.Budgets{DailyTokenCeiling: 1000}.Room(ledger.Totals{Usage: usage.Usage{InputTokens: 1000}}),
+			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
+			want: chore.TokenCeilingReached,
+		},
+		{
+			name: "just under the daily token ceiling is due",
+			tip:  ledger.Tip{},
+			head: "h1",
+			room: chore.Budgets{DailyTokenCeiling: 1000}.Room(ledger.Totals{Usage: usage.Usage{InputTokens: 999}}),
+			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
+			want: chore.Due,
 		},
 		{
 			name: "zero budgets mean unlimited despite huge totals",
 			tip:  ledger.Tip{},
 			head: "h1",
-			today: ledger.Totals{
+			room: chore.Budgets{}.Room(ledger.Totals{
 				Claims: 1_000_000, Filed: 1_000_000,
 				Usage: usage.Usage{InputTokens: 1_000_000},
-			},
+			}),
 			cfg:  chore.DueConfig{ClaimTimeout: time.Hour},
 			want: chore.Due,
 		},
@@ -245,7 +246,7 @@ func TestCheck(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := chore.Check(tt.tip, tt.recent, tt.head, now, tt.today, tt.cfg)
+			got := chore.Check(tt.tip, tt.recent, tt.head, now, tt.room, tt.cfg)
 			if got != tt.want {
 				t.Errorf("Check() = %d (%s), want %d (%s)", got, got, tt.want, tt.want)
 			}
@@ -272,5 +273,50 @@ func TestNotDueString(t *testing.T) {
 		if got := tt.reason.String(); got != tt.want {
 			t.Errorf("NotDue(%d).String() = %q, want %q", tt.reason, got, tt.want)
 		}
+	}
+}
+
+func TestBudgetsValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		b       chore.Budgets
+		wantErr string
+	}{
+		{
+			name: "zero budgets valid",
+			b:    chore.Budgets{},
+		},
+		{
+			name: "sweep under day valid",
+			b:    chore.Budgets{MaxFindingsPerSweep: 5, MaxFindingsPerDay: 10},
+		},
+		{
+			name: "sweep equal to day valid",
+			b:    chore.Budgets{MaxFindingsPerSweep: 5, MaxFindingsPerDay: 5},
+		},
+		{
+			name: "sweep only (no day cap) valid",
+			b:    chore.Budgets{MaxFindingsPerSweep: 5},
+		},
+		{
+			name:    "sweep exceeds day rejected",
+			b:       chore.Budgets{MaxFindingsPerSweep: 6, MaxFindingsPerDay: 5},
+			wantErr: "BUTLER_MAX_FINDINGS_PER_SWEEP (6) exceeds BUTLER_MAX_FINDINGS_PER_DAY (5); no run could ever start",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.b.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
 	}
 }
