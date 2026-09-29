@@ -15,21 +15,27 @@ import (
 )
 
 // fakeTree is Tree's test double: a fixed Head and TrackedFiles answer, or an
-// error for either. CommitPatch answers commitPatch/commitPatchErr.
+// error for either. CommitPatch answers commitPatch/commitPatchErr and, when
+// commitPatchCalls is set, counts its own invocations -- a pointer field so
+// the count survives fakeTree's copy into the Tree interface (issue #4075).
 type fakeTree struct {
 	head     string
 	headErr  error
 	files    []string
 	filesErr error
 
-	commitPatch    PatchCommit
-	commitPatchErr error
+	commitPatch      PatchCommit
+	commitPatchErr   error
+	commitPatchCalls *int
 }
 
 func (f fakeTree) Head(branch string) (string, error)           { return f.head, f.headErr }
 func (f fakeTree) TrackedFiles(commit string) ([]string, error) { return f.files, f.filesErr }
 
 func (f fakeTree) CommitPatch(branch, diff, message string) (PatchCommit, error) {
+	if f.commitPatchCalls != nil {
+		*f.commitPatchCalls++
+	}
 	return f.commitPatch, f.commitPatchErr
 }
 

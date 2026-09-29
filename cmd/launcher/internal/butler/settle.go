@@ -181,6 +181,9 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		return func(f settle.Finding) settle.Decoration {
 			backlink := butlerBacklink(s.chore, f)
 			dec := s.policy.decide(f, chore.Room{Promotions: remaining, Patches: patchesLeft})
+			if dec.patchSkip != "" {
+				fmt.Printf("    #%s  status=patch-skipped  note=%s\n", num, dec.patchSkip)
+			}
 			if dec.kind == patch {
 				subject := patchCommitSubject(f.Title)
 				pc, err := s.patch.tree.CommitPatch(s.patch.base, f.Patch, subject)

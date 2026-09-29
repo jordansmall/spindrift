@@ -1,8 +1,11 @@
 package butler
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"reflect"
 	"slices"
@@ -1404,11 +1407,21 @@ func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
 }
 
 // testPatchDiff is a minimal unified diff that clears signalwire's
-// ValidateUnifiedDiff -- what every patch-rung test below embeds as an
-// issue-intent's "patch" field (its own contents are never actually applied:
-// fakeTree.CommitPatch answers a scripted PatchCommit/error, not a real git
-// apply).
-const testPatchDiff = "--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
+// ValidateUnifiedDiff and patchTestPolicy's own patchPaths (docs/a.md, under
+// the default BUTLER_PATCH_PATHS) -- what every single-finding patch-rung
+// test below embeds as an issue-intent's "patch" field (its own contents are
+// never actually applied: fakeTree.CommitPatch answers a scripted
+// PatchCommit/error, not a real git apply).
+const testPatchDiff = "--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1 @@\n-old\n+new\n"
+
+// patchDiffFor is testPatchDiff's per-path sibling (issue #4075): decide's
+// site-key gate requires a patch's diff path to appear among the finding's
+// own dedup terms, so patchableDispatcherN can no longer hand every finding
+// the same fixed diff -- each needs its own path, matching its own dedup
+// term.
+func patchDiffFor(path string) string {
+	return fmt.Sprintf("--- a/%s\n+++ b/%s\n@@ -1 +1 @@\n-old\n+new\n", path, path)
+}
 
 // patchableDispatcher is promotableDispatcher's patch-rung sibling: its one
 // relayed finding also carries a Patch, so it clears decide's patch gate
@@ -1424,20 +1437,22 @@ func patchableDispatcher(class string) *dispatch.Fake {
 		},
 		IssueIntentsFound: true,
 		IssueIntents: []string{
-			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["a.go:Foo"],"class":%q,"concurrence":"agreed","patch":%q}`, class, testPatchDiff),
+			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["docs/a.md:Foo"],"class":%q,"concurrence":"agreed","patch":%q}`, class, testPatchDiff),
 		},
 	}
 	return d
 }
 
 // patchableDispatcherN is patchableDispatcher's multi-finding sibling: n
-// findings, same class, each with its own title/dedup term/patch so a test
-// can pit them against one sweep's shared patch room (issue #4074).
+// findings, same class, each with its own title/dedup term/patch (its own
+// docs/aN.md path, so decide's site-key gate holds for every one of them) so
+// a test can pit them against one sweep's shared patch room (issue #4074).
 func patchableDispatcherN(class string, n int) *dispatch.Fake {
 	d := dispatch.NewFake()
 	intents := make([]string, n)
 	for i := range intents {
-		intents[i] = fmt.Sprintf(`{"title":"fix typo %d","body":"repro","dedupTerms":["a%d.go:Foo"],"class":%q,"concurrence":"agreed","patch":%q}`, i, i, class, testPatchDiff)
+		path := fmt.Sprintf("docs/a%d.md", i)
+		intents[i] = fmt.Sprintf(`{"title":"fix typo %d","body":"repro","dedupTerms":[%q],"class":%q,"concurrence":"agreed","patch":%q}`, i, path+":Foo", class, patchDiffFor(path))
 	}
 	d.RunResult = dispatch.Result{
 		Success: true,
@@ -1525,6 +1540,9 @@ func patchTestPolicy() Policy {
 	policy.PromotionMaxFiles = 3
 	policy.Budgets.MaxPromotionsPerDay = 1
 	policy.Budgets.MaxPatchesPerDay = 1
+	policy.PatchPaths = DefaultPatchPaths
+	policy.PatchMaxFiles = 3
+	policy.PatchMaxLines = 20
 	return policy
 }
 
@@ -2298,5 +2316,91 @@ func TestSweep_PatchGateMergeGuardHitLeavesUnmerged(t *testing.T) {
 	iss, _ := fc.Issue("9520")
 	if !sameLabelSet(iss.Labels, wantLabels) {
 		t.Errorf("labels = %v, want exactly %v", iss.Labels, wantLabels)
+	}
+}
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns
+// everything it printed -- settle's status lines are fmt.Printf'd straight
+// to os.Stdout, so this is the only way a test can see one (issue #4075).
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout pipe writer: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
+	return buf.String()
+}
+
+// (r11) A diff touching CLAUDE.md -- allow-matched by "*.md" but explicitly
+// denied by DefaultPatchPaths' own "!CLAUDE.md" entry (ADR 0057, issue
+// #4075) -- never reaches the Tree at all: decide's patchPaths gate rejects
+// it before CommitPatch is ever called, so the finding falls back to
+// exactly what promote would do with no Patch, logging the gate's own
+// reason as a patch-skipped status line.
+func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	var commitPatchCalls int
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}, commitPatchCalls: &commitPatchCalls}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9600"
+
+	claudeDiff := "--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1 @@\n-old\n+new\n"
+	d := dispatch.NewFake()
+	d.RunResult = dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["CLAUDE.md:Foo"],"class":"docs-drift","concurrence":"agreed","patch":%q}`, claudeDiff),
+		},
+	}
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return d }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
+
+	var out Outcome
+	var err error
+	stdout := captureStdout(t, func() {
+		out, err = r.Sweep([]string{"bugs"})
+	})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Filed != 1 || out.Patched != 0 || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Filed=1 Patched=0 Promoted=1", out)
+	}
+	if commitPatchCalls != 0 {
+		t.Errorf("commitPatchCalls = %d, want 0: patchPaths must reject CLAUDE.md before the Tree is ever touched", commitPatchCalls)
+	}
+	if len(pf.pushCalls) != 0 || len(pf.draftCalls) != 0 {
+		t.Errorf("pushCalls = %v draftCalls = %v, want none", pf.pushCalls, pf.draftCalls)
+	}
+
+	labels := fc.PostIssueCalls[0].Labels
+	if !slices.Contains(labels, "ready-for-agent") || slices.Contains(labels, "agent-butler-patch") {
+		t.Fatalf("PostIssue labels = %v, want ready-for-agent and no agent-butler-patch", labels)
+	}
+
+	if !strings.Contains(stdout, "status=patch-skipped") || !strings.Contains(stdout, "outside patch paths") {
+		t.Errorf("settle log = %q, want a status=patch-skipped line naming the patchPaths gate", stdout)
 	}
 }

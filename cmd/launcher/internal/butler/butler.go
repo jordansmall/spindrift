@@ -259,7 +259,13 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	if r.patchForge == nil {
 		patchesPerDay = 0
 	}
-	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.Budgets.MaxPromotionsPerDay, r.policy.PromotionLabel, c.PatchClasses, patchesPerDay)
+	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.Budgets.MaxPromotionsPerDay, r.policy.PromotionLabel, patchPolicy{
+		classes:  c.PatchClasses,
+		perDay:   patchesPerDay,
+		paths:    r.policy.PatchPaths,
+		maxFiles: r.policy.PatchMaxFiles,
+		maxLines: r.policy.PatchMaxLines,
+	})
 
 	// The Box only ever sees a class list when promotion is on and today's
 	// promotion room is actually > 0: with nothing left to spend this run,
