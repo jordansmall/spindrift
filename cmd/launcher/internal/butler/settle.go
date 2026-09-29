@@ -39,6 +39,7 @@ type settleRun struct {
 	now                 func() time.Time
 	maxFindingsPerSweep int
 	policy              promotion
+	room                dayRoom
 }
 
 // newSettleRun constructs a settleRun for one Chore run. claim is the Ledger
@@ -49,9 +50,10 @@ type settleRun struct {
 // done commit's lastSwept/cursor on success. maxFindingsPerSweep caps how
 // many well-formed findings settle will file in one sweep; 0 means no cap.
 // policy is the host-side auto-promotion gate (issue #3880); its zero value
-// never promotes anything.
-func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, maxFindingsPerSweep int, policy promotion) *settleRun {
-	return &settleRun{it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, maxFindingsPerSweep: maxFindingsPerSweep, policy: policy}
+// never promotes anything. room supplies policy's per-day budget; settle only
+// spends a Ledger walk reading it when policy.enabled (issue #3993).
+func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, maxFindingsPerSweep int, policy promotion, room dayRoom) *settleRun {
+	return &settleRun{it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, maxFindingsPerSweep: maxFindingsPerSweep, policy: policy, room: room}
 }
 
 // settle files result's findings, if any, then writes the Chore's done
@@ -82,17 +84,14 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	finishParent := s.claim
 	var promoted []string
 	filed, dropped := settle.FileButlerFindings(s.it, num, result, s.maxFindingsPerSweep, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
-		// Room is evaluated at most once per settle, and only when this Chore
-		// has an allow-list at all -- a Chore with no Classes can never
-		// promote, so spending a Ledger walk on Room for it would be waste.
-		// Evaluating at settle time rather than at run start means a
-		// promotion whose reservation commit already landed is counted here;
-		// it is still a soft cap like ADR 0056's other budgets, not a hard
-		// one -- two runs settling at the same moment can each read the same
-		// total and both spend it.
+		// room is evaluated at most once per settle, and only when policy is
+		// enabled at all -- an unconfigured/off policy can never promote, so
+		// spending a Ledger walk on it would be waste. Evaluating at settle
+		// time rather than at run start means a promotion whose reservation
+		// commit already landed is counted here.
 		remaining := 0
-		if len(s.policy.Classes) > 0 && s.policy.Room != nil {
-			remaining = s.policy.Room()
+		if s.policy.enabled {
+			remaining = s.room.remaining(s.ledger, s.now())
 		}
 
 		// Reserve the slots this run intends to spend before filing anything
@@ -105,7 +104,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		if remaining > 0 {
 			eligible := 0
 			for _, f := range kept {
-				if s.policy.eligible(f, butlerFiles(f.DedupTerms)) {
+				if s.policy.decide(f, remaining).kind == promote {
 					eligible++
 				}
 			}
@@ -124,14 +123,14 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 
 		return func(f settle.Finding) settle.Decoration {
 			backlink := butlerBacklink(s.chore, f)
-			files := butlerFiles(f.DedupTerms)
-			if !s.policy.eligible(f, files) || remaining <= 0 {
+			dec := s.policy.decide(f, remaining)
+			if dec.kind != promote {
 				return settle.Decoration{Backlink: backlink}
 			}
-			note := promotionNote(s.chore, f, s.policy, len(files))
+			note := promotionNote(s.chore, f, s.policy, dec.files)
 			// Spend the slot only in OnFiled, after PostIssue succeeds, so a
 			// failed post frees it back to the rest of the sweep.
-			return settle.Decoration{Backlink: backlink + "\n\n" + note, ExtraLabels: []string{s.policy.Label}, OnFiled: func(url string) {
+			return settle.Decoration{Backlink: backlink + "\n\n" + note, ExtraLabels: dec.labels, OnFiled: func(url string) {
 				remaining--
 				promoted = append(promoted, url)
 			}}

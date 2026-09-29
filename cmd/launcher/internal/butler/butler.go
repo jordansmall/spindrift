@@ -8,7 +8,6 @@ package butler
 import (
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"time"
 
@@ -223,66 +222,25 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	}
 
 	scope := chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
-	promo := r.promotionPolicy(c)
+	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.MaxPromotionsPerDay, r.policy.PromotionLabel)
 
-	// The Box only ever sees promo.Classes when promotion is actually on
-	// (promo.Room set, i.e. MaxPromotionsPerDay > 0): with promotion off
-	// nothing can promote regardless of class, so there is nothing useful to
-	// tell the Box, and settle re-checks a finding's class against
-	// promo.Classes itself.
+	// The Box only ever sees a class list when promotion is actually on:
+	// with promotion off nothing can promote regardless of class, so there
+	// is nothing useful to tell the Box, and settle re-checks a finding's
+	// class against promo's own allow-list itself.
 	var classes []string
-	if promo.Room != nil {
-		classes = promo.Classes
+	if promo.enabled {
+		classes = c.Classes
 	}
 	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes})
 	defer d.Close()
 	result := d.Run()
 
-	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, r.policy.Budgets.MaxFindingsPerSweep, promo)
+	room := newDayRoom(r.policy)
+	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, r.policy.Budgets.MaxFindingsPerSweep, promo, room)
 	s := step.settle(d, result)
 	if !s.done {
 		return Outcome{Kind: ClaimLeft, Chore: choreName}, nil
 	}
 	return Outcome{Kind: Swept, Chore: choreName, Filed: s.filed, Promoted: s.promoted, Dropped: s.dropped}, nil
-}
-
-// promotionPolicy builds c's promotion (issue #3880): Classes and MaxFiles
-// come straight from c and r.policy, and Room -- when promotion is on at all
-// -- re-walks today's Ledger at settle time (r.backend, r.policy.choreNames(),
-// r.now().In(r.policy.Zone)), the same call Sweep makes at run start, so a
-// promotion whose done commit already landed is counted here. Room takes its
-// own fresh ledger.Snapshot each call rather than reusing Sweep's, since it
-// must see promotions that landed between run start and settle. Like ADR
-// 0056's other budgets this is a soft cap, not a hard one: two runs settling
-// at the same moment can each read the same total and both spend it. A
-// Snapshot or DayTotalsAll error fails closed (0 room, a warning to stderr)
-// rather than promoting on a total it could not compute.
-func (r *Runner) promotionPolicy(c chore.Chore) promotion {
-	pp := promotion{
-		Classes:  c.Classes,
-		MaxFiles: r.policy.PromotionMaxFiles,
-		Label:    r.policy.PromotionLabel,
-	}
-	if r.policy.MaxPromotionsPerDay <= 0 {
-		return pp
-	}
-	perDay := r.policy.MaxPromotionsPerDay
-	backend, enabled, zone, now := r.backend, r.policy.choreNames(), r.policy.Zone, r.now
-	pp.Room = func() int {
-		var totals ledger.Totals
-		snap, err := ledger.Snapshot(backend)
-		if err == nil {
-			totals, err = ledger.DayTotalsAll(snap, enabled, now().In(zone))
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "butler: promotion room: %s\n", err)
-			return 0
-		}
-		remaining := perDay - totals.Promoted
-		if remaining < 0 {
-			remaining = 0
-		}
-		return remaining
-	}
-	return pp
 }
