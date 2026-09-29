@@ -9,6 +9,36 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.20.2 — 2026-09-29
+
+Butler groundwork: config mistakes get caught up front, and findings are
+checked the same way whichever route they take.
+
+No breaking changes.
+
+- **Butler config typos fail early.** An enabled Chore with no prompt file
+  now fails at Nix evaluation, so your own `nix flake check` catches it
+  instead of a Box finding out after it already claimed the run. A
+  `BUTLER_CHORE_CLASSES` entry for a Chore you haven't enabled, or a class
+  that isn't a lowercase slug (like `Error_Handling`), is rejected at
+  preflight with an error naming it. Those entries never promoted anything
+  before, so if one now fails, fixing it is what finally makes it work.
+- **The findings cap you set is the one you get.** A per-sweep cap above
+  eight used to be quietly clipped to eight on the signal socket. The socket
+  now follows `BUTLER_MAX_FINDINGS_PER_SWEEP`, and the butler prompt tells
+  the Box its cap up front rather than letting it learn by having findings
+  dropped.
+- **Findings are checked at the door.** The signal socket now rejects a
+  finding with a blank title or body, an oversized field, or a bad class,
+  and tells the Box why. Findings reported through the log instead get the
+  same checks at settle and are skipped (with the reason logged) rather than
+  filed with the bad parts quietly blanked.
+- **Less Ledger chatter.** The hosted Ledger fetches its refs once per run
+  instead of before every read, so a sweep makes far fewer round trips.
+- **The Box knows its Dispatch key.** Boxes now get `DISPATCH_KEY`,
+  `DISPATCH_KEYING`, and `DISPATCH_ANNOUNCE_VERB` alongside `DISPATCH_KIND`,
+  and custom prompts can use `DISPATCH_KEY` directly.
+
 ## 0.20.1 — 2026-09-28
 
 Issues that are already fixed now close themselves, plus a round of butler
