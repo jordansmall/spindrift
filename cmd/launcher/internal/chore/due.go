@@ -47,6 +47,11 @@ type Budgets struct {
 	// unlimited -- unlike this struct's other fields, so it is never a start
 	// gate (see Room.Promotions).
 	MaxPromotionsPerDay int
+	// MaxPatchesPerDay caps how many patches (ADR 0057) a local day may land,
+	// across every Chore. 0 means the patch rung is off, not unlimited --
+	// unlike this struct's other fields, so it is never a start gate (see
+	// Room.Patches).
+	MaxPatchesPerDay int
 }
 
 // Validate rejects a Budgets combination that could never let a run start:

@@ -103,6 +103,24 @@ func TestBudgetsRoom(t *testing.T) {
 			want:  chore.Room{Promotions: 0, Reason: chore.Due},
 		},
 		{
+			name:  "patches remaining",
+			b:     chore.Budgets{MaxPatchesPerDay: 5},
+			today: ledger.Totals{Patched: 2},
+			want:  chore.Room{Patches: 3, Reason: chore.Due},
+		},
+		{
+			name:  "patches off (zero) never gates Reason",
+			b:     chore.Budgets{MaxPatchesPerDay: 0},
+			today: ledger.Totals{Patched: 1_000_000},
+			want:  chore.Room{Patches: 0, Reason: chore.Due},
+		},
+		{
+			name:  "patches floored at zero past the limit",
+			b:     chore.Budgets{MaxPatchesPerDay: 5},
+			today: ledger.Totals{Patched: 9},
+			want:  chore.Room{Patches: 0, Reason: chore.Due},
+		},
+		{
 			name: "first firing gate wins: sweep before finding",
 			b: chore.Budgets{
 				MaxSweepsPerDay: 1, MaxFindingsPerDay: 1,

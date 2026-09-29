@@ -293,8 +293,9 @@ func testDoneOverClaim(t *testing.T, h Harness) {
 	}
 
 	finishState := ledger.State{
-		Filed: []string{"issue-1", "issue-2"},
-		Usage: usage.Usage{InputTokens: 100},
+		Filed:   []string{"issue-1", "issue-2"},
+		Patched: []string{"https://example.com/pull/1"},
+		Usage:   usage.Usage{InputTokens: 100},
 	}
 	done, err := ledger.Finish(backend, chore, claim, finishState, start.Add(time.Minute))
 	if err != nil {
@@ -308,6 +309,9 @@ func testDoneOverClaim(t *testing.T, h Harness) {
 	}
 	if len(done.State.Filed) != 2 {
 		t.Fatalf("Finish: got Filed %v, want the 2 given entries", done.State.Filed)
+	}
+	if len(done.State.Patched) != 1 {
+		t.Fatalf("Finish: got Patched %v, want the 1 given entry", done.State.Patched)
 	}
 
 	got, err := backend.Read(chore)
@@ -426,8 +430,9 @@ func testDayTotals(t *testing.T, h Harness) {
 		t.Fatalf("yesterday Claim: %v", err)
 	}
 	yesterdayDone, err := ledger.Finish(b, chore, yesterdayClaim, ledger.State{
-		Filed: []string{"should-not-count"},
-		Usage: usage.Usage{InputTokens: 999},
+		Filed:   []string{"should-not-count"},
+		Patched: []string{"should-not-count"},
+		Usage:   usage.Usage{InputTokens: 999},
 	}, yesterdayClaimStart.Add(5*time.Minute))
 	if err != nil {
 		t.Fatalf("yesterday Finish: %v", err)
@@ -442,6 +447,7 @@ func testDayTotals(t *testing.T, h Harness) {
 		Filed:    []string{"a", "b"},
 		Promoted: []string{"x"},
 		Dropped:  2,
+		Patched:  []string{"p1"},
 		Usage: usage.Usage{
 			InputTokens:              10,
 			OutputTokens:             5,
@@ -466,6 +472,7 @@ func testDayTotals(t *testing.T, h Harness) {
 		Filed:    []string{"c"},
 		Promoted: []string{"y", "z"},
 		Dropped:  1,
+		Patched:  []string{"p2", "p3"},
 		Usage: usage.Usage{
 			InputTokens:              7,
 			OutputTokens:             3,
@@ -495,6 +502,7 @@ func testDayTotals(t *testing.T, h Harness) {
 		Filed:    []string{"should-not-count-tomorrow"},
 		Promoted: []string{"should-not-count-tomorrow"},
 		Dropped:  99,
+		Patched:  []string{"should-not-count-tomorrow"},
 		Usage:    usage.Usage{InputTokens: 999},
 	}, tomorrowFinishStart)
 	if err != nil {
@@ -510,6 +518,7 @@ func testDayTotals(t *testing.T, h Harness) {
 		Filed:    []string{"should-not-count-tomorrow-2"},
 		Promoted: []string{"should-not-count-tomorrow-2"},
 		Dropped:  50,
+		Patched:  []string{"should-not-count-tomorrow-2"},
 		Usage:    usage.Usage{InputTokens: 500},
 	}, tomorrowClaimStart.Add(5*time.Minute))
 	if err != nil {
@@ -526,6 +535,7 @@ func testDayTotals(t *testing.T, h Harness) {
 		Filed:    3,
 		Promoted: 3,
 		Dropped:  3,
+		Patched:  3,
 		Usage: usage.Usage{
 			InputTokens:              17,
 			OutputTokens:             8,
