@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
@@ -585,6 +587,154 @@ func TestForgejoClient_ListLabels_OrgOtherErrorFails(t *testing.T) {
 	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
 	if _, err := fc.ListLabels(); err == nil {
 		t.Fatal("ListLabels: want error when the org lookup fails with neither 404 nor 403, got nil")
+	}
+}
+
+// ListLabels' org-lookup verdict is cached per client except on success or
+// on any error other than 404/403 (issue #4034): a success is never cached
+// because org labels can be added mid-run, and a non-404/403 error means
+// the verdict itself isn't settled yet, so a later poll must retry it
+// rather than pinning it to today's transient failure.
+func TestForgejoClient_ListLabels_OrgVerdictCachingPerClient(t *testing.T) {
+	tests := []struct {
+		name         string
+		orgHandler   func(w http.ResponseWriter, r *http.Request)
+		wantLabels   []string // nil when wantErr
+		wantErr      bool
+		cached       bool
+		wantWarnings int
+	}{
+		{
+			name:       "404 not found is cached",
+			orgHandler: func(w http.ResponseWriter, r *http.Request) { serveNoOrgLabels(w, r) },
+			wantLabels: []string{"ready-for-agent"},
+			cached:     true,
+		},
+		{
+			name:         "403 auth failure is cached",
+			orgHandler:   func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) },
+			wantLabels:   []string{"ready-for-agent"},
+			cached:       true,
+			wantWarnings: 1,
+		},
+		{
+			name:       "200 success is not cached",
+			orgHandler: func(w http.ResponseWriter, r *http.Request) { serveLabels(w, r, `[{"name":"org-only-label"}]`) },
+			wantLabels: []string{"ready-for-agent", "org-only-label"},
+			cached:     false,
+		},
+		{
+			// 400, not 500: a 500 would hit the rest client's own
+			// transient-status retry/backoff, muddying the request count
+			// this test asserts on (see the comment above
+			// TestForgejoClient_ListLabels_OrgOtherErrorFails).
+			name:       "other error is not cached",
+			orgHandler: func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadRequest) },
+			wantErr:    true,
+			cached:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orgRequests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/repos/owner/repo/labels":
+					serveLabels(w, r, `[{"name":"ready-for-agent"}]`)
+				case forgejoOrgLabelsPath:
+					orgRequests++
+					tt.orgHandler(w, r)
+				default:
+					t.Errorf("unexpected path: %s", r.URL.Path)
+				}
+			}))
+			defer srv.Close()
+
+			fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+			var countAfterCall1, countAfterCall2 int
+			stderr := captureStderr(t, func() {
+				for i := 0; i < 2; i++ {
+					labels, err := fc.ListLabels()
+					if tt.wantErr {
+						if err == nil {
+							t.Fatalf("ListLabels call %d: want error, got nil", i+1)
+						}
+					} else {
+						if err != nil {
+							t.Fatalf("ListLabels call %d: %v", i+1, err)
+						}
+						if !reflect.DeepEqual(labels, tt.wantLabels) {
+							t.Fatalf("ListLabels call %d = %v, want %v", i+1, labels, tt.wantLabels)
+						}
+					}
+					if i == 0 {
+						countAfterCall1 = orgRequests
+					} else {
+						countAfterCall2 = orgRequests
+					}
+				}
+			})
+
+			if tt.cached {
+				if countAfterCall1 < 1 {
+					t.Fatalf("org labels endpoint got %d requests after call 1, want at least 1", countAfterCall1)
+				}
+				if countAfterCall2 != countAfterCall1 {
+					t.Fatalf("org labels endpoint got %d requests after call 2, want %d (verdict cached)", countAfterCall2, countAfterCall1)
+				}
+			} else if countAfterCall2 <= countAfterCall1 {
+				t.Fatalf("org labels endpoint got %d requests after call 1 and %d after call 2, want call 2 > call 1 (verdict not cached)", countAfterCall1, countAfterCall2)
+			}
+
+			if warnings := strings.Count(stderr, "WARNING"); warnings != tt.wantWarnings {
+				t.Fatalf("stderr had %d WARNING lines across two ListLabels calls, want %d: %q", warnings, tt.wantWarnings, stderr)
+			}
+		})
+	}
+}
+
+// ListLabels called concurrently on one client, so that go test -race
+// actually sees shared access to orgLabelsUnavailable.
+func TestForgejoClient_ListLabels_ConcurrentCallsDoNotRace(t *testing.T) {
+	var orgRequests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/labels":
+			serveLabels(w, r, `[{"name":"ready-for-agent"}]`)
+		case forgejoOrgLabelsPath:
+			orgRequests.Add(1)
+			serveNoOrgLabels(w, r)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	want := []string{"ready-for-agent"}
+
+	const goroutines = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			labels, err := fc.ListLabels()
+			if err != nil {
+				errs <- fmt.Errorf("ListLabels: %v", err)
+				return
+			}
+			if !reflect.DeepEqual(labels, want) {
+				errs <- fmt.Errorf("ListLabels = %v, want %v", labels, want)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 
