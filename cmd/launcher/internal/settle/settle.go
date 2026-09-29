@@ -82,6 +82,15 @@ type Config struct {
 	// resolves them via forge.ResolveCapabilities so New probes nothing itself
 	// (issue #2945).
 	Capabilities forge.Capabilities
+
+	// Unclaimed marks a PR whose issue was never claimed (a butler patch
+	// finding, ADR 0057, issue #4076): the issue carries no InProgress state
+	// to leave, so the gate commits no tracker state except Complete once the
+	// PR actually merged, and a red gate leaves the PR draft with a failure
+	// comment rather than agent-failed. New clamps MaxFixAttempts to 0
+	// whenever this is true, since there is no Dispatcher to run a fix pass
+	// with.
+	Unclaimed bool
 }
 
 // Settler is the "settle a dispatch result" interface every generic caller
@@ -197,6 +206,9 @@ var _ Registrar = (*Settle)(nil)
 // New constructs a Settle, reading pr and landing from cfg.Capabilities rather
 // than re-deriving them here (issue #2945).
 func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
+	if cfg.Unclaimed {
+		cfg.MaxFixAttempts = 0
+	}
 	pr := cfg.Capabilities.PRForge
 	landing := cfg.Capabilities.LandingRecorder
 	landingPass := cfg.Capabilities.LandingPassRecorder

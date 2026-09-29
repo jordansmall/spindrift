@@ -16,7 +16,11 @@ import (
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	defer s.flushSettled(num)
 	branch := s.cf.AgentBranch(num)
-	fmt.Printf("    #%s  landing=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
+	note := fmt.Sprintf("no outcome line; PR discovered on %s", branch)
+	if s.cfg.Unclaimed {
+		note = "host-opened patch PR"
+	}
+	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, prURL, note)
 	landing, reason := s.selfHealAdopted(d, num, gen, prURL)
 	switch landing {
 	case landingMerged:

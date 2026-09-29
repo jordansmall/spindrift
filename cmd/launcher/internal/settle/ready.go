@@ -3,6 +3,7 @@ package settle
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -121,6 +122,14 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 						num, pr, s.cfg.MaxFixAttempts)
 				}
 				reason := fmt.Sprintf("ci-red: still red after exhausting %d fix pass(es)", s.cfg.MaxFixAttempts)
+				if s.cfg.Unclaimed {
+					// No label records this failure (transitionState is a
+					// no-op for an unclaimed issue, issue #4076), unlike the
+					// gateTerminal arm above which already comments.
+					if commentErr := s.it.Comment(num, fmt.Sprintf("landing failed: %s", reason)); commentErr != nil {
+						fmt.Fprintf(os.Stderr, "    ?? #%s: post unclaimed-failure comment: %v\n", num, commentErr)
+					}
+				}
 				s.transitionState(num, forge.InProgress, forge.Failed, reason)
 				return landingFailed, reason
 			}
@@ -210,6 +219,12 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 func (s *Settle) completeLanding(num string, gen uint64, landed landingResult) landingResult {
 	if s.terminated(num, gen) {
 		return landingAbandoned
+	}
+	// An unclaimed issue (issue #4076) only ever reaches Complete on an actual
+	// merge; manual/auto/guard-hit/merge-blocked leave it untouched since
+	// there was never an InProgress state to move out of.
+	if s.cfg.Unclaimed && landed != landingMerged {
+		return landed
 	}
 	s.transitionState(num, forge.InProgress, forge.Complete, "")
 	return landed
