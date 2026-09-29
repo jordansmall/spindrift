@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.20.2](https://github.com/jordansmall/spindrift/compare/v0.20.1...v0.20.2) (2026-09-29)
+
+
+### Features
+
+* **butler:** add a Runner that sweeps one Chore ([0fb60a2](https://github.com/jordansmall/spindrift/commit/0fb60a24b3699f82c536106a5a7127f96ac2301a)), closes [#3990](https://github.com/jordansmall/spindrift/issues/3990)
+* **butler:** declare the built-in chores in a nix catalog ([de9fbe0](https://github.com/jordansmall/spindrift/commit/de9fbe0514bd5baed10707a5ab49f46fbfde63e9)), closes [#3991](https://github.com/jordansmall/spindrift/issues/3991)
+* **butler:** fail evaluation on an enabled chore with no prompt ([9001cdf](https://github.com/jordansmall/spindrift/commit/9001cdf3a590eaf4b11a71f531b5d3f1ede46c24)), closes [#3991](https://github.com/jordansmall/spindrift/issues/3991)
+* **butler:** tell the Box its findings cap ([842d693](https://github.com/jordansmall/spindrift/commit/842d6935f2b42f218a969c0c204b48bc3dee20a3)), closes [#3994](https://github.com/jordansmall/spindrift/issues/3994)
+* **chore:** compute the day's budget Room once ([5c5b279](https://github.com/jordansmall/spindrift/commit/5c5b279eea3905829ad47c6e70899d2d488c07dd)), closes [#3994](https://github.com/jordansmall/spindrift/issues/3994)
+* **chore:** resolve the three butler knobs in one loader ([c60cdf6](https://github.com/jordansmall/spindrift/commit/c60cdf6e84d39db345bb8b4dd71dd0b081ec18fd)), closes [#3991](https://github.com/jordansmall/spindrift/issues/3991)
+* **dispatch:** cap socket intents at the sweep's room ([9ea4150](https://github.com/jordansmall/spindrift/commit/9ea4150b65be94d699d1c539a45500be667ef135)), closes [#3994](https://github.com/jordansmall/spindrift/issues/3994)
+* **dispatch:** export the kind's axes to the Box ([386fc8e](https://github.com/jordansmall/spindrift/commit/386fc8e93bd97557516207ea618ae1b8f012b2e9)), closes [#3996](https://github.com/jordansmall/spindrift/issues/3996)
+* **dispatchkey:** add the Dispatch key sum type ([841f23e](https://github.com/jordansmall/spindrift/commit/841f23eff923b7624ad548f1e796fc4cda18f984)), closes [#3988](https://github.com/jordansmall/spindrift/issues/3988)
+* **dispatchkind:** add five remaining kind axes ([12ac073](https://github.com/jordansmall/spindrift/commit/12ac0730c561062d61ab7eb45887eb4cc66edad3)), closes [#3989](https://github.com/jordansmall/spindrift/issues/3989)
+* **signal:** validate the finding at the socket ([b132a70](https://github.com/jordansmall/spindrift/commit/b132a705cebb403e84c801a581014aa7893f23c6)), closes [#3992](https://github.com/jordansmall/spindrift/issues/3992)
+
+
+### Bug Fixes
+
+* **butler:** reject non-slug chore classes ([3bc51fa](https://github.com/jordansmall/spindrift/commit/3bc51faf414d7db785826c371f77ddfb9d65dd8a)), closes [#3986](https://github.com/jordansmall/spindrift/issues/3986)
+* **settle:** decode findings into the wire type ([38453c5](https://github.com/jordansmall/spindrift/commit/38453c5790c4a3a2c1506bf752a6270f7a3a5f59)), closes [#3992](https://github.com/jordansmall/spindrift/issues/3992)
+
+
+### Documentation
+
+* **adr:** accept ADR 0056 with the kind-axis rules ([d16f88c](https://github.com/jordansmall/spindrift/commit/d16f88c3d0fe1a96cc2cdc952bfdfea0ee4b9d66)), closes [#3996](https://github.com/jordansmall/spindrift/issues/3996)
+* **butler:** state the chore class slug rule ([a1f652a](https://github.com/jordansmall/spindrift/commit/a1f652ab04c594d070a034ef0874a6c53b344dd0)), closes [#3986](https://github.com/jordansmall/spindrift/issues/3986)
+* **context:** define the Dispatch key ([4fa0cb1](https://github.com/jordansmall/spindrift/commit/4fa0cb17ed99f5238a90036878b0da2ec6963958)), closes [#3988](https://github.com/jordansmall/spindrift/issues/3988)
+* **daemon:** point stale comments at withoutKeys and Halt.ExitCode ([ac48562](https://github.com/jordansmall/spindrift/commit/ac4856269359a0b115a27aa8e93a39db58c7f58f)), closes [#4063](https://github.com/jordansmall/spindrift/issues/4063)
+* name inputdoc.Document.Lookup as the knob warning ([4a86787](https://github.com/jordansmall/spindrift/commit/4a86787d669fa0f601a3af1c86dcea74e22aee16)), closes [#4062](https://github.com/jordansmall/spindrift/issues/4062)
+* **release-notes:** add 0.20.2 highlights ([183eda4](https://github.com/jordansmall/spindrift/commit/183eda4b0e528557e994dc0b3bc1e349f749f9ac))
+* say the Ledger holds state only ([da3ad56](https://github.com/jordansmall/spindrift/commit/da3ad56e8e2a27bbd000643721ccb234d2f43075)), closes [#3995](https://github.com/jordansmall/spindrift/issues/3995)
+
+
+### Code Refactoring
+
+* **butler:** decide promotion once through one promotion value ([c53de78](https://github.com/jordansmall/spindrift/commit/c53de7893eb931cfaedeb41195dc855432a1220f)), closes [#3993](https://github.com/jordansmall/spindrift/issues/3993)
+* **butler:** drive the butler verb through Sweep ([06b80e6](https://github.com/jordansmall/spindrift/commit/06b80e650cccad163ea3ca0d8058b3928dcda2ad)), closes [#3990](https://github.com/jordansmall/spindrift/issues/3990)
+* **butler:** give the scan checkout a Tree adapter ([4c477f1](https://github.com/jordansmall/spindrift/commit/4c477f1525bed07a973afdc7d58a3590b1e8c20a)), closes [#3995](https://github.com/jordansmall/spindrift/issues/3995)
+* **butler:** read the chore knobs only through chore.Load ([01bb611](https://github.com/jordansmall/spindrift/commit/01bb61101c0267ae4a086ec108e5f6d473524cf7)), closes [#3991](https://github.com/jordansmall/spindrift/issues/3991)
+* **butler:** thread Sweep's Room into settle ([85cfbb0](https://github.com/jordansmall/spindrift/commit/85cfbb06d66b045948856d5ff1be458a98032c6b)), closes [#3994](https://github.com/jordansmall/spindrift/issues/3994)
+* **chore:** rename the pure butler package ([dd302e4](https://github.com/jordansmall/spindrift/commit/dd302e47007019cb4e4d6f180be2be2a25beef2e)), closes [#3987](https://github.com/jordansmall/spindrift/issues/3987)
+* **daemon:** carry the Dispatch key on events and slot flights ([6dd2378](https://github.com/jordansmall/spindrift/commit/6dd237875596b045ab787de97a583cbdb15c4e79)), closes [#3988](https://github.com/jordansmall/spindrift/issues/3988)
+* **daemon:** retire the kind aliases and read keying ([e35954b](https://github.com/jordansmall/spindrift/commit/e35954bc7207119ef83382b20fa95f1ed326faa1)), closes [#3989](https://github.com/jordansmall/spindrift/issues/3989)
+* **dispatch:** key the Box subject by dispatchkey.Key ([47820e9](https://github.com/jordansmall/spindrift/commit/47820e9968b74af337102ec1800e3e3780feec6e)), closes [#3988](https://github.com/jordansmall/spindrift/issues/3988)
+* **driver-exec:** post signals from the wire structs ([a302ca4](https://github.com/jordansmall/spindrift/commit/a302ca4c93abc68be1af35eeb317036cc6b76198)), closes [#3992](https://github.com/jordansmall/spindrift/issues/3992)
+* **entrypoint:** read kind axes, not the name ([923d767](https://github.com/jordansmall/spindrift/commit/923d767705e2c4268bad62a6854c3000338c34b1)), closes [#3996](https://github.com/jordansmall/spindrift/issues/3996)
+* **launcher:** fill the promotion label from the butler verb ([45ae017](https://github.com/jordansmall/spindrift/commit/45ae017e71bc91b21272f700b66b9331d9cbb9cf)), closes [#3993](https://github.com/jordansmall/spindrift/issues/3993)
+* **launcher:** route research tracker choice via axis ([abf2cfa](https://github.com/jordansmall/spindrift/commit/abf2cfa8a6de4eaeb4a837f983ea7939e30c3d3f)), closes [#3989](https://github.com/jordansmall/spindrift/issues/3989)
+* **ledger:** sync the hosted Ledger once per run ([d6c3d1b](https://github.com/jordansmall/spindrift/commit/d6c3d1b15676be156773fe9048685b720196d6db)), closes [#3995](https://github.com/jordansmall/spindrift/issues/3995)
+* **promptassembly:** pick contract and relay off axes ([7ae620b](https://github.com/jordansmall/spindrift/commit/7ae620b3ab14d59bb2c90e70e92dfd3cb79d06dd)), closes [#3989](https://github.com/jordansmall/spindrift/issues/3989)
+* **report:** key report records by dispatchkey.Key ([5654917](https://github.com/jordansmall/spindrift/commit/565491741f7fe0e13bd713e74b11233c25955cb1)), closes [#3988](https://github.com/jordansmall/spindrift/issues/3988)
+* **settle:** export one butler filing function ([a248cd4](https://github.com/jordansmall/spindrift/commit/a248cd46bc2791f79bb06dff80cd573f97d1667f)), closes [#3990](https://github.com/jordansmall/spindrift/issues/3990)
+* **settle:** hand the filed URL to the butler's OnFiled hook ([ae5cf13](https://github.com/jordansmall/spindrift/commit/ae5cf13d9fea222627d179b36a832f70731caa52)), closes [#3993](https://github.com/jordansmall/spindrift/issues/3993)
+* **settle:** read the finding label off the descriptor ([60c7258](https://github.com/jordansmall/spindrift/commit/60c7258217f68716df65aee93bdfe20aa0fd0dbd)), closes [#3989](https://github.com/jordansmall/spindrift/issues/3989)
+* **signalwire:** own the chore class slug ([af29e89](https://github.com/jordansmall/spindrift/commit/af29e892421a29ce040b18bc68c2c31ae8c04b75)), closes [#3986](https://github.com/jordansmall/spindrift/issues/3986)
+
+
+### Tests
+
+* **butler:** share one Ledger repo fixture and fake the Tree ([e968b11](https://github.com/jordansmall/spindrift/commit/e968b11773cb040e15ba6a5b5bb89a50776a8556)), closes [#3995](https://github.com/jordansmall/spindrift/issues/3995)
+* **launcher:** forbid kind-shaped comparisons ([bca5f1e](https://github.com/jordansmall/spindrift/commit/bca5f1e209ae1e110599fe1e8e2d3a90da9d3238)), closes [#3989](https://github.com/jordansmall/spindrift/issues/3989)
+* **signalwire:** pin relay prompt keys to the wire tags ([f5656d8](https://github.com/jordansmall/spindrift/commit/f5656d80e122540cb5e9840473ccb43d1e7bb3fb)), closes [#3992](https://github.com/jordansmall/spindrift/issues/3992)
+
 ## [0.20.1](https://github.com/jordansmall/spindrift/compare/v0.20.0...v0.20.1) (2026-09-28)
 
 
