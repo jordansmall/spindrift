@@ -274,6 +274,12 @@ type settledLatch struct {
 // call site, "" where none exists — see flushSettled for why this only
 // latches rather than emits.
 func (s *Settle) transitionState(num string, from, to forge.DispatchState, note string) {
+	// An unclaimed issue (issue #4076) never went agent-in-progress, so there
+	// is nothing to leave and no agent-failed to apply here — only a real
+	// merge (Complete, below) commits tracker state.
+	if s.cfg.Unclaimed && to != forge.Complete {
+		return
+	}
 	if err := s.it.TransitionState(num, from, to); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s\n", num, to)
 	}
