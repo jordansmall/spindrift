@@ -4893,42 +4893,71 @@ that Chore's `BUTLER_CHORE_CLASSES` allow-list, and every entry's Chore must
 be enabled in `BUTLER_CHORES` — either violation is rejected at `spindrift
 butler`/daemon startup preflight, naming the offending chore or class.
 
-For a finding the patch rung accepts, settle re-fetches the base branch's
-current head from the same scratch clone the run's Ledger and scan share,
-apply-checks the finding's own diff against that fresh tip, and — only once
-both succeed — commits it on top under the launcher's own identity
-(`GIT_USER_NAME`/`GIT_USER_EMAIL`). It then files the finding issue as usual (carrying
-both `agent-butler-finding` and `agent-butler-patch`, never a dispatch
-label), pushes the committed patch to that issue's agent branch with the
-launcher's own push credential, and opens a **draft** PR closing the finding
-(`Closes #N`) whose body quotes the allow-listed class and the in-Box
-reviewer's concurrence, recording the PR's URL in the Ledger done commit's
-`patched` list alongside `filed` and `promoted`. Any failure along that
-path — a diff that no longer applies to the fresh tip, a failed push, or
-a failed PR create — never fails the run; settle instead falls back to
-judging the finding exactly as the promotion path would (spending a
-promotion slot, not a patch slot). For a push/PR-create failure that
-means adding the work label to the already-filed issue rather than
-repeating `PostIssue`, so that issue keeps
-`agent-butler-patch` with no patch PR behind it — always possible here,
-since the same PatchForge that pushed the branch also carries
-`forge.IssueLabeler` (issue #4074). On `ISSUE_TRACKER=local` the rung is
-off before any of this: `butlerPatchForge` (`cmd/launcher/butler.go`)
-never builds a PatchForge for a tracker that lacks `IssueLabeler`, so a
-local finding is judged for promotion exactly as it would be with no
-patch at all — never filed with the patch label to begin with. The
-patch rung therefore needs a Code Forge that can both push a branch and
-open a draft PR host-side (`github` and `forgejo`, same as auto-promotion
-needs a Ledger) and, since issue #4074, an `ISSUE_TRACKER` that can add
-labels to an already-filed issue: neither `CODE_FORGE=local` nor `git`
-backs the forge half, and `ISSUE_TRACKER=local` can't label after
-filing, so a patch candidate on those trackers/forges always falls back
-to promotion (or plain filing, when promotion is off too). `ISSUE_TRACKER`
-must also name the same backend as `CODE_FORGE` (`github`+`github` or
-`forgejo`+`forgejo`): `Closes #N` and the `agent/issue-N` branch name an
-issue number in the forge's own namespace, so a mismatched pairing — e.g.
-`ISSUE_TRACKER=forgejo` with `CODE_FORGE=github` — would reference an
-unrelated issue, and the rung stays off there too.
+Three more host-only knobs bound what the rung will apply (issue #4075).
+`BUTLER_PATCH_PATHS` (schema key `butlerPatchPaths`) is a comma-separated
+glob list matched against every path in the diff: a path is admitted only
+when it matches at least one plain entry and no `!`-prefixed entry. Its
+default, `docs/**,*.md,!docs/adr/**,!CLAUDE.md,!CONTEXT.md,!CONTRIBUTING.md,!AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**`,
+admits documentation and root-level Markdown and denies the repo-root
+agent-instruction files and directories (`CLAUDE.md`, `AGENTS.md`,
+`skills/**`, and the rest of the built-in deny set); those deny entries are
+root-anchored, so a nested copy such as `docs/CLAUDE.md` is not denied by
+the default, and a Consumer that keeps one should add its own `!` entry.
+Setting the knob replaces the whole default, deny entries included.
+`BUTLER_PATCH_MAX_FILES` (schema key `butlerPatchMaxFiles`, default `3`)
+caps the files a diff may touch, and `BUTLER_PATCH_MAX_LINES` (schema key
+`butlerPatchMaxLines`, default `20`) caps its changed lines, added plus
+removed, across the whole diff.
+`BUTLER_PATCH_PATHS` gates what the host applies; `MERGE_GUARD_PATHS` still
+gates what merges, and neither knob stands in for the other. A patch
+candidate clears the rung only when every gate holds, checked in this order:
+its class is on `BUTLER_PATCH_CLASSES`; the diff parses and every file in it
+is a plain modification (no add, delete, rename, mode change, or binary
+content); the file cap; the line cap; every path clears
+`BUTLER_PATCH_PATHS`; every path is one of the finding's own site keys; the
+in-Box reviewer concurred; and the day's patch budget has room. The first
+gate that fails is logged at settle as `status=patch-skipped`, naming the
+gate, and the finding is then judged exactly as if it carried no patch. A
+diff that clears every gate but that `git apply` reads differently from
+the gates' own parse, or that fails to apply to the scanned commit or the
+current base head, logs `status=patch-apply-failed` instead, and the finding
+falls through to the same promote/skip decision.
+
+For a finding the patch rung accepts, settle apply-checks the finding's
+own diff against the commit the run scanned, then re-fetches the base
+branch's current head from the same scratch clone the run's Ledger and
+scan share, applies the diff to that fresh tip, and — only once all
+of that succeeds — commits it on top under the launcher's own identity
+(`GIT_USER_NAME`/`GIT_USER_EMAIL`). It then files the finding issue as usual
+(carrying both `agent-butler-finding` and `agent-butler-patch`, never a
+dispatch label), pushes the committed patch to that issue's agent branch
+with the launcher's own push credential, and opens a **draft** PR closing
+the finding (`Closes #N`) whose body quotes the allow-listed class and the
+in-Box reviewer's concurrence, recording the PR's URL in the Ledger done
+commit's `patched` list alongside `filed` and `promoted`. Any failure along
+that path — a diff that does not apply to the scanned commit or the fresh
+tip, a failed push, or a failed PR create — never fails the run; settle instead falls back to judging the
+finding exactly as the promotion path would (spending a promotion slot,
+not a patch slot). For a push/PR-create failure that means adding the
+work label to the already-filed issue rather than repeating `PostIssue`,
+so that issue keeps `agent-butler-patch` with no patch PR behind it —
+always possible here, since the same PatchForge that pushed the branch also
+carries `forge.IssueLabeler` (issue #4074). On `ISSUE_TRACKER=local` the
+rung is off before any of this: `butlerPatchForge` (`cmd/launcher/butler.go`)
+never builds a PatchForge for a tracker that lacks `IssueLabeler`, so a local
+finding is judged for promotion exactly as it would be with no patch at all
+— never filed with the patch label to begin with. The patch rung therefore
+needs a Code Forge that can both push a branch and open a draft PR host-side
+(`github` and `forgejo`, same as auto-promotion needs a Ledger) and, since
+issue #4074, an `ISSUE_TRACKER` that can add labels to an already-filed
+issue: neither `CODE_FORGE=local` nor `git` backs the forge half, and
+`ISSUE_TRACKER=local` can't label after filing, so a patch candidate on
+those trackers/forges always falls back to promotion (or plain filing, when
+promotion is off too). `ISSUE_TRACKER` must also name the same backend as
+`CODE_FORGE` (`github`+`github` or `forgejo`+`forgejo`): `Closes #N` and the
+`agent/issue-N` branch name an issue number in the forge's own namespace, so
+a mismatched pairing — e.g. `ISSUE_TRACKER=forgejo` with `CODE_FORGE=github`
+— would reference an unrelated issue, and the rung stays off there too.
 
 A patch PR that did open lands through the work merge gate once the Done
 commit is in: the host hands it to the gate's adopt entry point
