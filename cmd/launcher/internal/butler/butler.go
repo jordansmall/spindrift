@@ -46,6 +46,23 @@ type Policy struct {
 	PromotionLabel string
 }
 
+// PatchForge is the host capability the patch rung needs to land a finding
+// as a draft PR (ADR 0057, issue #4074): the branch name a filed finding's
+// issue number maps to, the push/draft-PR pair forge.BranchPusher and
+// forge.DraftPRCreator already give a write-capable host adapter, and
+// forge.IssueLabeler so a failed push or PR create can still fall the
+// already-filed finding back to promote (issue #4074) -- the reason
+// butlerPatchForge withholds the rung until tracker and forge both resolve
+// and name the same backend. A Runner built with a nil PatchForge never
+// reaches decide's patch branch at all -- see WithPatchForge and
+// Runner.run's own patchesPerDay gating.
+type PatchForge interface {
+	AgentBranch(num string) string
+	forge.BranchPusher
+	forge.DraftPRCreator
+	forge.IssueLabeler
+}
+
 // Kind names which of Sweep's four outcomes happened.
 type Kind int
 
@@ -71,24 +88,35 @@ type Outcome struct {
 	// Reasons holds one `chore %q not due: %s` line per candidate, only set
 	// when Kind is NotDue.
 	Reasons []string
-	// Filed, Promoted, Dropped are only set when Kind is Swept.
-	Filed, Promoted, Dropped int
+	// Filed, Promoted, Dropped, Patched are only set when Kind is Swept.
+	Filed, Promoted, Dropped, Patched int
 }
 
 // Runner sweeps one due Chore per Sweep call.
 type Runner struct {
-	backend ledger.Backend
-	tree    Tree
-	it      forge.IssueTracker
-	newBox  func(dispatch.Chore) dispatch.Dispatcher
-	policy  Policy
-	now     func() time.Time
+	backend    ledger.Backend
+	tree       Tree
+	it         forge.IssueTracker
+	newBox     func(dispatch.Chore) dispatch.Dispatcher
+	policy     Policy
+	now        func() time.Time
+	patchForge PatchForge
 }
 
 // New constructs a Runner. newBox builds the Dispatcher for one Chore run (a
 // real *dispatch.Factory.NewChore in production, dispatch.Fake in tests).
+// The patch rung stays off until a caller opts in with WithPatchForge.
 func New(backend ledger.Backend, tree Tree, it forge.IssueTracker, newBox func(dispatch.Chore) dispatch.Dispatcher, policy Policy, now func() time.Time) *Runner {
 	return &Runner{backend: backend, tree: tree, it: it, newBox: newBox, policy: policy, now: now}
+}
+
+// WithPatchForge opts r into the patch rung (ADR 0057, issue #4074): f backs
+// decide's patch branch for every subsequent Sweep call. Returns r so a
+// caller can chain it onto New. If it is never called, r.patchForge stays
+// nil -- see Runner.run for what that gates.
+func (r *Runner) WithPatchForge(f PatchForge) *Runner {
+	r.patchForge = f
+	return r
 }
 
 // Sweep picks the first due Chore out of chores (in order) and runs it, or
@@ -192,7 +220,16 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	}
 
 	scope := chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
-	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.Budgets.MaxPromotionsPerDay, r.policy.PromotionLabel, c.PatchClasses, r.policy.Budgets.MaxPatchesPerDay)
+	// A nil patchForge means this Runner never opted into the patch rung
+	// (WithPatchForge), so patchesPerDay reads as 0 regardless of the
+	// Consumer's own BUTLER_MAX_PATCHES_PER_DAY -- newPromotion's patchEnabled
+	// derivation is the only place that decides "on", so settle never needs
+	// its own patchForge-nil check (issue #4074).
+	patchesPerDay := r.policy.Budgets.MaxPatchesPerDay
+	if r.patchForge == nil {
+		patchesPerDay = 0
+	}
+	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.Budgets.MaxPromotionsPerDay, r.policy.PromotionLabel, c.PatchClasses, patchesPerDay)
 
 	// The Box only ever sees a class list when promotion is on and today's
 	// promotion room is actually > 0: with nothing left to spend this run,
@@ -202,25 +239,28 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	if promo.enabled && room.Promotions > 0 {
 		classes = c.Classes
 	}
-	// Room.Patches is already 0 whenever the patch rung is off
-	// (MaxPatchesPerDay == 0), so this needs no separate enabled check. It
+	// promo.patchEnabled is required here, not just room.Patches > 0: room.Patches
+	// derives from the Consumer's raw BUTLER_MAX_PATCHES_PER_DAY budget alone
+	// (chore.Room.new), so it stays positive even when this Runner has no
+	// patchForge (issue #4074) -- patchesPerDay above is what actually folds
+	// that in, and patchEnabled is the only place that reads patchesPerDay. It
 	// also requires len(classes) > 0 -- the promotion class list just above
 	// -- because the relay fragment only ever honours CHORE_PATCH_CLASSES
 	// for a class also present on CHORE_CLASSES: with promotion off or its
 	// room spent, classes is empty and a patch-class list alone would tell
 	// the Box about candidates the relay fragment says to omit -class for.
 	var patchClasses []string
-	if len(classes) > 0 && room.Patches > 0 {
+	if promo.patchEnabled && len(classes) > 0 && room.Patches > 0 {
 		patchClasses = c.PatchClasses
 	}
 	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes, PatchClasses: patchClasses, MaxFindings: room.Findings})
 	defer d.Close()
 	result := d.Run()
 
-	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo)
+	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch})
 	s := step.settle(d, result)
 	if !s.done {
 		return Outcome{Kind: ClaimLeft, Chore: choreName}, nil
 	}
-	return Outcome{Kind: Swept, Chore: choreName, Filed: s.filed, Promoted: s.promoted, Dropped: s.dropped}, nil
+	return Outcome{Kind: Swept, Chore: choreName, Filed: s.filed, Promoted: s.promoted, Dropped: s.dropped, Patched: s.patched}, nil
 }

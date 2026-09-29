@@ -2,17 +2,33 @@ package butler
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
 )
+
+// conventionalSubjectRE matches a Conventional Commits subject line
+// (type[(scope)][!]: description); patchCommitSubject uses it to decide
+// whether a finding's own title already reads as one.
+var conventionalSubjectRE = regexp.MustCompile(`^[a-z]+(?:\([^)]*\))?!?: \S`)
+
+// conventionalBangRE matches the breaking-change "!" in an already-
+// conventional subject, capturing the type[(scope)] on one side and the
+// ": " on the other so patchCommitSubject can drop just the "!" (issue
+// #4074): a Box-authored "feat!: ..." title landing verbatim as a squash
+// subject would otherwise drive an unintended release-please major bump.
+var conventionalBangRE = regexp.MustCompile(`^([a-z]+(?:\([^)]*\))?)!(: )`)
 
 // settled is what one settleRun.settle call reports back to Sweep: whether
 // the done commit actually landed, and, only when it did, the counts Sweep's
@@ -21,8 +37,8 @@ import (
 // on the done commit and a crashed Box (no ready outcome at all) both leave
 // nothing new to read back.
 type settled struct {
-	done                     bool
-	filed, promoted, dropped int
+	done                              bool
+	filed, promoted, dropped, patched int
 }
 
 // settleRun is one Chore run's settle step: file each finding the Box reported, then write the Chore's
@@ -39,6 +55,21 @@ type settleRun struct {
 	now    func() time.Time
 	room   chore.Room
 	policy promotion
+
+	// patch backs the patch rung (ADR 0057, issue #4074) -- see Runner.run
+	// for how patch.forge's presence gates it.
+	patch patchRung
+}
+
+// patchRung is the three fields the patch rung needs (ADR 0057, issue
+// #4074): tree commits a candidate's diff on top of the fresh base head,
+// forge pushes the committed branch and opens the draft PR (and, on a
+// failed push/PR-create, labels the already-filed issue for the fallback
+// promote), and base is the branch both target.
+type patchRung struct {
+	tree  Tree
+	forge PatchForge
+	base  string
 }
 
 // newSettleRun constructs a settleRun for one Chore run. claim is the Ledger
@@ -52,9 +83,10 @@ type settleRun struct {
 // auto-promote, only when policy.enabled -- room is computed once per Sweep
 // and handed down, never re-walked here (issue #3994). policy is the
 // host-side auto-promotion gate (issue #3880); its zero value never
-// promotes anything.
-func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, room chore.Room, policy promotion) *settleRun {
-	return &settleRun{it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy}
+// promotes anything. patch backs the patch rung (ADR 0057); see Runner.run
+// for how patch.forge's presence gates it.
+func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, room chore.Room, policy promotion, patch patchRung) *settleRun {
+	return &settleRun{it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy, patch: patch}
 }
 
 // settle files result's findings, if any, then writes the Chore's done
@@ -83,7 +115,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	}
 
 	finishParent := s.claim
-	var promoted []string
+	var promoted, patched []string
 	filed, dropped := settle.FileButlerFindings(s.it, num, result, s.room.Findings, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// An unconfigured/off policy can never promote, so it reserves none
 		// of the day's shared promotion room. room.Promotions is Sweep's own
@@ -94,6 +126,9 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		if s.policy.enabled {
 			remaining = s.room.Promotions
 		}
+		// Unlike remaining, patchesLeft needs no guard: decide's patch gate
+		// checks patchEnabled itself.
+		patchesLeft := s.room.Patches
 
 		// Reserve the slots this run intends to spend before filing anything
 		// (issue #3926): if the done commit below never lands -- the claim
@@ -101,7 +136,11 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		// reservation still counts against DayTotals, so a lost Finish can
 		// never let a Chore promote past the day's budget. finishParent
 		// moves to the reservation tip on success so the done commit's own
-		// CAS is checked against it, not the stale claim.
+		// CAS is checked against it, not the stale claim. Patch candidates
+		// count as promotion-eligible here too (see eligible's loop below),
+		// so a patch that lands but whose own Finish is lost still leaves
+		// the reservation spent -- over-counting that day's promotions,
+		// never under-counting them (issue #4074).
 		if remaining > 0 {
 			eligible := 0
 			for _, f := range kept {
@@ -110,7 +149,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 				// patch-gate-fails contract), so it still needs a reserved
 				// promotion slot -- this count must not skip it just
 				// because it might patch instead.
-				if s.policy.decide(f, chore.Room{Promotions: remaining}).kind == promote {
+				if s.policy.decide(f, promoteOnlyRoom(remaining)).kind == promote {
 					eligible++
 				}
 			}
@@ -129,10 +168,48 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 
 		return func(f settle.Finding) settle.Decoration {
 			backlink := butlerBacklink(s.chore, f)
-			// Patch room stays zero here too (issue #4074): landing a patch
-			// PR is a later slice, so decide only ever promotes or skips at
-			// this call site for now.
-			dec := s.policy.decide(f, chore.Room{Promotions: remaining})
+			dec := s.policy.decide(f, chore.Room{Promotions: remaining, Patches: patchesLeft})
+			if dec.kind == patch {
+				subject := patchCommitSubject(f.Title)
+				pc, err := s.patch.tree.CommitPatch(s.patch.base, f.Patch, subject)
+				if err != nil {
+					// A stale/rebased diff: file exactly as if it had no
+					// Patch at all, re-deciding with patch room zeroed so
+					// decide can only promote or skip from here (issue #4074).
+					fmt.Printf("    #%s  status=patch-skipped  !! %v\n", num, err)
+					dec = s.policy.decide(f, promoteOnlyRoom(remaining))
+				} else {
+					return settle.Decoration{
+						Backlink:    backlink,
+						ExtraLabels: []string{dispatchkind.Butler.PatchLabel},
+						// Spend the slot, push, and open the PR only in
+						// OnFiled, after PostIssue succeeds -- a failed post
+						// must not push a branch or open a PR for an issue
+						// that never landed (mirrors the promote path below).
+						OnFiled: func(url string) {
+							issueNum, err := issueNumberFromURL(url)
+							if err != nil {
+								// No issue number to label or close: the
+								// finding stays filed as-is.
+								fmt.Printf("    #%s  status=patch-failed  !! %v\n", num, err)
+								return
+							}
+							head := s.patch.forge.AgentBranch(issueNum)
+							prURL, err := s.landPatch(pc, subject, head, f, url, issueNum)
+							if err != nil {
+								fmt.Printf("    #%s  status=patch-failed  !! %v\n", num, err)
+								if s.fallBackToPromote(num, issueNum, f, remaining) {
+									remaining--
+									promoted = append(promoted, url)
+								}
+								return
+							}
+							patchesLeft--
+							patched = append(patched, prURL)
+						},
+					}
+				}
+			}
 			if dec.kind != promote {
 				return settle.Decoration{Backlink: backlink}
 			}
@@ -151,6 +228,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		Cursor:    s.scope.NextCursor,
 		Filed:     filed,
 		Promoted:  promoted,
+		Patched:   patched,
 		Usage:     d.CumulativeUsage(),
 		Dropped:   dropped,
 	}
@@ -164,13 +242,129 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	if len(promoted) > 0 {
 		note = fmt.Sprintf("%d filed, %d promoted", len(filed), len(promoted))
 	}
+	if len(patched) > 0 {
+		note = fmt.Sprintf("%s, %d patched", note, len(patched))
+	}
 	if dropped > 0 {
 		note = fmt.Sprintf("%s, %d dropped", note, dropped)
 	}
 	report.Settled(dispatchkey.Chore(s.chore), forge.Complete.String(), note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
 
-	return settled{done: true, filed: len(filed), promoted: len(promoted), dropped: dropped}
+	return settled{done: true, filed: len(filed), promoted: len(promoted), dropped: dropped, patched: len(patched)}
+}
+
+// landPatch pushes pc's committed branch to head and opens a draft PR for
+// it, returning the PR's URL. Called only from OnFiled, after the finding
+// issue itself has actually filed (issueNum), so the PR body can close it.
+func (s *settleRun) landPatch(pc PatchCommit, subject, head string, f settle.Finding, findingURL, issueNum string) (string, error) {
+	if err := s.patch.forge.PushBranch(pc.Dir, pc.Ref, head); err != nil {
+		return "", err
+	}
+	body := patchPRBody(s.chore, f, findingURL, issueNum)
+	prURL, _, err := s.patch.forge.CreateDraftPR(subject, body, s.patch.base, head)
+	if err != nil {
+		return "", err
+	}
+	return prURL, nil
+}
+
+// fallBackToPromote is landPatch's failure path (issue #4074): a finding
+// already filed with dispatchkind.Butler.PatchLabel, whose push or PR-create
+// then failed, is judged exactly as decidePromote would judge it with no
+// Patch, via s.patch.forge's own forge.IssueLabeler rather than PostIssue's
+// own labels (the issue already exists) -- reachable only because
+// butlerPatchForge (cmd/launcher/butler.go) refuses to turn the rung on
+// without an IssueLabeler in the first place. Reports whether it promoted --
+// the caller's OnFiled spends the shared remaining/promoted state itself on
+// true, the same way the ordinary promote path does. A failed AddLabels
+// leaves the finding filed with only its patch label -- logged, never
+// fatal, like every other best-effort step in this file.
+func (s *settleRun) fallBackToPromote(chorenum, issueNum string, f settle.Finding, remaining int) bool {
+	fb := s.policy.decide(f, promoteOnlyRoom(remaining))
+	if fb.kind != promote {
+		return false
+	}
+	if err := s.patch.forge.AddLabels(issueNum, fb.labels); err != nil {
+		fmt.Printf("    #%s  status=patch-fallback-label-failed  !! %v\n", chorenum, err)
+		return false
+	}
+	if err := s.it.Comment(issueNum, promotionNote(s.chore, f, s.policy, fb.files)); err != nil {
+		fmt.Printf("    #%s  status=patch-fallback-comment-failed  !! %v\n", chorenum, err)
+	}
+	return true
+}
+
+// promoteOnlyRoom zeroes the patch half of a chore.Room so a re-decide call
+// can only promote or skip a finding that has already left the patch path
+// (spent, skipped, or failed to land) -- never offered patch room a second
+// time for the same finding (issue #4074).
+func promoteOnlyRoom(promotions int) chore.Room {
+	return chore.Room{Promotions: promotions}
+}
+
+// issueNumberFromURL returns url's trailing path segment -- a filed issue's
+// number on the github/forgejo trackers -- for AgentBranch and
+// IssueLabeler.AddLabels, neither of which take a URL. It errors when that
+// segment is not a positive decimal number: the local tracker's PostIssue
+// returns "local:" + slug, which must never become a branch name or a
+// Closes reference (issue #4074).
+func issueNumberFromURL(url string) (string, error) {
+	tail := url[strings.LastIndex(url, "/")+1:]
+	if n, err := strconv.Atoi(tail); err != nil || n <= 0 {
+		return "", fmt.Errorf("issue url %q does not end in an issue number", url)
+	}
+	return tail, nil
+}
+
+// patchSubjectMaxLen is the /commit skill's own subject ceiling, applied
+// here too since patchCommitSubject's result also becomes the draft PR/
+// squash title (issue #4074).
+const patchSubjectMaxLen = 72
+
+// patchCommitSubject derives a Conventional Commits subject for a patch's
+// commit (and, doubling as the draft PR's title) from the finding's own
+// title: used as-is when it already reads as one, else prefixed so the
+// commit history stays Conventional-Commits-clean regardless of what a Box
+// happened to title the finding. A leading breaking-change "!" is always
+// stripped -- the butler never decides a finding is breaking, so the
+// squash title must never carry the marker release-please reads as a major
+// bump -- and the result is capped at patchSubjectMaxLen (issue #4074).
+func patchCommitSubject(title string) string {
+	subject := oneLine(title)
+	if !conventionalSubjectRE.MatchString(subject) {
+		subject = "chore(butler): " + subject
+	}
+	subject = conventionalBangRE.ReplaceAllString(subject, "$1$2")
+	return truncateSubject(subject, patchSubjectMaxLen)
+}
+
+// truncateSubject caps s at limit runes (never splitting a multi-byte rune),
+// replacing the last rune with "…" when it had to cut so the result still
+// reads as visibly truncated rather than silently clipped.
+func truncateSubject(s string, limit int) string {
+	r := []rune(s)
+	if len(r) <= limit {
+		return s
+	}
+	return string(r[:limit-1]) + "…"
+}
+
+// patchedNote is promotionNote's patch-rung sibling (ADR 0057): quotes the
+// reviewer's own concurrence the same way, naming the patch allow-list
+// rather than the promotion one.
+func patchedNote(choreName string, f settle.Finding) string {
+	return fmt.Sprintf(
+		"**Patched** by the butler: class `%s` is on the `%s` Chore's patch allow-list, and the in-Box reviewer agreed: `%s`",
+		f.Class, choreName, oneLine(f.Concurrence),
+	)
+}
+
+// patchPRBody renders a landed patch's draft PR body: the patched note, the
+// finding issue's own URL for context, and Closes #N so merging the PR
+// closes the finding it patches.
+func patchPRBody(choreName string, f settle.Finding, findingURL, issueNum string) string {
+	return fmt.Sprintf("%s\n\n%s\n\nCloses #%s", patchedNote(choreName, f), findingURL, issueNum)
 }
 
 // fail prints a status=failed line and reports the run failed. It applies no

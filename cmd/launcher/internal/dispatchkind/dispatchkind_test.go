@@ -135,3 +135,20 @@ func TestEveryAxisSetForEveryKind(t *testing.T) {
 		filerRelayGates[d.FilerRelayGate] = true
 	}
 }
+
+// TestPatchLabelIsButlerOnly guards PatchLabel's butler-only scope (issue
+// #4074): unlike FindingLabel, it isn't an axis every kind sets, since only
+// the butler ever lands a patch PR (ADR 0057).
+func TestPatchLabelIsButlerOnly(t *testing.T) {
+	if Butler.PatchLabel == "" {
+		t.Fatal("Butler.PatchLabel unset")
+	}
+	if Butler.PatchLabel == Butler.FindingLabel {
+		t.Fatalf("Butler.PatchLabel == FindingLabel (%q); must be distinct provenance labels", Butler.PatchLabel)
+	}
+	for _, d := range []*Descriptor{Work, Research} {
+		if d.PatchLabel != "" {
+			t.Errorf("%s: PatchLabel = %q, want unset (patch rung is butler-only)", d.Name, d.PatchLabel)
+		}
+	}
+}
