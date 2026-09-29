@@ -24,30 +24,19 @@ const validateMarkersRegistryPathForTest = "../internal/promptassembly/testdata/
 // covered cell (issue #2540: checkCoveredCell checks only dispatch kind
 // "work"). Since issue #2979 the Box-env-sourced fields arrive via t.Setenv,
 // so every one is set explicitly, even to "", or a leftover value in the test
-// process's own environment leaks into the run.
+// process's own environment leaks into the run. Blanking the generated
+// promptassembly.BoxEnvVarNames keeps that true as rows are added (issue
+// #4044).
 func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 	t.Helper()
-	t.Setenv("ORCHESTRATOR_ENABLED", "")
-	t.Setenv("AGENTS_JSON_TEMPLATE", "")
-	t.Setenv("BOX_FILER_ENABLED", "")
-	t.Setenv("BOX_WORKER_PROVISIONED", "")
-	t.Setenv("BOX_REVIEW_LOOP_INLINE", "")
-	t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "")
+	for _, name := range promptassembly.BoxEnvVarNames {
+		t.Setenv(name, "")
+	}
 	t.Setenv("ISSUE_TRACKER", "github")
-	t.Setenv("BOX_TRACKER_AXIS_READ", "")
-	t.Setenv("BOX_TRACKER_AXIS_WRITE", "")
-	t.Setenv("BOX_TRACKER_AXIS_FILER", "")
 	t.Setenv("BOX_WRITE_ENABLED", "1")
-	t.Setenv("LOCAL_ISSUE_REFERENCE", "")
 	t.Setenv("CODE_FORGE", "github")
-	t.Setenv("BOX_FORGE_BACKEND", "")
 	t.Setenv("DISPATCH_KIND", "work")
-	t.Setenv("SELF_CONTAINED", "")
 	t.Setenv("FIX_PASS", "0")
-	t.Setenv("RESUME_AFTER_HOLD", "")
-	t.Setenv("AUTO_FORMAT", "")
-	t.Setenv("AUTO_LINT", "")
-	t.Setenv("CI_FAILURE_SUMMARY", "")
 	t.Setenv("ISSUE_NUMBER", "2349")
 	t.Setenv("ISSUE_TITLE", "Add assemble-prompt CLI verb")
 	t.Setenv("BRANCH", "agent/issue-2349")
@@ -55,7 +44,6 @@ func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput
 	t.Setenv("IN_PROGRESS_LABEL", "agent-in-progress")
 	t.Setenv("COMPLETE_LABEL", "agent-complete")
 	t.Setenv("RUN_NONCE", "run-nonce-abc123")
-	t.Setenv("RESEARCH_STATUS_ENUM", "")
 	return []string{
 		"--caveman-skill-baked=true",
 		"--tdd-skill-baked=true",
@@ -229,73 +217,101 @@ func replaceArg(args []string, flag, value string) []string {
 	return out
 }
 
+// validatorCarrierCases pairs each BOX_SIGNAL_CARRIER value with the call the
+// validator names for a missing reject (comment) and warn (pr-intent) row:
+// the log carrier (unset; Gates reads anything but "socket" as log) names the
+// marker, the socket carrier the driver-exec signal call (issue #4044).
+var validatorCarrierCases = []struct {
+	carrier, reject, warn string
+}{
+	{"", "SPINDRIFT_COMMENT", "SPINDRIFT_PR_INTENT"},
+	{"socket", "driver-exec signal comment", "driver-exec signal pr-intent"},
+}
+
+func carrierName(carrier string) string {
+	if carrier == "" {
+		return "log"
+	}
+	return carrier
+}
+
 // A reject-severity validate row with its gate active and its marker missing
 // must exit non-zero and write none of the three output files: the Driver
 // must never run against an unmet contract (issue #2356).
 func TestRunAssemblePrompt_ValidatorRejectBlocksOutputs(t *testing.T) {
-	dir := t.TempDir()
-	promptOutput := filepath.Join(dir, "prompt.txt")
-	agentsJSONOutput := filepath.Join(dir, "agents.json")
-	handoffOutput := filepath.Join(dir, "handoff.json")
+	for _, tc := range validatorCarrierCases {
+		t.Run(carrierName(tc.carrier), func(t *testing.T) {
+			dir := t.TempDir()
+			promptOutput := filepath.Join(dir, "prompt.txt")
+			agentsJSONOutput := filepath.Join(dir, "agents.json")
+			handoffOutput := filepath.Join(dir, "handoff.json")
 
-	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	t.Setenv("DISPATCH_KIND", "research")
-	t.Setenv("BOX_WRITE_ENABLED", "")
-	args = replaceArg(args, "--prompts-dir", researchPromptDirLackingSpindriftComment(t))
+			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+			t.Setenv("DISPATCH_KIND", "research")
+			t.Setenv("BOX_WRITE_ENABLED", "")
+			t.Setenv("BOX_SIGNAL_CARRIER", tc.carrier)
+			args = replaceArg(args, "--prompts-dir", researchPromptDirLackingSpindriftComment(t))
 
-	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
-	if rc == 0 {
-		t.Fatalf("runAssemblePrompt exit = 0, want non-zero for a reject-gate missing marker (stdout=%q)", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "SPINDRIFT_COMMENT") {
-		t.Errorf("stdout = %q, want it to mention SPINDRIFT_COMMENT", stdout.String())
-	}
+			var stdout bytes.Buffer
+			rc := runAssemblePrompt(args, &stdout)
+			if rc == 0 {
+				t.Fatalf("runAssemblePrompt exit = 0, want non-zero for a reject-gate missing marker (stdout=%q)", stdout.String())
+			}
+			if !strings.Contains(stdout.String(), tc.reject) {
+				t.Errorf("stdout = %q, want it to mention %s", stdout.String(), tc.reject)
+			}
 
-	for _, p := range []string{promptOutput, agentsJSONOutput, handoffOutput} {
-		if info, err := os.Stat(p); err == nil {
-			t.Errorf("output file %s exists (size %d), want it never written on reject", p, info.Size())
-		} else if !os.IsNotExist(err) {
-			t.Errorf("stat %s: %v", p, err)
-		}
+			for _, p := range []string{promptOutput, agentsJSONOutput, handoffOutput} {
+				if info, err := os.Stat(p); err == nil {
+					t.Errorf("output file %s exists (size %d), want it never written on reject", p, info.Size())
+				} else if !os.IsNotExist(err) {
+					t.Errorf("stat %s: %v", p, err)
+				}
+			}
+		})
 	}
 }
 
 // The warn counterpart: a warn-severity row is advisory, so the run still
 // succeeds and writes all three output files (issue #2356).
 func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
-	dir := t.TempDir()
-	promptOutput := filepath.Join(dir, "prompt.txt")
-	agentsJSONOutput := filepath.Join(dir, "agents.json")
-	handoffOutput := filepath.Join(dir, "handoff.json")
+	for _, tc := range validatorCarrierCases {
+		t.Run(carrierName(tc.carrier), func(t *testing.T) {
+			dir := t.TempDir()
+			promptOutput := filepath.Join(dir, "prompt.txt")
+			agentsJSONOutput := filepath.Join(dir, "agents.json")
+			handoffOutput := filepath.Join(dir, "handoff.json")
 
-	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	t.Setenv("BOX_WRITE_ENABLED", "")
-	args = replaceArg(args, "--prompts-dir", issuePromptDirLackingSpindriftPRIntent(t))
+			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+			t.Setenv("BOX_WRITE_ENABLED", "")
+			t.Setenv("BOX_SIGNAL_CARRIER", tc.carrier)
+			args = replaceArg(args, "--prompts-dir", issuePromptDirLackingSpindriftPRIntent(t))
 
-	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
-	if rc != 0 {
-		t.Fatalf("runAssemblePrompt exit = %d, want 0 for a warn-gate missing marker (stdout=%q)", rc, stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "SPINDRIFT_PR_INTENT") {
-		t.Errorf("stdout = %q, want it to mention SPINDRIFT_PR_INTENT", stdout.String())
-	}
+			var stdout bytes.Buffer
+			rc := runAssemblePrompt(args, &stdout)
+			if rc != 0 {
+				t.Fatalf("runAssemblePrompt exit = %d, want 0 for a warn-gate missing marker (stdout=%q)", rc, stdout.String())
+			}
+			if !strings.Contains(stdout.String(), tc.warn) {
+				t.Errorf("stdout = %q, want it to mention %s", stdout.String(), tc.warn)
+			}
 
-	// agentsJSONOutput is only Stat-checked, not size-checked: with no
-	// AGENTS_JSON_TEMPLATE configured, Assemble's AgentsJSON legitimately
-	// renders empty.
-	if _, err := os.Stat(agentsJSONOutput); err != nil {
-		t.Fatalf("agents json output not written: %v", err)
-	}
-	for _, p := range []string{promptOutput, handoffOutput} {
-		info, err := os.Stat(p)
-		if err != nil {
-			t.Fatalf("output file %s not written: %v", p, err)
-		}
-		if info.Size() == 0 {
-			t.Errorf("output file %s is empty, want non-empty", p)
-		}
+			// agentsJSONOutput is only Stat-checked, not size-checked: with no
+			// AGENTS_JSON_TEMPLATE configured, Assemble's AgentsJSON legitimately
+			// renders empty.
+			if _, err := os.Stat(agentsJSONOutput); err != nil {
+				t.Fatalf("agents json output not written: %v", err)
+			}
+			for _, p := range []string{promptOutput, handoffOutput} {
+				info, err := os.Stat(p)
+				if err != nil {
+					t.Fatalf("output file %s not written: %v", p, err)
+				}
+				if info.Size() == 0 {
+					t.Errorf("output file %s is empty, want non-empty", p)
+				}
+			}
+		})
 	}
 }
 
