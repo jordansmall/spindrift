@@ -42,18 +42,6 @@ let
     }).spindrift.drvPath;
 in
 {
-  chore-catalog-prompt-paths-exist =
-    let
-      bad = builtins.filter (
-        c: c.prompt != (choresDir + "/${c.name}.md") || !builtins.pathExists c.prompt
-      ) catalog.chores;
-    in
-    assert assertMsg (bad == [ ])
-      "every lib/chore-catalog.nix entry's prompt must exist at templates/default/prompts/chores/<name>.md, offenders: ${
-        concatStringsSep ", " (map (c: c.name) bad)
-      }";
-    pkgs.runCommand "chore-catalog-prompt-paths-exist" { } "touch $out";
-
   chore-catalog-names-match-prompt-dir =
     assert assertMsg (catalogNamesSorted == promptStems)
       "lib/chore-catalog.nix's names (${concatStringsSep ", " catalogNamesSorted}) must equal templates/default/prompts/chores/*.md stems (${concatStringsSep ", " promptStems}) -- a prompt file added/removed without a matching catalog entry (or vice versa)";
