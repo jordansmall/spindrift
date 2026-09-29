@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -215,6 +216,44 @@ func resolveButlerSettings(cfg config, choreName string) (butlerSettings, error)
 	return butlerSettings{chores: chores, claimTimeout: claimTimeout, window: window}, nil
 }
 
+// hostPatchForge adapts an already-resolved CodeForge and Capabilities into
+// butler.PatchForge: AgentBranch comes from cf (every CodeForge has it),
+// PushBranch/CreateDraftPR/AddLabels from the three Capabilities fields
+// forge.ResolveCapabilities already populated only when a write-capable
+// adapter backs cf and it (issue #4074).
+type hostPatchForge struct {
+	cf forge.CodeForge
+	forge.BranchPusher
+	forge.DraftPRCreator
+	forge.IssueLabeler
+}
+
+func (h hostPatchForge) AgentBranch(num string) string { return h.cf.AgentBranch(num) }
+
+// butlerPatchForge builds cmdButler's butler.PatchForge, opting the patch
+// rung on only when caps proves cf can both push a branch and open a draft
+// PR host-side, the paired issue tracker can add labels to an already-filed
+// issue, and tracker and forge are the same backend. The labeler leg matters
+// on its own: ISSUE_TRACKER=local's PostIssue returns "local:"+slug, not a
+// forge issue number, so it implements no IssueLabeler -- without it a failed
+// push or PR-create would file the finding with the patch label and then
+// have no way to fall it back to promote. The same-backend leg keeps
+// "Closes #N" and the agent/issue-N branch pointing at the filed issue:
+// ISSUE_TRACKER=forgejo with CODE_FORGE=github would otherwise close an
+// unrelated GitHub issue N on merge, the hazard ensureClosesReference guards
+// on the work path (#2341). nil whenever any leg is missing:
+// WithPatchForge(nil) is "never opted in", so the rung stays off (issue
+// #4074).
+func butlerPatchForge(cf forge.CodeForge, caps forge.Capabilities) butler.PatchForge {
+	if !caps.HostCanOpenPR() || caps.IssueLabeler == nil {
+		return nil
+	}
+	if caps.TrackerDescriptor.Name == "" || caps.TrackerDescriptor != caps.ForgeDescriptor {
+		return nil
+	}
+	return hostPatchForge{cf: cf, BranchPusher: caps.BranchPusher, DraftPRCreator: caps.DraftPRCreator, IssueLabeler: caps.IssueLabeler}
+}
+
 // cmdButler is the `butler [--chore <name>]` subcommand (ADR 0056, issue
 // #3875, #3877, #3880): it sweeps the first due Chore among the one named on
 // --chore, or else every BUTLER_CHORES entry in order, and reports "no work"
@@ -278,7 +317,7 @@ func cmdButler(lc *launchContext, choreName string) int {
 		PromotionLabel:    lc.config.workLabel,
 	}
 
-	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now)
+	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities))
 	o, err := sweeper.Sweep(candidates)
 	if err == nil {
 		err = butlerOutcomeErr(o)

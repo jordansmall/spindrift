@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/forge"
@@ -81,6 +82,167 @@ func TestButlerOutcomeErr(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fakeBranchPusher/fakeDraftPRCreator are minimal stand-ins for
+// forge.BranchPusher/forge.DraftPRCreator -- just enough to populate
+// Capabilities and prove butlerPatchForge's gating and field wiring, not to
+// exercise the push/draft-PR mechanics themselves (issue #4074).
+type fakeBranchPusher struct{}
+
+func (fakeBranchPusher) PushBranch(srcDir, localRef, branch string) error { return nil }
+
+type fakeDraftPRCreator struct{}
+
+func (fakeDraftPRCreator) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+	return "", false, nil
+}
+
+// fakeIssueLabeler is a minimal stand-in for forge.IssueLabeler, the third
+// leg butlerPatchForge requires alongside push+draft-PR (issue #4074).
+type fakeIssueLabeler struct{}
+
+func (fakeIssueLabeler) AddLabels(num string, labels []string) error { return nil }
+
+// pushDraftForge wraps a forge.CodeForge with the BranchPusher and
+// DraftPRCreator methods a write-capable adapter would carry, so
+// forge.ResolveCapabilities can populate Capabilities.BranchPusher/
+// DraftPRCreator off a real type assertion rather than a hand-built
+// Capabilities value (issue #4074's wiring subtest below).
+type pushDraftForge struct {
+	forge.CodeForge
+	fakeBranchPusher
+	fakeDraftPRCreator
+}
+
+// butlerPatchForge opts the patch rung on only when Capabilities proves the
+// resolved CodeForge can both push a branch and open a draft PR host-side
+// (forge.Capabilities.HostCanOpenPR), the resolved IssueTracker can add
+// labels to an already-filed issue (forge.Capabilities.IssueLabeler), and
+// the tracker and forge descriptors name the same backend, so the issue
+// number both "Closes #N" and "agent/issue-N" carry actually names an issue
+// on that forge (issue #4074); any one of the four missing keeps the rung
+// off exactly as WithPatchForge(nil) does.
+func TestButlerPatchForge(t *testing.T) {
+	cf := forge.NewFake()
+	cf.BranchPrefix = "agent/issue-"
+
+	t.Run("neither capability", func(t *testing.T) {
+		if pf := butlerPatchForge(cf, forge.Capabilities{}); pf != nil {
+			t.Fatalf("butlerPatchForge = %v, want nil", pf)
+		}
+	})
+
+	t.Run("push only", func(t *testing.T) {
+		caps := forge.Capabilities{BranchPusher: fakeBranchPusher{}}
+		if pf := butlerPatchForge(cf, caps); pf != nil {
+			t.Fatalf("butlerPatchForge = %v, want nil", pf)
+		}
+	})
+
+	t.Run("draft PR only", func(t *testing.T) {
+		caps := forge.Capabilities{DraftPRCreator: fakeDraftPRCreator{}}
+		if pf := butlerPatchForge(cf, caps); pf != nil {
+			t.Fatalf("butlerPatchForge = %v, want nil", pf)
+		}
+	})
+
+	t.Run("push and draft PR, no issue labeler", func(t *testing.T) {
+		caps := forge.Capabilities{BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}}
+		if pf := butlerPatchForge(cf, caps); pf != nil {
+			t.Fatalf("butlerPatchForge = %v, want nil: a tracker with no IssueLabeler must never opt the rung on", pf)
+		}
+	})
+
+	githubDesc, _ := backend.ByName("github")
+	forgejoDesc, _ := backend.ByName("forgejo")
+
+	t.Run("both capabilities", func(t *testing.T) {
+		caps := forge.Capabilities{
+			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
+			ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
+		}
+		pf := butlerPatchForge(cf, caps)
+		if pf == nil {
+			t.Fatal("butlerPatchForge = nil, want a non-nil PatchForge")
+		}
+		if got, want := pf.AgentBranch("42"), "agent/issue-42"; got != want {
+			t.Errorf("AgentBranch(42) = %q, want %q", got, want)
+		}
+		if err := pf.PushBranch("dir", "ref", "branch"); err != nil {
+			t.Errorf("PushBranch: %v", err)
+		}
+		if _, _, err := pf.CreateDraftPR("t", "b", "base", "head"); err != nil {
+			t.Errorf("CreateDraftPR: %v", err)
+		}
+		if err := pf.AddLabels("42", []string{"ready-for-agent"}); err != nil {
+			t.Errorf("AddLabels: %v", err)
+		}
+	})
+
+	// (issue #4074) a github CODE_FORGE paired with a forgejo ISSUE_TRACKER
+	// is a valid pairing generally, but the two backends' issue numbers are
+	// foreign namespaces: a finding filed on forgejo as issue N shares no
+	// relationship with GitHub issue N. Even though both capabilities are
+	// otherwise present, the rung must stay off, or the draft PR's "Closes
+	// #N" and its "agent/issue-N" branch would name the wrong issue.
+	t.Run("mismatched tracker and forge namespaces", func(t *testing.T) {
+		caps := forge.Capabilities{
+			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
+			ForgeDescriptor: githubDesc, TrackerDescriptor: forgejoDesc,
+		}
+		if pf := butlerPatchForge(cf, caps); pf != nil {
+			t.Fatalf("butlerPatchForge = %v, want nil: forge and tracker descriptors name different backends", pf)
+		}
+	})
+
+	// (wiring) ISSUE_TRACKER=local paired with a push+draft-PR-capable
+	// CODE_FORGE: the local tracker's PostIssue returns "local:"+slug, not a
+	// forge issue number, so it implements no IssueLabeler. Resolving real
+	// Capabilities off that pair must come out nil here, not a hand-built
+	// Capabilities value that could paper over a missing IssueLabeler.
+	t.Run("wiring: local tracker never resolves an issue labeler", func(t *testing.T) {
+		pushCf := pushDraftForge{CodeForge: cf}
+		it := forge.NewFake().AsLocalIssueFiler()
+		caps := forge.ResolveCapabilities(pushCf, it, backend.Descriptor{}, backend.Descriptor{})
+		if caps.IssueLabeler != nil {
+			t.Fatalf("caps.IssueLabeler = %v, want nil: the local tracker implements no IssueLabeler", caps.IssueLabeler)
+		}
+		if pf := butlerPatchForge(pushCf, caps); pf != nil {
+			t.Fatalf("butlerPatchForge = %v, want nil", pf)
+		}
+	})
+
+	// (wiring) forgejo paired with forgejo: same backend on both axes, so
+	// the namespace leg passes and only the two capability legs matter.
+	// AsForgejoShaped's AddLabels (promoted like the real adapter's) proves
+	// the wiring resolves a real IssueLabeler, not a hand-built one.
+	t.Run("wiring: forgejo tracker paired with forgejo forge resolves", func(t *testing.T) {
+		pushCf := pushDraftForge{CodeForge: cf}
+		it := forge.NewFake().AsForgejoShaped()
+		caps := forge.ResolveCapabilities(pushCf, it, forgejoDesc, forgejoDesc)
+		if caps.IssueLabeler == nil {
+			t.Fatal("caps.IssueLabeler = nil, want the forgejo-shaped fake's AddLabels")
+		}
+		if pf := butlerPatchForge(pushCf, caps); pf == nil {
+			t.Fatal("butlerPatchForge = nil, want a non-nil PatchForge")
+		}
+	})
+
+	// (wiring) github forge paired with a forgejo-shaped tracker: proves the
+	// namespace leg alone blocks the rung even when both capability legs
+	// resolve for real off ResolveCapabilities, not a hand-built Capabilities.
+	t.Run("wiring: mismatched real capabilities never resolve", func(t *testing.T) {
+		pushCf := pushDraftForge{CodeForge: cf}
+		it := forge.NewFake().AsForgejoShaped()
+		caps := forge.ResolveCapabilities(pushCf, it, githubDesc, forgejoDesc)
+		if caps.IssueLabeler == nil {
+			t.Fatal("caps.IssueLabeler = nil, want the forgejo-shaped fake's AddLabels")
+		}
+		if pf := butlerPatchForge(pushCf, caps); pf != nil {
+			t.Fatalf("butlerPatchForge = %v, want nil: forge and tracker descriptors name different backends", pf)
+		}
+	})
 }
 
 // (k) cmdButler rejects a chore not named in BUTLER_CHORES, before ever

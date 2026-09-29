@@ -66,6 +66,11 @@ func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, butl
 		cleanup()
 		return nil, nil, nil, err
 	}
+	// CommitPatch refuses to commit without an identity; FetchTree leaves
+	// Name/Email unset since a scan-only Tree never needs one (see GitTree's
+	// doc), so production wiring stamps the launcher identity here.
+	tree.Name = c.gitUserName
+	tree.Email = c.gitUserEmail
 	return r, tree, cleanup, nil
 }
 
