@@ -4736,6 +4736,10 @@ ever sees it read-only, as `CHORE_CLASSES`, and only while today's
 promotion budget still has room left (never while promotion is off or
 the day's promotions are spent), so a Box whose findings can never
 promote never spends reviewer turns on candidates it cannot win.
+`BUTLER_PATCH_CLASSES` (issue #4072, ADR 0057) mirrors this: the Box sees
+it read-only as `CHORE_PATCH_CLASSES`, and only while today's patch
+budget still has room left (never while the patch rung is off or the
+day's patches are spent).
 Every class, configured or Box-reported, shares one grammar (issue #3986):
 a lowercase slug of letters, digits, and `-`, not starting with `-`, at most
 40 characters; a configured class that isn't one fails `spindrift butler`

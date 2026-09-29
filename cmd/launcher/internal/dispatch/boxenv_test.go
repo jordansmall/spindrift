@@ -462,7 +462,8 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 			DiffRange: "cafe..deadbeef",
 			Slice:     []string{"a.go", "b.go"},
 		},
-		Classes: []string{"flaky-test", "dead-code"},
+		Classes:      []string{"flaky-test", "dead-code"},
+		PatchClasses: []string{"docs-drift"},
 	}
 	env, err := buildBoxEnv(cfg, choreSubject(c), 0, "", "the-nonce")
 	if err != nil {
@@ -483,6 +484,9 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 	}
 	if got := env["CHORE_CLASSES"]; got != "flaky-test dead-code" {
 		t.Errorf("CHORE_CLASSES: got %q, want %q", got, "flaky-test dead-code")
+	}
+	if got := env["CHORE_PATCH_CLASSES"]; got != "docs-drift" {
+		t.Errorf("CHORE_PATCH_CLASSES: got %q, want %q", got, "docs-drift")
 	}
 	if got := env["BASE_BRANCH"]; got != "butler/lint-sweep" {
 		t.Errorf("BASE_BRANCH: got %q, want %q", got, "butler/lint-sweep")
@@ -534,6 +538,20 @@ func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
 	}
 	if v, ok := env["CHORE_CLASSES"]; ok {
 		t.Errorf("CHORE_CLASSES should be absent when Classes is empty, got %q", v)
+	}
+}
+
+// The patch rung's CHORE_PATCH_CLASSES sibling (issue #4072, ADR 0057) gets
+// the same absent-when-empty treatment: butler.go's job to leave
+// PatchClasses nil whenever the rung is off or today's patch room is spent,
+// this package just forwards whatever it is given.
+func TestBuildBoxEnv_ChoreOmitsEmptyPatchClasses(t *testing.T) {
+	env, err := buildBoxEnv(Config{}, choreSubject(Chore{Name: "empty", Branch: "b"}), 0, "", "")
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	if v, ok := env["CHORE_PATCH_CLASSES"]; ok {
+		t.Errorf("CHORE_PATCH_CLASSES should be absent when PatchClasses is empty, got %q", v)
 	}
 }
 

@@ -225,6 +225,11 @@
     kind = "string";
   }
   {
+    field = "ChorePatchClasses";
+    env = "CHORE_PATCH_CLASSES";
+    kind = "string";
+  }
+  {
     field = "ChoreMaxFindings";
     env = "CHORE_MAX_FINDINGS";
     kind = "string";

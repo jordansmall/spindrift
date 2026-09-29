@@ -202,7 +202,18 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	if promo.enabled && room.Promotions > 0 {
 		classes = c.Classes
 	}
-	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes, MaxFindings: room.Findings})
+	// Room.Patches is already 0 whenever the patch rung is off
+	// (MaxPatchesPerDay == 0), so this needs no separate enabled check. It
+	// also requires len(classes) > 0 -- the promotion class list just above
+	// -- because the relay fragment only ever honours CHORE_PATCH_CLASSES
+	// for a class also present on CHORE_CLASSES: with promotion off or its
+	// room spent, classes is empty and a patch-class list alone would tell
+	// the Box about candidates the relay fragment says to omit -class for.
+	var patchClasses []string
+	if len(classes) > 0 && room.Patches > 0 {
+		patchClasses = c.PatchClasses
+	}
+	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes, PatchClasses: patchClasses, MaxFindings: room.Findings})
 	defer d.Close()
 	result := d.Run()
 
