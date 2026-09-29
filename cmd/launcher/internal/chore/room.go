@@ -22,6 +22,11 @@ type Room struct {
 	// (MaxPromotionsPerDay == 0), not unlimited; Promotions never sets
 	// Reason since promotion isn't a start gate.
 	Promotions int
+	// Patches is how many more patches today may still land. Like
+	// Promotions, zero here means the patch rung is off
+	// (MaxPatchesPerDay == 0), not unlimited; Patches never sets Reason
+	// since the patch rung isn't a start gate.
+	Patches int
 	// Tokens is how many more tokens today may still spend. Zero with
 	// Reason == Due means DailyTokenCeiling is 0 (unlimited).
 	Tokens int
@@ -71,6 +76,10 @@ func (b Budgets) Room(today ledger.Totals) Room {
 
 	if b.MaxPromotionsPerDay > 0 {
 		r.Promotions = max(b.MaxPromotionsPerDay-today.Promoted, 0)
+	}
+
+	if b.MaxPatchesPerDay > 0 {
+		r.Patches = max(b.MaxPatchesPerDay-today.Patched, 0)
 	}
 
 	return r

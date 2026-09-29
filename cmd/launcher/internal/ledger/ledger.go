@@ -44,6 +44,7 @@ type State struct {
 	Filed     []string    `json:"filed,omitempty"`
 	Promoted  []string    `json:"promoted,omitempty"`
 	Dropped   int         `json:"dropped,omitempty"`
+	Patched   []string    `json:"patched,omitempty"` // PR URLs the run opened (ADR 0057).
 	Usage     usage.Usage `json:"usage"`
 	// Reserved is set only on a reservation commit (see Reserve): promotion
 	// slots a Claimed-phase entry holds against the day's budget before its
@@ -156,14 +157,16 @@ func Reserve(b Backend, chore string, claim Tip, n int, at time.Time) (Tip, erro
 
 // Totals sums a Chore's Ledger activity over a local day: budgets (ADR 0056
 // "Budgets") gate starting only, so Claims — runs started — is what they
-// check against, while Filed/Promoted/Dropped/Usage are the day's completed
-// work. Promoted also includes any in-flight or lost-race reservation (see
-// Reserve), so an unfinished Finish still counts against the day's budget.
+// check against, while Filed/Promoted/Dropped/Patched/Usage are the day's
+// completed work. Promoted also includes any in-flight or lost-race
+// reservation (see Reserve), so an unfinished Finish still counts against the
+// day's budget.
 type Totals struct {
 	Claims   int
 	Filed    int
 	Promoted int
 	Dropped  int
+	Patched  int
 	Usage    usage.Usage
 }
 
@@ -172,8 +175,8 @@ type Totals struct {
 // transition doesn't shift the boundary. There is no second store: it walks
 // History rather than keeping a running total. A run that spans midnight is
 // split across its two commits: it counts toward Claims on the day its
-// Claimed commit was made, and toward Filed/Promoted/Dropped/Usage on the
-// (possibly later) day its Done commit lands.
+// Claimed commit was made, and toward Filed/Promoted/Dropped/Patched/Usage on
+// the (possibly later) day its Done commit lands.
 //
 // A Claimed entry with Reserved > 0 is a reservation (see Reserve), not a
 // claim: it never adds to Claims. It adds Reserved to Promoted unless its
@@ -215,6 +218,7 @@ func DayTotals(b Reader, chore string, now time.Time) (Totals, error) {
 			t.Filed += len(e.State.Filed)
 			t.Promoted += len(e.State.Promoted)
 			t.Dropped += e.State.Dropped
+			t.Patched += len(e.State.Patched)
 			t.Usage = t.Usage.Add(e.State.Usage)
 		}
 	}
@@ -229,6 +233,7 @@ func (t Totals) add(o Totals) Totals {
 		Filed:    t.Filed + o.Filed,
 		Promoted: t.Promoted + o.Promoted,
 		Dropped:  t.Dropped + o.Dropped,
+		Patched:  t.Patched + o.Patched,
 		Usage:    t.Usage.Add(o.Usage),
 	}
 }

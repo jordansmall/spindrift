@@ -36,26 +36,27 @@ var errFakeHistory = errors.New("fake history failure")
 
 func TestDayTotalsAll(t *testing.T) {
 	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
-	entry := func(filed int, tokens int) []ledger.Entry {
+	entry := func(filed, patched, tokens int) []ledger.Entry {
 		return []ledger.Entry{{
 			At: now,
 			State: ledger.State{
-				Phase: ledger.Done,
-				Filed: make([]string, filed),
-				Usage: usage.Usage{InputTokens: tokens},
+				Phase:   ledger.Done,
+				Filed:   make([]string, filed),
+				Patched: make([]string, patched),
+				Usage:   usage.Usage{InputTokens: tokens},
 			},
 		}}
 	}
 	b := fakeBackend{history: map[string][]ledger.Entry{
-		"a": entry(2, 10),
-		"b": entry(3, 20),
+		"a": entry(2, 1, 10),
+		"b": entry(3, 4, 20),
 	}}
 
 	got, err := ledger.DayTotalsAll(b, []string{"a", "b"}, now)
 	if err != nil {
 		t.Fatalf("DayTotalsAll: %v", err)
 	}
-	want := ledger.Totals{Filed: 5, Usage: usage.Usage{InputTokens: 30}}
+	want := ledger.Totals{Filed: 5, Patched: 5, Usage: usage.Usage{InputTokens: 30}}
 	if got != want {
 		t.Fatalf("DayTotalsAll() = %+v, want %+v", got, want)
 	}

@@ -10,16 +10,16 @@ import (
 // tests (ledger_test.go) exercise it indirectly through the exported path.
 func TestTotalsAdd(t *testing.T) {
 	a := Totals{
-		Claims: 1, Filed: 2, Promoted: 3, Dropped: 4,
+		Claims: 1, Filed: 2, Promoted: 3, Dropped: 4, Patched: 5,
 		Usage: usage.Usage{InputTokens: 5, OutputTokens: 6},
 	}
 	b := Totals{
-		Claims: 10, Filed: 20, Promoted: 30, Dropped: 40,
+		Claims: 10, Filed: 20, Promoted: 30, Dropped: 40, Patched: 50,
 		Usage: usage.Usage{InputTokens: 50, OutputTokens: 60},
 	}
 	got := a.add(b)
 	want := Totals{
-		Claims: 11, Filed: 22, Promoted: 33, Dropped: 44,
+		Claims: 11, Filed: 22, Promoted: 33, Dropped: 44, Patched: 55,
 		Usage: usage.Usage{InputTokens: 55, OutputTokens: 66},
 	}
 	if got != want {
