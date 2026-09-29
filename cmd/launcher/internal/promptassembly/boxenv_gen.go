@@ -66,6 +66,55 @@ func EnvFromEnviron() Env {
 	}
 }
 
+// BoxEnvVarNames lists every EnvFromEnviron env var name, in row order, so a
+// test isolating itself from ambient Box env can blank each one instead of
+// hand-maintaining a copy that drifts (issue #4044).
+var BoxEnvVarNames = []string{
+	"ORCHESTRATOR_ENABLED",
+	"AGENTS_JSON_TEMPLATE",
+	"BOX_FILER_ENABLED",
+	"BOX_WORKER_PROVISIONED",
+	"BOX_SCOUT_PROVISIONED",
+	"BOX_REVIEW_LOOP_INLINE",
+	"BOX_REVIEW_LOOP_ORCHESTRATOR",
+	"ISSUE_TRACKER",
+	"BOX_TRACKER_AXIS_READ",
+	"BOX_TRACKER_AXIS_WRITE",
+	"BOX_TRACKER_AXIS_FILER",
+	"BOX_WRITE_ENABLED",
+	"LOCAL_ISSUE_REFERENCE",
+	"CODE_FORGE",
+	"BOX_FORGE_BACKEND",
+	"DISPATCH_KIND",
+	"DISPATCH_KEY",
+	"DISPATCH_KEYING",
+	"DISPATCH_ANNOUNCE_VERB",
+	"BOX_SIGNAL_CARRIER",
+	"SELF_CONTAINED",
+	"FIX_PASS",
+	"RESUME_AFTER_HOLD",
+	"AUTO_FORMAT",
+	"AUTO_LINT",
+	"CI_FAILURE_SUMMARY",
+	"ISSUE_NUMBER",
+	"ISSUE_TITLE",
+	"ISSUE_TEXT",
+	"BRANCH",
+	"BASE_BRANCH",
+	"IN_PROGRESS_LABEL",
+	"COMPLETE_LABEL",
+	"RUN_NONCE",
+	"RESEARCH_STATUS_ENUM",
+	"BOX_REVIEW_MODEL_OVERRIDE",
+	"BOX_REVIEW_EFFORT_OVERRIDE",
+	"CHORE_NAME",
+	"CHORE_HEAD",
+	"CHORE_DIFF_RANGE",
+	"CHORE_SLICE",
+	"CHORE_CLASSES",
+	"CHORE_MAX_FINDINGS",
+}
+
 // boxenvAtoi parses an int-kind Box env var, degrading to 0 on empty or
 // malformed input. Unlike cmd/launcher/main.go's atoiSchema, which falls
 // back to a per-key schema default (intSchemaDefault), these 43 rows are

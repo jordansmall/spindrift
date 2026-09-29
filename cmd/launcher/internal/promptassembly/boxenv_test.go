@@ -52,6 +52,12 @@ var boxEnvRows = []boxEnvRow{
 	{"ResearchStatusEnum", "RESEARCH_STATUS_ENUM", "string"},
 	{"ReviewModelOverride", "BOX_REVIEW_MODEL_OVERRIDE", "string"},
 	{"ReviewEffortOverride", "BOX_REVIEW_EFFORT_OVERRIDE", "string"},
+	{"ChoreName", "CHORE_NAME", "string"},
+	{"ChoreHead", "CHORE_HEAD", "string"},
+	{"ChoreDiffRange", "CHORE_DIFF_RANGE", "string"},
+	{"ChoreSlice", "CHORE_SLICE", "string"},
+	{"ChoreClasses", "CHORE_CLASSES", "string"},
+	{"ChoreMaxFindings", "CHORE_MAX_FINDINGS", "string"},
 }
 
 // boxEnvKindSpec is the one definition per kind that setValueAndExpect and
@@ -171,6 +177,20 @@ func TestEnvFromEnviron_FixPassMalformed(t *testing.T) {
 	got := EnvFromEnviron()
 	if got.FixPass != 0 {
 		t.Errorf("EnvFromEnviron().FixPass = %d, want 0 for malformed input", got.FixPass)
+	}
+}
+
+// TestBoxEnvVarNames_MatchesBoxEnvRows is an independent check that the
+// generated BoxEnvVarNames (boxenv_gen.go) lists exactly this file's
+// hand-typed boxEnvRows, in the same order (issue #4044) -- catching either
+// side drifting from lib/promptassembly-boxenv.nix without the other.
+func TestBoxEnvVarNames_MatchesBoxEnvRows(t *testing.T) {
+	want := make([]string, len(boxEnvRows))
+	for i, row := range boxEnvRows {
+		want[i] = row.env
+	}
+	if !reflect.DeepEqual(BoxEnvVarNames, want) {
+		t.Errorf("BoxEnvVarNames = %v, want %v", BoxEnvVarNames, want)
 	}
 }
 
