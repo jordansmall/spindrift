@@ -141,9 +141,10 @@ assert_review_handoff_golden() {
 # Shared env for the butler cells below (ADR 0056): the butler is keyed by
 # Chore name, never a tracker issue, so ISSUE_NUMBER/ISSUE_TITLE must be
 # unset -- entrypoint.sh's own early gate requires CHORE_NAME in their place
-# only when DISPATCH_KIND=butler. CHORE_HEAD/CHORE_DIFF_RANGE/CHORE_SLICE
-# mirror the Go suite's butlerEnv fixture (promptassembly/assemble_test.go)
-# so both harnesses exercise the same shape.
+# only when DISPATCH_KIND=butler. CHORE_HEAD/CHORE_DIFF_RANGE/CHORE_SLICE/
+# CHORE_MAX_FINDINGS mirror the Go suite's butlerEnv fixture
+# (promptassembly/assemble_test.go) so both harnesses exercise the same
+# shape.
 setup_butler_env() {
   export DISPATCH_KIND="butler"
   unset ISSUE_NUMBER ISSUE_TITLE
@@ -151,6 +152,7 @@ setup_butler_env() {
   export CHORE_HEAD="deadbeef"
   export CHORE_DIFF_RANGE="cafef00d..deadbeef"
   export CHORE_SLICE=$'cmd/launcher/main.go\ncmd/launcher/internal/dispatch/dispatch.go'
+  export CHORE_MAX_FINDINGS="5"
 }
 
 @test "assert_golden_text_or_update diffs and fails when golden and produced differ, UPDATE_GOLDENS unset" {

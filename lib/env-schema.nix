@@ -450,7 +450,7 @@ in
     env = "BUTLER_MAX_FINDINGS_PER_SWEEP";
     group = "dispatch";
     default = 5;
-    doc = "caps findings one butler run may file (ADR 0056): findings a run relays past it are dropped at settle and recorded as `dropped` in the Ledger, and a run does not start while fewer than this many remain in the day's BUTLER_MAX_FINDINGS_PER_DAY budget; 0 means no limit; this headroom gate only applies when BUTLER_MAX_FINDINGS_PER_DAY is non-zero, and this value must not exceed it (rejected at preflight)";
+    doc = "caps findings one butler run may file (ADR 0056): the Box's prompt names the cap, the Signal socket refuses findings past it, and settle drops any that still arrive past it (from either carrier), recording them as `dropped` in the Ledger; a run does not start while fewer than this many remain in the day's BUTLER_MAX_FINDINGS_PER_DAY budget; 0 removes only the per-sweep cap -- a run is still capped at the day's remaining BUTLER_MAX_FINDINGS_PER_DAY headroom when that is set; this headroom gate only applies when BUTLER_MAX_FINDINGS_PER_DAY is non-zero, and this value must not exceed it (rejected at preflight)";
     flakeOption = true;
     legacySettingsExempt = true;
     intKind = "nonneg";
