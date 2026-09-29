@@ -15,16 +15,23 @@ import (
 )
 
 // fakeTree is Tree's test double: a fixed Head and TrackedFiles answer, or an
-// error for either.
+// error for either. CommitPatch answers commitPatch/commitPatchErr.
 type fakeTree struct {
 	head     string
 	headErr  error
 	files    []string
 	filesErr error
+
+	commitPatch    PatchCommit
+	commitPatchErr error
 }
 
 func (f fakeTree) Head(branch string) (string, error)           { return f.head, f.headErr }
 func (f fakeTree) TrackedFiles(commit string) ([]string, error) { return f.files, f.filesErr }
+
+func (f fakeTree) CommitPatch(branch, diff, message string) (PatchCommit, error) {
+	return f.commitPatch, f.commitPatchErr
+}
 
 func testPolicy() Policy {
 	return Policy{
