@@ -1525,6 +1525,44 @@ func TestMainRun_StatusExtraArgument(t *testing.T) {
 	}
 }
 
+// TestMainRun_StatusIgnoresWrapperInput pins issue #4060: the `nix run
+// .#daemon` wrapper prepends `--input <doc>`, so status must still be found
+// behind it — and never load the (here nonexistent) document.
+func TestMainRun_StatusIgnoresWrapperInput(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	gitRunT(t, root, "-c", "init.defaultBranch=main", "init")
+	t.Chdir(root)
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", "/nonexistent.json", "status"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("mainRun() = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	var report daemon.StatusReport
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &report); err != nil {
+		t.Fatalf("decode stdout %q: %v", stdout.String(), err)
+	}
+	if report.Live {
+		t.Errorf("report.Live = true, want false")
+	}
+}
+
+// TestMainRun_StatusIgnoresWrapperInputExtraArgument asserts
+// `--input <doc> status dispatch` stays a usage error, not a kind selector.
+func TestMainRun_StatusIgnoresWrapperInputExtraArgument(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", "/nonexistent.json", "status", "dispatch"}, &stdout, &stderr)
+	if got != 1 {
+		t.Errorf("mainRun() = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), "status takes no arguments") {
+		t.Errorf("stderr = %q, want a status takes no arguments usage error", stderr.String())
+	}
+}
+
 // TestMainRun_StatusOutsideGitCheckout asserts `daemon status` fails with
 // gitDir's own error, exit 1, outside any checkout.
 func TestMainRun_StatusOutsideGitCheckout(t *testing.T) {
