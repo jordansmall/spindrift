@@ -30,6 +30,12 @@ Promotion classes for this run (blank when promotion is off):
 
 ${CHORE_CLASSES}
 
+Patch-eligible classes for this run (blank when the patch rung is off, or
+today's patch room is spent): a finding whose class is one of these may
+carry a unified diff as its patch.
+
+${CHORE_PATCH_CLASSES}
+
 Tag every finding with a class naming its kind: a lowercase slug of
 letters, digits, and `-`, not starting with `-`, at most 40 characters. A
 class outside that shape is rejected, and the finding with it.

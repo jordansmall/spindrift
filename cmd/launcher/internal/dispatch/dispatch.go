@@ -44,6 +44,14 @@ type Chore struct {
 	// promotion room is spent or off, so the Box never spends reviewer
 	// turns on candidates nothing can promote.
 	Classes []string
+	// PatchClasses is the patch-eligible class allow-list forwarded as
+	// CHORE_PATCH_CLASSES (issue #4072, ADR 0057), the patch-rung sibling of
+	// Classes: informational only for now -- settle will re-check a
+	// finding's class against the host's own allow-list once the patch rung
+	// applies patches (ADR 0057); on this branch settle carries
+	// Finding.Patch unexamined. The butler leaves this empty whenever
+	// today's patch room is spent or the rung is off.
+	PatchClasses []string
 	// MaxFindings is this sweep's findings room (chore.Room.Findings): the
 	// most findings the Box may relay this run. Zero means no host limit.
 	MaxFindings int
@@ -258,6 +266,9 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		}
 		if len(subj.chore.Classes) > 0 {
 			env["CHORE_CLASSES"] = strings.Join(subj.chore.Classes, " ")
+		}
+		if len(subj.chore.PatchClasses) > 0 {
+			env["CHORE_PATCH_CLASSES"] = strings.Join(subj.chore.PatchClasses, " ")
 		}
 		env["CHORE_MAX_FINDINGS"] = strconv.Itoa(subj.chore.maxIssueIntents())
 	} else {

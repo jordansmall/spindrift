@@ -59,6 +59,17 @@ func withClasses(chores []chore.Chore, name string, classes ...string) []chore.C
 	return chores
 }
 
+// withPatchClasses is withClasses' patch-rung sibling (issue #4072, ADR
+// 0057).
+func withPatchClasses(chores []chore.Chore, name string, classes ...string) []chore.Chore {
+	for i, c := range chores {
+		if c.Name == name {
+			chores[i].PatchClasses = classes
+		}
+	}
+	return chores
+}
+
 func runRepoGitOutput(t *testing.T, repo string, args ...string) []byte {
 	t.Helper()
 	full := append([]string{"-C", repo}, args...)
@@ -1150,6 +1161,104 @@ func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T)
 	}
 	if len(tip.State.Promoted) != 0 {
 		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+	}
+}
+
+// (p) BUTLER_MAX_PATCHES_PER_DAY (Policy.Budgets.MaxPatchesPerDay) defaults
+// to 0, the patch rung off: the Box must not be told a patch class list
+// even though the Chore has PatchClasses, mirroring
+// TestSweep_PromotionDisabledByDefaultFilesUnlabelled for the patch rung
+// (issue #4072, ADR 0057).
+func TestSweep_PatchRungOffByDefaultOmitsPatchClasses(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9300"
+	var gotChore dispatch.Chore
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		gotChore = c
+		return promotableDispatcher("docs-drift")
+	}
+
+	policy := testRunPolicy(noRunEvery, "bugs")
+	policy.Chores = withPatchClasses(policy.Chores, "bugs", "docs-drift")
+	// Budgets.MaxPatchesPerDay left at its zero value -- the default -- on purpose.
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	if _, err := r.Sweep([]string{"bugs"}); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(gotChore.PatchClasses) != 0 {
+		t.Errorf("dispatch.Chore.PatchClasses = %v, want none with the patch rung off", gotChore.PatchClasses)
+	}
+}
+
+// (q) With MaxPatchesPerDay > 0, today's patch room untouched, and
+// promotion also enabled with room, the Box is told its own Chore's
+// host-side patch allow-list, the patch rung's sibling of
+// TestSweep_PromotionEnabledPromotesAllowedFinding (issue #4072, ADR 0057).
+// This slice only forwards the fact -- landing a patch itself is out of
+// scope here.
+func TestSweep_PatchRungOnWithRoomForwardsPatchClasses(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9301"
+	var gotChore dispatch.Chore
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		gotChore = c
+		return promotableDispatcher("docs-drift")
+	}
+
+	policy := testRunPolicy(noRunEvery, "bugs")
+	policy.Chores = withClasses(policy.Chores, "bugs", "docs-drift")
+	policy.Chores = withPatchClasses(policy.Chores, "bugs", "docs-drift")
+	policy.PromotionMaxFiles = 3
+	policy.Budgets.MaxPromotionsPerDay = 1
+	policy.Budgets.MaxPatchesPerDay = 1
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	if _, err := r.Sweep([]string{"bugs"}); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if want := []string{"docs-drift"}; !slices.Equal(gotChore.PatchClasses, want) {
+		t.Errorf("dispatch.Chore.PatchClasses = %v, want %v", gotChore.PatchClasses, want)
+	}
+}
+
+// (q2) With MaxPatchesPerDay > 0 but promotion off (the default), the Box
+// must not be told a patch class list even though the Chore has
+// PatchClasses: the relay fragment only ever honours CHORE_PATCH_CLASSES
+// for a class also present on CHORE_CLASSES, and with promotion off that
+// list is always empty (review finding on issue #4072, ADR 0057).
+func TestSweep_PatchRungOnPromotionOffOmitsPatchClasses(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9302"
+	var gotChore dispatch.Chore
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		gotChore = c
+		return promotableDispatcher("docs-drift")
+	}
+
+	policy := testRunPolicy(noRunEvery, "bugs")
+	policy.Chores = withPatchClasses(policy.Chores, "bugs", "docs-drift")
+	policy.Budgets.MaxPatchesPerDay = 1
+	// MaxPromotionsPerDay left at its zero value -- promotion off -- on purpose.
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	if _, err := r.Sweep([]string{"bugs"}); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(gotChore.PatchClasses) != 0 {
+		t.Errorf("dispatch.Chore.PatchClasses = %v, want none with promotion off", gotChore.PatchClasses)
 	}
 }
 

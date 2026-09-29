@@ -298,8 +298,9 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	scalars["CHORE_DIFF_RANGE"] = e.ChoreDiffRange
 	scalars["CHORE_SLICE"] = e.ChoreSlice
 	scalars["CHORE_CLASSES"] = e.ChoreClasses
+	scalars["CHORE_PATCH_CLASSES"] = e.ChorePatchClasses
 	scalars["CHORE_MAX_FINDINGS"] = e.ChoreMaxFindings
-	for _, k := range []string{"CHORE_NAME", "CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE", "CHORE_CLASSES", "CHORE_MAX_FINDINGS"} {
+	for _, k := range []string{"CHORE_NAME", "CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE", "CHORE_CLASSES", "CHORE_PATCH_CLASSES", "CHORE_MAX_FINDINGS"} {
 		allowlist[k] = scalars[k]
 		vars[k] = varBody(k, scalars[k])
 	}
