@@ -489,6 +489,38 @@ in
     nixSubPath = "butler.patchClasses";
     boxEnv = false;
   };
+  butlerPatchPaths = {
+    env = "BUTLER_PATCH_PATHS";
+    group = "dispatch";
+    default = "docs/**,*.md,!docs/adr/**,!CLAUDE.md,!CONTEXT.md,!CONTRIBUTING.md,!AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**";
+    doc = "comma-separated globs (doublestar semantics: `**` any depth, `*` one path segment, so `*.md` matches only root-level Markdown) matched against every path in a patch candidate's diff (ADR 0057); a path is admitted only when it matches at least one plain entry and no `!`-prefixed (deny) entry; setting it replaces the whole default, so restate any built-in deny entry you want to keep; the built-in deny set is `docs/adr/**`, `CLAUDE.md`, `CONTEXT.md`, `CONTRIBUTING.md`, `AGENTS.md`, `skills/**`, `templates/**`, `fragments/**`, `.github/**`; those deny entries are root-anchored, covering only the repo-root agent-instruction files and directories -- a nested copy such as `docs/CLAUDE.md` is not denied by the default, so a Consumer that keeps one should add its own `!` entry; host-only -- the Box never sees this value; checked only when BUTLER_MAX_PATCHES_PER_DAY > 0; gates what the host applies as a patch, distinct from MERGE_GUARD_PATHS which still gates what merges -- neither knob absorbs the other";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    nixSubPath = "butler.patchPaths";
+    boxEnv = false;
+  };
+  butlerPatchMaxFiles = {
+    env = "BUTLER_PATCH_MAX_FILES";
+    group = "dispatch";
+    default = 3;
+    doc = "host limit on the files a patch candidate's diff may touch (ADR 0057); checked only when BUTLER_MAX_PATCHES_PER_DAY > 0";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "positive";
+    nixSubPath = "butler.patchMaxFiles";
+    boxEnv = false;
+  };
+  butlerPatchMaxLines = {
+    env = "BUTLER_PATCH_MAX_LINES";
+    group = "dispatch";
+    default = 20;
+    doc = "host limit on changed lines (added plus removed, across the whole diff) a patch candidate may carry (ADR 0057); checked only when BUTLER_MAX_PATCHES_PER_DAY > 0";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "positive";
+    nixSubPath = "butler.patchMaxLines";
+    boxEnv = false;
+  };
   butlerPromotionMaxFiles = {
     env = "BUTLER_PROMOTION_MAX_FILES";
     group = "dispatch";
