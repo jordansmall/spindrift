@@ -140,9 +140,10 @@ func oneLine(s string) string {
 // butlerBacklink renders the per-intent backlink appended to a filed
 // finding's body: which Chore filed it, the Box-claimed class if any (issue
 // #3870/#3880 -- named here regardless of whether the finding ends up
-// promoted), and which files (the path before the first ':' in each dedup
-// term, deduped, order kept) it concerns. The Files sentence is omitted
-// entirely when terms yields no paths, rather than printing "Files: ".
+// promoted), and which files (per butlerFiles: the path before the first ':'
+// in each usable dedup term, deduped, order kept) it concerns. The Files
+// sentence is omitted entirely when terms yields no paths, rather than
+// printing "Files: ".
 func butlerBacklink(choreName string, f settle.Finding) string {
 	lead := fmt.Sprintf("Filed by the butler's `%s` Chore.", choreName)
 	if f.Class != "" {
@@ -161,16 +162,16 @@ func butlerBacklink(choreName string, f settle.Finding) string {
 
 // butlerFiles extracts the file path from each "path/to/file.go:Symbol" dedup
 // term (the path before the first ':'), deduping while keeping first-seen
-// order. A term with no ':' is taken whole.
+// order. A term with no ':' is taken whole. A term settle's dedup key set
+// would drop, or whose path names no site (e.g. "-:Foo"), contributes no
+// file, so junk terms never satisfy decide's file-count floor (issue #4036).
+// The path stays raw: the normalized key folds case and separators.
 func butlerFiles(dedupTerms []string) []string {
 	seen := make(map[string]bool, len(dedupTerms))
 	var files []string
 	for _, term := range dedupTerms {
-		path := term
-		if i := strings.Index(term, ":"); i >= 0 {
-			path = term[:i]
-		}
-		if path == "" || seen[path] {
+		path, _, hasSymbol := strings.Cut(term, ":")
+		if seen[path] || !settle.UsableDedupTerm(term) || (hasSymbol && !settle.UsableDedupTerm(path)) {
 			continue
 		}
 		seen[path] = true
