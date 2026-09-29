@@ -82,3 +82,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 
 	return c
 }
+
+// HostCanOpenPR reports whether the host can push a branch it built itself
+// and open a draft PR on it, whatever the Box access mode (issue #4071).
+func (c Capabilities) HostCanOpenPR() bool { return c.BranchPusher != nil && c.DraftPRCreator != nil }
