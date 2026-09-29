@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
+	"spindrift.dev/launcher/internal/signalsocket"
 )
 
 // Chore is a one-shot butler run's key (ADR 0056, issue #3875), Factory.NewChore's
@@ -39,10 +40,23 @@ type Chore struct {
 	// CHORE_CLASSES (issue #3880), informational only: the Box never reads
 	// it back into a promotion decision, since the host re-checks a
 	// finding's class against its own allow-list at settle regardless of
-	// what the Box was told. butler.go leaves this empty whenever promotion
-	// is off (maxPromotionsPerDay == 0), so the Box never spends reviewer
+	// what the Box was told. The butler leaves this empty whenever today's
+	// promotion room is spent or off, so the Box never spends reviewer
 	// turns on candidates nothing can promote.
 	Classes []string
+	// MaxFindings is this sweep's findings room (chore.Room.Findings): the
+	// most findings the Box may relay this run. Zero means no host limit.
+	MaxFindings int
+}
+
+// maxIssueIntents is the effective cap on the findings a Chore run's Box may
+// relay: MaxFindings, else the signal socket's default. The socket and
+// CHORE_MAX_FINDINGS both read it, so the Box is told the socket's own cap.
+func (c Chore) maxIssueIntents() int {
+	if c.MaxFindings > 0 {
+		return c.MaxFindings
+	}
+	return signalsocket.DefaultMaxIssueIntents
 }
 
 // subject is what a Dispatch's Box works: a tracker issue or a one-shot
@@ -243,6 +257,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		if len(subj.chore.Classes) > 0 {
 			env["CHORE_CLASSES"] = strings.Join(subj.chore.Classes, " ")
 		}
+		env["CHORE_MAX_FINDINGS"] = strconv.Itoa(subj.chore.maxIssueIntents())
 	} else {
 		env["ISSUE_NUMBER"] = key
 		env["ISSUE_TITLE"] = subj.title

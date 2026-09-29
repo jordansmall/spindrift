@@ -192,6 +192,36 @@ func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 	}
 }
 
+// TestSweep_PassesRoomFindingsAsBoxMaxFindings pins issue #3994's butler
+// half: run() reads room.Findings (chore.Budgets.Room, computed once per
+// Sweep) into dispatch.Chore.MaxFindings, so the Box this run dispatches
+// carries the day's actual per-sweep cap rather than the socket's own
+// hardcoded default.
+func TestSweep_PassesRoomFindingsAsBoxMaxFindings(t *testing.T) {
+	const choreName = "bugs"
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+
+	d := readyDispatcher()
+	var got dispatch.Chore
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		got = c
+		return d
+	}
+
+	policy := testRunPolicy(noRunEvery, choreName)
+	policy.Budgets = chore.Budgets{MaxFindingsPerSweep: 12}
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, forge.NewFake().AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	if _, err := r.Sweep([]string{choreName}); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	if got.MaxFindings != 12 {
+		t.Errorf("newBox chore.MaxFindings = %d, want 12 (Budgets.MaxFindingsPerSweep)", got.MaxFindings)
+	}
+}
+
 // (b) A crashed run (no ready outcome) leaves the claim standing: settle
 // writes nothing, so the Ledger tip after the run is still the claim, and
 // Sweep reports ClaimLeft.

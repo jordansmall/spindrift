@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/signalsocket"
 )
 
 // Issue #3445 made an IssueTextFor error fatal to the dispatch. Callers of
@@ -495,6 +497,34 @@ func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
 	}
 	if v, ok := env["CHORE_CLASSES"]; ok {
 		t.Errorf("CHORE_CLASSES should be absent when Classes is empty, got %q", v)
+	}
+}
+
+// CHORE_MAX_FINDINGS forwards the sweep's own room (chore.Room.Findings,
+// issue #3994) when the host set one, and falls back to
+// signalsocket.DefaultMaxIssueIntents (8) when it left MaxFindings zero --
+// the same fallback startSignalSocket applies to the socket carrier's cap,
+// so a log-carrier Box is told the same number a socket-carrier one's
+// listener actually enforces.
+func TestBuildBoxEnv_ChoreForwardsMaxFindings(t *testing.T) {
+	cases := []struct {
+		name        string
+		maxFindings int
+		want        string
+	}{
+		{"host cap set", 12, "12"},
+		{"host cap unset", 0, strconv.Itoa(signalsocket.DefaultMaxIssueIntents)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, err := buildBoxEnv(Config{}, choreSubject(Chore{Name: "empty", Branch: "b", MaxFindings: tc.maxFindings}), 0, "", "")
+			if err != nil {
+				t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+			}
+			if got := env["CHORE_MAX_FINDINGS"]; got != tc.want {
+				t.Errorf("CHORE_MAX_FINDINGS: got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

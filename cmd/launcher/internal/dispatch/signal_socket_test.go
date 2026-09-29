@@ -13,6 +13,7 @@ import (
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/signalsocket"
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
@@ -381,5 +382,71 @@ func TestRunOnce_SignalCarrierSocket_MirrorNeverSplicesOutcomeLine(t *testing.T)
 	}
 	if mirrorLine <= outcomeLine {
 		t.Errorf("spindrift_op mirror on line %d, outcome on line %d: want the held mirror line flushed after the stream line completes", mirrorLine, outcomeLine)
+	}
+}
+
+// TestSignalSocketConfig_ChoreForwardsMaxFindings pins the socket half of
+// issue #3994: a Chore Dispatch's per-sweep room (Chore.MaxFindings) reaches
+// signalsocket.Config.MaxIssueIntents, so a socket-carrier Box relaying that
+// many distinct issue intents all land, and one more is refused.
+func TestSignalSocketConfig_ChoreForwardsMaxFindings(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, nil, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.NewChore(Chore{Name: "bugs", Branch: "main", MaxFindings: 12})
+	cfg := d.signalSocketConfig()
+	if cfg.MaxIssueIntents != 12 {
+		t.Fatalf("MaxIssueIntents = %d, want 12", cfg.MaxIssueIntents)
+	}
+
+	buf := signalsocket.New(cfg)
+	for i := 0; i < 12; i++ {
+		intent := signalwire.IssueIntent{Title: fmt.Sprintf("finding %d", i), Body: "b", Type: "bug"}
+		if _, rej := buf.AcceptIssueIntent(intent); rej != nil {
+			t.Fatalf("AcceptIssueIntent(%d) rejected: %+v", i, rej)
+		}
+	}
+	thirteenth := signalwire.IssueIntent{Title: "finding 12", Body: "b", Type: "bug"}
+	if _, rej := buf.AcceptIssueIntent(thirteenth); rej == nil {
+		t.Fatal("13th AcceptIssueIntent: want reject, got accepted")
+	}
+}
+
+// TestSignalSocketConfig_ZeroCapLeavesSocketDefault covers the issue's other
+// half: a work/issue Dispatch never sets MaxIssueIntents at all, and a Chore
+// Dispatch whose MaxFindings is 0 (no host-side per-sweep limit) forwards the
+// same DefaultMaxIssueIntents the socket falls back to on its own -- both
+// leave the socket at its 8-intent default.
+func TestSignalSocketConfig_ZeroCapLeavesSocketDefault(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, nil, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	work := f.New("42", "t")
+	if got := work.signalSocketConfig().MaxIssueIntents; got != 0 {
+		t.Errorf("work Dispatch MaxIssueIntents = %d, want 0 (socket default)", got)
+	}
+
+	choreNoCap := f.NewChore(Chore{Name: "bugs", Branch: "main"})
+	if got := choreNoCap.signalSocketConfig().MaxIssueIntents; got != signalsocket.DefaultMaxIssueIntents {
+		t.Errorf("uncapped Chore Dispatch MaxIssueIntents = %d, want %d (default)", got, signalsocket.DefaultMaxIssueIntents)
+	}
+
+	researchFactory, err := NewFactory(Config{Kind: "research"}, dir, nil, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer researchFactory.Cleanup()
+
+	research := researchFactory.New("42", "t")
+	if got := research.signalSocketConfig().MaxIssueIntents; got != 0 {
+		t.Errorf("research Dispatch MaxIssueIntents = %d, want 0 (socket default)", got)
 	}
 }

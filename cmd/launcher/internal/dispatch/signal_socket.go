@@ -45,15 +45,7 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 		return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- this runtime can only reach the Signal socket over its TCP fallback, which this mode blocks; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", d.cfg.NetworkMode)
 	}
 
-	// Consumes always lists all three kinds, never a narrower per-Dispatch
-	// set derived from the forge/tracker capability bits: the log carrier
-	// drops a signal the run never consumes silently, and this issue's
-	// contract is that both carriers produce the same Result, so a narrower
-	// Consumes here would make the carriers differ on which signals a given
-	// run accepts. Deliberately deferred, not overlooked.
-	buf := signalsocket.New(signalsocket.Config{
-		Consumes: []signalwire.Kind{signalwire.KindComment, signalwire.KindPRIntent, signalwire.KindIssueIntent},
-	})
+	buf := signalsocket.New(d.signalSocketConfig())
 
 	switch {
 	case transport.IsUnix():
@@ -131,4 +123,22 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 	default:
 		return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: transport probe returned neither a unix nor a tcp endpoint")
 	}
+}
+
+// signalSocketConfig derives this Dispatch's signalsocket.Config: Consumes
+// always lists all three kinds, never a narrower per-Dispatch set derived
+// from the forge/tracker capability bits, since the log carrier drops a
+// signal the run never consumes silently, and this issue's contract is that
+// both carriers produce the same Result, so a narrower Consumes here would
+// make the carriers differ on which signals a given run accepts.
+// Deliberately deferred, not overlooked. Only a Chore run overrides the
+// socket's default issue-intent cap, with its own findings room.
+func (d *Dispatch) signalSocketConfig() signalsocket.Config {
+	cfg := signalsocket.Config{
+		Consumes: []signalwire.Kind{signalwire.KindComment, signalwire.KindPRIntent, signalwire.KindIssueIntent},
+	}
+	if d.subject.key.IsChore() {
+		cfg.MaxIssueIntents = d.subject.chore.maxIssueIntents()
+	}
+	return cfg
 }
