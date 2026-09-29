@@ -64,12 +64,19 @@ falls through to the ordinary promote decision, never to an error:
 
 **The finding is still filed first.** The issue carries
 `agent-butler-finding` and a new provenance label, `agent-butler-patch`,
-and never a dispatch label. The host commits the diff with its own
-identity onto the finding's agent branch, pushes with the launcher
-credential, and opens a draft PR that closes the finding and shows the
-reviewer's concurrence and a visible "patched by the butler" note. The
-PR URL is recorded in the Ledger, and the Chore's claim is released,
-before CI is polled, so a crash while waiting never strands the claim.
+and never a dispatch label. (Amended by issue #4074: unless the push or
+PR create then fails and the finding falls back to promotion, which
+adds the dispatch label to the already-filed issue; that fallback needs
+a tracker that can add labels after filing — `github` or `forgejo` — and
+that names the same backend as the Code Forge, so `Closes #N` and the
+agent branch both land in that backend's own issue namespace; the rung
+stays off on a `local` tracker or a mismatched forge/tracker pairing.)
+The host commits the diff with its own identity onto the finding's
+agent branch, pushes with the launcher credential, and opens a draft
+PR that closes the finding and shows the reviewer's concurrence and a
+visible "patched by the butler" note. The PR URL is recorded in the
+Ledger, and the Chore's claim is released, before CI is polled, so a
+crash while waiting never strands the claim.
 
 **The PR then obeys every merge policy already set.** It enters the work
 merge gate through its existing entry point — CI to green, the Merge
