@@ -76,6 +76,14 @@ func normalizeDedupTerm(s string) (string, bool) {
 	return k, true
 }
 
+// UsableDedupTerm reports whether splitDedupTerms would keep s as a key, so
+// the butler's file count (issue #4036) never counts a term the dedup key
+// set drops.
+func UsableDedupTerm(s string) bool {
+	_, ok := normalizeDedupTerm(s)
+	return ok
+}
+
 // splitDedupTerms partitions terms into a dedup key set -- terms normalized,
 // invalid or blank ones dropped -- and the raw (un-normalized) terms
 // normalizeDedupTerm rejected, so fileIssueIntentsDetailed can warn about a
