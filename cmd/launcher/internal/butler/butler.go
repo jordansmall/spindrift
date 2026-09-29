@@ -192,7 +192,7 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	}
 
 	scope := chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
-	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.Budgets.MaxPromotionsPerDay, r.policy.PromotionLabel)
+	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.Budgets.MaxPromotionsPerDay, r.policy.PromotionLabel, c.PatchClasses, r.policy.Budgets.MaxPatchesPerDay)
 
 	// The Box only ever sees a class list when promotion is on and today's
 	// promotion room is actually > 0: with nothing left to spend this run,

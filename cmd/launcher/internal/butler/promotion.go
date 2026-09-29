@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/settle"
 )
 
@@ -33,32 +34,48 @@ type promotion struct {
 	// Consumer-configurable) -- carried on a promoted finding alongside
 	// "agent-butler-finding" so the work path picks it up (issue #3880).
 	label string
+	// patchEnabled is the patch rung's own on/off derivation, mirroring
+	// enabled -- see newPromotion. A finding never patches while this is
+	// false, regardless of anything else about it.
+	patchEnabled bool
+	// patchClasses is this Chore's host-side patch-class allow-list (from
+	// BUTLER_PATCH_CLASSES), checked independently of classes: decide's
+	// patch branch gates on patchClasses alone (ADR 0057) -- classes plays
+	// no part in it; classes only gates the ordinary promote branch.
+	patchClasses []string
 }
 
 // newPromotion builds a promotion from a Chore's allow-listed classes, the
-// host's per-finding file limit, its per-day promotion budget, and the
-// Consumer's work dispatch label. enabled requires all three of a positive
+// host's per-finding file limit, its per-day promotion budget, the
+// Consumer's work dispatch label, and the patch rung's own allow-listed
+// classes and per-day budget. enabled requires all three of a positive
 // per-day budget, a configured label, and at least one allow-listed class:
 // any one of them unset reads as "promotion off", never as "trust whatever
-// the unset one happens to be".
-func newPromotion(classes []string, maxFiles, perDay int, label string) promotion {
+// the unset one happens to be". patchEnabled mirrors that same rule for the
+// patch rung, independently: patchClasses and patchesPerDay are BUTLER_PATCH_
+// CLASSES/BUTLER_MAX_PATCHES_PER_DAY, and patching needs neither enabled nor
+// maxFiles -- those bounds land in a later ticket.
+func newPromotion(classes []string, maxFiles, perDay int, label string, patchClasses []string, patchesPerDay int) promotion {
 	return promotion{
-		enabled:  perDay > 0 && label != "" && len(classes) > 0,
-		classes:  classes,
-		maxFiles: maxFiles,
-		label:    label,
+		enabled:      perDay > 0 && label != "" && len(classes) > 0,
+		classes:      classes,
+		maxFiles:     maxFiles,
+		label:        label,
+		patchEnabled: patchesPerDay > 0 && len(patchClasses) > 0,
+		patchClasses: patchClasses,
 	}
 }
 
-// decisionKind names what decide chose for one finding. It is an enum
-// rather than a bool so a future third case -- a Patch decision, evaluated
-// before Promote -- can sit alongside skip/promote without a signature
-// change (issue #3993).
+// decisionKind names what decide chose for one finding: skip it, promote it
+// to a labeled work issue, or land it as a patch PR (ADR 0057) -- patch is
+// evaluated before promote, so a finding eligible for both patches rather
+// than promotes.
 type decisionKind int
 
 const (
 	skip decisionKind = iota
 	promote
+	patch
 )
 
 // decision is decide's verdict on one finding.
@@ -69,14 +86,29 @@ type decision struct {
 	files  int      // file count off the finding's dedup terms; only set when kind is promote
 }
 
-// decide is the promotion gate for one finding, checked in order: on/off,
-// the trust gate (allow-listed class), the quality filters (file count,
-// reviewer concurrence), then the shared per-sweep room. Each gate below
-// decide is its own predicate method so it stays separately testable, and
-// so a future patch gate has somewhere to sit alongside these. room is this
-// call's remaining budget, not a field on p -- the settle step tracks it
-// across findings in one sweep, spending it as findings promote.
-func (p promotion) decide(f settle.Finding, room int) decision {
+// decide is the promotion gate for one finding. The patch gate (rung on,
+// f.Patch present, class on the patch allow-list, reviewer concurrence,
+// patch room left) is checked first and in full: only when every one of
+// those holds does decide return patch, and it never touches promote's own
+// gates or room to do so (patching needs no promotion.enabled, no file
+// limit -- those bounds land in a later ticket). Any single patch gate
+// failing falls straight through to decidePromote, so a finding whose Patch
+// happens to be unusable is judged exactly as if it had none. room is this
+// sweep's shared budget, not a field on p -- the settle step tracks it
+// across findings in one sweep, spending it as findings promote or patch.
+func (p promotion) decide(f settle.Finding, room chore.Room) decision {
+	if p.patchEnabled && f.Patch != "" && p.patchClassListed(f) && p.concurred(f) && room.Patches > 0 {
+		return decision{kind: patch, reason: "patched"}
+	}
+	return p.decidePromote(f, room.Promotions)
+}
+
+// decidePromote is the promote/skip gate, checked in order: on/off, the
+// trust gate (allow-listed class), the quality filters (file count,
+// reviewer concurrence), then the shared per-sweep promotion room. Each
+// gate below is its own predicate method so it stays separately testable.
+// room is this call's remaining promotion budget.
+func (p promotion) decidePromote(f settle.Finding, room int) decision {
 	if !p.enabled {
 		return decision{kind: skip, reason: "promotion off"}
 	}
@@ -100,6 +132,13 @@ func (p promotion) decide(f settle.Finding, room int) decision {
 // on the host's own classes list.
 func (p promotion) allowListed(f settle.Finding) bool {
 	return f.Class != "" && slices.Contains(p.classes, f.Class)
+}
+
+// patchClassListed is the patch rung's own trust gate, mirroring allowListed
+// but checked against p.patchClasses (BUTLER_PATCH_CLASSES) rather than
+// p.classes (ADR 0057).
+func (p promotion) patchClassListed(f settle.Finding) bool {
+	return f.Class != "" && slices.Contains(p.patchClasses, f.Class)
 }
 
 // withinFileLimit: files comes from the Box's own dedup terms, so a finding

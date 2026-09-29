@@ -105,7 +105,12 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		if remaining > 0 {
 			eligible := 0
 			for _, f := range kept {
-				if s.policy.decide(f, remaining).kind == promote {
+				// Patch room is left zero here: a patch candidate whose
+				// landing later fails falls back to promote (decide's own
+				// patch-gate-fails contract), so it still needs a reserved
+				// promotion slot -- this count must not skip it just
+				// because it might patch instead.
+				if s.policy.decide(f, chore.Room{Promotions: remaining}).kind == promote {
 					eligible++
 				}
 			}
@@ -124,7 +129,10 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 
 		return func(f settle.Finding) settle.Decoration {
 			backlink := butlerBacklink(s.chore, f)
-			dec := s.policy.decide(f, remaining)
+			// Patch room stays zero here too (issue #4074): landing a patch
+			// PR is a later slice, so decide only ever promotes or skips at
+			// this call site for now.
+			dec := s.policy.decide(f, chore.Room{Promotions: remaining})
 			if dec.kind != promote {
 				return settle.Decoration{Backlink: backlink}
 			}
