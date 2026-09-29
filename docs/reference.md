@@ -4878,7 +4878,12 @@ write the reservation files every finding unlabelled. A running butler Box never
 (issue #3922), so with promotion on, a jam can fire shortly before a
 promoted finding makes dispatch runnable again.
 
-The Ledger and `chore.Room` already count a `patched` total alongside
+The patch rung is a second opt-in step, judged before promotion but not
+dependent on it: a finding whose diff clears every patch gate below is
+landed by the host as a PR instead of promoted, even with promotion off;
+one that fails any gate falls through to the promote/skip decision above.
+
+The Ledger and `chore.Room` count a `patched` total alongside
 `filed` and `promoted` (ADR 0057), and two host-only knobs configure the
 rung that spends it: `BUTLER_MAX_PATCHES_PER_DAY` (schema key
 `butlerMaxPatchesPerDay`, default `0`) caps butler findings landed as
@@ -4932,8 +4937,9 @@ of that succeeds — commits it on top under the launcher's own identity
 (carrying both `agent-butler-finding` and `agent-butler-patch`, never a
 dispatch label), pushes the committed patch to that issue's agent branch
 with the launcher's own push credential, and opens a **draft** PR closing
-the finding (`Closes #N`) whose body quotes the allow-listed class and the
-in-Box reviewer's concurrence, recording the PR's URL in the Ledger done
+the finding whose body opens with a visible **Patched** note quoting the
+allow-listed class and the in-Box reviewer's concurrence, then the finding
+issue's URL, then `Closes #N`, recording the PR's URL in the Ledger done
 commit's `patched` list alongside `filed` and `promoted`. Any failure along
 that path — a diff that does not apply to the scanned commit or the fresh
 tip, a failed push, or a failed PR create — never fails the run; settle instead falls back to judging the

@@ -664,7 +664,8 @@ being; today only the one-shot `spindrift butler` command runs it — itself
 picking a due Chore, or one named on `--chore` — and the [[Daemon]] will
 later run it only when no dispatch or research work is
 waiting. Advise-only for code; an opt-in, host-gated subset of its findings
-may be filed already dispatchable.
+may be filed already dispatchable. A further opt-in, host-gated subset may
+be landed by the host itself as a patch PR (ADR 0057).
 _Avoid_: sweep, patrol, scheduler, cron, audit.
 
 **Chore**:
