@@ -3056,6 +3056,41 @@ func TestNewCodeForge_ForgejoReadWrite_HostPRButNoBundleRelay(t *testing.T) {
 	}
 }
 
+// Capabilities.HostCanOpenPR (issue #4071) holds for github and forgejo under
+// either access mode, and never for git (push-only) or local (no PR at all).
+func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
+	tests := []struct {
+		forge, access string
+		want          bool
+	}{
+		{"github", "read-write", true},
+		{"github", "read-only", true},
+		{"forgejo", "read-write", true},
+		{"forgejo", "read-only", true},
+		{"git", "read-write", false},
+		{"local", "read-write", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.forge+" "+tc.access, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.codeForge = tc.forge
+			c.boxForgeAndIssueAccess = tc.access
+			c.forgejoBaseURL = "https://codeberg.org"
+			c.forgejoToken = "tok"
+			c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+			c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
+			cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
+			if cf == nil {
+				t.Fatalf("newCodeForge(CODE_FORGE=%s) = nil", tc.forge)
+			}
+			caps := forge.ResolveCapabilities(cf, forge.NewFake(), backend.Descriptor{}, backend.Descriptor{})
+			if got := caps.HostCanOpenPR(); got != tc.want {
+				t.Errorf("HostCanOpenPR() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // CODE_FORGE=local ignores BOX_FORGE_AND_ISSUE_ACCESS=read-only entirely:
 // local never had a distinct read-only CodeForge constructor, so read-only
 // falls through to the same plain adapter as read-write, unlike github and
