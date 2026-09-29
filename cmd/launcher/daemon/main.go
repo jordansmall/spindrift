@@ -34,6 +34,9 @@ import (
 // SIGTERM/SIGINT to the test binary.
 var installStopSignal = stopsignal.Notify
 
+// inputFlag: mainRun's status-verb check skips leading pairs of it.
+const inputFlag = "--input"
+
 // parsedArgs is the result of parsing argv: `--input <path>` plus an
 // optional positional kind-set selector (dispatch|research|butler, default
 // every kind — see parseArgs) and an optional `--feature-branch <branch>`.
@@ -61,9 +64,9 @@ func parseArgs(args []string) (parsedArgs, error) {
 	var featureBranch string
 	var positional []string
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--input" {
+		if args[i] == inputFlag {
 			if i+1 >= len(args) {
-				return parsedArgs{}, fmt.Errorf("flag --input requires a value")
+				return parsedArgs{}, fmt.Errorf("flag %s requires a value", inputFlag)
 			}
 			inputPath = args[i+1]
 			havePath = true
@@ -87,7 +90,7 @@ func parseArgs(args []string) (parsedArgs, error) {
 		positional = append(positional, args[i])
 	}
 	if !havePath {
-		return parsedArgs{}, fmt.Errorf("flag --input is required")
+		return parsedArgs{}, fmt.Errorf("flag %s is required", inputFlag)
 	}
 	if len(positional) > 1 {
 		return parsedArgs{}, fmt.Errorf("unexpected extra arguments: %v", positional[1:])
@@ -592,9 +595,16 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// research, see its own doc), and overloading that same slot with a
 	// verb would make `daemon status dispatch` parse as a kind selector of
 	// "status dispatch" rather than the status verb it plainly reads as.
-	if len(argv) > 0 && argv[0] == "status" {
-		if len(argv) > 1 {
-			return fail(stderr, fmt.Errorf("status takes no arguments, got: %v", argv[1:]))
+	//
+	// Leading --input pairs are skipped: the `nix run .#daemon` wrapper
+	// prepends `--input <doc>` to every argv, and status never loads it.
+	rest := argv
+	for len(rest) >= 2 && rest[0] == inputFlag {
+		rest = rest[2:]
+	}
+	if len(rest) > 0 && rest[0] == "status" {
+		if len(rest) > 1 {
+			return fail(stderr, fmt.Errorf("status takes no arguments, got: %v", rest[1:]))
 		}
 		wd, err := os.Getwd()
 		if err != nil {
