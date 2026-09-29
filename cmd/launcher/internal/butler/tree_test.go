@@ -5,49 +5,21 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/ledger/ledgertest"
 )
 
 // newTreeBareRepo builds a bare repo with one commit on "main" holding the
-// given paths (each blob's content is its own path), same exec-git style as
-// this package's newButlerBareRepo (settle_test.go) and the retired
-// internal/chore/git_test.go's newBareRepoWithFiles (issue #3995).
+// given paths, via the shared ledgertest.NewRepo fixture, and also returns
+// the commit sha the tree tests assert against.
 func newTreeBareRepo(t *testing.T, paths ...string) (repo, commit string) {
 	t.Helper()
-	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
-	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
-	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
-
-	bare := newButlerBareRepo(t)
-
-	var entries []string
-	for _, p := range paths {
-		hashCmd := exec.Command("git", "-C", bare, "hash-object", "-w", "--stdin")
-		hashCmd.Stdin = strings.NewReader(p)
-		out, err := hashCmd.Output()
-		if err != nil {
-			t.Fatalf("hash-object %s: %v", p, err)
-		}
-		blob := strings.TrimSpace(string(out))
-		entries = append(entries, "100644 blob "+blob+"\t"+p)
-	}
-	mktreeCmd := exec.Command("git", "-C", bare, "mktree")
-	mktreeCmd.Stdin = strings.NewReader(strings.Join(entries, "\n") + "\n")
-	treeOut, err := mktreeCmd.Output()
+	bare := ledgertest.NewRepo(t, paths...)
+	out, err := exec.Command("git", "-C", bare, "rev-parse", "refs/heads/main").Output()
 	if err != nil {
-		t.Fatalf("mktree: %v", err)
+		t.Fatalf("rev-parse: %v", err)
 	}
-	tree := strings.TrimSpace(string(treeOut))
-
-	commitOut, err := exec.Command("git", "-C", bare, "commit-tree", tree, "-m", "base").Output()
-	if err != nil {
-		t.Fatalf("commit-tree: %v", err)
-	}
-	commit = strings.TrimSpace(string(commitOut))
-	if out, err := exec.Command("git", "-C", bare, "update-ref", "refs/heads/main", commit).CombinedOutput(); err != nil {
-		t.Fatalf("update-ref: %v: %s", err, out)
-	}
-	return bare, commit
+	return bare, strings.TrimSpace(string(out))
 }
 
 func TestGitTreeHead(t *testing.T) {
@@ -91,7 +63,7 @@ func TestGitTreeTrackedFilesEmptyTree(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 
-	bare := newButlerBareRepo(t)
+	bare := ledgertest.NewRepo(t)
 
 	mktreeCmd := exec.Command("git", "-C", bare, "mktree")
 	mktreeCmd.Stdin = strings.NewReader("")
@@ -122,7 +94,7 @@ func TestGitTreeTrackedFilesEmptyTree(t *testing.T) {
 // FetchTree fetches "main" into it exactly once.
 func TestFetchTree_FetchesBranchAndReturnsTreeOverScratch(t *testing.T) {
 	remote, head := newTreeBareRepo(t, "a.go", "b.go")
-	scratch := newButlerBareRepo(t)
+	scratch := ledgertest.NewRepo(t)
 
 	tree, err := FetchTree(scratch, remote, "main")
 	if err != nil {
@@ -153,7 +125,7 @@ func TestFetchTree_FetchesBranchAndReturnsTreeOverScratch(t *testing.T) {
 // git wrappers give (forge.RedactURLCredentials) -- the port at 1 refuses
 // the connection immediately rather than hanging on GIT_TERMINAL_PROMPT=0.
 func TestFetchTree_RedactsCredentialsOnError(t *testing.T) {
-	scratch := newButlerBareRepo(t)
+	scratch := ledgertest.NewRepo(t)
 	const secret = "secret-token"
 	url := "https://user:" + secret + "@127.0.0.1:1/x.git"
 

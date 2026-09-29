@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
 )
 
@@ -40,7 +41,7 @@ func testPolicy() Policy {
 // chores is due: the head equals the (empty) tip's LastSwept with an empty
 // Cursor, so chore.Check reports NothingToScan for it.
 func TestSweep_NotDue(t *testing.T) {
-	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: ""}
 	it := forge.NewFake().AsIssueFiler()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -63,7 +64,7 @@ func TestSweep_NotDue(t *testing.T) {
 // TestSweep_EmptyChoresErrors pins the exact error text for an empty chores
 // list.
 func TestSweep_EmptyChoresErrors(t *testing.T) {
-	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	r := New(backend, fakeTree{}, forge.NewFake().AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return dispatch.NewFake() }, testPolicy(), time.Now)
 
 	_, err := r.Sweep(nil)
@@ -75,7 +76,7 @@ func TestSweep_EmptyChoresErrors(t *testing.T) {
 // TestSweep_UnconfiguredChoreErrors rejects a candidate absent from
 // Policy.Chores rather than sweeping it with a zero Every and no Classes.
 func TestSweep_UnconfiguredChoreErrors(t *testing.T) {
-	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	r := New(backend, fakeTree{}, forge.NewFake().AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return dispatch.NewFake() }, testPolicy(), time.Now)
 
 	_, err := r.Sweep([]string{"refactor"})
@@ -107,7 +108,7 @@ func (w *claimRace) Append(choreName, old string, s ledger.State, at time.Time) 
 // TestSweep_LostRace pins the LostRace Outcome: a due Chore whose Claim call
 // loses its compare-and-swap to a rival claim reports LostRace, not an error.
 func TestSweep_LostRace(t *testing.T) {
-	inner := ledger.Local{Repo: newButlerBareRepo(t)}
+	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	backend := &claimRace{Backend: inner}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 	it := forge.NewFake().AsIssueFiler()
@@ -128,7 +129,7 @@ func TestSweep_LostRace(t *testing.T) {
 // crashes (no ready outcome) files nothing and leaves the claim standing --
 // Sweep learns this from the settle step's own return, not a re-read.
 func TestSweep_ClaimLeft(t *testing.T) {
-	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 	it := forge.NewFake().AsIssueFiler()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -159,7 +160,7 @@ func TestSweep_ClaimLeft(t *testing.T) {
 // runs to completion, with Filed/Promoted/Dropped read off the settle step's
 // return, never a Ledger re-read.
 func TestSweep_Swept(t *testing.T) {
-	backend := ledger.Local{Repo: newButlerBareRepo(t)}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go", "b.go"}}
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/900"
@@ -207,7 +208,7 @@ func (erroringBackend) Read(string) (ledger.Tip, error) { return ledger.Tip{}, e
 // TestSweep_ReadLedgerError pins the wrap text for a per-candidate Read
 // failure.
 func TestSweep_ReadLedgerError(t *testing.T) {
-	backend := erroringBackend{ledger.Local{Repo: newButlerBareRepo(t)}}
+	backend := erroringBackend{ledger.Local{Repo: ledgertest.NewRepo(t)}}
 	tree := fakeTree{head: "headsha"}
 	it := forge.NewFake().AsIssueFiler()
 

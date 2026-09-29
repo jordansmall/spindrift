@@ -25,38 +25,6 @@ func setGitIdentityEnv(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 }
 
-// newBareRepo creates a bare repo with a single "main" branch (one commit),
-// so a contract case's refs/heads/* snapshot is non-empty and the
-// no-branch-moved assertion actually bites.
-func newBareRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	bare := filepath.Join(dir, "repo.git")
-	runGit(t, "", "init", "--bare", "-q", bare)
-	// Same rationale as forgetest.NewGitRepoFixture: a detached `git gc
-	// --auto` can still be repacking when t.TempDir()'s RemoveAll runs.
-	runGit(t, bare, "config", "gc.auto", "0")
-	runGit(t, bare, "config", "receive.autogc", "false")
-
-	tree := runGitOutputWithStdin(t, bare, "", "mktree")
-	commit := runGitOutputWithStdin(t, bare, "", "commit-tree", tree, "-m", "base")
-	runGit(t, bare, "update-ref", "refs/heads/main", commit)
-	return bare
-}
-
-func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	var full []string
-	if dir != "" {
-		full = append([]string{"-C", dir}, args...)
-	} else {
-		full = args
-	}
-	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", full, err, out)
-	}
-}
-
 func runGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	return runGitOutputWithStdin(t, dir, "", args...)
@@ -77,7 +45,7 @@ func runGitOutputWithStdin(t *testing.T, dir, stdin string, args ...string) stri
 func newHarness(t *testing.T) ledgertest.Harness {
 	t.Helper()
 	setGitIdentityEnv(t)
-	return localHarness{bare: newBareRepo(t)}
+	return localHarness{bare: ledgertest.NewRepo(t)}
 }
 
 // localHarness is the ledgertest.Harness for Local: Backend and Rival are
@@ -118,7 +86,7 @@ func TestLocalLedgerContract(t *testing.T) {
 // refs/spindrift/butler/, never refs/heads/.
 func TestLocalChain(t *testing.T) {
 	setGitIdentityEnv(t)
-	bare := newBareRepo(t)
+	bare := ledgertest.NewRepo(t)
 	b := ledger.Local{Repo: bare}
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -150,7 +118,7 @@ func TestLocalChain(t *testing.T) {
 // Chore's ancestor commit.
 func TestInvalidChoreName(t *testing.T) {
 	setGitIdentityEnv(t)
-	bare := newBareRepo(t)
+	bare := ledgertest.NewRepo(t)
 	b := ledger.Local{Repo: bare}
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -178,7 +146,7 @@ func TestInvalidChoreName(t *testing.T) {
 // surfaces as a plain error, not ErrLostRace.
 func TestAppendUpdateRefFailureNotLostRace(t *testing.T) {
 	setGitIdentityEnv(t)
-	bare := newBareRepo(t)
+	bare := ledgertest.NewRepo(t)
 	b := ledger.Local{Repo: bare}
 	const chore = "chore-lock"
 

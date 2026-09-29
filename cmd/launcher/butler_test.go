@@ -17,62 +17,11 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/signalwire"
 )
-
-// newButlerTestRepo builds a bare repo with one commit on "main" holding one
-// tracked file, the fixture this file's preflight-rejection tests use to
-// prove a claim never lands (same exec-git convention as
-// internal/chore/git_test.go and internal/butler's own bare-repo fixtures).
-func newButlerTestRepo(t *testing.T) (repo, head string) {
-	t.Helper()
-	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
-	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
-	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
-
-	dir := t.TempDir()
-	bare := filepath.Join(dir, "repo.git")
-	runButlerGit(t, "", "init", "--bare", "-q", bare)
-	runButlerGit(t, bare, "config", "gc.auto", "0")
-
-	hashCmd := exec.Command("git", "-C", bare, "hash-object", "-w", "--stdin")
-	hashCmd.Stdin = strings.NewReader("package a\n")
-	out, err := hashCmd.Output()
-	if err != nil {
-		t.Fatalf("hash-object: %v", err)
-	}
-	blob := strings.TrimSpace(string(out))
-
-	mktreeCmd := exec.Command("git", "-C", bare, "mktree")
-	mktreeCmd.Stdin = strings.NewReader("100644 blob " + blob + "\ta.go\n")
-	treeOut, err := mktreeCmd.Output()
-	if err != nil {
-		t.Fatalf("mktree: %v", err)
-	}
-	tree := strings.TrimSpace(string(treeOut))
-
-	commitOut, err := exec.Command("git", "-C", bare, "commit-tree", tree, "-m", "base").Output()
-	if err != nil {
-		t.Fatalf("commit-tree: %v", err)
-	}
-	head = strings.TrimSpace(string(commitOut))
-	runButlerGit(t, bare, "update-ref", "refs/heads/main", head)
-	return bare, head
-}
-
-func runButlerGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	full := args
-	if dir != "" {
-		full = append([]string{"-C", dir}, args...)
-	}
-	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", full, err, out)
-	}
-}
 
 func runButlerGitOutput(t *testing.T, repo string, args ...string) []byte {
 	t.Helper()
@@ -190,7 +139,7 @@ func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchCon
 // first.
 func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
 	t.Setenv("FILER_MODEL", "test-model")
-	repo, _ := newButlerTestRepo(t)
+	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bad.name")
 	var code int
 	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "", "") })
@@ -208,7 +157,7 @@ func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
 func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
 	t.Setenv("FILER_MODEL", "test-model")
 	withLoadedDoc(t, &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": "docs-drift"}})
-	repo, _ := newButlerTestRepo(t)
+	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bugs")
 	var code int
 	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "", "") })
@@ -251,7 +200,7 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("FILER_MODEL", "test-model")
-			repo, _ := newButlerTestRepo(t)
+			repo := ledgertest.NewRepo(t)
 			lc := testButlerLaunchContext(t, repo, "bugs")
 			tt.set(&lc.config)
 			var code int
@@ -612,7 +561,7 @@ func promotableRunFunc(class string) func(runner.Box) error {
 // standing "agent-butler-finding" provenance label.
 func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 	t.Setenv("FILER_MODEL", "test-model")
-	repo, _ := newButlerTestRepo(t)
+	repo := ledgertest.NewRepo(t)
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9301"

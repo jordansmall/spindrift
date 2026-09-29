@@ -13,12 +13,13 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// testRunClaimTimeout is the claim timeout every git-fixture-backed Sweep
-// test below passes explicitly, migrated from cmd/launcher's retired
-// testClaimTimeout (issue #3990).
+// testRunClaimTimeout is the claim timeout every Sweep test below passes
+// explicitly, migrated from cmd/launcher's retired testClaimTimeout (issue
+// #3990).
 const testRunClaimTimeout = 6 * time.Hour
 
 // noRunEvery is the zero Every: it never blocks a due check
@@ -58,51 +59,6 @@ func withClasses(chores []chore.Chore, name string, classes ...string) []chore.C
 	return chores
 }
 
-// newRunTestRepo builds a bare repo with one commit on "main" holding one
-// tracked file, the fixture every Sweep test below claims and sweeps
-// against against a real GitTree (same exec-git convention as
-// internal/chore/git_test.go and this package's own newButlerBareRepo,
-// migrated from cmd/launcher's retired newButlerTestRepo).
-func newRunTestRepo(t *testing.T) (repo, head string) {
-	t.Helper()
-	bare := newButlerBareRepo(t)
-
-	hashCmd := exec.Command("git", "-C", bare, "hash-object", "-w", "--stdin")
-	hashCmd.Stdin = strings.NewReader("package a\n")
-	out, err := hashCmd.Output()
-	if err != nil {
-		t.Fatalf("hash-object: %v", err)
-	}
-	blob := strings.TrimSpace(string(out))
-
-	mktreeCmd := exec.Command("git", "-C", bare, "mktree")
-	mktreeCmd.Stdin = strings.NewReader("100644 blob " + blob + "\ta.go\n")
-	treeOut, err := mktreeCmd.Output()
-	if err != nil {
-		t.Fatalf("mktree: %v", err)
-	}
-	tree := strings.TrimSpace(string(treeOut))
-
-	commitOut, err := exec.Command("git", "-C", bare, "commit-tree", tree, "-m", "base").Output()
-	if err != nil {
-		t.Fatalf("commit-tree: %v", err)
-	}
-	head = strings.TrimSpace(string(commitOut))
-	runRepoGit(t, bare, "update-ref", "refs/heads/main", head)
-	return bare, head
-}
-
-func runRepoGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	full := args
-	if dir != "" {
-		full = append([]string{"-C", dir}, args...)
-	}
-	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", full, err, out)
-	}
-}
-
 func runRepoGitOutput(t *testing.T, repo string, args ...string) []byte {
 	t.Helper()
 	full := append([]string{"-C", repo}, args...)
@@ -111,42 +67,6 @@ func runRepoGitOutput(t *testing.T, repo string, args ...string) []byte {
 		t.Fatalf("git %v: %v", full, err)
 	}
 	return out
-}
-
-// addRunCommit commits one new tracked file (name/content) on top of repo's
-// current refs/heads/main tip, moves the branch to it, and returns the new
-// commit sha -- simulating real work landing on the branch between Sweep
-// runs, so a run's DiffRange and tree-walk slice have something new to see.
-func addRunCommit(t *testing.T, repo, name, content string) string {
-	t.Helper()
-	parent := strings.TrimSpace(string(runRepoGitOutput(t, repo, "rev-parse", "refs/heads/main")))
-
-	hashCmd := exec.Command("git", "-C", repo, "hash-object", "-w", "--stdin")
-	hashCmd.Stdin = strings.NewReader(content)
-	blobOut, err := hashCmd.Output()
-	if err != nil {
-		t.Fatalf("hash-object: %v", err)
-	}
-	blob := strings.TrimSpace(string(blobOut))
-
-	lsOut := runRepoGitOutput(t, repo, "ls-tree", parent)
-	entries := string(lsOut) + "100644 blob " + blob + "\t" + name + "\n"
-
-	mktreeCmd := exec.Command("git", "-C", repo, "mktree")
-	mktreeCmd.Stdin = strings.NewReader(entries)
-	treeOut, err := mktreeCmd.Output()
-	if err != nil {
-		t.Fatalf("mktree: %v", err)
-	}
-	tree := strings.TrimSpace(string(treeOut))
-
-	commitOut, err := exec.Command("git", "-C", repo, "commit-tree", tree, "-p", parent, "-m", "add "+name).Output()
-	if err != nil {
-		t.Fatalf("commit-tree: %v", err)
-	}
-	commit := strings.TrimSpace(string(commitOut))
-	runRepoGit(t, repo, "update-ref", "refs/heads/main", commit)
-	return commit
 }
 
 // readyDispatcher builds a dispatch.Fake whose Run() reports a ready outcome
@@ -218,8 +138,10 @@ func promotableDispatcher(class string) *dispatch.Fake {
 func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 	for _, choreName := range []string{"bugs", "tidy-deps"} {
 		t.Run(choreName, func(t *testing.T) {
-			repo, head := newRunTestRepo(t)
+			repo := ledgertest.NewRepo(t)
 			backend := ledger.Local{Repo: repo}
+			const head = "headsha"
+			tree := fakeTree{head: head, files: []string{"a.go"}}
 
 			fc := forge.NewFake()
 			fc.PostIssueURL = "https://example.com/issues/9001"
@@ -236,7 +158,7 @@ func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 			}
 
 			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, choreName), func() time.Time { return now })
+			r := New(backend, tree, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, choreName), func() time.Time { return now })
 			out, err := r.Sweep([]string{choreName})
 			if err != nil {
 				t.Fatalf("Sweep: %v", err)
@@ -274,13 +196,13 @@ func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 // writes nothing, so the Ledger tip after the run is still the claim, and
 // Sweep reports ClaimLeft.
 func TestSweep_CrashedRunLeavesClaimStanding(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return crashedDispatcher() }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -302,8 +224,8 @@ func TestSweep_CrashedRunLeavesClaimStanding(t *testing.T) {
 // reading: with a clock that advances on every call, the crashed run's
 // standing claim must still carry the first reading.
 func TestSweep_ClaimStartIsDueCheckInstant(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return crashedDispatcher() }
 
@@ -313,7 +235,7 @@ func TestSweep_ClaimStartIsDueCheckInstant(t *testing.T) {
 		calls++
 		return first.Add(time.Duration(calls-1) * time.Hour)
 	}
-	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), now)
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), now)
 	if _, err := r.Sweep([]string{"bugs"}); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -330,8 +252,8 @@ func TestSweep_ClaimStartIsDueCheckInstant(t *testing.T) {
 // (c) A live (non-stale) claim held by another run makes Sweep report
 // NotDue without dispatching a Box or writing a new commit.
 func TestSweep_LiveClaimReportsNoWork(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "other-host", Start: now})
@@ -345,7 +267,7 @@ func TestSweep_LiveClaimReportsNoWork(t *testing.T) {
 		return dispatch.NewFake()
 	}
 
-	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now.Add(time.Minute) })
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now.Add(time.Minute) })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -374,8 +296,8 @@ func TestSweep_LiveClaimReportsNoWork(t *testing.T) {
 // (ADR 0056): the next run takes it over rather than reporting NotDue, and a
 // clean sweep against it still ends in a done commit.
 func TestSweep_StaleClaimIsTakenOver(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "dead-host", Start: start}); err != nil {
@@ -391,7 +313,7 @@ func TestSweep_StaleClaimIsTakenOver(t *testing.T) {
 	}
 
 	now := start.Add(testRunClaimTimeout + time.Minute)
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -418,10 +340,13 @@ func TestSweep_StaleClaimIsTakenOver(t *testing.T) {
 // takes the stale claim over rather than reporting NotDue, sweeps
 // lastSwept..newHead, resumes the tree walk strictly after the old cursor
 // (never restarting it), and ends in a done commit -- the full claimed(seed)
-// -> done(seed) -> claimed(stale) -> done(final) chain, newest first.
+// -> done(seed) -> claimed(stale) -> done(final) chain, newest first. head1
+// and head2 stand in for the branch's tip before and after work "lands"
+// between the seed and this run (fakeTree, no real git needed -- issue
+// #3995).
 func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
-	repo, head1 := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	const head1, head2 = "head1", "head2"
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 
 	seedStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	seedClaim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: seedStart})
@@ -438,7 +363,7 @@ func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
 		t.Fatalf("seed dead Claim: %v", err)
 	}
 
-	newHead := addRunCommit(t, repo, "b.go", "package b\n")
+	tree := fakeTree{head: head2, files: []string{"a.go", "b.go"}}
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9003"
@@ -451,7 +376,7 @@ func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
 	}
 
 	now := deadStart.Add(testRunClaimTimeout + time.Minute)
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -463,7 +388,7 @@ func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
 		t.Errorf("Outcome.Kind = %v, want Swept", out.Kind)
 	}
 
-	wantDiff := head1 + ".." + newHead
+	wantDiff := head1 + ".." + head2
 	if dispatchedChore.Scope.DiffRange != wantDiff {
 		t.Errorf("Scope.DiffRange = %q, want %q", dispatchedChore.Scope.DiffRange, wantDiff)
 	}
@@ -478,15 +403,15 @@ func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
 	if tip.State.Phase != ledger.Done {
 		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
 	}
-	if tip.State.LastSwept != newHead {
-		t.Errorf("LastSwept = %q, want %q", tip.State.LastSwept, newHead)
+	if tip.State.LastSwept != head2 {
+		t.Errorf("LastSwept = %q, want %q", tip.State.LastSwept, head2)
 	}
 
 	// Newest first: the final done commit, the takeover's own new claimed
 	// commit (ledger.Claim always appends a fresh state, never reusing the
 	// stale one), the dead host's now-superseded claim, and the seed done
 	// commit it was taken over on top of.
-	subjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+	subjects := gitLogSubjects(t, backend.Repo, ledger.RefPrefix+"bugs")
 	want := []string{"bugs: done", "bugs: claimed", "bugs: claimed", "bugs: done", "bugs: claimed"}
 	if !reflect.DeepEqual(subjects, want) {
 		t.Errorf("git log subjects = %v, want %v", subjects, want)
@@ -496,8 +421,8 @@ func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
 // (e) A claim just younger than the claim timeout is still live: Sweep
 // reports NotDue without taking it over or dispatching a Box.
 func TestSweep_ClaimJustUnderTimeoutStillLive(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "other-host", Start: start})
@@ -512,7 +437,7 @@ func TestSweep_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 	}
 
 	now := start.Add(testRunClaimTimeout - time.Minute)
-	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -537,8 +462,9 @@ func TestSweep_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 // claiming or dispatching. (ledger.Claim losing the race, the "f" case in
 // cmd/launcher's retired suite, is covered by TestSweep_LostRace above.)
 func TestSweep_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
-	repo, head := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	const head = "headsha"
+	tree := fakeTree{head: head, files: []string{"a.go"}}
 
 	doneAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: doneAt})
@@ -548,7 +474,7 @@ func TestSweep_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
 	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head}, doneAt); err != nil {
 		t.Fatalf("seed Finish: %v", err)
 	}
-	beforeSubjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+	beforeSubjects := gitLogSubjects(t, backend.Repo, ledger.RefPrefix+"bugs")
 
 	dispatched := false
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
@@ -557,7 +483,7 @@ func TestSweep_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
 	}
 
 	now := doneAt.Add(time.Hour) // well inside the 6h interval
-	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(6*time.Hour, "bugs"), func() time.Time { return now })
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(6*time.Hour, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -573,7 +499,7 @@ func TestSweep_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
 		t.Error("newBox was called; want no Box dispatched against a chore not due")
 	}
 
-	afterSubjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+	afterSubjects := gitLogSubjects(t, backend.Repo, ledger.RefPrefix+"bugs")
 	if !reflect.DeepEqual(afterSubjects, beforeSubjects) {
 		t.Errorf("git log subjects = %v, want unchanged %v", afterSubjects, beforeSubjects)
 	}
@@ -582,13 +508,14 @@ func TestSweep_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
 // (h) A named chore fully rotated through the tree, with head unmoved since
 // the last sweep, reports "nothing to scan" and NotDue.
 func TestSweep_NamedChoreNothingToScanReportsWhy(t *testing.T) {
-	repo, head := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	const head = "headsha"
+	tree := fakeTree{head: head, files: []string{"a.go"}}
 
 	fc := forge.NewFake()
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	if _, err := r.Sweep([]string{"bugs"}); err != nil {
 		t.Fatalf("seed clean run: %v", err)
 	}
@@ -606,7 +533,7 @@ func TestSweep_NamedChoreNothingToScanReportsWhy(t *testing.T) {
 		dispatched = true
 		return dispatch.NewFake()
 	}
-	r2 := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox2, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now.Add(time.Hour) })
+	r2 := New(backend, tree, fc.AsIssueFiler(), newBox2, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now.Add(time.Hour) })
 	out, err := r2.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -627,8 +554,9 @@ func TestSweep_NamedChoreNothingToScanReportsWhy(t *testing.T) {
 // due candidate in order, skipping one that isn't due yet and leaving its
 // Ledger untouched.
 func TestSweep_NoChorePicksFirstDueCandidate(t *testing.T) {
-	repo, head := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	const head = "headsha"
+	tree := fakeTree{head: head, files: []string{"a.go"}}
 
 	doneAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: doneAt})
@@ -638,7 +566,7 @@ func TestSweep_NoChorePicksFirstDueCandidate(t *testing.T) {
 	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head}, doneAt); err != nil {
 		t.Fatalf("seed Finish: %v", err)
 	}
-	beforeSubjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+	beforeSubjects := gitLogSubjects(t, backend.Repo, ledger.RefPrefix+"bugs")
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9004"
@@ -649,7 +577,7 @@ func TestSweep_NoChorePicksFirstDueCandidate(t *testing.T) {
 	}
 
 	now := doneAt.Add(time.Hour)
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, testRunPolicy(6*time.Hour, "bugs", "refactor"), func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, testRunPolicy(6*time.Hour, "bugs", "refactor"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs", "refactor"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -661,7 +589,7 @@ func TestSweep_NoChorePicksFirstDueCandidate(t *testing.T) {
 		t.Errorf("dispatched chore = %q, want refactor (bugs is not due yet)", dispatchedChore.Name)
 	}
 
-	afterSubjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+	afterSubjects := gitLogSubjects(t, backend.Repo, ledger.RefPrefix+"bugs")
 	if !reflect.DeepEqual(afterSubjects, beforeSubjects) {
 		t.Errorf("bugs ledger subjects = %v, want unchanged %v", afterSubjects, beforeSubjects)
 	}
@@ -678,8 +606,9 @@ func TestSweep_NoChorePicksFirstDueCandidate(t *testing.T) {
 // every candidate's own reason. (An empty chores slice is
 // TestSweep_EmptyChoresErrors above.)
 func TestSweep_NoChoreNoneDueReportsEachReason(t *testing.T) {
-	repo, head := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	const head = "headsha"
+	tree := fakeTree{head: head, files: []string{"a.go"}}
 
 	doneAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for _, choreName := range []string{"bugs", "refactor"} {
@@ -699,7 +628,7 @@ func TestSweep_NoChoreNoneDueReportsEachReason(t *testing.T) {
 	}
 
 	now := doneAt.Add(time.Hour)
-	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(6*time.Hour, "bugs", "refactor"), func() time.Time { return now })
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(6*time.Hour, "bugs", "refactor"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs", "refactor"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -721,8 +650,8 @@ func TestSweep_NoChoreNoneDueReportsEachReason(t *testing.T) {
 // shared day's sweep budget, so a distinct due candidate on another enabled
 // Chore reports the budget spent rather than running.
 func TestSweep_BudgetSpentByAnotherEnabledChore(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	// A Claimed commit on "refactor" -- a run already under way -- counts
@@ -739,7 +668,7 @@ func TestSweep_BudgetSpentByAnotherEnabledChore(t *testing.T) {
 
 	policy := testRunPolicy(noRunEvery, "bugs", "refactor")
 	policy.Budgets = chore.Budgets{MaxSweepsPerDay: 1}
-	r := New(backend, GitTree{Repo: repo}, forge.NewFake().AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -761,10 +690,15 @@ func TestSweep_BudgetSpentByAnotherEnabledChore(t *testing.T) {
 // is 04:30 UTC the *next* date, so this instant lands on different calendar
 // dates depending which zone decides the boundary. Reading at 23:50 the same
 // NY evening still finds the budget spent; reading at 00:10 the following NY
-// morning finds a fresh day and runs.
+// morning finds a fresh day and runs. head1/head2 stand in for the branch
+// tip before/after the seeded run, as above (fakeTree, no real git needed).
 func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
-	repo, head := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	const head1, head2 = "head1", "head2"
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	// The current tree head (head2) differs from the seeded LastSwept
+	// (head1), so the only thing left to block a later due check is the
+	// budget itself.
+	tree := fakeTree{head: head2, files: []string{"a.go", "newfile.go"}}
 
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
@@ -775,12 +709,9 @@ func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed Claim: %v", err)
 	}
-	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head}, seedAt); err != nil {
+	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head1}, seedAt); err != nil {
 		t.Fatalf("seed Finish: %v", err)
 	}
-	// Something new since the seeded run, so the only thing left to block a
-	// later due check is the budget itself.
-	addRunCommit(t, repo, "newfile.go", "package a\n")
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9099"
@@ -797,7 +728,7 @@ func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 	t.Run("same NY day: budget still spent", func(t *testing.T) {
 		dispatched = false
 		now := time.Date(2026, 1, 10, 23, 50, 0, 0, loc)
-		r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+		r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 		out, err := r.Sweep([]string{"bugs"})
 		if err != nil {
 			t.Fatalf("Sweep: %v", err)
@@ -817,7 +748,7 @@ func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 	t.Run("next NY day: due again", func(t *testing.T) {
 		dispatched = false
 		now := time.Date(2026, 1, 11, 0, 10, 0, 0, loc)
-		r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+		r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 		out, err := r.Sweep([]string{"bugs"})
 		if err != nil {
 			t.Fatalf("Sweep: %v", err)
@@ -835,8 +766,8 @@ func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 // that relays more findings than the cap gets the overflow dropped, and the
 // Ledger done commit records it (Dropped), matching Outcome.Dropped.
 func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9100"
@@ -859,7 +790,7 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	policy := testRunPolicy(noRunEvery, "bugs")
 	policy.Budgets = chore.Budgets{MaxFindingsPerSweep: 1}
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -885,8 +816,8 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 // anything -- a Consumer has to opt in to promotion itself, not just to a
 // Chore (issue #3880).
 func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9200"
@@ -902,7 +833,7 @@ func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 	// MaxPromotionsPerDay left at its zero value -- the default -- on purpose.
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -933,8 +864,8 @@ func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 // every other gate is filed carrying ready-for-agent, and the Ledger done
 // commit records its URL in Promoted (issue #3880).
 func TestSweep_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9201"
@@ -950,7 +881,7 @@ func TestSweep_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
 	policy.MaxPromotionsPerDay = 1
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -980,8 +911,8 @@ func TestSweep_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
 // the label a promoted finding actually carries end to end through Sweep's
 // run step (issue #3880).
 func TestSweep_PromotionUsesConfiguredWorkLabel(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9204"
@@ -994,7 +925,7 @@ func TestSweep_PromotionUsesConfiguredWorkLabel(t *testing.T) {
 	policy.PromotionLabel = "agent-go"
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	if _, err := r.Sweep([]string{"bugs"}); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -1012,22 +943,23 @@ func TestSweep_PromotionUsesConfiguredWorkLabel(t *testing.T) {
 // no room: the next otherwise-eligible finding still files, just unlabelled
 // (issue #3880). Room is walked fresh at settle time (ledger.DayTotalsAll),
 // so a promotion recorded earlier the same local day is what spends the
-// budget here.
+// budget here. head1/head2 stand in for the branch tip before/after the
+// seeded run, as above (fakeTree, no real git needed).
 func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
-	repo, head := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	const head1, head2 = "head1", "head2"
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	// The current tree head (head2) differs from the seeded LastSwept
+	// (head1), so NothingToScan never blocks this run's due check.
+	tree := fakeTree{head: head2, files: []string{"a.go", "newfile.go"}}
 
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	claim, err := ledger.Claim(backend, "bugs", ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: now})
 	if err != nil {
 		t.Fatalf("seed Claim: %v", err)
 	}
-	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head, Promoted: []string{"https://example.com/issues/seed"}}, now); err != nil {
+	if _, err := ledger.Finish(backend, "bugs", claim, ledger.State{LastSwept: head1, Promoted: []string{"https://example.com/issues/seed"}}, now); err != nil {
 		t.Fatalf("seed Finish: %v", err)
 	}
-	// Something new since the seeded run, so NothingToScan never blocks this
-	// run's due check.
-	addRunCommit(t, repo, "newfile.go", "package a\n")
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9202"
@@ -1038,7 +970,7 @@ func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 	policy.PromotionMaxFiles = 3
 	policy.MaxPromotionsPerDay = 1
 
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1063,8 +995,8 @@ func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 // allow-list is per Chore, so a Box relaying a class that is only on another
 // Chore's entry stays unlabelled (issue #3880).
 func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T) {
-	repo, _ := newRunTestRepo(t)
-	backend := ledger.Local{Repo: repo}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9203"
@@ -1078,7 +1010,7 @@ func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T)
 	policy.MaxPromotionsPerDay = 1
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: repo}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1111,9 +1043,13 @@ func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T)
 // convenience over these same two calls), so it belongs here rather than at
 // the verb level. It asserts the remote's own refs/spindrift/butler/<chore>
 // ref -- not just the scratch repo's -- picked up the done commit, and that
-// refs/heads/main on the remote never moved.
+// refs/heads/main on the remote never moved. Kept on a real ledgertest.Repo
+// and a real FetchTree (unlike every other Sweep test above), since it's the
+// one case actually exercising the Ledger/Tree wiring over real git, not
+// just Runner's own logic (issue #3995).
 func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
-	remoteRepo, head := newRunTestRepo(t)
+	remoteRepo := ledgertest.NewRepo(t)
+	head := strings.TrimSpace(string(runRepoGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")))
 
 	scratch := t.TempDir()
 	backend, err := ledger.NewRemote(scratch, remoteRepo)
