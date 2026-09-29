@@ -9,47 +9,109 @@ import (
 )
 
 // promotion is the host-side auto-promotion gate for one Chore's findings
-// (issue #3880, ADR 0056). The Box's issue-intent payload is
-// only ever an input to eligible, never the gate itself, so a Box cannot
-// widen its own allow-list, raise its own file limit, or grant itself more
-// of the day's promotion room.
+// (issue #3880, ADR 0056, issue #3993). Per ADR 0056, classes is the only
+// trust gate -- the host-side allow-list (BUTLER_CHORE_CLASSES); the
+// in-Box reviewer's concurrence and the file count read off the finding's
+// own dedup terms are quality filters on an already-trusted class, not
+// trust gates themselves. A Box's issue-intent payload is only ever an
+// input to decide, never the gate itself, so a Box cannot widen its own
+// allow-list, raise its own file limit, or grant itself more of the day's
+// promotion room.
 type promotion struct {
-	// Classes is this Chore's host-side finding-class allow-list (from
-	// BUTLER_CHORE_CLASSES). Nil/empty means no class is promotable -- an
+	// enabled is the sole on/off derivation every caller checks before
+	// decide can promote anything -- see newPromotion.
+	enabled bool
+	// classes is this Chore's host-side finding-class allow-list (from
+	// BUTLER_CHORE_CLASSES). Empty means no class is promotable -- an
 	// unconfigured Chore reads as opted out, not "trust the Box".
-	Classes []string
-	// MaxFiles is the host limit on how many files a promoted finding may
+	classes []string
+	// maxFiles is the host limit on how many files a promoted finding may
 	// touch. A finding naming zero files is never promotable regardless of
-	// MaxFiles (scope unknown), and MaxFiles itself must be >=1 for anything
-	// to promote.
-	MaxFiles int
-	// Room reports how many promotions remain today; evaluated at most once
-	// per settle call (concurrent runs make a value fetched earlier stale by
-	// the time this run would spend it). nil, or a func returning <=0, means
-	// no room: promotion is off regardless of the other three gates.
-	Room func() int
-	// Label is the work kind's own configured dispatch label (LABEL,
+	// maxFiles (scope unknown).
+	maxFiles int
+	// label is the work kind's own configured dispatch label (LABEL,
 	// Consumer-configurable) -- carried on a promoted finding alongside
 	// "agent-butler-finding" so the work path picks it up (issue #3880).
-	// Empty means unconfigured: never promote, rather than guess a name.
-	Label string
+	label string
 }
 
-// eligible reports whether f clears every promotion gate but room -- room is
-// this call's shared, mutable per-sweep remaining counter, not p's Room field
-// itself, so the settle step checks it separately alongside eligible.
-// f.Concurrence is already sanitized (settle.parseIssueIntent), so eligible
-// only needs to check it's non-blank.
-func (p promotion) eligible(f settle.Finding, files []string) bool {
-	if p.Label == "" {
-		return false
+// newPromotion builds a promotion from a Chore's allow-listed classes, the
+// host's per-finding file limit, its per-day promotion budget, and the
+// Consumer's work dispatch label. enabled requires all three of a positive
+// per-day budget, a configured label, and at least one allow-listed class:
+// any one of them unset reads as "promotion off", never as "trust whatever
+// the unset one happens to be".
+func newPromotion(classes []string, maxFiles, perDay int, label string) promotion {
+	return promotion{
+		enabled:  perDay > 0 && label != "" && len(classes) > 0,
+		classes:  classes,
+		maxFiles: maxFiles,
+		label:    label,
 	}
-	if f.Class == "" || !slices.Contains(p.Classes, f.Class) {
-		return false
+}
+
+// decisionKind names what decide chose for one finding. It is an enum
+// rather than a bool so a future third case -- a Patch decision, evaluated
+// before Promote -- can sit alongside skip/promote without a signature
+// change (issue #3993).
+type decisionKind int
+
+const (
+	skip decisionKind = iota
+	promote
+)
+
+// decision is decide's verdict on one finding.
+type decision struct {
+	kind   decisionKind
+	labels []string // only set when kind is promote
+	reason string   // short; read only by test failure messages
+	files  int      // file count off the finding's dedup terms; only set when kind is promote
+}
+
+// decide is the promotion gate for one finding, checked in order: on/off,
+// the trust gate (allow-listed class), the quality filters (file count,
+// reviewer concurrence), then the shared per-sweep room. Each gate below
+// decide is its own predicate method so it stays separately testable, and
+// so a future patch gate has somewhere to sit alongside these. room is this
+// call's remaining budget, not a field on p -- the settle step tracks it
+// across findings in one sweep, spending it as findings promote.
+func (p promotion) decide(f settle.Finding, room int) decision {
+	if !p.enabled {
+		return decision{kind: skip, reason: "promotion off"}
 	}
-	if len(files) < 1 || len(files) > p.MaxFiles {
-		return false
+	if !p.allowListed(f) {
+		return decision{kind: skip, reason: "class not allow-listed"}
 	}
+	files := butlerFiles(f.DedupTerms)
+	if !p.withinFileLimit(files) {
+		return decision{kind: skip, reason: "file count outside host limit"}
+	}
+	if !p.concurred(f) {
+		return decision{kind: skip, reason: "no reviewer concurrence"}
+	}
+	if room <= 0 {
+		return decision{kind: skip, reason: "no room"}
+	}
+	return decision{kind: promote, labels: []string{p.label}, reason: "promoted", files: len(files)}
+}
+
+// allowListed is the trust gate (ADR 0056): f's class must be non-blank and
+// on the host's own classes list.
+func (p promotion) allowListed(f settle.Finding) bool {
+	return f.Class != "" && slices.Contains(p.classes, f.Class)
+}
+
+// withinFileLimit: files comes from the Box's own dedup terms, so a finding
+// naming zero files (scope unknown) or more than the host's maxFiles never
+// promotes.
+func (p promotion) withinFileLimit(files []string) bool {
+	return len(files) >= 1 && len(files) <= p.maxFiles
+}
+
+// concurred: f.Concurrence is already sanitized (settle.parseIssueIntent),
+// so this only needs to check it's non-blank.
+func (p promotion) concurred(f settle.Finding) bool {
 	return strings.TrimSpace(f.Concurrence) != ""
 }
 
@@ -64,7 +126,7 @@ func promotionNote(choreName string, f settle.Finding, policy promotion, nFiles 
 	concurrence := oneLine(f.Concurrence)
 	return fmt.Sprintf(
 		"**Auto-promoted** to `%s` by the butler: class `%s` is on the `%s` Chore's allow-list, it touches %d file(s) (host limit %d), and the in-Box reviewer agreed: `%s`",
-		policy.Label, f.Class, choreName, nFiles, policy.MaxFiles, concurrence,
+		policy.label, f.Class, choreName, nFiles, policy.maxFiles, concurrence,
 	)
 }
 

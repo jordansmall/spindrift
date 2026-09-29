@@ -1237,14 +1237,13 @@ func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
 	}
 }
 
-// TestPromotion_RoomFetchesOnceAcrossEnabledChores pins that
-// Runner.promotionPolicy's Room re-walks the Ledger fresh each call (unlike
-// Sweep's shared Snapshot, per its own doc comment), but still costs exactly
-// one fetch for that one call, however many Chores are enabled -- Room calls
-// ledger.Snapshot inside itself, not a raw DayTotalsAll(backend, ...) that
-// would sync once per enabled Chore (issue #3918), migrated from
-// cmd/launcher's retired TestPromotionPolicy_RoomFetchesOnceAcrossEnabledChores
-// (issue #3990).
+// TestPromotion_RoomFetchesOnceAcrossEnabledChores pins that dayRoom.remaining
+// re-walks the Ledger fresh each call (unlike Sweep's shared Snapshot, per
+// its own doc comment), but still costs exactly one fetch for that one
+// call, however many Chores are enabled -- remaining calls ledger.Snapshot
+// inside itself, not a raw DayTotalsAll(backend, ...) that would sync once
+// per enabled Chore (issue #3918), migrated from cmd/launcher's retired
+// TestPromotionPolicy_RoomFetchesOnceAcrossEnabledChores (issue #3990).
 func TestPromotion_RoomFetchesOnceAcrossEnabledChores(t *testing.T) {
 	ledgerURL := newRunLedgerURL(t)
 
@@ -1256,16 +1255,15 @@ func TestPromotion_RoomFetchesOnceAcrossEnabledChores(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	policy := testRunPolicy(noRunEvery, "bugs", "docs-drift")
 	policy.MaxPromotionsPerDay = 1
-	r := New(remote, GitTree{}, forge.NewFake().AsIssueFiler(), nil, policy, func() time.Time { return now })
-	pp := r.promotionPolicy(policy.Chores[0]) // Chores[0] is "bugs"
+	room := newDayRoom(policy)
 
 	trace := filepath.Join(t.TempDir(), "trace2.log")
 	t.Setenv("GIT_TRACE2_EVENT", trace)
 
-	if got := pp.Room(); got != 1 {
-		t.Errorf("Room() = %d, want 1 (no promotions yet)", got)
+	if got := room.remaining(remote, now); got != 1 {
+		t.Errorf("remaining() = %d, want 1 (no promotions yet)", got)
 	}
 	if got := fetchCmdCount(t, trace); got != 1 {
-		t.Errorf("fetch count = %d, want exactly 1 for one Room() call", got)
+		t.Errorf("fetch count = %d, want exactly 1 for one remaining() call", got)
 	}
 }

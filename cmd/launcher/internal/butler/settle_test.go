@@ -85,7 +85,7 @@ func TestSettleRun_FilesFindingsWithProvenanceLabelAndBacklink(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{}, dayRoom{})
 
 	result := readyResult(
 		`{"title":"bug in a.go","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -129,7 +129,7 @@ func TestSettleRun_DoneCommitContents(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{}, dayRoom{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -185,7 +185,7 @@ func TestSettleRun_ReportsChoreSettledNotIssue(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{}, dayRoom{})
 
 	s.settle(dispatch.NewFake(), readyResult())
 
@@ -213,7 +213,7 @@ func TestSettleRun_PartialFilingFailure_RecordsOnlyWhatFiled(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{}, dayRoom{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -247,7 +247,7 @@ func TestSettleRun_CapDropsOverflowAndRecordsDropped(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 2, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 2, promotion{}, dayRoom{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -293,7 +293,7 @@ func TestSettleRun_ZeroCapFilesEverything(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{}, dayRoom{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -326,7 +326,7 @@ func TestSettleRun_MalformedPayloadDoesNotCountTowardCap(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 1, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 1, promotion{}, dayRoom{})
 
 	result := readyResult(
 		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -395,7 +395,7 @@ func TestSettleRun_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
 			fc := forge.NewFake()
 			scope := chore.Scope{Head: "newhead", NextCursor: "newcursor"}
 			now := start.Add(3 * time.Minute)
-			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{})
+			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{}, dayRoom{})
 
 			got := s.settle(dispatch.NewFake(), tc.result)
 			if got.done {
@@ -437,7 +437,7 @@ func TestSettleRun_CrashedRun_StillWarnsAboutRejectedSignals(t *testing.T) {
 	fc := forge.NewFake()
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{})
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, promotion{}, dayRoom{})
 
 	result := dispatch.Result{
 		Success:              false,
@@ -481,8 +481,9 @@ func TestSettleRun_Promotion_AllGatesPass(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 2, Room: func() int { return 1 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent"}
+	room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(`{"title":"promotable bug","body":"repro","dedupTerms":["a.go:Foo"],"class":"error-handling","concurrence":"looks like a real bug, agreed"}`)
 	got := s.settle(dispatch.NewFake(), result)
@@ -523,8 +524,9 @@ func TestSettleRun_Promotion_CustomLabel(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 2, Room: func() int { return 1 }, Label: "agent-go"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "agent-go"}
+	room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(`{"title":"promotable bug","body":"repro","dedupTerms":["a.go:Foo"],"class":"error-handling","concurrence":"looks like a real bug, agreed"}`)
 	s.settle(dispatch.NewFake(), result)
@@ -548,53 +550,63 @@ func TestSettleRun_Promotion_CustomLabel(t *testing.T) {
 
 // (f) Any single gate failing alone files the finding unlabelled.
 func TestSettleRun_Promotion_AnyGateFailingFilesUnlabelled(t *testing.T) {
-	base := promotion{Classes: []string{"error-handling"}, MaxFiles: 2, Room: func() int { return 1 }, Label: "ready-for-agent"}
+	base := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent"}
+	baseRoom := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
 
 	cases := []struct {
 		name    string
 		policy  promotion
+		room    dayRoom
 		payload string
 	}{
 		{
 			"class not on the allow-list",
 			base,
+			baseRoom,
 			`{"title":"f1","body":"b","dedupTerms":["a.go:X"],"class":"dead-code","concurrence":"agreed"}`,
 		},
 		{
 			"empty class",
 			base,
+			baseRoom,
 			`{"title":"f2","body":"b","dedupTerms":["a.go:X"],"class":"","concurrence":"agreed"}`,
 		},
 		{
 			"files exceed the host limit despite an allow-listed class",
-			func() promotion { p := base; p.MaxFiles = 1; return p }(),
+			func() promotion { p := base; p.maxFiles = 1; return p }(),
+			baseRoom,
 			`{"title":"f3","body":"b","dedupTerms":["a.go:X","b.go:Y"],"class":"error-handling","concurrence":"agreed"}`,
 		},
 		{
 			"zero files",
 			base,
+			baseRoom,
 			`{"title":"f4","body":"b","dedupTerms":[],"class":"error-handling","concurrence":"agreed"}`,
 		},
 		{
 			// Validate rejects a whitespace-only Concurrence outright (issue
-			// #3992); TestPromotion_Eligible covers eligible()'s trim alone.
+			// #3992); the decide table test covers concurred()'s trim alone.
 			"empty concurrence",
 			base,
+			baseRoom,
 			`{"title":"f5","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":""}`,
 		},
 		{
 			"maxPromotionsPerDay defaults to zero room",
-			func() promotion { p := base; p.Room = func() int { return 0 }; return p }(),
+			base,
+			dayRoom{perDay: 0, chores: []string{"bugs"}, zone: time.UTC},
 			`{"title":"f7","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`,
 		},
 		{
-			"no Room func at all",
-			func() promotion { p := base; p.Room = nil; return p }(),
+			"promotion off",
+			func() promotion { p := base; p.enabled = false; return p }(),
+			baseRoom,
 			`{"title":"f8","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`,
 		},
 		{
 			"empty Label fails closed despite every other gate passing",
-			func() promotion { p := base; p.Label = ""; return p }(),
+			func() promotion { p := base; p.label = ""; p.enabled = false; return p }(),
+			baseRoom,
 			`{"title":"f9","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`,
 		},
 	}
@@ -610,7 +622,7 @@ func TestSettleRun_Promotion_AnyGateFailingFilesUnlabelled(t *testing.T) {
 
 			scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 			now := start.Add(time.Minute)
-			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, tc.policy)
+			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, tc.policy, tc.room)
 
 			result := readyResult(tc.payload)
 			s.settle(dispatch.NewFake(), result)
@@ -645,8 +657,9 @@ func TestSettleRun_Promotion_RoomOfOnePromotesOnlyFirst(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(
 		`{"title":"first eligible","body":"b1","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed one"}`,
@@ -683,8 +696,9 @@ func TestSettleRun_Promotion_FailedPostReturnsRoomToLaterFinding(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(
 		`{"title":"first eligible","body":"b1","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed one"}`,
@@ -716,8 +730,9 @@ func TestSettleRun_Promotion_PayloadCannotWidenPolicy(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 5 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	room := dayRoom{perDay: 5, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(
 		`{"title":"sneaky payload","body":"b","dedupTerms":["a.go:X"],"class":"dead-code","concurrence":"agreed","classes":["dead-code"],"maxFiles":999,"labels":["ready-for-agent"]}`,
@@ -749,8 +764,9 @@ func TestSettleRun_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(`{"title":"multi-line concurrence","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed,\n\nbut also:\n- one\n- two"}`)
 	s.settle(dispatch.NewFake(), result)
@@ -770,58 +786,131 @@ func TestSettleRun_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
 	}
 }
 
-// (i) promotion.eligible in isolation, through a raw payload run
-// through settle.FileButlerFindings's parse so Concurrence arrives sanitized
-// the same way a real Finding does.
-func TestPromotion_Eligible(t *testing.T) {
-	basePolicy := promotion{Classes: []string{"error-handling"}, MaxFiles: 2, Label: "ready-for-agent"}
+// (i) promotion.decide in isolation: promotion off, an unlisted class, the
+// file-count gate (both directions -- zero files and over the limit),
+// missing/blank reviewer concurrence, no room left, and the promote case
+// itself, asserting the labels it hands back (issue #3993). No case here
+// hands decide a room closure -- room is a plain int argument now.
+func TestPromotion_Decide(t *testing.T) {
+	base := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent"}
 	baseFinding := settle.Finding{Class: "error-handling", DedupTerms: []string{"a.go:X"}, Concurrence: "agreed"}
-
-	if !basePolicy.eligible(baseFinding, butlerFiles(baseFinding.DedupTerms)) {
-		t.Fatalf("base policy/finding must be eligible")
-	}
 
 	cases := []struct {
 		name    string
 		policy  promotion
 		finding settle.Finding
+		room    int
+		want    decisionKind
 	}{
 		{
-			"empty Label",
-			func() promotion { p := basePolicy; p.Label = ""; return p }(),
+			"promotion off",
+			func() promotion { p := base; p.enabled = false; return p }(),
 			baseFinding,
+			1,
+			skip,
 		},
 		{
-			"empty Class",
-			basePolicy,
-			func() settle.Finding { f := baseFinding; f.Class = ""; return f }(),
-		},
-		{
-			"Class off the allow-list",
-			basePolicy,
+			"class not allow-listed",
+			base,
 			func() settle.Finding { f := baseFinding; f.Class = "dead-code"; return f }(),
+			1,
+			skip,
+		},
+		{
+			"empty class",
+			base,
+			func() settle.Finding { f := baseFinding; f.Class = ""; return f }(),
+			1,
+			skip,
+		},
+		{
+			"file limit exceeded",
+			base,
+			func() settle.Finding {
+				f := baseFinding
+				f.DedupTerms = []string{"a.go:X", "b.go:Y", "c.go:Z"}
+				return f
+			}(),
+			1,
+			skip,
 		},
 		{
 			"zero files",
-			basePolicy,
+			base,
 			func() settle.Finding { f := baseFinding; f.DedupTerms = nil; return f }(),
+			1,
+			skip,
 		},
 		{
-			"empty Concurrence",
-			basePolicy,
+			"missing concurrence",
+			base,
 			func() settle.Finding { f := baseFinding; f.Concurrence = ""; return f }(),
+			1,
+			skip,
 		},
 		{
-			"whitespace-only Concurrence",
-			basePolicy,
+			"whitespace-only concurrence",
+			base,
 			func() settle.Finding { f := baseFinding; f.Concurrence = "   \n\t "; return f }(),
+			1,
+			skip,
+		},
+		{
+			"no room",
+			base,
+			baseFinding,
+			0,
+			skip,
+		},
+		{
+			"promote",
+			base,
+			baseFinding,
+			1,
+			promote,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.policy.eligible(tc.finding, butlerFiles(tc.finding.DedupTerms)) {
-				t.Errorf("eligible() = true, want false with %s broken alone", tc.name)
+			got := tc.policy.decide(tc.finding, tc.room)
+			if got.kind != tc.want {
+				t.Fatalf("decide().kind = %v, want %v (reason %q)", got.kind, tc.want, got.reason)
+			}
+			if tc.want == promote {
+				if !slices.Equal(got.labels, []string{tc.policy.label}) {
+					t.Errorf("decide().labels = %v, want [%s]", got.labels, tc.policy.label)
+				}
+			} else if got.labels != nil {
+				t.Errorf("decide().labels = %v, want nil on skip", got.labels)
+			}
+		})
+	}
+}
+
+// TestNewPromotion_Enabled pins newPromotion's "any one of the three unset
+// reads as off" rule from its own doc comment: a positive per-day budget, a
+// configured label, and at least one allow-listed class must all hold, or
+// enabled is false regardless of the others.
+func TestNewPromotion_Enabled(t *testing.T) {
+	cases := []struct {
+		name    string
+		classes []string
+		perDay  int
+		label   string
+		want    bool
+	}{
+		{"all set", []string{"error-handling"}, 1, "ready-for-agent", true},
+		{"perDay zero", []string{"error-handling"}, 0, "ready-for-agent", false},
+		{"label empty", []string{"error-handling"}, 1, "", false},
+		{"classes empty", nil, 1, "ready-for-agent", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := newPromotion(tc.classes, 2, tc.perDay, tc.label)
+			if got.enabled != tc.want {
+				t.Errorf("newPromotion(...).enabled = %v, want %v", got.enabled, tc.want)
 			}
 		})
 	}
@@ -856,8 +945,9 @@ func TestPromotionNote_ConcurrenceMarkdownNeutralized(t *testing.T) {
 
 			scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 			now := start.Add(time.Minute)
-			policy := promotion{Classes: []string{"cls"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
-			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+			policy := promotion{enabled: true, classes: []string{"cls"}, maxFiles: 1, label: "ready-for-agent"}
+			room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+			s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 			payload := `{"title":"t","body":"b","dedupTerms":["a.go:X"],"class":"cls","concurrence":` + jsonQuote(c.raw) + `}`
 			result := readyResult(payload)
@@ -926,8 +1016,9 @@ func TestSettleRun_Promotion_ReserveCountsDespiteDoneAppendFailure(t *testing.T)
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	got := s.settle(dispatch.NewFake(), result)
@@ -963,8 +1054,9 @@ func TestSettleRun_Promotion_ReserveCountsDespiteTakeoverBeforeDone(t *testing.T
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	s.settle(dispatch.NewFake(), result)
@@ -996,8 +1088,9 @@ func TestSettleRun_Promotion_StaleClaimReserveFailsNeverPromotes(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Hour)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", staleClaim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", staleClaim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	got := s.settle(dispatch.NewFake(), result)
@@ -1033,8 +1126,9 @@ func TestSettleRun_Promotion_SuccessNoDoubleCount(t *testing.T) {
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 1 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	room := dayRoom{perDay: 1, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	got := s.settle(dispatch.NewFake(), result)
@@ -1063,8 +1157,9 @@ func TestSettleRun_Promotion_NoReservationCommitWhenNothingEligible(t *testing.T
 
 	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
 	now := start.Add(time.Minute)
-	policy := promotion{Classes: []string{"error-handling"}, MaxFiles: 1, Room: func() int { return 0 }, Label: "ready-for-agent"}
-	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	room := dayRoom{perDay: 0, chores: []string{"bugs"}, zone: time.UTC}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, 0, policy, room)
 
 	result := readyResult(`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`)
 	s.settle(dispatch.NewFake(), result)
