@@ -408,30 +408,33 @@ func TestButlerPreflight_PromptDirOverride(t *testing.T) {
 }
 
 // (n) parseButlerArgs: --chore is optional (an empty return means "pick a
-// due Chore"); --no-build is the one other flag butler shares with
-// dispatch/research.
+// due Chore") but, when given, takes one non-empty name at most once;
+// --no-build is the one other flag butler shares with dispatch/research.
 func TestParseButlerArgs(t *testing.T) {
 	cases := []struct {
 		name      string
 		args      []string
 		wantChore string
 		wantNo    bool
-		wantErr   bool
+		wantErr   string // substring of the expected error; "" means none
 	}{
-		{"chore only", []string{"--chore", "bugs"}, "bugs", false, false},
-		{"chore plus no-build", []string{"--chore", "bugs", "--no-build"}, "bugs", true, false},
-		{"no-build before chore", []string{"--no-build", "--chore", "bugs"}, "bugs", true, false},
-		{"no args at all: pick a due chore", []string{}, "", false, false},
-		{"no-build alone: pick a due chore", []string{"--no-build"}, "", true, false},
-		{"--chore with no value", []string{"--chore"}, "", false, true},
-		{"unrecognized token", []string{"bogus"}, "", false, true},
+		{"chore only", []string{"--chore", "bugs"}, "bugs", false, ""},
+		{"chore plus no-build", []string{"--chore", "bugs", "--no-build"}, "bugs", true, ""},
+		{"no-build before chore", []string{"--no-build", "--chore", "bugs"}, "bugs", true, ""},
+		{"no args at all: pick a due chore", []string{}, "", false, ""},
+		{"no-build alone: pick a due chore", []string{"--no-build"}, "", true, ""},
+		{"--chore with no value", []string{"--chore"}, "", false, "flag --chore requires a non-empty value"},
+		{"--chore with empty value", []string{"--chore", ""}, "", false, "flag --chore requires a non-empty value"},
+		{"--chore swallowing a flag", []string{"--chore", "-x"}, "", false, "flag --chore requires a chore name"},
+		{"--chore given twice", []string{"--chore", "bugs", "--chore", "refactor"}, "", false, "flag --chore given more than once"},
+		{"unrecognized token", []string{"bogus"}, "", false, "unrecognized argument: bogus"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			choreName, noBuild, err := parseButlerArgs(tc.args)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("parseButlerArgs(%v): got nil error, want one", tc.args)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("parseButlerArgs(%v): err = %v, want one containing %q", tc.args, err, tc.wantErr)
 				}
 				return
 			}
