@@ -1,6 +1,6 @@
 # The butler is an issue-less Dispatch kind whose state lives in a git ledger
 
-Status: proposed
+Status: accepted
 
 ## Context
 
@@ -161,3 +161,27 @@ store. Over-counting is the failure direction: a reserved slot whose post
 fails, or whose finding is deduplicated, stays spent if the done commit is
 then lost. `filed` keeps the old behaviour, so a lost done commit still
 undercounts the findings-per-day budget.
+
+## Amendment (issue #3996): every kind fact is a descriptor axis, and the Ledger is state only
+
+Two rules close out this ADR's "eight places" complaint (the Context section
+above) and pin down what the Ledger is for. **Every kind fact is a
+descriptor axis, and nothing branches on a kind name.** Keying, label
+family, prompt file, settle strategy, advise-only posture, read-only Box,
+Daemon priority, finding label, contract, Filer relay gate, tracker, and
+announce verb are all rows on the kind descriptor
+(`cmd/launcher/internal/dispatchkind`); the launcher reads the descriptor
+instead of re-deriving any of them from a kind string, and
+`kindaxes_guard_test.go` forbids a launcher-side comparison shaped like a
+kind test. The Box gets the same treatment: `buildBoxEnv` exports
+`DISPATCH_KEY` (the rendered key — bare issue number or `butler-<chore>`),
+`DISPATCH_KEYING` (`issue`|`chore`), and `DISPATCH_ANNOUNCE_VERB` as the
+facts a Box needs; `DISPATCH_KIND` crosses the seam display-only, read only
+by driver-exec for descriptor lookups such as advise-only posture, and never
+branched on in `agent/entrypoint.sh` — `tests/entrypoint-kind-axes.bats`
+fails the day it is. A fourth kind, when one is proposed, is one descriptor
+row, not a new string switch through eight files. **The Ledger is state
+only.** It holds claim and done state — `state.json`'s `lastSwept`, cursor,
+filed and promoted findings, token usage — and nothing else; scanning the
+Target checkout a run sweeps is a separate concern the Ledger never owns.
+Status moves to accepted.
