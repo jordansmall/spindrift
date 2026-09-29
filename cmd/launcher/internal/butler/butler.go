@@ -44,7 +44,20 @@ type Policy struct {
 	// swapped it out -- the label a promoted finding must carry for the work
 	// path to pick it up (issue #3880).
 	PromotionLabel string
+	// PatchPaths is BUTLER_PATCH_PATHS, the host allow/deny glob list a patch
+	// candidate's diff paths must clear (ADR 0057).
+	PatchPaths string
+	// PatchMaxFiles is BUTLER_PATCH_MAX_FILES, the host limit on how many
+	// files a patch candidate's diff may touch.
+	PatchMaxFiles int
+	// PatchMaxLines is BUTLER_PATCH_MAX_LINES, the host limit on changed
+	// lines (added plus removed) across a patch candidate's whole diff.
+	PatchMaxLines int
 }
+
+// DefaultPatchPaths is BUTLER_PATCH_PATHS' schema default (lib/env-schema.nix
+// butlerPatchPaths), pinned equal to it by the launcher's schema tests.
+const DefaultPatchPaths = "docs/**,*.md,!docs/adr/**,!CLAUDE.md,!CONTEXT.md,!CONTRIBUTING.md,!AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**"
 
 // PatchForge is the host capability the patch rung needs to land a finding
 // as a draft PR (ADR 0057, issue #4074): the branch name a filed finding's

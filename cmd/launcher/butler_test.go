@@ -710,6 +710,64 @@ func TestButlerPatchKnobsParseFromSchema(t *testing.T) {
 	}
 }
 
+// The three host patch-bound knobs (BUTLER_PATCH_PATHS, BUTLER_PATCH_MAX_FILES,
+// BUTLER_PATCH_MAX_LINES) resolve through the generated schemaFlags table and
+// loadSchemaConfig, same wiring every other schema knob uses (issue #4075,
+// ADR 0057). BUTLER_PATCH_PATHS' default must equal butler.DefaultPatchPaths
+// (the Go-side source of truth) and its doc must reproduce the built-in deny
+// set verbatim, per the issue's acceptance criteria.
+func TestButlerPatchBoundKnobsParseFromSchema(t *testing.T) {
+	wantDenyEntries := []string{
+		"docs/adr/**", "CLAUDE.md", "CONTEXT.md", "CONTRIBUTING.md",
+		"AGENTS.md", "skills/**", "templates/**", "fragments/**", ".github/**",
+	}
+
+	found := map[string]bool{}
+	for _, f := range schemaFlags {
+		switch f.env {
+		case "BUTLER_PATCH_PATHS":
+			found[f.env] = true
+			if f.dflt != butler.DefaultPatchPaths {
+				t.Errorf("%s default = %q, want %q (butler.DefaultPatchPaths)", f.env, f.dflt, butler.DefaultPatchPaths)
+			}
+			for _, entry := range wantDenyEntries {
+				if !strings.Contains(f.doc, entry) {
+					t.Errorf("%s doc missing deny entry %q verbatim: %q", f.env, entry, f.doc)
+				}
+			}
+		case "BUTLER_PATCH_MAX_FILES":
+			found[f.env] = true
+			if f.dflt != "3" {
+				t.Errorf("%s default = %q, want %q", f.env, f.dflt, "3")
+			}
+		case "BUTLER_PATCH_MAX_LINES":
+			found[f.env] = true
+			if f.dflt != "20" {
+				t.Errorf("%s default = %q, want %q", f.env, f.dflt, "20")
+			}
+		}
+	}
+	for _, env := range []string{"BUTLER_PATCH_PATHS", "BUTLER_PATCH_MAX_FILES", "BUTLER_PATCH_MAX_LINES"} {
+		if !found[env] {
+			t.Errorf("%s missing from schemaFlags", env)
+		}
+	}
+
+	t.Setenv("BUTLER_PATCH_PATHS", "docs/**,!docs/adr/**")
+	t.Setenv("BUTLER_PATCH_MAX_FILES", "5")
+	t.Setenv("BUTLER_PATCH_MAX_LINES", "40")
+	cfg := loadSchemaConfig()
+	if cfg.butlerPatchPaths != "docs/**,!docs/adr/**" {
+		t.Errorf("butlerPatchPaths = %q, want %q", cfg.butlerPatchPaths, "docs/**,!docs/adr/**")
+	}
+	if cfg.butlerPatchMaxFiles != 5 {
+		t.Errorf("butlerPatchMaxFiles = %d, want 5", cfg.butlerPatchMaxFiles)
+	}
+	if cfg.butlerPatchMaxLines != 40 {
+		t.Errorf("butlerPatchMaxLines = %d, want 40", cfg.butlerPatchMaxLines)
+	}
+}
+
 func TestParseButlerClaimTimeout(t *testing.T) {
 	cases := []struct {
 		name    string
