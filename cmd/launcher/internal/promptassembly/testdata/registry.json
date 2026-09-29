@@ -224,6 +224,11 @@
     "var": "BUTLER_PATCH_STEP"
   },
   {
+    "gate": "CHORE_PATCH_CLASSES",
+    "fragment": "butler-review-patch.md",
+    "var": "BUTLER_REVIEW_PATCH_STEP"
+  },
+  {
     "gate": "AUTO_FORMAT",
     "fragment": "auto-format.md",
     "var": "AUTO_FORMAT_STEP"
