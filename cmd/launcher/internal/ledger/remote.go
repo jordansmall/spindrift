@@ -3,12 +3,12 @@ package ledger
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // Remote implements Backend against a hosted forge's Ledger refs. It keeps a
@@ -59,23 +59,13 @@ func NewRemote(scratch, url string, gitArgs ...string) (Remote, error) {
 	return r, nil
 }
 
-// remoteCmd builds a git command against url: gitArgs first (leading
-// options like -c credential.helper=...), then args. GIT_TERMINAL_PROMPT=0
-// so a missing credential fails fast instead of hanging the caller.
-func (r Remote) remoteCmd(args ...string) *exec.Cmd {
-	full := append(append([]string{}, r.gitArgs...), args...)
-	cmd := exec.Command("git", full...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	return cmd
-}
-
 // sync fetches every Ledger ref from url into the scratch repo, so the
 // mirror picks up the remote's current state. A ref gone on the remote is
 // pruned locally; a ref never on the remote is simply absent (Local's
 // Read/History already treat that as a zero Tip). Called only from
 // NewRemote and from Append after a lost race, never routinely.
 func (r Remote) sync() error {
-	out, err := r.remoteCmd("-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec).CombinedOutput()
+	out, err := gitexec.Cmd(r.gitArgs, "-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ledger: fetch %s: %w: %s", forge.RedactURLCredentials(r.url), err, forge.RedactURLCredentials(string(out)))
 	}
@@ -93,7 +83,7 @@ func (r Remote) History(chore string, since time.Time) ([]Entry, error) {
 // lsRemote queries url directly (no scratch repo involved) for ref's current
 // value, "" if absent, so Append can tell a lost race from a real push error.
 func (r Remote) lsRemote(ref string) (string, error) {
-	out, err := r.remoteCmd("ls-remote", r.url, ref).Output()
+	out, err := gitexec.Cmd(r.gitArgs, "ls-remote", r.url, ref).Output()
 	if err != nil {
 		return "", fmt.Errorf("ledger: ls-remote %s %s: %w", forge.RedactURLCredentials(r.url), ref, err)
 	}
@@ -128,7 +118,7 @@ func (r Remote) Append(chore, old string, s State, at time.Time) (string, error)
 	ref := RefPrefix + chore
 	lease := fmt.Sprintf("--force-with-lease=%s:%s", ref, old)
 	refspec := fmt.Sprintf("%s:%s", newCommit, ref)
-	pushOut, err := r.remoteCmd("-C", r.repo, "push", "-q", r.url, lease, refspec).CombinedOutput()
+	pushOut, err := gitexec.Cmd(r.gitArgs, "-C", r.repo, "push", "-q", r.url, lease, refspec).CombinedOutput()
 	if err != nil {
 		// The lease lost only if the remote ref has since moved off old
 		// (absent counts as "") to something other than our own newCommit;

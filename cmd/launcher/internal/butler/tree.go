@@ -2,13 +2,12 @@ package butler
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // Tree is the checkout a Butler scans -- a seam over a local repo's
@@ -30,7 +29,7 @@ type GitTree struct {
 func (g GitTree) Head(branch string) (string, error) {
 	out, err := exec.Command("git", "-C", g.Repo, "rev-parse", "refs/heads/"+branch).Output()
 	if err != nil {
-		return "", outputErr(err, "resolve refs/heads/%s", branch)
+		return "", gitexec.OutputErr("butler", err, "resolve refs/heads/%s", branch)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -41,7 +40,7 @@ func (g GitTree) Head(branch string) (string, error) {
 func (g GitTree) TrackedFiles(commit string) ([]string, error) {
 	out, err := exec.Command("git", "-C", g.Repo, "ls-tree", "-r", "--name-only", "-z", commit).Output()
 	if err != nil {
-		return nil, outputErr(err, "ls-tree %s", commit)
+		return nil, gitexec.OutputErr("butler", err, "ls-tree %s", commit)
 	}
 	trimmed := bytes.Trim(out, "\x00")
 	if len(trimmed) == 0 {
@@ -65,23 +64,9 @@ func (g GitTree) TrackedFiles(commit string) ([]string, error) {
 // (forge.RedactURLCredentials).
 func FetchTree(scratch, url, branch string, gitArgs ...string) (GitTree, error) {
 	ref := "refs/heads/" + branch
-	args := append(append([]string{}, gitArgs...), "-C", scratch, "fetch", "--depth=1", "-q", url, "+"+ref+":"+ref)
-	cmd := exec.Command("git", args...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd := gitexec.Cmd(gitArgs, "-C", scratch, "fetch", "--depth=1", "-q", url, "+"+ref+":"+ref)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return GitTree{}, fmt.Errorf("butler: fetch branch %s from %s: %w: %s", branch, forge.RedactURLCredentials(url), err, forge.RedactURLCredentials(string(out)))
 	}
 	return GitTree{Repo: scratch}, nil
-}
-
-// outputErr wraps err from a git command run with Output(), keeping the
-// stderr Output() captured on *exec.ExitError (same convention as
-// ledger.Local's git wrapper).
-func outputErr(err error, format string, args ...any) error {
-	msg := fmt.Sprintf(format, args...)
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-		return fmt.Errorf("butler: %s: %w: %s", msg, err, bytes.TrimSpace(exitErr.Stderr))
-	}
-	return fmt.Errorf("butler: %s: %w", msg, err)
 }
