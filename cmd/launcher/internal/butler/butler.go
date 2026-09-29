@@ -202,7 +202,7 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	if promo.enabled && room.Promotions > 0 {
 		classes = c.Classes
 	}
-	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes})
+	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes, MaxFindings: room.Findings})
 	defer d.Close()
 	result := d.Run()
 
