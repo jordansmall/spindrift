@@ -23,11 +23,15 @@ if [ "${SELF_CONTAINED:-}" = 1 ] && [ -n "${BOX_IN_BOX_UNREACHABLE_TRACKER:-}" ]
   no_repo=true
 fi
 [ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${GH_TOKEN:?GH_TOKEN is required}"
-# The butler (ADR 0056, issue #3875) carries one Ledger Chore, never a
-# tracker issue: DISPATCH_KIND=butler requires CHORE_NAME in ISSUE_NUMBER's
-# place. Compared directly against DISPATCH_KIND rather than through a
-# helper function: this runs before any function below is defined.
-if [ "${DISPATCH_KIND:-}" = "butler" ]; then
+# The kind's axes, exported by dispatch.buildBoxEnv (ADR 0056, issue #3996).
+# This file reads them and never branches on DISPATCH_KIND, which is
+# display-only here (tests/entrypoint-kind-axes.bats pins that).
+: "${DISPATCH_KEY:?DISPATCH_KEY is required}"
+: "${DISPATCH_KEYING:?DISPATCH_KEYING is required}"
+: "${DISPATCH_ANNOUNCE_VERB:?DISPATCH_ANNOUNCE_VERB is required}"
+# A chore-keyed Dispatch (the butler) carries one Ledger Chore, never a
+# tracker issue, so it requires CHORE_NAME in ISSUE_NUMBER's place.
+if [ "$DISPATCH_KEYING" = "chore" ]; then
   : "${CHORE_NAME:?CHORE_NAME is required}"
 else
   : "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
@@ -57,13 +61,8 @@ configure_env() {
   # image-build time; AGENTS_JSON_TEMPLATE rides that preamble as a derived
   # value, not a schema knob. The :- expansions keep set -u and the linter happy.
   # A butler Box never checks this branch out (advise-only, ADR 0022) or
-  # pushes it, so the value only has to be legal and stable across a rerun,
-  # matching dispatch.go's own "butler-"+Name Dispatch-key convention.
-  if _is_butler; then
-    export BRANCH="${BRANCH_PREFIX:-}butler-${CHORE_NAME}"
-  else
-    export BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
-  fi
+  # pushes it, so the value only has to be legal and stable across a rerun.
+  export BRANCH="${BRANCH_PREFIX:-}${DISPATCH_KEY}"
 
   # Overridable only so the harness can be exercised on the host without a
   # container. WORK_DIR/REPO_MOUNT_DIR/OUTBOX_DIR are true runtime mount points,
@@ -592,28 +591,6 @@ _is_self_contained() {
   [ "${SELF_CONTAINED:-}" = "1" ]
 }
 
-# _is_butler reports whether this is the butler dispatch kind (ADR 0056,
-# issue #3875): a one-shot, advise-only sweep of one Ledger Chore, never a
-# tracker issue. Compared directly against DISPATCH_KIND, like
-# _is_self_contained above, rather than derived from a generic descriptor
-# flag: unlike the descriptor's AdviseOnly bit (shared with research),
-# requiring CHORE_NAME in place of ISSUE_NUMBER is genuinely butler-specific.
-_is_butler() {
-  [ "${DISPATCH_KIND:-}" = "butler" ]
-}
-
-# _issue_ref echoes this run's outcome-line "issue=" identifier and the
-# id used in status/log messages: the tracker issue number for every other
-# kind, or "butler-$CHORE_NAME" for the butler, which carries no tracker
-# issue at all (ADR 0056).
-_issue_ref() {
-  if _is_butler; then
-    printf 'butler-%s' "$CHORE_NAME"
-  else
-    printf '%s' "$ISSUE_NUMBER"
-  fi
-}
-
 # _is_readonly_outbox_relay reports whether this Box is read-only (no
 # push-capable token was ever issued, so a force-push can only 403) and its
 # backend is outbox-relay-capable per lib/backends/default.nix, forwarded as
@@ -1042,7 +1019,7 @@ emit_outcome_backstop() {
   # the backstop's own graceful degrade (issue #2459).
   driver-exec outcome-backstop \
     --repo "$WORK_DIR" \
-    --issue "$(_issue_ref)" \
+    --issue "$DISPATCH_KEY" \
     --branch "$BRANCH" \
     --base "origin/${BASE_BRANCH:-}" \
     --dispatch-kind "${DISPATCH_KIND:-work}" \
@@ -1071,6 +1048,7 @@ main() {
   local _outcome_via_backstop=""
   local ORCHESTRATOR
   local _advise_only
+  local _announce_subject _announce_suffix
 
   configure_env
 
@@ -1138,13 +1116,16 @@ main() {
   phase_conflict_resolve
   phase_prompt_assembly
 
-  if _is_butler; then
-    echo "==> claude sweeping chore $CHORE_NAME"
-  elif _is_advise_only; then
-    echo "==> claude researching issue #$ISSUE_NUMBER"
+  if [ "$DISPATCH_KEYING" = "chore" ]; then
+    _announce_subject="chore $CHORE_NAME"
   else
-    echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
+    _announce_subject="issue #$ISSUE_NUMBER"
   fi
+  _announce_suffix=" on $BRANCH"
+  if _is_advise_only; then
+    _announce_suffix=""
+  fi
+  echo "==> claude ${DISPATCH_ANNOUNCE_VERB} ${_announce_subject}${_announce_suffix}"
   local claude_rc=0
   run_driver_in_env "$prompt" "" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" "$_handoff" || claude_rc=$?
 
@@ -1308,7 +1289,7 @@ main() {
       --prior-outcome-line "$_last_outcome_line"
   fi
 
-  echo "==> entrypoint complete for $(_issue_ref)"
+  echo "==> entrypoint complete for $DISPATCH_KEY"
   exit "$claude_rc"
 }
 

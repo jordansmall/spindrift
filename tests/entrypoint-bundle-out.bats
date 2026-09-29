@@ -84,7 +84,7 @@ setup() {
 @test "read-only github research dispatch never invokes bundle-out" {
   unset CODE_FORGE            # default github
   unset BOX_WRITE_ENABLED
-  export DISPATCH_KIND=research
+  set_dispatch_kind research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -e "$OUTBOX_DIR" ]
@@ -104,7 +104,8 @@ setup() {
 }
 
 # Issue #3901: an unrecognized kind fails closed before clone_repo rather than
-# defaulting to work's (or any other) posture.
+# defaulting to work's (or any other) posture. The axes stay at the valid work
+# cell, so driver-exec advise-only is what rejects the name (issue #3996).
 @test "an unrecognized DISPATCH_KIND fails the Box before clone" {
   unset CODE_FORGE            # default github
   unset BOX_WRITE_ENABLED
@@ -122,7 +123,7 @@ setup() {
   # branch (ADR 0022), so it emits no bundle even when the driver crashed.
   unset CODE_FORGE            # default github
   unset BOX_WRITE_ENABLED
-  export DISPATCH_KIND=research
+  set_dispatch_kind research
   export FAKE_DRIVER_CRASH_EXIT=17
   run bash "$ENTRYPOINT"
   [ "$status" -eq 17 ]

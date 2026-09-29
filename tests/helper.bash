@@ -115,6 +115,38 @@ kill_stand_in_socat() {
   true
 }
 
+# set_dispatch_kind <work|research|butler> exports DISPATCH_KIND plus the axes
+# dispatch.buildBoxEnv derives from the kind's descriptor (issue #3996):
+# DISPATCH_KEYING, DISPATCH_ANNOUNCE_VERB and DISPATCH_KEY. The one place this
+# suite duplicates dispatchkind's Work/Research/Butler rows, so keep it in step
+# with them. Call it after ISSUE_NUMBER or CHORE_NAME is set: DISPATCH_KEY
+# reads whichever the kind is keyed by.
+set_dispatch_kind() {
+  local kind="$1"
+  export DISPATCH_KIND="$kind"
+  case "$kind" in
+    work)
+      export DISPATCH_KEYING="issue"
+      export DISPATCH_ANNOUNCE_VERB="implementing"
+      export DISPATCH_KEY="$ISSUE_NUMBER"
+      ;;
+    research)
+      export DISPATCH_KEYING="issue"
+      export DISPATCH_ANNOUNCE_VERB="researching"
+      export DISPATCH_KEY="$ISSUE_NUMBER"
+      ;;
+    butler)
+      export DISPATCH_KEYING="chore"
+      export DISPATCH_ANNOUNCE_VERB="sweeping"
+      export DISPATCH_KEY="butler-$CHORE_NAME"
+      ;;
+    *)
+      echo "set_dispatch_kind: unknown kind '$kind'" >&2
+      return 1
+      ;;
+  esac
+}
+
 # Bounded poll for a stand-in socat's UNIX-LISTEN socket file: a freshly
 # backgrounded socat may take a moment to bind.
 wait_for_socket() {
@@ -161,6 +193,7 @@ setup_entrypoint_env() {
   # review-axis (issue #3447): a test needing that sets the var itself.
   export AGENTS_PROMPT_FILES='{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md"}'
   export ISSUE_NUMBER="7"
+  set_dispatch_kind work
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
   # A real Box always receives a nonce, and both fakes/claude's

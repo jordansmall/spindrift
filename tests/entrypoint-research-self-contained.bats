@@ -10,7 +10,7 @@ setup() {
 }
 
 @test "SELF_CONTAINED=1 drives research-self-contained-prompt.md, not research-prompt.md" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   export SELF_CONTAINED="1"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -21,7 +21,7 @@ setup() {
 }
 
 @test "SELF_CONTAINED=1 clones no repo" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   export SELF_CONTAINED="1"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -31,7 +31,7 @@ setup() {
 }
 
 @test "SELF_CONTAINED=1 still injects the research outcome contract exactly once" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   export SELF_CONTAINED="1"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -39,7 +39,7 @@ setup() {
 }
 
 @test "SELF_CONTAINED=1 with a local issue tracker starts with no REPO_SLUG/GH_TOKEN" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   export SELF_CONTAINED="1"
   export ISSUE_TRACKER="local"
   export BOX_TRACKER_AXIS_READ=LOCAL
@@ -56,7 +56,7 @@ setup() {
 }
 
 @test "SELF_CONTAINED=1 with a github tracker but no REPO_SLUG still fails loudly at startup" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   export SELF_CONTAINED="1"
   unset REPO_SLUG
   run bash "$ENTRYPOINT"
@@ -65,7 +65,7 @@ setup() {
 }
 
 @test "DISPATCH_KIND=research without SELF_CONTAINED still drives research-prompt.md and clones" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q "Research GitHub issue #7" "$DRIVER_PROMPT_FILE"
@@ -75,7 +75,7 @@ setup() {
 
 # The status list comes from RESEARCH_STATUS_ENUM in the registry (issue #2504).
 @test "SELF_CONTAINED=1's OUTCOME grammar line renders the registry status enum" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   export SELF_CONTAINED="1"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

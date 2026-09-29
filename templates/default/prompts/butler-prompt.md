@@ -68,7 +68,7 @@ Once every finding is relayed (or the sweep concludes there is nothing to
 relay), print exactly one line as your final output — raw plain text, not
 wrapped in backticks, a code fence, or any other markdown formatting:
 
-SPINDRIFT_OUTCOME issue=butler-${CHORE_NAME} landing=none status=ready note=<n findings relayed>
+SPINDRIFT_OUTCOME issue=${DISPATCH_KEY} landing=none status=ready note=<n findings relayed>
 
 This must be the literal final message — nothing after it, no prose
 summary. `landing` is always `none`: this run lands nothing, on any forge.
@@ -77,4 +77,4 @@ If you cannot complete the sweep — the clone fails, the slice is
 unreadable, or some other blocker stops you before a genuine conclusion —
 use `blocked` as the escape hatch instead, same raw plain text requirement:
 
-SPINDRIFT_OUTCOME issue=butler-${CHORE_NAME} landing=none status=blocked note=<short reason>
+SPINDRIFT_OUTCOME issue=${DISPATCH_KEY} landing=none status=blocked note=<short reason>

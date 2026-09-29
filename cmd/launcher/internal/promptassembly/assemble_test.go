@@ -3416,6 +3416,7 @@ func butlerEnv() Env {
 	env.IssueTitle = ""
 	env.Branch = "agent/butler-bugs"
 	env.ChoreName = "bugs"
+	env.DispatchKey = "butler-bugs" // dispatch.go's buildBoxEnv: dispatchkey.Chore(name).String()
 	env.ChoreHead = "deadbeef"
 	env.ChoreDiffRange = "cafef00d..deadbeef"
 	env.ChoreSlice = "cmd/launcher/main.go\ncmd/launcher/internal/dispatch/dispatch.go"

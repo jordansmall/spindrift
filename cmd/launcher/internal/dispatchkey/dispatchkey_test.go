@@ -75,30 +75,25 @@ func TestIsZero(t *testing.T) {
 	}
 }
 
-// TestChoreSpellingMatchesBoxSeam pins Chore(name).String() to the literal
-// spelling the Box side already emits: agent/entrypoint.sh's _issue_ref and
-// butler-prompt.md's OUTCOME line format the same "butler-" prefix
-// independently in bash/markdown, so this package's Go rendering must not
-// drift from either without both sides noticing.
+// TestChoreSpellingMatchesBoxSeam pins Chore(name).String() to the
+// "butler-" prefix, and checks butler-prompt.md's OUTCOME lines read the
+// key off DISPATCH_KEY (the host's dispatch.go forwards
+// Chore(name).String() there verbatim, issue #3996) rather than
+// re-spelling the "butler-" prefix itself in-Box.
 func TestChoreSpellingMatchesBoxSeam(t *testing.T) {
 	prefix := strings.TrimSuffix(Chore("X").String(), "X")
 	if prefix != "butler-" {
 		t.Fatalf("Chore(\"X\").String() prefix = %q, want \"butler-\"", prefix)
 	}
 
-	entrypoint, err := os.ReadFile("../../../../agent/entrypoint.sh")
-	if err != nil {
-		t.Fatalf("reading entrypoint.sh: %v", err)
-	}
-	if !strings.Contains(string(entrypoint), "printf 'butler-%s' \"$CHORE_NAME\"") {
-		t.Error("agent/entrypoint.sh does not contain the expected butler-<percent>s spelling")
-	}
-
 	butlerPrompt, err := os.ReadFile("../../../../templates/default/prompts/butler-prompt.md")
 	if err != nil {
 		t.Fatalf("reading butler-prompt.md: %v", err)
 	}
-	if !strings.Contains(string(butlerPrompt), "issue=butler-${CHORE_NAME}") {
-		t.Error("templates/default/prompts/butler-prompt.md does not contain the expected butler-${CHORE_NAME} spelling")
+	if !strings.Contains(string(butlerPrompt), "issue=${DISPATCH_KEY}") {
+		t.Error("templates/default/prompts/butler-prompt.md does not contain the expected issue=${DISPATCH_KEY} spelling")
+	}
+	if strings.Contains(string(butlerPrompt), "butler-${CHORE_NAME}") {
+		t.Error("templates/default/prompts/butler-prompt.md still spells the butler- prefix itself (should read DISPATCH_KEY instead)")
 	}
 }

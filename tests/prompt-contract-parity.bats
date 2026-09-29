@@ -74,10 +74,10 @@ _parity_stub_prompt_dir() {
           printf 'research stub, no verdict-comment marker here\n' >"$prompt_dir/research-prompt.md"
         fi
         if [ "$gate" = true ]; then
-          export DISPATCH_KIND="research"
+          set_dispatch_kind research
           unset BOX_WRITE_ENABLED
         else
-          unset DISPATCH_KIND
+          set_dispatch_kind work
           export BOX_WRITE_ENABLED=1
         fi
         ;;
@@ -152,10 +152,10 @@ _parity_stub_prompt_dir() {
         fi
         export BOX_WRITE_ENABLED=1
         if [ "$gate" = true ]; then
-          export DISPATCH_KIND="research"
+          set_dispatch_kind research
           export BOX_FILER_ENABLED=1
         else
-          unset DISPATCH_KIND
+          set_dispatch_kind work
           unset BOX_FILER_ENABLED
         fi
         ;;

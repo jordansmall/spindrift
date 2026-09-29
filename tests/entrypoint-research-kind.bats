@@ -9,7 +9,7 @@ setup() {
 }
 
 @test "DISPATCH_KIND=research drives research-prompt.md, not issue-prompt.md" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q "Research GitHub issue #7" "$DRIVER_PROMPT_FILE"
@@ -26,7 +26,7 @@ setup() {
 # agent branch (ADR 0022): there is no code to land, so nothing to rebase.
 
 @test "research kind never checks out or pushes an agent branch" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   run git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD
@@ -46,7 +46,7 @@ setup() {
 # "implementing ... on $BRANCH" (issue #734).
 
 @test "research kind logs researching, not implementing, and names no branch" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q "==> claude researching issue #7" <<<"$output"
@@ -64,7 +64,7 @@ setup() {
 # outcome contract instead of the work "# LAND THE CHANGE" one (issue #640).
 
 @test "runtime prompt-dir override of research-prompt.md lacking the outcome contract gets it appended" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
   printf 'research stub, no contract here\n' >"$prompt_dir/research-prompt.md"
@@ -79,7 +79,7 @@ setup() {
 }
 
 @test "runtime prompt-dir override of research-prompt.md already containing the outcome contract is unchanged" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
   printf 'research stub\n\n# POST THE VERDICT\n\nalready has its own contract\n' \
@@ -95,7 +95,7 @@ setup() {
 }
 
 @test "research kind fails loudly when RESEARCH_OUTCOME_CONTRACT_FILE is missing" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
   printf 'research stub, no contract here\n' >"$prompt_dir/research-prompt.md"
@@ -110,7 +110,7 @@ setup() {
 # the rendered prompt, not just that the template references it (issue #2504).
 
 @test "research kind's OUTCOME grammar line renders the registry status enum" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>' "$DRIVER_PROMPT_FILE"
@@ -121,7 +121,7 @@ setup() {
 # research-appropriate blocked line instead (issue #640).
 
 @test "research kind backstop: no outcome line emits blocked with no branch push" {
-  export DISPATCH_KIND="research"
+  set_dispatch_kind research
   export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
