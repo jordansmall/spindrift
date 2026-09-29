@@ -1,20 +1,8 @@
 package main
 
 import (
-	"os/exec"
-	"strings"
 	"testing"
 )
-
-// rawGitOutput runs git in dir and returns trimmed stdout, or an error --
-// unlike runButlerGit (butler_test.go), it never t.Fatalf's, since
-// TestRemoteLedger_FetchesBaseBranchAndCleansUp needs to see a post-cleanup
-// rev-parse fail rather than aborting the test on it.
-func rawGitOutput(dir string, args ...string) (string, error) {
-	full := append([]string{"-C", dir}, args...)
-	out, err := exec.Command("git", full...).Output()
-	return strings.TrimSpace(string(out)), err
-}
 
 // TestBackendRows_NewLedgerCoverage pins which CODE_FORGE rows can host a
 // butler Ledger (issue #3876): local, github, and forgejo do; git and jira
@@ -44,23 +32,24 @@ func TestBackendRows_NewLedgerCoverage(t *testing.T) {
 // TestRemoteLedger_FetchesBaseBranchAndCleansUp drives remoteLedger against a
 // local bare repo standing in for a hosted forge's remote (no network, no
 // gitArgs needed for a plain filesystem URL). It checks the three things
-// cmdButler relies on: the returned repo has refs/heads/<base> at the
+// cmdButler relies on: the returned Tree resolves refs/heads/<base> to the
 // remote's head, the returned backend reads a zero Tip for an unclaimed
-// chore, and cleanup removes the scratch dir.
+// chore, and cleanup removes the scratch dir (the Tree can no longer resolve
+// anything once it's gone).
 func TestRemoteLedger_FetchesBaseBranchAndCleansUp(t *testing.T) {
 	remoteRepo, head := newButlerTestRepo(t)
 
-	backend, repo, cleanup, err := remoteLedger(config{schemaConfig: schemaConfig{baseBranch: "main"}}, remoteRepo)
+	backend, tree, cleanup, err := remoteLedger(config{schemaConfig: schemaConfig{baseBranch: "main"}}, remoteRepo)
 	if err != nil {
 		t.Fatalf("remoteLedger: %v", err)
 	}
 
-	gotHead, err := rawGitOutput(repo, "rev-parse", "refs/heads/main")
+	gotHead, err := tree.Head("main")
 	if err != nil {
-		t.Fatalf("rev-parse refs/heads/main in scratch repo: %v", err)
+		t.Fatalf("tree.Head(main): %v", err)
 	}
 	if gotHead != head {
-		t.Errorf("scratch repo refs/heads/main = %q, want remote head %q", gotHead, head)
+		t.Errorf("tree.Head(main) = %q, want remote head %q", gotHead, head)
 	}
 
 	tip, err := backend.Read("bugs")
@@ -72,8 +61,8 @@ func TestRemoteLedger_FetchesBaseBranchAndCleansUp(t *testing.T) {
 	}
 
 	cleanup()
-	if _, err := rawGitOutput(repo, "rev-parse", "--is-bare-repository"); err == nil {
-		t.Errorf("scratch repo %s still present after cleanup", repo)
+	if _, err := tree.Head("main"); err == nil {
+		t.Error("tree.Head(main) succeeded after cleanup, want error (scratch dir removed)")
 	}
 }
 

@@ -1191,13 +1191,13 @@ func TestSweep_RemoteBackendFetchesOnceForDueCheck(t *testing.T) {
 
 // TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape drives a full Sweep
 // against a Remote Ledger backend built the same way a hosted-forge backend
-// row (github, forgejo) wires one -- ledger.NewRemote's scratch repo fetched
-// forward to the base branch (Remote.FetchBranch), so the same repo path
-// serves both the GitTree and the Ledger (issue #3876's stand-in for "works
-// on github/forgejo"), migrated from cmd/launcher's retired
+// row (github, forgejo) wires one -- ledger.NewRemote's scratch repo, then
+// FetchTree fetching the same scratch repo forward to the base branch, so
+// one checkout serves both the Tree and the Ledger (issue #3876's stand-in
+// for "works on github/forgejo"), migrated from cmd/launcher's retired
 // TestRunButler_AgainstRemoteLedger (issue #3990): the assertion is about
 // ledger.Remote's own push/fetch behavior under a real Sweep, not about
-// cmd/launcher's backend-row wiring (remoteLedger itself is a 3-line
+// cmd/launcher's backend-row wiring (remoteLedger itself is a thin
 // convenience over these same two calls), so it belongs here rather than at
 // the verb level. It asserts the remote's own refs/spindrift/butler/<chore>
 // ref -- not just the scratch repo's -- picked up the done commit, and that
@@ -1210,14 +1210,15 @@ func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRemote: %v", err)
 	}
-	if err := backend.FetchBranch("main"); err != nil {
-		t.Fatalf("FetchBranch: %v", err)
+	tree, err := FetchTree(scratch, remoteRepo, "main")
+	if err != nil {
+		t.Fatalf("FetchTree: %v", err)
 	}
 
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, GitTree{Repo: scratch}, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)

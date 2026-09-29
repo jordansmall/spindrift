@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/git"
@@ -33,10 +34,10 @@ type backendRow struct {
 	newReadOnlyCodeForge func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge
 
 	// newLedger returns this CODE_FORGE's butler Ledger backend (issue #3876),
-	// the local repo path holding the base branch (for chore.Head /
-	// TrackedFiles), and a cleanup func to run once the run is over. nil means
+	// the butler.Tree a Chore run scans (issue #3995), and a cleanup func to
+	// run once the run is over. nil means
 	// this forge cannot host a butler Ledger yet (git).
-	newLedger func(c config) (ledger.Backend, string, func(), error)
+	newLedger func(c config) (ledger.Backend, butler.Tree, func(), error)
 
 	// boxTokenEnvVar is the ADR 0016 Box-side token override name; empty when
 	// the backend carries no bearer token (git, local).
@@ -44,26 +45,28 @@ type backendRow struct {
 }
 
 // remoteLedger builds a Ledger against a hosted forge: a fresh scratch repo
-// (ledger.NewRemote), fetched forward to c.baseBranch so the returned repo
-// path also satisfies chore.Head/TrackedFiles. Shared by the github and
-// forgejo rows, which differ only in url and gitArgs.
-func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, string, func(), error) {
+// (ledger.NewRemote), then a butler.Tree fetched from the same url onto
+// c.baseBranch (butler.FetchTree) over that same scratch repo -- one
+// checkout serving both the Ledger backend and the Chore scan. Shared by the
+// github and forgejo rows, which differ only in url and gitArgs.
+func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, butler.Tree, func(), error) {
 	dir, err := os.MkdirTemp("", "spindrift-ledger-*")
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("butler: create ledger scratch dir: %w", err)
+		return nil, nil, nil, fmt.Errorf("butler: create ledger scratch dir: %w", err)
 	}
 	cleanup := func() { os.RemoveAll(dir) }
 
 	r, err := ledger.NewRemote(dir, url, gitArgs...)
 	if err != nil {
 		cleanup()
-		return nil, "", nil, err
+		return nil, nil, nil, err
 	}
-	if err := r.FetchBranch(c.baseBranch); err != nil {
+	tree, err := butler.FetchTree(dir, url, c.baseBranch, gitArgs...)
+	if err != nil {
 		cleanup()
-		return nil, "", nil, err
+		return nil, nil, nil, err
 	}
-	return r, dir, cleanup, nil
+	return r, tree, cleanup, nil
 }
 
 func forgejoCodeForgeConfig(c config) forgejo.ForgejoCodeForgeConfig {
@@ -97,7 +100,7 @@ var backendRows = []backendRow{
 		newReadOnlyCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
 			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod))
 		},
-		newLedger: func(c config) (ledger.Backend, string, func(), error) {
+		newLedger: func(c config) (ledger.Backend, butler.Tree, func(), error) {
 			url, gitArgs := github.GitRemote(c.repoSlug)
 			return remoteLedger(c, url, gitArgs...)
 		},
@@ -129,7 +132,7 @@ var backendRows = []backendRow{
 		newReadOnlyCodeForge: func(c config, _ local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
 			return forgejo.NewReadOnlyForgejoCodeForge(forgejoCodeForgeConfig(c), it)
 		},
-		newLedger: func(c config) (ledger.Backend, string, func(), error) {
+		newLedger: func(c config) (ledger.Backend, butler.Tree, func(), error) {
 			return remoteLedger(c, forgejo.GitRemoteURL(c.forgejoBaseURL, c.repoSlug, c.forgejoToken))
 		},
 
@@ -180,8 +183,8 @@ var backendRows = []backendRow{
 		newCodeForge: func(c config, parent local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
 			return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 		},
-		newLedger: func(c config) (ledger.Backend, string, func(), error) {
-			return ledger.Local{Repo: c.codeForgeAccumulationRepoDir}, c.codeForgeAccumulationRepoDir, func() {}, nil
+		newLedger: func(c config) (ledger.Backend, butler.Tree, func(), error) {
+			return ledger.Local{Repo: c.codeForgeAccumulationRepoDir}, butler.GitTree{Repo: c.codeForgeAccumulationRepoDir}, func() {}, nil
 		},
 	},
 	{

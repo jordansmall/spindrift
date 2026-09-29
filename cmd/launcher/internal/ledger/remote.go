@@ -155,15 +155,3 @@ func (r Remote) Append(chore, old string, s State, at time.Time) (string, error)
 	}
 	return newCommit, nil
 }
-
-// FetchBranch fetches branch's current head from URL into the scratch repo
-// (shallow: the butler command only needs the tip tree, not history), so
-// chore.Head/chore.TrackedFiles can be computed against a local repo.
-func (r Remote) FetchBranch(branch string) error {
-	ref := "refs/heads/" + branch
-	out, err := r.remoteCmd("-C", r.Repo, "fetch", "--depth=1", "-q", r.URL, "+"+ref+":"+ref).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("ledger: fetch branch %s from %s: %w: %s", branch, forge.RedactURLCredentials(r.URL), err, forge.RedactURLCredentials(string(out)))
-	}
-	return nil
-}
