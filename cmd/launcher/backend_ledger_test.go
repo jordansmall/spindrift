@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
 )
 
@@ -49,7 +50,8 @@ func TestBackendRows_NewLedgerCoverage(t *testing.T) {
 // chore, and cleanup removes the scratch dir (the Tree can no longer resolve
 // anything once it's gone).
 func TestRemoteLedger_FetchesBaseBranchAndCleansUp(t *testing.T) {
-	remoteRepo, head := newButlerTestRepo(t)
+	remoteRepo := ledgertest.NewRepo(t)
+	head := strings.TrimSpace(string(runButlerGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")))
 
 	backend, tree, cleanup, err := remoteLedger(config{schemaConfig: schemaConfig{baseBranch: "main"}}, remoteRepo)
 	if err != nil {
@@ -142,18 +144,6 @@ func countCmdArgv(events []trace2Event, cmd, substr string) int {
 	return count
 }
 
-// countCmd counts every top-level (cmd_name) process named cmd, regardless
-// of argv.
-func countCmd(events []trace2Event, cmd string) int {
-	count := 0
-	for _, ev := range events {
-		if ev.Event == "cmd_name" && ev.Name == cmd {
-			count++
-		}
-	}
-	return count
-}
-
 // TestRemoteLedger_CountsOneFetchAndOnePushPerSweep drives a full
 // butler.Sweep against a remoteLedger-built backend/tree -- the same wiring
 // cmdButler uses for the github and forgejo rows -- with GIT_TRACE2_EVENT
@@ -162,7 +152,7 @@ func countCmd(events []trace2Event, cmd string) int {
 // of the base branch, issue #3995's "syncs once" for each), and one push per
 // Ledger commit the run makes: Claim then Finish, two, with promotion off.
 func TestRemoteLedger_CountsOneFetchAndOnePushPerSweep(t *testing.T) {
-	remoteRepo, _ := newButlerTestRepo(t)
+	remoteRepo := ledgertest.NewRepo(t)
 
 	trace := filepath.Join(t.TempDir(), "trace2.log")
 	t.Setenv("GIT_TRACE2_EVENT", trace)
@@ -204,7 +194,7 @@ func TestRemoteLedger_CountsOneFetchAndOnePushPerSweep(t *testing.T) {
 	}
 
 	events := readTrace2Events(t, trace)
-	if got := countCmd(events, "fetch"); got != 2 {
+	if got := ledgertest.CmdCount(t, trace, "fetch"); got != 2 {
 		t.Fatalf("fetch count = %d, want exactly 2 (one Ledger refspec, one base branch)", got)
 	}
 	if got := countCmdArgv(events, "fetch", ledger.RefPrefix); got != 1 {
@@ -213,7 +203,7 @@ func TestRemoteLedger_CountsOneFetchAndOnePushPerSweep(t *testing.T) {
 	if got := countCmdArgv(events, "fetch", "refs/heads/main"); got != 1 {
 		t.Errorf("fetches carrying refs/heads/main = %d, want exactly 1", got)
 	}
-	if got := countCmd(events, "push"); got != 2 {
+	if got := ledgertest.CmdCount(t, trace, "push"); got != 2 {
 		t.Errorf("push count = %d, want exactly 2 (Claim + Finish, promotion off)", got)
 	}
 }

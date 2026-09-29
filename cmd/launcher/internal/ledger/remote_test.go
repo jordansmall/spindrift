@@ -1,7 +1,6 @@
 package ledger_test
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -13,33 +12,6 @@ import (
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 )
-
-// fetchCmdCount counts top-level `git fetch` cmd_name events in the
-// GIT_TRACE2_EVENT log at path.
-func fetchCmdCount(t *testing.T, path string) int {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read trace2 log %s: %v", path, err)
-	}
-	count := 0
-	for _, line := range strings.Split(string(data), "\n") {
-		if line == "" {
-			continue
-		}
-		var ev struct {
-			Event string `json:"event"`
-			Name  string `json:"name"`
-		}
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			t.Fatalf("parse trace2 line %q: %v", line, err)
-		}
-		if ev.Event == "cmd_name" && ev.Name == "fetch" {
-			count++
-		}
-	}
-	return count
-}
 
 // remoteHarness is the ledgertest.Harness for Remote: the "remote" is a bare
 // repo shared by Backend and Rival, each of which is a Remote over its own
@@ -86,7 +58,7 @@ func (h remoteHarness) Branches(t *testing.T) map[string]string {
 func newRemoteHarness(t *testing.T) ledgertest.Harness {
 	t.Helper()
 	setGitIdentityEnv(t)
-	return remoteHarness{t: t, remote: newBareRepo(t)}
+	return remoteHarness{t: t, remote: ledgertest.NewRepo(t)}
 }
 
 func TestRemoteLedgerContract(t *testing.T) {
@@ -117,7 +89,7 @@ func TestNewRemoteUnreachableNotLostRace(t *testing.T) {
 // ErrLostRace: the remote now holds our own commit, so the claim won.
 func TestRemoteAppendAppliedDespitePushError(t *testing.T) {
 	setGitIdentityEnv(t)
-	bare := newBareRepo(t)
+	bare := ledgertest.NewRepo(t)
 
 	// A git-receive-pack on --exec-path that runs the real one, so the ref
 	// update lands, then exits non-zero so the client's push fails anyway.
@@ -170,7 +142,7 @@ func TestRemoteRedactsCredentials(t *testing.T) {
 // the earlier fetch, so it never exercises redaction on the push-error path.
 func TestRemoteAppendPushFailureRedactsCredentials(t *testing.T) {
 	setGitIdentityEnv(t)
-	bare := newBareRepo(t)
+	bare := ledgertest.NewRepo(t)
 	tokened := "https://user:secret@example.invalid/x.git"
 
 	// Reject every push, echoing the tokened URL to stderr (git relays a
@@ -217,7 +189,7 @@ func TestRemoteAppendPushFailureRedactsCredentials(t *testing.T) {
 // from the mirror with no network round-trip at all.
 func TestRemoteReadHistoryNoFetch(t *testing.T) {
 	setGitIdentityEnv(t)
-	bare := newBareRepo(t)
+	bare := ledgertest.NewRepo(t)
 
 	seed, err := ledger.NewRemote(t.TempDir(), bare)
 	if err != nil {
@@ -234,7 +206,7 @@ func TestRemoteReadHistoryNoFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRemote: %v", err)
 	}
-	if got := fetchCmdCount(t, trace); got != 1 {
+	if got := ledgertest.CmdCount(t, trace, "fetch"); got != 1 {
 		t.Fatalf("fetch count after NewRemote = %d, want exactly 1", got)
 	}
 
@@ -244,7 +216,7 @@ func TestRemoteReadHistoryNoFetch(t *testing.T) {
 	if _, err := r.History("chore-no-refetch", time.Time{}); err != nil {
 		t.Fatalf("History: %v", err)
 	}
-	if got := fetchCmdCount(t, trace); got != 1 {
+	if got := ledgertest.CmdCount(t, trace, "fetch"); got != 1 {
 		t.Errorf("fetch count after Read/History = %d, want still 1 (no re-fetch)", got)
 	}
 }
@@ -255,7 +227,7 @@ func TestRemoteReadHistoryNoFetch(t *testing.T) {
 // the mirror's next sync.
 func TestRemoteStaleMirrorInvisibleUntilRace(t *testing.T) {
 	setGitIdentityEnv(t)
-	bare := newBareRepo(t)
+	bare := ledgertest.NewRepo(t)
 
 	r, err := ledger.NewRemote(t.TempDir(), bare)
 	if err != nil {
