@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/rest"
@@ -61,9 +62,16 @@ type forgejoClient struct {
 	rest *rest.Client
 
 	// orgLabelsAuthWarnOnce gates ListLabels' missing-scope warning to once
-	// per client: ListLabels runs on every poll, and a token lacking
-	// read:organization fails the org lookup identically every time.
+	// per client: orgLabelsUnavailable stops the repeat lookup after the
+	// first call, so this Once only guards two concurrent first calls that
+	// both miss the flag.
 	orgLabelsAuthWarnOnce sync.Once
+
+	// orgLabelsUnavailable records that the org lookup 404ed or failed auth.
+	// Both are fixed for the client's lifetime (a user-owned repo, or the
+	// token's scope), so later polls skip the request (issue #4034). A
+	// success is never cached: org labels can be added mid-run.
+	orgLabelsUnavailable atomic.Bool
 }
 
 // NewForgejoClient returns an IssueTracker backed by the Forgejo REST API.
@@ -528,7 +536,9 @@ func walkPages[T any, K comparable](rc *rest.Client, path string, q url.Values, 
 // #2265, #3953, #3997), repo names first, then any org-only names, with
 // duplicates dropped. Forgejo's issue list and label-replace endpoints
 // resolve both label sets, so a pre-check that only saw repo labels would
-// treat an org-only label as undefined.
+// treat an org-only label as undefined. Once a call sees the org lookup 404
+// or fail auth, later calls on this client skip that lookup entirely (issue
+// #4034).
 func (c *forgejoClient) ListLabels() ([]string, error) {
 	repoPayload, err := walkPages(c.rest, c.repoPath()+"/labels", url.Values{}, func(l forgejoLabel) string { return l.Name })
 	if err != nil {
@@ -560,17 +570,23 @@ func (c *forgejoClient) ListLabels() ([]string, error) {
 // ErrConnectivity there) for deployments that work today, so it degrades to
 // repo labels only with a warning. The cost: for that token an org-only
 // label still reads as undefined, so ListIssues on it returns nothing (the
-// #3997 gap, now warned once per client). Any other error propagates.
+// #3997 gap, now warned once per client). Both verdicts stick for the
+// client via orgLabelsUnavailable. Any other error propagates, uncached.
 func (c *forgejoClient) orgLabels() ([]string, error) {
+	if c.orgLabelsUnavailable.Load() {
+		return nil, nil
+	}
 	payload, err := walkPages(c.rest, c.orgLabelsPath(), url.Values{}, func(l forgejoLabel) string { return l.Name })
 	if err != nil {
 		if errors.Is(err, forge.ErrNotFound) {
+			c.orgLabelsUnavailable.Store(true)
 			return nil, nil
 		}
 		if errors.Is(err, forge.ErrAuthFailure) {
 			c.orgLabelsAuthWarnOnce.Do(func() {
 				fmt.Fprintf(os.Stderr, "WARNING: forgejo: org label lookup failed (%v); the token likely lacks the read:organization scope, so org-only labels are not seen by label pre-checks\n", err)
 			})
+			c.orgLabelsUnavailable.Store(true)
 			return nil, nil
 		}
 		return nil, err
