@@ -242,24 +242,3 @@ func TestRemoteSnapshotDoesNotReFetch(t *testing.T) {
 		t.Fatalf("r.Read after remote advanced = %s, want the new tip %s", freshTip.Commit, newCommit)
 	}
 }
-
-// TestRemoteFetchBranch asserts that FetchBranch mirrors the remote's branch
-// head into the scratch repo, which the butler command needs to compute
-// chore.Head/chore.TrackedFiles against a local repo.
-func TestRemoteFetchBranch(t *testing.T) {
-	setGitIdentityEnv(t)
-	bare := newBareRepo(t)
-	r, err := ledger.NewRemote(t.TempDir(), bare)
-	if err != nil {
-		t.Fatalf("NewRemote: %v", err)
-	}
-
-	want := runGitOutput(t, bare, "rev-parse", "refs/heads/main")
-	if err := r.FetchBranch("main"); err != nil {
-		t.Fatalf("FetchBranch: %v", err)
-	}
-	got := runGitOutput(t, r.Repo, "rev-parse", "refs/heads/main")
-	if got != want {
-		t.Fatalf("FetchBranch: scratch repo's refs/heads/main = %s, want the remote's %s", got, want)
-	}
-}

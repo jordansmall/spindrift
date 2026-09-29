@@ -224,7 +224,7 @@ func cmdButler(lc *launchContext, choreName, workLabel string) int {
 	}
 	// butlerPreflight already checked row.newLedger != nil for this CODE_FORGE.
 	row, _ := backendByName(lc.config.codeForge)
-	backend, repo, ledgerCleanup, err := row.newLedger(lc.config)
+	backend, tree, ledgerCleanup, err := row.newLedger(lc.config)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "butler: %v\n", err)
 		return 1
@@ -256,7 +256,7 @@ func cmdButler(lc *launchContext, choreName, workLabel string) int {
 		PromotionLabel:      workLabel,
 	}
 
-	sweeper := butler.New(backend, butler.GitTree{Repo: repo}, lc.issueTracker, newDispatcher, policy, time.Now)
+	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now)
 	o, err := sweeper.Sweep(candidates)
 	if err == nil {
 		err = butlerOutcomeErr(o)

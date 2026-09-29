@@ -17,29 +17,6 @@ import (
 	"spindrift.dev/launcher/internal/ledger"
 )
 
-// Tree is the checkout a Butler scans -- a thin seam over internal/chore's
-// git-shelling Head/TrackedFiles so Sweep is testable without a real repo.
-type Tree interface {
-	Head(branch string) (string, error)
-	TrackedFiles(commit string) ([]string, error)
-}
-
-// GitTree is Tree's production implementation: Repo identifies the bare
-// Accumulation repo internal/chore's git wrapper shells out to. The branch
-// comes from Sweep's own r.policy.Branch, not a field here, so it's never
-// passed twice (issue #3990).
-type GitTree struct {
-	Repo string
-}
-
-// Head resolves branch's tip in g.Repo.
-func (g GitTree) Head(branch string) (string, error) { return chore.Head(g.Repo, branch) }
-
-// TrackedFiles returns every path git tracks in commit's tree.
-func (g GitTree) TrackedFiles(commit string) ([]string, error) {
-	return chore.TrackedFiles(g.Repo, commit)
-}
-
 // Policy is a Runner's resolved butler knobs (ADR 0056).
 type Policy struct {
 	// Branch is the branch a run's Box clones and scans (forwarded as
