@@ -9,12 +9,14 @@ import (
 
 func TestLoad(t *testing.T) {
 	cases := []struct {
-		name    string
-		chores  string
-		every   string
-		classes string
-		want    []Chore
-		wantErr string // substring; "" means no error
+		name             string
+		chores           string
+		every            string
+		classes          string
+		patchClasses     string
+		maxPatchesPerDay int
+		want             []Chore
+		wantErr          string // substring; "" means no error
 		// wantErrEach, when set, asserts the error is non-nil and each of
 		// these substrings appears in it exactly once (used for cases where
 		// a problem must be deduplicated across repeated or multiple inputs).
@@ -161,11 +163,72 @@ func TestLoad(t *testing.T) {
 			classes:     "alsobad=x",
 			wantErrEach: []string{`"bad/name"`, `"unknown"`, `"alsobad"`},
 		},
+		{
+			name:         "rung off ignores a malformed BUTLER_PATCH_CLASSES",
+			chores:       "bugs",
+			patchClasses: "bugs", // missing '='
+			want:         []Chore{{Name: "bugs", Every: DefaultEvery}},
+		},
+		{
+			name:         "rung off ignores a disabled-chore BUTLER_PATCH_CLASSES entry",
+			chores:       "bugs",
+			patchClasses: "docs-drift=stale-reference",
+			want:         []Chore{{Name: "bugs", Every: DefaultEvery}},
+		},
+		{
+			name:             "rung on resolves PatchClasses",
+			chores:           "bugs docs-drift",
+			classes:          "bugs=error-handling,resource-leak docs-drift=stale-reference",
+			patchClasses:     "bugs=error-handling docs-drift=stale-reference",
+			maxPatchesPerDay: 1,
+			want: []Chore{
+				{Name: "bugs", Every: DefaultEvery, Classes: []string{"error-handling", "resource-leak"}, PatchClasses: []string{"error-handling"}},
+				{Name: "docs-drift", Every: DefaultEvery, Classes: []string{"stale-reference"}, PatchClasses: []string{"stale-reference"}},
+			},
+		},
+		{
+			name:             "rung on: chore with no BUTLER_PATCH_CLASSES entry has a nil allow-list",
+			chores:           "bugs",
+			classes:          "bugs=error-handling",
+			maxPatchesPerDay: 1,
+			want:             []Chore{{Name: "bugs", Every: DefaultEvery, Classes: []string{"error-handling"}}},
+		},
+		{
+			name:             "rung on: patch class outside the promotion classes rejected",
+			chores:           "bugs",
+			classes:          "bugs=error-handling",
+			patchClasses:     "bugs=resource-leak",
+			maxPatchesPerDay: 1,
+			wantErr:          `chore "bugs": class "resource-leak" is not on its BUTLER_CHORE_CLASSES allow-list`,
+		},
+		{
+			name:             "rung on: patch class entry for a not-enabled chore rejected",
+			chores:           "bugs",
+			classes:          "bugs=error-handling",
+			patchClasses:     "docs-drift=stale-reference",
+			maxPatchesPerDay: 1,
+			wantErr:          `chore "docs-drift" is not enabled (BUTLER_CHORES="bugs")`,
+		},
+		{
+			name:             "rung on: BUTLER_PATCH_CLASSES grammar error prefixed",
+			chores:           "bugs",
+			patchClasses:     "bugs",
+			maxPatchesPerDay: 1,
+			wantErr:          "BUTLER_PATCH_CLASSES: invalid entry",
+		},
+		{
+			name:             "rung on: subset check skipped when BUTLER_CHORE_CLASSES itself fails to parse",
+			chores:           "bugs",
+			classes:          "bugs",
+			patchClasses:     "bugs=resource-leak",
+			maxPatchesPerDay: 1,
+			wantErrEach:      []string{"BUTLER_CHORE_CLASSES: invalid entry"},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Load(Knobs{Chores: tc.chores, Every: tc.every, Classes: tc.classes})
+			got, err := Load(Knobs{Chores: tc.chores, Every: tc.every, Classes: tc.classes, PatchClasses: tc.patchClasses, MaxPatchesPerDay: tc.maxPatchesPerDay})
 
 			if tc.wantErrEach != nil {
 				if err == nil {

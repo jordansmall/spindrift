@@ -367,6 +367,31 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 			wantErr: "BUTLER_CHORE_CLASSES",
 		},
 		{
+			name: "patch rung off ignores a malformed BUTLER_PATCH_CLASSES",
+			mutate: func(t *testing.T, c *config) {
+				c.butlerPatchClasses = "bugs" // missing "=chore" pairing; BUTLER_MAX_PATCHES_PER_DAY stays 0
+			},
+			wantErr: "",
+		},
+		{
+			name: "patch class outside the promotion classes rejected",
+			mutate: func(t *testing.T, c *config) {
+				c.butlerChoreClasses = "bugs=error-handling"
+				c.butlerPatchClasses = "bugs=resource-leak"
+				c.butlerMaxPatchesPerDay = 1
+			},
+			wantErr: "BUTLER_PATCH_CLASSES",
+		},
+		{
+			name: "patch class entry for a not-enabled chore rejected",
+			mutate: func(t *testing.T, c *config) {
+				c.butlerChoreClasses = "bugs=error-handling"
+				c.butlerPatchClasses = "docs-drift=stale-reference"
+				c.butlerMaxPatchesPerDay = 1
+			},
+			wantErr: "BUTLER_PATCH_CLASSES",
+		},
+		{
 			name: "sweep cap above day cap",
 			mutate: func(t *testing.T, c *config) {
 				c.butlerMaxFindingsPerSweep = 6

@@ -94,8 +94,9 @@ type choreCatalog struct {
 }
 
 // butlerPreflight holds the guards cmdButler checks before it claims
-// anything. A malformed BUTLER_CHORE_CLASSES fails here, before any claim; a
-// Chore with no entry is fine, its allow-list is just empty. The Filer gate
+// anything. A malformed BUTLER_CHORE_CLASSES, or (when BUTLER_MAX_PATCHES_PER_DAY
+// > 0) BUTLER_PATCH_CLASSES, fails here, before any claim; a Chore with no
+// entry is fine, its allow-list is just empty. The Filer gate
 // matters because a butler Box relays findings only through the Filer:
 // without one it would still report ready, and settling would advance
 // lastSwept and the cursor past findings nobody filed. An empty chore (no
@@ -117,7 +118,13 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, catalog ch
 	if choreName != "" && !promptassembly.ValidChoreName(choreName) {
 		return nil, fmt.Errorf("butler: chore %q: invalid name format: %s", choreName, promptassembly.ChoreNameRule)
 	}
-	chores, err := chore.Load(chore.Knobs{Chores: cfg.butlerChores, Every: cfg.butlerEvery, Classes: cfg.butlerChoreClasses})
+	chores, err := chore.Load(chore.Knobs{
+		Chores:           cfg.butlerChores,
+		Every:            cfg.butlerEvery,
+		Classes:          cfg.butlerChoreClasses,
+		PatchClasses:     cfg.butlerPatchClasses,
+		MaxPatchesPerDay: cfg.butlerMaxPatchesPerDay,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("butler: %w", err)
 	}
@@ -176,6 +183,7 @@ func butlerBudgets(cfg config) chore.Budgets {
 		MaxFindingsPerSweep: cfg.butlerMaxFindingsPerSweep,
 		DailyTokenCeiling:   cfg.butlerDailyTokenCeiling,
 		MaxPromotionsPerDay: cfg.butlerMaxPromotionsPerDay,
+		MaxPatchesPerDay:    cfg.butlerMaxPatchesPerDay,
 	}
 }
 
@@ -187,9 +195,9 @@ type butlerSettings struct {
 }
 
 // resolveButlerSettings runs every butler config check -- butlerPreflight's
-// guards (which also resolve BUTLER_CHORES, BUTLER_EVERY and
-// BUTLER_CHORE_CLASSES via chore.Load), then BUTLER_CLAIM_TIMEOUT and
-// DAEMON_AWAKE_WINDOW -- before any Ledger claim.
+// guards (which also resolve BUTLER_CHORES, BUTLER_EVERY, BUTLER_CHORE_CLASSES
+// and, when the patch rung is on, BUTLER_PATCH_CLASSES, via chore.Load), then
+// BUTLER_CLAIM_TIMEOUT and DAEMON_AWAKE_WINDOW -- before any Ledger claim.
 func resolveButlerSettings(cfg config, choreName string) (butlerSettings, error) {
 	filerEnabled := resolveAgentPresenceSignals(cfg.driver).filerEnabled
 	chores, err := butlerPreflight(cfg, choreName, filerEnabled, resolveChoreCatalog())
