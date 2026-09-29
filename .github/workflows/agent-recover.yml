@@ -88,13 +88,24 @@ jobs:
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
-      # recover exits non-zero when it can't adopt anything — no open PR,
-      # the issue can't be fetched, or the claim or PR lookup errors — and
-      # in those cases it leaves labels untouched. A signalled stop also
-      # exits non-zero. Every path that adopts and settles a PR
-      # (green->complete, red-exhausted->failed, merge-blocked->complete)
-      # exits 0 with the label already swapped, so the park step below
-      # stays dormant.
+      # recover's exit code decides whether the park step below fires; it
+      # runs on any non-zero exit.
+      # - exit 0, labels untouched: another launcher process holds this
+      #   issue's claim for a live Box, so recover skips it (#3885).
+      # - exit 0, label already swapped: recover adopted and settled an open
+      #   PR (green->complete, red-exhausted->failed, merge-blocked->complete)
+      #   or, with no open PR, a relayed finished branch.
+      # - exit 1, labels untouched, recover-reason written: nothing to adopt
+      #   (no open PR and no relayed branch, the issue can't be fetched, or
+      #   the claim or PR lookup errors), or the logs dir can't be created.
+      #   A failure before recover starts (bad flags, a failed build) also
+      #   exits 1, but with no recover-reason.
+      #   GitHub only: if the issue was agent-complete before the claim, a
+      #   nothing-to-adopt failure restores agent-complete and exits 0
+      #   instead, when it can read and restore that state (#2477).
+      # - exit 7, no recover-reason: a signalled stop. The label may already
+      #   have moved (an abort reclaims the issue, or a settle finished
+      #   first), and the park step still fires unless the job was cancelled.
       - name: Recover the issue
         id: recover
         run: |
