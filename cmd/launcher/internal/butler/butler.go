@@ -39,9 +39,6 @@ type Policy struct {
 	// PromotionMaxFiles is BUTLER_PROMOTION_MAX_FILES, the host limit on how
 	// many files an auto-promoted finding may touch.
 	PromotionMaxFiles int
-	// MaxPromotionsPerDay is BUTLER_MAX_PROMOTIONS_PER_DAY; 0 (the default)
-	// means promotion is off regardless of Classes.
-	MaxPromotionsPerDay int
 	// PromotionLabel is the Consumer's configured work dispatch label
 	// (LABEL), captured before the butler kind's own (label-less) family
 	// swapped it out -- the label a promoted finding must carry for the work
@@ -148,7 +145,7 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", c.Name, verdict))
 			continue
 		}
-		return r.run(c, tip, head, whenNow)
+		return r.run(c, tip, head, whenNow, room)
 	}
 
 	return Outcome{Kind: NotDue, Reasons: reasons}, nil
@@ -169,13 +166,14 @@ func (p Policy) choreNames() []string {
 // run's scan Scope (internal/chore.NextScope), dispatches one Box through
 // r.newBox, and settles the result (ADR 0056). claimedAt is Sweep's whenNow,
 // reused for ClaimedBy.Start so the claim is stamped at the same instant its
-// due decision was made; r.now is called fresh at settle time instead. Once
-// the Box has run, whether its settle step actually wrote the done commit
-// (Box success) or left the claim standing (Box crash, ADR 0056) is read off
-// the settle step's own return, never by re-reading the Ledger -- a crashed
-// run's settle writes nothing at all, so there would be nothing new there to
-// read back anyway.
-func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.Time) (Outcome, error) {
+// due decision was made; r.now is called fresh at settle time instead. room
+// is Sweep's own chore.Room, handed to the Box and to settle rather than
+// re-walked. Once the Box has run, whether its settle step actually wrote
+// the done commit (Box success) or left the claim standing (Box crash, ADR
+// 0056) is read off the settle step's own return, never by re-reading the
+// Ledger -- a crashed run's settle writes nothing at all, so there would be
+// nothing new there to read back anyway.
+func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.Time, room chore.Room) (Outcome, error) {
 	choreName := c.Name
 	files, err := r.tree.TrackedFiles(head)
 	if err != nil {
@@ -194,22 +192,21 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	}
 
 	scope := chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
-	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.MaxPromotionsPerDay, r.policy.PromotionLabel)
+	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.Budgets.MaxPromotionsPerDay, r.policy.PromotionLabel)
 
-	// The Box only ever sees a class list when promotion is actually on:
-	// with promotion off nothing can promote regardless of class, so there
-	// is nothing useful to tell the Box, and settle re-checks a finding's
-	// class against promo's own allow-list itself.
+	// The Box only ever sees a class list when promotion is on and today's
+	// promotion room is actually > 0: with nothing left to spend this run,
+	// there is nothing useful to tell the Box, and settle re-checks a
+	// finding's class against promo itself regardless.
 	var classes []string
-	if promo.enabled {
+	if promo.enabled && room.Promotions > 0 {
 		classes = c.Classes
 	}
 	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes})
 	defer d.Close()
 	result := d.Run()
 
-	room := newDayRoom(r.policy)
-	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, r.policy.Budgets.MaxFindingsPerSweep, promo, room)
+	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo)
 	s := step.settle(d, result)
 	if !s.done {
 		return Outcome{Kind: ClaimLeft, Chore: choreName}, nil

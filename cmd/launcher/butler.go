@@ -253,15 +253,14 @@ func cmdButler(lc *launchContext, choreName, workLabel string) int {
 	}
 
 	policy := butler.Policy{
-		Branch:              lc.config.baseBranch,
-		Host:                host,
-		Chores:              settings.chores,
-		ClaimTimeout:        settings.claimTimeout,
-		Budgets:             budgets,
-		Zone:                settings.window.Location(),
-		PromotionMaxFiles:   lc.config.butlerPromotionMaxFiles,
-		MaxPromotionsPerDay: lc.config.butlerMaxPromotionsPerDay,
-		PromotionLabel:      workLabel,
+		Branch:            lc.config.baseBranch,
+		Host:              host,
+		Chores:            settings.chores,
+		ClaimTimeout:      settings.claimTimeout,
+		Budgets:           budgets,
+		Zone:              settings.window.Location(),
+		PromotionMaxFiles: lc.config.butlerPromotionMaxFiles,
+		PromotionLabel:    workLabel,
 	}
 
 	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now)

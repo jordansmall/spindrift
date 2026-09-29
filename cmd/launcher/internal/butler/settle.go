@@ -31,15 +31,14 @@ type settled struct {
 // transition -- the butler carries no tracker issue of its own, only a
 // Ledger Chore.
 type settleRun struct {
-	it                  forge.IssueTracker
-	ledger              ledger.Backend
-	chore               string
-	claim               ledger.Tip
-	scope               chore.Scope
-	now                 func() time.Time
-	maxFindingsPerSweep int
-	policy              promotion
-	room                dayRoom
+	it     forge.IssueTracker
+	ledger ledger.Backend
+	chore  string
+	claim  ledger.Tip
+	scope  chore.Scope
+	now    func() time.Time
+	room   chore.Room
+	policy promotion
 }
 
 // newSettleRun constructs a settleRun for one Chore run. claim is the Ledger
@@ -47,13 +46,15 @@ type settleRun struct {
 // swap parent, unless settle first reserves promotion slots (issue #3926), in
 // which case the reservation commit takes over as parent; scope is the run's
 // computed Scope (internal/chore.NextScope), whose Head/NextCursor become the
-// done commit's lastSwept/cursor on success. maxFindingsPerSweep caps how
-// many well-formed findings settle will file in one sweep; 0 means no cap.
-// policy is the host-side auto-promotion gate (issue #3880); its zero value
-// never promotes anything. room supplies policy's per-day budget; settle only
-// spends a Ledger walk reading it when policy.enabled (issue #3993).
-func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, maxFindingsPerSweep int, policy promotion, room dayRoom) *settleRun {
-	return &settleRun{it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, maxFindingsPerSweep: maxFindingsPerSweep, policy: policy, room: room}
+// done commit's lastSwept/cursor on success. room is Sweep's chore.Room:
+// room.Findings caps how many well-formed findings settle will file this
+// sweep (0 means no cap), and room.Promotions seeds how many may
+// auto-promote, only when policy.enabled -- room is computed once per Sweep
+// and handed down, never re-walked here (issue #3994). policy is the
+// host-side auto-promotion gate (issue #3880); its zero value never
+// promotes anything.
+func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, room chore.Room, policy promotion) *settleRun {
+	return &settleRun{it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy}
 }
 
 // settle files result's findings, if any, then writes the Chore's done
@@ -83,15 +84,15 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 
 	finishParent := s.claim
 	var promoted []string
-	filed, dropped := settle.FileButlerFindings(s.it, num, result, s.maxFindingsPerSweep, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
-		// room is evaluated at most once per settle, and only when policy is
-		// enabled at all -- an unconfigured/off policy can never promote, so
-		// spending a Ledger walk on it would be waste. Evaluating at settle
-		// time rather than at run start means a promotion whose reservation
-		// commit already landed is counted here.
+	filed, dropped := settle.FileButlerFindings(s.it, num, result, s.room.Findings, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
+		// An unconfigured/off policy can never promote, so it reserves none
+		// of the day's shared promotion room. room.Promotions is Sweep's own
+		// snapshot, handed down rather than re-walked here (issue #3994): a
+		// promotion landed by a concurrent run mid-sweep is not seen (soft
+		// cap, chore.Room's own doc).
 		remaining := 0
 		if s.policy.enabled {
-			remaining = s.room.remaining(s.ledger, s.now())
+			remaining = s.room.Promotions
 		}
 
 		// Reserve the slots this run intends to spend before filing anything

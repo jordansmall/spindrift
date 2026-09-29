@@ -4817,11 +4817,10 @@ which judges the finding handed to it rather than a branch diff, and
 which the butler keeps in `--agents` even under `ORCHESTRATOR`, since an
 advise-only run never gets the code-owned review pass that otherwise
 replaces it; and today's `BUTLER_MAX_PROMOTIONS_PER_DAY` (schema key
-`butlerMaxPromotionsPerDay`, default `0`) budget has room, walked from
-the Ledger at settle time like the budgets above. On a hosted forge that
-walk reads the Ledger mirror fetched once at run start (issue #3995), so
-promotions another host makes during a long run go uncounted here -- the
-cap is soft, not a hard ceiling. Default `0` means promotion
+`butlerMaxPromotionsPerDay`, default `0`) budget has room, part of the
+same once-per-Sweep `chore.Room` the budgets above are walked into
+(issue #3994), not a second Ledger walk at settle, so promotions another
+run lands during a long run go uncounted here. Default `0` means promotion
 is off — unlike every other butler budget, where `0` means no limit — so
 enabling a Chore, or listing classes in `BUTLER_CHORE_CLASSES`, never
 promotes anything by itself; it is not a start gate either, and a spent
