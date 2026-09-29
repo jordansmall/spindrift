@@ -5639,7 +5639,8 @@ It never refuses to start over this, unlike the `BOX_SIGNAL_CARRIER` check
 that runs after it. An exported `CONTINUOUS_DISPATCH=1` or `ISSUE_NUMBER` or
 `MODEL` now configures the daemon alone — its own knob resolution is
 unchanged, and an ambient value still wins there with its own, separate
-deprecation warning (`lookupKnob`, same file) — it simply never reaches a
+deprecation warning (`inputdoc.Document.Lookup`,
+`cmd/launcher/internal/inputdoc/inputdoc.go`) — it simply never reaches a
 child. Anything a child's own wrapper re-sources from `harness.env` in its
 working directory is outside the daemon's control and stays so.
 
