@@ -22,7 +22,7 @@ in
   # spindrift issue run real checks in-box (issue #470) instead of
   # round-tripping CI for nix feedback.
   nixStoreWritable = true;
-  # Bake the rest of nix/checks.nix's dependency closure so in-box checks don't
+  # Bake the rest of the nix/checks/ dependency closure so in-box checks don't
   # cold-substitute it. The packages above and the ones every mkHarness image
   # bakes already cover most checks; `nixfmt` and `mandoc` are the remaining
   # gap (issue #470).

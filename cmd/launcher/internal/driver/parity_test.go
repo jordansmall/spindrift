@@ -2,7 +2,7 @@ package driver
 
 import "testing"
 
-// nixDriverNames is generated from lib/drivers/default.nix by nix/checks.nix;
+// nixDriverNames is generated from lib/drivers/default.nix by nix/regen.nix;
 // see drivernames_gen.go. Edit lib/drivers/default.nix and run `nix run .#regen`.
 
 func TestParityWithNixDriverRegistry(t *testing.T) {

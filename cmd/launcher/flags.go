@@ -237,7 +237,7 @@ func validateChoice(env, value string) error {
 	return nil
 }
 
-// subcommandEntry is one row of the subcommand listing. nix/checks.nix
+// subcommandEntry is one row of the subcommand listing. nix/regen.nix
 // generates the subcommandRegistry table from lib/subcommands.nix.
 type subcommandEntry struct {
 	name  string // must match a verbHandlers key exactly
