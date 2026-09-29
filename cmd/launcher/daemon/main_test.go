@@ -95,6 +95,23 @@ func TestMainRun_BadAwakeWindow(t *testing.T) {
 	}
 }
 
+// TestMainRun_BadKindSelector pins that fail() owns the "daemon: " prefix
+// alone: an unknown kind selector's stderr must carry it exactly once, not
+// doubled by ParseKinds also prefixing its own error.
+func TestMainRun_BadKindSelector(t *testing.T) {
+	clearKnobEnvT(t)
+	path := writeInputDocument(t, validKnobDocument())
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", path, "bogus"}, &stdout, &stderr)
+	if got != 1 {
+		t.Errorf("mainRun() = %d, want 1", got)
+	}
+	want := `daemon: unknown kind "bogus"` + "\n"
+	if stderr.String() != want {
+		t.Errorf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
 // TestMainRun_AbsentAwakeWindowIsNotAnError asserts an absent
 // DAEMON_AWAKE_WINDOW proceeds exactly as startup does today: no
 // "no value for DAEMON_AWAKE_WINDOW" diagnostic, and mainRun fails for the

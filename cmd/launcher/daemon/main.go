@@ -125,13 +125,13 @@ func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knob
 	}
 	resolved, err := chore.Load(knobs)
 	if err != nil {
-		return nil, fmt.Errorf("daemon: butler: %w", err)
+		return nil, fmt.Errorf("butler: %w", err)
 	}
 	if len(resolved) > 0 {
 		return kinds, nil
 	}
 	if explicitSelector {
-		return nil, fmt.Errorf("daemon: butler selected but %w", chore.ErrNoChores)
+		return nil, fmt.Errorf("butler selected but %w", chore.ErrNoChores)
 	}
 	return slices.DeleteFunc(slices.Clone(kinds), func(k daemon.Kind) bool { return k == daemon.KindOf(dispatchkind.Butler) }), nil
 }
@@ -266,7 +266,7 @@ func validateSignalCarrier(raw string) error {
 // system that does not exist and report a phantom self-change.
 func nixSystemDouble(goos, goarch string) (string, error) {
 	unmapped := func() error {
-		return fmt.Errorf("daemon: no nix system double for GOOS/GOARCH %s/%s", goos, goarch)
+		return fmt.Errorf("no nix system double for GOOS/GOARCH %s/%s", goos, goarch)
 	}
 	var arch string
 	switch goarch {

@@ -34,7 +34,7 @@ func ParseKind(s string) (Kind, error) {
 	if d, ok := dispatchkind.ByVerb(s); ok {
 		return KindOf(d), nil
 	}
-	return "", fmt.Errorf("daemon: unknown kind %q", s)
+	return "", fmt.Errorf("unknown kind %q", s)
 }
 
 // ParseKinds parses the daemon's argv verb as a set of kinds to draw from one
@@ -55,5 +55,5 @@ func ParseKinds(s string) ([]Kind, error) {
 	if d, ok := dispatchkind.ByVerb(s); ok {
 		return []Kind{KindOf(d)}, nil
 	}
-	return nil, fmt.Errorf("daemon: unknown kind %q", s)
+	return nil, fmt.Errorf("unknown kind %q", s)
 }
