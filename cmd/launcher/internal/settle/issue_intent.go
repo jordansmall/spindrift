@@ -120,12 +120,6 @@ type filedIntent struct {
 	// entry so a verdict-comment renderer can name what it matched (issue
 	// #3811), rather than that reference only ever reaching stdout.
 	DupRef string
-	// ExtraLabels holds the extraLabels decorate returned for this intent,
-	// set only on a successful filing -- a failed PostIssue never applied
-	// them. internal/butler's settle step reads this back to know which URLs
-	// its own promotion gate actually promoted, without threading a second
-	// return path through fileIssueIntentsDetailedFunc.
-	ExtraLabels []string
 }
 
 // fileIssueIntentsDetailed returns one filedIntent per well-formed payload in
@@ -134,7 +128,7 @@ type filedIntent struct {
 // any ensureTypeLabel match, never the payload's own (issue #1949). A package
 // function, not a *Settle method, so ResearchSettle can call it (issue #2590).
 func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel, bodyBacklink string) []filedIntent {
-	return fileIssueIntentsDetailedFunc(it, num, result, provenanceLabel, func(issueIntent) (string, []string, func()) { return bodyBacklink, nil, nil })
+	return fileIssueIntentsDetailedFunc(it, num, result, provenanceLabel, func(issueIntent) (string, []string, func(string)) { return bodyBacklink, nil, nil })
 }
 
 // fileIssueIntentsDetailedFunc is fileIssueIntentsDetailed's per-intent sibling
@@ -143,20 +137,19 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 // own files in its backlink. It also returns extraLabels -- labels beyond the
 // provenance and type labels this function already applies, e.g. the Butler
 // Runner's own auto-promotion gate (issue #3880) adding "ready-for-agent" --
-// appended after them, and, on a successful filing only, recorded onto the
-// resulting filedIntent.ExtraLabels. The third return, onFiled, is called
-// only after PostIssue actually succeeds -- never on a failed or skipped
-// intent -- so a caller that spends shared state (the Runner's per-run
-// promotion room) on deciding extraLabels can defer committing that spend
-// until the filing it was for is real: a failed PostIssue must not burn the
-// day's promotion room. fileIssueIntentsDetailed delegates to this with a
-// constant closure,
+// appended after them. The third return, onFiled, is called with the filed
+// issue's URL only after PostIssue actually succeeds -- never on a failed or
+// skipped intent -- so a caller that spends shared state (the Runner's
+// per-run promotion room) on deciding extraLabels can defer committing that
+// spend, and record which URL it was spent on, until the filing it was for
+// is real: a failed PostIssue must not burn the day's promotion room.
+// fileIssueIntentsDetailed delegates to this with a constant closure,
 // rather than the other way around, so gate.go's call keeps its existing
 // (it, num, result, provenanceLabel, bodyBacklink string) shape --
 // nix/checks/dispatch-labels.nix's
 // extractFileIssueIntentsProvenanceLabel extracts the provenance label from
 // that exact call site as source text.
-func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func())) []filedIntent {
+func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func(url string))) []filedIntent {
 	if !result.IssueIntentsFound {
 		return nil
 	}
@@ -252,9 +245,9 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 			dedupIndex[k] = ref
 		}
 		if onFiled != nil {
-			onFiled()
+			onFiled(url)
 		}
-		out = append(out, filedIntent{Title: in.Title, URL: url, ExtraLabels: extraLabels})
+		out = append(out, filedIntent{Title: in.Title, URL: url})
 	}
 	return out
 }
