@@ -71,8 +71,8 @@ func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Resul
 
 	var findings []Finding
 	for _, raw := range kept {
-		in, ok := parseIssueIntent(raw)
-		if !ok {
+		in, rej := parseIssueIntent(raw)
+		if rej != nil {
 			continue
 		}
 		findings = append(findings, in.finding())
@@ -111,7 +111,7 @@ func capIntents(raw []string, n int) (kept []string, dropped int) {
 	kept = make([]string, 0, len(raw))
 	wellFormed := 0
 	for _, r := range raw {
-		if _, ok := parseIssueIntent(r); !ok {
+		if _, rej := parseIssueIntent(r); rej != nil {
 			kept = append(kept, r)
 			continue
 		}

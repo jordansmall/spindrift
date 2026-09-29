@@ -37,28 +37,31 @@ func filedURLs(filed []filedIntent) []string {
 }
 
 // TestParseIssueIntent_ClassMustBeALowercaseSlug: a Class outside
-// signalwire.ValidClass's shape is cleared rather than rejecting the whole
-// intent (issue #3880 review finding) -- it is Box-supplied text
-// interpolated unescaped into host-authored backlink/note strings, so
-// anything but a plain slug is treated the same as no claimed class at all.
+// signalwire.ValidClass's shape now skips the whole intent (issue #3992 --
+// signalwire.IssueIntent.Validate rejects it with Status "invalid_class")
+// rather than silently clearing Class and filing anyway (the pre-#3992
+// behavior, issue #3880 review finding). It is Box-supplied text
+// interpolated unescaped into host-authored backlink/note strings, so the
+// socket carrier has always rejected it at the door; the log carrier now
+// applies the identical rule.
 func TestParseIssueIntent_ClassMustBeALowercaseSlug(t *testing.T) {
 	cases := []struct {
-		name      string
-		class     string
-		wantClass string
+		name   string
+		class  string
+		wantOK bool
 	}{
-		{"plain slug", "error-handling", "error-handling"},
-		{"single char", "a", "a"},
-		{"digits and hyphens", "a1-b2", "a1-b2"},
-		{"empty stays empty", "", ""},
-		{"uppercase rejected", "Error-Handling", ""},
-		{"leading hyphen rejected", "-error", ""},
-		{"embedded space rejected", "error handling", ""},
-		{"embedded newline rejected", "error\nhandling", ""},
-		{"backtick rejected", "error`handling", ""},
-		{"markdown-ish rejected", "**bold**", ""},
-		{"too long rejected", strings.Repeat("a", signalwire.MaxClassLen+1), ""},
-		{"exactly max length kept", strings.Repeat("a", signalwire.MaxClassLen), strings.Repeat("a", signalwire.MaxClassLen)},
+		{"plain slug", "error-handling", true},
+		{"single char", "a", true},
+		{"digits and hyphens", "a1-b2", true},
+		{"empty stays empty", "", true},
+		{"uppercase rejected", "Error-Handling", false},
+		{"leading hyphen rejected", "-error", false},
+		{"embedded space rejected", "error handling", false},
+		{"embedded newline rejected", "error\nhandling", false},
+		{"backtick rejected", "error`handling", false},
+		{"markdown-ish rejected", "**bold**", false},
+		{"too long rejected", strings.Repeat("a", signalwire.MaxClassLen+1), false},
+		{"exactly max length kept", strings.Repeat("a", signalwire.MaxClassLen), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,16 +70,25 @@ func TestParseIssueIntent_ClassMustBeALowercaseSlug(t *testing.T) {
 			// produces well-formed input -- the test is about
 			// signalwire.ValidClass's shape check, not JSON's own escaping
 			// rules.
-			payload, err := json.Marshal(map[string]string{"title": "t", "class": tc.class})
+			payload, err := json.Marshal(map[string]string{"title": "t", "body": "b", "class": tc.class})
 			if err != nil {
 				t.Fatalf("json.Marshal: %v", err)
 			}
-			in, ok := parseIssueIntent(string(payload))
-			if !ok {
-				t.Fatalf("parseIssueIntent(%q) ok = false, want true", payload)
+			in, rej := parseIssueIntent(string(payload))
+			if !tc.wantOK {
+				if rej == nil {
+					t.Fatalf("parseIssueIntent(%q) rej = nil, want an invalid_class reject", payload)
+				}
+				if rej.Status != "invalid_class" {
+					t.Errorf("rej.Status = %q, want %q", rej.Status, "invalid_class")
+				}
+				return
 			}
-			if in.Class != tc.wantClass {
-				t.Errorf("Class = %q, want %q", in.Class, tc.wantClass)
+			if rej != nil {
+				t.Fatalf("parseIssueIntent(%q) rej = %v, want nil", payload, rej)
+			}
+			if in.Class != tc.class {
+				t.Errorf("Class = %q, want %q", in.Class, tc.class)
 			}
 		})
 	}
@@ -145,13 +157,29 @@ func TestParseIssueIntent_ConcurrenceIsBoundedAndBacktickNeutralized(t *testing.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			payload, err := json.Marshal(map[string]string{"title": "t", "concurrence": tc.concurrence})
+			// sanitizeConcurrence itself, independent of the MaxBodyBytes wire
+			// bound signalwire.IssueIntent.Validate now applies to Concurrence
+			// (issue #3992): a couple of cases below flood past that 64KB bound
+			// on purpose to pin sanitizeConcurrence's own fail-closed behavior,
+			// and would never reach sanitizeConcurrence through parseIssueIntent
+			// at all -- Validate rejects the whole intent first.
+			if got := sanitizeConcurrence(tc.concurrence); got != tc.want {
+				t.Errorf("sanitizeConcurrence(%q) = %q, want %q", tc.name, got, tc.want)
+			}
+
+			payload, err := json.Marshal(map[string]string{"title": "t", "body": "b", "concurrence": tc.concurrence})
 			if err != nil {
 				t.Fatalf("json.Marshal: %v", err)
 			}
-			in, ok := parseIssueIntent(string(payload))
-			if !ok {
-				t.Fatalf("parseIssueIntent(%q) ok = false, want true", payload)
+			in, rej := parseIssueIntent(string(payload))
+			if len(tc.concurrence) > signalwire.MaxBodyBytes {
+				if rej == nil {
+					t.Fatalf("parseIssueIntent(%q) rej = nil, want an oversize reject", payload)
+				}
+				return
+			}
+			if rej != nil {
+				t.Fatalf("parseIssueIntent(%q) rej = %v, want nil", payload, rej)
 			}
 			if in.Concurrence != tc.want {
 				t.Errorf("Concurrence = %q, want %q", in.Concurrence, tc.want)
