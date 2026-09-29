@@ -171,6 +171,58 @@ func TestFake_CreateLabel(t *testing.T) {
 	})
 }
 
+func TestFake_AddLabels(t *testing.T) {
+	t.Run("appends missing labels, dedups already-present ones", func(t *testing.T) {
+		f := forge.NewFake()
+		f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-butler-finding"}})
+
+		if err := f.AddLabels("42", []string{"agent-butler-finding", "ready-for-agent"}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(f.AddLabelsCalls) != 1 {
+			t.Fatalf("want 1 AddLabelsCall, got %d", len(f.AddLabelsCalls))
+		}
+		iss, err := f.Issue("42")
+		if err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		want := []string{"agent-butler-finding", "ready-for-agent"}
+		if len(iss.Labels) != len(want) {
+			t.Fatalf("labels = %v, want %v", iss.Labels, want)
+		}
+		for _, l := range want {
+			found := false
+			for _, got := range iss.Labels {
+				if got == l {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("labels = %v, missing %q", iss.Labels, l)
+			}
+		}
+	})
+
+	t.Run("errors on unknown issue", func(t *testing.T) {
+		f := forge.NewFake()
+		if err := f.AddLabels("no-such-issue", []string{"ready-for-agent"}); err == nil {
+			t.Fatal("want error for unknown issue, got nil")
+		}
+	})
+
+	t.Run("returns scripted error", func(t *testing.T) {
+		f := forge.NewFake()
+		f.SetIssue(forge.Issue{Number: "42"})
+		f.AddLabelsErr = errors.New("api error")
+
+		err := f.AddLabels("42", []string{"ready-for-agent"})
+		if err == nil || err.Error() != "api error" {
+			t.Fatalf("want api error, got %v", err)
+		}
+	})
+}
+
 func TestFake_OpenPRForBranch(t *testing.T) {
 	f := forge.NewFake()
 	f.SetPR("agent/issue-7", forge.PR{URL: "https://github.com/o/r/pull/99"})

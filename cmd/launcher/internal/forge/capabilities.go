@@ -38,6 +38,7 @@ type Capabilities struct {
 	CommentLister         CommentLister
 	LinkedIssueLister     LinkedIssueLister
 	LabeledBacklogLister  LabeledBacklogLister
+	IssueLabeler          IssueLabeler
 
 	// CODE_FORGE and ISSUE_TRACKER select independently, so each knob keeps
 	// its own descriptor row.
@@ -76,6 +77,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.CommentLister, _ = it.(CommentLister)
 	c.LinkedIssueLister, _ = it.(LinkedIssueLister)
 	c.LabeledBacklogLister, _ = it.(LabeledBacklogLister)
+	c.IssueLabeler, _ = it.(IssueLabeler)
 
 	c.ForgeDescriptor = forgeDesc
 	c.TrackerDescriptor = trackerDesc

@@ -65,6 +65,11 @@ type IssueTrackerFake struct {
 	CreateLabelCalls []CreateLabelCall
 	CreateLabelErr   error
 
+	// AddLabelsCalls records each AddLabels invocation so a test can assert
+	// call count and arguments directly (issue #4074).
+	AddLabelsCalls []AddLabelsCall
+	AddLabelsErr   error
+
 	RecordLandingCalls []RecordLandingCall
 	RecordLandingErr   error
 
@@ -99,6 +104,7 @@ type IssueTrackerFake struct {
 
 var _ IssueTracker = (*IssueTrackerFake)(nil)
 var _ CommentLister = (*IssueTrackerFake)(nil)
+var _ IssueLabeler = (*IssueTrackerFake)(nil)
 
 // TransitionStateCall records a single TransitionState invocation.
 type TransitionStateCall struct {
@@ -115,6 +121,12 @@ type CompleteVerdictCall struct {
 // CreateLabelCall records a single CreateLabel invocation.
 type CreateLabelCall struct {
 	Name, Description, Color string
+}
+
+// AddLabelsCall records a single AddLabels invocation.
+type AddLabelsCall struct {
+	Num    string
+	Labels []string
 }
 
 // CommentCall records a single Comment invocation.
@@ -389,6 +401,31 @@ func (tf *IssueTrackerFake) CreateLabel(name, description, color string) error {
 	defer tf.mu.Unlock()
 	tf.CreateLabelCalls = append(tf.CreateLabelCalls, CreateLabelCall{name, description, color})
 	return tf.CreateLabelErr
+}
+
+// AddLabels implements the optional IssueLabeler interface (issue #4074). It
+// errors on an unknown num, unlike TransitionState's best-effort no-op: a
+// caller reaching for AddLabels always names an issue it just filed or
+// otherwise knows exists, so a missing issue is a real fake-setup bug, not a
+// benign double-dispatch the way a stale TransitionState can be.
+func (tf *IssueTrackerFake) AddLabels(num string, labels []string) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.AddLabelsCalls = append(tf.AddLabelsCalls, AddLabelsCall{Num: num, Labels: append([]string(nil), labels...)})
+	if tf.AddLabelsErr != nil {
+		return tf.AddLabelsErr
+	}
+	iss, ok := tf.issues[num]
+	if !ok {
+		return fmt.Errorf("issue %s not found", num)
+	}
+	for _, l := range labels {
+		if !slices.Contains(iss.Labels, l) {
+			iss.Labels = append(iss.Labels, l)
+		}
+	}
+	tf.issues[num] = iss
+	return nil
 }
 
 // SetIssue upserts an issue into the fake store.
