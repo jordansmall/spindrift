@@ -811,7 +811,89 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 	}
 }
 
-// (m) BUTLER_MAX_PROMOTIONS_PER_DAY (Policy.MaxPromotionsPerDay) defaults to
+// (l2) BUTLER_MAX_FINDINGS_PER_SWEEP=0 (no per-sweep limit configured on
+// top of a day cap) still bounds a sweep at the day's remaining finding
+// headroom, not an uncapped run (due.go's MaxFindingsPerSweep doc): with
+// MaxFindingsPerDay=10 and 4 already filed today, a Box relaying more than
+// 6 findings gets only 6 filed, the rest dropped (issue #3994 review
+// finding).
+func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9101"
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Seed today's Filed=4 through a real Sweep against a different Chore --
+	// Budgets are global across every enabled Chore (chore.Budgets' own
+	// doc), not per Chore, so this counts toward "bugs"'s headroom below.
+	seed := dispatch.NewFake()
+	seed.RunResult = dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "butler-seed", Status: outcome.StatusReady, Note: "seeded"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"s1","body":"repro","dedupTerms":["a.go:S1"]}`,
+			`{"title":"s2","body":"repro","dedupTerms":["a.go:S2"]}`,
+			`{"title":"s3","body":"repro","dedupTerms":["a.go:S3"]}`,
+			`{"title":"s4","body":"repro","dedupTerms":["a.go:S4"]}`,
+		},
+	}
+	seedPolicy := testRunPolicy(noRunEvery, "seed", "bugs")
+	seedRunner := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, fc.AsIssueFiler(), func(c dispatch.Chore) dispatch.Dispatcher { return seed }, seedPolicy, func() time.Time { return now })
+	seedOut, err := seedRunner.Sweep([]string{"seed"})
+	if err != nil {
+		t.Fatalf("seed Sweep: %v", err)
+	}
+	if seedOut.Kind != Swept || seedOut.Filed != 4 {
+		t.Fatalf("seed Outcome = %+v, want Kind=Swept Filed=4", seedOut)
+	}
+
+	d := dispatch.NewFake()
+	d.RunResult = dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"bug one","body":"repro","dedupTerms":["a.go:One"]}`,
+			`{"title":"bug two","body":"repro","dedupTerms":["a.go:Two"]}`,
+			`{"title":"bug three","body":"repro","dedupTerms":["a.go:Three"]}`,
+			`{"title":"bug four","body":"repro","dedupTerms":["a.go:Four"]}`,
+			`{"title":"bug five","body":"repro","dedupTerms":["a.go:Five"]}`,
+			`{"title":"bug six","body":"repro","dedupTerms":["a.go:Six"]}`,
+			`{"title":"bug seven","body":"repro","dedupTerms":["a.go:Seven"]}`,
+		},
+	}
+	policy := testRunPolicy(noRunEvery, "seed", "bugs")
+	policy.Budgets = chore.Budgets{MaxFindingsPerDay: 10, MaxFindingsPerSweep: 0}
+	r := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, fc.AsIssueFiler(), func(c dispatch.Chore) dispatch.Dispatcher { return d }, policy, func() time.Time { return now })
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Filed != 6 || out.Dropped != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Filed=6 Dropped=1", out)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.Dropped != 1 {
+		t.Errorf("Dropped = %d, want 1", tip.State.Dropped)
+	}
+	if len(tip.State.Filed) != 6 {
+		t.Errorf("len(Filed) = %d, want 6", len(tip.State.Filed))
+	}
+}
+
+// (m) BUTLER_MAX_PROMOTIONS_PER_DAY (Policy.Budgets.MaxPromotionsPerDay) defaults to
 // 0, so wiring the class allow-list alone (Chore.Classes) never promotes
 // anything -- a Consumer has to opt in to promotion itself, not just to a
 // Chore (issue #3880).
@@ -878,7 +960,7 @@ func TestSweep_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
 	policy := testRunPolicy(noRunEvery, "bugs")
 	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
 	policy.PromotionMaxFiles = 3
-	policy.MaxPromotionsPerDay = 1
+	policy.Budgets.MaxPromotionsPerDay = 1
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
@@ -921,7 +1003,7 @@ func TestSweep_PromotionUsesConfiguredWorkLabel(t *testing.T) {
 	policy := testRunPolicy(noRunEvery, "bugs")
 	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
 	policy.PromotionMaxFiles = 3
-	policy.MaxPromotionsPerDay = 1
+	policy.Budgets.MaxPromotionsPerDay = 1
 	policy.PromotionLabel = "agent-go"
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -941,10 +1023,9 @@ func TestSweep_PromotionUsesConfiguredWorkLabel(t *testing.T) {
 
 // (o) A day whose Ledger already holds MaxPromotionsPerDay promotions leaves
 // no room: the next otherwise-eligible finding still files, just unlabelled
-// (issue #3880). Room is walked fresh at settle time (ledger.DayTotalsAll),
-// so a promotion recorded earlier the same local day is what spends the
-// budget here. head1/head2 stand in for the branch tip before/after the
-// seeded run, as above (fakeTree, no real git needed).
+// (issue #3880). The earlier promotion is seeded before this Sweep call, so
+// Sweep's own single Room walk at its own start (issue #3994) already sees
+// it spent -- no second walk at settle time is needed to catch it.
 func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 	const head1, head2 = "head1", "head2"
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
@@ -963,12 +1044,16 @@ func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9202"
-	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+	var gotChore dispatch.Chore
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		gotChore = c
+		return promotableDispatcher("error-handling")
+	}
 
 	policy := testRunPolicy(noRunEvery, "bugs")
 	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
 	policy.PromotionMaxFiles = 3
-	policy.MaxPromotionsPerDay = 1
+	policy.Budgets.MaxPromotionsPerDay = 1
 
 	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})
@@ -981,6 +1066,13 @@ func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 
 	if len(fc.PostIssueCalls) != 1 || slices.Contains(fc.PostIssueCalls[0].Labels, "ready-for-agent") {
 		t.Fatalf("PostIssueCalls = %+v, want one call with no ready-for-agent label (budget spent)", fc.PostIssueCalls)
+	}
+	// Room already spent (today.Promoted >= MaxPromotionsPerDay): the Box
+	// must not be told a class list even though the Chore has Classes and
+	// promotion is on, mirroring the promotion-off case above (issue #3994
+	// review finding, butler.go's room.Promotions > 0 gate).
+	if len(gotChore.Classes) != 0 {
+		t.Errorf("dispatch.Chore.Classes = %v, want none with today's promotion room spent", gotChore.Classes)
 	}
 	tip, err := backend.Read("bugs")
 	if err != nil {
@@ -1007,7 +1099,7 @@ func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T)
 	// this run actually sweeps.
 	policy.Chores = withClasses(policy.Chores, "refactor", "error-handling")
 	policy.PromotionMaxFiles = 3
-	policy.MaxPromotionsPerDay = 1
+	policy.Budgets.MaxPromotionsPerDay = 1
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
@@ -1028,6 +1120,88 @@ func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T)
 	}
 	if len(tip.State.Promoted) != 0 {
 		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+	}
+}
+
+// countingHistoryBackend wraps a ledger.Backend and counts History calls
+// whose since is exactly midnight -- the shape only a day's totals walk
+// (ledger.DayTotalsAll, via chore.Budgets.Room) makes; Sweep's own due-check
+// History call for a candidate's recent claims uses since =
+// whenNow.Add(-c.Every) instead, so the two are never confused.
+type countingHistoryBackend struct {
+	ledger.Backend
+	midnight    time.Time
+	totalsWalks int
+}
+
+func (w *countingHistoryBackend) History(choreName string, since time.Time) ([]ledger.Entry, error) {
+	if since.Equal(w.midnight) {
+		w.totalsWalks++
+	}
+	return w.Backend.History(choreName, since)
+}
+
+// (q) One full Sweep -- claim, run a Box whose finding is eligible to
+// promote, settle -- with promotion enabled walks the day's totals exactly
+// once: Sweep's own Room computation up front, never a second walk inside
+// settle (issue #3994; before this the promotion Room closure re-walked the
+// Ledger fresh at settle time on top of Sweep's own walk, costing two).
+func TestSweep_PromotionEnabledWalksDayTotalsOnce(t *testing.T) {
+	midnight := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	backend := &countingHistoryBackend{Backend: ledger.Local{Repo: ledgertest.NewRepo(t)}, midnight: midnight}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9300"
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+
+	policy := testRunPolicy(noRunEvery, "bugs")
+	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
+	policy.PromotionMaxFiles = 3
+	policy.Budgets.MaxPromotionsPerDay = 1
+
+	now := midnight.Add(time.Hour)
+	r := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Promoted=1", out)
+	}
+	if backend.totalsWalks != 1 {
+		t.Errorf("totalsWalks = %d, want exactly 1 (Sweep's own Room, no second walk in settle)", backend.totalsWalks)
+	}
+}
+
+// (q2) With two enabled Chores, the day's totals walk costs one History
+// call per Chore (DayTotalsAll folds one DayTotals per name) -- 2, never 4.
+// A single-Chore fixture can't tell "one walk, N Chores" apart from "N
+// Chores walked twice" since both read back totalsWalks == N in that case;
+// this pins the count where the two diverge (issue #3994 review finding).
+func TestSweep_PromotionEnabledWalksDayTotalsOncePerChore(t *testing.T) {
+	midnight := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	backend := &countingHistoryBackend{Backend: ledger.Local{Repo: ledgertest.NewRepo(t)}, midnight: midnight}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9301"
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return promotableDispatcher("error-handling") }
+
+	policy := testRunPolicy(noRunEvery, "bugs", "docs-drift")
+	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
+	policy.PromotionMaxFiles = 3
+	policy.Budgets.MaxPromotionsPerDay = 1
+
+	now := midnight.Add(time.Hour)
+	r := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Promoted=1", out)
+	}
+	if backend.totalsWalks != 2 {
+		t.Errorf("totalsWalks = %d, want exactly 2 (one per enabled Chore, one Sweep -- not 4, two walks)", backend.totalsWalks)
 	}
 }
 
