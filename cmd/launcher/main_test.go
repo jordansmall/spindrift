@@ -28,6 +28,7 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 // A bare `spindrift` prints help and exits 0 rather than falling through to
@@ -3786,6 +3787,89 @@ func TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess(t *testing.T) {
 	scRW := settleConfig(cRW, localloop.Wire(localloopConfig(cRW), fc), fc, forge.Capabilities{})
 	if scRW.ReadOnly {
 		t.Error("settleConfig(read-write default).ReadOnly = true, want false")
+	}
+}
+
+// settleConfig sets Unclaimed true for the butler kind (issue #4076): a
+// landed patch PR's finding issue was never claimed, so there is no
+// Dispatcher to run a fix pass, and the gate must treat red CI as terminal.
+// The butler config goes through applyDispatchKind, as production's does, so
+// the configured Complete label must survive the label-family swap.
+func TestSettleConfig_ButlerKindForcesUnclaimed(t *testing.T) {
+	fc := forge.NewFake()
+
+	c := minimalValidConfig()
+	c.maxFixAttempts = 3
+	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{})
+	if sc.MaxFixAttempts != 3 || sc.Unclaimed {
+		t.Errorf("settleConfig(work kind) = {MaxFixAttempts: %d, Unclaimed: %v}, want {3, false}", sc.MaxFixAttempts, sc.Unclaimed)
+	}
+
+	cb := minimalValidConfig()
+	cb.maxFixAttempts = 3
+	cb.label = "ready-for-agent"
+	cb.inProgressLabel = "agent-in-progress"
+	cb.completeLabel = "agent-complete"
+	cb.failedLabel = "agent-failed"
+	cb = applyDispatchKind(cb, dispatchkind.Butler)
+	scb := settleConfig(cb, localloop.Wire(localloopConfig(cb), fc), fc, forge.Capabilities{})
+	if !scb.Unclaimed {
+		t.Errorf("settleConfig(butler kind).Unclaimed = %v, want true", scb.Unclaimed)
+	}
+	if scb.CompleteLabel != "agent-complete" {
+		t.Errorf("settleConfig(butler kind).CompleteLabel = %q, want %q", scb.CompleteLabel, "agent-complete")
+	}
+
+	dl := dispatchLabels(cb)
+	if dl.Complete != "agent-complete" {
+		t.Errorf("dispatchLabels(butler kind).Complete = %q, want %q", dl.Complete, "agent-complete")
+	}
+	if dl.InProgress != "" || dl.Failed != "" || dl.Dispatchable != "" {
+		t.Errorf("dispatchLabels(butler kind) = %+v, want InProgress/Failed/Dispatchable all blank", dl)
+	}
+}
+
+// A green butler patch PR under immediate merges and completes its finding
+// through the production wiring (applyDispatchKind, newSettle), not a
+// hand-built settle.Config (issue #4076).
+func TestButlerPatchGate_GreenImmediateMergeCompletesIssue(t *testing.T) {
+	c := minimalValidConfig()
+	c.mergeMode = "immediate"
+	c.maxRebaseAttempts = 0
+	c.mergePollTimeout = 100
+	c.label = "ready-for-agent"
+	c.inProgressLabel = "agent-in-progress"
+	c.completeLabel = "agent-complete"
+	c.failedLabel = "agent-failed"
+	c = applyDispatchKind(c, dispatchkind.Butler)
+
+	fc := forge.NewFake(dispatchLabels(c))
+	const prURL = "https://github.com/owner/repo/pull/42"
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-butler-finding", "agent-butler-patch"}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+
+	lw := localloop.Wire(localloopConfig(c), fc)
+	caps := forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{})
+	s := newSettle(c, fc, lw, fc, caps)
+	ws, ok := s.(settle.WorkSettler)
+	if !ok {
+		t.Fatalf("newSettle(butler kind) = %T, does not implement settle.WorkSettler", s)
+	}
+
+	ws.SettleAdopted(nil, "1", 0, prURL)
+
+	if fc.Merged != prURL {
+		t.Errorf("fc.Merged = %q, want %q", fc.Merged, prURL)
+	}
+	iss, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(1): %v", err)
+	}
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue labels = %v, want agent-complete", iss.Labels)
+	}
+	if len(fc.CloseMergedIssueCalls) != 1 {
+		t.Errorf("CloseMergedIssueCalls = %v, want exactly one close", fc.CloseMergedIssueCalls)
 	}
 }
 

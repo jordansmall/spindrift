@@ -10,12 +10,14 @@ import (
 	"testing"
 	"time"
 
+	bkd "spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 // testRunClaimTimeout is the claim timeout every Sweep test below passes
@@ -1225,7 +1227,7 @@ func TestSweep_PatchRungOnWithRoomForwardsPatchClasses(t *testing.T) {
 
 	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	if _, err := r.Sweep([]string{"bugs"}); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -1488,6 +1490,31 @@ func (f *fakePatchForge) CreateDraftPR(title, body, base, head string) (string, 
 	return f.draftURL, true, nil
 }
 
+// fakePatchGateCall records one PatchGate.SettleAdopted invocation.
+type fakePatchGateCall struct {
+	d     dispatch.Dispatcher
+	num   string
+	gen   uint64
+	prURL string
+}
+
+// fakePatchGate is a no-op recording PatchGate (issue #4076): every existing
+// patch-rung Sweep test that doesn't itself exercise the merge gate passes
+// one of these so WithPatchForge never sees a nil gate. onCall, when set,
+// runs before the call is recorded -- TestSweep_PatchGateCalledAfterDoneCommit
+// uses it to read the Ledger from inside the call.
+type fakePatchGate struct {
+	calls  []fakePatchGateCall
+	onCall func(num, prURL string)
+}
+
+func (g *fakePatchGate) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+	if g.onCall != nil {
+		g.onCall(num, prURL)
+	}
+	g.calls = append(g.calls, fakePatchGateCall{d: d, num: num, gen: gen, prURL: prURL})
+}
+
 // patchTestPolicy builds a Policy with both the promotion and patch rungs on
 // for the "docs-drift" class on "bugs" -- the shape every patch-rung Sweep
 // test below starts from, tuning only what its own case cares about.
@@ -1549,7 +1576,7 @@ func TestSweep_PatchedFindingLandsDraftPR(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1620,7 +1647,7 @@ func TestSweep_PatchDiffNoLongerAppliesFallsBackToPromote(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1665,7 +1692,7 @@ func TestSweep_PatchDiffNoLongerAppliesFilesPlainWithPromotionOff(t *testing.T) 
 	policy.Budgets.MaxPromotionsPerDay = 0 // promotion off; the patch rung stays on
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1707,7 +1734,7 @@ func TestSweep_PatchPRCreateFailsFallsBackToPromoteViaAddLabels(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1765,7 +1792,7 @@ func TestSweep_PatchBudgetSpendsOncePerSweep(t *testing.T) {
 	policy.Budgets.MaxPromotionsPerDay = 2 // headroom for the second finding to promote instead
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, policy, func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1807,7 +1834,7 @@ func TestSweep_PatchPushFailsFallsBackToPromote(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1850,7 +1877,7 @@ func TestSweep_PatchFallbackAddLabelsFailsCountsNoPromotion(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1894,7 +1921,7 @@ func TestSweep_PatchFallbackCommentFailsStillCountsPromotion(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1939,7 +1966,7 @@ func TestSweep_PatchLocalTrackerIssueURLLeavesFindingFiled(t *testing.T) {
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	r := New(backend, tree, fc.AsLocalIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf)
+	r := New(backend, tree, fc.AsLocalIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	out, err := r.Sweep([]string{"bugs"})
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
@@ -1966,5 +1993,310 @@ func TestSweep_PatchLocalTrackerIssueURLLeavesFindingFiled(t *testing.T) {
 	}
 	if tip.State.Phase != ledger.Done {
 		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
+	}
+}
+
+// patchGateDispatchLabels mirrors settle_test.go's own testDispatchLabels:
+// the DispatchLabels a real *settle.Settle needs to know what "agent-
+// complete"/"agent-failed" actually spell, even though an unclaimed patch
+// finding's issue never carries agent-in-progress in the first place.
+var patchGateDispatchLabels = forge.DispatchLabels{
+	Dispatchable: "ready-for-agent",
+	InProgress:   "agent-in-progress",
+	Complete:     "agent-complete",
+	Failed:       "agent-failed",
+}
+
+// newPatchGateSettle builds the same shape of *settle.Settle production
+// hands a landed butler patch PR to (issue #4076): MaxFixAttempts 0, since
+// there is no Dispatcher to run a fix pass against, and Unclaimed true,
+// since the finding issue was never claimed. fc backs both the tracker and
+// the code/PR forge, so the PR URL fakePatchForge.CreateDraftPR hands back
+// is the very URL this gate polls.
+func newPatchGateSettle(fc *forge.Fake, mergeMode, guardPaths string) *settle.Settle {
+	cfg := settle.Config{
+		CompleteLabel:     "agent-complete",
+		MergeMode:         mergeMode,
+		MergeGuardPaths:   guardPaths,
+		MergePollInterval: 1,
+		MergePollTimeout:  100,
+		MaxFixAttempts:    0,
+		Unclaimed:         true,
+		Clock:             dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) {}},
+		Capabilities:      forge.ResolveCapabilities(fc, fc, bkd.Descriptor{}, bkd.Descriptor{}),
+	}
+	return settle.New(cfg, fc, fc)
+}
+
+// snapshotGate wraps a real PatchGate and records the Ledger's state
+// immediately before and after one SettleAdopted call, so a test can pin
+// that a failed/no-op gate outcome writes no further Ledger commit on top
+// of the Chore's own Done commit (issue #4076).
+type snapshotGate struct {
+	gate          PatchGate
+	backend       ledger.Backend
+	chore         string
+	before, after ledger.State
+}
+
+func (g *snapshotGate) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+	if tip, err := g.backend.Read(g.chore); err == nil {
+		g.before = tip.State
+	}
+	g.gate.SettleAdopted(d, num, gen, prURL)
+	if tip, err := g.backend.Read(g.chore); err == nil {
+		g.after = tip.State
+	}
+}
+
+// sameLabelSet compares two label sets order-insensitively.
+func sameLabelSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for _, w := range want {
+		if !slices.Contains(got, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// (a) The gate is handed each landed patch's issue number/PR URL only after
+// the Chore's Done Ledger commit has actually landed (issue #4076): the
+// recording fake gate reads the Ledger from inside its own call and finds
+// the commit -- Phase done, claim released, Patched carrying the PR URL --
+// already there.
+func TestSweep_PatchGateCalledAfterDoneCommit(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9500"
+	fc.SetIssue(forge.Issue{Number: "9500"})
+
+	prURL := "https://example.com/pull/500"
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	var sawDoneCommit bool
+	gate := &fakePatchGate{}
+	gate.onCall = func(num, url string) {
+		tip, err := backend.Read("bugs")
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		sawDoneCommit = tip.State.Phase == ledger.Done && tip.State.ClaimedBy == nil && slices.Contains(tip.State.Patched, url)
+	}
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, gate)
+	if _, err := r.Sweep([]string{"bugs"}); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	if !sawDoneCommit {
+		t.Errorf("gate ran before the Done commit landed, or the commit did not yet carry the patched PR URL")
+	}
+	if len(gate.calls) != 1 {
+		t.Fatalf("gate calls = %+v, want exactly 1", gate.calls)
+	}
+	call := gate.calls[0]
+	if call.d != nil {
+		t.Errorf("gate dispatcher = %v, want nil", call.d)
+	}
+	if call.num != "9500" {
+		t.Errorf("gate num = %q, want %q", call.num, "9500")
+	}
+	if call.gen != 0 {
+		t.Errorf("gate gen = %d, want 0", call.gen)
+	}
+	if call.prURL != prURL {
+		t.Errorf("gate prURL = %q, want %q", call.prURL, prURL)
+	}
+}
+
+// (b) A red gate on a landed patch PR must never write a second Ledger
+// commit on top of the Chore's own Done commit, and must leave the finding
+// issue at exactly its two filed labels -- no agent-failed, since there was
+// never an InProgress state for the gate to demote from (issue #4076).
+func TestSweep_PatchGateRedLeavesLedgerAndLabelsUnchanged(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake(patchGateDispatchLabels)
+	fc.PostIssueURL = "https://example.com/issues/9501"
+	wantLabels := []string{"agent-butler-finding", "agent-butler-patch"}
+	fc.SetIssue(forge.Issue{Number: "9501", Labels: append([]string{}, wantLabels...)})
+
+	prURL := "https://example.com/pull/501"
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateFailure})
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	real := newPatchGateSettle(fc, "immediate", "")
+	gate := &snapshotGate{gate: real, backend: backend, chore: "bugs"}
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, gate)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Patched != 1 {
+		t.Errorf("Outcome.Patched = %d, want 1", out.Patched)
+	}
+	if !reflect.DeepEqual(gate.before, gate.after) {
+		t.Errorf("Ledger state changed across the gate call: before=%+v after=%+v", gate.before, gate.after)
+	}
+	if fc.Merged != "" {
+		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue("9501")
+	if !sameLabelSet(iss.Labels, wantLabels) {
+		t.Errorf("labels = %v, want exactly %v", iss.Labels, wantLabels)
+	}
+}
+
+// (c) Under MERGE_MODE=immediate with a green gate, a landed patch PR
+// actually merges and its finding issue reaches agent-complete -- the one
+// tracker transition an unclaimed issue does commit, since it reflects the
+// PR having landed rather than a claim being released (issue #4076).
+func TestSweep_PatchGateImmediateGreenMergesAndCompletes(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake(patchGateDispatchLabels)
+	fc.PostIssueURL = "https://example.com/issues/9502"
+	fc.SetIssue(forge.Issue{Number: "9502", Labels: []string{"agent-butler-finding", "agent-butler-patch"}})
+
+	prURL := "https://example.com/pull/502"
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	gate := newPatchGateSettle(fc, "immediate", "")
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, gate)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Patched != 1 {
+		t.Errorf("Outcome.Patched = %d, want 1", out.Patched)
+	}
+	if fc.Merged != prURL {
+		t.Errorf("fc.Merged = %q, want %q", fc.Merged, prURL)
+	}
+	iss, _ := fc.Issue("9502")
+	if !slices.Contains(iss.Labels, "agent-complete") {
+		t.Errorf("issue labels = %v, want agent-complete", iss.Labels)
+	}
+	if len(fc.CloseMergedIssueCalls) != 1 {
+		t.Errorf("CloseMergedIssueCalls = %v, want exactly one merged-close", fc.CloseMergedIssueCalls)
+	}
+}
+
+// (d) Green but MERGE_MODE=manual/auto never actually lands the PR, so an
+// unclaimed finding issue's labels are left completely untouched -- there is
+// nothing for the gate to commit (issue #4076).
+func TestSweep_PatchGateManualAndAutoLeaveIssueUntouched(t *testing.T) {
+	cases := []struct {
+		mode          string
+		wantAutoMerge bool
+	}{
+		{mode: "manual"},
+		{mode: "auto", wantAutoMerge: true},
+	}
+	for i, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+			tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+			fc := forge.NewFake(patchGateDispatchLabels)
+			fc.PostIssueURL = fmt.Sprintf("https://example.com/issues/951%d", i)
+			num := fmt.Sprintf("951%d", i)
+			wantLabels := []string{"agent-butler-finding", "agent-butler-patch"}
+			fc.SetIssue(forge.Issue{Number: num, Labels: append([]string{}, wantLabels...)})
+
+			prURL := fmt.Sprintf("https://example.com/pull/951%d", i)
+			fc.SetCheckStates(prURL, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+			pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+			newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+			gate := newPatchGateSettle(fc, tc.mode, "")
+
+			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, gate)
+			out, err := r.Sweep([]string{"bugs"})
+			if err != nil {
+				t.Fatalf("Sweep: %v", err)
+			}
+			if out.Patched != 1 {
+				t.Errorf("Outcome.Patched = %d, want 1", out.Patched)
+			}
+			if fc.Merged != "" {
+				t.Errorf("mode=%s: expected no merge; fc.Merged=%q", tc.mode, fc.Merged)
+			}
+			if len(fc.MarkReadyCalls) != 1 {
+				t.Errorf("mode=%s: expected exactly one MarkReady call; got %v", tc.mode, fc.MarkReadyCalls)
+			}
+			if tc.wantAutoMerge && len(fc.EnqueueAutoMergeCalls) != 1 {
+				t.Errorf("mode=%s: expected auto-merge to be enqueued; got %v", tc.mode, fc.EnqueueAutoMergeCalls)
+			}
+			if len(fc.TransitionStateCalls) != 0 {
+				t.Errorf("mode=%s: expected no TransitionState calls; got %+v", tc.mode, fc.TransitionStateCalls)
+			}
+			iss, _ := fc.Issue(num)
+			if !sameLabelSet(iss.Labels, wantLabels) {
+				t.Errorf("mode=%s: labels = %v, want exactly %v", tc.mode, iss.Labels, wantLabels)
+			}
+		})
+	}
+}
+
+// (e) A merge guard hit on the landed patch's own PR downgrades it to
+// manual -- the PR is never merged, the guard posts its own comment, and the
+// finding issue's labels are left untouched, the same as an ordinary
+// manual-mode green gate (issue #4076).
+func TestSweep_PatchGateMergeGuardHitLeavesUnmerged(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake(patchGateDispatchLabels)
+	fc.PostIssueURL = "https://example.com/issues/9520"
+	wantLabels := []string{"agent-butler-finding", "agent-butler-patch"}
+	fc.SetIssue(forge.Issue{Number: "9520", Labels: append([]string{}, wantLabels...)})
+
+	prURL := "https://example.com/pull/520"
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+	fc.SetPRFiles(prURL, []string{".github/workflows/ci.yml"})
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: prURL}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	gate := newPatchGateSettle(fc, "immediate", ".github/**")
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, gate)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Patched != 1 {
+		t.Errorf("Outcome.Patched = %d, want 1", out.Patched)
+	}
+	if fc.Merged != "" {
+		t.Errorf("merge guard must prevent Merge from being called; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("expected exactly one guard comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+	if !strings.Contains(fc.CommentCalls[0].Body, "MERGE_GUARD_PATHS") {
+		t.Errorf("comment body = %q, want a reference to MERGE_GUARD_PATHS", fc.CommentCalls[0].Body)
+	}
+	iss, _ := fc.Issue("9520")
+	if !sameLabelSet(iss.Labels, wantLabels) {
+		t.Errorf("labels = %v, want exactly %v", iss.Labels, wantLabels)
 	}
 }

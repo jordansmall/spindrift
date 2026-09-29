@@ -152,3 +152,17 @@ func TestPatchLabelIsButlerOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestUnclaimedGateIsButlerOnly guards UnclaimedGate's butler-only scope
+// (issue #4076): only the butler's landed patch PR settles a PR on an issue
+// the kind never claimed.
+func TestUnclaimedGateIsButlerOnly(t *testing.T) {
+	if !Butler.UnclaimedGate {
+		t.Fatal("Butler.UnclaimedGate = false, want true")
+	}
+	for _, d := range []*Descriptor{Work, Research} {
+		if d.UnclaimedGate {
+			t.Errorf("%s: UnclaimedGate = true, want false (unclaimed gate is butler-only)", d.Name)
+		}
+	}
+}
