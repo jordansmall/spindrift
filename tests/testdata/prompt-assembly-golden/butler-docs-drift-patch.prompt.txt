@@ -29,14 +29,14 @@ the outcome line's key=value pairs, and the PR-intent line's nonce and
 base64 payload as one unbroken token. The verdict line must additionally
 remain the first line of the agent's final message.
 
-One-shot sweep of the `bugs` chore (ADR 0056). An
+One-shot sweep of the `docs-drift` chore (ADR 0056). An
 advise-only Box: no branch cut, no commits, no PR, no push, and no direct
 write to the Issue Tracker. Scan the Target repo as checked out for this
 Chore's kind of finding and relay each one to the Filer — the launcher
 files it for a human to triage. The sweep records `deadbeef` as its
 head; the checkout may be newer if the base branch moved since. This run
 carries no tracker issue number: it is keyed by the Chore's own name,
-`bugs`, not an issue.
+`docs-drift`, not an issue.
 
 # SCOPE
 
@@ -52,22 +52,23 @@ cmd/launcher/internal/dispatch/dispatch.go
 
 # CHORE
 
-Look for latent bugs in the scoped code: correctness mistakes, wrong error
-handling (swallowed, mismatched, or missing), races and other concurrency
-hazards, off-by-one and boundary errors, and resource leaks (an unclosed
-file, connection, goroutine, or lock that outlives its scope).
+Look for documentation that has drifted from the code it describes: a
+stale reference (a doc naming a file, function, flag, environment
+variable, or command that no longer exists or was renamed), a wrong
+example or command, or a documented default or behaviour the code now
+contradicts.
 
-A finding must be concrete and cited with file:line, and worth a human's
-time to read and fix. Prefer filing nothing over a speculative or
-stylistic finding — this is not a style or readability sweep, and a vague
-"this could maybe be a problem" finding costs a human more to triage than
-it saves.
+A finding must be concrete and cited with both the doc line and the code
+line it contradicts, and worth a human's time to read and fix. Prefer
+filing nothing over a speculative finding — this is not a style or
+completeness sweep, and a doc that is merely thin rather than wrong is
+out of scope.
 
 # PROMOTION CANDIDATES
 
 Promotion classes for this run (blank when promotion is off):
 
-
+docs-drift typo
 
 Tag every finding with a class naming its kind: a lowercase slug of
 letters, digits, and `-`, not starting with `-`, at most 40 characters. A
@@ -87,6 +88,34 @@ promotion classes are blank, or no `reviewer` subagent is provisioned this
 run, no finding is a candidate: relay every finding, class included, with no
 concurrence.
 
+Patch-eligible classes for this run: a finding whose class is one of these
+may carry a unified diff as its patch.
+
+docs-drift
+
+For a candidate whose class is also a patch class, make the fix before you
+spawn the `reviewer`: in the throwaway clone this Box already has, edit only
+the existing files the finding's site keys name — modification hunks only,
+never an added, deleted, renamed, or binary file, and never a mode change.
+Take a unified diff against the commit you scanned (`git diff HEAD --
+<site files>`), then revert the whole working tree (`git checkout HEAD -- .`)
+so the sweep continues on a clean one. The prohibition on committing,
+pushing, or opening a PR still holds — the diff never leaves this Box
+except in the reviewer delegation and the filed finding.
+
+Hand the reviewer the diff alongside the finding's title, body, class, and
+site keys. If its final message starts `VERDICT: APPROVE`, pass the filer
+the diff as the finding's patch, alongside the concurrence. Any other
+answer is dissent: relay the finding without a concurrence and without the
+diff, same as a non-candidate. A candidate outside the patch classes gets
+no diff; a non-candidate never gets one either.
+
+Keep every diff minimal — the smallest change that fixes exactly what the
+finding says. The host alone decides whether a patch is applied, against
+bounds this Box is not told: a diff too wide simply falls through to
+promotion instead of being applied, so never guess at a size limit — just
+stay small.
+
 None of this — the class list, the reviewer, the concurrence — promotes
 anything by itself. The launcher alone decides whether a finding is
 promoted, against its own allow-list and daily budget, at settle. Pass
@@ -97,6 +126,28 @@ candidate.
 
 Relay at most 5 findings this run, the most important
 first — the launcher may refuse or drop any beyond that.
+
+**File findings.** Hand every finding worth tracking to the filer subagent:
+a bug, a missing feature, a perf chore your sweep surfaced. It is
+pre-provisioned via --agents; pass it each finding verbatim. This dispatch
+carries no tracker issue number for provenance — instead, give the filer the
+finding's dedup/site key (`path/to/file.go:Symbol`, or `path/to/file.go:<line>`
+when it names no symbol) naming the file(s) the finding concerns, so the
+launcher can derive that from the filed issue-intent. Also give the filer the
+finding's class, and, only when the `reviewer` agreed on it (see PROMOTION
+CANDIDATES above), the reviewer's one-line concurrence.
+
+The butler never writes to the Issue Tracker itself — the filer is
+relay-only here. It emits `SPINDRIFT_ISSUE_INTENT` lines instead of filing
+directly, and the launcher files each one host-side once you exit, applying
+the `agent-butler-finding` label itself — no issue URL is known yet.
+
+Best-effort: filing must never block the sweep.
+
+- On success (the filer reports `QUEUED`), just count it toward this run's
+  OUTCOME note — never fabricate an issue URL.
+- On failure (the filer errors, times out, or returns nothing usable), drop
+  the finding: the butler posts no comment anywhere to fall back into.
 
 Never push, never open a PR, never commit, never edit an issue, add or
 remove a label, or file an issue yourself, and never write to the Ledger —
@@ -109,7 +160,7 @@ Once every finding is relayed (or the sweep concludes there is nothing to
 relay), print exactly one line as your final output — raw plain text, not
 wrapped in backticks, a code fence, or any other markdown formatting:
 
-SPINDRIFT_OUTCOME issue=butler-bugs landing=none status=ready note=<n findings relayed>
+SPINDRIFT_OUTCOME issue=butler-docs-drift landing=none status=ready note=<n findings relayed>
 
 This must be the literal final message — nothing after it, no prose
 summary. `landing` is always `none`: this run lands nothing, on any forge.
@@ -118,4 +169,4 @@ If you cannot complete the sweep — the clone fails, the slice is
 unreadable, or some other blocker stops you before a genuine conclusion —
 use `blocked` as the escape hatch instead, same raw plain text requirement:
 
-SPINDRIFT_OUTCOME issue=butler-bugs landing=none status=blocked note=<short reason>
+SPINDRIFT_OUTCOME issue=butler-docs-drift landing=none status=blocked note=<short reason>

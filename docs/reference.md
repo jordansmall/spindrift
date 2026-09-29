@@ -4753,7 +4753,9 @@ promote never spends reviewer turns on candidates it cannot win.
 `BUTLER_PATCH_CLASSES` (issue #4072, ADR 0057) mirrors this: the Box sees
 it read-only as `CHORE_PATCH_CLASSES`, and only while today's patch
 budget still has room left (never while the patch rung is off or the
-day's patches are spent).
+day's patches are spent). The butler prompt's patch instructions (issue
+#4073) render only when `CHORE_PATCH_CLASSES` is non-empty, so a run with
+no patch room carries no patch prose at all.
 Every class, configured or Box-reported, shares one grammar (issue #3986):
 a lowercase slug of letters, digits, and `-`, not starting with `-`, at most
 40 characters; a configured class that isn't one fails `spindrift butler`

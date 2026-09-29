@@ -3482,6 +3482,44 @@ func TestButlerPromptStatesClassSlugRule(t *testing.T) {
 	}
 }
 
+// The patch rung's prompt instructions (ADR 0057, issue #4073) render only
+// when the host forwards a non-empty CHORE_PATCH_CLASSES: butlerEnv leaves
+// it unset, matching a Chore with the patch rung off, or today's patch room
+// spent.
+func TestAssembleButlerPatchClassesGate(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name              string
+		chorePatchClasses string
+		wantRendered      bool
+	}{
+		{name: "unset", chorePatchClasses: "", wantRendered: false},
+		{name: "set", chorePatchClasses: "docs-drift", wantRendered: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := butlerEnv()
+			env.ChorePatchClasses = tc.chorePatchClasses
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			const marker = "Patch-eligible classes for this run"
+			got := strings.Contains(result.Prompt, marker)
+			if got != tc.wantRendered {
+				t.Errorf("Prompt contains butler-patch.md text = %v, want %v:\n%s", got, tc.wantRendered, result.Prompt)
+			}
+			if tc.wantRendered && !strings.Contains(result.Prompt, tc.chorePatchClasses) {
+				t.Errorf("Prompt missing substituted CHORE_PATCH_CLASSES value %q:\n%s", tc.chorePatchClasses, result.Prompt)
+			}
+		})
+	}
+}
+
 // A ByChore kind with an unresolvable CHORE_NAME fails assembly outright
 // (choreSection), unlike ISSUE_TEXT's silent-empty default.
 func TestAssembleButlerUnknownChoreFails(t *testing.T) {

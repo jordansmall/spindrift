@@ -715,3 +715,16 @@ SKILL
 
   assert_cell_golden "butler-docs-drift" initial
 }
+
+@test "production path matches the golden fixture for the butler docs-drift chore cell with the patch rung on" {
+  # Nearest sibling: "butler-docs-drift", plus a promotion/patch class pair
+  # (ADR 0057, issue #4073) and a filer roster so this cell also captures the
+  # reviewer's rendered prompt in .agents.json, same as research-filer-on.
+  setup_butler_env "docs-drift"
+  export CHORE_CLASSES="docs-drift typo"
+  export CHORE_PATCH_CLASSES="docs-drift"
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+  export BOX_FILER_ENABLED=1
+
+  assert_cell_golden "butler-docs-drift-patch" initial
+}
