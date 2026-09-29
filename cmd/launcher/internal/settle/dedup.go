@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -21,6 +22,23 @@ var findingLabels = func() []string {
 	labels := make([]string, len(dispatchkind.All))
 	for i, d := range dispatchkind.All {
 		labels[i] = d.FindingLabel
+	}
+	// agent-butler-patch (ADR 0057) is not a Descriptor's FindingLabel: the
+	// host adds it alongside agent-butler-finding when it lands a finding as
+	// a patch PR. Folding in doctor.ButlerLabelNames() rather than a bare
+	// literal ties this list to the source nix/checks/dispatch-labels.nix
+	// extracts from -- for as long as ButlerLabelNames stays the
+	// return-literal that check parses -- so a rename in lib/labels.nix
+	// can't drift from dedup silently.
+	seen := make(map[string]bool, len(labels))
+	for _, l := range labels {
+		seen[l] = true
+	}
+	for _, l := range doctor.ButlerLabelNames() {
+		if !seen[l] {
+			labels = append(labels, l)
+			seen[l] = true
+		}
 	}
 	return labels
 }()

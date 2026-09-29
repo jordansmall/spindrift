@@ -147,6 +147,7 @@ let
       ++ labels.recoverable
       ++ labels.reviewFinding
       ++ labels.butlerFinding
+      ++ labels.butlerPatch
     )
     ++ labels.triggerOnly;
   # The surfaces that write or create a label literal outside the

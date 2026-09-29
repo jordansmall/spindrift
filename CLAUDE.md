@@ -42,6 +42,10 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   number of files, an in-Box reviewer's concurrence, and the day's
   promotion budget — off by default. See
   [Butler](docs/reference.md#butler).
+- `agent-butler-patch` — provenance label for a butler finding the host lands
+  as a patch PR (ADR 0057), alongside `agent-butler-finding`. Never carries a
+  dispatch label. The patch rung is off until `BUTLER_MAX_PATCHES_PER_DAY` is
+  greater than 0.
 
 ### Dispatch authentication
 

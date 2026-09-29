@@ -814,10 +814,11 @@ func mixedMissingLabelsFake() (f *forge.Fake, workMissing, advisoryMissing []str
 	present := []string{"ready-for-agent", "agent-in-progress"} // agent-failed, agent-complete missing
 	present = append(present, research[:len(research)-1]...)
 	present = append(present, priority[:len(priority)-1]...)
+	present = append(present, butler[:len(butler)-1]...)
 	f.Labels = present
 
 	workMissing = []string{"agent-failed", "agent-complete"}
-	advisoryMissing = []string{research[len(research)-1], priority[len(priority)-1], ambiguous[0], butler[0]}
+	advisoryMissing = []string{research[len(research)-1], priority[len(priority)-1], ambiguous[0], butler[len(butler)-1]}
 
 	// A second ListLabels read — only reached if the prompt is accepted —
 	// reports every label present, as if CreateLabel had just succeeded for

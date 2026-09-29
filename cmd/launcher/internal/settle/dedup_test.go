@@ -391,6 +391,9 @@ func TestIsFindingIssue(t *testing.T) {
 	if !isFindingIssue([]string{dispatchkind.Butler.FindingLabel}) {
 		t.Error("isFindingIssue false for a butler-finding-labeled issue (ADR 0056)")
 	}
+	if !isFindingIssue([]string{"agent-butler-patch"}) {
+		t.Error("isFindingIssue false for an agent-butler-patch-labeled issue (ADR 0057)")
+	}
 	if isFindingIssue([]string{"bug", "ready-for-agent"}) {
 		t.Error("isFindingIssue true for an issue carrying neither finding label")
 	}
@@ -456,7 +459,7 @@ func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 	if len(stub.calls) != 2 {
 		t.Fatalf("ListIssuesWithLabels calls = %d, want 2 (one per state)", len(stub.calls))
 	}
-	want := []string{dispatchkind.Work.FindingLabel, dispatchkind.Research.FindingLabel, dispatchkind.Butler.FindingLabel}
+	want := []string{dispatchkind.Work.FindingLabel, dispatchkind.Research.FindingLabel, dispatchkind.Butler.FindingLabel, "agent-butler-patch"}
 	for _, state := range []forge.IssueState{forge.IssueOpen, forge.IssueClosed} {
 		call := stub.callFor(state)
 		if call == nil {
@@ -559,6 +562,26 @@ func TestBacklogDedupIndex_IndexesClosedButlerFindingIssue(t *testing.T) {
 
 	if index["closed butler site"] != "#7" {
 		t.Errorf("index[closed butler site] = %q, want #7", index["closed butler site"])
+	}
+}
+
+// A finding the host already landed as a patch PR carries agent-butler-patch
+// instead of (or alongside) agent-butler-finding (ADR 0057); the dedup index
+// must still list it, since it is not any Descriptor's FindingLabel.
+func TestBacklogDedupIndex_IndexesButlerPatchLabelledIssue(t *testing.T) {
+	stub := &labeledBacklogListerStub{
+		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueOpen: {
+				{Number: "9", Labels: []string{"agent-butler-patch"}, Body: "<!-- spindrift-dedup: patched butler site -->"},
+			},
+		},
+	}
+
+	index := backlogDedupIndex(stub, "100")
+
+	if index["patched butler site"] != "#9" {
+		t.Errorf("index[patched butler site] = %q, want #9", index["patched butler site"])
 	}
 }
 
