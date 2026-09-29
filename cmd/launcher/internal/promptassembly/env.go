@@ -97,10 +97,17 @@ type Env struct {
 
 	// DispatchKind, SelfContained, FixPass, and ResumeAfterHold select which
 	// prompt renders (research/fix/issue) and the session-resume mode.
-	DispatchKind    string // entrypoint.sh: $DISPATCH_KIND (default "work")
+	DispatchKind    string // entrypoint.sh: $DISPATCH_KIND (default "work"; entrypoint.sh never branches on it)
 	SelfContained   bool   // entrypoint.sh: $SELF_CONTAINED == "1", read via _is_self_contained
 	FixPass         int    // entrypoint.sh: $FIX_PASS (fix-pass number; >0 selects fix-prompt.md)
 	ResumeAfterHold bool   // entrypoint.sh: $RESUME_AFTER_HOLD presence
+
+	// DispatchKey, DispatchKeying, DispatchAnnounceVerb are the kind's axes
+	// (issue #3996), forwarded as separate facts so the entrypoint and
+	// prompts never have to re-derive them from DispatchKind.
+	DispatchKey          string // entrypoint.sh: $DISPATCH_KEY (bare issue number, or "butler-<chore>")
+	DispatchKeying       string // entrypoint.sh: $DISPATCH_KEYING ("issue" or "chore")
+	DispatchAnnounceVerb string // entrypoint.sh: $DISPATCH_ANNOUNCE_VERB (Box start-line verb)
 
 	// SignalCarrier is the BOX_SIGNAL_CARRIER knob (ADR 0052, issue #3725) as the
 	// Box sees it: "log" (or empty, the schema default) or "socket". It selects

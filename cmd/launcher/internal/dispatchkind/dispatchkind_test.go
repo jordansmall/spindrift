@@ -66,6 +66,16 @@ func TestByVerb(t *testing.T) {
 	}
 }
 
+// TestKeyingString pins the DISPATCH_KEYING wire values (issue #3996).
+func TestKeyingString(t *testing.T) {
+	if got := ByIssue.String(); got != "issue" {
+		t.Errorf("ByIssue.String() = %q, want %q", got, "issue")
+	}
+	if got := ByChore.String(); got != "chore" {
+		t.Errorf("ByChore.String() = %q, want %q", got, "chore")
+	}
+}
+
 // TestAllOrder pins the daemon's default pool order (issue #3541): work
 // before research before butler.
 func TestAllOrder(t *testing.T) {

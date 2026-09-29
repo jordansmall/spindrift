@@ -112,6 +112,43 @@ func TestBuildBoxEnvSetsDispatchKind(t *testing.T) {
 	}
 }
 
+// Issue #3996: the Box reads its axes as separate facts, never
+// DISPATCH_KIND (display-only there).
+func TestBuildBoxEnvSetsDispatchAxes(t *testing.T) {
+	for _, d := range dispatchkind.All {
+		env := mustBuildBoxEnv(t, Config{Kind: d.Name}, "3", "T", 0, "", "")
+		if got := env["DISPATCH_KEYING"]; got != d.Keying.String() {
+			t.Errorf("%s: DISPATCH_KEYING = %q, want %q", d.Name, got, d.Keying.String())
+		}
+		if got := env["DISPATCH_ANNOUNCE_VERB"]; got != d.AnnounceVerb {
+			t.Errorf("%s: DISPATCH_ANNOUNCE_VERB = %q, want %q", d.Name, got, d.AnnounceVerb)
+		}
+		if got := env["DISPATCH_KEY"]; got != "3" {
+			t.Errorf("%s: DISPATCH_KEY = %q, want %q", d.Name, got, "3")
+		}
+	}
+}
+
+// DISPATCH_KEY carries the same bare issue key an issue Dispatch's outcome
+// line uses (dispatchkey.Key.String()).
+func TestBuildBoxEnvDispatchKeyForIssue(t *testing.T) {
+	if got := mustBuildBoxEnv(t, Config{}, "42", "T", 0, "", "")["DISPATCH_KEY"]; got != "42" {
+		t.Errorf("DISPATCH_KEY: got %q, want %q", got, "42")
+	}
+}
+
+// DISPATCH_KEY carries the byte-identical "butler-<chore>" outcome-line key
+// (dispatchkey.Chore(name).String()) for a butler Dispatch.
+func TestBuildBoxEnvDispatchKeyForChore(t *testing.T) {
+	env, err := buildBoxEnv(Config{Kind: dispatchkind.Butler.Name}, choreSubject(Chore{Name: "lint-sweep"}), 0, "", "")
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	if got := env["DISPATCH_KEY"]; got != "butler-lint-sweep" {
+		t.Errorf("DISPATCH_KEY: got %q, want %q", got, "butler-lint-sweep")
+	}
+}
+
 // Issue #2202: the entrypoint reads SELF_CONTAINED to skip clone_repo and
 // select the self-contained research prompt.
 func TestBuildBoxEnv_SelfContainedSetsMarker(t *testing.T) {

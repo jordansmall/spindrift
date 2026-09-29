@@ -110,10 +110,12 @@ type Config struct {
 	// feature off, and runOnce then starts no proxy and mounts no socket.
 	RegistryProxyRoutes []registryproxy.Route
 
-	// Kind is the dispatch kind ("work" or "research", ADR 0022) forwarded as
-	// DISPATCH_KIND, the Box's one input for both its prompt and its
-	// advise-only posture (resolved in-Box from the descriptor, issue #3901).
-	// Empty defaults to "work".
+	// Kind is the dispatch kind ("work", "research" or "butler"). Its
+	// descriptor's axes reach the Box as DISPATCH_KEYING and
+	// DISPATCH_ANNOUNCE_VERB (issue #3996); the name itself rides along as
+	// DISPATCH_KIND, which the entrypoint only displays or hands to driver-exec
+	// for a descriptor lookup (advise-only posture, issue #3901). Empty
+	// defaults to "work".
 	Kind string
 
 	// SelfContained forwards the research kind's no-repo sub-mode as
@@ -276,6 +278,16 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		kind = dispatchkind.Work.Name
 	}
 	env["DISPATCH_KIND"] = kind
+	// The Box reads DISPATCH_KEY/DISPATCH_KEYING/DISPATCH_ANNOUNCE_VERB, never
+	// DISPATCH_KIND (display-only there); an unrecognized kind falls back to
+	// Work's axes rather than leaving them unset (issue #3996).
+	d, ok := dispatchkind.ByName(kind)
+	if !ok {
+		d = dispatchkind.Work
+	}
+	env["DISPATCH_KEY"] = key
+	env["DISPATCH_KEYING"] = d.Keying.String()
+	env["DISPATCH_ANNOUNCE_VERB"] = d.AnnounceVerb
 	if cfg.SelfContained {
 		env["SELF_CONTAINED"] = "1"
 	}
