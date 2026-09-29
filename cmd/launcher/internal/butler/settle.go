@@ -186,12 +186,12 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 			}
 			if dec.kind == patch {
 				subject := patchCommitSubject(f.Title)
-				pc, err := s.patch.tree.CommitPatch(s.patch.base, f.Patch, subject)
+				pc, err := s.patch.tree.CommitPatch(s.patch.base, ScannedCommit(s.scope.Head), f.Patch, subject)
 				if err != nil {
 					// A stale/rebased diff: file exactly as if it had no
 					// Patch at all, re-deciding with patch room zeroed so
 					// decide can only promote or skip from here (issue #4074).
-					fmt.Printf("    #%s  status=patch-skipped  !! %v\n", num, err)
+					fmt.Printf("    #%s  status=patch-apply-failed  !! %v\n", num, err)
 					dec = s.policy.decide(f, promoteOnlyRoom(remaining))
 				} else {
 					return settle.Decoration{
