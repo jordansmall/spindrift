@@ -16,12 +16,16 @@ import (
 type Finding struct {
 	Class, Concurrence string
 	DedupTerms         []string
+	// Patch is an optional unified diff (ADR 0057, issue #4072), carried
+	// through unexamined: whether it is ever applied is the host's own
+	// later decision, gated on Class, never this plan callback's.
+	Patch string
 }
 
 // finding is in's promotion-relevant view, the projection both FileButlerFindings
 // call sites (the plan callback and its per-finding decorate) need.
 func (in issueIntent) finding() Finding {
-	return Finding{Class: in.Class, Concurrence: in.Concurrence, DedupTerms: in.DedupTerms}
+	return Finding{Class: in.Class, Concurrence: in.Concurrence, DedupTerms: in.DedupTerms, Patch: in.Patch}
 }
 
 // Decoration is what a plan's per-finding callback adds to one finding's

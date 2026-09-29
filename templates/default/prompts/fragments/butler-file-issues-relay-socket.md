@@ -17,8 +17,8 @@ launcher files each one host-side once you exit, applying the
 The filer sends each in one call, the body on stdin through a quoted
 `SPINDRIFT_SIGNAL_EOF` heredoc (`-body-file` only as a fallback for a body
 already in a file). The flags are exactly `-title`, `-type`, `-dedup`
-(repeatable), `-body-file`, `-class`, and `-concurrence` (the last two only
-when the finding has one) — there is no `-body` flag. `-type`
+(repeatable), `-body-file`, `-class`, `-concurrence`, and `-patch-file` (the
+last three only when the finding has one) — there is no `-body` flag. `-type`
 is exactly one of `bug`, `enhancement`, `chore`. A title with backticks
 needs single quotes, not double. A title containing a single quote needs
 `'\''` in its place. The filer runs the command bare — never through

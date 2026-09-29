@@ -84,7 +84,7 @@ const relaySendParagraphMarker = "The filer sends each in one call"
 // butler-file-issues-relay-socket.md intentionally duplicate the "The filer
 // sends each in one call" paragraph, so a wording fix applied to only one of
 // the three drifts silently unless this test catches it. The butler's flag
-// clause legitimately differs — `-class` and `-concurrence` are butler-only
+// clause legitimately differs — `-class`, `-concurrence` and `-patch-file` are butler-only
 // (cmd/launcher/driver-exec/signal_cmd.go, issue #3880) — so that clause is
 // normalized to the shared "and `-body-file`" wording before comparing; any
 // other wording change in any copy still fails.
@@ -99,7 +99,7 @@ func TestIssueIntentRelaySummariesSharedSendParagraph(t *testing.T) {
 		t.Errorf("file-issues-relay-socket.md and research-file-issues-relay-socket.md diverge in their shared send paragraph (from %q):\nfile-issues-relay-socket.md:\n%s\n\nresearch-file-issues-relay-socket.md:\n%s", marker, fileIssues, researchFileIssues)
 	}
 
-	const butlerOnlyClause = "`-body-file`, `-class`, and `-concurrence` (the last two only\nwhen the finding has one)"
+	const butlerOnlyClause = "`-body-file`, `-class`, `-concurrence`, and `-patch-file` (the\nlast three only when the finding has one)"
 	if strings.Count(butlerFileIssues, butlerOnlyClause) != 1 {
 		t.Fatalf("butler-file-issues-relay-socket.md send paragraph does not contain the butler-only flag clause exactly once (from %q; re-wrapping that clause also trips this):\n%s", marker, butlerFileIssues)
 	}

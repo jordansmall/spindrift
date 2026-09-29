@@ -10,3 +10,9 @@
    `driver-exec signal issue-intent` call. Omit the concurrence entirely
    when you were not handed one.
 
+   When the finding's class is one the host has put on its patch
+   allow-list, and only then, you may also carry a `"patch"` key: a unified
+   diff of modification hunks only, no binary content, under the same
+   per-field size cap as every other key. The host, never you, decides
+   whether it is ever applied. Omit the key entirely otherwise.
+

@@ -524,6 +524,40 @@ func TestRunSignal_IssueIntentClassAndConcurrence(t *testing.T) {
 	})
 }
 
+// TestRunSignal_IssueIntentPatchFile pins -patch-file (ADR 0057, issue
+// #4072): its absence carries no Patch, and it reads the named file's
+// content verbatim into the buffered intent's Patch field.
+func TestRunSignal_IssueIntentPatchFile(t *testing.T) {
+	forEachTransport(t, func(t *testing.T, transport string) {
+		srv := startSignalServer(t, transport, signalsocket.Config{Consumes: allKinds()})
+
+		const diff = "--- a/foo.go\n+++ b/foo.go\n@@ -1,2 +1,2 @@\n package foo\n-func Old() {}\n+func New() {}\n"
+		path := filepath.Join(t.TempDir(), "fix.patch")
+		if err := os.WriteFile(path, []byte(diff), 0o600); err != nil {
+			t.Fatalf("write patch file: %v", err)
+		}
+
+		if rc, out := runVerb(t, "one body", "issue-intent", "-title", "one", "-type", "bug"); rc != 0 {
+			t.Fatalf("issue-intent exit = %d, want 0 (out=%q)", rc, out)
+		}
+		if rc, out := runVerb(t, "two body", "issue-intent", "-title", "two", "-type", "chore",
+			"-class", "flaky-test", "-patch-file", path); rc != 0 {
+			t.Fatalf("issue-intent exit = %d, want 0 (out=%q)", rc, out)
+		}
+
+		got := srv.buf.IssueIntents()
+		if len(got) != 2 {
+			t.Fatalf("issue intents = %+v, want 2", got)
+		}
+		if got[0].Patch != "" {
+			t.Errorf("intent[0].Patch = %q, want none", got[0].Patch)
+		}
+		if got[1].Patch != diff {
+			t.Errorf("intent[1].Patch = %q, want %q", got[1].Patch, diff)
+		}
+	})
+}
+
 // TestRunSignal_IssueIntentDedupWireBody pins the wire shape directly,
 // bypassing the socket: -dedup adds a dedupTerms array with the given terms
 // in order, and its absence must leave the posted body byte-identical to
@@ -592,6 +626,22 @@ func TestRunSignal_IssueIntentDedupWireBody(t *testing.T) {
 		}
 		if !strings.Contains(got, `"concurrence":"confirmed"`) {
 			t.Errorf("posted body = %s, want a concurrence field", got)
+		}
+	})
+	t.Run("no patch key without -patch-file", func(t *testing.T) {
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug")
+		if strings.Contains(got, "patch") {
+			t.Errorf("posted body = %s, want no patch key without -patch-file", got)
+		}
+	})
+	t.Run("patch file content", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "fix.patch")
+		if err := os.WriteFile(path, []byte("--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"), 0o600); err != nil {
+			t.Fatalf("write patch file: %v", err)
+		}
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug", "-patch-file", path)
+		if !strings.Contains(got, `"patch":"--- a/f\u000a+++ b/f\u000a@@ -1 +1 @@\u000a-a\u000a+b\u000a"`) {
+			t.Errorf("posted body = %s, want a patch field carrying the file's content", got)
 		}
 	})
 }
@@ -1012,11 +1062,12 @@ func TestRawFields(t *testing.T) {
 			DedupTerms:  []string{"a.go:Foo", "b.go:Bar"},
 			Class:       "flaky-test",
 			Concurrence: "confirmed",
+			Patch:       "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n",
 		}))
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)
 		}
-		want := `{"body":"b","class":"flaky-test","concurrence":"confirmed","dedupTerms":["a.go:Foo","b.go:Bar"],"title":"t","type":"bug"}`
+		want := `{"body":"b","class":"flaky-test","concurrence":"confirmed","dedupTerms":["a.go:Foo","b.go:Bar"],"patch":"--- a/f\u000a+++ b/f\u000a@@ -1 +1 @@\u000a-a\u000a+b\u000a","title":"t","type":"bug"}`
 		if string(got) != want {
 			t.Fatalf("rawFields marshaled = %s, want %s", got, want)
 		}

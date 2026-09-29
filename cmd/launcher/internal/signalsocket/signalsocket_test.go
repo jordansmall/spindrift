@@ -174,19 +174,20 @@ func TestBytesCountsContentFields(t *testing.T) {
 	}
 }
 
-// A term-less, class-less, concurrence-less intent must hash and count a
-// fixed literal -- pinned so a future change to the framing can't silently
-// drift it. Bytes stays the pre-slice value since Class/Concurrence
-// contribute their own (zero) length either way; the hash moved once, when
-// issue #3880 gave Class and Concurrence their own always-framed slots
-// alongside Type, and is now pinned again at that new value.
+// A term-less, class-less, concurrence-less, patch-less intent must hash and
+// count a fixed literal -- pinned so a future change to the framing can't
+// silently drift it. Bytes stays the pre-slice value since
+// Class/Concurrence/Patch contribute their own (zero) length either way; the
+// hash moved once, when issue #3880 gave Class and Concurrence their own
+// always-framed slots alongside Type, moved again when issue #4072 gave
+// Patch one too, and is now pinned again at that new value.
 func TestBytesAndHashUnchangedWithoutDedupTerms(t *testing.T) {
 	b := newAll(t)
 	r := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "ti", Body: "body", Type: "bug"})
 	if want := len("ti") + len("body") + len("bug"); r.Bytes != want {
 		t.Fatalf("bytes = %d, want %d", r.Bytes, want)
 	}
-	const wantHash = "sha256:ec5a271124c04d25b1cad1bf2c34421dc0229c8a63c2f9fe2eb42619742fe2d3"
+	const wantHash = "sha256:cfdf7c4dcbe3bf0c4f6250ef05ecbd7cdc6c10fda077d190972ba5b0ea7e558c"
 	if r.Hash != wantHash {
 		t.Fatalf("hash = %q, want %q", r.Hash, wantHash)
 	}

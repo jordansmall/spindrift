@@ -13,6 +13,7 @@ import (
 func TestIssueIntentValidate(t *testing.T) {
 	bad := string([]byte{0xff})
 	big := strings.Repeat("x", MaxBodyBytes+1)
+	const validUnifiedDiff = "--- a/foo.go\n+++ b/foo.go\n@@ -1,2 +1,2 @@\n package foo\n-func Old() {}\n+func New() {}\n"
 
 	cases := []struct {
 		name       string
@@ -28,6 +29,26 @@ func TestIssueIntentValidate(t *testing.T) {
 		},
 		{"blank dedup term ok", IssueIntent{Title: "t", Body: "b", DedupTerms: []string{"   "}}, "", 0},
 		{"40-char class ok", IssueIntent{Title: "t", Body: "b", Class: strings.Repeat("a", MaxClassLen)}, "", 0},
+		{
+			"valid patch accepted",
+			IssueIntent{Title: "t", Body: "b", Patch: validUnifiedDiff},
+			"", 0,
+		},
+		{
+			"non-diff patch rejected",
+			IssueIntent{Title: "t", Body: "b", Patch: "just some ordinary text\n"},
+			"invalid_patch", 400,
+		},
+		{
+			"oversize patch rejected",
+			IssueIntent{Title: "t", Body: "b", Patch: big},
+			"oversize", 413,
+		},
+		{
+			"binary hunk patch rejected",
+			IssueIntent{Title: "t", Body: "b", Patch: "diff --git a/foo.bin b/foo.bin\nindex 1234567..89abcde 100644\nBinary files a/foo.bin and b/foo.bin differ\n"},
+			"invalid_patch", 400,
+		},
 		{"blank title", IssueIntent{Title: " ", Body: "b"}, "empty", 400},
 		{"blank body", IssueIntent{Title: "t", Body: ""}, "empty", 400},
 		{"invalid utf-8 in title", IssueIntent{Title: bad, Body: "b"}, "invalid_utf8", 400},

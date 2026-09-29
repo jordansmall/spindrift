@@ -143,14 +143,14 @@ func (b *Buffer) AcceptIssueIntent(i signalwire.IssueIntent) (signalwire.Receipt
 	// term keeps every check it has today (UTF-8, oversize).
 	i = i.PruneBlankDedupTerms()
 
-	total := len(i.Title) + len(i.Body) + len(i.Type) + len(i.Class) + len(i.Concurrence)
+	total := len(i.Title) + len(i.Body) + len(i.Type) + len(i.Class) + len(i.Concurrence) + len(i.Patch)
 	for _, term := range i.DedupTerms {
 		total += len(term)
 	}
 	partial := signalwire.Receipt{
 		Kind:  signalwire.KindIssueIntent,
 		Bytes: total,
-		Hash:  contentHash(signalwire.KindIssueIntent, append([]string{i.Title, i.Body, i.Type, i.Class, i.Concurrence}, i.DedupTerms...)...),
+		Hash:  contentHash(signalwire.KindIssueIntent, append([]string{i.Title, i.Body, i.Type, i.Class, i.Concurrence, i.Patch}, i.DedupTerms...)...),
 	}
 	if rej := b.checkKind(signalwire.KindIssueIntent); rej != nil {
 		return partial, rej

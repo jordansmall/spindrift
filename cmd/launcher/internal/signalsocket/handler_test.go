@@ -166,6 +166,54 @@ func TestHandlerRejectsMalformedBody(t *testing.T) {
 	}
 }
 
+// TestHandlerRejectsMalformedPatch shows a malformed patch reaching the Box
+// over the actual HTTP route (ADR 0057, issue #4072): a non-diff patch and
+// an over-cap one are each rejected with a reason naming what is wrong,
+// before the intent is ever buffered.
+func TestHandlerRejectsMalformedPatch(t *testing.T) {
+	b := newAll(t)
+	h := signalsocket.NewHandler(b, nil)
+
+	w := do(t, h, http.MethodPost, "/issue-intent",
+		`{"title":"t","body":"b","type":"bug","patch":"just some ordinary text"}`)
+	rej := wantReject(t, w, "invalid_patch", http.StatusBadRequest)
+	if !strings.Contains(rej.Reason, "unified diff") {
+		t.Errorf("reason = %q, want it to say the patch is not a unified diff", rej.Reason)
+	}
+
+	big := strings.Repeat("x", signalwire.MaxBodyBytes+1)
+	w = do(t, h, http.MethodPost, "/issue-intent",
+		`{"title":"t","body":"b","type":"bug","patch":"`+big+`"}`)
+	rej = wantReject(t, w, "oversize", http.StatusRequestEntityTooLarge)
+	if !strings.HasPrefix(rej.Reason, "patch ") {
+		t.Errorf("reason = %q, want it to name patch", rej.Reason)
+	}
+
+	if got := b.IssueIntents(); len(got) != 0 {
+		t.Fatalf("IssueIntents() = %+v, want none buffered after two rejects", got)
+	}
+}
+
+// TestHandlerRequestSizeAccommodatesBodyAndPatch shows MaxRequestBytes is
+// sized for two worst-case-escaped fields, not one (review finding on issue
+// #4072): a body at the MaxBodyBytes cap plus a heavily-escaped patch at the
+// same cap must still clear the reader's ceiling and reach per-field
+// validation (here, invalid_patch), rather than the generic request-size
+// reject a one-field-sized ceiling would give.
+func TestHandlerRequestSizeAccommodatesBodyAndPatch(t *testing.T) {
+	h := signalsocket.NewHandler(newAll(t), nil)
+
+	// \u0001 escapes to one control byte, so MaxBodyBytes repeats decode to
+	// exactly MaxBodyBytes bytes while costing 6*MaxBodyBytes on the wire.
+	escaped := strings.Repeat(`\u0001`, signalwire.MaxBodyBytes)
+	w := do(t, h, http.MethodPost, "/issue-intent",
+		`{"title":"t","body":"`+escaped+`","type":"bug","patch":"`+escaped+`"}`)
+	rej := wantReject(t, w, "invalid_patch", http.StatusBadRequest)
+	if !strings.Contains(rej.Reason, "unified diff") {
+		t.Errorf("reason = %q, want it to say the patch is not a unified diff", rej.Reason)
+	}
+}
+
 // Content is never destination (issue #3724): a request that tries to name one
 // must fail loudly rather than have the field dropped on the floor.
 func TestHandlerRejectsDestinationFields(t *testing.T) {
