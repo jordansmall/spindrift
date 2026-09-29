@@ -2100,9 +2100,10 @@ func TestWarnStrippedChildEnv_UnsetKnobWarnsNever(t *testing.T) {
 }
 
 // TestWarnStrippedChildEnv_EmptyExportWarnsNever mirrors the "set" test
-// lookupKnob itself applies (its `os.Getenv(envVar) != ""` guard in
-// main.go): an exported-but-empty knob (present in the environment with
-// value "") is not "set" there, so it must not be "set" here either.
+// inputdoc.Document.Lookup itself applies (its `v := os.Getenv(envVar);
+// v != ""` guard in inputdoc.go): an exported-but-empty knob (present in
+// the environment with value "") is not "set" there, so it must not be
+// "set" here either.
 func TestWarnStrippedChildEnv_EmptyExportWarnsNever(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")
 	var stderr bytes.Buffer
