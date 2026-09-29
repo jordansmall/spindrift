@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"path"
 	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/bundlerelay"
 	"spindrift.dev/launcher/internal/forge/git"
 	"spindrift.dev/launcher/internal/forge/rest"
 )
@@ -254,4 +256,61 @@ func (f *forgejoCodeForge) BranchProtected(branch string) (bool, error) {
 	return false, nil
 }
 
+// relayClone builds the `git clone` closure bundlerelay's Relay,
+// CommitSubjects, and PushBranch all take as their clone step: op names the
+// caller for the wrapped error's description. f.remote carries the token as
+// userinfo, so the clone's CombinedOutput stays out of the error: git's
+// diagnostics echo the tokened URL back.
+func (f *forgejoCodeForge) relayClone(op string) func(dir string) error {
+	return func(dir string) error {
+		if _, err := exec.Command("git", "clone", "--no-single-branch", f.remote, dir).CombinedOutput(); err != nil {
+			return fmt.Errorf("forgejo: %s: git clone %s: %w", op, forge.RedactURLCredentials(f.remote), err)
+		}
+		return nil
+	}
+}
+
+// PushBranch force-with-lease-pushes localRef from the git repo at srcDir onto
+// branch on the target repo, with the launcher's own token (issue #4071, ADR
+// 0057).
+func (f *forgejoCodeForge) PushBranch(srcDir, localRef, branch string) error {
+	return bundlerelay.PushBranch("forgejo", srcDir, localRef, branch, f.relayClone("push branch"))
+}
+
+// CreateDraftPR opens a draft PR from head onto base. Forgejo has no
+// create-time draft field and encodes the state as a title prefix
+// (forgejoWIPPrefix), which MarkReady strips before merge. A retried create
+// for the same head adopts that branch's open PR and reports created=false,
+// so a caller (issues #2407, #2447) knows the title and body are not its own.
+// Read-write and read-only settle alike may call it (issue #4071); settle's
+// own gating (Open checks BundleRelay first) is what keeps a read-write land
+// from ever making a host-side create that conflicts with the Box's own.
+func (f *forgejoCodeForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+	reqBody := map[string]any{
+		"title": forgejoWIPPrefix + " " + title,
+		"head":  head,
+		"base":  base,
+		"body":  body,
+	}
+	var payload forgejoPullPayload
+	err := f.rest.Do(http.MethodPost, f.repoPath()+"/pulls", reqBody, &payload)
+	if err == nil {
+		return payload.HTMLURL, true, nil
+	}
+	createErr := fmt.Errorf("forgejo: create draft PR: %w", err)
+	// A 409 means a PR for this head already exists. forgejoStatusMap maps that
+	// status onto errMergeRefused too, so match the create call's own
+	// StatusError rather than errors.Is, which would also match a 405.
+	// OpenPRForBranch is draft-inclusive (issue #2408), and this PR is a draft.
+	var statusErr rest.StatusError
+	if errors.As(err, &statusErr) && statusErr.Status == http.StatusConflict {
+		if pr, ok, openErr := f.OpenPRForBranch(head); openErr == nil && ok {
+			return pr.URL, false, nil
+		}
+	}
+	return "", false, createErr
+}
+
 var _ forge.BranchProtectionForge = (*forgejoCodeForge)(nil)
+var _ forge.BranchPusher = (*forgejoCodeForge)(nil)
+var _ forge.DraftPRCreator = (*forgejoCodeForge)(nil)

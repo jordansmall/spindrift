@@ -67,7 +67,11 @@ not to use that reachability for writes:
   single-line and nonce-guarded by this ADR's #1938 amendment); the Launcher
   opens the draft PR host-side via `forge.DraftPRCreator`, a new optional
   capability discovered by type assertion the same way `PRForge` and
-  `BundleRelay` are.
+  `BundleRelay` are. (Amended by issue #4071: the github and forgejo base
+  adapters now implement `DraftPRCreator` under read-write too, alongside a
+  host-credentialed `BranchPusher`, and the read-only wrappers inherit it
+  rather than owning a copy; see [ADR
+  0057](0057-the-butler-lands-bounded-patches-through-the-host.md).)
 - **Comment → comment line.** Instead of `gh issue comment`, the Box emits a
   `SPINDRIFT_COMMENT` stdout signal (ADR 0032's mechanism, later reshaped
   single-line and nonce-guarded by ADR 0032's #1940 amendment); the Launcher

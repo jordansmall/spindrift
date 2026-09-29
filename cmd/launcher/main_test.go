@@ -3032,11 +3032,11 @@ func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *t
 	}
 }
 
-// The default read-write keeps today's plain Forgejo adapter byte for byte:
-// it must satisfy neither forge.BundleRelay nor forge.DraftPRCreator, or
-// settle's generic relay-before-merge (ready.go) would try to relay a bundle
-// a read-write Box never wrote.
-func TestNewCodeForge_ForgejoReadWrite_DoesNotImplementBundleRelayOrDraftPRCreator(t *testing.T) {
+// The default read-write forgejo adapter now pushes branches and opens draft
+// PRs host-side too (issue #4071), so only forge.BundleRelay stays
+// read-only-only: settle's generic relay-before-merge (ready.go) would
+// otherwise try to relay a bundle a read-write Box never wrote.
+func TestNewCodeForge_ForgejoReadWrite_HostPRButNoBundleRelay(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
 	c.forgejoBaseURL = "https://codeberg.org"
@@ -3048,8 +3048,11 @@ func TestNewCodeForge_ForgejoReadWrite_DoesNotImplementBundleRelayOrDraftPRCreat
 	if _, ok := cf.(forge.BundleRelay); ok {
 		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.BundleRelay, want it hidden")
 	}
-	if _, ok := cf.(forge.DraftPRCreator); ok {
-		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.DraftPRCreator, want it hidden")
+	if _, ok := cf.(forge.DraftPRCreator); !ok {
+		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) does not satisfy forge.DraftPRCreator")
+	}
+	if _, ok := cf.(forge.BranchPusher); !ok {
+		t.Error("newCodeForge(CODE_FORGE=forgejo, BOX_FORGE_AND_ISSUE_ACCESS=read-write) does not satisfy forge.BranchPusher")
 	}
 }
 
