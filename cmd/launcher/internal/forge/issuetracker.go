@@ -197,6 +197,20 @@ type HostPostedIssueFiler interface {
 	PostIssue(title, body string, labels []string) (url string, err error)
 }
 
+// IssueLabeler is the optional IssueTracker capability for adapters that can
+// add labels to an existing issue without going through TransitionState's
+// DispatchState mapping (issue #4074): the butler's patch rung files a
+// finding issue with agent-butler-finding and agent-butler-patch but no
+// dispatch label, and only promotes it to a work label later, after a
+// failed patch push or PR create -- a plain label add TransitionState
+// cannot express, since the butler kind's label family has no Ready label
+// to transition through.
+type IssueLabeler interface {
+	// AddLabels adds labels to issue num, leaving any labels already present
+	// untouched.
+	AddLabels(num string, labels []string) error
+}
+
 // LandingRecorder is the optional IssueTracker capability for adapters that
 // can persist where a Dispatch's work landed (ADR 0029). Only the local
 // adapter implements it; github and jira issues close through the forge's own

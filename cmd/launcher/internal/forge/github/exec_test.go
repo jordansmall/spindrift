@@ -2376,3 +2376,52 @@ esac`)
 		})
 	}
 }
+
+// AddLabels issues one gh issue edit call carrying a repeated --add-label
+// flag per label, mirroring TransitionState's exec style (issue #4074).
+func TestExecClient_AddLabels_OneCallRepeatedFlags(t *testing.T) {
+	dir := prependFakeGH(t, "")
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if err := c.AddLabels("10", []string{"agent-butler-finding", "agent-butler-patch"}); err != nil {
+		t.Fatalf("AddLabels: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "call-") {
+			calls++
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("gh invoked %d times, want exactly 1", calls)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := string(raw)
+	if !strings.Contains(argv, "issue\nedit\n10\n--repo\nowner/repo\n--add-label\nagent-butler-finding\n--add-label\nagent-butler-patch") {
+		t.Errorf("argv = %q, want one edit call with two --add-label flags", argv)
+	}
+}
+
+// gh's stderr must reach the returned error, matching TransitionState's
+// GenuineFailureSurfaced coverage.
+func TestExecClient_AddLabels_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
+exit 1`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	err := c.AddLabels("10", []string{"ready-for-agent"})
+	if err == nil {
+		t.Fatal("AddLabels: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Fatalf("AddLabels error must contain gh's stderr; got: %q", err.Error())
+	}
+}

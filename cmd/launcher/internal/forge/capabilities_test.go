@@ -130,6 +130,12 @@ func TestResolveCapabilities_IssueTrackerShapes(t *testing.T) {
 		if c.HostPostedIssueFiler == nil {
 			t.Error("HostPostedIssueFiler = nil, want non-nil for issue-filer tracker")
 		}
+		// issueFilerTracker embeds the IssueTracker interface value rather than
+		// *Fake (fake_shapes.go), so AddLabels needs its own forwarding method
+		// or it stays hidden here (issue #4074).
+		if c.IssueLabeler == nil {
+			t.Error("IssueLabeler = nil, want non-nil for issue-filer tracker")
+		}
 	})
 }
 

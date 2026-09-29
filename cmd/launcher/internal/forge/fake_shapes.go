@@ -15,7 +15,15 @@ func (i issueFilerTracker) PostIssue(title, body string, labels []string) (strin
 	return i.f.postIssue(title, body, labels)
 }
 
+// AddLabels promotes IssueTrackerFake's AddLabels (issue #4074): the butler's
+// patch rung files with AsIssueFiler() and, on a failed patch push or PR
+// create, must add a work dispatch label to the issue it just filed.
+func (i issueFilerTracker) AddLabels(num string, labels []string) error {
+	return i.f.AddLabels(num, labels)
+}
+
 var _ HostPostedIssueFiler = issueFilerTracker{}
+var _ IssueLabeler = issueFilerTracker{}
 
 // noLandingIssueTracker hides a Fake's RecordLanding and CloseIssue so a
 // type assertion against either reports absence, matching the github and
@@ -108,10 +116,21 @@ func (fs forgejoShapedIssueTracker) CloseMergedIssue(num string) error {
 	return fs.f.CloseMergedIssue(num)
 }
 
-// AsForgejoShaped returns f in the forgejo adapter's shape: MergeCloser, but no LandingRecorder, IssueCloser, or GithubTracker.
+// AddLabels promotes IssueTrackerFake's AddLabels (issue #4074), mirroring
+// the real forgejo adapter (internal/forge/forgejo/forgejo.go), which
+// implements it too: embedding the IssueTracker interface value rather than
+// *Fake would otherwise hide it, the same reason issueFilerTracker promotes
+// it explicitly.
+func (fs forgejoShapedIssueTracker) AddLabels(num string, labels []string) error {
+	return fs.f.AddLabels(num, labels)
+}
+
+// AsForgejoShaped returns f in the forgejo adapter's shape: MergeCloser and IssueLabeler, but no LandingRecorder, IssueCloser, or GithubTracker.
 func (f *Fake) AsForgejoShaped() IssueTracker {
 	return forgejoShapedIssueTracker{IssueTracker: f, f: f}
 }
+
+var _ IssueLabeler = forgejoShapedIssueTracker{}
 
 // seamListedIssueTracker adds the local adapter's SeamLister (ADR 0033),
 // kept separate so localShapedIssueTracker's callers do not gain it too.

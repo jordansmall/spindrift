@@ -1825,3 +1825,79 @@ func TestForgejoClient_CloseMergedIssue_GenuineFailureSurfaced(t *testing.T) {
 		t.Errorf("error must surface the unexpected status, got: %v", err)
 	}
 }
+
+// AddLabels appends only the labels num does not already carry, replacing the
+// full set through setLabels (issue #4074).
+func TestForgejoClient_AddLabels_AppendsMissingOnly(t *testing.T) {
+	h := newForgejoHarness(t)
+	h.SeedIssue(forge.Issue{Number: "42", Title: "t", Labels: []string{"agent-butler-finding"}})
+
+	labeler, ok := h.Tracker().(forge.IssueLabeler)
+	if !ok {
+		t.Fatal("forgejoClient does not satisfy forge.IssueLabeler")
+	}
+	if err := labeler.AddLabels("42", []string{"agent-butler-finding", "ready-for-agent"}); err != nil {
+		t.Fatalf("AddLabels: %v", err)
+	}
+
+	iss, err := h.Tracker().Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if len(iss.Labels) != 2 || !slices.Contains(iss.Labels, "agent-butler-finding") || !slices.Contains(iss.Labels, "ready-for-agent") {
+		t.Errorf("labels = %v, want [agent-butler-finding ready-for-agent], no duplicate", iss.Labels)
+	}
+}
+
+// An empty label name is a caller bug, not a legitimate no-op label the way
+// TransitionState's unconfigured to-label is; it must be rejected before any
+// network call.
+func TestForgejoClient_AddLabels_EmptyLabelErrorsWithoutRequest(t *testing.T) {
+	h := newForgejoHarness(t)
+	h.SeedIssue(forge.Issue{Number: "42", Title: "t", Labels: []string{"agent-butler-finding"}})
+
+	labeler, ok := h.Tracker().(forge.IssueLabeler)
+	if !ok {
+		t.Fatal("forgejoClient does not satisfy forge.IssueLabeler")
+	}
+	err := labeler.AddLabels("42", []string{"ready-for-agent", ""})
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+
+	iss, err := h.Tracker().Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if len(iss.Labels) != 1 || iss.Labels[0] != "agent-butler-finding" {
+		t.Errorf("labels = %v, want unchanged [agent-butler-finding]", iss.Labels)
+	}
+}
+
+// A real labels-PUT failure must reach the caller.
+func TestForgejoClient_AddLabels_GenuineFailureSurfaced(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/issues/42":
+			w.Write([]byte(`{"number":42,"title":"t","body":"","state":"open","labels":[]}`))
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	labeler, ok := fc.(forge.IssueLabeler)
+	if !ok {
+		t.Fatalf("forgejoClient does not satisfy forge.IssueLabeler")
+	}
+	err := labeler.AddLabels("42", []string{"ready-for-agent"})
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error must surface the unexpected status, got: %v", err)
+	}
+}

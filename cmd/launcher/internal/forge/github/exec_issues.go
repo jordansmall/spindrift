@@ -259,6 +259,23 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 	return nil
 }
 
+// AddLabels implements forge.IssueLabeler (issue #4074): one gh issue edit
+// call carrying a --add-label flag per label, mirroring TransitionState's
+// exec and error-handling style.
+func (e *execClient) AddLabels(num string, labels []string) error {
+	args := []string{"issue", "edit", num, "--repo", e.repo}
+	for _, l := range labels {
+		args = append(args, "--add-label", l)
+	}
+	cmd := exec.Command("gh", args...)
+	if _, err := cmd.Output(); err != nil {
+		return ghCommandErr(fmt.Sprintf("gh issue edit %s", num), err)
+	}
+	return nil
+}
+
+var _ forge.IssueLabeler = (*execClient)(nil)
+
 // issueLabels skips the title/body/state fields Issue fetches; CompleteVerdict's
 // InProgress precondition check needs nothing but the labels.
 func (e *execClient) issueLabels(num string) ([]string, error) {

@@ -276,6 +276,20 @@ func (c *forgejoClient) setLabels(num string, names []string) error {
 		map[string]any{"labels": names}, nil)
 }
 
+// appendAbsentLabels returns a copy of existing with each label in add
+// appended, skipping any already present and any empty string -- the shared
+// piece of TransitionState's single to-label append and AddLabels'
+// whole-list append, so the two cannot drift apart (issue #4074).
+func appendAbsentLabels(existing, add []string) []string {
+	out := append([]string(nil), existing...)
+	for _, l := range add {
+		if l != "" && !slices.Contains(out, l) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 // TransitionState replaces num's label set, dropping the from label and adding
 // the to label. A claim to InProgress also drops any stale Complete or Failed
 // terminal label.
@@ -299,9 +313,25 @@ func (c *forgejoClient) TransitionState(num string, from, to forge.DispatchState
 			newLabels = append(newLabels, l)
 		}
 	}
-	if add := c.cfg.Labels.Label(to); add != "" && !slices.Contains(newLabels, add) {
-		newLabels = append(newLabels, add)
+	newLabels = appendAbsentLabels(newLabels, []string{c.cfg.Labels.Label(to)})
+	return c.setLabels(num, newLabels)
+}
+
+// AddLabels implements forge.IssueLabeler (issue #4074): read num's current
+// labels, then replace the full set through setLabels with labels appended
+// -- Forgejo's labels endpoint has no additive "add one label" call. Unlike
+// TransitionState's to-label, which can legitimately be empty for a state
+// with no configured label, every label passed here is meant to be added, so
+// an empty one is a caller bug and is rejected before any network call.
+func (c *forgejoClient) AddLabels(num string, labels []string) error {
+	if slices.Contains(labels, "") {
+		return fmt.Errorf("forgejo: AddLabels %s: empty label name", num)
 	}
+	iss, err := c.Issue(num)
+	if err != nil {
+		return err
+	}
+	newLabels := appendAbsentLabels(iss.Labels, labels)
 	return c.setLabels(num, newLabels)
 }
 
@@ -476,6 +506,7 @@ func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, 
 
 var _ forge.HostPostedCommenter = (*forgejoClient)(nil)
 var _ forge.HostPostedIssueFiler = (*forgejoClient)(nil)
+var _ forge.IssueLabeler = (*forgejoClient)(nil)
 
 // StateLabels implements forge.LabeledTracker.
 func (c *forgejoClient) StateLabels() forge.DispatchLabels {
