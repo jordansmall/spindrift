@@ -576,14 +576,11 @@ func TestSettleRun_Promotion_AnyGateFailingFilesUnlabelled(t *testing.T) {
 			`{"title":"f4","body":"b","dedupTerms":[],"class":"error-handling","concurrence":"agreed"}`,
 		},
 		{
+			// Validate rejects a whitespace-only Concurrence outright (issue
+			// #3992); TestPromotion_Eligible covers eligible()'s trim alone.
 			"empty concurrence",
 			base,
 			`{"title":"f5","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":""}`,
-		},
-		{
-			"whitespace-only concurrence",
-			base,
-			`{"title":"f6","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"   "}`,
 		},
 		{
 			"maxPromotionsPerDay defaults to zero room",

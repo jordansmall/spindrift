@@ -15,31 +15,12 @@ import (
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// issueIntent is the decoded shape of one SPINDRIFT_ISSUE_INTENT payload
-// (issue #2018). Labels is the Box's own request, parsed but never passed to
-// PostIssue; the caller's provenanceLabel picks the labels. DedupTerms is
-// also the Box's own request, but unlike Labels it does reach the filed
-// issue: it keys the host-side dedup check (dedup.go, issue #3609) and is
-// written into the filed body's hidden marker so a later run can recover it.
+// issueIntent is one decoded SPINDRIFT_ISSUE_INTENT payload (issue #2018):
+// the wire shape plus Labels, the Box's own request, parsed but never passed
+// to PostIssue -- the caller's provenanceLabel picks the labels (issue #1949).
 type issueIntent struct {
-	Title      string   `json:"title"`
-	Body       string   `json:"body"`
-	Labels     []string `json:"labels"`
-	DedupTerms []string `json:"dedupTerms"`
-	// Type is an optional finding-type token (issue #2594 / ADR 0041), never
-	// used directly as a label; see ensureTypeLabel.
-	Type string `json:"type"`
-	// Class and Concurrence are both Box claims the butler's auto-promotion
-	// gate (issue #3880, ADR 0056) takes as input, never as the gate itself:
-	// Class is the finding class the Box tagged, checked against the host's
-	// own allow-list; Concurrence is the in-Box reviewer's one-line
-	// agreement, empty when the reviewer dissented or never ran. Both are
-	// bounded before they ever reach host-authored note text -- see
-	// sanitizeConcurrence for how Concurrence is neutralized. Neither field
-	// can promote anything on its own -- the host-side policy the Butler
-	// Runner's promotion gate holds decides that.
-	Class       string `json:"class"`
-	Concurrence string `json:"concurrence"`
+	signalwire.IssueIntent
+	Labels []string `json:"labels"`
 }
 
 // ensureTypeLabel ensure-creates typ's mapped label and returns the label to
@@ -105,24 +86,21 @@ func sanitizeConcurrence(s string) string {
 }
 
 // parseIssueIntent decodes one raw SPINDRIFT_ISSUE_INTENT payload, already
-// base64-decoded and nonce-verified by outcome.AllIssueIntentLinesInLog.
-// Returns ok=false for malformed JSON or a blank title. A Class that fails
-// signalwire.ValidClass is cleared rather than rejecting the whole intent:
-// it reads downstream as "no class claimed", so it is simply never named
-// and never promotable, the same as an intentionally absent Class.
-func parseIssueIntent(raw string) (issueIntent, bool) {
+// base64-decoded and nonce-verified by outcome.AllIssueIntentLinesInLog, and
+// re-validates it defensively: the log carrier reaches settle unchecked, and
+// a socket payload already passed Validate, plus the socket's own type
+// requirement and its blank-dedup-term pruning. Any reject skips the whole
+// intent, so an illegal Class is never silently dropped from one.
+func parseIssueIntent(raw string) (issueIntent, *signalwire.Reject) {
 	var in issueIntent
 	if err := json.Unmarshal([]byte(raw), &in); err != nil {
-		return issueIntent{}, false
+		return issueIntent{}, &signalwire.Reject{Status: "invalid_json", Reason: "malformed issue-intent payload"}
 	}
-	if strings.TrimSpace(in.Title) == "" {
-		return issueIntent{}, false
-	}
-	if !signalwire.ValidClass(in.Class) {
-		in.Class = ""
+	if rej := in.Validate(); rej != nil {
+		return issueIntent{}, rej
 	}
 	in.Concurrence = sanitizeConcurrence(in.Concurrence)
-	return in, true
+	return in, nil
 }
 
 // filedIntent is the outcome of filing one issue-intent: a URL on success,
@@ -206,9 +184,9 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 	var dedupIndex map[string]string
 	var out []filedIntent
 	for _, raw := range result.IssueIntents {
-		in, ok := parseIssueIntent(raw)
-		if !ok {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: skipping malformed issue-intent payload\n", num)
+		in, rej := parseIssueIntent(raw)
+		if rej != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: skipping invalid issue-intent payload: %s\n", num, rej.Reason)
 			continue
 		}
 		keys, dropped := splitDedupTerms(in.DedupTerms)

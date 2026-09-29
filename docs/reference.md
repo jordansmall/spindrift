@@ -4723,6 +4723,10 @@ Every class, configured or Box-reported, shares one grammar (issue #3986):
 a lowercase slug of letters, digits, and `-`, not starting with `-`, at most
 40 characters; a configured class that isn't one fails `spindrift butler`
 preflight (and `spindrift doctor --butler`) naming the class and the rule.
+On the log carrier, settle re-validates each finding with the same rules the
+socket enforces on receipt, and a finding that fails — a non-slug class
+included — is skipped, with a host stderr line naming the rejection,
+rather than filed with the bad field cleared (issue #3992).
 
 A run claims the Chore's **Ledger** — its durable record, kept as a chain of
 commits on `refs/spindrift/butler/<chore>` in the Target repo, never on a
