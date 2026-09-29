@@ -9,6 +9,45 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.21.0 — 2026-09-29
+
+The butler can now fix small things itself: a finding that comes with a
+tight, safe diff lands as a PR instead of just an issue.
+
+No breaking changes.
+
+- **Butler patches (opt-in).** A butler finding can now carry its own diff.
+  If it passes every check, the host commits it, pushes a branch, and opens
+  a PR that closes the finding, rather than only filing or promoting the
+  issue. It's off until you set `BUTLER_MAX_PATCHES_PER_DAY` above 0, and
+  it needs GitHub or Forgejo as both the Code Forge and the issue tracker.
+  `BUTLER_PATCH_CLASSES` picks which finding classes may patch (by default
+  just `docs-drift=stale-reference`).
+- **Patches are kept small and safe.** A patch may only modify existing
+  files (no adds, deletes, renames, or binaries), must stay within
+  `BUTLER_PATCH_MAX_FILES` (default 3) and `BUTLER_PATCH_MAX_LINES`
+  (default 20), may only touch paths `BUTLER_PATCH_PATHS` allows (docs and
+  Markdown by default, never agent instruction files or `.github/`), and
+  needs the in-Box reviewer to agree. It also has to apply cleanly to both
+  the scanned commit and the current base branch. A patch that misses any
+  check is logged as `patch-skipped` or `patch-apply-failed`, and the
+  finding is handled as if it had no patch.
+- **Patch PRs go through the normal merge gate.** A green patch PR merges
+  (or waits for a human under `MERGE_MODE=manual` or a `MERGE_GUARD_PATHS`
+  hit) just like a work PR, with no fix passes. A red run leaves the PR in
+  draft with a comment and never marks anything `agent-failed`. Patched
+  findings carry the new `agent-butler-patch` label, which
+  `spindrift doctor` now checks for and offers to create.
+- **Butler and daemon fixes.** `nix run .#daemon -- status` works again.
+  `spindrift butler` now rejects an empty `--chore`, a value that looks
+  like another flag, or a second `--chore`, so an unset variable in a
+  wrapper script can't quietly sweep whichever Chore was due. Findings
+  whose only file references were junk no longer slip through to
+  auto-promotion, and the daemon no longer prints `daemon: daemon:` on
+  startup errors.
+- **Fewer Forgejo calls.** The Forgejo backend remembers when a repo's
+  owner has no org labels instead of asking again on every lookup.
+
 ## 0.20.2 — 2026-09-29
 
 Butler groundwork: config mistakes get caught up front, and findings are
