@@ -13,7 +13,6 @@ import (
 
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/chore"
-	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/ledger"
@@ -91,7 +90,7 @@ func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 		config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "other-chore"}},
 		cleanup: func() {},
 	}
-	code := cmdButler(lc, "bugs", "")
+	code := cmdButler(lc, "bugs")
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
@@ -142,7 +141,7 @@ func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
 	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bad.name")
 	var code int
-	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "", "") })
+	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
@@ -160,7 +159,7 @@ func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
 	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bugs")
 	var code int
-	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "", "") })
+	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
@@ -204,7 +203,7 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 			lc := testButlerLaunchContext(t, repo, "bugs")
 			tt.set(&lc.config)
 			var code int
-			stderr := captureStderrFile(t, func() { code = cmdButler(lc, "", "") })
+			stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
 			if code != exitConfigInvalid {
 				t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 			}
@@ -225,7 +224,7 @@ func TestCmdButler_RejectsOverrideForChoreNotEnabled(t *testing.T) {
 		cleanup: func() {},
 	}
 	var code int
-	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "", "") })
+	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
@@ -241,7 +240,7 @@ func TestCmdButler_RejectsForgeWithNoLedger(t *testing.T) {
 		config:  config{schemaConfig: schemaConfig{codeForge: "git", butlerChores: "bugs"}},
 		cleanup: func() {},
 	}
-	code := cmdButler(lc, "bugs", "")
+	code := cmdButler(lc, "bugs")
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
@@ -261,7 +260,7 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 				config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: schemaDefault("BUTLER_CHORES")}},
 				cleanup: func() {},
 			}
-			code := cmdButler(lc, choreName, "")
+			code := cmdButler(lc, choreName)
 			if code != exitConfigInvalid {
 				t.Errorf("cmdButler(%q) code = %d, want %d", choreName, code, exitConfigInvalid)
 			}
@@ -554,11 +553,12 @@ func promotableRunFunc(class string) func(runner.Box) error {
 }
 
 // cmdButler hands a promoted finding the operator's configured work label
-// through its workLabel parameter (issue #3993). Every host-side gate clears: "bugs" is
-// allow-listed for class "error-handling", the finding names one file, it
-// carries a reviewer concurrence, and BUTLER_MAX_PROMOTIONS_PER_DAY leaves
-// room -- so the filed issue carries both the configured label and the
-// standing "agent-butler-finding" provenance label.
+// through lc.config.workLabel (issue #3993, #4054). Every host-side gate
+// clears: "bugs" is allow-listed for class "error-handling", the finding
+// names one file, it carries a reviewer concurrence, and
+// BUTLER_MAX_PROMOTIONS_PER_DAY leaves room -- so the filed issue carries
+// both the configured label and the standing "agent-butler-finding"
+// provenance label.
 func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 	t.Setenv("FILER_MODEL", "test-model")
 	repo := ledgertest.NewRepo(t)
@@ -581,13 +581,13 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 			baseBranch:                   schemaDefault("BASE_BRANCH"),
 			butlerMaxPromotionsPerDay:    1,
 			butlerPromotionMaxFiles:      3,
-		}},
+		}, workLabel: "agent-go"},
 		factory:      testFactory(t, t.TempDir(), fr),
 		issueTracker: fc.AsIssueFiler(),
 		cleanup:      func() {},
 	}
 
-	code := cmdButler(lc, "bugs", "agent-go")
+	code := cmdButler(lc, "bugs")
 	if code != 0 {
 		t.Fatalf("cmdButler code = %d, want 0", code)
 	}
@@ -600,21 +600,5 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 	}
 	if !slices.Contains(got, "agent-butler-finding") {
 		t.Errorf("labels = %v, want agent-butler-finding", got)
-	}
-}
-
-// TestButlerWorkLabel_ReadsConfiguredLabelBeforeKindSwap pins butlerWorkLabel
-// to a fresh, pre-swap config read, and documents why: bootstrap's
-// applyDispatchKind blanks the label for butler's label-less family, so
-// reading it post-swap would silently disable promotion (issue #3993).
-func TestButlerWorkLabel_ReadsConfiguredLabelBeforeKindSwap(t *testing.T) {
-	t.Setenv("LABEL", "agent-go")
-
-	if got := butlerWorkLabel(); got != "agent-go" {
-		t.Fatalf("butlerWorkLabel() = %q, want %q", got, "agent-go")
-	}
-
-	if got := applyDispatchKind(loadConfig(), dispatchkind.Butler).label; got != "" {
-		t.Fatalf("applyDispatchKind(...).label = %q, want empty (butler's label-less family)", got)
 	}
 }
