@@ -1020,6 +1020,21 @@ func TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal(t *testing.T) {
 	}
 }
 
+// workLabel survives the butler swap, so no caller depends on reading LABEL
+// before applyDispatchKind runs (issue #4054).
+func TestApplyDispatchKind_Butler_PreservesConfiguredWorkLabel(t *testing.T) {
+	t.Setenv("LABEL", "agent-go")
+
+	c := applyDispatchKind(loadConfig(), dispatchkind.Butler)
+
+	if c.workLabel != "agent-go" {
+		t.Errorf("workLabel = %q, want %q", c.workLabel, "agent-go")
+	}
+	if c.label != "" {
+		t.Errorf("label = %q, want empty (butler's label-less family)", c.label)
+	}
+}
+
 // A research-kind config's IssueTracker resolves verdict labels
 // (CompleteVerdict) while a work-kind config's does not: the kind-aware seam
 // of ADR 0022, exercised through the local adapter because its state field is

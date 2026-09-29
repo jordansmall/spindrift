@@ -136,6 +136,13 @@ type config struct {
 	// operator intent carried by which subcommand launched, not a config knob.
 	dispatchKind *dispatchkind.Descriptor
 
+	// workLabel is the operator's configured work LABEL, captured by
+	// applyDispatchKind before its swap blanks c.label for a label-less
+	// family (butler, ADR 0056). Butler promotion reads it (issue #4054).
+	// It is the configured LABEL only when applyDispatchKind runs on a fresh
+	// loadConfig(); a second application captures the prior kind's label.
+	workLabel string
+
 	// selfContained is the research kind's no-repo sub-mode (issue #2202,
 	// --self-contained): the Box clones no repo and explores none, and startup
 	// validation permits the no-REPO_SLUG/no-GH_TOKEN configuration. validate
@@ -178,7 +185,9 @@ func (c config) effectiveBoxForgeAndIssueAccess() string {
 // key off the names directly, and leaves completeLabel blank — the
 // verdict-carrying transition uses IssueTracker.CompleteVerdict instead.
 // configuredWork is captured before the swap overwrites it, since the other
-// family's in-progress label (issue #3541) may be the configured one.
+// family's in-progress label (issue #3541) may be the configured one; it also
+// becomes c.workLabel, so a label-less family (butler) still has the
+// configured work label available after its own c.label goes blank.
 func applyDispatchKind(c config, kind *dispatchkind.Descriptor) config {
 	c.dispatchKind = kind
 	configuredWork := forge.DispatchLabels{
@@ -187,6 +196,8 @@ func applyDispatchKind(c config, kind *dispatchkind.Descriptor) config {
 		Complete:     c.completeLabel,
 		Failed:       c.failedLabel,
 	}
+
+	c.workLabel = configuredWork.Dispatchable
 
 	ownFamily := c.kind().Labels
 	own := forge.FamilyLabels(ownFamily, configuredWork)
