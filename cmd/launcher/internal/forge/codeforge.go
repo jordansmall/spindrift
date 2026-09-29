@@ -116,7 +116,9 @@ type PRForge interface {
 // #1914): under BOX_FORGE_AND_ISSUE_ACCESS=read-only the Box holds no write
 // token, so the Launcher opens the draft PR instead, from a title, body, base,
 // and head the Box supplies. Only meaningful for a forge that also implements
-// PRForge. No adapter implements it yet; issue #1916's startup gate names it.
+// PRForge. github and forgejo base adapters implement it regardless of the
+// Box's access mode (issue #4071); read-only settle uses it for the Box's
+// hand-off.
 type DraftPRCreator interface {
 	// CreateDraftPR opens a draft PR from head onto base and returns its URL.
 	// created is false when the adapter instead adopted a pre-existing open PR
@@ -124,6 +126,15 @@ type DraftPRCreator interface {
 	// Settle's reconstructed-PR path (issue #2447) must not word over an
 	// adopted PR's title and body, so it needs the two cases apart.
 	CreateDraftPR(title, body, base, head string) (url string, created bool, err error)
+}
+
+// BranchPusher is the optional host-credentialed push interface (issue #4071,
+// ADR 0057): github and forgejo base adapters implement it regardless of the
+// Box's access mode, backed by the same relay clone the bundle relay uses.
+type BranchPusher interface {
+	// PushBranch force-with-lease-pushes localRef from the git repo at srcDir
+	// onto branch on the target repo.
+	PushBranch(srcDir, localRef, branch string) error
 }
 
 // BranchProtectionForge is the optional branch-protection-query interface (issue

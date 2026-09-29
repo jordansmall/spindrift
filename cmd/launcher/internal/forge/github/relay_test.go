@@ -337,15 +337,6 @@ esac
 	}
 }
 
-// A read-write Box opens its own PR in-box, so settle must never call a
-// host-side create for it.
-func TestExecClient_DoesNotImplementDraftPRCreator(t *testing.T) {
-	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	if _, ok := cf.(forge.DraftPRCreator); ok {
-		t.Error("NewExecClient satisfies forge.DraftPRCreator, want it hidden for read-write")
-	}
-}
-
 // A fix-pass retry rebuilds a bundle whose branch tip diverged from what an
 // earlier pass relayed. It must overwrite the remote ref rather than be
 // rejected as non-fast-forward (issue #1918's acceptance criterion).
