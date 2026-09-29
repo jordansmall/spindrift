@@ -189,13 +189,16 @@ func resolveButlerSettings(cfg config, choreName string) (butlerSettings, error)
 // #3875, #3877, #3880): it sweeps the first due Chore among the one named on
 // --chore, or else every BUTLER_CHORES entry in order, and reports "no work"
 // with each candidate's reason if none is due. Each swept Chore's finding is
-// auto-promoted to ready-for-agent when it clears every host-side gate
+// auto-promoted to workLabel when it clears every host-side gate
 // (allow-listed class, file limit, reviewer concurrence, and daily
 // promotion room); BUTLER_MAX_PROMOTIONS_PER_DAY defaults to 0, off. A
 // resolveButlerSettings failure exits exitConfigInvalid (6) rather than 1,
 // so the daemon's shared breaker (internal/daemon/outcome.go) never treats a
-// config problem as an unclassified error (issue #3920).
-func cmdButler(lc *launchContext, choreName string) int {
+// config problem as an unclassified error (issue #3920). workLabel is the
+// operator's configured work LABEL (read by the caller before bootstrap's
+// kind swap blanks it, issue #3880/#3993), fed straight into
+// Policy.PromotionLabel.
+func cmdButler(lc *launchContext, choreName, workLabel string) int {
 	defer lc.cleanup()
 
 	settings, err := resolveButlerSettings(lc.config, choreName)
@@ -250,7 +253,7 @@ func cmdButler(lc *launchContext, choreName string) int {
 		Zone:                settings.window.Location(),
 		PromotionMaxFiles:   lc.config.butlerPromotionMaxFiles,
 		MaxPromotionsPerDay: lc.config.butlerMaxPromotionsPerDay,
-		PromotionLabel:      lc.config.configuredWorkLabel,
+		PromotionLabel:      workLabel,
 	}
 
 	sweeper := butler.New(backend, butler.GitTree{Repo: repo}, lc.issueTracker, newDispatcher, policy, time.Now)
@@ -272,10 +275,21 @@ func butlerVerbHandler(args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
+	workLabel := butlerWorkLabel()
 	lc, err := bootstrap(!noBuild, dispatchkind.Butler, false)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return bootstrapExitCode(err)
 	}
-	return cmdButler(lc, choreName)
+	return cmdButler(lc, choreName, workLabel)
+}
+
+// butlerWorkLabel returns the operator's configured work LABEL, read from a
+// fresh loadConfig because bootstrap's applyDispatchKind blanks c.label for
+// butler's label-less family. A second loadConfig call is safe: it's a
+// deterministic function of env vars and host git config (bootstrap.go:60),
+// so it agrees with bootstrap's own load. A promoted finding must carry this
+// label (issue #3993).
+func butlerWorkLabel() string {
+	return loadConfig().label
 }

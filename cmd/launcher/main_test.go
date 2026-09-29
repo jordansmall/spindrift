@@ -997,24 +997,6 @@ func TestApplyDispatchKind_Work_LeavesConfiguredLabelsAlone(t *testing.T) {
 	}
 }
 
-// The butler kind carries no Dispatchable label of its own (LabelsNone), but
-// applyDispatchKind still captures the operator's configured work LABEL into
-// configuredWorkLabel before the swap -- a promoted finding needs the real
-// name, not the family's own blank one (issue #3880).
-func TestApplyDispatchKind_Butler_CapturesConfiguredWorkLabel(t *testing.T) {
-	c := minimalValidConfig()
-	c.label = "agent-go"
-
-	got := applyDispatchKind(c, dispatchkind.Butler)
-
-	if got.label != "" {
-		t.Errorf("label = %q, want empty (butler's LabelsNone family)", got.label)
-	}
-	if got.configuredWorkLabel != "agent-go" {
-		t.Errorf("configuredWorkLabel = %q, want %q", got.configuredWorkLabel, "agent-go")
-	}
-}
-
 // config's by-value embed of schemaConfig means applyDispatchKind mutates
 // only the returned copy, leaving the caller's original untouched. A pointer
 // embed would let the label swap alias and corrupt the caller's struct.
