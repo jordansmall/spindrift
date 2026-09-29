@@ -21,8 +21,10 @@ type schemaConfig struct {
 	butlerEvery                  string
 	butlerMaxFindingsPerDay      int
 	butlerMaxFindingsPerSweep    int
+	butlerMaxPatchesPerDay       int
 	butlerMaxPromotionsPerDay    int
 	butlerMaxSweepsPerDay        int
+	butlerPatchClasses           string
 	butlerPromotionMaxFiles      int
 	bwrapUnshareNet              bool
 	claudeOAuthToken             string
@@ -109,8 +111,10 @@ func loadSchemaConfig() schemaConfig {
 		butlerEvery:               getenvSchema("BUTLER_EVERY"),
 		butlerMaxFindingsPerDay:   atoiNonnegSchema("BUTLER_MAX_FINDINGS_PER_DAY"),
 		butlerMaxFindingsPerSweep: atoiNonnegSchema("BUTLER_MAX_FINDINGS_PER_SWEEP"),
+		butlerMaxPatchesPerDay:    atoiNonnegSchema("BUTLER_MAX_PATCHES_PER_DAY"),
 		butlerMaxPromotionsPerDay: atoiNonnegSchema("BUTLER_MAX_PROMOTIONS_PER_DAY"),
 		butlerMaxSweepsPerDay:     atoiNonnegSchema("BUTLER_MAX_SWEEPS_PER_DAY"),
+		butlerPatchClasses:        getenvSchema("BUTLER_PATCH_CLASSES"),
 		butlerPromotionMaxFiles:   atoiSchema("BUTLER_PROMOTION_MAX_FILES"),
 		bwrapUnshareNet:           getenvSchema("BWRAP_UNSHARE_NET") != "",
 		claudeOAuthToken:          os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),

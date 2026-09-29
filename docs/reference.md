@@ -4858,6 +4858,21 @@ write the reservation files every finding unlabelled. A running butler Box never
 (issue #3922), so with promotion on, a jam can fire shortly before a
 promoted finding makes dispatch runnable again.
 
+The Ledger and `chore.Room` already count a `patched` total alongside
+`filed` and `promoted` (ADR 0057), and two host-only knobs configure the
+rung that will spend it: `BUTLER_MAX_PATCHES_PER_DAY` (schema key
+`butlerMaxPatchesPerDay`, default `0`) caps butler findings landed as
+host-applied patch PRs per day, same shape as `BUTLER_MAX_PROMOTIONS_PER_DAY`
+— `0` means the rung is off, so enabling a Chore never patches anything by
+itself, and it is not a start gate either. `BUTLER_PATCH_CLASSES` (schema
+key `butlerPatchClasses`, default `docs-drift=stale-reference`) is each
+Chore's host-side patch allow-list, in the same `<chore>=<class>[,<class>...]`
+grammar as `BUTLER_CHORE_CLASSES`, and is checked only when
+`BUTLER_MAX_PATCHES_PER_DAY > 0`: every entry's classes must be a subset of
+that Chore's `BUTLER_CHORE_CLASSES` allow-list, and every entry's Chore must
+be enabled in `BUTLER_CHORES` — either violation is rejected at `spindrift
+butler`/daemon startup preflight, naming the offending chore or class.
+
 ## Registry route discovery
 
 `spindrift registry discover <repo-dir> <routes-file>` (ADR 0045) writes a

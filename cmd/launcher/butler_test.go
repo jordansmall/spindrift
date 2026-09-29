@@ -270,50 +270,57 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 
 // (m) butlerPreflight guards codeForge, BUTLER_CHORES membership (or, with
 // no --chore, BUTLER_CHORES being non-empty at all), BUTLER_CHORE_CLASSES
-// syntax, and the Filer gate in that order, before cmdButler ever claims a
-// Ledger -- in particular a chore run with no provisioned Filer
-// (DRIVER=opencode, or FILER_MODEL="") must be refused up front rather than
-// sweep and silently drop findings.
+// syntax, the BUTLER_PATCH_CLASSES cross-checks (ADR 0057, only when
+// butlerMaxPatchesPerDay > 0), and the Filer gate in that order, before
+// cmdButler ever claims a Ledger -- in particular a chore run with no
+// provisioned Filer (DRIVER=opencode, or FILER_MODEL="") must be refused up
+// front rather than sweep and silently drop findings.
 func TestButlerPreflight(t *testing.T) {
 	cases := []struct {
-		name               string
-		codeForge          string
-		butlerChores       string
-		butlerChoreClasses string
-		butlerMaxPerSweep  int
-		butlerMaxPerDay    int
-		chore              string
-		filerEnabled       bool
-		catalogNames       []string
-		catalogKnown       bool
-		wantErr            string // substring of the error, checked in guard order; "" means no error
+		name                   string
+		codeForge              string
+		butlerChores           string
+		butlerChoreClasses     string
+		butlerMaxPerSweep      int
+		butlerMaxPerDay        int
+		butlerPatchClasses     string
+		butlerMaxPatchesPerDay int
+		chore                  string
+		filerEnabled           bool
+		catalogNames           []string
+		catalogKnown           bool
+		wantErr                string // substring of the error, checked in guard order; "" means no error
 	}{
-		{"all clear", "local", "bugs", "bugs=error-handling", 0, 0, "bugs", true, nil, false, ""},
-		{"github clear", "github", "bugs", "", 0, 0, "bugs", true, nil, false, ""},
-		{"forgejo clear", "forgejo", "bugs", "", 0, 0, "bugs", true, nil, false, ""},
-		{"forge with no ledger rejected", "git", "bugs", "", 0, 0, "bugs", true, nil, false, "cannot host a butler Ledger (supported: github, forgejo, local)"},
-		{"chore not enabled", "local", "other-chore", "", 0, 0, "bugs", true, nil, false, "is not enabled"},
-		{"malformed classes rejected", "local", "bugs", "bugs", 0, 0, "bugs", true, nil, false, "BUTLER_CHORE_CLASSES"},
-		{"non-slug class rejected", "local", "bugs", "bugs=Error_Handling", 0, 0, "bugs", true, nil, false, "Error_Handling"},
-		{"filer not provisioned", "local", "bugs", "", 0, 0, "bugs", false, nil, false, "needs a provisioned Filer"},
-		{"forge checked before chore", "git", "other-chore", "", 0, 0, "bugs", false, nil, false, "cannot host a butler Ledger"},
-		{"chore checked before filer", "local", "other-chore", "", 0, 0, "bugs", false, nil, false, "is not enabled"},
-		{"classes checked before filer", "local", "bugs", "bugs", 0, 0, "bugs", false, nil, false, "BUTLER_CHORE_CLASSES"},
-		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", 0, 0, "tidy-deps", true, nil, false, ""},
-		{"class-list entry naming an unknown non-built-in chore rejected", "local", "bugs", "notachore=error-handling", 0, 0, "bugs", true, nil, false, "is not enabled and not a built-in chore"},
-		{"dogfood-shaped config passes", "local", "bugs docs-drift", schemaDefault("BUTLER_CHORE_CLASSES"), 0, 0, "", true, nil, false, ""},
-		{"no chore: all clear with chores enabled", "local", "bugs", "", 0, 0, "", true, nil, false, ""},
-		{"no chore: empty BUTLER_CHORES rejected", "local", "", "", 0, 0, "", true, nil, false, "BUTLER_CHORES is empty"},
-		{"no chore: filer checked after empty-chores guard", "local", "", "", 0, 0, "", false, nil, false, "BUTLER_CHORES is empty"},
-		{"sweep exceeds day rejected", "local", "bugs", "", 6, 5, "bugs", true, nil, false, "BUTLER_MAX_FINDINGS_PER_SWEEP (6) exceeds BUTLER_MAX_FINDINGS_PER_DAY (5); no run could ever start"},
-		{"sweep equals day ok", "local", "bugs", "", 5, 5, "bugs", true, nil, false, ""},
-		{"day zero with sweep set ok", "local", "bugs", "", 5, 0, "bugs", true, nil, false, ""},
-		{"bad --chore name rejected", "local", "bugs", "", 0, 0, "bad name!", true, nil, false, "invalid name format"},
-		{"bad BUTLER_CHORES entry rejected", "local", "bad name!", "", 0, 0, "", true, nil, false, "invalid name format"},
-		{"chore missing from catalog rejected", "local", "bugs", "", 0, 0, "bugs", true, []string{"docs-drift"}, true, "prompt file missing"},
-		{"chore present in catalog passes", "local", "bugs", "", 0, 0, "bugs", true, []string{"bugs"}, true, ""},
-		{"empty known catalog rejected", "local", "bugs", "", 0, 0, "bugs", true, nil, true, "prompt file missing"},
-		{"catalog absent skips prompt check", "local", "bugs", "", 0, 0, "bugs", true, nil, false, ""},
+		{"all clear", "local", "bugs", "bugs=error-handling", 0, 0, "", 0, "bugs", true, nil, false, ""},
+		{"github clear", "github", "bugs", "", 0, 0, "", 0, "bugs", true, nil, false, ""},
+		{"forgejo clear", "forgejo", "bugs", "", 0, 0, "", 0, "bugs", true, nil, false, ""},
+		{"forge with no ledger rejected", "git", "bugs", "", 0, 0, "", 0, "bugs", true, nil, false, "cannot host a butler Ledger (supported: github, forgejo, local)"},
+		{"chore not enabled", "local", "other-chore", "", 0, 0, "", 0, "bugs", true, nil, false, "is not enabled"},
+		{"malformed classes rejected", "local", "bugs", "bugs", 0, 0, "", 0, "bugs", true, nil, false, "BUTLER_CHORE_CLASSES"},
+		{"non-slug class rejected", "local", "bugs", "bugs=Error_Handling", 0, 0, "", 0, "bugs", true, nil, false, "Error_Handling"},
+		{"filer not provisioned", "local", "bugs", "", 0, 0, "", 0, "bugs", false, nil, false, "needs a provisioned Filer"},
+		{"forge checked before chore", "git", "other-chore", "", 0, 0, "", 0, "bugs", false, nil, false, "cannot host a butler Ledger"},
+		{"chore checked before filer", "local", "other-chore", "", 0, 0, "", 0, "bugs", false, nil, false, "is not enabled"},
+		{"classes checked before filer", "local", "bugs", "bugs", 0, 0, "", 0, "bugs", false, nil, false, "BUTLER_CHORE_CLASSES"},
+		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", 0, 0, "", 0, "tidy-deps", true, nil, false, ""},
+		{"class-list entry naming an unknown non-built-in chore rejected", "local", "bugs", "notachore=error-handling", 0, 0, "", 0, "bugs", true, nil, false, "is not enabled and not a built-in chore"},
+		{"dogfood-shaped config passes", "local", "bugs docs-drift", schemaDefault("BUTLER_CHORE_CLASSES"), 0, 0, "", 0, "", true, nil, false, ""},
+		{"no chore: all clear with chores enabled", "local", "bugs", "", 0, 0, "", 0, "", true, nil, false, ""},
+		{"no chore: empty BUTLER_CHORES rejected", "local", "", "", 0, 0, "", 0, "", true, nil, false, "BUTLER_CHORES is empty"},
+		{"no chore: filer checked after empty-chores guard", "local", "", "", 0, 0, "", 0, "", false, nil, false, "BUTLER_CHORES is empty"},
+		{"sweep exceeds day rejected", "local", "bugs", "", 6, 5, "", 0, "bugs", true, nil, false, "BUTLER_MAX_FINDINGS_PER_SWEEP (6) exceeds BUTLER_MAX_FINDINGS_PER_DAY (5); no run could ever start"},
+		{"sweep equals day ok", "local", "bugs", "", 5, 5, "", 0, "bugs", true, nil, false, ""},
+		{"day zero with sweep set ok", "local", "bugs", "", 5, 0, "", 0, "bugs", true, nil, false, ""},
+		{"bad --chore name rejected", "local", "bugs", "", 0, 0, "", 0, "bad name!", true, nil, false, "invalid name format"},
+		{"bad BUTLER_CHORES entry rejected", "local", "bad name!", "", 0, 0, "", 0, "", true, nil, false, "invalid name format"},
+		{"chore missing from catalog rejected", "local", "bugs", "", 0, 0, "", 0, "bugs", true, []string{"docs-drift"}, true, "prompt file missing"},
+		{"chore present in catalog passes", "local", "bugs", "", 0, 0, "", 0, "bugs", true, []string{"bugs"}, true, ""},
+		{"empty known catalog rejected", "local", "bugs", "", 0, 0, "", 0, "bugs", true, nil, true, "prompt file missing"},
+		{"catalog absent skips prompt check", "local", "bugs", "", 0, 0, "", 0, "bugs", true, nil, false, ""},
+		{"patch rung off ignores a malformed BUTLER_PATCH_CLASSES", "local", "bugs", "", 0, 0, "bugs", 0, "bugs", true, nil, false, ""},
+		{"patch class outside promotion classes rejected", "local", "bugs", "bugs=error-handling", 0, 0, "bugs=resource-leak", 1, "bugs", true, nil, false, `chore "bugs": class "resource-leak" is not on its BUTLER_CHORE_CLASSES allow-list`},
+		{"patch class for disabled chore rejected", "local", "bugs", "bugs=error-handling", 0, 0, "docs-drift=stale-reference", 1, "bugs", true, nil, false, `chore "docs-drift" is not enabled`},
+		{"patch rung on with allow-listed class passes", "local", "bugs", "bugs=error-handling", 0, 0, "bugs=error-handling", 1, "bugs", true, nil, false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -323,6 +330,8 @@ func TestButlerPreflight(t *testing.T) {
 				butlerChoreClasses:        tc.butlerChoreClasses,
 				butlerMaxFindingsPerSweep: tc.butlerMaxPerSweep,
 				butlerMaxFindingsPerDay:   tc.butlerMaxPerDay,
+				butlerPatchClasses:        tc.butlerPatchClasses,
+				butlerMaxPatchesPerDay:    tc.butlerMaxPatchesPerDay,
 			}}
 			catalog := choreCatalog{names: tc.catalogNames, known: tc.catalogKnown}
 			_, err := butlerPreflight(cfg, tc.chore, tc.filerEnabled, catalog)
@@ -498,6 +507,43 @@ func TestButlerPromotionKnobsParseFromSchema(t *testing.T) {
 	}
 	if cfg.butlerPromotionMaxFiles != 9 {
 		t.Errorf("butlerPromotionMaxFiles = %d, want 9", cfg.butlerPromotionMaxFiles)
+	}
+}
+
+// The two host patch knobs (BUTLER_MAX_PATCHES_PER_DAY, BUTLER_PATCH_CLASSES)
+// resolve through the generated schemaFlags table and loadSchemaConfig, the
+// same wiring every other schema knob uses (ADR 0057).
+func TestButlerPatchKnobsParseFromSchema(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		dflt string
+	}{
+		{"BUTLER_MAX_PATCHES_PER_DAY", "0"},
+		{"BUTLER_PATCH_CLASSES", "docs-drift=stale-reference"},
+	} {
+		found := false
+		for _, f := range schemaFlags {
+			if f.env != tc.env {
+				continue
+			}
+			found = true
+			if f.dflt != tc.dflt {
+				t.Errorf("%s default = %q, want %q", tc.env, f.dflt, tc.dflt)
+			}
+		}
+		if !found {
+			t.Errorf("%s missing from schemaFlags", tc.env)
+		}
+	}
+
+	t.Setenv("BUTLER_MAX_PATCHES_PER_DAY", "4")
+	t.Setenv("BUTLER_PATCH_CLASSES", "bugs=error-handling")
+	cfg := loadSchemaConfig()
+	if cfg.butlerMaxPatchesPerDay != 4 {
+		t.Errorf("butlerMaxPatchesPerDay = %d, want 4", cfg.butlerMaxPatchesPerDay)
+	}
+	if cfg.butlerPatchClasses != "bugs=error-handling" {
+		t.Errorf("butlerPatchClasses = %q, want %q", cfg.butlerPatchClasses, "bugs=error-handling")
 	}
 }
 

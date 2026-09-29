@@ -468,6 +468,27 @@ in
     nixSubPath = "butler.maxPromotionsPerDay";
     boxEnv = false;
   };
+  butlerMaxPatchesPerDay = {
+    env = "BUTLER_MAX_PATCHES_PER_DAY";
+    group = "dispatch";
+    default = 0;
+    doc = "caps butler findings landed as host-applied patch PRs per day (ADR 0057); like BUTLER_MAX_PROMOTIONS_PER_DAY, 0 means the patch rung is off (the default), so enabling a Chore alone never patches; host-only -- the Box never sees this value; not a start gate -- a spent patch budget still lets sweeps run and file";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "nonneg";
+    nixSubPath = "butler.maxPatchesPerDay";
+    boxEnv = false;
+  };
+  butlerPatchClasses = {
+    env = "BUTLER_PATCH_CLASSES";
+    group = "dispatch";
+    default = choreCatalog.patchClassesDefault;
+    doc = "space-separated `<chore>=<class>[,<class>...]` entries, each Chore's host-side patch allow-list (ADR 0057), a subset of that Chore's BUTLER_CHORE_CLASSES entry; checked only when BUTLER_MAX_PATCHES_PER_DAY > 0; an entry naming a Chore not enabled in BUTLER_CHORES, or a class not on that Chore's BUTLER_CHORE_CLASSES allow-list, is rejected naming the offender; setting it replaces the whole default, so restate any built-in entry you want to keep; the default names only docs-drift, so turning the rung on without enabling docs-drift in BUTLER_CHORES requires overriding this to name an enabled Chore instead";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    nixSubPath = "butler.patchClasses";
+    boxEnv = false;
+  };
   butlerPromotionMaxFiles = {
     env = "BUTLER_PROMOTION_MAX_FILES";
     group = "dispatch";
