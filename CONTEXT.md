@@ -677,7 +677,8 @@ _Avoid_: lens, task, job.
 A [[Chore]]'s durable record in the Target repo: the history of every
 Butler run on it — how far it has swept, where it is in the tree, what it
 filed and spent, which the daily budgets are totalled from — and the claim
-that stops two runs working the same chore at once.
+that stops two runs working the same chore at once. It holds state only:
+the checkout a Butler scans is not part of it.
 _Avoid_: state file, log (the Box log), report.
 
 **Dispatch lifecycle**:

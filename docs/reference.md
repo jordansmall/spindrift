@@ -4732,10 +4732,12 @@ A run claims the Chore's **Ledger** — its durable record, kept as a chain of
 commits on `refs/spindrift/butler/<chore>` in the Target repo, never on a
 branch. On the local forge that ref lives in the bare Accumulation repo and
 moves with `git update-ref`. On `github` and `forgejo` it lives on the
-Target repo's remote: the host fetches the ref into a throwaway scratch
-clone, builds each state commit there, and pushes it with
-`--force-with-lease` on the tip it read, authenticated with the launcher's
-own credential (the `gh` CLI's for GitHub, `FORGEJO_TOKEN` for Forgejo).
+Target repo's remote: the host fetches the Ledger refs once per run into
+a throwaway scratch clone (alongside a shallow fetch of the base branch
+the run scans), reads the Ledger from that copy, builds each state commit
+there, and pushes it with `--force-with-lease` on the tip it read,
+authenticated with the launcher's own credential (the `gh` CLI's for
+GitHub, `FORGEJO_TOKEN` for Forgejo).
 That push has its own refspec — it never goes through the bundle relay and
 never touches `refs/heads/` — and a lost lease is a lost claim, not an
 error. `git log refs/spindrift/butler/<chore>` (after `git fetch origin
@@ -4816,7 +4818,10 @@ which the butler keeps in `--agents` even under `ORCHESTRATOR`, since an
 advise-only run never gets the code-owned review pass that otherwise
 replaces it; and today's `BUTLER_MAX_PROMOTIONS_PER_DAY` (schema key
 `butlerMaxPromotionsPerDay`, default `0`) budget has room, walked from
-the Ledger at settle time like the budgets above. Default `0` means promotion
+the Ledger at settle time like the budgets above. On a hosted forge that
+walk reads the Ledger mirror fetched once at run start (issue #3995), so
+promotions another host makes during a long run go uncounted here -- the
+cap is soft, not a hard ceiling. Default `0` means promotion
 is off — unlike every other butler budget, where `0` means no limit — so
 enabling a Chore, or listing classes in `BUTLER_CHORE_CLASSES`, never
 promotes anything by itself; it is not a start gate either, and a spent
