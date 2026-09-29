@@ -354,6 +354,15 @@ let
       var = "BUTLER_FILE_ISSUES_RELAY_SOCKET_STEP";
       signalChannel = "issue-intent";
     }
+    # The butler's patch-instructions step (ADR 0057, issue #4073): the
+    # forwarded CHORE_PATCH_CLASSES fact's presence is its own gate, same
+    # shape as CI_FAILURE_SUMMARY below, so a run with the patch rung off (or
+    # today's patch room spent) carries no patch prose at all.
+    {
+      gate = "CHORE_PATCH_CLASSES";
+      fragment = "butler-patch.md";
+      var = "BUTLER_PATCH_STEP";
+    }
     {
       gate = "AUTO_FORMAT";
       fragment = "auto-format.md";

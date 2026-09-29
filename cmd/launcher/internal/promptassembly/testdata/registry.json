@@ -219,6 +219,11 @@
     "signalChannel": "issue-intent"
   },
   {
+    "gate": "CHORE_PATCH_CLASSES",
+    "fragment": "butler-patch.md",
+    "var": "BUTLER_PATCH_STEP"
+  },
+  {
     "gate": "AUTO_FORMAT",
     "fragment": "auto-format.md",
     "var": "AUTO_FORMAT_STEP"

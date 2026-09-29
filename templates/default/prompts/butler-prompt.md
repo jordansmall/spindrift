@@ -30,12 +30,6 @@ Promotion classes for this run (blank when promotion is off):
 
 ${CHORE_CLASSES}
 
-Patch-eligible classes for this run (blank when the patch rung is off, or
-today's patch room is spent): a finding whose class is one of these may
-carry a unified diff as its patch.
-
-${CHORE_PATCH_CLASSES}
-
 Tag every finding with a class naming its kind: a lowercase slug of
 letters, digits, and `-`, not starting with `-`, at most 40 characters. A
 class outside that shape is rejected, and the finding with it.
@@ -54,7 +48,7 @@ promotion classes are blank, or no `reviewer` subagent is provisioned this
 run, no finding is a candidate: relay every finding, class included, with no
 concurrence.
 
-None of this — the class list, the reviewer, the concurrence — promotes
+${BUTLER_PATCH_STEP}None of this — the class list, the reviewer, the concurrence — promotes
 anything by itself. The launcher alone decides whether a finding is
 promoted, against its own allow-list and daily budget, at settle. Pass
 every finding's class to the filer regardless of whether it is a

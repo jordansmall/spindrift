@@ -622,3 +622,27 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 		})
 	}
 }
+
+// CHORE_PATCH_CLASSES is a presence-is-the-gate fact, same shape as
+// CI_FAILURE_SUMMARY (ADR 0057, issue #4073): the host only forwards it for a
+// butler Chore with the patch rung on and today's patch room left, so an
+// empty value must carry no patch prose.
+func TestGatesChorePatchClasses(t *testing.T) {
+	cases := []struct {
+		name              string
+		chorePatchClasses string
+		want              bool
+	}{
+		{name: "unset", chorePatchClasses: "", want: false},
+		{name: "set", chorePatchClasses: "docs-drift", want: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := Gates(Env{ChorePatchClasses: tc.chorePatchClasses})
+			if got["CHORE_PATCH_CLASSES"] != tc.want {
+				t.Errorf("Gates(ChorePatchClasses=%q)[\"CHORE_PATCH_CLASSES\"] = %v, want %v", tc.chorePatchClasses, got["CHORE_PATCH_CLASSES"], tc.want)
+			}
+		})
+	}
+}
