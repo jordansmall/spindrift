@@ -1,5 +1,87 @@
 # Changelog
 
+## [0.21.0](https://github.com/jordansmall/spindrift/compare/v0.20.2...v0.21.0) (2026-09-29)
+
+
+### Features
+
+* **butler:** add patch path, file, line bounds ([09cb1b7](https://github.com/jordansmall/spindrift/commit/09cb1b793bb77f57a273427d060d59966dcef532)), closes [#4075](https://github.com/jordansmall/spindrift/issues/4075)
+* **butler:** add the patch rung's two knobs ([b6a8603](https://github.com/jordansmall/spindrift/commit/b6a86038c15940abc013e6044355ac3f0d646a8a)), closes [#4072](https://github.com/jordansmall/spindrift/issues/4072)
+* **butler:** bound a patch before decide picks it ([14db0c5](https://github.com/jordansmall/spindrift/commit/14db0c5a031df81cb68853ebbc4119f4f03c618d)), closes [#4075](https://github.com/jordansmall/spindrift/issues/4075)
+* **butler:** check patch against scanned commit ([7f17765](https://github.com/jordansmall/spindrift/commit/7f1776514d30f9b0c8dada97c96260c2fdeab465)), closes [#4075](https://github.com/jordansmall/spindrift/issues/4075)
+* **butler:** count patches in the Ledger and Room ([071b344](https://github.com/jordansmall/spindrift/commit/071b344bd4017d64d186bf25a6c0ca8ca45f540b)), closes [#4072](https://github.com/jordansmall/spindrift/issues/4072)
+* **butler:** hand a landed patch PR to the merge gate ([895b55e](https://github.com/jordansmall/spindrift/commit/895b55e87d2ea7b77f249f5ee302c567493fb95f)), closes [#4076](https://github.com/jordansmall/spindrift/issues/4076)
+* **butler:** have the Box make a patch candidate's diff ([2251c98](https://github.com/jordansmall/spindrift/commit/2251c98902a15d45abf9fb6f02447d09d88f05ef)), closes [#4073](https://github.com/jordansmall/spindrift/issues/4073)
+* **butler:** land a patched finding as a draft PR ([485c471](https://github.com/jordansmall/spindrift/commit/485c47166538bed9275f03bb791deb5127470405)), closes [#4074](https://github.com/jordansmall/spindrift/issues/4074)
+* **butler:** let decide choose a patch first ([5b002ed](https://github.com/jordansmall/spindrift/commit/5b002ed0a56591a642fd180894e46ba58597a4db)), closes [#4074](https://github.com/jordansmall/spindrift/issues/4074)
+* **butler:** let the reviewer judge the patch diff ([b6df680](https://github.com/jordansmall/spindrift/commit/b6df680a3f0ea836daaed292e06826755bb2a7c2)), closes [#4073](https://github.com/jordansmall/spindrift/issues/4073)
+* **butler:** let the Tree commit a patch ([b195125](https://github.com/jordansmall/spindrift/commit/b19512577dc0daf7aa884701e9dc1a62b3c05699)), closes [#4074](https://github.com/jordansmall/spindrift/issues/4074)
+* **butler:** tell the Box which classes may patch ([7bdafe2](https://github.com/jordansmall/spindrift/commit/7bdafe27a9cb0b85ff52eb9b11f62a23ec7798b4)), closes [#4072](https://github.com/jordansmall/spindrift/issues/4072)
+* **butler:** turn on the patch rung in production ([d128e05](https://github.com/jordansmall/spindrift/commit/d128e0550aa26725d06fd4a55e4414f544d3da86)), closes [#4074](https://github.com/jordansmall/spindrift/issues/4074)
+* **doctor:** add the agent-butler-patch label ([75b7ec2](https://github.com/jordansmall/spindrift/commit/75b7ec2204fa9f04c61c8f0ea06f35fd49a0f0e0)), closes [#4072](https://github.com/jordansmall/spindrift/issues/4072)
+* **forge:** expose HostCanOpenPR on capabilities ([869f10d](https://github.com/jordansmall/spindrift/commit/869f10d9a88c97ad8ca1619f15aafbaa860d5c65)), closes [#4071](https://github.com/jordansmall/spindrift/issues/4071)
+* **forgejo:** push branches and open draft PRs host-side ([cea226f](https://github.com/jordansmall/spindrift/commit/cea226fd8b8fe4d7f0936c28f7a954b4a773f9ed)), closes [#4071](https://github.com/jordansmall/spindrift/issues/4071)
+* **forge:** let a tracker add labels to an issue ([721ed51](https://github.com/jordansmall/spindrift/commit/721ed51656c11830784f88eb5f98b85869cdefcd)), closes [#4074](https://github.com/jordansmall/spindrift/issues/4074)
+* **github:** push branches and open draft PRs host-side ([1f48fb0](https://github.com/jordansmall/spindrift/commit/1f48fb0c1b3731fb6339b48d0e8cb6f20584b3a7)), closes [#4071](https://github.com/jordansmall/spindrift/issues/4071)
+* **promptassembly:** generate BoxEnvVarNames list ([e81dfec](https://github.com/jordansmall/spindrift/commit/e81dfec215460d718f1f2d41d2972fd22f28b9dd)), closes [#4044](https://github.com/jordansmall/spindrift/issues/4044)
+* **settle:** gate a PR whose issue was never claimed ([be2f652](https://github.com/jordansmall/spindrift/commit/be2f652f232b6e1c287466278f3f6b438badacc4)), closes [#4076](https://github.com/jordansmall/spindrift/issues/4076)
+* **signal:** let a butler finding carry a patch ([64ce3f6](https://github.com/jordansmall/spindrift/commit/64ce3f6e55774617e84146b2870d7eeeb4247fbc)), closes [#4072](https://github.com/jordansmall/spindrift/issues/4072)
+* **signalwire:** parse a diff into file entries ([7790fa1](https://github.com/jordansmall/spindrift/commit/7790fa15e6e091eaeb1d237d4bae915e3b5517cb)), closes [#4075](https://github.com/jordansmall/spindrift/issues/4075)
+
+
+### Bug Fixes
+
+* **butler:** read promotion label from lc.config ([7075737](https://github.com/jordansmall/spindrift/commit/7075737e9ca41eaefe51a458d4f1ec6d8899b7fb)), closes [#4054](https://github.com/jordansmall/spindrift/issues/4054)
+* **butler:** reject empty or repeated --chore ([071e86f](https://github.com/jordansmall/spindrift/commit/071e86f2abcb351c98cb643448552a28a71893fd)), closes [#4059](https://github.com/jordansmall/spindrift/issues/4059)
+* **butler:** skip junk dedup terms in butlerFiles ([25bf1fc](https://github.com/jordansmall/spindrift/commit/25bf1fc5fe1db526a7ea61fb03434a64177add72)), closes [#4036](https://github.com/jordansmall/spindrift/issues/4036)
+* **butler:** state the full class slug rule ([3b80623](https://github.com/jordansmall/spindrift/commit/3b806237fc0f500af9d3107dfe42210f61a9eefc)), closes [#4040](https://github.com/jordansmall/spindrift/issues/4040)
+* **daemon:** find status behind the wrapper's --input ([2140dc6](https://github.com/jordansmall/spindrift/commit/2140dc65aa584347f9ce3c39f3de0b6389e8a8a9)), closes [#4060](https://github.com/jordansmall/spindrift/issues/4060)
+* **daemon:** print a single daemon prefix on startup errors ([b8d2eed](https://github.com/jordansmall/spindrift/commit/b8d2eed50080c6272904f5ee20cd76c48a2dd5ae)), closes [#4069](https://github.com/jordansmall/spindrift/issues/4069)
+* **driver-exec:** blank every Box env var in tests ([65a3620](https://github.com/jordansmall/spindrift/commit/65a3620b57b2d25d5f913e65cdd293adb96f23d7)), closes [#4044](https://github.com/jordansmall/spindrift/issues/4044)
+* **renderers:** cite nix/regen.nix in gen headers ([d0219b3](https://github.com/jordansmall/spindrift/commit/d0219b32d0c88ab929889aa1bdb1b5d94d48a3dc)), closes [#4068](https://github.com/jordansmall/spindrift/issues/4068)
+
+
+### Performance Improvements
+
+* **forgejo:** cache the org-labels 404 per client ([f5269ea](https://github.com/jordansmall/spindrift/commit/f5269ea4eaa2d3129a05335d0b8524b265a20f62)), closes [#4034](https://github.com/jordansmall/spindrift/issues/4034)
+
+
+### Documentation
+
+* **adr:** accept ADR 0057 ([c39642e](https://github.com/jordansmall/spindrift/commit/c39642ef3f4f1e7e72fac4e0ff73d87865996359)), closes [#4077](https://github.com/jordansmall/spindrift/issues/4077)
+* **butler:** describe how a patched finding lands ([4fb55cd](https://github.com/jordansmall/spindrift/commit/4fb55cdd1055ac51af6ba694727949de6adf72f5)), closes [#4074](https://github.com/jordansmall/spindrift/issues/4074)
+* **butler:** describe the patch PR's merge gate ([acc83a2](https://github.com/jordansmall/spindrift/commit/acc83a2fc8078713ee7bee4740aa4f1635cf2e64)), closes [#4076](https://github.com/jordansmall/spindrift/issues/4076)
+* **butler:** describe the patch rung's bounds ([e49da70](https://github.com/jordansmall/spindrift/commit/e49da7095a1d95a5df9bad1df47234eab7ae2c30)), closes [#4075](https://github.com/jordansmall/spindrift/issues/4075)
+* **butler:** name the patch rung's end states and opt-in ([05d7956](https://github.com/jordansmall/spindrift/commit/05d7956f44a9a49b6909d881c7a6e3c0370f87a9)), closes [#4077](https://github.com/jordansmall/spindrift/issues/4077)
+* **ci:** spell out recover exit codes in both mirrors ([bc9a677](https://github.com/jordansmall/spindrift/commit/bc9a67779c2d514a9357ca58bda95773179747c2)), closes [#4032](https://github.com/jordansmall/spindrift/issues/4032)
+* **daemon:** note status ignores the wrapper input ([32b9492](https://github.com/jordansmall/spindrift/commit/32b9492db10e7359d905d778408de645ec169ab2))
+* drop stale nix/checks.nix comment refs ([2f615ba](https://github.com/jordansmall/spindrift/commit/2f615ba1c99840cf5cb0f24c722878c3c4093596)), closes [#4068](https://github.com/jordansmall/spindrift/issues/4068)
+* **reference:** count butler label among doctor advisories ([0c1f172](https://github.com/jordansmall/spindrift/commit/0c1f17241a5ecda7b1fb2a5323eda21bdaf1af7e)), closes [#4061](https://github.com/jordansmall/spindrift/issues/4061)
+* **reference:** name all daemon preflight outcomes ([58367f9](https://github.com/jordansmall/spindrift/commit/58367f9bdcdab2ece57c5e92e1fbc03f2acf8390)), closes [#4064](https://github.com/jordansmall/spindrift/issues/4064)
+* **reference:** say how an already-resolved issue closes on jira ([9ab3818](https://github.com/jordansmall/spindrift/commit/9ab3818f91c5f663822a6796a1150851cb5bd9fe)), closes [#4027](https://github.com/jordansmall/spindrift/issues/4027)
+* **release-notes:** add 0.21.0 highlights ([781616b](https://github.com/jordansmall/spindrift/commit/781616b48a433585be213c3206e2e08a09387e10))
+
+
+### Code Refactoring
+
+* **butler,ledger:** use gitexec for git calls ([6d4aea3](https://github.com/jordansmall/spindrift/commit/6d4aea36aad0190be679c350874e87df02ad2ab5)), closes [#4056](https://github.com/jordansmall/spindrift/issues/4056)
+* **gitexec:** add shared git invocation helpers ([734e62e](https://github.com/jordansmall/spindrift/commit/734e62ee6faf89d06f301a3a366dd60af6404fa0)), closes [#4056](https://github.com/jordansmall/spindrift/issues/4056)
+* **launcher:** keep configured work label on config ([ced9a53](https://github.com/jordansmall/spindrift/commit/ced9a53e0f3a9e047d9654cd73df2702e5f58070)), closes [#4054](https://github.com/jordansmall/spindrift/issues/4054)
+* **renderers:** share the Go string-slice file ([03a1b01](https://github.com/jordansmall/spindrift/commit/03a1b0199d31773b12a34d0f6fae595735a1cfce)), closes [#4047](https://github.com/jordansmall/spindrift/issues/4047)
+* **settle:** export UsableDedupTerm ([ac6469b](https://github.com/jordansmall/spindrift/commit/ac6469b06c4e2c93b2a38db14c6b8c6167a10c1f)), closes [#4036](https://github.com/jordansmall/spindrift/issues/4036)
+
+
+### Tests
+
+* **checks:** pin forgejo/github comment parity ([97a2257](https://github.com/jordansmall/spindrift/commit/97a22573eed7658f43612b5eae9ae4f756a4fe4f)), closes [#4029](https://github.com/jordansmall/spindrift/issues/4029)
+* **forgejo:** cover the per-client org-labels cache ([688919d](https://github.com/jordansmall/spindrift/commit/688919d1a30e581e2828ee0e66e53a515318ec92)), closes [#4034](https://github.com/jordansmall/spindrift/issues/4034)
+* **nix:** pin forgejo-label-swap comment encoding ([209a1ac](https://github.com/jordansmall/spindrift/commit/209a1ac28f11ebbb8ed3e9bc1058d4ff5120e4d1)), closes [#4030](https://github.com/jordansmall/spindrift/issues/4030)
+
+
+### Miscellaneous Chores
+
+* **butler:** drop the catalog's unused prompt field ([57fa78d](https://github.com/jordansmall/spindrift/commit/57fa78d44d6ed40823036279e975e09f9934813c)), closes [#4048](https://github.com/jordansmall/spindrift/issues/4048)
+
 ## [0.20.2](https://github.com/jordansmall/spindrift/compare/v0.20.1...v0.20.2) (2026-09-29)
 
 
