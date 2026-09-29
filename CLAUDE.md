@@ -5,6 +5,16 @@
 Issues live on GitHub (`jordansmall/spindrift`). File agent-ready issues via the
 `/to-tickets` skill, never ad-hoc `gh issue create`.
 
+### Dispatch kinds
+
+The three kinds (work, research, butler) are declared once, in
+`cmd/launcher/internal/dispatchkind`. Every kind fact — keying, label
+family, prompt file, settle strategy, and the rest — is a row on that
+descriptor; neither the launcher nor the Box branches on a kind name to
+re-derive one. See [ADR
+0056](docs/adr/0056-the-butler-is-an-issueless-dispatch-kind-with-its-state-in-git.md)
+(amendment, issue #3996).
+
 ### Triage label lifecycle
 
 Agent issues move through these labels (see `.github/workflows/agent-dispatch.yml`):
