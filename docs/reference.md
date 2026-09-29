@@ -5346,9 +5346,10 @@ chores enabled (BUTLER_CHORES is empty)`, `gateButlerKind`,
 dispatched ahead of that kind-selector parse rather than sharing its slot —
 `nix run .#daemon -- status` prints the checkout's current daemon state and
 exits without starting anything, needing no `--input` document (reading
-status is not running a daemon). stdout is the machine-readable
-`StatusReport` JSON, one object (`lockHeld`, `holder`, `live`, `stale`,
-`status`), holding this binary's "stdout is the machine stream only" line
+status is not running a daemon; the wrapper's own leading `--input <doc>`
+is accepted and ignored). stdout is the machine-readable `StatusReport`
+JSON, one object (`lockHeld`, `holder`, `live`, `stale`, `status`),
+holding this binary's "stdout is the machine stream only" line
 (**Event stream**, below); stderr gets one human sentence. It exits 0
 whenever it produced an answer, "no daemon running" included — a scripting
 caller reads `.live`, not the exit code, and this binary's own exit-code
