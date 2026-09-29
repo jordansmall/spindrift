@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/bundlerelay"
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
 )
 
@@ -491,4 +492,59 @@ func (e *execClient) Rebase(prURL string) error {
 	return gitplumbing.GitForcePush(ctx, dir)
 }
 
+// relayClone builds the `gh repo clone` closure bundlerelay's Relay,
+// CommitSubjects, and PushBranch all take as their clone step: op names the
+// caller for the wrapped ghCommandErr's description.
+func (e *execClient) relayClone(op string) func(dir string) error {
+	return func(dir string) error {
+		if _, err := exec.Command("gh", "repo", "clone", e.repo, dir, "--", "--no-single-branch").Output(); err != nil {
+			return ghCommandErr("github: "+op+": gh repo clone", err)
+		}
+		return nil
+	}
+}
+
+// PushBranch force-with-lease-pushes localRef from the git repo at srcDir onto
+// branch on the target repo, with the launcher's own gh-cli credential (issue
+// #4071, ADR 0057).
+func (e *execClient) PushBranch(srcDir, localRef, branch string) error {
+	return bundlerelay.PushBranch("github", srcDir, localRef, branch, e.relayClone("push branch"))
+}
+
+// CreateDraftPR opens a draft PR from head onto base. head and base are
+// branch names in e.repo, never a fork's owner:branch form. Read-write and
+// read-only settle alike may call it (issue #4071); settle's own gating
+// (Open checks BundleRelay first) is what keeps a read-write land from ever
+// making a host-side create that conflicts with the Box's own.
+func (e *execClient) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+	var stderr bytes.Buffer
+	cmd := exec.Command("gh", "pr", "create",
+		"--repo", e.repo,
+		"--draft",
+		"--base", base,
+		"--head", head,
+		"--title", title,
+		"--body", body,
+	)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		createErr := ghCommandErrText("github: create draft PR: gh pr create", err, stderr.String())
+		// A retried or raced host-side create (issue #2407) fails with gh's
+		// "already exists" stderr, not a sentinel error. Adopt the branch's
+		// open PR rather than report a settled hand-off as blocked, returning
+		// created=false so settle's reconstructed-PR path (issue #2447) knows
+		// the title and body are not the ones supplied here.
+		if strings.Contains(stderr.String(), "already exists") {
+			if pr, ok, openErr := e.OpenPRForBranch(head); openErr == nil && ok {
+				return pr.URL, false, nil
+			}
+		}
+		return "", false, createErr
+	}
+	return strings.TrimSpace(string(out)), true, nil
+}
+
 var _ forge.BranchProtectionForge = (*execClient)(nil)
+var _ forge.BranchPusher = (*execClient)(nil)
+var _ forge.DraftPRCreator = (*execClient)(nil)

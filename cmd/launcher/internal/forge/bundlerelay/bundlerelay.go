@@ -25,6 +25,12 @@ import (
 // forever.
 const RelayForcePushTimeout = 5 * time.Minute
 
+// invalidArg reports whether s is empty or starts with "-", the shared guard
+// against a git positional arg parsing as an option.
+func invalidArg(s string) bool {
+	return s == "" || strings.HasPrefix(s, "-")
+}
+
 // Relay imports ref from outboxDir/seambundle.FileName into a fresh clone of
 // the target repo and force-pushes it to origin (issue #2212). A missing or
 // malformed bundle is an error, never a silent no-op: an absent bundle file
@@ -46,6 +52,44 @@ func Relay(backend, outboxDir, ref string, clone func(dir string) error) error {
 	// and has no upstream for a bare force-with-lease to target. The
 	// destination must be explicit, first push or retried force-update alike.
 	return gitplumbing.GitForcePush(ctx, dir, "-u", "origin", ref)
+}
+
+// PushBranch fetches localRef from the git repo at srcDir into a fresh clone
+// of the target repo and force-with-lease-pushes it to origin as branch (issue
+// #4071, ADR 0057). Unlike Relay, which fetches a ref out of a one-shot bundle
+// file, this fetches straight from a live local repo.
+func PushBranch(backend, srcDir, localRef, branch string, clone func(dir string) error) error {
+	// Defense in depth, as prepareBundleFetch's ref guard: all three reach git
+	// as positional args, where a leading "-" would parse as an option.
+	if invalidArg(srcDir) {
+		return fmt.Errorf("%s: push branch: invalid srcDir %q", backend, srcDir)
+	}
+	if invalidArg(localRef) {
+		return fmt.Errorf("%s: push branch: invalid localRef %q", backend, localRef)
+	}
+	if invalidArg(branch) {
+		return fmt.Errorf("%s: push branch: invalid branch %q", backend, branch)
+	}
+	dir, gitIn, cleanup, err := cloneScratch(backend, "push branch", clone)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if out, err := gitIn("fetch", srcDir, localRef).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: push branch: git fetch %s %s: %w: %s", backend, srcDir, localRef, err, out)
+	}
+	// A fetch straight into refs/heads/branch would refuse when branch is the
+	// clone's own checked-out default branch, so land FETCH_HEAD via a
+	// checkout -B instead.
+	if out, err := gitIn("checkout", "-B", branch, "FETCH_HEAD").CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: push branch: git checkout -B %s FETCH_HEAD: %w: %s", backend, branch, err, out)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), RelayForcePushTimeout)
+	defer cancel()
+	// The clone's own origin/<branch>, if any, is the lease: absent, it must
+	// not exist on the remote either.
+	return gitplumbing.GitForcePush(ctx, dir, "-u", "origin", branch)
 }
 
 // CommitSubjects returns the one-line commit subjects ref carries relative to
@@ -91,30 +135,15 @@ func CommitSubjects(backend, outboxDir, base, ref string, clone func(dir string)
 	return subjects, nil
 }
 
-// prepareBundleFetch is the shared preamble behind Relay and CommitSubjects:
-// validate ref, confirm the bundle at outboxDir/seambundle.FileName exists,
-// clone the target repo into a scratch dir, verify the bundle against that
-// clone, and fetch ref into refs/heads/ref. On any error it has already
-// cleaned up, so callers defer the returned cleanup only once err is nil.
-func prepareBundleFetch(backend, outboxDir, ref string, clone func(dir string) error) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
-	// Defense in depth: callers derive ref from cf.AgentBranch(num) host-side,
-	// but it still interpolates into a refspec and, for CommitSubjects, a `git
-	// log` revision range, so guard it regardless of that holding upstream.
-	if ref == "" || strings.HasPrefix(ref, "-") {
-		return "", nil, nil, fmt.Errorf("%s: relay bundle: invalid ref %q", backend, ref)
-	}
-	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
-	if _, err := os.Stat(bundlePath); err != nil {
-		// An absent outbox directory also yields os.IsNotExist, and "no dir"
-		// means "nothing to relay" just as "no bundle file" does.
-		if os.IsNotExist(err) {
-			return "", nil, nil, fmt.Errorf("%s: relay bundle: %w: %s", backend, forge.ErrBundleNotFound, bundlePath)
-		}
-		return "", nil, nil, fmt.Errorf("%s: relay bundle: %w", backend, err)
-	}
+// cloneScratch mkdtemps a scratch dir, runs clone against it, and wires up a
+// gitIn helper bound to that dir, the preamble Relay, CommitSubjects, and
+// PushBranch all share; op prefixes its mkdtemp error to match the caller's. On
+// any error it has already cleaned up, so callers defer the returned cleanup
+// only once err is nil.
+func cloneScratch(backend, op string, clone func(dir string) error) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
 	dir, err = os.MkdirTemp("", "spindrift-relay-*")
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("%s: relay bundle: mkdtemp: %w", backend, err)
+		return "", nil, nil, fmt.Errorf("%s: %s: mkdtemp: %w", backend, op, err)
 	}
 	cleanup = func() { os.RemoveAll(dir) }
 
@@ -129,6 +158,34 @@ func prepareBundleFetch(backend, outboxDir, ref string, clone func(dir string) e
 
 	gitIn = func(args ...string) *exec.Cmd {
 		return exec.Command("git", append([]string{"-C", dir}, args...)...)
+	}
+	return dir, gitIn, cleanup, nil
+}
+
+// prepareBundleFetch is the shared preamble behind Relay and CommitSubjects:
+// validate ref, confirm the bundle at outboxDir/seambundle.FileName exists,
+// clone the target repo into a scratch dir, verify the bundle against that
+// clone, and fetch ref into refs/heads/ref. On any error it has already
+// cleaned up, so callers defer the returned cleanup only once err is nil.
+func prepareBundleFetch(backend, outboxDir, ref string, clone func(dir string) error) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
+	// Defense in depth: callers derive ref from cf.AgentBranch(num) host-side,
+	// but it still interpolates into a refspec and, for CommitSubjects, a `git
+	// log` revision range, so guard it regardless of that holding upstream.
+	if invalidArg(ref) {
+		return "", nil, nil, fmt.Errorf("%s: relay bundle: invalid ref %q", backend, ref)
+	}
+	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
+	if _, err := os.Stat(bundlePath); err != nil {
+		// An absent outbox directory also yields os.IsNotExist, and "no dir"
+		// means "nothing to relay" just as "no bundle file" does.
+		if os.IsNotExist(err) {
+			return "", nil, nil, fmt.Errorf("%s: relay bundle: %w: %s", backend, forge.ErrBundleNotFound, bundlePath)
+		}
+		return "", nil, nil, fmt.Errorf("%s: relay bundle: %w", backend, err)
+	}
+	dir, gitIn, cleanup, err = cloneScratch(backend, "relay bundle", clone)
+	if err != nil {
+		return "", nil, nil, err
 	}
 	// Verified against dir, not the ambient cwd: `git bundle verify` needs the
 	// bundle's prerequisite commits reachable from some repo, and dir is the

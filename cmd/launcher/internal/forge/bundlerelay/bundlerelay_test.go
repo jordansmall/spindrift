@@ -101,6 +101,80 @@ func TestRelay_InvalidRefErrorsBeforeFilesystemWork(t *testing.T) {
 	}
 }
 
+// srcDir is a nonexistent path for the srcDir cases, so any filesystem work
+// PushBranch did before rejecting the arg would fail with a different error.
+func TestPushBranch_InvalidArgsErrorBeforeFilesystemWork(t *testing.T) {
+	cases := []struct {
+		name                     string
+		srcDir, localRef, branch string
+		wantErrSubstr            string
+	}{
+		{"empty srcDir", "", "localref", "branch", "invalid srcDir"},
+		{"dash srcDir", "-x", "localref", "branch", "invalid srcDir"},
+		{"empty localRef", "/nonexistent/src/dir", "", "branch", "invalid localRef"},
+		{"dash localRef", "/nonexistent/src/dir", "-x", "branch", "invalid localRef"},
+		{"empty branch", "/nonexistent/src/dir", "localref", "", "invalid branch"},
+		{"dash branch", "/nonexistent/src/dir", "localref", "-x", "invalid branch"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			err := PushBranch("test", tc.srcDir, tc.localRef, tc.branch, func(dir string) error {
+				called = true
+				return nil
+			})
+			if err == nil {
+				t.Fatal("PushBranch with an invalid arg: got nil error, want one")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Errorf("PushBranch with an invalid arg: err = %v, want it to mention %q", err, tc.wantErrSubstr)
+			}
+			if called {
+				t.Error("PushBranch with an invalid arg: clone closure was called, want it skipped")
+			}
+		})
+	}
+}
+
+// A localRef absent from srcDir must fail the `git fetch` step, distinct from
+// the checkout failure TestPushBranch_CheckoutFailureErrors pins below.
+func TestPushBranch_FetchFailureErrors(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	src := t.TempDir()
+	forgetest.Run(t, "", "clone", repo.Bare, src)
+
+	err := PushBranch("test", src, "nonexistent-ref", "agent/issue-4071", localClone(repo.Bare))
+	if err == nil {
+		t.Fatal("PushBranch with a localRef missing from srcDir: got nil error, want one")
+	}
+	if !strings.Contains(err.Error(), "git fetch") {
+		t.Errorf("PushBranch with a localRef missing from srcDir: err = %v, want it to mention %q", err, "git fetch")
+	}
+}
+
+// "bad..name" is a syntactically invalid git ref (two consecutive dots), so
+// the fetch of a real localRef succeeds and `git checkout -B` is what fails.
+func TestPushBranch_CheckoutFailureErrors(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	src := t.TempDir()
+	forgetest.Run(t, "", "clone", repo.Bare, src)
+	forgetest.Run(t, src, "checkout", "-b", "work")
+	forgetest.WriteFile(t, filepath.Join(src, "feature.txt"), "feature\n")
+	forgetest.Run(t, src, "add", "feature.txt")
+	forgetest.Run(t, src, "commit", "-m", "feature")
+
+	err := PushBranch("test", src, "work", "bad..name", localClone(repo.Bare))
+	if err == nil {
+		t.Fatal("PushBranch with an invalid branch ref name: got nil error, want one")
+	}
+	if !strings.Contains(err.Error(), "git checkout -B") {
+		t.Errorf("PushBranch with an invalid branch ref name: err = %v, want it to mention %q", err, "git checkout -B")
+	}
+	if strings.Contains(err.Error(), "git fetch") {
+		t.Fatalf("PushBranch with an invalid branch ref name: err = %v, want it to fail at checkout, not fetch", err)
+	}
+}
+
 func TestRelay_MissingBundleErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
