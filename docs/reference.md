@@ -4864,11 +4864,12 @@ ship `chores/<name>.md` in a `SPINDRIFT_PROMPT_DIR` override directory
 — but that override shadows all of `/agent/prompts`, so it must carry
 the full prompt tree, not only `chores/`. No Chore is enabled by
 default. Before it claims anything, the command checks every
-`BUTLER_CHORES` entry (and `--chore`): a name outside `[A-Za-z0-9_-]`,
-or a Chore with no `<name>.md` (under the `SPINDRIFT_PROMPT_DIR`
-override when set, else in the image's baked `choresDir`, carried as
-the run document's `CHORE_CATALOG`), exits 6 as a config error rather
-than leaving a claim standing for `BUTLER_CLAIM_TIMEOUT` (issue #3905).
+`BUTLER_CHORES` entry (and `--chore`): a name outside `[A-Za-z0-9_-]`
+or starting with `-`, or a Chore with no `<name>.md` (under the
+`SPINDRIFT_PROMPT_DIR` override when set, else in the image's baked
+`choresDir`, carried as the run document's `CHORE_CATALOG`), exits 6
+as a config error rather than leaving a claim standing for
+`BUTLER_CLAIM_TIMEOUT` (issue #3905).
 This prompt-file check is skipped when the run document carries no
 `CHORE_CATALOG` (no `--input`, or a wrapper generated before this
 change), so such a run keeps the old stale-claim behavior until the

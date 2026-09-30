@@ -131,6 +131,11 @@ func TestLoad(t *testing.T) {
 			wantErr: "invalid name format",
 		},
 		{
+			name:    "leading-dash chore name in BUTLER_CHORES",
+			chores:  "-legacy",
+			wantErr: "invalid name format",
+		},
+		{
 			name:        "repeated invalid chore name reported once",
 			chores:      "bad/name bad/name",
 			wantErrEach: []string{"bad/name"},
