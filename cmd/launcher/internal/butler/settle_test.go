@@ -1716,6 +1716,58 @@ func TestSettleRun_ReservesPromotionAndPatchInOneCommit(t *testing.T) {
 	}
 }
 
+// (u) A lost Finish still hands each landed patch to the merge gate, on both
+// failure shapes -- a non-CAS error and a rival takeover's CAS win --
+// since skipping it would orphan the already-open draft PR. The gate runs
+// after the lost Finish attempt, so no Ledger write follows it -- the
+// takeover shape's rival claim lands inside that attempt (issue #4118).
+func TestSettleRun_Patch_GateRunsDespiteLostFinish(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		wrap func(ledger.Backend) ledger.Backend
+	}{
+		{"done append error", func(b ledger.Backend) ledger.Backend {
+			return doneAppendErr{Backend: b, err: errors.New("push failed")}
+		}},
+		{"takeover before done", func(b ledger.Backend) ledger.Backend { return takeoverOnDone{Backend: b} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
+			start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			claim := claimButlerChore(t, inner, "bugs", start)
+
+			fc := forge.NewFake()
+			fc.PostIssueURL = "https://example.com/issues/9503"
+			tree, pf, gate := patchReserveRig(fc)
+			history := func() int {
+				entries, err := inner.History("bugs", start.Add(-time.Hour))
+				if err != nil {
+					t.Fatalf("History: %v", err)
+				}
+				return len(entries)
+			}
+			atGate := -1
+			gate.onCall = func(string, string) { atGate = history() }
+
+			scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+			now := start.Add(time.Minute)
+			room := chore.Room{Promotions: 1, Patches: 1}
+			s := newSettleRun(fc.AsIssueFiler(), tc.wrap(inner), "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate})
+
+			if got := s.settle(dispatch.NewFake(), patchReserveResult()); got.done {
+				t.Errorf("settled = %+v, want done=false (the Finish was lost)", got)
+			}
+			want := []fakePatchGateCall{{num: "9503", prURL: pf.draftURL}}
+			if !slices.Equal(gate.calls, want) {
+				t.Errorf("gate calls = %+v, want %+v", gate.calls, want)
+			}
+			if after := history(); after != atGate {
+				t.Errorf("History = %d entries after settle, %d at the gate call; want equal (the gate runs after the lost Finish, and no Ledger write follows it)", after, atGate)
+			}
+		})
+	}
+}
+
 // jsonQuote renders s as a JSON string literal. Go's strconv.Quote escaping
 // happens to match JSON's for the plain ASCII these test cases use.
 func jsonQuote(s string) string {
