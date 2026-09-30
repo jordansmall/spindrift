@@ -3,7 +3,7 @@
    the body to a file in one call and send it in the next:
 
 ```sh
-driver-exec signal issue-intent -title '<title>' -type bug -dedup '<site key>' <<'SPINDRIFT_SIGNAL_EOF'
+driver-exec signal issue-intent -title '<title>' -type bug -dedup 'path/to/file.go:Symbol' <<'SPINDRIFT_SIGNAL_EOF'
 <issue body>
 SPINDRIFT_SIGNAL_EOF
 ```

@@ -166,7 +166,7 @@ func TestFilerFileRelaySocketFragmentSendShape(t *testing.T) {
 	assertPromptClauses(t, "fragments/filer-file-relay-socket.md", []promptClause{
 		{
 			name:   "the heredoc example carries -dedup",
-			clause: `driver-exec signal issue-intent -title '<title>' -type bug -dedup '<site key>' <<'SPINDRIFT_SIGNAL_EOF'`,
+			clause: `driver-exec signal issue-intent -title '<title>' -type bug -dedup 'path/to/file.go:Symbol' <<'SPINDRIFT_SIGNAL_EOF'`,
 		},
 	})
 	assertClosingDelimiterAtColumnOne(t, "fragments/filer-file-relay-socket.md")
