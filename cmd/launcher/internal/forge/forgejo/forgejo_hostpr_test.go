@@ -73,9 +73,8 @@ func TestForgejoCodeForge_CreateDraftPR_PostsAndReturnsURL(t *testing.T) {
 }
 
 // A refused create (422, e.g. an invalid head branch) must produce an error,
-// not a blank URL. rest.Client's error carries the HTTP status, not the
-// response body, so this checks the status rather than any message text
-// (unlike github's gh-cli path, which does surface stderr verbatim).
+// not a blank URL. rest.Client's StatusError carries both the HTTP status
+// and the forge's own message, so this checks for both.
 func TestForgejoCodeForge_CreateDraftPR_RefusedErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -96,6 +95,9 @@ func TestForgejoCodeForge_CreateDraftPR_RefusedErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "422") {
 		t.Errorf("CreateDraftPR error = %q, want it to mention the 422 status", err.Error())
+	}
+	if !strings.Contains(err.Error(), "head branch does not exist") {
+		t.Errorf("CreateDraftPR error = %q, want it to mention the forge's message", err.Error())
 	}
 }
 
