@@ -144,3 +144,24 @@ policy is `immediate` has chosen that for every PR, not this one.
 - This rung lands on spec #3985's shapes (one wire type, one `decide`,
   one Room, a Tree adapter) and is blocked by those four tickets. It is
   specified in issue #4001.
+
+## Amendment (issue #4111): patches are reserved with promotions
+
+A landed patch's only Ledger record used to be the done commit's
+`patched` list, written after the draft PR was already open. A done
+commit that never landed (a claim-timeout takeover, or a failed push of
+the Ledger ref) left an open patch PR that the patches-per-day budget
+never counted, so the next run's room was overstated and the day could
+exceed `BUTLER_MAX_PATCHES_PER_DAY`. The reservation commit from ADR
+0056's #3926 amendment now carries `reservedPatches` beside `reserved`,
+in the same commit. Today's patched total counts a reservation's patch
+slots under the same rule as its promotion slots, so a finished run
+counts once and a lost one still counts. A patch-only reservation is
+still not a claim, and a run with patch room but no promotion room
+still reserves. Over-counting stays the failure direction: a patch
+candidate whose class also clears the promotion allow-list is held
+eligible for a promotion slot too, capped by the run's remaining room,
+so a lost done commit after a landed patch can over-count that day's
+promotions but never leaves a slot uncounted; a patch candidate outside the promotion allow-list never
+holds one. A stale diff or a failed push or PR create likewise leaves
+its reserved patch slot spent if the done commit is then lost.
