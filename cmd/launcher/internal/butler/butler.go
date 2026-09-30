@@ -276,15 +276,16 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 		classes = c.Classes
 	}
 	// promo.patchEnabled is required here, not just room.Patches > 0: room.Patches
-	// derives from the Consumer's raw BUTLER_MAX_PATCHES_PER_DAY budget alone
-	// (chore.Room.new), so it stays positive even when this Runner has no
-	// patchForge (issue #4074) -- patchesPerDay above is what actually folds
-	// that in, and patchEnabled is the only place that reads patchesPerDay. It
-	// also requires len(classes) > 0 -- the promotion class list just above
-	// -- because the relay fragment only ever honours CHORE_PATCH_CLASSES
-	// for a class also present on CHORE_CLASSES: with promotion off or its
-	// room spent, classes is empty and a patch-class list alone would tell
-	// the Box about candidates the relay fragment says to omit -class for.
+	// derives from the Consumer's BUTLER_MAX_PATCHES_PER_DAY budget and today's
+	// ledger alone (chore.Budgets.Room), so it stays positive even when this
+	// Runner has no patchForge (issue #4074) -- patchesPerDay above is what
+	// actually folds that in, and patchEnabled is the only place that reads
+	// patchesPerDay. It also requires len(classes) > 0 -- the promotion class
+	// list just above -- because the relay fragment only ever honours
+	// CHORE_PATCH_CLASSES for a class also present on CHORE_CLASSES: with
+	// promotion off or its room spent, classes is empty and a patch-class
+	// list alone would tell the Box about candidates the relay fragment says
+	// to omit -class for.
 	var patchClasses []string
 	if promo.patchEnabled && len(classes) > 0 && room.Patches > 0 {
 		patchClasses = c.PatchClasses
