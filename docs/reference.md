@@ -24,13 +24,158 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
-| `spindrift doctor`               | check configuration validity, forge credentials, repository connectivity, container runtime readiness (advisory only — issue #2561), base-branch protection (fatal if `MERGE_MODE` isn't `manual` and the base branch isn't protected, advisory otherwise — issue #2570; a fatal result is reported inline and then deferred rather than ending the report, so the recoverable-issues row, label rows, and interactive create-label offer below still run — issue #2798), and label presence — the four triage labels (required) and the thirteen advisory labels, which are the seven `agent-research*` labels, the three `agent-priority-*` labels, `agent-ambiguous-spec`, `agent-butler-finding`, and `agent-butler-patch` (ADR 0022, ADR 0040, ADR 0041, ADR 0056, ADR 0057, advisory only); every failing row rendered through `Reporter.Results` (`cmd/launcher/internal/doctor/report.go`), plus the failing label rows, which share the same `rowPrefix` helper, is prefixed `MISSING:` when its Tier is Required or `advisory:` when its Tier is Advisory (every line written outside those two paths spells its own prefix or none — for example the launch-gate rows below, the runtime row, the label-section summary and label-creation lines, the label-section error a deferred repo-state failure re-prints, and the connectivity row the fail-fast path drops from the printed set, whose `remedy:` line, when it has one, is all that reaches stdout), so a fatal gap reads apart from an informational one without waiting for the aggregate summary line (issue #2723, issue #3362) — the one exception is a Required-tier check whose probe couldn't determine the answer (say, a permission error reaching the thing being probed, rather than a definitive absence): that row still renders `advisory:` and does not fail the run, because doctor never reports a hard failure it isn't sure of (issue #2962); when run interactively (TTY attached) and labels are missing it offers to create them, with the prompt itself stating the required/advisory tier counts and what declining each means; in CI (no TTY) missing required labels are fatal; it also reports the same required-knob/driver/cross-knob checks `dispatch` gates on (issue #2559), one status line per check (plus a remedy line for a failing one, unless its remedy just repeats the error); a distinct exit code per failure class (below) and, on any failure, a stderr summary that stands alone even with stdout redirected (issue #2569); passed `--butler`, it additionally validates the butler's own config (a Filer, `DRIVER` not `opencode`, a `CODE_FORGE` with a Ledger, `BUTLER_CHORE_CLASSES`, the sweep-vs-day cap relationship, `BUTLER_EVERY`, `BUTLER_CLAIM_TIMEOUT`, `DAEMON_AWAKE_WINDOW`), failing with exit 2 like any other required check (issue #3920); when the configured runner kind (`RUNNER_KIND`) is bwrap, it also reports three capability checks — `bwrap-overlay-support`, `bwrap-network-isolation`, `bwrap-cgroup-delegation` — each Tier mirroring the real launch-time gate for the current config, reporting Required vs Advisory severity for operator visibility (these rows are informational only and never affect `spindrift doctor`'s exit code), except `bwrap-cgroup-delegation`, which is always Advisory since bwrap degrades gracefully without cgroup delegation (ADR 0042, issue #2671); for every non-bwrap runner kind (never under bwrap) it also reports a `podman-machine-memory` row, Required tier — unlike the bwrap rows above, which stay informational, this row's failure does affect `spindrift doctor`'s exit code: it is classified alongside the required-knob checks, so a podman machine sized below `MEMORY_LIMIT` × `MAX_PARALLEL` plus a fixed 512MiB VM overhead fails `spindrift doctor` with exit 2 (issue #3544) — the VM's own OOM-killer fires before any single container's `--memory` cgroup cap ever bites — and reporting `not applicable` rather than a failure for a non-podman runtime, an empty `MEMORY_LIMIT` (the schema's deliberate opt-out), or no active podman machine, with a remedy naming all three fixes (lower `MAX_PARALLEL`, raise the machine's RAM, or lower `MEMORY_LIMIT`) alongside the exact `--memory` figure that would satisfy it (issue #3537); it also renders the ordered launch-gate registry (issue #2942) as five `ok: <name>` / `MISSING: <name>: <error>` pass/fail rows — `read-only-capability`, `network-mode-runtime`, `signal-carrier-network-mode` (the gate that refuses `BOX_SIGNAL_CARRIER=socket` under `NETWORK_MODE=none`, the one pairing the socket carrier can never work under — see [Signal socket](#signal-socket-box_signal_carriersocket)), `read-only-token-github`, `read-only-token-forgejo` — the same gates `dispatch`'s bootstrap and `preview` enforce before launching a Box; when `REGISTRY_PROXY_ROUTES_FILE` (ADR 0045) is set it also reports a `registry-route-credential[<match-host>]` and a `registry-route-origin[<match-host>]` row per declared route, so a broken credential or a malformed `upstream-origin` names the offending route directly; it also reports an advisory `registry-route-drift` row reporting any host the repo names that no route covers (ADR 0045) — under `CODE_FORGE=local` sourced from the Accumulation repo's own `BASE_BRANCH` ref (ADR 0033), the same dispatch snapshot a Box would clone, skipping the row when that repo or ref isn't available; under every other Code Forge, only when invoked inside a checkout whose `origin` remote matches the configured Target repo (the same-repo/dogfood case) (issue #3311) — see [Registry route discovery](#registry-route-discovery); and it also reports a `registry-proxy-transport` row naming which transport (`unix socket` or `tcp`) a dispatch would use to reach the launcher-side registry proxy, probed through the identical seam a dispatch itself calls (issue #3111) so the reported answer can't drift from what a real dispatch does — `not configured`, with no probe run at all, when `REGISTRY_PROXY_ROUTES_FILE` is unset, and always Advisory, since both transports are working outcomes (issue #3114); and finally, last of all the rows, when `BOX_SIGNAL_CARRIER=socket` (never under `log`, where the row does not print at all) it reports a `signal-socket-transport` row naming the same transport verdict (`unix socket` or `tcp`) probed through the identical seam a dispatch uses for its Signal socket, always Advisory so it never affects the exit code, degrading under `NETWORK_MODE=none` regardless of transport (no probe run at all), under a TCP verdict paired with `NETWORK_MODE=no-host-loopback`, or on an indeterminate probe — see [Signal socket](#signal-socket-box_signal_carriersocket); quiet by default (issue #3777): a healthy run writes nothing to stdout and exits 0, and without the flag the only things that still print are `MISSING:` rows and their `remedy:` lines, the interactive create-label prompt (with the advisory labels it offers re-listed immediately above it, since their own rows were suppressed), the `created:` lines, and the still-missing-after-creation lines; `ok:` rows and `advisory:` rows — including a Required row demoted to advisory by an indeterminate probe (issue #2962) — print only under `--verbose` or its short form `-v`, as do the read-only token gates' (`read-only-token-github`, `read-only-token-forgejo`) own `WARNING:` lines on a passing gate under `BOX_FORGE_AND_ISSUE_ACCESS=read-only` when the Box token's write capability couldn't be introspected — suppressed only in this report, since the same gates still print those lines during `dispatch`'s and `preview`'s own enforcement, which carries no quiet mode of its own — and together `--verbose`/`-v` reproduce the full pre-#3777 report; exit codes and the on-failure stderr summary are unchanged, so a redirected stdout still loses nothing; an unrecognised flag or argument is a usage error on stderr with exit 1 |
+| `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |
 | `spindrift --version`            | installed version and revision                                                  |
+
+### `spindrift doctor` checks
+
+The checks `spindrift doctor` runs, grouped by what it probes.
+
+**Configuration and required knobs**
+
+- Configuration validity: the same required-knob/driver/cross-knob checks
+  `dispatch` gates on (issue #2559) — one status line per check, plus a
+  remedy line for a failing one, unless its remedy just repeats the error.
+- Passed `--butler`, doctor additionally validates the butler's own config
+  (a Filer, `DRIVER` not `opencode`, a `CODE_FORGE` with a Ledger,
+  `BUTLER_CHORE_CLASSES`, the sweep-vs-day cap relationship, `BUTLER_EVERY`,
+  `BUTLER_CLAIM_TIMEOUT`, `DAEMON_AWAKE_WINDOW`), failing with exit 2 like
+  any other required check (issue #3920).
+
+**Repository and runtime**
+
+- `issue-tracker` and `code-forge`, required: forge credentials and
+  repository connectivity for the Issue Tracker and the Code Forge. These
+  rows fail fast — a failure here ends the report.
+- Base-branch protection: fatal if `MERGE_MODE` isn't `manual` and the base
+  branch isn't protected, advisory otherwise (issue #2570). A fatal result
+  is reported inline and then deferred rather than ending the report, so
+  the `recoverable-issues` row, label rows, and interactive create-label
+  offer below still run (issue #2798).
+- `recoverable-issues`, required: counts the issues wearing the recoverable
+  state label and names `spindrift recover <issue>` as the way to land each.
+- Container runtime readiness — advisory only (issue #2561).
+
+**Labels**
+
+- The four triage labels, required.
+- The seven `agent-research*` labels (ADR 0022, ADR 0041), advisory.
+- The three `agent-priority-*` labels (ADR 0040), advisory.
+- `agent-ambiguous-spec`, advisory.
+- The butler pair `agent-butler-finding` (ADR 0056) and `agent-butler-patch`
+  (ADR 0057), advisory.
+- When run interactively (TTY attached) and labels are missing, doctor
+  offers to create them, with the prompt itself stating the
+  required/advisory tier counts and what declining each means; in CI (no
+  TTY), missing required labels are fatal.
+
+**Runner-specific rows**
+
+- When the configured runner kind (`RUNNER_KIND`) is bwrap, three
+  capability checks — `bwrap-overlay-support`, `bwrap-network-isolation`,
+  `bwrap-cgroup-delegation` — each Tier mirroring the real launch-time gate
+  for the current config, reporting Required vs Advisory severity for
+  operator visibility (these rows are informational only and never affect
+  `spindrift doctor`'s exit code), except `bwrap-cgroup-delegation`, which
+  is always Advisory since bwrap degrades gracefully without cgroup
+  delegation (ADR 0042, issue #2671).
+- For every non-bwrap runner kind (never under bwrap), a
+  `podman-machine-memory` row, Required tier — unlike the bwrap rows above,
+  which stay informational, this row's failure fails `spindrift doctor`
+  with exit 2 (issue #3544, issue #3537) — see [Podman machine
+  RAM](#podman-machine-ram).
+
+**Launch-gate registry rows**
+
+Doctor renders the ordered launch-gate registry (issue #2942) as five
+`ok: <name>` / `MISSING: <name>: <error>` pass/fail rows —
+`read-only-capability`, `network-mode-runtime`,
+`signal-carrier-network-mode` (the gate that refuses
+`BOX_SIGNAL_CARRIER=socket` under `NETWORK_MODE=none`, the one pairing
+the socket carrier can never work under — see [Signal
+socket](#signal-socket-box_signal_carriersocket)),
+`read-only-token-github`, `read-only-token-forgejo` — the same gates
+`dispatch`'s bootstrap and `preview` enforce before launching a Box.
+
+**Registry-proxy rows**
+
+- When `REGISTRY_PROXY_ROUTES_FILE` (ADR 0045) is set, a
+  `registry-route-credential[<match-host>]` and a
+  `registry-route-origin[<match-host>]` row per declared route, so a broken
+  credential or a malformed `upstream-origin` names the offending route
+  directly.
+- An advisory `registry-route-drift` row reporting any host the repo names
+  that no route covers (ADR 0045) — under `CODE_FORGE=local` sourced from
+  the Accumulation repo's own `BASE_BRANCH` ref (ADR 0033), the same
+  dispatch snapshot a Box would clone, skipping the row when that repo or
+  ref isn't available; under every other Code Forge, only when invoked
+  inside a checkout whose `origin` remote matches the configured Target
+  repo (the same-repo/dogfood case) (issue #3311) — see [Registry route
+  discovery](#registry-route-discovery).
+- A `registry-proxy-transport` row naming which transport (`unix socket` or
+  `tcp`) a dispatch would use to reach the launcher-side registry proxy,
+  probed through the identical seam a dispatch itself calls (issue #3111)
+  so the reported answer can't drift from what a real dispatch does —
+  `not configured`, with no probe run at all, when
+  `REGISTRY_PROXY_ROUTES_FILE` is unset, and always Advisory, since both
+  transports are working outcomes (issue #3114).
+
+**Signal socket transport**
+
+Last of all the rows, when `BOX_SIGNAL_CARRIER=socket` (never under `log`,
+where the row does not print at all), a `signal-socket-transport` row naming
+the same transport verdict (`unix socket` or `tcp`) probed through the
+identical seam a dispatch uses for its Signal socket, always Advisory so it
+never affects the exit code, degrading under `NETWORK_MODE=none` regardless
+of transport (no probe run at all), under a TCP verdict paired with
+`NETWORK_MODE=no-host-loopback`, or on an indeterminate probe — see [Signal
+socket](#signal-socket-box_signal_carriersocket).
+
+**Output conventions**
+
+- Every failing row rendered through `Reporter.Results`
+  (`cmd/launcher/internal/doctor/report.go`), plus the failing label rows,
+  which share the same `rowPrefix` helper, is prefixed `MISSING:` when its
+  Tier is Required or `advisory:` when its Tier is Advisory. Every line
+  written outside those two paths spells its own prefix or none — for
+  example the launch-gate rows above, the runtime row, the label-section
+  summary and label-creation lines, the label-section error a deferred
+  repo-state failure re-prints, and the connectivity row the fail-fast
+  path drops from the printed set, whose `remedy:` line, when it has one,
+  is all that reaches stdout — so a fatal gap reads apart from an
+  informational one without waiting for the aggregate summary line (issue
+  #2723, issue #3362).
+- The one exception to that prefix rule is a Required-tier check whose
+  probe couldn't determine the answer (say, a permission error reaching
+  the thing being probed, rather than a definitive absence): that row
+  still renders `advisory:` and does not fail the run, because doctor
+  never reports a hard failure it isn't sure of (issue #2962).
+- Quiet by default (issue #3777): a healthy run writes nothing to stdout
+  and exits 0. Without the flag, the only things that still print are
+  `MISSING:` rows and their `remedy:` lines, the interactive create-label
+  prompt (with the advisory labels it offers re-listed immediately above
+  it, since their own rows were suppressed), the `created:` lines, and the
+  still-missing-after-creation lines. `ok:` rows and `advisory:` rows —
+  including a Required row demoted to advisory by an indeterminate probe
+  (issue #2962) — print only under `--verbose` or its short form `-v`, as
+  do the read-only token gates' (`read-only-token-github`,
+  `read-only-token-forgejo`) own `WARNING:` lines on a passing gate under
+  `BOX_FORGE_AND_ISSUE_ACCESS=read-only` when the Box token's write
+  capability couldn't be introspected — suppressed only in this report,
+  since the same gates still print those lines during `dispatch`'s and
+  `preview`'s own enforcement, which carries no quiet mode of its own.
+  Together `--verbose`/`-v` reproduce the full pre-#3777 report; exit
+  codes and the on-failure stderr summary are unchanged, so a redirected
+  stdout still loses nothing.
+- A distinct exit code per failure class — see [exit
+  codes](#spindrift-doctor-exit-codes) — and, on any failure, a stderr
+  summary that stands alone even with stdout redirected (issue #2569).
+- An unrecognised flag or argument is a usage error on stderr with exit 1.
 
 ### `spindrift doctor` exit codes
 
@@ -74,7 +219,7 @@ each other, so the collision is not a conflict to resolve.
 
 | exit | meaning |
 |------|---------|
-| 0    | healthy — required checks passed; advisory findings (missing research/priority/ambiguous-spec/butler labels, runtime not ready, etc.) are allowed, and their rows print only under `--verbose`/`-v` — except the advisory labels re-listed above the interactive create-label prompt and the still-missing-after-creation lines, which print either way (see the `spindrift doctor` row above) |
+| 0    | healthy — required checks passed; advisory findings (missing research/priority/ambiguous-spec/butler labels, runtime not ready, etc.) are allowed, and their rows print only under `--verbose`/`-v` — except the advisory labels re-listed above the interactive create-label prompt and the still-missing-after-creation lines, which print either way (see [`spindrift doctor` checks](#spindrift-doctor-checks)) |
 | 1    | reserved for internal/unclassified errors |
 | 2    | configuration invalid — the same required-knob/driver/cross-knob validation `dispatch` gates on, minus runtime readiness (advisory here, per exit 0 above, even though `dispatch` itself still requires it before launching a Box); also fires when `podman-machine-memory` fails (the podman machine is undersized for `MEMORY_LIMIT` × `MAX_PARALLEL`, issue #3544), since that row is classified alongside the required-knob checks |
 | 3    | auth or connectivity — the issue tracker or code forge could not be reached, or a work-tier label create call failed (an advisory-tier label create failure does not fail the check and still exits 0; its row prints only under `--verbose`/`-v`) |
