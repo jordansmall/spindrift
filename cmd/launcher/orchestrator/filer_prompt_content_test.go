@@ -23,3 +23,26 @@ func TestFilerPromptReportShapeContract(t *testing.T) {
 		},
 	})
 }
+
+// TestFilerPromptSiteKeyRuleContract pins filer-prompt.md's step 2 site-key
+// rule (issue #4108): a finding naming a symbol keys on `file:Symbol`, never
+// a line or range even when it also cites lines, and the key names the code
+// the finding is about, not the test file/line where it was noticed. It also
+// pins the in-batch dedup instruction, since the host catches only exact
+// keys and overlapping line ranges, never a divergent key for one symbol.
+func TestFilerPromptSiteKeyRuleContract(t *testing.T) {
+	assertPromptClauses(t, "filer-prompt.md", []promptClause{
+		{
+			name:   "a symbol keys on file:Symbol, never a line or range, even when the finding also cites lines",
+			clause: "never a line or line range, even when the finding also cites lines",
+		},
+		{
+			name:   "key on the code the finding is about, not the test file/line where it was noticed",
+			clause: "Key on the code the finding is about (the symbol under test), not the test file or line where the defect was noticed",
+		},
+		{
+			name:   "dedup the batch against itself before filing",
+			clause: "Dedup the batch against itself first: two findings sharing a site key, or naming the same symbol, are one finding — file it once",
+		},
+	})
+}

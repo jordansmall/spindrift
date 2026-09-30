@@ -18,11 +18,18 @@ issue number alone — research never opens a PR; a butler delegation (ADR
 Steps:
 
 ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_STEP}${FILER_LABEL_RELAY_BUTLER_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
+   - Dedup the batch against itself first: two findings sharing a site key,
+     or naming the same symbol, are one finding — file it once. The host
+     catches only exact keys and overlapping line ranges, so one defect
+     sent under two different keys files twice.
    - Every finding's dedup key is its *site*, not its prose:
-     `path/to/file.go:Symbol` where the finding names a symbol, else
-     `path/to/file.go:<line>`. The Standards and Spec review axes word the
-     same defect differently, so only the site is stable across them — never
-     key on wording. One key per finding; add a second only when a finding
+     `path/to/file.go:Symbol` where the finding names a symbol — never a
+     line or line range, even when the finding also cites lines — else
+     `path/to/file.go:<line>`. Key on the code the finding is about (the
+     symbol under test), not the test file or line where the defect was
+     noticed. The Standards and Spec review axes word the same defect
+     differently, so only the site is stable across them — never key on
+     wording. One key per finding; add a second only when a finding
      genuinely spans two sites.
    - Search for the site key over open issues first — the most reliable
      check, since it matches the stable key rather than prose:
