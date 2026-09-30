@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -166,6 +167,12 @@ func TestDoChainsStatusErrorMappedStatus(t *testing.T) {
 	if statusErr.Status != http.StatusConflict {
 		t.Fatalf("StatusError.Status = %d, want %d", statusErr.Status, http.StatusConflict)
 	}
+	if statusErr.Message != "" {
+		t.Fatalf("StatusError.Message = %q, want empty for a bodyless response", statusErr.Message)
+	}
+	if want := fmt.Sprintf("status %d", http.StatusConflict); statusErr.Error() != want {
+		t.Fatalf("StatusError.Error() = %q, want %q", statusErr.Error(), want)
+	}
 }
 
 func TestDoChainsStatusErrorUnmappedStatus(t *testing.T) {
@@ -186,6 +193,117 @@ func TestDoChainsStatusErrorUnmappedStatus(t *testing.T) {
 	}
 	if statusErr.Status != http.StatusTeapot {
 		t.Fatalf("StatusError.Status = %d, want %d", statusErr.Status, http.StatusTeapot)
+	}
+	if statusErr.Message != "" {
+		t.Fatalf("StatusError.Message = %q, want empty for a bodyless response", statusErr.Message)
+	}
+	// The "unexpected" branch must not repeat the status code now that
+	// StatusError.Error() also renders it.
+	if got := err.Error(); strings.Count(got, strconv.Itoa(http.StatusTeapot)) != 1 {
+		t.Fatalf("Do error = %q, want the status code %d to appear exactly once", got, http.StatusTeapot)
+	}
+}
+
+// TestDoStatusErrorMessage covers how readErrorMessage derives
+// StatusError.Message from a non-2xx response body, across the JSON,
+// raw-text, and edge-case shapes a forge can send.
+func TestDoStatusErrorMessage(t *testing.T) {
+	jiraBody := `{"errorMessages":["Issue does not exist"],"errors":{}}`
+	oversizedJSON := `{"message":"` + strings.Repeat("x", maxErrorBodyRead) + `"}`
+
+	cases := []struct {
+		name     string
+		status   int
+		statuses StatusMap
+		body     string
+		want     string
+	}{
+		{
+			// A mapped status whose body is Forgejo/Gitea-shaped JSON
+			// ({"message": ...}) must surface that message, not just the
+			// raw status.
+			name:     "mapped status surfaces JSON message",
+			status:   http.StatusUnprocessableEntity,
+			statuses: StatusMap{http.StatusUnprocessableEntity: errNotFoundStub},
+			body:     `{"message":"head branch does not exist"}`,
+			want:     "head branch does not exist",
+		},
+		{
+			// An unmapped status with a non-JSON, multi-line body falls
+			// back to the raw text, flattened to a single line so it
+			// doesn't break the %w error chain.
+			name:   "unmapped status falls back to raw text body",
+			status: http.StatusTeapot,
+			body:   "line one\nline two\n",
+			want:   "line one line two",
+		},
+		{
+			// A body that parses as JSON but carries no non-empty
+			// "message" (Jira's shape) must still surface its detail, so
+			// the raw envelope is used instead of an empty string.
+			name:   "JSON body with no message field falls back to raw text",
+			status: http.StatusBadRequest,
+			body:   jiraBody,
+			want:   jiraBody,
+		},
+		{
+			// A JSON body larger than maxErrorBodyRead won't fully
+			// decode, so it falls back to the (truncated) raw prefix.
+			name:   "oversized JSON body falls back to truncated raw prefix",
+			status: http.StatusBadRequest,
+			body:   oversizedJSON,
+			want:   oversizedJSON[:maxErrorMessageLen] + "...",
+		},
+		{
+			// Control bytes (a terminal escape, a NUL) are blanked, not
+			// dropped, so they can't reach Message or fuse the words
+			// around them.
+			name:   "control bytes are blanked",
+			status: http.StatusTeapot,
+			body:   "a\x1b[31mb\x00c",
+			want:   "a [31mb c",
+		},
+		{
+			// An oversized body must be truncated, since StatusError.Message
+			// can end up quoted in an issue comment.
+			name:   "oversized body truncates",
+			status: http.StatusTeapot,
+			body:   strings.Repeat("a", 500),
+			want:   strings.Repeat("a", maxErrorMessageLen) + "...",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			c := New(srv.URL, nil, "testbackend", tc.statuses, nil)
+
+			err := c.Do(http.MethodGet, "/widgets/1", nil, nil)
+			if err == nil {
+				t.Fatal("Do returned nil error, want a non-nil error for a non-2xx status")
+			}
+			if sentinel, ok := tc.statuses[tc.status]; ok && !errors.Is(err, sentinel) {
+				t.Fatalf("Do error = %v, want errors.Is match against the mapped sentinel", err)
+			}
+			var statusErr StatusError
+			if !errors.As(err, &statusErr) {
+				t.Fatalf("Do error = %v, want errors.As match against StatusError", err)
+			}
+			if statusErr.Status != tc.status {
+				t.Fatalf("StatusError.Status = %d, want %d", statusErr.Status, tc.status)
+			}
+			if statusErr.Message != tc.want {
+				t.Fatalf("StatusError.Message = %q, want %q", statusErr.Message, tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Do error = %q, want it to mention the message %q", err.Error(), tc.want)
+			}
+		})
 	}
 }
 
@@ -314,6 +432,7 @@ func TestDoExhaustsRetriesOnPersistentTransient(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		w.WriteHeader(http.StatusTooManyRequests)
+		io.WriteString(w, `{"message":"rate limit exceeded"}`)
 	}))
 	defer srv.Close()
 
@@ -336,6 +455,13 @@ func TestDoExhaustsRetriesOnPersistentTransient(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), strconv.Itoa(http.StatusTooManyRequests)) {
 		t.Fatalf("Do error = %v, want it to mention status code %d", err, http.StatusTooManyRequests)
+	}
+	var statusErr StatusError
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("Do error = %v, want errors.As match against StatusError", err)
+	}
+	if want := "rate limit exceeded"; statusErr.Message != want {
+		t.Fatalf("StatusError.Message = %q, want %q", statusErr.Message, want)
 	}
 	if requests != defaultMaxAttempts {
 		t.Fatalf("server saw %d requests, want %d (defaultMaxAttempts)", requests, defaultMaxAttempts)

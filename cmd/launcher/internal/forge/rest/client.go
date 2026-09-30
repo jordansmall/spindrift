@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -50,13 +51,19 @@ type StatusMap map[int]error
 // things on different endpoints of the same backend (Forgejo's 409 is "not
 // mergeable" on merge but "already exists" on pulls-create) while StatusMap's
 // sentinel is shared Client-wide, so a caller disambiguates with errors.As.
+// Message is the forge's own explanation from the response body, if any.
 type StatusError struct {
-	Status int
+	Status  int
+	Message string
 }
 
-// Error renders the status code, e.g. "status 409".
+// Error renders the status code, e.g. "status 409", with the forge's message
+// appended when present, e.g. "status 422: head branch does not exist".
 func (e StatusError) Error() string {
-	return fmt.Sprintf("status %d", e.Status)
+	if e.Message == "" {
+		return fmt.Sprintf("status %d", e.Status)
+	}
+	return fmt.Sprintf("status %d: %s", e.Status, e.Message)
 }
 
 // DecodeError marks a 2xx body that did not decode as the expected JSON,
@@ -113,6 +120,59 @@ func New(baseURL string, auth AuthStrategy, backend string, statuses StatusMap, 
 
 func isTransientStatus(status int) bool {
 	return status == http.StatusTooManyRequests || (status >= 500 && status < 600)
+}
+
+// maxErrorMessageLen bounds StatusError.Message to this many runes (plus a
+// trailing "..." ellipsis when truncated): these strings can end up quoted
+// verbatim in an issue comment, so an oversized or binary body must not flow
+// through unbounded.
+const maxErrorMessageLen = 200
+
+// maxErrorBodyRead caps how much of a non-2xx body readErrorMessage reads. A
+// JSON body past this limit won't decode, so it falls back to the raw prefix
+// like any non-JSON body.
+const maxErrorBodyRead = 4 * 1024
+
+// readErrorMessage extracts a short, single-line explanation from a non-2xx
+// response body: the "message" field for a Forgejo/Gitea-shaped JSON error,
+// or the raw body text otherwise — including JSON with no "message", such as
+// Jira's {"errorMessages":[...]}, whose detail lives only in the envelope.
+func readErrorMessage(r io.Reader) string {
+	raw, err := io.ReadAll(io.LimitReader(r, maxErrorBodyRead))
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+
+	text := string(raw)
+	var decoded struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &decoded) == nil && decoded.Message != "" {
+		text = decoded.Message
+	}
+
+	// Blank every non-printable rune (control bytes, format and bidi runes,
+	// non-ASCII spaces) so a forge body can't smuggle terminal escapes into
+	// logs.
+	printable := strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
+		return ' '
+	}, text)
+
+	flat := strings.Join(strings.Fields(printable), " ")
+	return truncateRunes(flat, maxErrorMessageLen)
+}
+
+// truncateRunes returns s unchanged if it has at most n runes, otherwise its
+// first n runes plus a trailing "...", without splitting a multi-byte rune.
+func truncateRunes(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "..."
 }
 
 // HTTPClientForTest returns the underlying *http.Client, so an adapter's own
@@ -176,12 +236,12 @@ func (c *Client) Do(method, path string, body, out any) error {
 			continue
 		}
 
-		if sentinel, ok := c.statuses[resp.StatusCode]; ok {
-			resp.Body.Close()
-			return fmt.Errorf("%s: %s %s: %w: %w", c.backend, method, path, sentinel, StatusError{Status: resp.StatusCode})
-		}
+		statusErr := StatusError{Status: resp.StatusCode, Message: readErrorMessage(resp.Body)}
 		resp.Body.Close()
-		return fmt.Errorf("%s: %s %s: unexpected status %d: %w", c.backend, method, path, resp.StatusCode, StatusError{Status: resp.StatusCode})
+		if sentinel, ok := c.statuses[resp.StatusCode]; ok {
+			return fmt.Errorf("%s: %s %s: %w: %w", c.backend, method, path, sentinel, statusErr)
+		}
+		return fmt.Errorf("%s: %s %s: unexpected %w", c.backend, method, path, statusErr)
 	}
 	return fmt.Errorf("%s: %s %s: maxAttempts must be >= 1 (got %d)", c.backend, method, path, c.maxAttempts)
 }
