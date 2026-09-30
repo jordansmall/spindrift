@@ -5030,7 +5030,8 @@ alongside the sweep's full `filed` list. Before filing, settle reserves the
 slots it means to spend in a Ledger commit of their own (issue #3926), so a
 done commit that never lands (a claim takeover, or a failed Ledger push) still
 counts those promotions against the day's budget; a run that cannot
-write the reservation files every finding unlabelled. A running butler Box never mutes the daemon's `jam` event
+write the reservation files every finding plain, with no promotion and no
+patch. A running butler Box never mutes the daemon's `jam` event
 (issue #3922), so with promotion on, a jam can fire shortly before a
 promoted finding makes dispatch runnable again.
 
@@ -5039,20 +5040,27 @@ dependent on it: a finding whose diff clears every patch gate below is
 landed by the host as a PR instead of promoted, even with promotion off;
 one that fails any gate falls through to the promote/skip decision above.
 
-The Ledger and `chore.Room` count a `patched` total alongside
-`filed` and `promoted` (ADR 0057), and two host-only knobs configure the
-rung that spends it: `BUTLER_MAX_PATCHES_PER_DAY` (schema key
-`butlerMaxPatchesPerDay`, default `0`) caps butler findings landed as
-host-applied patch PRs per day, same shape as `BUTLER_MAX_PROMOTIONS_PER_DAY`
-— `0` means the rung is off, so enabling a Chore never patches anything by
-itself, and it is not a start gate either. `BUTLER_PATCH_CLASSES` (schema
-key `butlerPatchClasses`, default `docs-drift=stale-reference`) is each
-Chore's host-side patch allow-list, in the same `<chore>=<class>[,<class>...]`
-grammar as `BUTLER_CHORE_CLASSES`, and is checked only when
-`BUTLER_MAX_PATCHES_PER_DAY > 0`: every entry's classes must be a subset of
-that Chore's `BUTLER_CHORE_CLASSES` allow-list, and every entry's Chore must
-be enabled in `BUTLER_CHORES` — either violation is rejected at `spindrift
-butler`/daemon startup preflight, naming the offending chore or class.
+The Ledger and `chore.Room` count a `patched` total alongside `filed`
+and `promoted` (ADR 0057), and two host-only knobs configure the rung that
+spends it: `BUTLER_MAX_PATCHES_PER_DAY` (schema key `butlerMaxPatchesPerDay`,
+default `0`) caps butler findings landed as host-applied patch PRs per day,
+same shape as `BUTLER_MAX_PROMOTIONS_PER_DAY` — `0` means the rung is off,
+so enabling a Chore never patches anything by itself, and it is not a start
+gate either. The same reservation commit also carries the patch slots settle
+means to spend (issue #4111), so a patch PR opened ahead of a done commit
+that never lands still counts against this budget. A patch candidate whose
+class also clears the promotion allow-list is held eligible for a promotion
+slot too, capped by the run's remaining room, so a lost done commit after
+a landed patch can over-count that day's promotions but never leaves a
+slot uncounted; a patch candidate outside the promotion allow-list never
+holds one. `BUTLER_PATCH_CLASSES` (schema key `butlerPatchClasses`, default
+`docs-drift=stale-reference`) is each Chore's host-side patch allow-list, in
+the same `<chore>=<class>[,<class>...]` grammar as `BUTLER_CHORE_CLASSES`,
+and is checked only when `BUTLER_MAX_PATCHES_PER_DAY > 0`: every entry's
+classes must be a subset of that Chore's `BUTLER_CHORE_CLASSES` allow-list,
+and every entry's Chore must be enabled in `BUTLER_CHORES` — either
+violation is rejected at `spindrift butler`/daemon startup preflight,
+naming the offending chore or class.
 
 Three more host-only knobs bound what the rung will apply (issue #4075).
 `BUTLER_PATCH_PATHS` (schema key `butlerPatchPaths`) is a comma-separated
