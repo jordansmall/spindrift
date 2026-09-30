@@ -256,6 +256,11 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	if _, err := ledger.Finish(s.ledger, s.chore, finishParent, state, s.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
 		report.Settled(dispatchkey.Chore(s.chore), forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err))
+		// Still gate the already-open draft PRs, or they orphan (issue
+		// #4118). #4076's ordering has nothing left to protect: a lost CAS
+		// means a rival owns the Chore, and any other error leaves this
+		// claim standing until stale-claim takeover whatever runs next.
+		s.adoptLandings(landings)
 		return settled{}
 	}
 
@@ -272,14 +277,19 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	report.Settled(dispatchkey.Chore(s.chore), forge.Complete.String(), note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
 
-	// Only now, after the Done commit above has actually landed, hand each
-	// patch to the work merge gate: a crash while polling CI must never
-	// leave the Chore's claim standing (issue #4076).
+	// On the success path, hand each patch to the work merge gate only after
+	// the Done commit above has actually landed: a crash while polling CI
+	// must never leave the Chore's claim standing (issue #4076).
+	s.adoptLandings(landings)
+
+	return settled{done: true, filed: len(filed), promoted: len(promoted), dropped: dropped, patched: len(patched)}
+}
+
+// adoptLandings hands each landed patch's draft PR to the work merge gate.
+func (s *settleRun) adoptLandings(landings []patchLanding) {
 	for _, l := range landings {
 		s.patch.gate.SettleAdopted(nil, l.issueNum, 0, l.prURL)
 	}
-
-	return settled{done: true, filed: len(filed), promoted: len(promoted), dropped: dropped, patched: len(patched)}
 }
 
 // landPatch pushes pc's committed branch to head and opens a draft PR for
