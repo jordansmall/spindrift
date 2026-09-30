@@ -173,8 +173,11 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 	// anything the list returns. backlogDedupIndex yields a non-nil map even
 	// on failure, so the nil check below is a true once-only memo. Grown in
 	// place as this run files its own intents, so a duplicate pair within one
-	// payload dedups too, not just against the backlog.
+	// payload dedups too, not just against the backlog. runKeys is that
+	// within-run subset, kept apart so applyRunLineOverlap never matches a
+	// line overlap against the backlog (issue #4108).
 	var dedupIndex map[string]string
+	runKeys := make(map[string]string)
 	var out []filedIntent
 	for _, raw := range result.IssueIntents {
 		in, rej := parseIssueIntent(raw)
@@ -191,6 +194,7 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		} else if dedupIndex == nil {
 			dedupIndex = backlogDedupIndex(it, num)
 		}
+		applyRunLineOverlap(dedupIndex, runKeys, keys)
 		ov := matchDedup(dedupIndex, keys)
 		if ov.full {
 			// Every covering ref, not just the first: per-site dedup lets
@@ -243,6 +247,7 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		ref := fmt.Sprintf("this run's %q", in.Title)
 		for k := range keys {
 			dedupIndex[k] = ref
+			runKeys[k] = ref
 		}
 		if onFiled != nil {
 			onFiled(url)

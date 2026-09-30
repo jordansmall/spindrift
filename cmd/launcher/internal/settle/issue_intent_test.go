@@ -1326,6 +1326,197 @@ func TestFileIssueIntentsDetailed_Dedup_SkipCarriesDupRef(t *testing.T) {
 	}
 }
 
+// Two dedup keys naming overlapping line ranges in the same file
+// ("...bundlerelay.go:80-83" and "...bundlerelay.go:80") are the same site
+// spelled at different granularity: the second must skip against the first,
+// within one run (issue #4108).
+func TestFileIssueIntentsDetailed_Dedup_LineOverlapWithinRun(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first finding at the site","body":"body one","dedupTerms":["cmd/launcher/internal/forge/bundlerelay/bundlerelay.go:80-83"]}`,
+			`{"title":"second finding at the same site","body":"body two","dedupTerms":["cmd/launcher/internal/forge/bundlerelay/bundlerelay.go:80"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (the second overlaps the first's line range)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:1" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:1")
+	}
+	if len(filed) != 2 {
+		t.Fatalf("filed = %+v, want 2 entries", filed)
+	}
+	skip := filed[1]
+	if !skip.Skipped {
+		t.Fatalf("filed[1] = %+v, want Skipped", skip)
+	}
+	if want := `this run's "first finding at the site"`; skip.DupRef != want {
+		t.Errorf("DupRef = %q, want %q", skip.DupRef, want)
+	}
+}
+
+// applyRunLineOverlap must be transitive within one run: an aliased key
+// joins runKeys too, so a third key that only overlaps the alias -- not the
+// original run key -- still chains onto the same ref instead of filing a
+// second time (issue #4108). In this order "...x.go:83" overlaps only the
+// "...x.go:80-83" alias, never the filed "...x.go:80".
+func TestFileIssueIntentsDetailed_Dedup_LineOverlapChainsAcrossRun(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"finding at line 80 alone","body":"body one","dedupTerms":["pkg/x.go:80"]}`,
+			`{"title":"finding at lines 80-83","body":"body two","dedupTerms":["pkg/x.go:80-83"]}`,
+			`{"title":"finding at line 83 alone","body":"body three","dedupTerms":["pkg/x.go:83"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (the second and third both alias the first)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:2" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:2")
+	}
+	for i, f := range filed[1:] {
+		if want := `this run's "finding at line 80 alone"`; !f.Skipped || f.DupRef != want {
+			t.Errorf("filed[%d] = %+v, want Skipped with DupRef %q", i+1, f, want)
+		}
+	}
+}
+
+// An intent carrying one aliased key plus one new, non-overlapping key must
+// still file: a partial overlap, not a skip (issue #4108).
+func TestFileIssueIntentsDetailed_Dedup_LineOverlapPartialWithinRunStillFiles(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"finding at lines 80-83","body":"body one","dedupTerms":["pkg/x.go:80-83"]}`,
+			`{"title":"finding at line 80 and elsewhere","body":"body two","dedupTerms":["pkg/x.go:80","pkg/y.go:5"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 2 {
+		t.Fatalf("PostIssueCalls = %+v, want 2 (partial overlap still files)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0")
+	}
+}
+
+// Two line-site keys in the same file that do NOT overlap ("...x.go:80-83"
+// and "...x.go:90") both file: line-overlap aliasing must not widen into a
+// whole-file match.
+func TestFileIssueIntentsDetailed_Dedup_NonOverlappingLinesBothFile(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"finding at lines 80-83","body":"body one","dedupTerms":["pkg/x.go:80-83"]}`,
+			`{"title":"finding at line 90","body":"body two","dedupTerms":["pkg/x.go:90"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 2 {
+		t.Fatalf("PostIssueCalls = %+v, want 2 (non-overlapping line ranges are distinct sites)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0")
+	}
+}
+
+// The same line range in two different files must never alias: the file
+// prefix, not just the numeric range, has to match.
+func TestFileIssueIntentsDetailed_Dedup_SameLinesDifferentFilesBothFile(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"finding in file a","body":"body one","dedupTerms":["pkg/a.go:80-83"]}`,
+			`{"title":"finding in file b","body":"body two","dedupTerms":["pkg/b.go:80-83"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 2 {
+		t.Fatalf("PostIssueCalls = %+v, want 2 (different files, never aliased)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0")
+	}
+}
+
+// The in-run line-overlap backstop must never reach into the backlog: two
+// findings a few lines apart in a long-lived file still both file, even
+// though the backlog issue's marker names a line range overlapping the new
+// intent's (issue #4108) -- only a within-run repeat is aliased.
+func TestFileIssueIntentsDetailed_Dedup_LineOverlapExcludesBacklog(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding at the same site",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: pkg/x.go:80-83 -->",
+		Labels: []string{"agent-review-finding"},
+	})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"a new finding at an overlapping line","body":"new body","dedupTerms":["pkg/x.go:80"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (backlog overlap must not suppress the filing)", fc.PostIssueCalls)
+	}
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:0")
+	}
+}
+
 // An open backlog issue carrying the dedup marker for a term is an exact
 // retry of an already-filed finding, even under completely different prose
 // (issue #3609): the intent is skipped and the skip line names the matched

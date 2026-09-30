@@ -378,6 +378,104 @@ func TestMatchDedup_DeterministicRefsAcrossManyCoveredKeys(t *testing.T) {
 	}
 }
 
+// dedupKeyLineSpec parses a normalized key's trailing line-site segment, or
+// reports ok=false for a key that names no line site at all (issue #4108).
+func TestDedupKeyLineSpec(t *testing.T) {
+	cases := []struct {
+		name       string
+		key        string
+		wantPrefix string
+		wantLo     int
+		wantHi     int
+		wantOK     bool
+	}{
+		{"single line", "pkg:file:go:80", "pkg:file:go", 80, 80, true},
+		{"line range", "pkg:file:go:80-83", "pkg:file:go", 80, 83, true},
+		{"no trailing segment at all", "80", "", 0, 0, false},
+		{"empty prefix", ":80", "", 0, 0, false},
+		{"trailing colon, no segment", "pkg:file:go:", "", 0, 0, false},
+		{"non-numeric segment", "pkg:file:go:main", "", 0, 0, false},
+		{"reversed range", "pkg:file:go:83-80", "", 0, 0, false},
+		{"zero line", "pkg:file:go:0", "", 0, 0, false},
+		{"malformed range", "pkg:file:go:80-", "", 0, 0, false},
+		{"leading-sign single line", "pkg:file:go:+80", "", 0, 0, false},
+		{"leading-sign range hi", "pkg:file:go:80-+83", "", 0, 0, false},
+		{"overflow single line", "pkg:file:go:1234567890123456789012345", "", 0, 0, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			prefix, lo, hi, ok := dedupKeyLineSpec(c.key)
+			if ok != c.wantOK || prefix != c.wantPrefix || lo != c.wantLo || hi != c.wantHi {
+				t.Errorf("dedupKeyLineSpec(%q) = (%q, %d, %d, %v), want (%q, %d, %d, %v)",
+					c.key, prefix, lo, hi, ok, c.wantPrefix, c.wantLo, c.wantHi, c.wantOK)
+			}
+		})
+	}
+}
+
+// dedupLineOverlap requires both a shared file prefix and an intersecting
+// line range -- either alone is not enough (issue #4108).
+func TestDedupLineOverlap(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b string
+		want bool
+	}{
+		{"identical single line", "pkg:file:go:80", "pkg:file:go:80", true},
+		{"range contains point", "pkg:file:go:80-83", "pkg:file:go:80", true},
+		{"point at range tail", "pkg:file:go:80-83", "pkg:file:go:83", true},
+		{"ranges overlap partially", "pkg:file:go:80-83", "pkg:file:go:82-90", true},
+		{"adjacent, not overlapping", "pkg:file:go:80-83", "pkg:file:go:84", false},
+		{"same lines, different file", "pkg:a:go:80-83", "pkg:b:go:80-83", false},
+		{"one side not a line site", "pkg:file:go:80", "pkg:file:go:main", false},
+		{"neither side a line site", "pkg:file:go:main", "pkg:file:go:other", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := dedupLineOverlap(c.a, c.b); got != c.want {
+				t.Errorf("dedupLineOverlap(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+			}
+		})
+	}
+}
+
+// When two run keys both overlap one intent key, the smallest run key's ref
+// must win regardless of Go's randomized map order. Looped, like
+// TestMatchDedup_DeterministicRefsAcrossManyCoveredKeys, to pin this against
+// map-order flakiness.
+func TestApplyRunLineOverlap_DeterministicRefAcrossOverlappingRunKeys(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		dedupIndex := map[string]string{}
+		runKeys := map[string]string{
+			"pkg:file:go:80-85": "ref A",
+			"pkg:file:go:82-90": "ref B",
+		}
+		keys := map[string]bool{"pkg:file:go:83": true}
+		applyRunLineOverlap(dedupIndex, runKeys, keys)
+		if got := dedupIndex["pkg:file:go:83"]; got != "ref A" {
+			t.Fatalf("iteration %d: dedupIndex[%q] = %q, want %q", i, "pkg:file:go:83", got, "ref A")
+		}
+	}
+}
+
+// One key of an intent must never alias onto a sibling key of the same
+// intent: 83-90 overlaps only 80-83, not the run's filed 80, so it stays
+// unaliased whichever key the map visits first. Looped against map order.
+func TestApplyRunLineOverlap_SiblingKeysNeverChain(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		dedupIndex := map[string]string{"pkg:file:go:80": "ref A"}
+		runKeys := map[string]string{"pkg:file:go:80": "ref A"}
+		keys := map[string]bool{"pkg:file:go:80-83": true, "pkg:file:go:83-90": true}
+		applyRunLineOverlap(dedupIndex, runKeys, keys)
+		if got := dedupIndex["pkg:file:go:80-83"]; got != "ref A" {
+			t.Fatalf("iteration %d: dedupIndex[%q] = %q, want %q", i, "pkg:file:go:80-83", got, "ref A")
+		}
+		if got, ok := dedupIndex["pkg:file:go:83-90"]; ok {
+			t.Fatalf("iteration %d: dedupIndex[%q] = %q, want unaliased", i, "pkg:file:go:83-90", got)
+		}
+	}
+}
+
 // isFindingIssue recognizes every provenance label and rejects an issue
 // carrying none of them -- the gate that keeps an ordinary backlog issue from
 // ever suppressing a filing.
