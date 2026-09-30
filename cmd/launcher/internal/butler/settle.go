@@ -212,7 +212,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 								return
 							}
 							head := s.patch.forge.AgentBranch(issueNum)
-							prURL, err := s.landPatch(pc, subject, head, f, url, issueNum)
+							prURL, err := s.landPatch(num, pc, subject, head, f, url, issueNum)
 							if err != nil {
 								fmt.Printf("    #%s  status=patch-failed  !! %v\n", num, err)
 								if s.fallBackToPromote(num, issueNum, f, remaining) {
@@ -284,17 +284,40 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 
 // landPatch pushes pc's committed branch to head and opens a draft PR for
 // it, returning the PR's URL. Called only from OnFiled, after the finding
-// issue itself has actually filed (issueNum), so the PR body can close it.
-func (s *settleRun) landPatch(pc PatchCommit, subject, head string, f settle.Finding, findingURL, issueNum string) (string, error) {
+// issue itself has actually filed (issueNum), so the PR body can close it. A
+// CreateDraftPR error is ambiguous -- a timeout or 5xx can arrive after the
+// server already created the PR (issue #4112) -- so an open PR found for head
+// afterwards counts as landed, and only a confirmed-absent one gets the
+// pushed branch deleted before the error falls back to promote.
+func (s *settleRun) landPatch(chorenum string, pc PatchCommit, subject, head string, f settle.Finding, findingURL, issueNum string) (string, error) {
 	if err := s.patch.forge.PushBranch(pc.Dir, pc.Ref, head, s.patch.base); err != nil {
 		return "", err
 	}
 	body := patchPRBody(s.chore, f, findingURL, issueNum)
-	prURL, _, err := s.patch.forge.CreateDraftPR(subject, body, s.patch.base, head)
-	if err != nil {
-		return "", err
+	prURL, _, createErr := s.patch.forge.CreateDraftPR(subject, body, s.patch.base, head)
+	if createErr == nil {
+		return prURL, nil
 	}
-	return prURL, nil
+	pr, found, lookupErr := s.patch.forge.OpenPRForBranch(head)
+	if lookupErr != nil {
+		// Branch kept: a PR this lookup could not see may be live, and
+		// deleting its head branch would close it.
+		fmt.Printf("    #%s  status=patch-pr-lookup-failed  !! %v\n", chorenum, lookupErr)
+		return "", createErr
+	}
+	if found {
+		// head is agent/issue-N for the issue just filed, so no earlier run
+		// can own a PR on it -- adopting whatever is open there is safe.
+		fmt.Printf("    #%s  status=patch-pr-adopted  !! %v\n", chorenum, createErr)
+		return pr.URL, nil
+	}
+	// Residual race: if the timed-out create lands on the server only after
+	// this lookup said "not found", the delete below closes it and the
+	// finding still gets promoted -- the same outcome as before #4112.
+	if delErr := s.patch.forge.DeleteBranch(head, s.patch.base); delErr != nil {
+		fmt.Printf("    #%s  status=patch-branch-cleanup-failed  !! %v\n", chorenum, delErr)
+	}
+	return "", createErr
 }
 
 // fallBackToPromote is landPatch's failure path (issue #4074): a finding

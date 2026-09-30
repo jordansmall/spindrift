@@ -218,40 +218,47 @@ func resolveButlerSettings(cfg config, choreName string) (butlerSettings, error)
 
 // hostPatchForge adapts an already-resolved CodeForge and Capabilities into
 // butler.PatchForge: AgentBranch comes from cf (every CodeForge has it),
-// PushBranch/CreateDraftPR/AddLabels from the three Capabilities fields
-// forge.ResolveCapabilities already populated only when a write-capable
-// adapter backs cf and it (issue #4074).
+// every other method from the Capabilities fields forge.ResolveCapabilities
+// already populated only when a write-capable adapter backs cf and it (issue
+// #4074, #4112).
 type hostPatchForge struct {
 	cf forge.CodeForge
+	pr forge.PRForge
 	forge.BranchPusher
 	forge.DraftPRCreator
 	forge.IssueLabeler
+	forge.BranchDeleter
 }
 
 func (h hostPatchForge) AgentBranch(num string) string { return h.cf.AgentBranch(num) }
 
+func (h hostPatchForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
+	return h.pr.OpenPRForBranch(branch)
+}
+
 // butlerPatchForge builds cmdButler's butler.PatchForge, opting the patch
 // rung on only when caps proves cf can both push a branch and open a draft
-// PR host-side, the paired issue tracker can add labels to an already-filed
-// issue, and tracker and forge are the same backend. The labeler leg matters
-// on its own: ISSUE_TRACKER=local's PostIssue returns "local:"+slug, not a
-// forge issue number, so it implements no IssueLabeler -- without it a failed
-// push or PR-create would file the finding with the patch label and then
-// have no way to fall it back to promote. The same-backend leg keeps
-// "Closes #N" and the agent/issue-N branch pointing at the filed issue:
-// ISSUE_TRACKER=forgejo with CODE_FORGE=github would otherwise close an
-// unrelated GitHub issue N on merge, the hazard ensureClosesReference guards
-// on the work path (#2341). nil whenever any leg is missing:
-// WithPatchForge(nil, nil) is "never opted in", so the rung stays off (issue
-// #4074).
+// PR host-side, look up that PR and delete that branch again (issue #4112),
+// the paired issue tracker can add labels to an already-filed issue, and tracker
+// and forge are the same backend. The labeler leg matters on its own:
+// ISSUE_TRACKER=local's PostIssue returns "local:"+slug, not a forge issue
+// number, so it implements no IssueLabeler -- without it a failed push or
+// PR-create would file the finding with the patch label and then have no way
+// to fall it back to promote. The same-backend leg keeps "Closes #N" and the
+// agent/issue-N branch pointing at the filed issue: ISSUE_TRACKER=forgejo
+// with CODE_FORGE=github would otherwise close an unrelated GitHub issue N
+// on merge, the hazard ensureClosesReference guards on the work path
+// (#2341). nil whenever any leg is missing: WithPatchForge(nil, nil) is
+// "never opted in", so the rung stays off (issue #4074).
 func butlerPatchForge(cf forge.CodeForge, caps forge.Capabilities) butler.PatchForge {
-	if !caps.HostCanOpenPR() || caps.IssueLabeler == nil {
+	if !caps.HostCanOpenPR() || caps.IssueLabeler == nil ||
+		caps.PRForge == nil || caps.BranchDeleter == nil {
 		return nil
 	}
 	if caps.TrackerDescriptor.Name == "" || caps.TrackerDescriptor != caps.ForgeDescriptor {
 		return nil
 	}
-	return hostPatchForge{cf: cf, BranchPusher: caps.BranchPusher, DraftPRCreator: caps.DraftPRCreator, IssueLabeler: caps.IssueLabeler}
+	return hostPatchForge{cf: cf, pr: caps.PRForge, BranchPusher: caps.BranchPusher, DraftPRCreator: caps.DraftPRCreator, IssueLabeler: caps.IssueLabeler, BranchDeleter: caps.BranchDeleter}
 }
 
 // cmdButler is the `butler [--chore <name>]` subcommand (ADR 0056, issue

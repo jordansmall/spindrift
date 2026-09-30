@@ -60,20 +60,20 @@ type Policy struct {
 const DefaultPatchPaths = "docs/**,*.md,!docs/adr/**,!**/CLAUDE.md,!**/CONTEXT.md,!**/CONTRIBUTING.md,!**/AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**"
 
 // PatchForge is the host capability the patch rung needs to land a finding
-// as a draft PR (ADR 0057, issue #4074): the branch name a filed finding's
-// issue number maps to, the push/draft-PR pair forge.BranchPusher and
-// forge.DraftPRCreator already give a write-capable host adapter, and
-// forge.IssueLabeler so a failed push or PR create can still fall the
-// already-filed finding back to promote (issue #4074) -- the reason
-// butlerPatchForge withholds the rung until tracker and forge both resolve
-// and name the same backend. A Runner built with a nil PatchForge never
-// reaches decide's patch branch at all -- see WithPatchForge and
-// Runner.run's own patchesPerDay gating.
+// as a draft PR (ADR 0057, issue #4074, #4112): push plus draft-PR create,
+// forge.IssueLabeler to fall a failed landing back to promote, and
+// forge.PRForge's OpenPRForBranch plus forge.BranchDeleter to check a
+// failed create for a PR the server made anyway before deleting the pushed
+// branch. See butlerPatchForge (cmd/launcher/butler.go) for when the rung
+// is on. A Runner built with a nil PatchForge never reaches decide's patch
+// branch at all -- see WithPatchForge.
 type PatchForge interface {
 	AgentBranch(num string) string
 	forge.BranchPusher
 	forge.DraftPRCreator
 	forge.IssueLabeler
+	forge.BranchDeleter
+	OpenPRForBranch(branch string) (forge.PR, bool, error)
 }
 
 // PatchGate is the work merge gate a landed patch PR is handed to once its

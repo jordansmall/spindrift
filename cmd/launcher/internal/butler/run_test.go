@@ -1471,13 +1471,19 @@ func patchableDispatcherN(class string, n int) *dispatch.Fake {
 type fakePushCall struct{ srcDir, localRef, branch, base string }
 type fakeDraftCall struct{ title, body, base, head string }
 
+// fakeDeleteCall records one DeleteBranch invocation.
+type fakeDeleteCall struct{ branch, base string }
+
 // fakePatchForge is PatchForge's test double: AgentBranch is prefix+num,
 // PushBranch/CreateDraftPR each record their call and answer a scripted
 // error, or -- on CreateDraftPR -- the scripted draftURL. AddLabels is
 // promoted straight through from the embedded forge.IssueLabeler (issue
 // #4074), normally the same fc.AsIssueFiler() fake the test's own
 // IssueTracker is, so a fallback assertion against fc.AddLabelsCalls sees
-// the call whichever path it came through.
+// the call whichever path it came through. openPR/openPRFound/openPRErr and
+// deleteCalls/deleteErr back landPatch's ambiguous-CreateDraftPR-error
+// recovery (issue #4112): a lookup told apart from a real create failure,
+// and the branch cleanup that follows only when no PR was found.
 type fakePatchForge struct {
 	prefix string
 	forge.IssueLabeler
@@ -1488,6 +1494,14 @@ type fakePatchForge struct {
 	draftCalls []fakeDraftCall
 	draftURL   string
 	draftErr   error
+
+	openPRCalls []string
+	openPR      forge.PR
+	openPRFound bool
+	openPRErr   error
+
+	deleteCalls []fakeDeleteCall
+	deleteErr   error
 }
 
 func (f *fakePatchForge) AgentBranch(num string) string { return f.prefix + num }
@@ -1503,6 +1517,19 @@ func (f *fakePatchForge) CreateDraftPR(title, body, base, head string) (string, 
 		return "", false, f.draftErr
 	}
 	return f.draftURL, true, nil
+}
+
+func (f *fakePatchForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
+	f.openPRCalls = append(f.openPRCalls, branch)
+	if f.openPRErr != nil {
+		return forge.PR{}, false, f.openPRErr
+	}
+	return f.openPR, f.openPRFound, nil
+}
+
+func (f *fakePatchForge) DeleteBranch(branch, base string) error {
+	f.deleteCalls = append(f.deleteCalls, fakeDeleteCall{branch, base})
+	return f.deleteErr
 }
 
 // fakePatchGateCall records one PatchGate.SettleAdopted invocation.
@@ -1750,10 +1777,12 @@ func TestSweep_PatchDiffNoLongerAppliesFilesPlainWithPromotionOff(t *testing.T) 
 }
 
 // (r4) A patch that commits cleanly but fails to land -- CreateDraftPR
-// errors after the push succeeded -- falls back to promoting the
-// already-filed issue via IssueLabeler.AddLabels, since PostIssue already
-// ran and cannot be redone with different labels. The finding keeps its
-// agent-butler-patch provenance label; ready-for-agent is added on top.
+// errors after the push succeeded, and a lookup finds no PR was created
+// anyway -- falls back to promoting the already-filed issue via
+// IssueLabeler.AddLabels, since PostIssue already ran and cannot be redone
+// with different labels. The finding keeps its agent-butler-patch
+// provenance label; ready-for-agent is added on top. The orphaned branch the
+// failed push left behind is deleted (issue #4112).
 func TestSweep_PatchPRCreateFailsFallsBackToPromoteViaAddLabels(t *testing.T) {
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
@@ -1781,6 +1810,14 @@ func TestSweep_PatchPRCreateFailsFallsBackToPromoteViaAddLabels(t *testing.T) {
 	labels := fc.PostIssueCalls[0].Labels
 	if !slices.Contains(labels, "agent-butler-patch") {
 		t.Errorf("PostIssue labels = %v, want agent-butler-patch (filed as a patch candidate before the PR failed)", labels)
+	}
+
+	wantBranch := pf.prefix + "9403"
+	if len(pf.openPRCalls) != 1 || pf.openPRCalls[0] != wantBranch {
+		t.Fatalf("openPRCalls = %v, want exactly one lookup of %q", pf.openPRCalls, wantBranch)
+	}
+	if len(pf.deleteCalls) != 1 || pf.deleteCalls[0] != (fakeDeleteCall{branch: wantBranch, base: "main"}) {
+		t.Fatalf("deleteCalls = %+v, want exactly one delete of %q with base %q", pf.deleteCalls, wantBranch, "main")
 	}
 
 	tip, err := backend.Read("bugs")
@@ -1877,6 +1914,12 @@ func TestSweep_PatchPushFailsFallsBackToPromote(t *testing.T) {
 	if len(pf.draftCalls) != 0 {
 		t.Errorf("draftCalls = %+v, want none: a failed push must never reach CreateDraftPR", pf.draftCalls)
 	}
+	if len(pf.openPRCalls) != 0 {
+		t.Errorf("openPRCalls = %v, want none: a failed push must never reach OpenPRForBranch", pf.openPRCalls)
+	}
+	if len(pf.deleteCalls) != 0 {
+		t.Errorf("deleteCalls = %v, want none: PushBranch itself never created a branch to clean up", pf.deleteCalls)
+	}
 
 	tip, err := backend.Read("bugs")
 	if err != nil {
@@ -1890,6 +1933,147 @@ func TestSweep_PatchPushFailsFallsBackToPromote(t *testing.T) {
 	}
 	if tip.State.Phase != ledger.Done {
 		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
+	}
+}
+
+// (r9, issue #4112) CreateDraftPR errors, but OpenPRForBranch finds the PR
+// was created anyway (a timeout/5xx after the server made it): landPatch
+// adopts it as if the create had succeeded. No fallback runs -- no delete,
+// no AddLabels, no promotion comment -- and the Ledger records the adopted
+// URL under Patched, same as an ordinary landed patch, with the merge gate
+// handed that URL too.
+func TestSweep_PatchPRCreateErrorsButPRWasCreatedAdopts(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9504"
+	fc.SetIssue(forge.Issue{Number: "9504"})
+
+	pf := &fakePatchForge{
+		prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("timeout"),
+		openPR: forge.PR{URL: "https://example.com/pull/9504"}, openPRFound: true,
+	}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	gate := &fakePatchGate{}
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, gate)
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 1 || out.Promoted != 0 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=1 Promoted=0", out)
+	}
+	if len(pf.deleteCalls) != 0 {
+		t.Errorf("deleteCalls = %v, want none: a found PR must never be orphaned by deleting its head branch", pf.deleteCalls)
+	}
+	if len(fc.AddLabelsCalls) != 0 {
+		t.Errorf("AddLabelsCalls = %+v, want none: the adopted PR is not a promotion fallback", fc.AddLabelsCalls)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("CommentCalls = %+v, want none: no promotion note for an adopted patch", fc.CommentCalls)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Patched, []string{pf.openPR.URL}) {
+		t.Errorf("Patched = %v, want [%s]", tip.State.Patched, pf.openPR.URL)
+	}
+	if len(tip.State.Promoted) != 0 {
+		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
+	}
+	if len(gate.calls) != 1 || gate.calls[0].prURL != pf.openPR.URL {
+		t.Fatalf("gate.calls = %+v, want one SettleAdopted call with %q", gate.calls, pf.openPR.URL)
+	}
+}
+
+// (r10, issue #4112) CreateDraftPR errors and OpenPRForBranch itself errors:
+// the branch is kept (a PR might be live that the lookup just couldn't see),
+// and the create error still falls the finding back to promote.
+func TestSweep_PatchPRLookupErrorsFallsBackToPromoteKeepsBranch(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9505"
+	fc.SetIssue(forge.Issue{Number: "9505"})
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom"), openPRErr: errors.New("lookup boom")}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
+	var out Outcome
+	var err error
+	stdout := captureStdout(t, func() {
+		out, err = r.Sweep([]string{"bugs"})
+	})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=1", out)
+	}
+	if len(pf.deleteCalls) != 0 {
+		t.Errorf("deleteCalls = %v, want none: a failed lookup must never delete a branch a live PR might still need", pf.deleteCalls)
+	}
+	if !strings.Contains(stdout, "status=patch-pr-lookup-failed") || !strings.Contains(stdout, "lookup boom") {
+		t.Errorf("settle log = %q, want a status=patch-pr-lookup-failed line naming the lookup error", stdout)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want [%s]", tip.State.Promoted, fc.PostIssueURL)
+	}
+}
+
+// (r11, issue #4112) CreateDraftPR errors, no PR was created, and the
+// cleanup DeleteBranch itself fails: cleanup failure is logged and best-
+// effort -- the finding still falls back to promote as usual.
+func TestSweep_PatchBranchCleanupFailsStillFallsBackToPromote(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9506"
+	fc.SetIssue(forge.Issue{Number: "9506"})
+
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftErr: errors.New("boom"), deleteErr: errors.New("delete boom")}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return patchableDispatcher("docs-drift") }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
+	var out Outcome
+	var err error
+	stdout := captureStdout(t, func() {
+		out, err = r.Sweep([]string{"bugs"})
+	})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != Swept || out.Patched != 0 || out.Promoted != 1 {
+		t.Fatalf("Outcome = %+v, want Kind=Swept Patched=0 Promoted=1", out)
+	}
+	if len(pf.deleteCalls) != 1 {
+		t.Fatalf("deleteCalls = %+v, want exactly one attempt", pf.deleteCalls)
+	}
+	if !strings.Contains(stdout, "status=patch-branch-cleanup-failed") || !strings.Contains(stdout, "delete boom") {
+		t.Errorf("settle log = %q, want a status=patch-branch-cleanup-failed line naming the delete error", stdout)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !slices.Equal(tip.State.Promoted, []string{fc.PostIssueURL}) {
+		t.Errorf("Promoted = %v, want [%s]", tip.State.Promoted, fc.PostIssueURL)
 	}
 }
 
