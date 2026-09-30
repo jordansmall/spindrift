@@ -132,8 +132,9 @@ type DraftPRCreator interface {
 // ADR 0057): github and forgejo base adapters implement it regardless of the
 // Box's access mode, backed by the same relay clone the bundle relay uses.
 type BranchPusher interface {
-	// PushBranch force-with-lease-pushes localRef from the git repo at srcDir
-	// onto branch on the target repo.
+	// PushBranch pushes localRef from the git repo at srcDir onto branch on
+	// the target repo, creating it. It refuses when branch already exists on
+	// the target (issue #4104).
 	PushBranch(srcDir, localRef, branch string) error
 }
 

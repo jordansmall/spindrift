@@ -270,9 +270,9 @@ func (f *forgejoCodeForge) relayClone(op string) func(dir string) error {
 	}
 }
 
-// PushBranch force-with-lease-pushes localRef from the git repo at srcDir onto
-// branch on the target repo, with the launcher's own token (issue #4071, ADR
-// 0057).
+// PushBranch creates branch on the target repo from localRef in the git repo
+// at srcDir, with the launcher's own token (issue #4071, ADR 0057); refuses if
+// branch already exists (issue #4104).
 func (f *forgejoCodeForge) PushBranch(srcDir, localRef, branch string) error {
 	return bundlerelay.PushBranch("forgejo", srcDir, localRef, branch, f.relayClone("push branch"))
 }

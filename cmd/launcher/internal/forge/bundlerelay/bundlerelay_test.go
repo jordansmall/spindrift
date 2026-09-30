@@ -175,6 +175,112 @@ func TestPushBranch_CheckoutFailureErrors(t *testing.T) {
 	}
 }
 
+// A fresh branch, the only kind the butler patch rung ever pushes, is created
+// at the pushed tip.
+func TestPushBranch_CreatesFreshBranch(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	src := t.TempDir()
+	forgetest.Run(t, "", "clone", repo.Bare, src)
+	forgetest.Run(t, src, "checkout", "-b", "work")
+	forgetest.WriteFile(t, filepath.Join(src, "feature.txt"), "v1\n")
+	forgetest.Run(t, src, "add", "feature.txt")
+	forgetest.Run(t, src, "commit", "-m", "v1")
+	wantSHA := forgetest.RevParse(t, src, "work")
+
+	if err := PushBranch("test", src, "work", "agent/issue-4104", localClone(repo.Bare)); err != nil {
+		t.Fatalf("PushBranch onto a fresh branch: %v", err)
+	}
+
+	if got := forgetest.RevParse(t, repo.Bare, "refs/heads/agent/issue-4104"); got != wantSHA {
+		t.Errorf("refs/heads/agent/issue-4104 = %s, want %s", got, wantSHA)
+	}
+}
+
+// PushBranch must be create-only (issue #4104): a branch that already exists
+// on the remote must refuse, leaving the remote ref's SHA unchanged, even
+// though the fresh scratch clone's own origin/<branch> lease would otherwise
+// pass. Covers both an agent branch and the base branch "main", which a bare
+// clone-relative lease let PushBranch clobber.
+func TestPushBranch_ExistingBranchRefusesAndLeavesRemoteUnchanged(t *testing.T) {
+	for _, branch := range []string{"agent/issue-4104", "main"} {
+		t.Run(branch, func(t *testing.T) {
+			repo := newBundleRelayHarness(t)
+			if branch != "main" {
+				// Seed branch onto the remote first, so this case exercises
+				// refusing an already-pushed agent branch, not a fresh one.
+				seedSrc := t.TempDir()
+				forgetest.Run(t, "", "clone", repo.Bare, seedSrc)
+				forgetest.Run(t, seedSrc, "checkout", "-b", branch)
+				forgetest.WriteFile(t, filepath.Join(seedSrc, "seed.txt"), "seed\n")
+				forgetest.Run(t, seedSrc, "add", "seed.txt")
+				forgetest.Run(t, seedSrc, "commit", "-m", "seed")
+				forgetest.Run(t, seedSrc, "push", "origin", branch)
+			}
+			wantSHA := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch)
+
+			// Commit on an orphan branch in a fresh clone of repo.Bare, so
+			// this push's payload shares no history with whatever branch is
+			// already on the remote.
+			src := t.TempDir()
+			forgetest.Run(t, "", "clone", repo.Bare, src)
+			forgetest.Run(t, src, "checkout", "--orphan", "test-payload")
+			forgetest.WriteFile(t, filepath.Join(src, "feature.txt"), "v1\n")
+			forgetest.Run(t, src, "add", "feature.txt")
+			forgetest.Run(t, src, "commit", "-m", "v1")
+
+			err := PushBranch("test", src, "test-payload", branch, localClone(repo.Bare))
+			if err == nil {
+				t.Fatalf("PushBranch onto existing branch %q: got nil error, want one", branch)
+			}
+			if !strings.Contains(err.Error(), "stale info") && !strings.Contains(err.Error(), "already exists on origin") {
+				t.Errorf("PushBranch onto existing branch %q: err = %v, want it to mention %q or %q", branch, err, "stale info", "already exists on origin")
+			}
+
+			if got := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+				t.Errorf("refs/heads/%s = %s, want %s (unchanged)", branch, got, wantSHA)
+			}
+		})
+	}
+}
+
+// A fast-forward push (the new commit's parent is the remote branch's current
+// tip) is still refused: create-only means no push at all onto an existing
+// branch, not merely a rejection of non-fast-forwards.
+func TestPushBranch_FastForwardOntoExistingBranchRefused(t *testing.T) {
+	repo := newBundleRelayHarness(t)
+	branch := "agent/issue-4104"
+
+	seedSrc := t.TempDir()
+	forgetest.Run(t, "", "clone", repo.Bare, seedSrc)
+	forgetest.Run(t, seedSrc, "checkout", "-b", branch)
+	forgetest.WriteFile(t, filepath.Join(seedSrc, "seed.txt"), "seed\n")
+	forgetest.Run(t, seedSrc, "add", "seed.txt")
+	forgetest.Run(t, seedSrc, "commit", "-m", "seed")
+	forgetest.Run(t, seedSrc, "push", "origin", branch)
+	wantSHA := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch)
+
+	// src is a clone that already has branch's tip as an ancestor, so the new
+	// commit fast-forwards it.
+	src := t.TempDir()
+	forgetest.Run(t, "", "clone", repo.Bare, src)
+	forgetest.Run(t, src, "checkout", branch)
+	forgetest.WriteFile(t, filepath.Join(src, "feature.txt"), "v1\n")
+	forgetest.Run(t, src, "add", "feature.txt")
+	forgetest.Run(t, src, "commit", "-m", "v1")
+
+	err := PushBranch("test", src, branch, branch, localClone(repo.Bare))
+	if err == nil {
+		t.Fatal("PushBranch fast-forwarding an existing branch: got nil error, want one")
+	}
+	if !strings.Contains(err.Error(), "stale info") && !strings.Contains(err.Error(), "already exists on origin") {
+		t.Errorf("PushBranch fast-forwarding an existing branch: err = %v, want it to mention %q or %q", err, "stale info", "already exists on origin")
+	}
+
+	if got := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+		t.Errorf("refs/heads/%s = %s, want %s (unchanged)", branch, got, wantSHA)
+	}
+}
+
 func TestRelay_MissingBundleErrors(t *testing.T) {
 	repo := newBundleRelayHarness(t)
 	outbox := t.TempDir()
