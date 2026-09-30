@@ -272,9 +272,9 @@ func (f *forgejoCodeForge) relayClone(op string) func(dir string) error {
 
 // PushBranch creates branch on the target repo from localRef in the git repo
 // at srcDir, with the launcher's own token (issue #4071, ADR 0057); refuses if
-// branch already exists (issue #4104).
-func (f *forgejoCodeForge) PushBranch(srcDir, localRef, branch string) error {
-	return bundlerelay.PushBranch("forgejo", srcDir, localRef, branch, f.relayClone("push branch"))
+// branch already exists, or is base (issue #4104).
+func (f *forgejoCodeForge) PushBranch(srcDir, localRef, branch, base string) error {
+	return bundlerelay.PushBranch("forgejo", srcDir, localRef, branch, base, f.relayClone("push branch"))
 }
 
 // CreateDraftPR opens a draft PR from head onto base. Forgejo has no

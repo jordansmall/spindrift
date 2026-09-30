@@ -91,7 +91,7 @@ func TestButlerOutcomeErr(t *testing.T) {
 // exercise the push/draft-PR mechanics themselves (issue #4074).
 type fakeBranchPusher struct{}
 
-func (fakeBranchPusher) PushBranch(srcDir, localRef, branch string) error { return nil }
+func (fakeBranchPusher) PushBranch(srcDir, localRef, branch, base string) error { return nil }
 
 type fakeDraftPRCreator struct{}
 
@@ -170,7 +170,7 @@ func TestButlerPatchForge(t *testing.T) {
 		if got, want := pf.AgentBranch("42"), "agent/issue-42"; got != want {
 			t.Errorf("AgentBranch(42) = %q, want %q", got, want)
 		}
-		if err := pf.PushBranch("dir", "ref", "branch"); err != nil {
+		if err := pf.PushBranch("dir", "ref", "branch", "base"); err != nil {
 			t.Errorf("PushBranch: %v", err)
 		}
 		if _, _, err := pf.CreateDraftPR("t", "b", "base", "head"); err != nil {

@@ -79,7 +79,7 @@ func TestExecClient_PushBranch_CreatesRemoteBranch(t *testing.T) {
 
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
 	branch := "agent/issue-9001"
-	if err := c.PushBranch(src, "work", branch); err != nil {
+	if err := c.PushBranch(src, "work", branch, "main"); err != nil {
 		t.Fatalf("PushBranch: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestExecClient_PushBranch_RefusesExistingBranch(t *testing.T) {
 	forgetest.WriteFile(t, filepath.Join(src1, "feature.txt"), "v1\n")
 	forgetest.Run(t, src1, "add", "feature.txt")
 	forgetest.Run(t, src1, "commit", "-m", "v1")
-	if err := c.PushBranch(src1, "work", branch); err != nil {
+	if err := c.PushBranch(src1, "work", branch, "main"); err != nil {
 		t.Fatalf("PushBranch (first): %v", err)
 	}
 	wantSHA := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch)
@@ -114,7 +114,7 @@ func TestExecClient_PushBranch_RefusesExistingBranch(t *testing.T) {
 	forgetest.WriteFile(t, filepath.Join(src2, "feature.txt"), "v2\n")
 	forgetest.Run(t, src2, "add", "feature.txt")
 	forgetest.Run(t, src2, "commit", "-m", "v2")
-	if err := c.PushBranch(src2, "work2", branch); err == nil {
+	if err := c.PushBranch(src2, "work2", branch, "main"); err == nil {
 		t.Fatal("PushBranch onto an already-existing branch: got nil error, want one")
 	}
 
@@ -139,7 +139,7 @@ func TestExecClient_PushBranch_HookRejectionSurfacesStderr(t *testing.T) {
 	forgetest.Run(t, src, "commit", "-m", "feature")
 
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
-	err := c.PushBranch(src, "work", "agent/issue-9003")
+	err := c.PushBranch(src, "work", "agent/issue-9003", "main")
 	if err == nil {
 		t.Fatal("PushBranch rejected by a pre-receive hook: got nil error, want one")
 	}
