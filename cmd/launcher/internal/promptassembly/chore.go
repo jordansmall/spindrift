@@ -10,16 +10,18 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
-var choreNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var choreNameRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
 
 // ChoreNameRule describes choreNameRe for error messages; keep the two in step.
-const ChoreNameRule = "must contain only letters, digits, '-', and '_'"
+const ChoreNameRule = "must contain only letters, digits, '-', and '_', not starting with '-'"
 
 // ValidChoreName reports whether s is one or more letters, digits, dash, and
-// underscore -- the one shape a ChoreName must satisfy before it can safely reach
-// filepath.Join. No path separator or ".." can ever cross this gate before
-// choreSection builds the chores/<name>.md lookup path (ADR 0056, issue
-// #3875). internal/chore bounds BUTLER_CHORE_CLASSES names with it too.
+// underscore, not starting with '-' -- the one shape a ChoreName must satisfy
+// before it can safely reach filepath.Join, and one that --chore can never
+// mistake for a flag (issue #4095). No path separator or ".." can ever cross
+// this gate before choreSection builds the chores/<name>.md lookup path
+// (ADR 0056, issue #3875). internal/chore bounds BUTLER_CHORE_CLASSES names
+// with it too.
 func ValidChoreName(s string) bool {
 	return choreNameRe.MatchString(s)
 }
