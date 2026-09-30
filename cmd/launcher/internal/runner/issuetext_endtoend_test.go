@@ -19,9 +19,9 @@ const (
 
 // issueTextValue returns the value of the LAST "ISSUE_TEXT=" entry in env.
 // resolvedRunEnv emits at most one, but ociRunEnv starts from the calling
-// process's own os.Environ(), which inside a dispatched Box can already carry
-// an unrelated ambient ISSUE_TEXT. ociRunEnv appends the boxEnv-driven entry
-// last, so scanning from the end picks it over any ambient one.
+// process's own os.Environ(), which still carries the blank ISSUE_TEXT each
+// subtest sets. ociRunEnv appends the boxEnv-driven entry last, so scanning
+// from the end picks it over that inherited one.
 func issueTextValue(t *testing.T, env []string) string {
 	t.Helper()
 	for i := len(env) - 1; i >= 0; i-- {
@@ -36,8 +36,9 @@ func issueTextValue(t *testing.T, env []string) string {
 // TestIssueTextReachesAssembledPromptUnderBothRunners is the end-to-end half
 // of issue #3470: the env each runner hands its Box carries ISSUE_TEXT, and
 // feeding that env into promptassembly's box-env read (EnvFromEnviron) yields
-// a prompt with the "# ISSUE TEXT" section. Each case applies only that one
-// entry via t.Setenv; the runner's other off-argv keys do not affect the claim.
+// a prompt with the "# ISSUE TEXT" section. Each case blanks every Box env
+// var first, then applies only ISSUE_TEXT via t.Setenv; the runner's other
+// off-argv keys do not affect the claim.
 func TestIssueTextReachesAssembledPromptUnderBothRunners(t *testing.T) {
 	const issueText = "issue-3470 title line\n\nA multi-line private issue body,\nwith a second paragraph and a trailing note."
 
@@ -56,6 +57,9 @@ func TestIssueTextReachesAssembledPromptUnderBothRunners(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			for _, name := range promptassembly.BoxEnvVarNames {
+				t.Setenv(name, "")
+			}
 			boxEnv := map[string]string{"ISSUE_TEXT": issueText}
 			runEnv := tc.runEnv(boxEnv)
 
