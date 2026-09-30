@@ -378,7 +378,7 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 
 	reportRead, reportWrite, err := os.Pipe()
 	if err != nil {
-		return daemon.ChildResult{}, fmt.Errorf("daemon: report pipe: %w", err)
+		return daemon.ChildResult{}, fmt.Errorf("report pipe: %w", err)
 	}
 	// The write end is exec.Cmd.ExtraFiles' first (and only) entry, which
 	// always lands at fd 3 in the child — daemon.ReportFD names that same
@@ -389,7 +389,7 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	if err := cmd.Start(); err != nil {
 		_ = reportRead.Close()
 		_ = reportWrite.Close()
-		return daemon.ChildResult{}, fmt.Errorf("daemon: start child: %w", err)
+		return daemon.ChildResult{}, fmt.Errorf("start child: %w", err)
 	}
 	// The parent's copy of the write end must close right after Start: the
 	// child has its own (inherited, distinct fd) copy, but as long as the
@@ -421,7 +421,7 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 		// daemon.Loop's Interpret is what turns it into a verdict.
 		return daemon.ChildResult{Exit: exitErr.ExitCode()}, nil
 	}
-	return daemon.ChildResult{}, fmt.Errorf("daemon: wait child: %w", waitErr)
+	return daemon.ChildResult{}, fmt.Errorf("wait child: %w", waitErr)
 }
 
 // readReports reads report-protocol lines from r to EOF and, for each one
@@ -538,9 +538,9 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error
 		if code := exitErr.ExitCode(); code >= 0 {
 			return code, nil
 		}
-		return 0, fmt.Errorf("daemon: doctor ended without an exit code: %w", waitErr)
+		return 0, fmt.Errorf("doctor ended without an exit code: %w", waitErr)
 	}
-	return 0, fmt.Errorf("daemon: run doctor: %w", waitErr)
+	return 0, waitErr
 }
 
 // forwardSignals starts one goroutine that watches stop and abort for the
