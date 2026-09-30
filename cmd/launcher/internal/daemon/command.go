@@ -148,7 +148,7 @@ func appFlakeref(repoPath, attr, revision, unpinnedMsg string) (string, error) {
 	// stripped first, so a bare default attr never trips it).
 	frag := strings.TrimPrefix(attr, ".#")
 	if frag != "" && strings.ContainsAny(frag, "#?&") {
-		return "", fmt.Errorf("daemon: app attr must not contain '#', '?', or '&', got %q", attr)
+		return "", fmt.Errorf("app attr must not contain '#', '?', or '&', got %q", attr)
 	}
 	return pinnedFlakeref(repoPath, revision, frag), nil
 }
@@ -165,13 +165,13 @@ func appFlakeref(repoPath, attr, revision, unpinnedMsg string) (string, error) {
 // validation.
 func validateRepoPathAndRevision(repoPath, revision, unpinnedMsg string) error {
 	if repoPath == "" || !path.IsAbs(repoPath) {
-		return fmt.Errorf("daemon: repo path must be an absolute path, got %q", repoPath)
+		return fmt.Errorf("repo path must be an absolute path, got %q", repoPath)
 	}
 	if revision == "" {
-		return fmt.Errorf("daemon: revision must not be empty (%s)", unpinnedMsg)
+		return fmt.Errorf("revision must not be empty (%s)", unpinnedMsg)
 	}
 	if strings.ContainsAny(repoPath, "#?&") {
-		return fmt.Errorf("daemon: repo path must not contain '#', '?', or '&', got %q", repoPath)
+		return fmt.Errorf("repo path must not contain '#', '?', or '&', got %q", repoPath)
 	}
 	return nil
 }
@@ -209,7 +209,7 @@ func SelfCommand(s SelfSpec) ([]string, error) {
 		return nil, err
 	}
 	if s.System == "" {
-		return nil, fmt.Errorf("daemon: system must not be empty")
+		return nil, fmt.Errorf("system must not be empty")
 	}
 	frag := strings.TrimPrefix(s.SelfAttr, ".#")
 	// Unlike ChildCommand's AppAttr, an empty attr here is an error rather
@@ -218,10 +218,10 @@ func SelfCommand(s SelfSpec) ([]string, error) {
 	// fragment, which nix run itself defaults for; nix eval has no such
 	// default to fall back on).
 	if frag == "" {
-		return nil, fmt.Errorf("daemon: self attr must not be empty, got %q", s.SelfAttr)
+		return nil, fmt.Errorf("self attr must not be empty, got %q", s.SelfAttr)
 	}
 	if strings.ContainsAny(frag, "#?&") {
-		return nil, fmt.Errorf("daemon: self attr must not contain '#', '?', or '&', got %q", s.SelfAttr)
+		return nil, fmt.Errorf("self attr must not contain '#', '?', or '&', got %q", s.SelfAttr)
 	}
 
 	// The fragment is the full attribute path (apps.<system>.<attr>.program),
