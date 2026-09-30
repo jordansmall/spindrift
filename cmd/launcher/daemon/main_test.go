@@ -1922,6 +1922,31 @@ func TestStartupPreflight_RunDoctorSeamFailure(t *testing.T) {
 	}
 }
 
+// TestStartupPreflight_RunDoctorSeamErrorCarriesNoDaemonPrefix pins that a
+// real RunDoctor seam error (the doctor binary missing) comes back with no
+// "daemon: " of its own — mainRun's preflight-halt print adds the only one.
+func TestStartupPreflight_RunDoctorSeamErrorCarriesNoDaemonPrefix(t *testing.T) {
+	origFetch, origDoctor := runnerFetchCommand, runnerDoctorCommand
+	t.Cleanup(func() { runnerFetchCommand, runnerDoctorCommand = origFetch, origDoctor })
+
+	runnerFetchCommand = scriptedFetchSeamT(t, func() string { return "deadbeef" }, nil)
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/nonexistent/spindrift-doctor")
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	var buf bytes.Buffer
+	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	got := startupPreflight(context.Background(), r, em).String()
+	if !strings.HasPrefix(got, "preflight: run-doctor: ") {
+		t.Errorf("startupPreflight().String() = %q, want prefix %q", got, "preflight: run-doctor: ")
+	}
+	if n := strings.Count(got, "daemon: "); n != 0 {
+		t.Errorf(`startupPreflight().String() = %q, want zero "daemon: " (got %d)`, got, n)
+	}
+}
+
 // TestStartupPreflight_ContextCancelled covers both seams returning
 // ctx.Err(): the result must classify as daemon.HaltOperatorStop, so a
 // Ctrl-C during the preflight exits 0 rather than daemon.ExitPreflightFailed.
