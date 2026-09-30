@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/promptassembly"
 )
 
 const e2eDriverExecPackage = "spindrift.dev/launcher/driver-exec"
@@ -89,33 +91,18 @@ func TestHandoffEndToEnd(t *testing.T) {
 
 	// Issue #2979 moved assemble-prompt's Box env fields from a flag to the
 	// process environment, which the subprocess below inherits from this test.
-	// The test can itself run inside a spindrift Box, so clear the vars it
-	// does not pin before setting the ones it does, matching boxenv_test.go's
-	// TestEnvFromEnviron guard.
-	for _, envVar := range []string{
-		"AGENTS_JSON_TEMPLATE",
-		"BOX_FILER_ENABLED",
-		"BOX_WORKER_PROVISIONED",
-		"BOX_TRACKER_AXIS_READ",
-		"BOX_TRACKER_AXIS_WRITE",
-		"BOX_TRACKER_AXIS_FILER",
-		"LOCAL_ISSUE_REFERENCE",
-		"BOX_FORGE_BACKEND",
-		"SELF_CONTAINED",
-		"RESUME_AFTER_HOLD",
-		"AUTO_FORMAT",
-		"AUTO_LINT",
-		"CI_FAILURE_SUMMARY",
-		"RESEARCH_STATUS_ENUM",
-	} {
-		t.Setenv(envVar, "")
+	// The test can itself run inside a spindrift Box, so clear every Box env
+	// var (promptassembly.BoxEnvVarNames, issue #4044) before setting the ones
+	// it does pin below.
+	for _, name := range promptassembly.BoxEnvVarNames {
+		t.Setenv(name, "")
 	}
-	// ORCHESTRATOR_ENABLED and the review-loop vars put the render on the one
-	// cell that emits a review prompt, and --review-prompt-output below makes
-	// Handoff.ReviewPromptFile non-empty, which dispatches the orchestrator
-	// into its implement, review and land loop.
+	// ORCHESTRATOR_ENABLED and BOX_REVIEW_LOOP_ORCHESTRATOR, with
+	// BOX_REVIEW_LOOP_INLINE left blank by the loop above, put the render on
+	// the one cell that emits a review prompt, and --review-prompt-output
+	// below makes Handoff.ReviewPromptFile non-empty, which dispatches the
+	// orchestrator into its implement, review and land loop.
 	t.Setenv("ORCHESTRATOR_ENABLED", "1")
-	t.Setenv("BOX_REVIEW_LOOP_INLINE", "")
 	t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "1")
 	t.Setenv("ISSUE_TRACKER", "github")
 	t.Setenv("BOX_WRITE_ENABLED", "1")
