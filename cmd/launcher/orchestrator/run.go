@@ -724,7 +724,13 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	// (AC4): skip the bullet rather than point the land pass at a file that
 	// isn't there.
 	if state.FindingsLogPath != "" && pathExists(state.FindingsLogPath) {
-		fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding an earlier round's fix pass already fixed inline, or already dropped, is resolved, not re-filed)\n", state.FindingsLogPath)
+		fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding an earlier round's fix pass already fixed inline, already dropped, or already escalated, is resolved, not re-filed)\n", state.FindingsLogPath)
+	}
+	// A land pass reaching FILE ISSUES needs a prior pass's escalated
+	// dispositions, or it re-escalates a finding already queued (issue
+	// #4108).
+	if state.DispositionsLogPath != "" && pathExists(state.DispositionsLogPath) {
+		fmt.Fprintf(&b, "- Dispositions log: %s (every fix pass's own per-finding dispositions so far -- a finding recorded there as `won't-fix: escalated ...` was already escalated; never escalate it again)\n", state.DispositionsLogPath)
 	}
 	// promptfence.Block stops this agent-authored log, downstream of
 	// untrusted issue and comment text (CLAUDE.md's comment-injection trust

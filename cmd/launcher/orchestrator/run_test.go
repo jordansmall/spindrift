@@ -5331,8 +5331,79 @@ func TestSeedPromptFromStateIncludesFindingsLog(t *testing.T) {
 	if !strings.Contains(gotStr, "not just this round's Reviewer findings above") {
 		t.Errorf("seeded prompt = %q, want it to contrast the findings log with the last-round-only Reviewer findings bullet", gotStr)
 	}
-	if !strings.Contains(gotStr, "an earlier round's fix pass already fixed inline, or already dropped, is resolved, not re-filed") {
+	if !strings.Contains(gotStr, "an earlier round's fix pass already fixed inline, already dropped, or already escalated, is resolved, not re-filed") {
 		t.Errorf("seeded prompt = %q, want it to reconcile the union path with file-issues-direct.md's \"do not re-file what you just fixed or dropped.\"", gotStr)
+	}
+}
+
+// TestSeedPromptFromStateIncludesDispositionsLog verifies seedPromptFromState
+// (issue #4108) carries state.DispositionsLogPath into the fix/land seeded
+// prompt, not only into seedReviewPromptFromState's block, so a later land
+// pass can see a finding an earlier fix pass already recorded as
+// "won't-fix: escalated ..." and skip re-escalating it.
+func TestSeedPromptFromStateIncludesDispositionsLog(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "dispositions.md")
+	if err := os.WriteFile(logPath, []byte("finding F -> won't-fix: escalated to filer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// DispositionsLogPath alone never occurs in practice: a fix pass writes it
+	// only once it has also set LastVerdict (RunState.IsEmpty()'s check is
+	// unchanged by this fix, per issue #4108). Set LastVerdict here so this
+	// state triggers seeding the way a real fix/land handoff would.
+	state := runstate.RunState{
+		LastVerdict:         "BLOCK",
+		DispositionsLogPath: logPath,
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	gotStr := string(got)
+	if !strings.Contains(gotStr, "Dispositions log: "+logPath) {
+		t.Errorf("seeded prompt = %q, want it to name the dispositions log path", gotStr)
+	}
+	if !strings.Contains(gotStr, "was already escalated; never escalate it again") {
+		t.Errorf("seeded prompt = %q, want an explicit instruction not to re-escalate an already-escalated finding", gotStr)
+	}
+}
+
+// TestSeedPromptFromStateSkipsDispositionsLogBulletWhenFileGone verifies
+// seedPromptFromState degrades a DispositionsLogPath that no longer points at
+// a real file the same way an unset path does, omitting the bullet rather
+// than pointing the land pass at a missing file.
+func TestSeedPromptFromStateSkipsDispositionsLogBulletWhenFileGone(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		LastVerdict:         "BLOCK",
+		DispositionsLogPath: filepath.Join(dir, "does-not-exist.md"),
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	if strings.Contains(string(got), "Dispositions log:") {
+		t.Errorf("seeded prompt = %q, want no \"Dispositions log:\" bullet when the recorded path no longer exists", got)
 	}
 }
 

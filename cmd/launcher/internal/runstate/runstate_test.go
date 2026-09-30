@@ -342,8 +342,10 @@ func TestRunStateIsEmpty(t *testing.T) {
 	if !(RunState{DispositionsPath: "/tmp/dispositions.md"}).IsEmpty() {
 		t.Error("IsEmpty() of a state with only DispositionsPath set = false, want true")
 	}
-	// DispositionsLogPath is the same case: only seedReviewPromptFromState
-	// reads it.
+	// DispositionsLogPath is the same case: seedPromptFromState reads it too
+	// (orchestrator/run.go), but it never exists without PassSummaryPath
+	// already set, so DispositionsLogPath alone must not make the state
+	// non-empty.
 	if !(RunState{DispositionsLogPath: "/tmp/dispositions-log.md"}).IsEmpty() {
 		t.Error("IsEmpty() of a state with only DispositionsLogPath set = false, want true")
 	}
