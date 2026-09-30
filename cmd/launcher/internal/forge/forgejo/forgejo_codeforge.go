@@ -277,6 +277,18 @@ func (f *forgejoCodeForge) PushBranch(srcDir, localRef, branch, base string) err
 	return bundlerelay.PushBranch("forgejo", srcDir, localRef, branch, base, f.relayClone("push branch"))
 }
 
+// DeleteBranch deletes branch from the target repo with the launcher's own
+// token (issue #4112).
+func (f *forgejoCodeForge) DeleteBranch(branch, base string) error {
+	if err := forge.ValidateBranchDelete("forgejo", branch, base); err != nil {
+		return err
+	}
+	if err := f.rest.Do(http.MethodDelete, f.repoPath()+"/branches/"+url.PathEscape(branch), nil, nil); err != nil {
+		return fmt.Errorf("forgejo: delete branch: %w", err)
+	}
+	return nil
+}
+
 // CreateDraftPR opens a draft PR from head onto base. Forgejo has no
 // create-time draft field and encodes the state as a title prefix
 // (forgejoWIPPrefix), which MarkReady strips before merge. A retried create
@@ -313,4 +325,5 @@ func (f *forgejoCodeForge) CreateDraftPR(title, body, base, head string) (string
 
 var _ forge.BranchProtectionForge = (*forgejoCodeForge)(nil)
 var _ forge.BranchPusher = (*forgejoCodeForge)(nil)
+var _ forge.BranchDeleter = (*forgejoCodeForge)(nil)
 var _ forge.DraftPRCreator = (*forgejoCodeForge)(nil)
