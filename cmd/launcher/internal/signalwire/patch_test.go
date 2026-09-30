@@ -224,6 +224,14 @@ func TestParseUnifiedDiff(t *testing.T) {
 			false, "",
 		},
 		{
+			// A /dev/null header decides create/delete outright; the
+			// hunk-shape guess never overrides it (issue #4116).
+			"plain --- /dev/null add with a delete-shaped hunk",
+			"--- /dev/null\n+++ b/x.go\n@@ -1 +0,0 @@\n-line\n",
+			[]DiffFile{{Path: "x.go", Change: "added", Added: 0, Removed: 1}},
+			false, "",
+		},
+		{
 			"git new file mode",
 			"diff --git a/new.go b/new.go\nnew file mode 100644\nindex 0000000..1234567\n--- /dev/null\n+++ b/new.go\n@@ -0,0 +1,2 @@\n+line1\n+line2\n",
 			[]DiffFile{{Path: "new.go", Change: "added", Added: 2, Removed: 0}},
@@ -252,6 +260,14 @@ func TestParseUnifiedDiff(t *testing.T) {
 			"rename via ---/+++ name mismatch",
 			"--- a/old.go\n+++ b/new.go\n@@ -1 +1 @@\n-a\n+b\n",
 			[]DiffFile{{Path: "new.go", Change: "renamed", Added: 1, Removed: 1}},
+			false, "",
+		},
+		{
+			// Differing ---/+++ paths outrank the hunk-shape delete guess
+			// (issue #4116).
+			"rename outranks a delete-shaped hunk",
+			"--- a/old.txt\n+++ b/new.txt\n@@ -1 +0,0 @@\n-x\n",
+			[]DiffFile{{Path: "new.txt", Change: "renamed", Added: 0, Removed: 1}},
 			false, "",
 		},
 		{
@@ -364,6 +380,43 @@ func TestParseUnifiedDiff(t *testing.T) {
 			"all-hunkless git sections still rejected as no hunk",
 			"diff --git a/foo.sh b/foo.sh\nold mode 100644\nnew mode 100755\n",
 			nil, true, "no hunk",
+		},
+		{
+			// git apply --summary reports " delete f.txt" here (issue #4116).
+			"plain single-hunk delete inferred without /dev/null header",
+			"--- a/f.txt\n+++ b/f.txt\n@@ -1 +0,0 @@\n-a\n",
+			[]DiffFile{{Path: "f.txt", Change: "deleted", Added: 0, Removed: 1}},
+			false, "",
+		},
+		{
+			"plain single-hunk create inferred without /dev/null header",
+			"--- a/g.txt\n+++ b/g.txt\n@@ -0,0 +1 @@\n+b\n",
+			[]DiffFile{{Path: "g.txt", Change: "added", Added: 1, Removed: 0}},
+			false, "",
+		},
+		{
+			// git reports no summary line for more than one hunk.
+			"plain multi-hunk all-removed stays a modification",
+			"--- a/h.txt\n+++ b/h.txt\n@@ -1 +0,0 @@\n-a\n@@ -3 +2,0 @@\n-c\n",
+			[]DiffFile{{Path: "h.txt", Change: "", Added: 0, Removed: 2}},
+			false, "",
+		},
+		{
+			// git pins create/delete to "no" for a git-format section.
+			"diff --git section with same hunk shape and no extended header stays a modification",
+			"diff --git a/j.txt b/j.txt\n--- a/j.txt\n+++ b/j.txt\n@@ -1 +0,0 @@\n-a\n",
+			[]DiffFile{{Path: "j.txt", Change: "", Added: 0, Removed: 1}},
+			false, "",
+		},
+		{
+			// A nested second pair is a plain section to git too.
+			"nested second header pair under one diff --git section infers its own delete",
+			"diff --git a/CLAUDE.md b/CLAUDE.md\nindex 1234567..89abcde 100644\n--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1 @@\n-a\n+b\n--- a/docs/x.md\n+++ b/docs/x.md\n@@ -1 +0,0 @@\n-c\n",
+			[]DiffFile{
+				{Path: "CLAUDE.md", Change: "", Added: 1, Removed: 1},
+				{Path: "docs/x.md", Change: "deleted", Added: 0, Removed: 1},
+			},
+			false, "",
 		},
 	}
 
