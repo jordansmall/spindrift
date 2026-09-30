@@ -273,6 +273,50 @@ func TestRunChild_KindMismatchReportedPastMalformedLine(t *testing.T) {
 	}
 }
 
+// TestRunChild_InvalidIssueRecordCarriesSingleDaemonPrefix pins readReports'
+// "daemon: read child report: " as the line's only "daemon: ": ParseRecord's
+// own error text must stay unprefixed.
+func TestRunChild_InvalidIssueRecordCarriesSingleDaemonPrefix(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	script := `printf '%s\n' '{"event":"box","issue":"abc"}' >&3; exit 0`
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", script)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	readStderr := captureStderr(t)
+	req := daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}
+	if _, err := r.RunChild(context.Background(), req); err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	want := `daemon: read child report: record: invalid issue "abc"` + "\n"
+	if stderr := string(readStderr()); stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+}
+
+// TestRunChild_ChildCommandErrorCarriesNoDaemonPrefix pins that a
+// ChildCommand/appFlakeref build error returned by RunChild carries no
+// "daemon: " of its own — runSlot's "run-child: " backoff reason wraps it
+// as-is. The empty Revision fails before RunChild reaches any exec seam.
+func TestRunChild_ChildCommandErrorCarriesNoDaemonPrefix(t *testing.T) {
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	req := daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work)}
+	_, err := r.RunChild(context.Background(), req)
+	if err == nil {
+		t.Fatalf("RunChild() error = nil, want non-nil")
+	}
+	got := err.Error()
+	if !strings.HasPrefix(got, "revision must not be empty") {
+		t.Errorf("RunChild() error = %q, want prefix %q", got, "revision must not be empty")
+	}
+	if n := strings.Count(got, "daemon: "); n != 0 {
+		t.Errorf(`RunChild() error = %q, want zero "daemon: " (got %d)`, got, n)
+	}
+}
+
 // TestRunChild_OverLongLineDiscardedThenValidArrives drives a child that
 // writes one unterminated line well past report.MaxLine, then a valid record:
 // readReports must neither buffer the over-long run without limit nor wedge

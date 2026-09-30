@@ -60,21 +60,21 @@ func ParseRecord(line string, kind Kind) (Record, bool, error) {
 		return Record{}, false, nil
 	}
 	if rec.Key.IsZero() {
-		return Record{}, false, fmt.Errorf("daemon: record: carries neither issue nor chore")
+		return Record{}, false, fmt.Errorf("record: carries neither issue nor chore")
 	}
 	issue, chore := rec.Key.Fields()
 	if issue != "" && !validIssue(issue) {
-		return Record{}, false, fmt.Errorf("daemon: record: invalid issue %q", issue)
+		return Record{}, false, fmt.Errorf("record: invalid issue %q", issue)
 	}
 	if chore != "" && !validChore(chore) {
-		return Record{}, false, fmt.Errorf("daemon: record: invalid chore %q", chore)
+		return Record{}, false, fmt.Errorf("record: invalid chore %q", chore)
 	}
 	if rec.Key.IsChore() != kind.choreKeyed() {
 		shape := "issue-keyed"
 		if rec.Key.IsChore() {
 			shape = "chore-keyed"
 		}
-		return Record{}, false, fmt.Errorf("daemon: record: %s child sent %s record %q: %w", kind, shape, rec.Key, ErrKindMismatch)
+		return Record{}, false, fmt.Errorf("record: %s child sent %s record %q: %w", kind, shape, rec.Key, ErrKindMismatch)
 	}
 	return rec, true, nil
 }
