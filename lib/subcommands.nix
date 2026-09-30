@@ -33,7 +33,7 @@
     # due BUTLER_CHORES entry itself (issue #3877).
     name = "butler";
     usage = "[--chore <name>] [--no-build]";
-    doc = "one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; never merges, never promotes";
+    doc = "one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; promotes a finding or opens a patch PR for it only through opt-in host-side gates (both off by default)";
   }
   {
     name = "preview";

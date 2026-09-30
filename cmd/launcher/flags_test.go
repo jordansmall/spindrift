@@ -620,7 +620,7 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 		"  console                                                  browse the open backlog interactively (read-only)\n" +
 		"  dispatch [--no-build] [--yes] [--continuous] [issue...]  dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)\n" +
 		"  research [--no-build] [--yes] [--continuous] [issue...]  advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes\n" +
-		"  butler [--chore <name>] [--no-build]                     one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; never merges, never promotes\n" +
+		"  butler [--chore <name>] [--no-build]                     one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; promotes a finding or opens a patch PR for it only through opt-in host-side gates (both off by default)\n" +
 		"  preview [issue...]                                       dry-run: show what dispatch would pick up, in order\n" +
 		"  build                                                    realize the agent image without running any agent\n" +
 		"  recover <issue>                                          run the merge gate for a single issue\n" +
