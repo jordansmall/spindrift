@@ -301,8 +301,27 @@ func parsePlainFileSection(lines []string, i int) (file DiffFile, next int, err,
 	if hunks == 0 {
 		return DiffFile{}, 0, errors.New("patch is not a unified diff: no hunk"), pathErr
 	}
-	path, change := resolvePathAndChange("", 0, dashPath, plusPath)
-	return DiffFile{Path: path, Change: change, Added: added, Removed: removed}, next, nil, pathErr
+	// git apply's parse_single_patch infers a create/delete for a plain
+	// section from one hunk with an empty side; context lines count toward
+	// a side, so the header's counts decide, not added/removed. Like git,
+	// only when no /dev/null header already decides it. A degenerate
+	// -0,0 +0,0 hunk lands on "deleted"; git refuses it as corrupt anyway.
+	change, rank := "", 0
+	if hunks == 1 && dashPath != devNull && plusPath != devNull {
+		// parseHunk already matched and count-parsed this header at
+		// lines[i+2], so m is non-nil and the counts parse.
+		m := hunkHeaderRE.FindStringSubmatch(lines[i+2])
+		oldLen, _ := countOrDefault(m[2])
+		newLen, _ := countOrDefault(m[4])
+		switch {
+		case newLen == 0:
+			setChange(&change, &rank, "deleted", rankAddedOrDeleted)
+		case oldLen == 0:
+			setChange(&change, &rank, "added", rankAddedOrDeleted)
+		}
+	}
+	path, finalChange := resolvePathAndChange(change, rank, dashPath, plusPath)
+	return DiffFile{Path: path, Change: finalChange, Added: added, Removed: removed}, next, nil, pathErr
 }
 
 // parseHeaderPairAndHunks parses one "--- "/"+++ " header pair starting at
