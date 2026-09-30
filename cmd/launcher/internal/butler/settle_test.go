@@ -1052,6 +1052,16 @@ func TestPromotion_DecidePatch(t *testing.T) {
 			f.Patch = "--- a/docs/deleted.md\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-old\n"
 			return p, f
 		}, nil, "deleted"},
+		{"deleted file inferred from hunk shape", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			// No /dev/null side -- git apply infers delete from the single
+			// hunk's all-old shape alone (issue #4116).
+			f.Patch = "--- a/docs/deleted.md\n+++ b/docs/deleted.md\n@@ -1 +0,0 @@\n-old\n"
+			return p, f
+		}, nil, "not modification-only: docs/deleted.md deleted"},
+		{"added file inferred from hunk shape", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = "--- a/docs/added.md\n+++ b/docs/added.md\n@@ -0,0 +1 @@\n+new\n"
+			return p, f
+		}, nil, "not modification-only: docs/added.md added"},
 		{"renamed file", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
 			f.Patch = "diff --git a/docs/old.md b/docs/new.md\nsimilarity index 90%\nrename from docs/old.md\nrename to docs/new.md\n--- a/docs/old.md\n+++ b/docs/new.md\n@@ -1 +1 @@\n-x\n+y\n"
 			return p, f

@@ -387,6 +387,67 @@ func TestVerifyDiffMatchesGit_AcceptsMatchingModification(t *testing.T) {
 	}
 }
 
+// TestVerifyDiffMatchesGit_AgreesWithParserOnHunkShape pins parser/git
+// agreement on the plain-section create/delete inference from hunk shape
+// alone (issue #4116): git reports a summary line exactly where the parser
+// reports a create/delete, which the modification-only gate catches first.
+func TestVerifyDiffMatchesGit_AgreesWithParserOnHunkShape(t *testing.T) {
+	bare, _ := newTreeBareRepo(t)
+
+	tests := []struct {
+		name       string
+		diff       string
+		wantChange string
+		wantErr    bool
+	}{
+		{
+			name: "plain multi-hunk all-removed stays a modification",
+			diff: "--- a/z.txt\n+++ b/z.txt\n@@ -1 +0,0 @@\n-line1\n@@ -5 +0,0 @@\n-line2\n",
+		},
+		{
+			name: "diff --git section with no extended header stays a modification",
+			diff: "diff --git a/w.txt b/w.txt\n--- a/w.txt\n+++ b/w.txt\n@@ -1 +0,0 @@\n-line\n",
+		},
+		{
+			name:       "plain single-hunk delete",
+			diff:       "--- a/x.txt\n+++ b/x.txt\n@@ -1 +0,0 @@\n-line\n",
+			wantChange: "deleted",
+			wantErr:    true,
+		},
+		{
+			name:       "plain single-hunk create",
+			diff:       "--- a/y.txt\n+++ b/y.txt\n@@ -0,0 +1 @@\n+line\n",
+			wantChange: "added",
+			wantErr:    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			entries, err := signalwire.ParseUnifiedDiff(tc.diff)
+			if err != nil {
+				t.Fatalf("ParseUnifiedDiff: %v", err)
+			}
+			if len(entries) != 1 || entries[0].Change != tc.wantChange {
+				t.Fatalf("entries = %+v, want single entry with Change %q", entries, tc.wantChange)
+			}
+
+			err = verifyDiffMatchesGit(nil, bare, tc.diff, entries)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("verifyDiffMatchesGit: got nil error, want one")
+				}
+				if !strings.Contains(err.Error(), "summary line") {
+					t.Fatalf("verifyDiffMatchesGit error = %q, want it to mention a summary line", err.Error())
+				}
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("verifyDiffMatchesGit: %v, want nil", err)
+			}
+		})
+	}
+}
+
 // TestFetchTree_RedactsCredentialsOnError pins that a failed fetch's error
 // never leaks a URL's embedded token, the same guarantee ledger.Remote's own
 // git wrappers give (forge.RedactURLCredentials) -- the port at 1 refuses
