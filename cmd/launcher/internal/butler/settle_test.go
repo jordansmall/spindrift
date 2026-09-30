@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
@@ -1446,6 +1447,262 @@ func TestSettleRun_Promotion_NoReservationCommitWhenNothingEligible(t *testing.T
 	}
 	if len(entries) != 2 {
 		t.Errorf("History = %d entries, want exactly 2 (claim, done -- no reservation)", len(entries))
+	}
+}
+
+// patchReservePromotion builds a promotion with the patch rung always on
+// (docs-drift, DefaultPatchPaths, room enough for one) and the promotion
+// rung on iff promoteEnabled -- the shape TestSettleRun_Patch_* below share,
+// pinning that a patch candidate's own eligibility never depends on the
+// promotion rung being on (issue #4111).
+func patchReservePromotion(promoteEnabled bool) promotion {
+	perDay := 0
+	if promoteEnabled {
+		perDay = 1
+	}
+	return newPromotion(
+		[]string{"docs-drift"}, 4, perDay, "ready-for-agent",
+		patchPolicy{classes: []string{"docs-drift"}, perDay: 1, paths: DefaultPatchPaths, maxFiles: 3, maxLines: 20},
+	)
+}
+
+// patchReserveResult is one patch-eligible finding: docs/a.md, matching
+// testPatchDiff, on the docs-drift class every patchReservePromotion above
+// allow-lists.
+func patchReserveResult() dispatch.Result {
+	return readyResult(fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["docs/a.md:Foo"],"class":"docs-drift","concurrence":"agreed","patch":%q}`, testPatchDiff))
+}
+
+// patchReserveRig is the tree/forge/gate a patch-landing settleRun test
+// needs: fakeTree answers CommitPatch, fc is both the IssueTracker and (via
+// AsIssueFiler/embedding) the fakePatchForge's IssueLabeler, and pf answers
+// PushBranch/CreateDraftPR.
+func patchReserveRig(fc *forge.Fake) (fakeTree, *fakePatchForge, *fakePatchGate) {
+	tree := fakeTree{head: "headsha", files: []string{"docs/a.md"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
+	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc, draftURL: "https://example.com/pull/1"}
+	return tree, pf, &fakePatchGate{}
+}
+
+// (o) A landed patch's own reservation survives a lost Finish (non-CAS
+// error): the PR is already open and the finding already filed, so
+// DayTotals must count it even though the done commit never landed (issue
+// #4111, mirrors (j) for promotions).
+func TestSettleRun_Patch_ReserveCountsDespiteDoneAppendFailure(t *testing.T) {
+	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, inner, "bugs", start)
+	backend := doneAppendErr{Backend: inner, err: errors.New("push failed")}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9500"
+	tree, pf, gate := patchReserveRig(fc)
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	room := chore.Room{Promotions: 1, Patches: 1}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate})
+
+	got := s.settle(dispatch.NewFake(), patchReserveResult())
+	if got.done {
+		t.Errorf("settled = %+v, want done=false (the Finish push failed)", got)
+	}
+	if len(pf.draftCalls) != 1 {
+		t.Fatalf("draftCalls = %+v, want 1 (the patch still landed before Finish)", pf.draftCalls)
+	}
+
+	totals, err := ledger.DayTotals(inner, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Patched != 1 {
+		t.Errorf("Patched = %d, want 1 (the reservation, despite the lost done commit)", totals.Patched)
+	}
+}
+
+// (p) A rival takeover lands between this run's reservation and its done
+// write: the done commit's own CAS legitimately loses, but the patch
+// reservation still stands in the chain and must still count (issue #4111,
+// mirrors (k) for promotions).
+func TestSettleRun_Patch_ReserveCountsDespiteTakeoverBeforeDone(t *testing.T) {
+	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, inner, "bugs", start)
+	backend := takeoverOnDone{Backend: inner}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9501"
+	tree, pf, gate := patchReserveRig(fc)
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	room := chore.Room{Promotions: 1, Patches: 1}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate})
+
+	s.settle(dispatch.NewFake(), patchReserveResult())
+	if len(pf.draftCalls) != 1 {
+		t.Fatalf("draftCalls = %+v, want 1", pf.draftCalls)
+	}
+
+	totals, err := ledger.DayTotals(inner, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Patched != 1 {
+		t.Errorf("Patched = %d, want 1 (the reservation, despite the takeover before done)", totals.Patched)
+	}
+}
+
+// (q) The patch rung reserves and lands independently of the promotion
+// rung: with promotion off (perDay 0, so decidePromote itself never fires)
+// and only patch room, a landed patch's reservation still survives a lost
+// Finish (issue #4111).
+func TestSettleRun_Patch_ReservesWithPromotionOff(t *testing.T) {
+	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, inner, "bugs", start)
+	backend := doneAppendErr{Backend: inner, err: errors.New("push failed")}
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9502"
+	tree, pf, gate := patchReserveRig(fc)
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	room := chore.Room{Promotions: 0, Patches: 1}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(false), patchRung{tree: tree, forge: pf, base: "main", gate: gate})
+
+	s.settle(dispatch.NewFake(), patchReserveResult())
+	if len(pf.draftCalls) != 1 {
+		t.Fatalf("draftCalls = %+v, want 1 (patching needs no promotion.enabled)", pf.draftCalls)
+	}
+
+	totals, err := ledger.DayTotals(inner, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Patched != 1 {
+		t.Errorf("Patched = %d, want 1 (reserved despite promotion being off)", totals.Patched)
+	}
+}
+
+// (r) The ordinary success path reserves then finishes on top of the
+// reservation: DayTotals must count the patch exactly once (mirrors (m)
+// for promotions).
+func TestSettleRun_Patch_SuccessNoDoubleCount(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9503"
+	tree, pf, gate := patchReserveRig(fc)
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	room := chore.Room{Promotions: 1, Patches: 1}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate})
+
+	got := s.settle(dispatch.NewFake(), patchReserveResult())
+	if !got.done || got.patched != 1 {
+		t.Errorf("settled = %+v, want done=true patched=1", got)
+	}
+
+	totals, err := ledger.DayTotals(backend, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Patched != 1 {
+		t.Errorf("Patched = %d, want exactly 1 (not double-counted from the reservation beneath the done commit)", totals.Patched)
+	}
+}
+
+// (s) A takeover before Settle even starts leaves the claim stale by the
+// time Reserve runs, so Reserve itself loses its CAS: the run must not land
+// the patch (no push, no draft PR), the same contract (l) pins for
+// promotions (issue #4111).
+func TestSettleRun_Patch_StaleClaimReserveFailsNeverLands(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	staleClaim := claimButlerChore(t, backend, "bugs", start)
+	claimButlerChore(t, backend, "bugs", start.Add(30*time.Minute))
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9504"
+	tree, pf, gate := patchReserveRig(fc)
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Hour)
+	room := chore.Room{Promotions: 1, Patches: 1}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", staleClaim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, base: "main", gate: gate})
+
+	got := s.settle(dispatch.NewFake(), patchReserveResult())
+	if got.done {
+		t.Errorf("settled = %+v, want done=false (the stale claim's own Finish must also lose)", got)
+	}
+	if len(pf.pushCalls) != 0 || len(pf.draftCalls) != 0 {
+		t.Errorf("pushCalls = %v draftCalls = %v, want none: Reserve lost its CAS before any decoration ran", pf.pushCalls, pf.draftCalls)
+	}
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("want 1 PostIssue call, got %d", len(fc.PostIssueCalls))
+	}
+	if labels := fc.PostIssueCalls[0].Labels; slices.Contains(labels, dispatchkind.Butler.PatchLabel) {
+		t.Errorf("labels = %v, want no patch label (Reserve lost its CAS)", labels)
+	}
+
+	totals, err := ledger.DayTotals(backend, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Patched != 0 {
+		t.Errorf("Patched = %d, want 0 (Reserve never landed)", totals.Patched)
+	}
+}
+
+// (t) A promote-only finding and a separate patch finding in the same sweep
+// share one reservation commit, not two: Reserved counts the promote-only
+// finding (its class is on the promotion allow-list) and ReservedPatches
+// counts the patch finding (its class is only on the patch allow-list, so it
+// never counts toward Reserved) -- issue #4111.
+func TestSettleRun_ReservesPromotionAndPatchInOneCommit(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9600"
+	tree, pf, gate := patchReserveRig(fc)
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := newPromotion(
+		[]string{"error-handling"}, 4, 1, "ready-for-agent",
+		patchPolicy{classes: []string{"docs-drift"}, perDay: 1, paths: DefaultPatchPaths, maxFiles: 3, maxLines: 20},
+	)
+	room := chore.Room{Promotions: 1, Patches: 1}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, policy, patchRung{tree: tree, forge: pf, base: "main", gate: gate})
+
+	result := readyResult(
+		`{"title":"promotable","body":"b","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed"}`,
+		fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["docs/a.md:Foo"],"class":"docs-drift","concurrence":"agreed","patch":%q}`, testPatchDiff),
+	)
+	s.settle(dispatch.NewFake(), result)
+
+	entries, err := backend.History("bugs", start.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	var reservations int
+	for _, e := range entries {
+		if e.State.Phase != ledger.Claimed || (e.State.Reserved == 0 && e.State.ReservedPatches == 0) {
+			continue
+		}
+		reservations++
+		if e.State.Reserved != 1 || e.State.ReservedPatches != 1 {
+			t.Errorf("reservation = Reserved=%d ReservedPatches=%d, want 1 and 1", e.State.Reserved, e.State.ReservedPatches)
+		}
+	}
+	if reservations != 1 {
+		t.Fatalf("reservation commits = %d, want exactly 1", reservations)
 	}
 }
 
