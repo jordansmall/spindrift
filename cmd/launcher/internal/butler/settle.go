@@ -143,38 +143,40 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		patchesLeft := s.room.Patches
 
 		// Reserve the slots this run intends to spend before filing anything
-		// (issue #3926): if the done commit below never lands -- the claim
-		// was lost to a takeover, or the push itself fails -- the
+		// (issues #3926, #4111): if the done commit below never lands -- the
+		// claim was lost to a takeover, or the push itself fails -- the
 		// reservation still counts against DayTotals, so a lost Finish can
-		// never let a Chore promote past the day's budget. finishParent
-		// moves to the reservation tip on success so the done commit's own
-		// CAS is checked against it, not the stale claim. Patch candidates
-		// count as promotion-eligible here too (see eligible's loop below),
-		// so a patch that lands but whose own Finish is lost still leaves
-		// the reservation spent -- over-counting that day's promotions,
-		// never under-counting them (issue #4074).
-		if remaining > 0 {
-			eligible := 0
-			for _, f := range kept {
-				// Patch room is left zero here: a patch candidate whose
-				// landing later fails falls back to promote (decide's own
-				// patch-gate-fails contract), so it still needs a reserved
-				// promotion slot -- this count must not skip it just
-				// because it might patch instead.
-				if s.policy.decide(f, promoteOnlyRoom(remaining)).kind == promote {
-					eligible++
-				}
+		// never let a Chore promote or patch past the day's budget.
+		// finishParent moves to the reservation tip on success so the done
+		// commit's own CAS is checked against it, not the stale claim. A
+		// patch candidate that is also promotion-eligible holds a promotion
+		// slot as well as its patch slot while room allows (its fallback
+		// needs one), so a landed patch whose Finish is lost over-counts
+		// that day's promotions, never under-counts either budget.
+		eligible, patchCount := 0, 0
+		for _, f := range kept {
+			// Patch room is left zero for this probe: a patch candidate
+			// whose landing later fails falls back to promote (decide's
+			// own patch-gate-fails contract), so it still needs a reserved
+			// promotion slot -- this count must not skip it just because
+			// it might patch instead.
+			if s.policy.decide(f, promoteOnlyRoom(remaining)).kind == promote {
+				eligible++
 			}
-			n := min(remaining, eligible)
-			if n > 0 {
-				reserved, err := ledger.Reserve(s.ledger, s.chore, s.claim, ledger.Reservation{Promotions: n}, s.now())
-				if err != nil {
-					fmt.Printf("    #%s  status=promotion-reserve-failed  !! %v\n", num, err)
-					remaining = 0
-				} else {
-					remaining = n
-					finishParent = reserved
-				}
+			if patchesLeft > 0 && s.policy.decide(f, chore.Room{Promotions: remaining, Patches: patchesLeft}).kind == patch {
+				patchCount++
+			}
+		}
+		n := min(remaining, eligible)
+		p := min(patchesLeft, patchCount)
+		remaining, patchesLeft = n, p
+		if n > 0 || p > 0 {
+			reserved, err := ledger.Reserve(s.ledger, s.chore, s.claim, ledger.Reservation{Promotions: n, Patches: p}, s.now())
+			if err != nil {
+				fmt.Printf("    #%s  status=reserve-failed  !! %v\n", num, err)
+				remaining, patchesLeft = 0, 0
+			} else {
+				finishParent = reserved
 			}
 		}
 
