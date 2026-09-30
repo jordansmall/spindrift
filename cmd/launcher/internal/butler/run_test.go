@@ -2359,7 +2359,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 // (r11) A diff touching CLAUDE.md -- allow-matched by "*.md" but explicitly
-// denied by DefaultPatchPaths' own "!CLAUDE.md" entry (ADR 0057, issue
+// denied by DefaultPatchPaths' own "!**/CLAUDE.md" entry (ADR 0057, issue
 // #4075) -- never reaches the Tree at all: decide's patchPaths gate rejects
 // it before CommitPatch is ever called, so the finding falls back to
 // exactly what promote would do with no Patch, logging the gate's own

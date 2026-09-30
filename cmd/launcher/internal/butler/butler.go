@@ -57,7 +57,7 @@ type Policy struct {
 
 // DefaultPatchPaths is BUTLER_PATCH_PATHS' schema default (lib/env-schema.nix
 // butlerPatchPaths), pinned equal to it by the launcher's schema tests.
-const DefaultPatchPaths = "docs/**,*.md,!docs/adr/**,!CLAUDE.md,!CONTEXT.md,!CONTRIBUTING.md,!AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**"
+const DefaultPatchPaths = "docs/**,*.md,!docs/adr/**,!**/CLAUDE.md,!**/CONTEXT.md,!**/CONTRIBUTING.md,!**/AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**"
 
 // PatchForge is the host capability the patch rung needs to land a finding
 // as a draft PR (ADR 0057, issue #4074): the branch name a filed finding's

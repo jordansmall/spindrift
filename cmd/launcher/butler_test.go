@@ -718,8 +718,8 @@ func TestButlerPatchKnobsParseFromSchema(t *testing.T) {
 // set verbatim, per the issue's acceptance criteria.
 func TestButlerPatchBoundKnobsParseFromSchema(t *testing.T) {
 	wantDenyEntries := []string{
-		"docs/adr/**", "CLAUDE.md", "CONTEXT.md", "CONTRIBUTING.md",
-		"AGENTS.md", "skills/**", "templates/**", "fragments/**", ".github/**",
+		"docs/adr/**", "**/CLAUDE.md", "**/CONTEXT.md", "**/CONTRIBUTING.md",
+		"**/AGENTS.md", "skills/**", "templates/**", "fragments/**", ".github/**",
 	}
 
 	found := map[string]bool{}
