@@ -167,7 +167,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 			}
 			n := min(remaining, eligible)
 			if n > 0 {
-				reserved, err := ledger.Reserve(s.ledger, s.chore, s.claim, n, s.now())
+				reserved, err := ledger.Reserve(s.ledger, s.chore, s.claim, ledger.Reservation{Promotions: n}, s.now())
 				if err != nil {
 					fmt.Printf("    #%s  status=promotion-reserve-failed  !! %v\n", num, err)
 					remaining = 0

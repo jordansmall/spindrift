@@ -575,61 +575,78 @@ func testDayTotals(t *testing.T, h Harness) {
 }
 
 // testReserve exercises ledger.Reserve directly: a reservation counts toward
-// DayTotals' Promoted unless a Done lands directly on top of it, it is
-// itself never a Claim, and it obeys the same compare-and-swap as Claim and
-// Finish.
+// DayTotals' Promoted and Patched unless a Done lands directly on top of it,
+// it is itself never a Claim, and it obeys the same compare-and-swap as Claim
+// and Finish.
 func testReserve(t *testing.T, h Harness) {
 	before := h.Branches(t)
 	b := h.Backend()
 	day := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
 
-	t.Run("FinishedNoDoubleCount", func(t *testing.T) {
-		const chore = "chore-reserve-finished"
-		by := ledger.ClaimedBy{Host: "w", Start: day}
-		claim, err := ledger.Claim(b, chore, ledger.Tip{}, by)
-		if err != nil {
-			t.Fatalf("Claim: %v", err)
+	t.Run("DayTotals", func(t *testing.T) {
+		// Table over what a reservation's Promotions/Patches, and whether a
+		// Finish lands on top of it, do to the day's totals: a still-open
+		// reservation counts its own numbers (in-flight), a finished one
+		// counts the Done's own list instead (no double count), and either
+		// half can be reserved alone.
+		tests := []struct {
+			name                                  string
+			chore                                 string
+			promotions, patches                   int
+			finish                                *ledger.State
+			wantPromoted, wantPatched, wantClaims int
+		}{
+			{
+				name: "FinishedNoDoubleCount", chore: "chore-reserve-finished",
+				promotions: 2, finish: &ledger.State{Promoted: []string{"url"}},
+				wantPromoted: 1, wantClaims: 1,
+			},
+			{
+				name: "FinishedNoDoubleCountPatched", chore: "chore-reserve-finished-patched",
+				patches: 2, finish: &ledger.State{Patched: []string{"pr-url"}},
+				wantPatched: 1, wantClaims: 1,
+			},
+			{
+				name: "InFlight", chore: "chore-reserve-inflight",
+				promotions:   2,
+				wantPromoted: 2, wantClaims: 1,
+			},
+			{
+				name: "InFlightPatched", chore: "chore-reserve-inflight-patched",
+				patches:     2,
+				wantPatched: 2, wantClaims: 1,
+			},
 		}
-		reserved, err := ledger.Reserve(b, chore, claim, 2, day.Add(time.Minute))
-		if err != nil {
-			t.Fatalf("Reserve: %v", err)
-		}
-		if _, err := ledger.Finish(b, chore, reserved, ledger.State{
-			Promoted: []string{"url"},
-		}, day.Add(2*time.Minute)); err != nil {
-			t.Fatalf("Finish: %v", err)
-		}
-		got, err := ledger.DayTotals(b, chore, day)
-		if err != nil {
-			t.Fatalf("DayTotals: %v", err)
-		}
-		if got.Promoted != 1 {
-			t.Fatalf("DayTotals.Promoted: got %d, want 1 (no double count)", got.Promoted)
-		}
-		if got.Claims != 1 {
-			t.Fatalf("DayTotals.Claims: got %d, want 1 (reservation is not a claim)", got.Claims)
-		}
-	})
-
-	t.Run("InFlight", func(t *testing.T) {
-		const chore = "chore-reserve-inflight"
-		by := ledger.ClaimedBy{Host: "w", Start: day}
-		claim, err := ledger.Claim(b, chore, ledger.Tip{}, by)
-		if err != nil {
-			t.Fatalf("Claim: %v", err)
-		}
-		if _, err := ledger.Reserve(b, chore, claim, 2, day.Add(time.Minute)); err != nil {
-			t.Fatalf("Reserve: %v", err)
-		}
-		got, err := ledger.DayTotals(b, chore, day)
-		if err != nil {
-			t.Fatalf("DayTotals: %v", err)
-		}
-		if got.Promoted != 2 {
-			t.Fatalf("DayTotals.Promoted: got %d, want 2 (in-flight reservation counts)", got.Promoted)
-		}
-		if got.Claims != 1 {
-			t.Fatalf("DayTotals.Claims: got %d, want 1", got.Claims)
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				by := ledger.ClaimedBy{Host: "w", Start: day}
+				claim, err := ledger.Claim(b, tc.chore, ledger.Tip{}, by)
+				if err != nil {
+					t.Fatalf("Claim: %v", err)
+				}
+				reserved, err := ledger.Reserve(b, tc.chore, claim, ledger.Reservation{Promotions: tc.promotions, Patches: tc.patches}, day.Add(time.Minute))
+				if err != nil {
+					t.Fatalf("Reserve: %v", err)
+				}
+				if tc.finish != nil {
+					if _, err := ledger.Finish(b, tc.chore, reserved, *tc.finish, day.Add(2*time.Minute)); err != nil {
+						t.Fatalf("Finish: %v", err)
+					}
+				}
+				got, err := ledger.DayTotals(b, tc.chore, day)
+				if err != nil {
+					t.Fatalf("DayTotals: %v", err)
+				}
+				if got.Promoted != tc.wantPromoted {
+					t.Errorf("DayTotals.Promoted: got %d, want %d", got.Promoted, tc.wantPromoted)
+				}
+				if got.Patched != tc.wantPatched {
+					t.Errorf("DayTotals.Patched: got %d, want %d", got.Patched, tc.wantPatched)
+				}
+				if got.Claims != tc.wantClaims {
+					t.Errorf("DayTotals.Claims: got %d, want %d", got.Claims, tc.wantClaims)
+				}
+			})
 		}
 	})
 
@@ -640,7 +657,7 @@ func testReserve(t *testing.T, h Harness) {
 		if err != nil {
 			t.Fatalf("Claim: %v", err)
 		}
-		reserved, err := ledger.Reserve(b, chore, claim, 2, day.Add(time.Minute))
+		reserved, err := ledger.Reserve(b, chore, claim, ledger.Reservation{Promotions: 2, Patches: 1}, day.Add(time.Minute))
 		if err != nil {
 			t.Fatalf("Reserve: %v", err)
 		}
@@ -660,6 +677,9 @@ func testReserve(t *testing.T, h Harness) {
 		if got.Promoted != 2 {
 			t.Fatalf("DayTotals.Promoted: got %d, want 2 (lost reservation still counts)", got.Promoted)
 		}
+		if got.Patched != 1 {
+			t.Fatalf("DayTotals.Patched: got %d, want 1 (lost patch reservation still counts)", got.Patched)
+		}
 		if got.Claims != 2 {
 			t.Fatalf("DayTotals.Claims: got %d, want 2 (original claim + takeover claim)", got.Claims)
 		}
@@ -676,7 +696,7 @@ func testReserve(t *testing.T, h Harness) {
 		if _, err := ledger.Finish(b, chore, claim, ledger.State{}, day.Add(time.Minute)); err != nil {
 			t.Fatalf("Finish: %v", err)
 		}
-		if _, err := ledger.Reserve(b, chore, claim, 2, day.Add(2*time.Minute)); !errors.Is(err, ledger.ErrLostRace) {
+		if _, err := ledger.Reserve(b, chore, claim, ledger.Reservation{Promotions: 2}, day.Add(2*time.Minute)); !errors.Is(err, ledger.ErrLostRace) {
 			t.Fatalf("Reserve on stale tip: got err %v, want ErrLostRace", err)
 		}
 	})
@@ -701,7 +721,7 @@ func testReserve(t *testing.T, h Harness) {
 		if err != nil {
 			t.Fatalf("Claim: %v", err)
 		}
-		reserved, err := ledger.Reserve(b, chore, claim2, 3, day.Add(3*time.Minute))
+		reserved, err := ledger.Reserve(b, chore, claim2, ledger.Reservation{Promotions: 3, Patches: 2}, day.Add(3*time.Minute))
 		if err != nil {
 			t.Fatalf("Reserve: %v", err)
 		}
@@ -719,6 +739,9 @@ func testReserve(t *testing.T, h Harness) {
 		}
 		if reserved.State.Reserved != 3 {
 			t.Fatalf("Reserve: got Reserved %d, want 3", reserved.State.Reserved)
+		}
+		if reserved.State.ReservedPatches != 2 {
+			t.Fatalf("Reserve: got ReservedPatches %d, want 2", reserved.State.ReservedPatches)
 		}
 	})
 

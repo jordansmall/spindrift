@@ -46,10 +46,11 @@ type State struct {
 	Dropped   int         `json:"dropped,omitempty"`
 	Patched   []string    `json:"patched,omitempty"` // PR URLs the run opened (ADR 0057).
 	Usage     usage.Usage `json:"usage"`
-	// Reserved is set only on a reservation commit (see Reserve): promotion
-	// slots a Claimed-phase entry holds against the day's budget before its
-	// Done lands.
-	Reserved int `json:"reserved,omitempty"`
+	// Reserved and ReservedPatches are set only on a reservation commit (see
+	// Reserve): promotion and patch (ADR 0057) slots a Claimed-phase entry
+	// holds against the day's budget before its Done lands.
+	Reserved        int `json:"reserved,omitempty"`
+	ReservedPatches int `json:"reservedPatches,omitempty"`
 }
 
 // StaleClaim reports whether s is a claim old enough that the worker holding
@@ -138,16 +139,25 @@ func Finish(b Backend, chore string, claim Tip, s State, at time.Time) (Tip, err
 	return Tip{Commit: commit, State: s}, nil
 }
 
+// Reservation is how many slots of each day budget Reserve holds. It is
+// named fields rather than two positional ints so a transposed call cannot
+// compile; chore.Room can't serve, since chore imports ledger.
+type Reservation struct {
+	Promotions int
+	Patches    int
+}
+
 // Reserve appends a reservation on top of claim, conditional on claim being
 // unchanged: a copy of claim.State (Phase, ClaimedBy, LastSwept, and Cursor
 // carried unchanged, so StaleClaim and a live-claim check still see a normal
-// claim) with Reserved set to n. settle calls this before promoting, so the
-// slots are counted by DayTotals even if the Finish that follows never lands
-// (a CAS loss or a push error). The caller Finishes on top of the returned
-// Tip.
-func Reserve(b Backend, chore string, claim Tip, n int, at time.Time) (Tip, error) {
+// claim) with Reserved and ReservedPatches set from r. settle calls this
+// before promoting or patching, so the slots are counted by DayTotals even
+// if the Finish that follows never lands (a CAS loss or a push error). The
+// caller Finishes on top of the returned Tip.
+func Reserve(b Backend, chore string, claim Tip, r Reservation, at time.Time) (Tip, error) {
 	s := claim.State
-	s.Reserved = n
+	s.Reserved = r.Promotions
+	s.ReservedPatches = r.Patches
 	commit, err := b.Append(chore, claim.Commit, s, at)
 	if err != nil {
 		return Tip{}, err
@@ -158,9 +168,9 @@ func Reserve(b Backend, chore string, claim Tip, n int, at time.Time) (Tip, erro
 // Totals sums a Chore's Ledger activity over a local day: budgets (ADR 0056
 // "Budgets") gate starting only, so Claims — runs started — is what they
 // check against, while Filed/Promoted/Dropped/Patched/Usage are the day's
-// completed work. Promoted also includes any in-flight or lost-race
-// reservation (see Reserve), so an unfinished Finish still counts against the
-// day's budget.
+// completed work. Promoted and Patched also include any in-flight or
+// lost-race reservation (see Reserve and DayTotals), so an unfinished Finish
+// still counts against the day's budget.
 type Totals struct {
 	Claims   int
 	Filed    int
@@ -178,13 +188,15 @@ type Totals struct {
 // Claimed commit was made, and toward Filed/Promoted/Dropped/Patched/Usage on
 // the (possibly later) day its Done commit lands.
 //
-// A Claimed entry with Reserved > 0 is a reservation (see Reserve), not a
-// claim: it never adds to Claims. It adds Reserved to Promoted unless its
-// child in the chain (the next-newer entry) is a Done — that Done's own
-// Promoted is the accurate count, so counting both would double-count a
-// successful run. A reservation with no child yet, or whose child is a
-// takeover Claim (its own Finish having been lost to the same race Reserve
-// guards against), counts Reserved.
+// A Claimed entry with Reserved > 0 or ReservedPatches > 0 is a reservation
+// (see Reserve), not a claim: it never adds to Claims. It adds Reserved to
+// Promoted and ReservedPatches to Patched unless its child in the chain (the
+// next-newer entry) is a Done — that Done's own Promoted/Patched is the
+// accurate count, so counting both would double-count a successful run. A
+// reservation with no child yet, or whose child is a takeover Claim (its own
+// Finish having been lost to the same race Reserve guards against), counts
+// Reserved and ReservedPatches. One finding may hold both: a patch candidate
+// also keeps a promotion slot for its fallback.
 func DayTotals(b Reader, chore string, now time.Time) (Totals, error) {
 	loc := now.Location()
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
@@ -206,11 +218,12 @@ func DayTotals(b Reader, chore string, now time.Time) (Totals, error) {
 		}
 		switch e.State.Phase {
 		case Claimed:
-			if e.State.Reserved > 0 {
+			if e.State.Reserved > 0 || e.State.ReservedPatches > 0 {
 				if i > 0 && entries[i-1].State.Phase == Done {
 					continue
 				}
 				t.Promoted += e.State.Reserved
+				t.Patched += e.State.ReservedPatches
 				continue
 			}
 			t.Claims++
