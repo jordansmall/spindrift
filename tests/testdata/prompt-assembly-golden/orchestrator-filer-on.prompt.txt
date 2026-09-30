@@ -357,23 +357,27 @@ triage below, not the blocking-verdict handling above:
    Scope is never the uncertain part — whether this branch touched a
    surface is a fact the diff answers — so what reaches item 3 this way
    is still out of scope, and item 3 files it rather than fixing it.
-3. Escalate — to the filer if present, else the PR body — only a finding
-   that genuinely needs a human: a real design trade-off, work outside
-   this issue's scope, or a change too large to fold in without derailing
-   the slice. Item 1's scope pin is absolute here, so the round-aware
+3. Escalate — to the filer if present, else the PR body — only a
+   finding that genuinely needs a human: a real design trade-off, work
+   outside this issue's scope, or a change too large to fold in without
+   derailing the slice. A finding an earlier round of this run already
+   escalated must never be escalated again, even reworded: a relayed
+   filer's intents file only once the run ends, so its own duplicate
+   search cannot see them yet, and a reworded copy can slip past any
+   search. Item 1's scope pin is absolute here, so the round-aware
    tiebreak below only ever runs where fixing is available at all —
-   inside the surface this branch already touched. On a surface this
-   branch never touched there is no inline fix to weigh, so an uncertain
-   finding item 2 hands up is filed, at every round. When unsure whether
-   a finding clears that bar: on the first review round, fix it rather
-   than file it. From the second review round on,
+   inside the surface this branch already touched. On a surface
+   this branch never touched there is no inline fix to weigh, so an
+   uncertain finding item 2 hands up is filed, at every round. When
+   unsure whether a finding clears that bar: on the first review
+   round, fix it rather than file it. From the second review round on,
    escalate it only when fixing it would widen the diff — new behaviour,
    a new surface, or an edit large enough to need its own review; an
    ambiguous finding whose fix is small and stays inside what this branch
-   already touches is still fixed inline, at every round.
-   Deferring is the safer failure mode precisely where a silently widened
-   diff is the alternative, and only there: elsewhere filing is the
-   costlier failure — a backlog issue nobody picks up, and a duplicate a
+   already touches is still fixed inline, at every round. Deferring is
+   the safer failure mode precisely where a silently widened diff is
+   the alternative, and only there: elsewhere filing is the costlier
+   failure — a backlog issue nobody picks up, and a duplicate a
    later run rediscovers and files again. Narrowing the round-2 flip to
    diff growth is this tiebreak's calibration, not a weakening of it.
 
@@ -382,21 +386,23 @@ two cases above, write to `/tmp/pass-summary.md` (outside the repo, never
 commit) a free-form summary of what you did this pass and what remains — the
 next pass, if any, is seeded with this path.
 
-Also write a second, separate file, `/tmp/dispositions.md` (outside the
-repo, never commit) — do not fold this into the pass-summary file above, and
-do not put pass-summary prose into this one. It holds nothing but one terse
-line per Blocking or Non-blocking finding this pass addressed: `<finding> ->
-fixed in commit <SHA>` for one you actually fixed, or `<finding> ->
+Also write a second, separate file, `/tmp/dispositions.md` (outside the repo,
+never commit) — do not fold this into the pass-summary file above, and do
+not put pass-summary prose into this one. It holds nothing but one terse
+line per Blocking or Non-blocking finding this pass addressed: `<finding>
+-> fixed in commit <SHA>` for one you actually fixed, or `<finding> ->
 won't-fix: <reason>` for one you deliberately left alone (an escalated
-finding, per the non-blocking triage above, is a won't-fix here). Reference
-existing artifacts — the commit SHA, a `file:line`, an issue number — rather
-than restating their content: no narrative, no headers, no reasoning beyond
-that one-line reason, and no pasted diff hunks, file contents, or transcript
-excerpts. A later review round reads this file verbatim and treats every
-line as an unverified claim to check against the diff, not settled fact, so
-write it precisely enough to survive that check, and terse enough to stay a
-reference rather than a restatement — a compact, well-formed entry never
-needs more than a short clause after the arrow.
+finding, per the non-blocking triage above, is a won't-fix here, with the
+reason `escalated to filer`, or `escalated to PR body` when no filer is
+present, so a later round knows it is already escalated and never escalates
+it again). Reference existing artifacts — the commit SHA, a `file:line`,
+an issue number — rather than restating their content: no narrative, no
+headers, no reasoning beyond that one-line reason, and no pasted diff hunks,
+file contents, or transcript excerpts. A later review round reads this file
+verbatim and treats every line as an unverified claim to check against the
+diff, not settled fact, so write it precisely enough to survive that check,
+and terse enough to stay a reference rather than a restatement — a compact,
+well-formed entry never needs more than a short clause after the arrow.
 
 Also write a third, separate file, `/tmp/decisions.md` (outside the repo,
 never commit) — never fold this into the pass-summary or dispositions file

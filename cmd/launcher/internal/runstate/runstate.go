@@ -92,9 +92,11 @@ type RunState struct {
 func (s RunState) IsEmpty() bool {
 	// DoneSlices/RemainingSlices are dispatch-internal bookkeeping (issue
 	// #2059) that seedPromptFromState never renders (issue #2549).
-	// DispositionsPath, DispositionsLogPath and ReviewedCommitAnchor are read
-	// only by seedReviewPromptFromState's narrower check (issue #2550), and
+	// DispositionsPath and ReviewedCommitAnchor are read only by
+	// seedReviewPromptFromState's narrower check (issue #2550), and
 	// seedPromptFromState freshly reads the decisions files (issue #2695).
+	// DispositionsLogPath is only appended after a pass has written its
+	// summary, by which point PassSummaryPath is already set (issue #4108).
 	return s.LastVerdict == "" &&
 		s.ScoutBriefPath == "" &&
 		s.PassSummaryPath == "" &&
