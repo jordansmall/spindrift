@@ -159,9 +159,9 @@ in
 
   # The configured `defaults` and `runtime` are baked into the generated
   # `run`/`build` Launcher input documents (ADR 0020), and this is the drift
-  # gate for the hand-written inputDocument Go struct (cmd/launcher/inputdoc.go).
-  # The greps hand-pick specific keys, so a new flakeOption knob is not
-  # automatically asserted here.
+  # gate for the hand-written Go struct inputdoc.Document in
+  # cmd/launcher/internal/inputdoc/inputdoc.go. The greps hand-pick specific
+  # keys, so a new flakeOption knob is not automatically asserted here.
   mkharness-defaults = pkgs.runCommand "mkharness-defaults" { } ''
     runDoc=${customHarness.internals.runInputDocumentFile}
     ! grep -q -- '@label@' "$runDoc"

@@ -858,8 +858,8 @@ in
       "documentArtifactKeys must be the sorted union of runArtifacts/buildArtifacts output keys (both runnerKinds) plus the manual IMAGE and GITHUB_OUTPUT escape hatches, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-document-artifact-keys" { } "touch $out";
 
-  # The {settings, artifacts} nesting is what the Go inputDocument struct
-  # parses (ADR 0020).
+  # The {settings, artifacts} nesting is what the Go inputdoc.Document
+  # struct (cmd/launcher/internal/inputdoc/inputdoc.go) parses (ADR 0020).
   preambles-render-input-document-json =
     let
       out = preambles.renderInputDocumentJSON {
