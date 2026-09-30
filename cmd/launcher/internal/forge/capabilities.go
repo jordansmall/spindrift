@@ -17,6 +17,7 @@ type Capabilities struct {
 	PRForge                 PRForge
 	DraftPRCreator          DraftPRCreator
 	BranchPusher            BranchPusher
+	BranchDeleter           BranchDeleter
 	BranchProtectionForge   BranchProtectionForge
 	BundleCommitSubjects    BundleCommitSubjects
 
@@ -58,6 +59,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.PRForge, _ = cf.(PRForge)
 	c.DraftPRCreator, _ = cf.(DraftPRCreator)
 	c.BranchPusher, _ = cf.(BranchPusher)
+	c.BranchDeleter, _ = cf.(BranchDeleter)
 	c.BranchProtectionForge, _ = cf.(BranchProtectionForge)
 	c.BundleCommitSubjects, _ = cf.(BundleCommitSubjects)
 

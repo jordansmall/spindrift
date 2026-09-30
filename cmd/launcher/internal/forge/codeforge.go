@@ -1,5 +1,10 @@
 package forge
 
+import (
+	"fmt"
+	"strings"
+)
+
 // CodeForge is the seam every adapter implements: agent branch naming, rebase,
 // merge/landing under MERGE_MODE, and connectivity probe.
 type CodeForge interface {
@@ -137,6 +142,35 @@ type BranchPusher interface {
 	// the target, and when branch is base, before any clone or network work
 	// (issue #4104).
 	PushBranch(srcDir, localRef, branch, base string) error
+}
+
+// BranchDeleter is the optional host-credentialed branch-delete interface
+// (issue #4112, ADR 0057): github and forgejo base adapters implement it
+// regardless of the Box's access mode. The butler patch rung uses it to
+// remove a branch it just pushed (BranchPusher) when the draft PR create
+// that was meant to follow then fails, so a failed patch attempt leaves no
+// orphan branch behind.
+type BranchDeleter interface {
+	// DeleteBranch deletes branch from the target repo. It refuses an empty
+	// or leading-"-" branch, and branch == base, before any network call
+	// (ValidateBranchDelete). Deleting a branch that does not exist on the
+	// target is an error, not a silent no-op: DeleteBranch's one caller only
+	// ever names a branch it just pushed itself.
+	DeleteBranch(branch, base string) error
+}
+
+// ValidateBranchDelete is the guard every BranchDeleter runs before any
+// network call, the delete-side twin of bundlerelay.PushBranch's own (issue
+// #4104): a leading "-" would parse as an option, and branch == base would
+// delete the branch patches land onto.
+func ValidateBranchDelete(backend, branch, base string) error {
+	if branch == "" || strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("%s: delete branch: invalid branch %q", backend, branch)
+	}
+	if strings.TrimPrefix(branch, "refs/heads/") == strings.TrimPrefix(base, "refs/heads/") {
+		return fmt.Errorf("%s: delete branch: branch %q is the base branch", backend, branch)
+	}
+	return nil
 }
 
 // BranchProtectionForge is the optional branch-protection-query interface (issue

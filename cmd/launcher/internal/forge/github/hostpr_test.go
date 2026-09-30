@@ -147,3 +147,68 @@ func TestExecClient_PushBranch_HookRejectionSurfacesStderr(t *testing.T) {
 		t.Errorf("PushBranch error = %q, want it to contain the hook's stderr", err.Error())
 	}
 }
+
+// DeleteBranch issues gh's own ref-delete API verbatim (issue #4112).
+func TestExecClient_DeleteBranch_IssuesGhApiDelete(t *testing.T) {
+	dir := prependFakeGH(t, "")
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if err := c.DeleteBranch("agent/issue-9004", "main"); err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("read recorded call: %v", err)
+	}
+	wantArgs := "api\n-X\nDELETE\nrepos/owner/repo/git/refs/heads/agent/issue-9004\n"
+	if string(got) != wantArgs {
+		t.Errorf("gh api args = %q, want %q", string(got), wantArgs)
+	}
+}
+
+// A refused delete must surface gh's stderr, not just "exit status 1".
+func TestExecClient_DeleteBranch_Errors(t *testing.T) {
+	prependFakeGH(t, `printf 'HTTP 404: Not Found\n' >&2
+exit 1
+`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	err := c.DeleteBranch("agent/issue-9005", "main")
+	if err == nil {
+		t.Fatal("DeleteBranch with a failing gh api: got nil error, want one")
+	}
+	if !strings.Contains(err.Error(), "HTTP 404: Not Found") {
+		t.Errorf("DeleteBranch error = %q, want it to contain gh's stderr", err.Error())
+	}
+}
+
+// DeleteBranch refuses branch == base and an invalid branch name before any
+// gh invocation, matching PushBranch's create-only guard (issue #4104).
+func TestExecClient_DeleteBranch_RefusesBeforeAnyGhCall(t *testing.T) {
+	cases := []struct {
+		name, branch, base, wantErrSubstr string
+	}{
+		{"empty branch", "", "main", "invalid branch"},
+		{"dash branch", "-x", "main", "invalid branch"},
+		{"branch is base", "main", "main", "base branch"},
+		{"branch is base, refs/heads/ prefixed", "refs/heads/main", "main", "base branch"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := prependFakeGH(t, "")
+
+			c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+			err := c.DeleteBranch(tc.branch, tc.base)
+			if err == nil {
+				t.Fatal("DeleteBranch with an invalid arg: got nil error, want one")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Errorf("DeleteBranch error = %q, want it to contain %q", err.Error(), tc.wantErrSubstr)
+			}
+			if calls, _ := filepath.Glob(filepath.Join(dir, "call-*.txt")); len(calls) != 0 {
+				t.Errorf("DeleteBranch with an invalid arg: gh was invoked, want it skipped")
+			}
+		})
+	}
+}

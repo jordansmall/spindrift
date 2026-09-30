@@ -1,12 +1,14 @@
 package forgejo_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -305,6 +307,101 @@ func TestForgejoCodeForge_BranchProtected_GenericNotFound(t *testing.T) {
 	}
 	if protected {
 		t.Fatal("BranchProtected() = true, want false alongside a non-nil error")
+	}
+}
+
+// DeleteBranch issues Forgejo's own branch-delete endpoint verbatim (issue
+// #4112).
+func TestForgejoCodeForge_DeleteBranch_IssuesDelete(t *testing.T) {
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.EscapedPath()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	bd, ok := cf.(forge.BranchDeleter)
+	if !ok {
+		t.Fatal("forgejoCodeForge does not implement forge.BranchDeleter")
+	}
+	if err := bd.DeleteBranch("agent/issue-9004", "main"); err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Errorf("request method = %q, want %q", gotMethod, http.MethodDelete)
+	}
+	wantPath := "/api/v1/repos/owner/repo/branches/agent%2Fissue-9004"
+	if gotPath != wantPath {
+		t.Errorf("request path = %q, want %q", gotPath, wantPath)
+	}
+}
+
+// A refused delete (e.g. a branch that does not exist) must surface the
+// forge's own message.
+func TestForgejoCodeForge_DeleteBranch_Errors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]any{"message": "branch does not exist"})
+	}))
+	defer srv.Close()
+
+	cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+		BaseURL: srv.URL,
+		Repo:    "owner/repo",
+		Token:   "tok",
+	}, nil)
+	bd := cf.(forge.BranchDeleter)
+	err := bd.DeleteBranch("agent/issue-9005", "main")
+	if err == nil {
+		t.Fatal("DeleteBranch against a missing branch: got nil error, want one")
+	}
+	if !strings.Contains(err.Error(), "branch does not exist") {
+		t.Errorf("DeleteBranch error = %q, want it to mention the forge's message", err.Error())
+	}
+}
+
+// DeleteBranch refuses branch == base and an invalid branch name before any
+// request, matching PushBranch's create-only guard (issue #4104).
+func TestForgejoCodeForge_DeleteBranch_RefusesBeforeAnyRequest(t *testing.T) {
+	cases := []struct {
+		name, branch, base, wantErrSubstr string
+	}{
+		{"empty branch", "", "main", "invalid branch"},
+		{"dash branch", "-x", "main", "invalid branch"},
+		{"branch is base", "main", "main", "base branch"},
+		{"branch is base, refs/heads/ prefixed", "refs/heads/main", "main", "base branch"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer srv.Close()
+
+			cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
+				BaseURL: srv.URL,
+				Repo:    "owner/repo",
+				Token:   "tok",
+			}, nil)
+			bd := cf.(forge.BranchDeleter)
+			err := bd.DeleteBranch(tc.branch, tc.base)
+			if err == nil {
+				t.Fatal("DeleteBranch with an invalid arg: got nil error, want one")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Errorf("DeleteBranch error = %q, want it to contain %q", err.Error(), tc.wantErrSubstr)
+			}
+			if called {
+				t.Error("DeleteBranch with an invalid arg: request was sent, want it skipped")
+			}
+		})
 	}
 }
 

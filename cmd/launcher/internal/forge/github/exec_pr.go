@@ -511,6 +511,20 @@ func (e *execClient) PushBranch(srcDir, localRef, branch, base string) error {
 	return bundlerelay.PushBranch("github", srcDir, localRef, branch, base, e.relayClone("push branch"))
 }
 
+// DeleteBranch deletes branch from the target repo with the launcher's own
+// gh-cli credential (issue #4112).
+func (e *execClient) DeleteBranch(branch, base string) error {
+	if err := forge.ValidateBranchDelete("github", branch, base); err != nil {
+		return err
+	}
+	cmd := exec.Command("gh", "api", "-X", "DELETE",
+		fmt.Sprintf("repos/%s/git/refs/heads/%s", e.repo, branch))
+	if _, err := cmd.Output(); err != nil {
+		return ghCommandErr("github: delete branch: gh api", err)
+	}
+	return nil
+}
+
 // CreateDraftPR opens a draft PR from head onto base. head and base are
 // branch names in e.repo, never a fork's owner:branch form. Read-write and
 // read-only settle alike may call it (issue #4071); settle's own gating
@@ -547,4 +561,5 @@ func (e *execClient) CreateDraftPR(title, body, base, head string) (string, bool
 
 var _ forge.BranchProtectionForge = (*execClient)(nil)
 var _ forge.BranchPusher = (*execClient)(nil)
+var _ forge.BranchDeleter = (*execClient)(nil)
 var _ forge.DraftPRCreator = (*execClient)(nil)
