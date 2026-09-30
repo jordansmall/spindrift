@@ -105,25 +105,38 @@ type fakeIssueLabeler struct{}
 
 func (fakeIssueLabeler) AddLabels(num string, labels []string) error { return nil }
 
-// pushDraftForge wraps a forge.CodeForge with the BranchPusher and
-// DraftPRCreator methods a write-capable adapter would carry, so
-// forge.ResolveCapabilities can populate Capabilities.BranchPusher/
-// DraftPRCreator off a real type assertion rather than a hand-built
-// Capabilities value (issue #4074's wiring subtest below).
+// fakeBranchDeleter is a minimal stand-in for forge.BranchDeleter, the leg
+// butlerPatchForge requires alongside PRForge for landPatch's ambiguous-
+// create recovery (issue #4112).
+type fakeBranchDeleter struct{}
+
+func (fakeBranchDeleter) DeleteBranch(branch, base string) error { return nil }
+
+// pushDraftForge wraps a forge.CodeForge with the BranchPusher,
+// DraftPRCreator, and BranchDeleter methods, plus a real *forge.PRForgeFake,
+// a write-capable adapter would carry, so forge.ResolveCapabilities can
+// populate Capabilities.BranchPusher/DraftPRCreator/PRForge/BranchDeleter
+// off a real type assertion rather than a hand-built Capabilities value
+// (issue #4074's, #4112's wiring subtests below).
 type pushDraftForge struct {
 	forge.CodeForge
 	fakeBranchPusher
 	fakeDraftPRCreator
+	fakeBranchDeleter
+	*forge.PRForgeFake
 }
 
 // butlerPatchForge opts the patch rung on only when Capabilities proves the
 // resolved CodeForge can both push a branch and open a draft PR host-side
-// (forge.Capabilities.HostCanOpenPR), the resolved IssueTracker can add
-// labels to an already-filed issue (forge.Capabilities.IssueLabeler), and
-// the tracker and forge descriptors name the same backend, so the issue
-// number both "Closes #N" and "agent/issue-N" carry actually names an issue
-// on that forge (issue #4074); any one of the four missing keeps the rung
-// off exactly as WithPatchForge(nil, nil) does.
+// (forge.Capabilities.HostCanOpenPR), can look up an open PR for a branch and
+// delete a branch host-side (forge.Capabilities.PRForge/BranchDeleter, issue
+// #4112 -- landPatch's own ambiguous-create recovery), the resolved
+// IssueTracker can add labels to an already-filed issue
+// (forge.Capabilities.IssueLabeler), and the tracker and forge descriptors
+// name the same backend, so the issue number both "Closes #N" and
+// "agent/issue-N" carry actually names an issue on that forge (issue #4074);
+// any one leg missing keeps the rung off exactly as WithPatchForge(nil, nil)
+// does.
 func TestButlerPatchForge(t *testing.T) {
 	cf := forge.NewFake()
 	cf.BranchPrefix = "agent/issue-"
@@ -158,9 +171,38 @@ func TestButlerPatchForge(t *testing.T) {
 	githubDesc, _ := backend.ByName("github")
 	forgejoDesc, _ := backend.ByName("forgejo")
 
+	// (issue #4112) every other leg present, but no PRForge to look an open
+	// PR up with: the rung must stay off, since landPatch could never tell a
+	// create that genuinely failed from one that landed anyway.
+	t.Run("no PRForge", func(t *testing.T) {
+		caps := forge.Capabilities{
+			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
+			BranchDeleter:   fakeBranchDeleter{},
+			ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
+		}
+		if pf := butlerPatchForge(cf, caps); pf != nil {
+			t.Fatalf("butlerPatchForge = %v, want nil: no PRForge to resolve an ambiguous create with", pf)
+		}
+	})
+
+	// (issue #4112) every other leg present, but no BranchDeleter: the rung
+	// must stay off, since a genuinely failed create would leave an orphaned
+	// branch with no way to clean it up.
+	t.Run("no BranchDeleter", func(t *testing.T) {
+		caps := forge.Capabilities{
+			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
+			PRForge:         cf.PRForgeFake,
+			ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
+		}
+		if pf := butlerPatchForge(cf, caps); pf != nil {
+			t.Fatalf("butlerPatchForge = %v, want nil: no BranchDeleter to clean up an orphaned branch with", pf)
+		}
+	})
+
 	t.Run("both capabilities", func(t *testing.T) {
 		caps := forge.Capabilities{
 			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
+			PRForge: cf.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
 			ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
 		}
 		pf := butlerPatchForge(cf, caps)
@@ -179,6 +221,12 @@ func TestButlerPatchForge(t *testing.T) {
 		if err := pf.AddLabels("42", []string{"ready-for-agent"}); err != nil {
 			t.Errorf("AddLabels: %v", err)
 		}
+		if _, found, err := pf.OpenPRForBranch("head"); err != nil || found {
+			t.Errorf("OpenPRForBranch = (%v, %v), want (false, nil)", found, err)
+		}
+		if err := pf.DeleteBranch("branch", "base"); err != nil {
+			t.Errorf("DeleteBranch: %v", err)
+		}
 	})
 
 	// (issue #4074) a github CODE_FORGE paired with a forgejo ISSUE_TRACKER
@@ -190,6 +238,7 @@ func TestButlerPatchForge(t *testing.T) {
 	t.Run("mismatched tracker and forge namespaces", func(t *testing.T) {
 		caps := forge.Capabilities{
 			BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
+			PRForge: cf.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
 			ForgeDescriptor: githubDesc, TrackerDescriptor: forgejoDesc,
 		}
 		if pf := butlerPatchForge(cf, caps); pf != nil {
@@ -203,7 +252,7 @@ func TestButlerPatchForge(t *testing.T) {
 	// Capabilities off that pair must come out nil here, not a hand-built
 	// Capabilities value that could paper over a missing IssueLabeler.
 	t.Run("wiring: local tracker never resolves an issue labeler", func(t *testing.T) {
-		pushCf := pushDraftForge{CodeForge: cf}
+		pushCf := pushDraftForge{CodeForge: cf, PRForgeFake: cf.PRForgeFake}
 		it := forge.NewFake().AsLocalIssueFiler()
 		caps := forge.ResolveCapabilities(pushCf, it, backend.Descriptor{}, backend.Descriptor{})
 		if caps.IssueLabeler != nil {
@@ -219,11 +268,14 @@ func TestButlerPatchForge(t *testing.T) {
 	// AsForgejoShaped's AddLabels (promoted like the real adapter's) proves
 	// the wiring resolves a real IssueLabeler, not a hand-built one.
 	t.Run("wiring: forgejo tracker paired with forgejo forge resolves", func(t *testing.T) {
-		pushCf := pushDraftForge{CodeForge: cf}
+		pushCf := pushDraftForge{CodeForge: cf, PRForgeFake: cf.PRForgeFake}
 		it := forge.NewFake().AsForgejoShaped()
 		caps := forge.ResolveCapabilities(pushCf, it, forgejoDesc, forgejoDesc)
 		if caps.IssueLabeler == nil {
 			t.Fatal("caps.IssueLabeler = nil, want the forgejo-shaped fake's AddLabels")
+		}
+		if caps.PRForge == nil || caps.BranchDeleter == nil {
+			t.Fatalf("caps.PRForge = %v caps.BranchDeleter = %v, want both non-nil", caps.PRForge, caps.BranchDeleter)
 		}
 		if pf := butlerPatchForge(pushCf, caps); pf == nil {
 			t.Fatal("butlerPatchForge = nil, want a non-nil PatchForge")
@@ -234,7 +286,7 @@ func TestButlerPatchForge(t *testing.T) {
 	// namespace leg alone blocks the rung even when both capability legs
 	// resolve for real off ResolveCapabilities, not a hand-built Capabilities.
 	t.Run("wiring: mismatched real capabilities never resolve", func(t *testing.T) {
-		pushCf := pushDraftForge{CodeForge: cf}
+		pushCf := pushDraftForge{CodeForge: cf, PRForgeFake: cf.PRForgeFake}
 		it := forge.NewFake().AsForgejoShaped()
 		caps := forge.ResolveCapabilities(pushCf, it, githubDesc, forgejoDesc)
 		if caps.IssueLabeler == nil {
