@@ -126,8 +126,9 @@ func extractInputFlag(args []string) (path string, remaining []string, err error
 	return path, remaining, nil
 }
 
-// flagEntry maps a runtime knob to its CLI flag. mkHarness.nix generates the
-// schemaFlags table from lib/env-schema.nix.
+// flagEntry maps a runtime knob to its CLI flag. nix/regen.nix generates the
+// schemaFlags table from lib/env-schema.nix, via lib/renderers.nix's
+// renderFlagTableGo.
 type flagEntry struct {
 	env             string // SCREAMING_SNAKE_CASE
 	flag            string // kebab-case, no leading dashes
@@ -147,7 +148,8 @@ type flagEntry struct {
 
 // secretKnob is a knob the schema marks secret = true, so it gets no inline
 // value flag: callers supply it through the environment, --<fileFlag>, or
-// --<cmdFlag>. mkHarness.nix generates secretKnobs from lib/env-schema.nix.
+// --<cmdFlag>. nix/regen.nix generates secretKnobs from lib/env-schema.nix,
+// via lib/renderers.nix's renderFlagTableGo.
 type secretKnob struct {
 	env      string
 	doc      string
