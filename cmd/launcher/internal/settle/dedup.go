@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -281,4 +282,104 @@ func matchDedup(index map[string]string, keys map[string]bool) dedupOverlap {
 	}
 	ov.full = len(keys) > 0 && len(ov.covered) == len(keys)
 	return ov
+}
+
+// dedupKeyLineSpec parses key's trailing ":<line>" or ":<lo>-<hi>" segment
+// (normalizeDedupKey never folds the "-" a range uses, issue #4108),
+// returning the key's file-prefix (everything before that segment) and the
+// line range it names. ok is false when key carries no such trailing
+// segment, or the prefix or the range is malformed -- none of those name a
+// line site, so a caller must not treat them as one.
+func dedupKeyLineSpec(key string) (prefix string, lo, hi int, ok bool) {
+	i := strings.LastIndex(key, ":")
+	if i <= 0 || i == len(key)-1 {
+		return "", 0, 0, false
+	}
+	prefix, spec := key[:i], key[i+1:]
+	if dash := strings.IndexByte(spec, '-'); dash >= 0 {
+		loStr, hiStr := spec[:dash], spec[dash+1:]
+		loN, okLo := parseDedupLineDigits(loStr)
+		hiN, okHi := parseDedupLineDigits(hiStr)
+		if !okLo || !okHi || loN <= 0 || hiN < loN {
+			return "", 0, 0, false
+		}
+		return prefix, loN, hiN, true
+	}
+	n, okN := parseDedupLineDigits(spec)
+	if !okN || n <= 0 {
+		return "", 0, 0, false
+	}
+	return prefix, n, n, true
+}
+
+// parseDedupLineDigits parses s as a line number, unlike strconv.Atoi
+// rejecting a leading sign (e.g. "+80") so a stray "+" can never masquerade
+// as part of a line number and slip a non-site key past dedupKeyLineSpec
+// (issue #4108). The digit-only scan above already rejects anything
+// non-numeric, so the trailing strconv.Atoi error now fires only on
+// overflow -- a digit run too long to fit an int (e.g. 25 digits).
+func parseDedupLineDigits(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// dedupLineOverlap reports whether a and b name the same file (per
+// dedupKeyLineSpec's prefix) with intersecting line ranges. Neither being a
+// line-site key at all (dedupKeyLineSpec's ok false) is never an overlap.
+func dedupLineOverlap(a, b string) bool {
+	pa, loA, hiA, okA := dedupKeyLineSpec(a)
+	pb, loB, hiB, okB := dedupKeyLineSpec(b)
+	if !okA || !okB || pa != pb {
+		return false
+	}
+	return loA <= hiB && loB <= hiA
+}
+
+// applyRunLineOverlap aliases each of keys not already in dedupIndex to the
+// ref of a runKeys entry naming an overlapping line range in the same file,
+// so "...go:80-83" and "...go:80" (issue #4108) dedup like one key and
+// matchDedup handles the rest unchanged. runKeys holds only this run's own
+// filings: against the backlog, two findings a few lines apart in a
+// long-lived file are distinct and must both file. When several run keys
+// overlap one intent key, the smallest wins, so the ref is deterministic
+// despite Go's randomized map order. An aliased key also joins runKeys under
+// the same ref, so a later intent's key overlapping only the alias (not the
+// original run key) still chains onto the same ref instead of filing again
+// (issue #4108). The aliases join only once every key is matched: joining
+// mid-loop would let one key of this intent chain onto a sibling key of its
+// own, making the outcome hang on map order.
+func applyRunLineOverlap(dedupIndex, runKeys map[string]string, keys map[string]bool) {
+	aliases := make(map[string]string)
+	for k := range keys {
+		if _, ok := dedupIndex[k]; ok {
+			continue
+		}
+		var best string
+		for rk := range runKeys {
+			if !dedupLineOverlap(k, rk) {
+				continue
+			}
+			if best == "" || rk < best {
+				best = rk
+			}
+		}
+		if best != "" {
+			aliases[k] = runKeys[best]
+		}
+	}
+	for k, ref := range aliases {
+		dedupIndex[k] = ref
+		runKeys[k] = ref
+	}
 }

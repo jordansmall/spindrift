@@ -3433,11 +3433,21 @@ and skips, so this converges rather than refiling forever.
 The index also grows as the run files its own intents, so two intents in
 the same payload that collide dedup against each other too, not only
 against the backlog, which is what stops the two review axes from filing
-the same defect twice. The two direct filing paths (`gh`, Forgejo) never
-reach the Launcher, so their dedup stays entirely the Filer's own: it
-runs the open-issue search above itself, keyed on the finding's site
-rather than its prose, and appends the same marker line to the body it
-files, keeping the marker format identical across both write mechanisms.
+the same defect twice. Within one run only, two keys naming the same file
+with overlapping line specs (e.g. `…go:80-83` and `…go:80`) also count as
+one site, so the second aliases the first instead of filing again (issue
+#4108). An aliased key joins the run's own keys in turn, so the aliasing
+chains: `…go:80`, then `…go:80-83`, then `…go:83-90` all collapse onto
+the first filing, however long the chain of overlapping ranges grows. Two
+keys of the same intent never chain onto each other, though; only keys
+from earlier intents count. This aliasing never reaches into the
+backlog: two findings a few lines apart in a long-lived file are
+distinct there and both still file. The two direct filing paths (`gh`,
+Forgejo) never reach the Launcher, so their dedup stays entirely the
+Filer's own: it runs the open-issue search above itself, keyed on the
+finding's site rather than its prose, and appends the same marker line
+to the body it files, keeping the marker format identical across both
+write mechanisms.
 
 ##### Filing volume on the status output
 
