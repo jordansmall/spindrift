@@ -5142,24 +5142,37 @@ a mismatched pairing — e.g. `ISSUE_TRACKER=forgejo` with `CODE_FORGE=github`
 — would reference an unrelated issue, and the rung stays off there too.
 
 A patch PR that did open lands through the work merge gate once the Done
-commit is in: the host hands it to the gate's adopt entry point
-(`settle.SettleAdopted`) with no Dispatcher, and the butler kind's settle
-config sets `settle.Config.Unclaimed`, which forces `MaxFixAttempts` to
-`0` (issue #4076). The gate polls CI to green, marks the PR ready, applies
-the usual merge guard (`MERGE_GUARD_PATHS` downgrades it back to manual),
-then follows `MERGE_MODE` exactly as for a work PR: manual leaves it for a
-human, auto queues it at the forge, immediate merges
+commit is in (or once it is lost, below): the host hands it to the gate's
+adopt entry point (`settle.SettleAdopted`) with no Dispatcher, and the
+butler kind's settle config sets `settle.Config.Unclaimed`, which forces
+`MaxFixAttempts` to `0` (issue #4076). The gate polls CI to green, marks
+the PR ready, applies the usual merge guard (`MERGE_GUARD_PATHS` downgrades
+it back to manual), then follows `MERGE_MODE` exactly as for a work PR:
+manual leaves it for a human, auto queues it at the forge, immediate merges
 it host-side behind the existing stale-base preflight. A red run or a
 CI-poll timeout leaves the PR in draft and adds a `landing failed: ...`
 comment to the finding instead — no fix pass, no Box, no `agent-failed`;
 the issue keeps only its two labels, sitting in the butler triage queue for
 a human to promote or close. A clean merge closes the finding and marks it
-`agent-complete` like any landed work PR. The gate runs after the Done
-commit, so a crash mid-poll never leaves the Chore's claim standing, and
-neither the Outcome's `patched` count nor the Ledger changes because of how
-the gate resolves. The daemon's butler slot stays held while the gate polls
-CI — idle time by construction, since the butler is the idle-priority kind
-(`dispatchkind.PriorityIdle`).
+`agent-complete` like any landed work PR. On the success path the gate runs
+after the Done commit, so a crash mid-poll never leaves the Chore's claim
+standing, and neither the Outcome's `patched` count nor the Ledger changes
+because of how the gate resolves. The daemon's butler slot stays held while
+the gate polls CI — idle time by construction, since the butler is the
+idle-priority kind (`dispatchkind.PriorityIdle`).
+
+If the Done commit is lost instead — a claim takeover wins the CAS, or the
+Ledger push fails — the host logs `status=ledger-finish-failed` and still
+hands every patch PR it already opened to the same gate, so none is left
+open with no CI watch (issue #4118). Gating there cannot strand a claim the
+Done commit would have released: after a lost CAS a rival already owns the
+Chore, and after any other failure this run's claim stands until a
+stale-claim takeover either way. The sweep still reports `ClaimLeft`, so the
+Outcome's `patched` count stays `0` even though the gate may merge the PR;
+the patch's Ledger reservation still counts it against the day's budget.
+The Ledger's `LastSwept` and `Cursor` do not advance either, so the next
+sweep re-reports the same finding, and only host dedup on the filed issue's
+`spindrift-dedup` marker keeps it from landing a second patch PR.
 
 ## Registry route discovery
 

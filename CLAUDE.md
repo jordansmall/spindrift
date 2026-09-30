@@ -55,12 +55,13 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   as `CODE_FORGE` (`github`+`github` or `forgejo`+`forgejo`), since `Closes
   #N` and the agent branch both name an issue in the forge's own
   namespace (issue #4074). The patch PR lands through the work merge
-  gate with zero fix passes: a clean merge closes the finding and marks
-  it `agent-complete` like any landed work PR (a green PR left unmerged —
-  `MERGE_MODE=manual`, a `MERGE_GUARD_PATHS` hit, or a merge blocked after
-  green — stays open, marked ready, for a human to merge, while
-  `MERGE_MODE=auto` queues it at the forge; neither adds
-  `agent-complete`); a red run or a CI-poll timeout leaves the
+  gate with zero fix passes — even when the run's Ledger Done commit is
+  lost after the PR opened (issue #4118): a clean merge closes the
+  finding and marks it `agent-complete` like any landed work PR (a
+  green PR left unmerged — `MERGE_MODE=manual`, a `MERGE_GUARD_PATHS`
+  hit, or a merge blocked after green — stays open, marked ready, for
+  a human to merge, while `MERGE_MODE=auto` queues it at the forge;
+  neither adds `agent-complete`); a red run or a CI-poll timeout leaves the
   PR in draft and the issue wearing only its two labels, for a human to
   relabel `ready-for-agent` or close — `agent-failed` never applies to
   this path. [Butler](docs/reference.md#butler) is the full record;
