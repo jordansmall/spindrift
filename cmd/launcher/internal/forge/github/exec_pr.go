@@ -506,9 +506,9 @@ func (e *execClient) relayClone(op string) func(dir string) error {
 
 // PushBranch creates branch on the target repo from localRef in the git repo
 // at srcDir, with the launcher's own gh-cli credential (issue #4071, ADR
-// 0057); refuses if branch already exists (issue #4104).
-func (e *execClient) PushBranch(srcDir, localRef, branch string) error {
-	return bundlerelay.PushBranch("github", srcDir, localRef, branch, e.relayClone("push branch"))
+// 0057); refuses if branch already exists, or is base (issue #4104).
+func (e *execClient) PushBranch(srcDir, localRef, branch, base string) error {
+	return bundlerelay.PushBranch("github", srcDir, localRef, branch, base, e.relayClone("push branch"))
 }
 
 // CreateDraftPR opens a draft PR from head onto base. head and base are

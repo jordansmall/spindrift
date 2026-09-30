@@ -1468,7 +1468,7 @@ func patchableDispatcherN(class string, n int) *dispatch.Fake {
 
 // fakePushCall/fakeDraftCall record one fakePatchForge.PushBranch/CreateDraftPR
 // invocation.
-type fakePushCall struct{ srcDir, localRef, branch string }
+type fakePushCall struct{ srcDir, localRef, branch, base string }
 type fakeDraftCall struct{ title, body, base, head string }
 
 // fakePatchForge is PatchForge's test double: AgentBranch is prefix+num,
@@ -1492,8 +1492,8 @@ type fakePatchForge struct {
 
 func (f *fakePatchForge) AgentBranch(num string) string { return f.prefix + num }
 
-func (f *fakePatchForge) PushBranch(srcDir, localRef, branch string) error {
-	f.pushCalls = append(f.pushCalls, fakePushCall{srcDir, localRef, branch})
+func (f *fakePatchForge) PushBranch(srcDir, localRef, branch, base string) error {
+	f.pushCalls = append(f.pushCalls, fakePushCall{srcDir, localRef, branch, base})
 	return f.pushErr
 }
 
@@ -1615,8 +1615,8 @@ func TestSweep_PatchedFindingLandsDraftPR(t *testing.T) {
 	}
 
 	wantBranch := pf.prefix + "9400"
-	if len(pf.pushCalls) != 1 || pf.pushCalls[0].branch != wantBranch {
-		t.Fatalf("pushCalls = %+v, want exactly one push to %q", pf.pushCalls, wantBranch)
+	if len(pf.pushCalls) != 1 || pf.pushCalls[0].branch != wantBranch || pf.pushCalls[0].base != "main" {
+		t.Fatalf("pushCalls = %+v, want exactly one push to %q with base %q", pf.pushCalls, wantBranch, "main")
 	}
 	if len(pf.draftCalls) != 1 {
 		t.Fatalf("draftCalls = %+v, want 1", pf.draftCalls)
@@ -2528,8 +2528,8 @@ func TestSweep_PatchAppliesToScannedAndMovedBaseHeadLands(t *testing.T) {
 		t.Fatalf("pushCalls = %+v, want exactly one", pf.pushCalls)
 	}
 	push := pf.pushCalls[0]
-	if push.srcDir != bare || push.localRef != patchRef {
-		t.Errorf("push srcDir/localRef = %q/%q, want %q/%q", push.srcDir, push.localRef, bare, patchRef)
+	if push.srcDir != bare || push.localRef != patchRef || push.base != "main" {
+		t.Errorf("push srcDir/localRef/base = %q/%q/%q, want %q/%q/%q", push.srcDir, push.localRef, push.base, bare, patchRef, "main")
 	}
 
 	commit := resolveRef(t, bare, patchRef)

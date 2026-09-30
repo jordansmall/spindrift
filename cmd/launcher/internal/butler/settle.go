@@ -284,7 +284,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 // it, returning the PR's URL. Called only from OnFiled, after the finding
 // issue itself has actually filed (issueNum), so the PR body can close it.
 func (s *settleRun) landPatch(pc PatchCommit, subject, head string, f settle.Finding, findingURL, issueNum string) (string, error) {
-	if err := s.patch.forge.PushBranch(pc.Dir, pc.Ref, head); err != nil {
+	if err := s.patch.forge.PushBranch(pc.Dir, pc.Ref, head, s.patch.base); err != nil {
 		return "", err
 	}
 	body := patchPRBody(s.chore, f, findingURL, issueNum)

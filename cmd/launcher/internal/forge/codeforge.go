@@ -134,8 +134,9 @@ type DraftPRCreator interface {
 type BranchPusher interface {
 	// PushBranch pushes localRef from the git repo at srcDir onto branch on
 	// the target repo, creating it. It refuses when branch already exists on
-	// the target (issue #4104).
-	PushBranch(srcDir, localRef, branch string) error
+	// the target, and when branch is base, before any clone or network work
+	// (issue #4104).
+	PushBranch(srcDir, localRef, branch, base string) error
 }
 
 // BranchProtectionForge is the optional branch-protection-query interface (issue

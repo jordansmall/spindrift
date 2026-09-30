@@ -30,13 +30,13 @@ type Tree interface {
 	// branch's current tip, in that order, then commits it on top of the tip
 	// as message under the launcher identity, returning a PatchCommit naming
 	// the repo dir and the local ref holding that commit -- exactly what
-	// forge.BranchPusher.PushBranch(srcDir, localRef, branch) takes (issue
-	// #4074).
+	// forge.BranchPusher.PushBranch(srcDir, localRef, branch, base) takes
+	// (issue #4074).
 	CommitPatch(branch string, scanned ScannedCommit, diff, message string) (PatchCommit, error)
 }
 
 // PatchCommit is CommitPatch's result: srcDir and localRef, ready to hand
-// straight to forge.BranchPusher.PushBranch(srcDir, localRef, branch).
+// straight to forge.BranchPusher.PushBranch(srcDir, localRef, branch, base).
 type PatchCommit struct {
 	Dir string
 	Ref string

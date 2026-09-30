@@ -58,12 +58,15 @@ func Relay(backend, outboxDir, ref string, clone func(dir string) error) error {
 // of the target repo and pushes it to origin as branch, creating it (issue
 // #4071, ADR 0057; create-only per issue #4104). Unlike Relay, which fetches a
 // ref out of a one-shot bundle file, this fetches straight from a live local
-// repo. It refuses when branch already exists on origin, base branch
-// included: its one caller, the butler patch rung, only ever publishes a
-// just-filed finding's fresh agent branch.
-func PushBranch(backend, srcDir, localRef, branch string, clone func(dir string) error) error {
-	// Defense in depth, as prepareBundleFetch's ref guard: all three reach git
-	// as positional args, where a leading "-" would parse as an option.
+// repo. It refuses branch == base up front, and any branch that already
+// exists on origin at push time: its one caller, the butler patch rung, only
+// ever publishes a just-filed finding's fresh agent branch.
+func PushBranch(backend, srcDir, localRef, branch, base string, clone func(dir string) error) error {
+	// Defense in depth, as prepareBundleFetch's ref guard: srcDir, localRef,
+	// and branch reach git as positional args, where a leading "-" would
+	// parse as an option. base never reaches git, but an empty or
+	// leading-"-" base names no real branch, so the guard below would pass
+	// every branch.
 	if invalidArg(srcDir) {
 		return fmt.Errorf("%s: push branch: invalid srcDir %q", backend, srcDir)
 	}
@@ -72,6 +75,16 @@ func PushBranch(backend, srcDir, localRef, branch string, clone func(dir string)
 	}
 	if invalidArg(branch) {
 		return fmt.Errorf("%s: push branch: invalid branch %q", backend, branch)
+	}
+	if invalidArg(base) {
+		return fmt.Errorf("%s: push branch: invalid base %q", backend, base)
+	}
+	// The create-only lease below refuses the base branch too, but only after
+	// a clone and a fetch (issue #4104). Normalize both sides first: a
+	// "refs/heads/"-qualified branch must still compare equal to a bare
+	// base name.
+	if strings.TrimPrefix(branch, "refs/heads/") == strings.TrimPrefix(base, "refs/heads/") {
+		return fmt.Errorf("%s: push branch: branch %q is the base branch", backend, branch)
 	}
 	dir, gitIn, cleanup, err := cloneScratch(backend, "push branch", clone)
 	if err != nil {

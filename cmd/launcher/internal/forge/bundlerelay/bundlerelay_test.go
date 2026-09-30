@@ -105,21 +105,25 @@ func TestRelay_InvalidRefErrorsBeforeFilesystemWork(t *testing.T) {
 // PushBranch did before rejecting the arg would fail with a different error.
 func TestPushBranch_InvalidArgsErrorBeforeFilesystemWork(t *testing.T) {
 	cases := []struct {
-		name                     string
-		srcDir, localRef, branch string
-		wantErrSubstr            string
+		name                           string
+		srcDir, localRef, branch, base string
+		wantErrSubstr                  string
 	}{
-		{"empty srcDir", "", "localref", "branch", "invalid srcDir"},
-		{"dash srcDir", "-x", "localref", "branch", "invalid srcDir"},
-		{"empty localRef", "/nonexistent/src/dir", "", "branch", "invalid localRef"},
-		{"dash localRef", "/nonexistent/src/dir", "-x", "branch", "invalid localRef"},
-		{"empty branch", "/nonexistent/src/dir", "localref", "", "invalid branch"},
-		{"dash branch", "/nonexistent/src/dir", "localref", "-x", "invalid branch"},
+		{"empty srcDir", "", "localref", "branch", "main", "invalid srcDir"},
+		{"dash srcDir", "-x", "localref", "branch", "main", "invalid srcDir"},
+		{"empty localRef", "/nonexistent/src/dir", "", "branch", "main", "invalid localRef"},
+		{"dash localRef", "/nonexistent/src/dir", "-x", "branch", "main", "invalid localRef"},
+		{"empty branch", "/nonexistent/src/dir", "localref", "", "main", "invalid branch"},
+		{"dash branch", "/nonexistent/src/dir", "localref", "-x", "main", "invalid branch"},
+		{"empty base", "/nonexistent/src/dir", "localref", "branch", "", "invalid base"},
+		{"dash base", "/nonexistent/src/dir", "localref", "branch", "-x", "invalid base"},
+		{"branch is base", "/nonexistent/src/dir", "localref", "main", "main", "base branch"},
+		{"branch is base, refs/heads/ prefixed", "/nonexistent/src/dir", "localref", "refs/heads/main", "main", "base branch"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
-			err := PushBranch("test", tc.srcDir, tc.localRef, tc.branch, func(dir string) error {
+			err := PushBranch("test", tc.srcDir, tc.localRef, tc.branch, tc.base, func(dir string) error {
 				called = true
 				return nil
 			})
@@ -143,7 +147,7 @@ func TestPushBranch_FetchFailureErrors(t *testing.T) {
 	src := t.TempDir()
 	forgetest.Run(t, "", "clone", repo.Bare, src)
 
-	err := PushBranch("test", src, "nonexistent-ref", "agent/issue-4071", localClone(repo.Bare))
+	err := PushBranch("test", src, "nonexistent-ref", "agent/issue-4071", "main", localClone(repo.Bare))
 	if err == nil {
 		t.Fatal("PushBranch with a localRef missing from srcDir: got nil error, want one")
 	}
@@ -163,7 +167,7 @@ func TestPushBranch_CheckoutFailureErrors(t *testing.T) {
 	forgetest.Run(t, src, "add", "feature.txt")
 	forgetest.Run(t, src, "commit", "-m", "feature")
 
-	err := PushBranch("test", src, "work", "bad..name", localClone(repo.Bare))
+	err := PushBranch("test", src, "work", "bad..name", "main", localClone(repo.Bare))
 	if err == nil {
 		t.Fatal("PushBranch with an invalid branch ref name: got nil error, want one")
 	}
@@ -187,7 +191,7 @@ func TestPushBranch_CreatesFreshBranch(t *testing.T) {
 	forgetest.Run(t, src, "commit", "-m", "v1")
 	wantSHA := forgetest.RevParse(t, src, "work")
 
-	if err := PushBranch("test", src, "work", "agent/issue-4104", localClone(repo.Bare)); err != nil {
+	if err := PushBranch("test", src, "work", "agent/issue-4104", "main", localClone(repo.Bare)); err != nil {
 		t.Fatalf("PushBranch onto a fresh branch: %v", err)
 	}
 
@@ -199,8 +203,10 @@ func TestPushBranch_CreatesFreshBranch(t *testing.T) {
 // PushBranch must be create-only (issue #4104): a branch that already exists
 // on the remote must refuse, leaving the remote ref's SHA unchanged, even
 // though the fresh scratch clone's own origin/<branch> lease would otherwise
-// pass. Covers both an agent branch and the base branch "main", which a bare
-// clone-relative lease let PushBranch clobber.
+// pass. Covers both an agent branch and "main", which a bare clone-relative
+// lease let PushBranch clobber. base is "trunk", not "main", for both
+// subtests so the "main" case still reaches the remote-side create-only
+// refusal instead of the earlier branch-is-base guard.
 func TestPushBranch_ExistingBranchRefusesAndLeavesRemoteUnchanged(t *testing.T) {
 	for _, branch := range []string{"agent/issue-4104", "main"} {
 		t.Run(branch, func(t *testing.T) {
@@ -228,7 +234,7 @@ func TestPushBranch_ExistingBranchRefusesAndLeavesRemoteUnchanged(t *testing.T) 
 			forgetest.Run(t, src, "add", "feature.txt")
 			forgetest.Run(t, src, "commit", "-m", "v1")
 
-			err := PushBranch("test", src, "test-payload", branch, localClone(repo.Bare))
+			err := PushBranch("test", src, "test-payload", branch, "trunk", localClone(repo.Bare))
 			if err == nil {
 				t.Fatalf("PushBranch onto existing branch %q: got nil error, want one", branch)
 			}
@@ -268,7 +274,7 @@ func TestPushBranch_FastForwardOntoExistingBranchRefused(t *testing.T) {
 	forgetest.Run(t, src, "add", "feature.txt")
 	forgetest.Run(t, src, "commit", "-m", "v1")
 
-	err := PushBranch("test", src, branch, branch, localClone(repo.Bare))
+	err := PushBranch("test", src, branch, branch, "trunk", localClone(repo.Bare))
 	if err == nil {
 		t.Fatal("PushBranch fast-forwarding an existing branch: got nil error, want one")
 	}
