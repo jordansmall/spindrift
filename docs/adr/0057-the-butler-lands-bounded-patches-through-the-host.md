@@ -78,7 +78,10 @@ and any branch that already exists on the Target at push time, so the
 lease never force-overwrites a branch someone else pushed; a refused
 push falls back to promotion like any other failed push), and opens a
 draft PR that closes the finding and shows the reviewer's concurrence
-and a visible "patched by the butler" note. The PR URL is recorded in the
+and a visible "patched by the butler" note (amended by issue #4112: a
+failed create first adopts any open PR the forge made on that branch
+anyway, else the host deletes the pushed branch before falling back to
+promotion, so a failed landing leaves no orphan branch). The PR URL is recorded in the
 Ledger, and the Chore's claim is released, before CI is polled, so a
 crash while waiting never strands the claim.
 

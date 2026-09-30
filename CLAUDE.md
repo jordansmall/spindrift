@@ -46,7 +46,8 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   as a patch PR (ADR 0057), alongside `agent-butler-finding`. Never carries a
   dispatch label, except when the host's push or PR create fails and the
   finding falls back to promotion — the issue then keeps this label with no
-  patch PR behind it. The patch rung is off until
+  patch PR behind it (a failed create first adopts any PR the forge made
+  anyway, else deletes the pushed branch; issue #4112). The patch rung is off until
   `BUTLER_MAX_PATCHES_PER_DAY` is greater than 0, and also needs an issue
   tracker that can add a label after filing (`github`/`forgejo`; never
   `ISSUE_TRACKER=local`), since a failed landing's fallback has nowhere
