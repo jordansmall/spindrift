@@ -5058,13 +5058,14 @@ Three more host-only knobs bound what the rung will apply (issue #4075).
 `BUTLER_PATCH_PATHS` (schema key `butlerPatchPaths`) is a comma-separated
 glob list matched against every path in the diff: a path is admitted only
 when it matches at least one plain entry and no `!`-prefixed entry. Its
-default, `docs/**,*.md,!docs/adr/**,!CLAUDE.md,!CONTEXT.md,!CONTRIBUTING.md,!AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**`,
-admits documentation and root-level Markdown and denies the repo-root
-agent-instruction files and directories (`CLAUDE.md`, `AGENTS.md`,
-`skills/**`, and the rest of the built-in deny set); those deny entries are
-root-anchored, so a nested copy such as `docs/CLAUDE.md` is not denied by
-the default, and a Consumer that keeps one should add its own `!` entry.
-Setting the knob replaces the whole default, deny entries included.
+default, `docs/**,*.md,!docs/adr/**,!**/CLAUDE.md,!**/CONTEXT.md,!**/CONTRIBUTING.md,!**/AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**`,
+admits documentation and root-level Markdown and denies the
+agent-instruction files and directories (`**/CLAUDE.md`, `**/AGENTS.md`,
+`skills/**`, and the rest of the built-in deny set); the four
+agent-instruction file names are denied at any depth, matching
+`MERGE_GUARD_PATHS`' `**/CLAUDE.md` style, while the directory entries stay
+root-anchored. Setting the knob replaces the whole default, deny entries
+included.
 `BUTLER_PATCH_MAX_FILES` (schema key `butlerPatchMaxFiles`, default `3`)
 caps the files a diff may touch, and `BUTLER_PATCH_MAX_LINES` (schema key
 `butlerPatchMaxLines`, default `20`) caps its changed lines, added plus

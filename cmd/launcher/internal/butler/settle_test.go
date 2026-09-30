@@ -1078,6 +1078,26 @@ func TestPromotion_DecidePatch(t *testing.T) {
 			f.DedupTerms = []string{"CLAUDE.md:X"}
 			return p, f
 		}, nil, "outside patch paths"},
+		{"nested CLAUDE.md outside patchPaths", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = oneMod("docs/CLAUDE.md")
+			f.DedupTerms = []string{"docs/CLAUDE.md:X"}
+			return p, f
+		}, nil, "outside patch paths"},
+		{"nested AGENTS.md outside patchPaths", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = oneMod("docs/AGENTS.md")
+			f.DedupTerms = []string{"docs/AGENTS.md:X"}
+			return p, f
+		}, nil, "outside patch paths"},
+		{"nested CONTEXT.md outside patchPaths", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = oneMod("docs/CONTEXT.md")
+			f.DedupTerms = []string{"docs/CONTEXT.md:X"}
+			return p, f
+		}, nil, "outside patch paths"},
+		{"nested CONTRIBUTING.md outside patchPaths", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
+			f.Patch = oneMod("docs/sub/CONTRIBUTING.md")
+			f.DedupTerms = []string{"docs/sub/CONTRIBUTING.md:X"}
+			return p, f
+		}, nil, "outside patch paths"},
 		{"CLAUDE.md smuggled behind a second header pair under one diff --git section", func(p promotion, f settle.Finding) (promotion, settle.Finding) {
 			// A second "--- "/"+++ " pair under one "diff --git" section is
 			// its own file to `git apply`; ParseUnifiedDiff must surface it
