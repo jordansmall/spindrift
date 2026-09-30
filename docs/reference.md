@@ -5116,7 +5116,15 @@ slot, not a patch slot). For a push/PR-create failure that means adding the
 work label to the already-filed issue rather than repeating `PostIssue`,
 so that issue keeps `agent-butler-patch` with no patch PR behind it —
 always possible here, since the same PatchForge that pushed the branch also
-carries `forge.IssueLabeler` (issue #4074). On `ISSUE_TRACKER=local` the
+carries `forge.IssueLabeler` (issue #4074). A failed PR create is checked
+first, though, since a timeout or 5xx can arrive after the forge already
+made the PR: if an open PR exists for the agent branch, settle treats it as
+a landed patch instead (recorded under `patched`, handed to the merge gate,
+never promoted). Only when no PR exists does settle delete the branch it
+just pushed, best effort — a failed delete is logged as
+`status=patch-branch-cleanup-failed` and promotion still happens — and a
+failed lookup keeps the branch, since deleting a PR's head branch closes
+that PR (issue #4112). On `ISSUE_TRACKER=local` the
 rung is off before any of this: `butlerPatchForge` (`cmd/launcher/butler.go`)
 never builds a PatchForge for a tracker that lacks `IssueLabeler`, so a local
 finding is judged for promotion exactly as it would be with no patch at all
