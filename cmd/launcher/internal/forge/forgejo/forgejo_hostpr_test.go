@@ -127,9 +127,9 @@ func newForgejoPushBranchForge(t *testing.T, bare string) forge.BranchPusher {
 }
 
 // PushBranch fetches localRef straight out of the local repo at srcDir, not
-// out of a bundle, and force-with-lease-pushes it onto branch on the target
+// out of a bundle, and pushes it onto a fresh branch on the target
 // remote (issue #4071, ADR 0057).
-func TestForgejoCodeForge_PushBranch_ForceUpdatesRemoteBranch(t *testing.T) {
+func TestForgejoCodeForge_PushBranch_CreatesRemoteBranch(t *testing.T) {
 	repo := newForgejoPushBranchHarness(t)
 
 	src := t.TempDir()
@@ -151,10 +151,10 @@ func TestForgejoCodeForge_PushBranch_ForceUpdatesRemoteBranch(t *testing.T) {
 	}
 }
 
-// A branch that already exists on the remote with different content must be
-// force-updated: PushBranch's fresh clone sees the remote's current state, so
-// force-with-lease's lease matches and the update succeeds.
-func TestForgejoCodeForge_PushBranch_ForceUpdatesExistingBranch(t *testing.T) {
+// PushBranch is create-only (issue #4104): a second push onto a branch the
+// first push already created must fail, leaving the first push's tip
+// on the remote untouched.
+func TestForgejoCodeForge_PushBranch_RefusesExistingBranch(t *testing.T) {
 	repo := newForgejoPushBranchHarness(t)
 	branch := "agent/issue-9002"
 	bp := newForgejoPushBranchForge(t, repo.Bare)
@@ -168,6 +168,7 @@ func TestForgejoCodeForge_PushBranch_ForceUpdatesExistingBranch(t *testing.T) {
 	if err := bp.PushBranch(src1, "work", branch); err != nil {
 		t.Fatalf("PushBranch (first): %v", err)
 	}
+	wantSHA := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch)
 
 	src2 := t.TempDir()
 	forgetest.Run(t, "", "clone", repo.Bare, src2)
@@ -176,13 +177,12 @@ func TestForgejoCodeForge_PushBranch_ForceUpdatesExistingBranch(t *testing.T) {
 	forgetest.WriteFile(t, filepath.Join(src2, "feature.txt"), "v2\n")
 	forgetest.Run(t, src2, "add", "feature.txt")
 	forgetest.Run(t, src2, "commit", "-m", "v2")
-	wantSHA := forgetest.RevParse(t, src2, "work2")
-	if err := bp.PushBranch(src2, "work2", branch); err != nil {
-		t.Fatalf("PushBranch (force update): %v", err)
+	if err := bp.PushBranch(src2, "work2", branch); err == nil {
+		t.Fatal("PushBranch onto an already-existing branch: got nil error, want one")
 	}
 
 	if got := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
-		t.Errorf("refs/heads/%s = %s, want %s (the second push's tip)", branch, got, wantSHA)
+		t.Errorf("refs/heads/%s = %s, want %s (the first push's tip, unchanged)", branch, got, wantSHA)
 	}
 }
 

@@ -55,9 +55,12 @@ func Relay(backend, outboxDir, ref string, clone func(dir string) error) error {
 }
 
 // PushBranch fetches localRef from the git repo at srcDir into a fresh clone
-// of the target repo and force-with-lease-pushes it to origin as branch (issue
-// #4071, ADR 0057). Unlike Relay, which fetches a ref out of a one-shot bundle
-// file, this fetches straight from a live local repo.
+// of the target repo and pushes it to origin as branch, creating it (issue
+// #4071, ADR 0057; create-only per issue #4104). Unlike Relay, which fetches a
+// ref out of a one-shot bundle file, this fetches straight from a live local
+// repo. It refuses when branch already exists on origin, base branch
+// included: its one caller, the butler patch rung, only ever publishes a
+// just-filed finding's fresh agent branch.
 func PushBranch(backend, srcDir, localRef, branch string, clone func(dir string) error) error {
 	// Defense in depth, as prepareBundleFetch's ref guard: all three reach git
 	// as positional args, where a leading "-" would parse as an option.
@@ -87,9 +90,19 @@ func PushBranch(backend, srcDir, localRef, branch string, clone func(dir string)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), RelayForcePushTimeout)
 	defer cancel()
-	// The clone's own origin/<branch>, if any, is the lease: absent, it must
-	// not exist on the remote either.
-	return gitplumbing.GitForcePush(ctx, dir, "-u", "origin", branch)
+	// The empty expect means refs/heads/branch must not exist on origin. For
+	// this ref it overrides the bare --force-with-lease's clone-relative
+	// lease, which covers only the clone-to-push window (issue #4104).
+	lease := "--force-with-lease=refs/heads/" + branch + ":"
+	if err := gitplumbing.GitForcePush(ctx, dir, lease, "-u", "origin", branch); err != nil {
+		// "stale info" is git's lease-mismatch marker, here only ever an
+		// existing branch; a timeout or hook rejection passes through as is.
+		if !strings.Contains(err.Error(), "stale info") {
+			return err
+		}
+		return fmt.Errorf("%s: push branch: %s already exists on origin, create-only push refused: %w", backend, branch, err)
+	}
+	return nil
 }
 
 // CommitSubjects returns the one-line commit subjects ref carries relative to
