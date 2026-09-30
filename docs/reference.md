@@ -5082,15 +5082,18 @@ of that succeeds — commits it on top under the launcher's own identity
 (`GIT_USER_NAME`/`GIT_USER_EMAIL`). It then files the finding issue as usual
 (carrying both `agent-butler-finding` and `agent-butler-patch`, never a
 dispatch label), pushes the committed patch to that issue's agent branch
-with the launcher's own push credential, and opens a **draft** PR closing
-the finding whose body opens with a visible **Patched** note quoting the
-allow-listed class and the in-Box reviewer's concurrence, then the finding
-issue's URL, then `Closes #N`, recording the PR's URL in the Ledger done
-commit's `patched` list alongside `filed` and `promoted`. Any failure along
-that path — a diff that does not apply to the scanned commit or the fresh
-tip, a failed push, or a failed PR create — never fails the run; settle instead falls back to judging the
-finding exactly as the promotion path would (spending a promotion slot,
-not a patch slot). For a push/PR-create failure that means adding the
+with the launcher's own push credential — create-only: the push refuses
+the base branch outright and any branch that already exists on the Target,
+so it never overwrites a branch a human or a work Box pushed (issue #4104)
+— and opens a **draft** PR closing the finding whose body opens with
+a visible **Patched** note quoting the allow-listed class and the in-Box
+reviewer's concurrence, then the finding issue's URL, then `Closes #N`,
+recording the PR's URL in the Ledger done commit's `patched` list alongside
+`filed` and `promoted`. Any failure along that path — a diff that does
+not apply to the scanned commit or the fresh tip, a failed or refused push,
+or a failed PR create — never fails the run; settle instead falls back to
+judging the finding exactly as the promotion path would (spending a promotion
+slot, not a patch slot). For a push/PR-create failure that means adding the
 work label to the already-filed issue rather than repeating `PostIssue`,
 so that issue keeps `agent-butler-patch` with no patch PR behind it —
 always possible here, since the same PatchForge that pushed the branch also

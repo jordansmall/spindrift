@@ -72,9 +72,13 @@ that names the same backend as the Code Forge, so `Closes #N` and the
 agent branch both land in that backend's own issue namespace; the rung
 stays off on a `local` tracker or a mismatched forge/tracker pairing.)
 The host commits the diff with its own identity onto the finding's
-agent branch, pushes with the launcher credential, and opens a draft
-PR that closes the finding and shows the reviewer's concurrence and a
-visible "patched by the butler" note. The PR URL is recorded in the
+agent branch, pushes with the launcher credential (amended by issue
+#4104: create-only — the push refuses the base branch before any clone,
+and any branch that already exists on the Target at push time, so the
+lease never force-overwrites a branch someone else pushed; a refused
+push falls back to promotion like any other failed push), and opens a
+draft PR that closes the finding and shows the reviewer's concurrence
+and a visible "patched by the butler" note. The PR URL is recorded in the
 Ledger, and the Chore's claim is released, before CI is polled, so a
 crash while waiting never strands the claim.
 
