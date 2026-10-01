@@ -14,12 +14,16 @@ import (
 
 // runRegistryDiscover is the testable core of `spindrift registry discover`.
 // Errors go to stderr, not stdout, so a caller piping stdout to a report file
-// still sees failures. The report prints only after the file is written, so a
-// failed run never describes routes that were not persisted. Zero routes is a
-// failure: a header-only file would fail registryroutes.Parse.
+// still sees failures. The report prints on the error and zero-route paths
+// too, so an operator still sees which hosts matched; only the `route ...`
+// lines mean a file was written. Zero routes is a failure: a header-only file
+// would fail registryroutes.Parse.
 func runRegistryDiscover(stdout, stderr io.Writer, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
 	routes, report, err := registrydiscover.Discover(repoDir, stores, lookup, probe)
 	if err != nil {
+		// An Extract error carries a zero Report, which prints nothing:
+		// every printRegistryDiscoverReport section is guarded by len > 0.
+		printRegistryDiscoverReport(stdout, report)
 		fmt.Fprintf(stderr, "registry discover: %s\n", err)
 		return 1
 	}
