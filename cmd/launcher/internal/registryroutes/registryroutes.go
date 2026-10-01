@@ -135,10 +135,6 @@ func parseRoutes(data []byte, rows []ecosystem.Row) ([]Route, error) {
 		}
 		seenHosts[normalizedHost] = true
 
-		if err := retiredRouteKeysError(label, rr); err != nil {
-			return nil, err
-		}
-
 		// ValidateUpstreamOrigin rejects "", so only a route that declared the
 		// optional field is validated; one that omits it stores "" and derives
 		// its origin from the Target repo's committed config.
@@ -172,6 +168,13 @@ func parseRoutes(data []byte, rows []ecosystem.Row) ([]Route, error) {
 		}
 
 		if err := validateAllowPatterns(label, rr.Allow); err != nil {
+			return nil, err
+		}
+
+		// The retired-key stanza echoes the route's fields verbatim, so it must
+		// only ever see ones already validated -- above all a credential map
+		// parseCredential accepted, never one it would drop or alter (#3436).
+		if err := retiredRouteKeysError(label, rr); err != nil {
 			return nil, err
 		}
 
@@ -472,9 +475,11 @@ func retiredRouteEcosystemBlocks(ecosystems map[string]map[string]any) string {
 
 // retiredRouteCredentialInline renders a route's credential map back as the
 // TOML inline table it was written as, in a fixed order (the source key in
-// credentialSourceKeys order, then its companion), since go randomizes map
-// iteration and an operator is told to copy-paste this text. Unrecognized keys
-// are dropped so the stanza parses. Returns "" for a route with no credential.
+// credresolver.Kinds() order, then its companion), since go randomizes map
+// iteration and an operator is told to copy-paste this text. parseRoutes
+// validates the credential before reporting a retired key, so m is always a
+// map parseCredential accepted and every key in it is a known source or
+// companion. Returns "" for a route with no credential.
 func retiredRouteCredentialInline(m map[string]any) string {
 	if len(m) == 0 {
 		return ""
@@ -492,9 +497,6 @@ func retiredRouteCredentialInline(m map[string]any) string {
 		if cv, ok := m[kind.CompanionKey]; ok {
 			pairs = append(pairs, fmt.Sprintf("%s = %s", kind.CompanionKey, tomlValue(cv)))
 		}
-	}
-	if len(pairs) == 0 {
-		return ""
 	}
 	return "{ " + strings.Join(pairs, ", ") + " }"
 }
@@ -516,8 +518,9 @@ func tomlKey(key string) string {
 // tomlValue renders one decoded free-form value back as TOML: a credential
 // value or an ecosystem declaration's, each a string or an array of them.
 // Anything else renders as a quoted Go rendering rather than being dropped
-// silently, since parseCredential or the row's own RouteDeclaration hook names
-// it precisely once the operator has migrated off the retired key.
+// silently, since the row's own RouteDeclaration hook names it precisely once
+// the operator has migrated off the retired key; a credential value never gets
+// here, as parseRoutes validates the credential before any stanza renders.
 func tomlValue(v any) string {
 	switch t := v.(type) {
 	case string:
