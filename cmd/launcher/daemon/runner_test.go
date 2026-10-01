@@ -1292,22 +1292,7 @@ func TestResolveTip_SelfPathHappyPath(t *testing.T) {
 // takes — and that ResolveTip wraps it as a *daemon.SelfEvalError, the
 // class the pool's backoff reason depends on.
 func TestResolveTip_SelfPathEvalFailureCarriesStderr(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	orig := runnerEvalCommand
-	t.Cleanup(func() { runnerEvalCommand = orig })
-	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf 'error: attribute missing\n' >&2; exit 1`)
-	}
-
-	dirConsumer := bareOriginConsumerT(t)
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	_, err := r.ResolveTip(context.Background())
-	var se *daemon.SelfEvalError
-	if !errors.As(err, &se) {
-		t.Fatalf("ResolveTip() error = %v, want a *daemon.SelfEvalError", err)
-	}
+	se := selfEvalErrorT(t, "error: attribute missing")
 	if !strings.Contains(se.Error(), "attribute missing") {
 		t.Errorf("SelfEvalError.Error() = %q, want it to contain the captured stderr", se.Error())
 	}
@@ -2471,5 +2456,107 @@ func TestResolveTip_FeatureBranchConcurrentCallersShareSingleLsRemote(t *testing
 		if err != nil {
 			t.Errorf("caller %d: ResolveTip() error: %v", i, err)
 		}
+	}
+}
+
+// stderrExitCmd stubs a child that prints msg to stderr and exits with code.
+func stderrExitCmd(ctx context.Context, msg string, code int) *exec.Cmd {
+	return exec.CommandContext(ctx, "/bin/sh", "-c", fmt.Sprintf(`printf '%%s\n' "$1" >&2; exit %d`, code), "sh", msg)
+}
+
+// selfEvalErrorT drives ResolveTip against a self eval that fails with the
+// given stderr and returns the resulting *daemon.SelfEvalError.
+func selfEvalErrorT(t *testing.T, stderr string) *daemon.SelfEvalError {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	orig := runnerEvalCommand
+	t.Cleanup(func() { runnerEvalCommand = orig })
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return stderrExitCmd(ctx, stderr, 1)
+	}
+
+	dirConsumer := bareOriginConsumerT(t)
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: dirConsumer, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	_, err := r.ResolveTip(context.Background())
+	var se *daemon.SelfEvalError
+	if !errors.As(err, &se) {
+		t.Fatalf("ResolveTip() error = %v, want a *daemon.SelfEvalError", err)
+	}
+	return se
+}
+
+// credURLStderr is synthetic child stderr carrying URL userinfo, as git
+// prints when a remote URL embeds a token.
+const credURLStderr = "fatal: unable to access 'https://user:pass@host.example/repo.git/': Could not resolve host"
+
+func assertCredentialsRedacted(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("error = nil, want a failure carrying stderr")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "user:pass") || strings.Contains(msg, "pass@") {
+		t.Errorf("error = %q, want URL credentials redacted", msg)
+	}
+	if !strings.Contains(msg, "host.example/repo.git") || !strings.Contains(msg, "Could not resolve host") {
+		t.Errorf("error = %q, want the rest of stderr preserved", msg)
+	}
+}
+
+func TestFetchRevision_FetchErrorRedactsURLCredentials(t *testing.T) {
+	orig := runnerFetchCommand
+	t.Cleanup(func() { runnerFetchCommand = orig })
+	runnerFetchCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return stderrExitCmd(ctx, credURLStderr, 128)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
+	_, err := r.fetchRevision(context.Background())
+	assertCredentialsRedacted(t, err)
+}
+
+func TestFetchRevision_LsRemoteErrorRedactsURLCredentials(t *testing.T) {
+	orig := runnerFetchCommand
+	t.Cleanup(func() { runnerFetchCommand = orig })
+	runnerFetchCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if len(args) >= 3 && args[2] == "ls-remote" {
+			return stderrExitCmd(ctx, credURLStderr, 128)
+		}
+		return exec.CommandContext(ctx, "/bin/sh", "-c", `echo deadbeef`)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", nixSystem: "x86_64-linux", env: os.Environ()})
+	_, err := r.fetchRevision(context.Background())
+	assertCredentialsRedacted(t, err)
+}
+
+func TestResolveTip_SelfPathEvalFailureRedactsURLCredentials(t *testing.T) {
+	assertCredentialsRedacted(t, selfEvalErrorT(t, credURLStderr))
+}
+
+// TestFetchRevision_RealGitFetchErrorRedactsURLCredentials runs real git
+// against a credential-bearing remote URL whose host is rejected locally
+// (.invalid, bad hostname), so no network is touched. git stops at the first
+// '@' in its diagnostic, so the password's tail ("ss@") is what could leak.
+func TestFetchRevision_RealGitFetchErrorRedactsURLCredentials(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir()
+	gitRunT(t, "", "init", repo)
+	gitRunT(t, repo, "remote", "add", "origin", "https://alice:p@ss@nonexistent.invalid/o/r.git")
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: repo, appAttr: ".#", baseBranch: "main", nixSystem: "x86_64-linux", env: os.Environ()})
+	_, err := r.fetchRevision(context.Background())
+	if err == nil {
+		t.Fatal("fetchRevision() error = nil, want a fetch failure")
+	}
+	if strings.Contains(err.Error(), "ss@") || strings.Contains(err.Error(), "alice") {
+		t.Errorf("fetchRevision() error = %q, want URL credentials redacted", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nonexistent.invalid/o/r.git") {
+		t.Errorf("fetchRevision() error = %q, want git's diagnostic preserved", err.Error())
 	}
 }

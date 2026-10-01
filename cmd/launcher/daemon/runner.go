@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -124,6 +125,13 @@ var runnerFetchCommand = exec.CommandContext
 // reports with a different code.
 const lsRemoteNoMatchExit = 2
 
+// redactedStderr renders captured child stderr for embedding in an error;
+// those errors reach the event stream and status file, so URL userinfo is
+// redacted here, at the source.
+func redactedStderr(b *bytes.Buffer) string {
+	return forge.RedactURLCredentials(strings.TrimSpace(b.String()))
+}
+
 // fetchRevision shells out to git fetch + rev-parse via runnerFetchCommand
 // (context-aware), so a cancelled ctx (SIGINT/SIGTERM with no child yet to
 // forward to) tears the fetch down instead of hanging the daemon until
@@ -142,7 +150,7 @@ func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 	var stderr bytes.Buffer
 	fetch.Stderr = &stderr
 	if err := fetch.Run(); err != nil {
-		return "", fmt.Errorf("git fetch %s %s: %w: %s", remote, r.baseBranch, err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("git fetch %s %s: %w: %s", remote, r.baseBranch, err, redactedStderr(&stderr))
 	}
 	// FETCH_HEAD, not the local baseBranch ref: a bare `fetch` never moves
 	// any local branch, and resolving the local ref instead would silently
@@ -165,7 +173,7 @@ func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == lsRemoteNoMatchExit {
 				return "", &daemon.FeatureBranchGoneError{Remote: remote, Branch: r.featureBranch}
 			}
-			return "", fmt.Errorf("git ls-remote %s %s: %w: %s", remote, ref, err, strings.TrimSpace(lsStderr.String()))
+			return "", fmt.Errorf("git ls-remote %s %s: %w: %s", remote, ref, err, redactedStderr(&lsStderr))
 		}
 	}
 
@@ -216,7 +224,7 @@ func (r *hostRunner) evalSelfPath(ctx context.Context, revision string) (string,
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("nix eval %s: %w: %s", strings.Join(argv[1:], " "), err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("nix eval %s: %w: %s", strings.Join(argv[1:], " "), err, redactedStderr(&stderr))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
