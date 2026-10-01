@@ -502,13 +502,13 @@ func TestDiscover_ThreeWayEnvPlaceholderCollisionDisambiguated(t *testing.T) {
 	}
 }
 
-func TestDisambiguateEnvPlaceholders_BoundExhaustedNamesLexicallySmallest(t *testing.T) {
+func TestDisambiguateEnvPlaceholders_BoundExhaustedNamesEveryContestedPlaceholder(t *testing.T) {
 	// Two independent pairs of hosts that genuinely collide under hostHash
 	// (found by brute force, not stubbed): each pair shares one
 	// CredentialValue, so the round bound trips for real, with no injected
-	// hash. The error must deterministically name the lexicographically
-	// smaller of the two contested names, not whichever name Go's
-	// randomized map iteration visits first.
+	// hash. The error must name every contested placeholder, not just one,
+	// since silently dropping a colliding name would leave an operator
+	// unaware that name's hosts still share an env var too.
 	const aHost1, aHost2 = "host-322383.example.com", "host-139598.example.com"
 	const bHost1, bHost2 = "host-322382.example.com", "host-139599.example.com"
 	if hostHash(aHost1) != hostHash(aHost2) {
@@ -531,11 +531,15 @@ func TestDisambiguateEnvPlaceholders_BoundExhaustedNamesLexicallySmallest(t *tes
 	if err == nil {
 		t.Fatalf("disambiguateEnvPlaceholders: want error on unresolvable collision, got nil (routes = %+v)", routes)
 	}
-	if !strings.Contains(err.Error(), "SPINDRIFT_REGISTRY_CREDENTIAL_A") {
-		t.Errorf("error %q does not name the lexicographically smallest colliding placeholder", err.Error())
+	for _, name := range []string{"SPINDRIFT_REGISTRY_CREDENTIAL_A", "SPINDRIFT_REGISTRY_CREDENTIAL_B"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error %q does not name contested placeholder %s", err.Error(), name)
+		}
 	}
-	if strings.Contains(err.Error(), "SPINDRIFT_REGISTRY_CREDENTIAL_B") {
-		t.Errorf("error %q names the larger colliding placeholder instead of the smallest", err.Error())
+	for _, host := range []string{aHost1, aHost2, bHost1, bHost2} {
+		if !strings.Contains(err.Error(), host) {
+			t.Errorf("error %q does not name contested host %s", err.Error(), host)
+		}
 	}
 }
 
@@ -562,16 +566,22 @@ func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T)
 			"these fixture hosts no longer collide under hostHash and need updating", host1, hostHash(host1), host2, hostHash(host2))
 	}
 
+	// A non-colliding matched host, so report.Matched is covered too.
+	const matchedHost = "matched.example.com"
+
 	dir := t.TempDir()
-	npmrc := fmt.Sprintf("registry=https://%s/\n@scope1:registry=https://%s/\n", host1, host2)
+	npmrc := fmt.Sprintf("registry=https://%s/\n@scope1:registry=https://%s/\n@scope2:registry=https://%s/\n", host1, host2, matchedHost)
 	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
+	stores := []Store{{Name: "netrc", Path: "/fake/.netrc"}}
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
+		return d.Host == matchedHost, nil
+	}
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, nil, lookup, probe)
+	routes, report, err := Discover(dir, stores, lookup, probe)
 	if err == nil {
 		t.Fatalf("Discover: want error on unresolvable env placeholder collision, got nil (routes = %+v)", routes)
 	}
@@ -585,10 +595,22 @@ func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T)
 	if routes != nil {
 		t.Errorf("routes = %+v, want nil (Discover must not hand back a table where two hosts share one env var)", routes)
 	}
-	// Discover zeroes the report on this path too; pinning it keeps the
-	// whole error-path return contract asserted, not just half of it.
-	if len(report.Matched) != 0 || len(report.Unmatched) != 0 || len(report.NoRegistry) != 0 {
-		t.Errorf("report = %+v, want the zero Report on the error path", report)
+	// Discover still hands back the report it built before disambiguation
+	// ran, so a caller can show which hosts went unmatched even on this
+	// error path, rather than only the bare error.
+	if len(report.Unmatched) != 2 {
+		t.Fatalf("report.Unmatched = %+v, want 2 entries", report.Unmatched)
+	}
+	gotHosts := []string{report.Unmatched[0].Host, report.Unmatched[1].Host}
+	slices.Sort(gotHosts)
+	wantHosts := []string{host1, host2}
+	slices.Sort(wantHosts)
+	if !slices.Equal(gotHosts, wantHosts) {
+		t.Errorf("report.Unmatched hosts = %v, want %v", gotHosts, wantHosts)
+	}
+	wantMatched := []MatchedHost{{Host: matchedHost, StoreName: "netrc", StorePath: "/fake/.netrc"}}
+	if len(report.Matched) != 1 || report.Matched[0] != wantMatched[0] {
+		t.Errorf("report.Matched = %+v, want %+v", report.Matched, wantMatched)
 	}
 }
 

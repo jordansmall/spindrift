@@ -113,7 +113,9 @@ func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Rou
 	}
 
 	if err := disambiguateEnvPlaceholders(routes); err != nil {
-		return nil, Report{}, err
+		// The report stays valid through a collision; returning it lets the
+		// caller show the operator which hosts were involved.
+		return nil, report, err
 	}
 
 	return routes, report, nil
@@ -159,7 +161,17 @@ func disambiguateEnvPlaceholders(routes []Route) error {
 			return nil
 		}
 		if round == len(envIdxs) {
-			return fmt.Errorf("registrydiscover: could not disambiguate env placeholder %q after %d rounds", slices.Min(contested), round)
+			slices.Sort(contested)
+			parts := make([]string, len(contested))
+			for i, name := range contested {
+				hosts := make([]string, len(byName[name]))
+				for j, idx := range byName[name] {
+					hosts[j] = routes[idx].MatchHost
+				}
+				slices.Sort(hosts)
+				parts[i] = fmt.Sprintf("%s (hosts %s)", name, strings.Join(hosts, ", "))
+			}
+			return fmt.Errorf("registrydiscover: could not disambiguate env placeholders after %d rounds: %s", round, strings.Join(parts, "; "))
 		}
 		for _, name := range contested {
 			for _, i := range byName[name] {
