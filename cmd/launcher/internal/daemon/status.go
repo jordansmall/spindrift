@@ -28,7 +28,11 @@ type Status struct {
 	Time    string `json:"time"`    // RFC3339 UTC, this write
 	Kinds   []Kind `json:"kinds"`   // the configured kind set
 	State   State  `json:"state"`
-	// Reason is the halt reason, populated only when State is StateHalted.
+	// Reason is the halt reason when State is StateHalted, even if Until's
+	// walk also exhausted its horizon. Under any other state it is set only
+	// when the walk exhausted, marking NextCheck as a re-check rather than
+	// a real reopening — in practice StateAsleep or StateWorking, since an
+	// exhausted walk always yields a positive wait. Empty otherwise.
 	Reason string       `json:"reason,omitempty"`
 	Slots  []SlotStatus `json:"slots"`
 	Checks []KindCheck  `json:"checks"`
@@ -83,7 +87,8 @@ type KindCheck struct {
 	// NextCheck is RFC3339 UTC; empty means the kind is runnable now. It
 	// is the later of the kind's own backoff deadline and the instant a
 	// shut Awake window reopens, so an asleep daemon never reports a kind
-	// as runnable now.
+	// as runnable now. In the walk-exhausted degraded case (see
+	// Status.Reason) that instant is only a re-check, not a real reopening.
 	NextCheck string `json:"nextCheck,omitempty"`
 	// Jammed is true when this kind's last check found open issues none of
 	// which were dispatchable (exit 3), and it is still gated on that

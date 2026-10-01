@@ -6125,12 +6125,12 @@ opposites:
 
 | `state` | meaning |
 |---------|---------|
-| `working` | at least one slot has a child running |
+| `working` | at least one slot has a child running; `reason` is set too when the Awake window has since shut and `Window.Until`'s zone-period walk exhausts its horizon without finding an opening — the same degraded case as `asleep` below, just observed while a child is still running |
 | `waiting` | nothing is running, every configured kind is gated, and none of them by a none-dispatchable result — every queue is empty, ordinary overnight quiet |
 | `jammed` | nothing is running, every configured kind is gated, and at least one of them by a none-dispatchable result — open issues exist and nothing can dispatch them |
-| `asleep` | nothing is running and the Awake window is shut |
+| `asleep` | nothing is running and the Awake window is shut; `reason` is set too, but only in the degraded case where `Window.Until`'s zone-period walk exhausts its horizon without finding an opening — empty in the ordinary shut-window case |
 | `checking` | nothing is running but at least one kind is runnable — a slot is between iterations, about to check the queue |
-| `halted` | the pool has halted; `reason` says why |
+| `halted` | the pool has halted; `reason` says why — a halt wins the top-level `reason` field too even if `Window.Until`'s walk has also exhausted its horizon, though `nextCheck` still floors at that re-check instant |
 
 `waiting` and `jammed` are indistinguishable to an outside observer — both
 mean "nothing running, nothing to do right now" — but the first is
@@ -6187,7 +6187,13 @@ alarming. A shut Awake window pushes every kind's
 `nextCheck` out to the instant the window reopens, whatever that kind's
 own backoff says — no slot starts a child until the window is open
 again — so an `asleep` daemon says when it will next look rather than
-reading as runnable now.
+reading as runnable now. In the degraded case where `Window.Until`'s
+zone-period walk exhausts its horizon without finding an opening (see the
+`state` table's `asleep` and `working` rows above), that instant is only
+the walk's 8-day re-check, not a real reopening — `reason` on the
+top-level status is how a reader tells the two apart, whether the pool
+is otherwise `asleep` or still `working` out a child started before the
+window shut.
 
 **Reservation.** `RESEARCH_RESERVATION` (default 1) is how many of the
 pool's `MAX_PARALLEL` slots prefer research over work (`slotOrder`,
@@ -6853,7 +6859,7 @@ which runs outside every slot's own goroutine.
 
 | event | fields | when |
 |-------|--------|------|
-| `awake_close` | `time`, `slot`, `wait`, `reason` | the first slot parks on a shut Awake window — not the close instant itself, so a pool still busy at the close reports the transition, and computes `wait` (how long until the next opening), at that later parking |
+| `awake_close` | `time`, `slot`, `wait`, `reason` | the first slot parks on a shut Awake window — not the close instant itself, so a pool still busy at the close reports the transition, and computes `wait` (how long until the next opening), at that later parking. `reason` is ordinarily `"outside the Awake window"`; if `Window.Until`'s zone-period walk exhausts its 8-day horizon without finding an opening (a walk bug no real IANA zone reaches), `reason` instead reads `"no Awake window opening found within the walk horizon: re-checking then"` and `wait` is that 192h re-check, not a real opening — the daemon re-checks rather than halting |
 | `awake_open` | `time`, `slot`, `reason` | the Awake window reopens after a prior `awake_close`; never emitted for a daemon that starts inside an already-open window |
 | `baton_hold` | `time`, `slot`, `reason` | a slot reaches `awaitBaton` (`pool.go`) and finds another slot still discovering, so it parks — one event per park, since each parking slot logs independently on its own pass through the loop; `reason` is the fixed `batonHoldReason`, `"waiting for the discovery baton: another slot's child is still discovering"`, matching the other wait events in this stream |
 | `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child's `box` record arrives via `OnRecord`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `RunChild` seam error (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs — or the holder returning for any reason at all before its round otherwise resolved (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |

@@ -165,6 +165,16 @@ const (
 	batonHoldReason = "waiting for the discovery baton: another slot's child is still discovering"
 )
 
+// outsideWindowReason and walkExhaustedReason are the two Reason strings an
+// awake_close event can carry (the ordinary shut-window case, and Until's
+// walk exhausting untilHorizon without finding an opening). walkExhaustedReason
+// also surfaces on a non-halted Status (asleep or working) via snapshotLocked,
+// since the same degraded walk floors every checks[].nextCheck there too.
+const (
+	outsideWindowReason = "outside the Awake window"
+	walkExhaustedReason = "no Awake window opening found within the walk horizon: re-checking then"
+)
+
 // slotFlight is what one occupied slot currently has in flight. issues is
 // the deduped set behind SlotStatus.Issues (origin/main's "seen" semantics,
 // issue #3627's review finding) in first-seen order; key is tracked
@@ -491,12 +501,12 @@ func (s *state) siblingsEngaged(slot int) bool {
 // arrives, so a shut window costs one sleep, not a poll loop through it.
 func (p *pool) awaitWindow(ctx context.Context, slot int) {
 	for {
-		wait, _ := p.cfg.Awake.Until(p.clk.Now())
+		wait, exhausted := p.cfg.Awake.Until(p.clk.Now())
 		if wait <= 0 {
 			p.noteAwakeOpen(slot)
 			return
 		}
-		p.noteAwakeClose(slot, wait)
+		p.noteAwakeClose(slot, wait, exhausted)
 		p.clk.Sleep(ctx, wait)
 		if p.stopped() || ctx.Err() != nil {
 			return
@@ -512,7 +522,11 @@ func (p *pool) awaitWindow(ctx context.Context, slot int) {
 // write is unconditional, though, unlike the event: every parking slot is
 // about to sleep out the shut window, whether or not it was the one that
 // noticed the edge, so each must record its own phase regardless.
-func (p *pool) noteAwakeClose(slot int, wait time.Duration) {
+//
+// Being edge-triggered, the event's Reason reflects only the first park's
+// walk: a later re-park in the same shut span whose walk exhausts is not
+// re-reported. Status.Reason recomputes on every publish, so it still is.
+func (p *pool) noteAwakeClose(slot int, wait time.Duration, exhausted bool) {
 	p.mutate(func(s *state) []Event {
 		first := !s.awakeShut
 		s.awakeShut = true
@@ -520,7 +534,11 @@ func (p *pool) noteAwakeClose(slot int, wait time.Duration) {
 		if !first {
 			return nil
 		}
-		return []Event{{Event: "awake_close", Slot: intPtr(slot), Wait: wait.String(), Reason: "outside the Awake window"}}
+		reason := outsideWindowReason
+		if exhausted {
+			reason = walkExhaustedReason
+		}
+		return []Event{{Event: "awake_close", Slot: intPtr(slot), Wait: wait.String(), Reason: reason}}
 	})
 }
 
@@ -1052,8 +1070,10 @@ func (p *pool) snapshotLocked() Status {
 	// while the window is open and for the nil always-awake window, so
 	// this stays the zero Time in the ordinary case.
 	var windowOpensAt time.Time
-	if d, _ := p.cfg.Awake.Until(now); d > 0 {
+	var windowWalkExhausted bool
+	if d, exhausted := p.cfg.Awake.Until(now); d > 0 {
 		windowOpensAt = now.Add(d)
+		windowWalkExhausted = exhausted
 	}
 	checks := make([]KindCheck, 0, len(p.cfg.Kinds))
 	allGated := true
@@ -1111,6 +1131,11 @@ func (p *pool) snapshotLocked() Status {
 		computedState = StateJammed
 	case allGated:
 		computedState = StateWaiting
+	}
+	// Outside the switch so a still-working pool marks its floored
+	// nextCheck as a re-check too, not only an asleep one.
+	if windowWalkExhausted && computedState != StateHalted {
+		reason = walkExhaustedReason
 	}
 
 	// Copied, not aliased, matching the issues copy above: nothing
