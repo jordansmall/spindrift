@@ -1184,9 +1184,10 @@ matched against the route's `UpstreamHost` case-insensitively
 (`cargoRouteHostMatches`), at both the minted-name reservation and the
 binding loop, so an uppercase-host index binds a lowercase `match-host` and
 the reverse — the same case folding `registryvocab.HostKey` and the proxy's
-own rewrite already apply, though not their port handling. The key
-above then folds that index's host, so the host-case axis holds on a
-`[registries.NAME].index` spelling variant as well as a
+own rewrite already apply, though not their port handling. The in-tree
+config rewrite folds host case too, ASCII only (the issue #3706 amendment
+below). The key above then folds that index's host, so the host-case axis
+holds on a `[registries.NAME].index` spelling variant as well as a
 `[source.NAME].registry` one. Past case the compare stays verbatim on
 `host:port`, so a `cargo.example.test:443` index against a bare
 `cargo.example.test` route host still binds nothing. Default ports
@@ -1328,3 +1329,27 @@ before the dispatch ever falls through to the TCP transport. Before that
 change, the rule that every non-verdict exit is an infrastructure failure
 (issue #3120) governed the exit-125 shape above, and a dispatch that met
 it aborted rather than falling back to TCP.
+
+## Amendment (issue #3706): the in-tree config rewrite folds host case
+
+The in-tree config rewrite (npm, yarn, pnpm; `InTreeBindings()` excludes
+cargo) matches the upstream host case-insensitively, as the cargo route
+binding above has since issue #3665 — though it folds ASCII only, where
+`cargoRouteHostMatches` uses `strings.EqualFold`'s Unicode folding; the two
+agree on every ASCII or punycode hostname. A tracked config spelling the host
+in another case than the route's `UpstreamHost` otherwise kept the real
+upstream URL, or, when another line spelled it the route's way, was
+half-rewritten with the skip-worktree bit hiding the stale line from
+`git status`.
+
+`ApplyInTreeBinding` folds ASCII case over the whole `https://HOST` /
+`http://HOST` needle, so the scheme folds along with the host (`HTTP://` is
+the same URL). It matches on a folded copy of the config and splices the
+local URL into the original by index, so only the matched span changes and a
+path or token keeps its spelling; folding ASCII only is what keeps the byte
+offsets aligned. A port stays part of the host: `host` and `host:8443` remain
+distinct rewrites. The duplicate-host guard and the verb layer's same-host
+collision drop key on the same fold, so two routes differing only in host
+case collide rather than both running a rewrite pass. That drop also guards
+the cargo home-render path, so two cargo routes differing only in host case
+are dropped as collided too, matching #3665's case-insensitive binding.
