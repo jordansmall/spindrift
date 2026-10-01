@@ -113,6 +113,48 @@ type HostRewrite struct {
 	LocalURL     string
 }
 
+// FoldHost is the key in-tree binding compares upstream hosts on. Hostnames
+// compare case-insensitively (RFC 4343 folds ASCII only). It keeps any port,
+// unlike registryvocab.HostKey: "registry.example.com" and
+// "registry.example.com:8443" are distinct rewrites here.
+func FoldHost(host string) string {
+	return asciiLower(host)
+}
+
+// asciiLower lowercases ASCII A-Z only. Because it never changes byte length, a
+// caller can match on the lowered copy and splice into the original by index.
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
+// replaceAllFold is strings.ReplaceAll with ASCII case-insensitive matching.
+// Bytes outside a matched span, such as an uppercase path, stay untouched.
+// Relies on asciiLower being length-preserving (ASCII-only) so indexes into the
+// folded copy align with s; old must be non-empty (callers prepend a scheme).
+func replaceAllFold(s, old, repl string) string {
+	foldedS, foldedOld := asciiLower(s), asciiLower(old)
+	var out strings.Builder
+	last := 0
+	for {
+		i := strings.Index(foldedS[last:], foldedOld)
+		if i < 0 {
+			break
+		}
+		i += last
+		out.WriteString(s[last:i])
+		out.WriteString(repl)
+		last = i + len(old)
+	}
+	out.WriteString(s[last:])
+	return out.String()
+}
+
 // ApplyInTreeBinding rewrites row's in-tree config file, when it exists and is
 // git-tracked, so references to any rewrites' UpstreamHost point at that
 // entry's LocalURL. Cargo has no config-time env-var substitution for a
@@ -135,10 +177,11 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 		if rw.LocalURL == "" {
 			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with an empty LocalURL for UpstreamHost %q in rewrites for %s", rw.UpstreamHost, row.InTreeConfigPath)
 		}
-		if seenHosts[rw.UpstreamHost] {
+		key := FoldHost(rw.UpstreamHost)
+		if seenHosts[key] {
 			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with duplicate UpstreamHost %q in rewrites for %s", rw.UpstreamHost, row.InTreeConfigPath)
 		}
-		seenHosts[rw.UpstreamHost] = true
+		seenHosts[key] = true
 	}
 
 	configPath := filepath.Join(repoDir, row.InTreeConfigPath)
@@ -199,9 +242,11 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 	// content change. Every rewrite's host is checked, not just the first, so a
 	// config naming only a later route's host still reaches the loop (#3142).
 	contentStr := string(content)
+	foldedContent := asciiLower(contentStr)
 	anyHostPresent := false
 	for _, rw := range rewrites {
-		if strings.Contains(contentStr, "https://"+rw.UpstreamHost) || strings.Contains(contentStr, "http://"+rw.UpstreamHost) {
+		host := FoldHost(rw.UpstreamHost)
+		if strings.Contains(foldedContent, "https://"+host) || strings.Contains(foldedContent, "http://"+host) {
 			anyHostPresent = true
 			break
 		}
@@ -236,13 +281,14 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 	})
 
 	// Two passes per rewrite because the config may use either scheme, including
-	// a sparse index URL like "sparse+https://HOST/...". ReplaceAll matches
-	// literally, so unlike the old sed -i version this needs no metacharacter
-	// escaping for hosts containing ".", "#", or "*".
+	// a sparse index URL like "sparse+https://HOST/...". Matching is literal
+	// apart from ASCII case folding (issue #3706), so unlike the old sed -i
+	// version this needs no metacharacter escaping for hosts containing ".",
+	// "#", or "*".
 	rewritten := contentStr
 	for _, rw := range ordered {
-		rewritten = strings.ReplaceAll(rewritten, "https://"+rw.UpstreamHost, rw.LocalURL)
-		rewritten = strings.ReplaceAll(rewritten, "http://"+rw.UpstreamHost, rw.LocalURL)
+		rewritten = replaceAllFold(rewritten, "https://"+rw.UpstreamHost, rw.LocalURL)
+		rewritten = replaceAllFold(rewritten, "http://"+rw.UpstreamHost, rw.LocalURL)
 	}
 
 	// Tag before writing: update-index only flips an index bit, so a path git

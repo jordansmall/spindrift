@@ -1508,3 +1508,126 @@ func TestApplyInTreeBindingMissingConfigUnderHostRootedRoute(t *testing.T) {
 		t.Errorf("reason = %v, want %v", reason, ApplyMissing)
 	}
 }
+
+// Issue #3706: hostnames compare case-insensitively, so a tracked config that
+// spells the host in a different case than the route's upstream host must
+// still be rewritten, in either direction. The path after the host keeps its
+// case byte-for-byte.
+func TestApplyInTreeBindingMatchesHostCaseInsensitively(t *testing.T) {
+	const local = "http://127.0.0.1:27182/r0"
+	cases := []struct {
+		name    string
+		host    string
+		content string
+		want    string
+	}{
+		{
+			name:    "config uppercase, route lowercase",
+			host:    "artifactory.example.test",
+			content: "registry=https://ARTIFACTORY.example.test/Api/Cargo/Index/\n",
+			want:    "registry=" + local + "/Api/Cargo/Index/\n",
+		},
+		{
+			name:    "mixed lines, lowercase and capitalised",
+			host:    "artifactory.example.test",
+			content: "a=https://artifactory.example.test/x/\nb=https://Artifactory.example.test/Y/\n",
+			want:    "a=" + local + "/x/\nb=" + local + "/Y/\n",
+		},
+		{
+			name:    "route mixed case, config lowercase",
+			host:    "Artifactory.Example.Test",
+			content: "registry=https://artifactory.example.test/index/\n",
+			want:    "registry=" + local + "/index/\n",
+		},
+		{
+			name:    "scheme folds too",
+			host:    "artifactory.example.test",
+			content: "registry=HTTP://Artifactory.example.test/Index/\n",
+			want:    "registry=" + local + "/Index/\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := newTestRepo(t)
+			writeConfig(t, dir, npmBinding.InTreeConfigPath, tc.content, true)
+
+			reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: tc.host, LocalURL: local}})
+			if err != nil {
+				t.Fatalf("ApplyInTreeBinding: %v", err)
+			}
+			if reason != ApplyApplied {
+				t.Errorf("reason = %v, want %v", reason, ApplyApplied)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("rewritten content = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Case-variant hosts name the same host, so host-only matching cannot tell
+// the two rewrites apart: same contract violation as an exact duplicate.
+func TestApplyInTreeBindingErrorsOnCaseVariantDuplicateUpstreamHost(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry = \"https://artifactory.example.test/index/\"\n"
+	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+
+	rewrites := []HostRewrite{
+		{UpstreamHost: "artifactory.example.test", LocalURL: "http://127.0.0.1:27182/r0"},
+		{UpstreamHost: "ARTIFACTORY.example.test", LocalURL: "http://127.0.0.1:27182/r1"},
+	}
+	if _, err := ApplyInTreeBinding(dir, cargoBinding, rewrites); err == nil {
+		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (case-variant duplicate UpstreamHost)")
+	}
+}
+
+// The longest-first ordering must hold when the hosts are spelled in a case
+// that differs from the config's: each URL still goes to its own LocalURL.
+func TestApplyInTreeBindingOverlappingMixedCaseHostsRewriteLongestFirst(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "short = \"https://REGISTRY.example.com/Index/\"\nlong = \"https://registry.EXAMPLE.com:8443/Index/\"\n"
+	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+
+	rewrites := []HostRewrite{
+		{UpstreamHost: "registry.example.com", LocalURL: "http://127.0.0.1:27182/r0"},
+		{UpstreamHost: "REGISTRY.example.com:8443", LocalURL: "http://127.0.0.1:27182/r1"},
+	}
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyApplied {
+		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "short = \"http://127.0.0.1:27182/r0/Index/\"\nlong = \"http://127.0.0.1:27182/r1/Index/\"\n"
+	if string(got) != want {
+		t.Errorf("rewritten content = %q, want %q", got, want)
+	}
+}
+
+func TestASCIILowerLowercasesASCIIOnly(t *testing.T) {
+	cases := map[string]string{
+		"":                          "",
+		"Registry.Example.COM:8443": "registry.example.com:8443",
+		"already.lower":             "already.lower",
+		"Ä.example":                 "Ä.example",
+		"K.example":                 "K.example",
+	}
+	for in, want := range cases {
+		got := asciiLower(in)
+		if got != want {
+			t.Errorf("asciiLower(%q) = %q, want %q", in, got, want)
+		}
+		if len(got) != len(in) {
+			t.Errorf("asciiLower(%q) changed byte length: %d -> %d", in, len(in), len(got))
+		}
+	}
+}
