@@ -367,7 +367,7 @@ backticks, a code fence, or any other markdown formatting:
 
 SPINDRIFT_OUTCOME issue=7 landing=<pr-url> status=ready note=<short reason>
 
-Grammar: `SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=<status> note=<short reason>`
+Grammar: `SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=<status> note=<text>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
 spaces and `=`). The only valid `status` values here are `ready` and `blocked`
 — no other word belongs in that field (`status=ambiguous` and

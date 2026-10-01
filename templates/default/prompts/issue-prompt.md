@@ -154,7 +154,7 @@ rebase-merge, and the complete-label swap.
 `CODE_FORGE=local` already printed their outcome line and stopped under LAND
 THE CHANGE above.)
 
-${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason>`
+${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<text>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
 spaces and `=`). The only valid `status` values here are `ready` and `blocked`
 — no other word belongs in that field (`status=ambiguous` and
