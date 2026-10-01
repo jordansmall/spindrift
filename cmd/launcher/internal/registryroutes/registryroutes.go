@@ -737,13 +737,28 @@ func validateAuthScheme(label, scheme string) error {
 	return fmt.Errorf("registryroutes: %s: auth-scheme %q is not one of \"bearer\", \"basic\", or \"header:<Name>\"", label, scheme)
 }
 
+// rejectURLDelimiters bans "?" and "#" (issue #3321): they open a URL's query
+// and fragment, so no request path carries them, and a declared path spliced
+// into a GOPROXY or Gradle URL would be cut short at them. Shared by
+// validateAllowPatterns and validateDeclaredPath so the two cannot drift.
+func rejectURLDelimiters(label, field, value string) error {
+	if strings.ContainsAny(value, "?#") {
+		return fmt.Errorf("registryroutes: %s: %s %q must not contain %q or %q", label, field, value, "?", "#")
+	}
+	return nil
+}
+
 // validateAllowPatterns rejects any pattern not already in the canonical
 // subtree-root form registrypathset derives (ADR 0047, issue #3258). It checks
 // with path.Clean rather than normalizing, so a mistyped pattern fails at parse
 // time instead of silently mismatching a request path. "/" is rejected too:
 // PathSet.Admits reads it as "admit every path", the off switch ADR 0047 bans.
+// "?" and "#" are banned first (rejectURLDelimiters): path.Clean keeps them.
 func validateAllowPatterns(label string, patterns []string) error {
 	for _, p := range patterns {
+		if err := rejectURLDelimiters(label, "allow pattern", p); err != nil {
+			return err
+		}
 		if p == "" || path.Clean(p) != p || !strings.HasPrefix(p, "/") {
 			return fmt.Errorf("registryroutes: %s: allow pattern %q must be an absolute path already in canonical form (leading \"/\", no trailing \"/\", no \".\" or \"..\" segment)", label, p)
 		}
@@ -758,8 +773,12 @@ func validateAllowPatterns(label string, patterns []string) error {
 // shared so gradle-path (issue #3259) and go-path (issue #3260) cannot drift.
 // Both ban "$", "`", and "\": gradle's value lands in a Groovy double-quoted
 // literal where "$" interpolates at load time, go's in a shell-sourced export
-// line. It strips every trailing "/", so "//" cannot pass the bare-root check.
+// line. Both also ban "?" and "#" (rejectURLDelimiters). It strips every
+// trailing "/", so "//" cannot pass the bare-root check.
 func validateDeclaredPath(label, field, value string) (string, error) {
+	if err := rejectURLDelimiters(label, field, value); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(value) != value || strings.ContainsAny(value, " \t\r\n") {
 		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain whitespace", label, field, value)
 	}
