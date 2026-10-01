@@ -243,6 +243,13 @@ still-running Dispatch settles on its own. Terminate-all additionally applies
 Terminate (above) to every live Dispatch before exiting. Anything else,
 including a bare "stay", cancels the pending quit and keeps the session running.
 
+Once quit, the Console ignores SIGTERM and SIGINT — through the drain and the
+teardown that follows — so a stray `kill` cannot cut cleanup short. SIGKILL is
+the only way out; what it leaves running is flagged for adoption by the next
+session's orphan detection (see Orphan recovery below). The registration is
+taken before the TUI starts, so a signal in that first instant is swallowed
+too rather than ending startup.
+
 ## Orphan recovery
 
 A hard death — a crash, a dropped SSH session — leaves its containers running

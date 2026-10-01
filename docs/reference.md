@@ -4709,12 +4709,13 @@ fix could still forward the launcher's own SIGINT into the child's group
 with `syscall.Kill(-pgid, syscall.SIGINT)` before the launcher exits. That
 isn't wired up today: `Start`'s `(func() error, error)` return signature
 exposes no pid or pgid to forward against, so this would need a seam change
-first. It also has no home to hang off yet — no `cmd/launcher` source
-installs a SIGINT handler for this path today; the only `signal.Notify`
-call in the tree, in `quickstart/maskedinput.go`, handles unrelated masked
-input, and the Console TUI's bubbletea run loop installs its own, separate
-SIGINT handling. So the orphaned-build cost of the Ctrl-C case is a
-deliberate, currently-unmitigated cost, not one that's impossible to avoid.
+first. The launcher's own SIGINT/SIGTERM registration,
+`stopsignal.Notify` (behind `main.go`'s `installStopSignal` seam), is held
+by the headless dispatch paths and, since issue #3651, for the Console's
+whole run (the daemon holds its own), but its relay only closes stop/abort
+channels; it has no hook that forwards a signal into a child's group. So
+the orphaned-build cost of the Ctrl-C case is a deliberate,
+currently-unmitigated cost, not one that's impossible to avoid.
 
 ---
 
