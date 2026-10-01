@@ -1527,6 +1527,42 @@ func TestSummarizeStatus_LockHeldDistinguishesNoStatusFromUncorrelated(t *testin
 	if !strings.Contains(got, "999") {
 		t.Errorf("summarizeStatus(uncorrelated status) = %q, want it to name the leftover status's own pid", got)
 	}
+	if !strings.Contains(got, "not this holder's (pid=1 host=h kind=dispatch started=x)") {
+		t.Errorf("summarizeStatus(uncorrelated status) = %q, want it to contrast the leftover with the holder", got)
+	}
+}
+
+// TestSummarizeStatus_LockHeldWindowReadsAsPredecessorLeftover pins issue
+// #3597: a window-shaped report (lock line and status naming the same dead
+// pid, Stale set) must still read as a predecessor's leftover.
+func TestSummarizeStatus_LockHeldWindowReadsAsPredecessorLeftover(t *testing.T) {
+	report := daemon.StatusReport{
+		LockHeld:      true,
+		Stale:         true,
+		HolderPidGone: true,
+		Holder:        "pid=4242 host=h kind=dispatch started=x",
+		Status:        &daemon.Status{Pid: 4242, Host: "h", State: daemon.StateWorking},
+	}
+	want := "daemon: a daemon holds this checkout and is still starting; its lock line and the published status file are both a predecessor's leftover (pid=4242, state=working)"
+	if got := summarizeStatus(report); got != want {
+		t.Errorf("summarizeStatus(window report) = %q, want %q", got, want)
+	}
+}
+
+// TestSummarizeStatus_CrossHostPidCollisionIsNotWindow pins that a cross-host
+// collision report (HolderPidGone unset) keeps the "not this holder's"
+// wording.
+func TestSummarizeStatus_CrossHostPidCollisionIsNotWindow(t *testing.T) {
+	report := daemon.StatusReport{
+		LockHeld: true,
+		Stale:    true,
+		Holder:   "pid=100 host=a kind=dispatch started=x",
+		Status:   &daemon.Status{Pid: 100, Host: "b", State: daemon.StateWorking},
+	}
+	want := "daemon: a daemon holds this checkout, but the published status file is a predecessor's leftover (pid=100, state=working), not this holder's (pid=100 host=a kind=dispatch started=x)"
+	if got := summarizeStatus(report); got != want {
+		t.Errorf("summarizeStatus(collision report) = %q, want %q", got, want)
+	}
 }
 
 // TestMainRun_StatusExtraArgument asserts an extra positional argument
