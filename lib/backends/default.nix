@@ -12,10 +12,17 @@
 # this list, and this order reproduces both axes' pinned choice orders without
 # a separate per-axis ordering table.
 
-# An omitted bool means false. An omitted trackerAxisRead or trackerAxisWrite
-# means "GITHUB"; an omitted trackerAxisFiler or forgeBackend means "GH"; an
-# omitted doctorTokenHint or doctorSlugHint means doctor falls back to its
-# github-shaped default.
+# An omitted bool means false. An omitted trackerAxisRead means "GITHUB"; an
+# omitted trackerAxisWrite means "GITHUB" too, except in cmd/launcher for a row
+# that sets trackerAxisRead, which reads it as-is (issue #2673); an omitted
+# trackerAxisFiler or forgeBackend means "GH"; an omitted doctorTokenHint or
+# doctorSlugHint means doctor falls back to its github-shaped default. Omission
+# is the only way to ask for a default: renderBackendRegistryGo throws on an
+# explicit "" for tokenEnvVar or any of those defaulted string fields except
+# trackerAxisWrite, because the generated Go cannot tell "" from omitted, and
+# lib/mkHarness.nix defaults on absence while cmd/launcher defaults on
+# emptiness (issue #3487). trackerAxisWrite = "" is legal (see local) because
+# cmd/launcher reads it as-is.
 
 # goVar is an explicit field rather than a derived title-case transform,
 # because "github" must render as "GitHub" and no capitalize-first rule
