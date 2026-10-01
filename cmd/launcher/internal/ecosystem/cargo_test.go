@@ -927,6 +927,65 @@ index = "sparse+https://cargo.example.test:8443/index/"
 	}
 }
 
+// Hosts are case-insensitive, so a route's UpstreamHost and a repo index host
+// that differ only in case are the same host and must bind (issue #3665).
+func TestCargoSourceReplacements_HostCaseInsensitiveBinding(t *testing.T) {
+	const port = 27182
+	for _, tc := range []struct {
+		name         string
+		upstreamHost string
+		indexHost    string
+	}{
+		{"uppercase index host", "cargo.example.test", "CARGO.example.test"},
+		{"uppercase route host", "CARGO.example.test", "cargo.example.test"},
+		{"uppercase ported route host", "CARGO.example.test:8443", "cargo.example.test:8443"},
+		{"mixed case on both sides", "Cargo.Example.test", "cARGO.example.TEST"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			routes := []registrymanifest.Route{
+				{Prefix: "r0", UpstreamHost: "crates.io"},
+				{Prefix: "r1", UpstreamHost: tc.upstreamHost, Ecosystems: CargoRouteBlock("acme")},
+			}
+			repoConfig := `[registries.acme]
+index = "sparse+https://` + tc.indexHost + `/index/"
+`
+
+			got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+			if len(warnings) != 0 {
+				t.Errorf("warnings = %v, want none", warnings)
+			}
+			if len(got) != 1 || got[0].Prefix != "r1" {
+				t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement on r1", got)
+			}
+		})
+	}
+}
+
+// The minted-name reservation must use the same host compare as the binding
+// loop: a case-variant binding still reserves
+// spindrift-registry-proxy-<prefix>-<name>, so a repo [source.*] table by
+// that name is not reused (issue #3665).
+func TestCargoSourceReplacements_GuardedNamesFallBackToMintedAcrossHostCase(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test"},
+	}
+	repoConfig := `[registries.acme]
+index = "sparse+https://CARGO.example.test/index/"
+
+[source.spindrift-registry-proxy-r1-acme]
+registry = "sparse+https://CARGO.example.test/index/"
+`
+
+	got, _ := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-acme" {
+		t.Fatalf("CargoSourceReplacements() = %+v, want the minted name (guard rejected the reserved name)", got)
+	}
+}
+
 // An empty replacements slice must return CargoConfigTOML's own output
 // byte-for-byte, since that is the pre-#3201 render every existing caller and
 // test still pins.

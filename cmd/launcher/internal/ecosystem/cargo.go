@@ -363,6 +363,13 @@ func cargoIndexHost(index string) (string, bool) {
 	return u.Host, true
 }
 
+// cargoRouteHostMatches reports whether indexHost, a cargoIndexHost result,
+// names route's upstream. Hosts are case-insensitive and neither side is
+// lowercased at its source, so case folds; the port still compares verbatim.
+func cargoRouteHostMatches(indexHost string, route registrymanifest.Route) bool {
+	return strings.EqualFold(indexHost, route.UpstreamHost)
+}
+
 // cargoIndexPath returns index's path component, stripping "sparse+" first,
 // for a host-rooted route's per-registry local URL (issue #3256): a registry
 // served at its own real path must resolve through that path locally, or the
@@ -481,7 +488,7 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 		// filtering happens later, so a decl that will end up unbound still
 		// gets its name reserved here.
 		for _, d := range hosted {
-			if d.host == route.UpstreamHost {
+			if cargoRouteHostMatches(d.host, route) {
 				homeOwnedSourceNames[registryProxySourceName+"-"+route.Prefix+"-"+d.name] = true
 			}
 		}
@@ -536,7 +543,7 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 		bound := make(map[string]bool)
 		var matched []matchedDecl
 		for _, d := range hosted {
-			if d.host != route.UpstreamHost {
+			if !cargoRouteHostMatches(d.host, route) {
 				continue
 			}
 			if !cargoBareKeyPattern.MatchString(d.name) {
