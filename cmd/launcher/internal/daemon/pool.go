@@ -491,7 +491,7 @@ func (s *state) siblingsEngaged(slot int) bool {
 // arrives, so a shut window costs one sleep, not a poll loop through it.
 func (p *pool) awaitWindow(ctx context.Context, slot int) {
 	for {
-		wait := p.cfg.Awake.Until(p.clk.Now())
+		wait, _ := p.cfg.Awake.Until(p.clk.Now())
 		if wait <= 0 {
 			p.noteAwakeOpen(slot)
 			return
@@ -1052,7 +1052,7 @@ func (p *pool) snapshotLocked() Status {
 	// while the window is open and for the nil always-awake window, so
 	// this stays the zero Time in the ordinary case.
 	var windowOpensAt time.Time
-	if d := p.cfg.Awake.Until(now); d > 0 {
+	if d, _ := p.cfg.Awake.Until(now); d > 0 {
 		windowOpensAt = now.Add(d)
 	}
 	checks := make([]KindCheck, 0, len(p.cfg.Kinds))

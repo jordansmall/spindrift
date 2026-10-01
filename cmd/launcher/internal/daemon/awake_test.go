@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/binary"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,8 +22,8 @@ func TestParseWindowEmptyIsAlwaysAwake(t *testing.T) {
 	if !w.Open(now) {
 		t.Fatalf("nil Window.Open() = false, want true (always awake)")
 	}
-	if got := w.Until(now); got != 0 {
-		t.Fatalf("nil Window.Until() = %v, want 0", got)
+	if got, exhausted := w.Until(now); got != 0 || exhausted {
+		t.Fatalf("nil Window.Until() = (%v, %v), want (0, false)", got, exhausted)
 	}
 }
 
@@ -179,8 +181,8 @@ func TestWindowOpenAndUntil(t *testing.T) {
 				if got := w.Open(c.now); got != c.wantOpen {
 					t.Errorf("Open(%v) = %v, want %v", c.now, got, c.wantOpen)
 				}
-				if got := w.Until(c.now); got != c.wantUntil {
-					t.Errorf("Until(%v) = %v, want %v", c.now, got, c.wantUntil)
+				if got, exhausted := w.Until(c.now); got != c.wantUntil || exhausted {
+					t.Errorf("Until(%v) = (%v, %v), want (%v, false)", c.now, got, exhausted, c.wantUntil)
 				}
 			})
 		}
@@ -204,8 +206,8 @@ func TestWindowOpenAndUntil(t *testing.T) {
 				if got := w.Open(c.now); got != c.wantOpen {
 					t.Errorf("Open(%v) = %v, want %v", c.now, got, c.wantOpen)
 				}
-				if got := w.Until(c.now); got != c.wantUntil {
-					t.Errorf("Until(%v) = %v, want %v", c.now, got, c.wantUntil)
+				if got, exhausted := w.Until(c.now); got != c.wantUntil || exhausted {
+					t.Errorf("Until(%v) = (%v, %v), want (%v, false)", c.now, got, exhausted, c.wantUntil)
 				}
 			})
 		}
@@ -225,8 +227,8 @@ func TestWindowOpenAndUntil(t *testing.T) {
 		if utcWindow.Open(now) {
 			t.Errorf("UTC window Open(%v) = true, want false (21:30 UTC, before 22:00)", now)
 		}
-		if got, want := utcWindow.Until(now), 30*time.Minute; got != want {
-			t.Errorf("UTC window Until(%v) = %v, want %v", now, got, want)
+		if got, exhausted := utcWindow.Until(now); got != 30*time.Minute || exhausted {
+			t.Errorf("UTC window Until(%v) = (%v, %v), want (%v, false)", now, got, exhausted, 30*time.Minute)
 		}
 	})
 
@@ -234,13 +236,13 @@ func TestWindowOpenAndUntil(t *testing.T) {
 		w := mustWindow(t, "09:00-17:00 UTC")
 
 		before := utc(2026, 6, 1, 8, 0)
-		if got, want := w.Until(before), time.Hour; got != want {
-			t.Errorf("Until(%v) = %v, want %v", before, got, want)
+		if got, exhausted := w.Until(before); got != time.Hour || exhausted {
+			t.Errorf("Until(%v) = (%v, %v), want (%v, false)", before, got, exhausted, time.Hour)
 		}
 
 		inside := utc(2026, 6, 1, 10, 0)
-		if got := w.Until(inside); got != 0 {
-			t.Errorf("Until(%v) = %v, want 0 (already open)", inside, got)
+		if got, exhausted := w.Until(inside); got != 0 || exhausted {
+			t.Errorf("Until(%v) = (%v, %v), want (0, false) (already open)", inside, got, exhausted)
 		}
 	})
 
@@ -253,8 +255,8 @@ func TestWindowOpenAndUntil(t *testing.T) {
 
 		// 2026-03-07 21:00 EST, one hour before the window opens.
 		before := time.Date(2026, 3, 7, 21, 0, 0, 0, loc)
-		if got, want := w.Until(before), time.Hour; got != want {
-			t.Errorf("Until(%v) = %v, want %v", before, got, want)
+		if got, exhausted := w.Until(before); got != time.Hour || exhausted {
+			t.Errorf("Until(%v) = (%v, %v), want (%v, false)", before, got, exhausted, time.Hour)
 		}
 
 		// Either side of the 2am->3am gap: 01:30 EST (just before) and
@@ -329,9 +331,12 @@ func TestWindowOpenAndUntil(t *testing.T) {
 		}
 
 		now := time.Date(2026, 3, 8, 0, 0, 0, 0, loc)
-		until := w.Until(now)
+		until, exhausted := w.Until(now)
 		if until <= 0 {
 			t.Fatalf("Until(%v) = %v, want a strictly positive duration", now, until)
+		}
+		if exhausted {
+			t.Fatalf("Until(%v) exhausted = true, want false", now)
 		}
 		next := now.Add(until)
 		if !w.Open(next) {
@@ -357,8 +362,8 @@ func TestWindowOpenAndUntil(t *testing.T) {
 		// the wall-clock digits alone would suggest, because that hour is
 		// skipped rather than lived through.
 		now := time.Date(2026, 3, 8, 0, 30, 0, 0, loc)
-		if got, want := w.Until(now), time.Hour+30*time.Minute; got != want {
-			t.Errorf("Until(%v) = %v, want %v", now, got, want)
+		if got, exhausted := w.Until(now); got != time.Hour+30*time.Minute || exhausted {
+			t.Errorf("Until(%v) = (%v, %v), want (%v, false)", now, got, exhausted, time.Hour+30*time.Minute)
 		}
 		opened := time.Date(2026, 3, 8, 4, 0, 0, 0, loc)
 		if !w.Open(opened) {
@@ -382,8 +387,108 @@ func TestWindowOpenAndUntil(t *testing.T) {
 		if got, want := now.Format("15:04 MST"), "01:40 EDT"; got != want {
 			t.Fatalf("sanity check: now = %s, want %s", got, want)
 		}
-		if got, want := w.Until(now), 20*time.Minute; got != want {
-			t.Errorf("Until(%v) = %v, want %v", now, got, want)
+		if got, exhausted := w.Until(now); got != 20*time.Minute || exhausted {
+			t.Errorf("Until(%v) = (%v, %v), want (%v, false)", now, got, exhausted, 20*time.Minute)
 		}
 	})
+}
+
+// buildTZif assembles a minimal TZif v1 blob by hand per tzfile(5), rather
+// than pulling one from a real zone, so a test can pin an offset-change
+// schedule no real IANA zone has. isutcnt/isstdcnt/leapcnt are left at 0:
+// Go's own TZif reader (zoneinfo_read.go) treats those arrays as optional
+// and guards every read on the actual counts, so omitting them is valid,
+// not a shortcut that happens to parse.
+func buildTZif(t *testing.T, transTimes []int32, transTypes []byte, offsets []int32, isdst []byte, abbrevIdx []byte, abbrev string) []byte {
+	t.Helper()
+	if len(offsets) != len(isdst) || len(offsets) != len(abbrevIdx) {
+		t.Fatalf("buildTZif: mismatched type slice lengths")
+	}
+	if len(transTimes) != len(transTypes) {
+		t.Fatalf("buildTZif: mismatched transition slice lengths")
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("TZif")
+	buf.WriteByte(0)            // version 1: 4-byte transition times, no footer
+	buf.Write(make([]byte, 15)) // reserved
+
+	be4 := func(n int) {
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(n))
+		buf.Write(b[:])
+	}
+	be4(0)               // isutcnt
+	be4(0)               // isstdcnt
+	be4(0)               // leapcnt
+	be4(len(transTimes)) // timecnt
+	be4(len(offsets))    // typecnt
+	be4(len(abbrev))     // charcnt
+
+	for _, tt := range transTimes {
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(tt))
+		buf.Write(b[:])
+	}
+	buf.Write(transTypes)
+
+	for i := range offsets {
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(offsets[i]))
+		buf.Write(b[:])
+		buf.WriteByte(isdst[i])
+		buf.WriteByte(abbrevIdx[i])
+	}
+	buf.WriteString(abbrev)
+
+	return buf.Bytes()
+}
+
+// TestWindowUntilExhaustedSyntheticZone drives the untilHorizon fallback
+// with a synthetic zone (no real IANA zone behaves this way) that jumps
+// the local clock straight from 02:59:59 to 04:00:00 every day (+0 -> +1
+// at 03:00Z) and repeats 11:00-11:59 on the way back (+1 -> +0 at
+// 11:00Z). A 03:15-03:45 window's local minutes therefore never occur on
+// any day, so Until must walk every zone period out to untilHorizon and
+// report it exhausted rather than silently returning a plausible-looking
+// duration for a window that in fact never opens.
+func TestWindowUntilExhaustedSyntheticZone(t *testing.T) {
+	const abbrev = "P0\x00P1\x00"
+	offsets := []int32{0, 3600}
+	isdst := []byte{0, 1}
+	abbrevIdx := []byte{0, 3}
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	const days = 30 // well past now+untilHorizon (8d), with margin so the
+	// walk never runs off the end of the explicit transition table into
+	// TZif's "last type persists" extension before exhausting.
+	var times []int32
+	var types []byte
+	for d := 0; d < days; d++ {
+		dayStart := base + int64(d)*86400
+		times = append(times, int32(dayStart+3*3600)) // 03:00Z: +0 -> +1
+		types = append(types, 1)
+		times = append(times, int32(dayStart+11*3600)) // 11:00Z: +1 -> +0
+		types = append(types, 0)
+	}
+
+	data := buildTZif(t, times, types, offsets, isdst, abbrevIdx, abbrev)
+	loc, err := time.LoadLocationFromTZData("Synthetic/Until", data)
+	if err != nil {
+		t.Fatalf("LoadLocationFromTZData: %v", err)
+	}
+
+	w := &Window{start: 195, end: 225, loc: loc} // 03:15-03:45 local
+	now := time.Date(2026, 1, 2, 12, 0, 0, 0, loc)
+
+	wait, exhausted := w.Until(now)
+	if !exhausted {
+		t.Fatalf("Until(%v) exhausted = false, want true", now)
+	}
+	if wait != untilHorizon {
+		t.Fatalf("Until(%v) wait = %v, want untilHorizon (%v)", now, wait, untilHorizon)
+	}
+	if w.Open(now.Add(wait)) {
+		t.Fatalf("Open(now+wait) = true, want false: the window never actually opens in this zone")
+	}
 }

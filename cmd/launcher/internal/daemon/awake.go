@@ -146,9 +146,14 @@ const untilHorizon = 8 * 24 * time.Hour
 // Open at the boundary instant itself instead: that's what makes a
 // window opening mid-skip resolve to the transition, and a window
 // re-opening inside a repeated hour get seen at all.
-func (w *Window) Until(now time.Time) time.Duration {
+//
+// exhausted is true only when the walk runs past untilHorizon without
+// finding an opening, so a caller can tell that degraded case apart from
+// a genuine long park; wait is then untilHorizon, a re-check interval
+// rather than an opening.
+func (w *Window) Until(now time.Time) (wait time.Duration, exhausted bool) {
 	if w == nil || w.Open(now) {
-		return 0
+		return 0, false
 	}
 
 	t := now
@@ -166,13 +171,13 @@ func (w *Window) Until(now time.Time) time.Duration {
 		cand = cand.Add(-time.Duration(cand.Nanosecond()) * time.Nanosecond)
 
 		if zoneEnd.IsZero() || cand.Before(zoneEnd) {
-			return cand.Sub(now)
+			return cand.Sub(now), false
 		}
 		t = zoneEnd
 		if w.Open(t) {
-			return t.Sub(now)
+			return t.Sub(now), false
 		}
 	}
 	// Degrade to a re-check rather than taking a long-lived daemon down.
-	return untilHorizon
+	return untilHorizon, true
 }
