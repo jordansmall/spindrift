@@ -287,7 +287,7 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 	if l.Factory != nil {
 		reaper = l.Factory
 	}
-	killErr := terminate.Reclaim(tracker, l.CodeForge, reaper, l.registry(), num)
+	killErr := terminate.Reclaim(tracker, l.CodeForge, reaper, l.registry(), num, terminate.Gesture)
 
 	l.queueRef().setState(num, PickTerminated, "terminated by operator")
 	l.signalRefresh()

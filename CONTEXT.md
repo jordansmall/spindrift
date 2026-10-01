@@ -973,6 +973,9 @@ branches and open PRs stay put, and the terminate comment on the issue links
 them so a later re-dispatch can adopt rather than collide. The ending is
 recorded outside the state machine: a terminal line in the Box log and that
 comment. Distinct from Unpick, which retracts a Pick that never launched.
+The same reclaim path (`terminate.Reclaim`) also serves an [[Abort signal]]
+and a shutdown drain's release, each posting its own trigger-specific
+comment — only the operator gesture described above is a Terminate.
 _Avoid_: kill, cancel, abort.
 
 **Reconcile**:

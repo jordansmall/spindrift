@@ -58,7 +58,7 @@ func TestReclaim_ReapsTransitionsAndComments(t *testing.T) {
 	fc, fr, factory, dir := newReclaimFixture(t)
 	fc.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/owner/repo/pull/7"})
 
-	if err := terminate.Reclaim(fc, fc, factory, terminate.NewRegistry(), "42"); err != nil {
+	if err := terminate.Reclaim(fc, fc, factory, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestReclaim_MarksRegistry(t *testing.T) {
 	reg := terminate.NewRegistry()
 	gen := reg.Begin("42")
 
-	if err := terminate.Reclaim(fc, fc, factory, reg, "42"); err != nil {
+	if err := terminate.Reclaim(fc, fc, factory, reg, "42", terminate.Gesture); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestReclaim_PropagatesKillError(t *testing.T) {
 	fc, fr, factory, _ := newReclaimFixture(t)
 	fr.KillErr = errors.New("boom: kill failed")
 
-	err := terminate.Reclaim(fc, fc, factory, terminate.NewRegistry(), "42")
+	err := terminate.Reclaim(fc, fc, factory, terminate.NewRegistry(), "42", terminate.Gesture)
 	if err != fr.KillErr {
 		t.Fatalf("Reclaim err = %v, want %v", err, fr.KillErr)
 	}
@@ -145,7 +145,7 @@ func TestReclaim_PropagatesKillError(t *testing.T) {
 func TestReclaim_NotesDanglingBranchWhenNoOpenPR(t *testing.T) {
 	fc := newFakeForge(t)
 
-	if err := terminate.Reclaim(fc, fc, nil, terminate.NewRegistry(), "42"); err != nil {
+	if err := terminate.Reclaim(fc, fc, nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestReclaim_NotesDanglingBranchWhenNoOpenPR(t *testing.T) {
 func TestReclaim_NilReaperAndCodeForge_SafeAndNotesNone(t *testing.T) {
 	fc := newFakeForge(t)
 
-	if err := terminate.Reclaim(fc, nil, nil, terminate.NewRegistry(), "42"); err != nil {
+	if err := terminate.Reclaim(fc, nil, nil, terminate.NewRegistry(), "42", terminate.Gesture); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
@@ -176,5 +176,83 @@ func TestReclaim_NilReaperAndCodeForge_SafeAndNotesNone(t *testing.T) {
 	}
 	if !strings.Contains(fc.CommentCalls[0].Body, "no open branch/PR found") {
 		t.Errorf("comment must note no open branch/PR; body=%q", fc.CommentCalls[0].Body)
+	}
+}
+
+// TestReclaim_WordingNamesTrigger pins issue #3559: the comment and
+// terminal log line must name the trigger that actually fired Reclaim, not
+// always claim an operator Terminate. DrainDecline in particular must claim
+// no termination or kill, since it fires before any Box ever launched. Every
+// comment shares the terminate.CommentSuffix callers match.
+func TestReclaim_WordingNamesTrigger(t *testing.T) {
+	tests := []struct {
+		name            string
+		trigger         terminate.Trigger
+		wantCommentHas  string
+		wantCommentNone []string
+		wantLogLine     string
+	}{
+		{
+			name:           "Gesture",
+			trigger:        terminate.Gesture,
+			wantCommentHas: "Terminated by operator",
+			wantLogLine:    "terminated by operator; issue returned to Dispatchable",
+		},
+		{
+			name:           "SignalAbort",
+			trigger:        terminate.SignalAbort,
+			wantCommentHas: "Aborted on signal",
+			wantLogLine:    "aborted on signal; issue returned to Dispatchable",
+		},
+		{
+			name:            "DrainDecline",
+			trigger:         terminate.DrainDecline,
+			wantCommentHas:  "Released on shutdown",
+			wantCommentNone: []string{"Terminated", "terminated", "kill"},
+			wantLogLine:     "released on shutdown; issue returned to Dispatchable",
+		},
+		{
+			// The zero value (no Trigger constant) must fall to neutral
+			// wording that names no actor, never the Gesture wording.
+			name:            "zero value falls to neutral wording",
+			trigger:         terminate.Trigger(0),
+			wantCommentHas:  "Reclaimed back to Dispatchable.",
+			wantCommentNone: []string{"Terminated", "terminated", "Aborted", "aborted", "Released", "released"},
+			wantLogLine:     "reclaimed; issue returned to Dispatchable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc, _, factory, dir := newReclaimFixture(t)
+
+			if err := terminate.Reclaim(fc, fc, factory, terminate.NewRegistry(), "42", tt.trigger); err != nil {
+				t.Fatalf("Reclaim: %v", err)
+			}
+
+			if len(fc.CommentCalls) != 1 {
+				t.Fatalf("CommentCalls: want 1, got %+v", fc.CommentCalls)
+			}
+			body := fc.CommentCalls[0].Body
+			if !strings.Contains(body, tt.wantCommentHas) {
+				t.Errorf("comment must contain %q; body=%q", tt.wantCommentHas, body)
+			}
+			if !strings.Contains(body, terminate.CommentSuffix) {
+				t.Errorf("comment must contain the shared %q suffix; body=%q", terminate.CommentSuffix, body)
+			}
+			for _, absent := range tt.wantCommentNone {
+				if strings.Contains(body, absent) {
+					t.Errorf("comment must not contain %q; body=%q", absent, body)
+				}
+			}
+
+			log, err := os.ReadFile(filepath.Join(dispatch.HostLogDirFor(dir), "issue-42.log"))
+			if err != nil {
+				t.Fatalf("read terminal log: %v", err)
+			}
+			if !strings.Contains(string(log), tt.wantLogLine) {
+				t.Errorf("terminal log must carry %q; got %q", tt.wantLogLine, log)
+			}
+		})
 	}
 }

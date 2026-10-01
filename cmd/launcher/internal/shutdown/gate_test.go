@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/shutdown"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // stubReaper is a minimal terminate.Reaper: it counts Kill calls per issue
@@ -69,13 +70,13 @@ func inProgressToDispatchableCount(fc *forge.Fake, num string) int {
 	return n
 }
 
-// reclaimCommentCount counts the "Terminated by operator" comments Reclaim
-// posts for num, the operator-visible half of a release: a transition without
-// one leaves the issue silently re-dispatchable.
-func reclaimCommentCount(fc *forge.Fake, num string) int {
+// reclaimCommentCount counts the Reclaim comments for num whose body contains
+// want, the issue-visible half of a release: a transition without one
+// leaves the issue silently re-dispatchable.
+func reclaimCommentCount(fc *forge.Fake, num, want string) int {
 	n := 0
 	for _, call := range fc.CommentCalls {
-		if call.Num == num && strings.Contains(call.Body, "Terminated by operator") {
+		if call.Num == num && strings.Contains(call.Body, want) {
 			n++
 		}
 	}
@@ -132,6 +133,9 @@ func TestAbort_ReclaimsEveryInFlightIssueExactlyOnce(t *testing.T) {
 		}
 		if got := reaper.killCount(num); got != 1 {
 			t.Errorf("#%s: kill count = %d, want 1", num, got)
+		}
+		if got := reclaimCommentCount(fc, num, "Aborted on signal"); got != 1 {
+			t.Errorf("#%s: Aborted-on-signal comments = %d, want 1", num, got)
 		}
 	}
 	if !g.Signalled() {
@@ -195,7 +199,7 @@ func TestAbort_SettledIssueNotReclaimed(t *testing.T) {
 	if got := inProgressToDispatchableCount(fc, "1"); got != 0 {
 		t.Errorf("#1 (already settled): InProgress->Dispatchable transitions = %d, want 0", got)
 	}
-	if got := reclaimCommentCount(fc, "1"); got != 0 {
+	if got := reclaimCommentCount(fc, "1", terminate.CommentSuffix); got != 0 {
 		t.Errorf("#1 (already settled): reclaim comments = %d, want 0", got)
 	}
 	if got := reaper.killCount("1"); got != 0 {
@@ -228,7 +232,7 @@ func TestLaunch_DecliningAfterSignal_ReclaimsHeldClaimAndSkipsArm(t *testing.T) 
 	if got := reaper.killCount("1"); got != 0 {
 		t.Errorf("#1: kill count = %d, want 0 (arm never ran, so there is no Box to kill)", got)
 	}
-	if got := reclaimCommentCount(fc, "1"); got != 1 {
+	if got := reclaimCommentCount(fc, "1", "Released on shutdown"); got != 1 {
 		t.Errorf("#1: reclaim comments = %d, want 1", got)
 	}
 	g.Settle()
@@ -320,7 +324,7 @@ func TestLaunch_DecliningUnheldIssue_TouchesNothing(t *testing.T) {
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls: want none for an unheld claim, got %+v", fc.TransitionStateCalls)
 	}
-	if got := reclaimCommentCount(fc, "1"); got != 0 {
+	if got := reclaimCommentCount(fc, "1", terminate.CommentSuffix); got != 0 {
 		t.Errorf("#1: reclaim comments = %d, want 0 for an unheld claim", got)
 	}
 	g.Settle()
@@ -345,7 +349,7 @@ func TestAllowed_DecliningHeldIssue_ReleasesClaim(t *testing.T) {
 	if got := inProgressToDispatchableCount(fc, "1"); got != 1 {
 		t.Errorf("#1: InProgress->Dispatchable transitions = %d, want 1", got)
 	}
-	if got := reclaimCommentCount(fc, "1"); got != 1 {
+	if got := reclaimCommentCount(fc, "1", "Released on shutdown"); got != 1 {
 		t.Errorf("#1: reclaim comments = %d, want 1", got)
 	}
 	if got := reaper.killCount("1"); got != 0 {
@@ -374,7 +378,7 @@ func TestAllowed_DecliningUnheldIssue_TouchesNothing(t *testing.T) {
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls: want none for an unheld claim, got %+v", fc.TransitionStateCalls)
 	}
-	if got := reclaimCommentCount(fc, "1"); got != 0 {
+	if got := reclaimCommentCount(fc, "1", terminate.CommentSuffix); got != 0 {
 		t.Errorf("#1: reclaim comments = %d, want 0 for an unheld claim", got)
 	}
 	g.Settle()
