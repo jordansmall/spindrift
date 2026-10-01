@@ -2708,6 +2708,110 @@ credential = { %s }
 	}
 }
 
+// Issue #3436: a route carrying a retired key must still validate its
+// credential first. A malformed credential fails on parseCredential's own
+// error before parseRoutes ever reaches the retired-key check, so no
+// replacement stanza is printed for it -- the stanza-echo path only ever
+// sees a credential parseCredential already accepted.
+func TestParse_RetiredKeyRouteWithMalformedCredentialFailsOnCredential(t *testing.T) {
+	credCases := []struct {
+		name          string
+		credential    string
+		wantErrSubstr string
+		// secretValue, if set, is a credential-shaped value that must never
+		// appear anywhere in the error (issue #3436).
+		secretValue string
+	}{
+		{"unknown-only", `{ bogus = "y" }`, `credential has unknown key "bogus"`, ""},
+		{"empty-table", `{}`, `credential names no source`, ""},
+		{"valid-plus-unknown", `{ netrc = "/n", bogus = "y" }`, `credential has unknown key "bogus"`, ""},
+		{"orphan-companion", `{ registry-name = "my-registry" }`, `credential key "registry-name" is only valid alongside "cargo-credentials"`, ""},
+		{"unknown-secret-value", `{ token = "ghp_supersecret" }`, `credential has unknown key "token"`, "ghp_supersecret"},
+		{"netrc-not-a-string", `{ netrc = 123 }`, `credential key "netrc" must be a string`, ""},
+		{"exec-not-strings", `{ exec = [1, 2] }`, `credential key "exec" must be an array of strings`, ""},
+		{"env-nan", `{ env = nan }`, `credential key "env" must be a string`, ""},
+		{"netrc-inf", `{ netrc = inf }`, `credential key "netrc" must be a string`, ""},
+		{"netrc-local-date", `{ netrc = 1979-05-27 }`, `credential key "netrc" must be a string`, ""},
+		{"netrc-offset-datetime", `{ netrc = 1979-05-27T07:32:00Z }`, `credential key "netrc" must be a string`, ""},
+		{"netrc-table", `{ netrc = { a = "b" } }`, `credential key "netrc" must be a string`, ""},
+	}
+	retiredCases := []struct {
+		name string
+		decl string
+	}{
+		{"adr-0047", `enforce-allowlist = false`},
+		{"adr-0047-upstream-base-url", `upstream-base-url = "https://repo.example.com/x"`},
+		{"adr-0048", `go-path = "/go"`},
+	}
+
+	for _, cc := range credCases {
+		for _, rc := range retiredCases {
+			t.Run(cc.name+"/"+rc.name, func(t *testing.T) {
+				doc := fmt.Sprintf(`
+[[routes]]
+match-host = "repo.example.com"
+credential = %s
+%s
+`, cc.credential, rc.decl)
+				_, err := Parse([]byte(doc))
+				if err == nil {
+					t.Fatal("expected error for malformed credential, got nil")
+				}
+				msg := err.Error()
+				if !strings.Contains(msg, cc.wantErrSubstr) {
+					t.Errorf("error = %v, want substring %q", err, cc.wantErrSubstr)
+				}
+				if strings.Contains(msg, "[[routes]]") {
+					t.Errorf("error prints a replacement stanza for a malformed credential, want parseCredential's error only, got: %v", err)
+				}
+				for _, key := range []string{"enforce-allowlist", "upstream-base-url", "go-path"} {
+					if strings.Contains(msg, key) {
+						t.Errorf("error names retired key %q, want parseCredential's error to win, got: %v", key, err)
+					}
+				}
+				if cc.secretValue != "" && strings.Contains(msg, cc.secretValue) {
+					t.Errorf("error echoes secret value %q, got: %v", cc.secretValue, err)
+				}
+			})
+		}
+	}
+}
+
+// The retired-key stanza echoes upstream-origin, auth-scheme, and allow too,
+// so an invalid one fails on its own error before any stanza prints (#3436).
+func TestParse_RetiredKeyRouteWithInvalidFieldFailsOnField(t *testing.T) {
+	fieldCases := []struct {
+		name          string
+		decl          string
+		wantErrSubstr string
+	}{
+		{"upstream-origin-with-path", `upstream-origin = "https://repo.example.com/x"`, `upstream-origin`},
+		{"auth-scheme-digest", `auth-scheme = "digest"`, `auth-scheme "digest" is not one of`},
+		{"allow-relative", `allow = ["no-slash"]`, `allow pattern "no-slash" must be an absolute path`},
+	}
+	for _, fc := range fieldCases {
+		t.Run(fc.name, func(t *testing.T) {
+			doc := fmt.Sprintf(`
+[[routes]]
+match-host = "repo.example.com"
+go-path = "/go"
+%s
+`, fc.decl)
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatal("expected error for invalid field, got nil")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, fc.wantErrSubstr) {
+				t.Errorf("error = %v, want substring %q", err, fc.wantErrSubstr)
+			}
+			if strings.Contains(msg, "[[routes]]") || strings.Contains(msg, "go-path") {
+				t.Errorf("error prints the retired-key stanza for an invalid field, want the field's own error only, got: %v", err)
+			}
+		})
+	}
+}
+
 // kindMissingCompanionFixtures supplies, for each kind with a CompanionKey,
 // a credential inline table naming the source but omitting its companion.
 var kindMissingCompanionFixtures = map[string]string{
