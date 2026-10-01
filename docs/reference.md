@@ -2315,12 +2315,15 @@ the findings whose `path:line` citations already live in that space,
 so a pre-image range is directly comparable to a finding's line while a
 new-side range would not be. `count == 0` marks a pure insertion, landed
 immediately after old line `start`, distinguishing an insertion from a
-modification. A path whose pre-image hunks cannot be determined is simply
-absent from the ranges — a binary file, say; a mode-only change, which
-numstat counts as `0 0 <path>` while the `-U0` diff renders only the mode
-lines and no hunk at all; on a rebased branch, a path the moved base also
-changed, whose anchor-to-HEAD hunks mix the land pass's edits with the
-base's and cannot be told apart in the anchor's coordinates; a renamed
+modification. `post_count` records the hunk's post-image line count (issue
+#3532), so a one-line insertion and a long one stay distinguishable; it is
+omitted when zero — a pure deletion, or a post side the header regex
+could not read. A path whose pre-image hunks cannot be determined is
+simply absent from the ranges — a binary file, say; a mode-only change,
+which numstat counts as `0 0 <path>` while the `-U0` diff renders only the
+mode lines and no hunk at all; on a rebased branch, a path the moved base
+also changed, whose anchor-to-HEAD hunks mix the land pass's edits with
+the base's and cannot be told apart in the anchor's coordinates; a renamed
 path, which numstat reports as a composite key (`d/{old.txt => new.txt}`
 when the two paths share a directory, `old.txt => new.txt` when they do
 not) that no diff header's own path can match — and which, at 100%
@@ -2346,17 +2349,22 @@ can never false-fire it — or a recorded land delta (issue #3244) whose
 touched lines land outside what the approving round's own findings vouch
 for (issue #3504): a finding's `path:line` citation vouches for that line,
 widened by a small tolerance window, not the whole file, so the gate fires
-when the delta touches lines beyond those windows; a finding that names a
-path with no line still vouches for the whole path; and a path the delta
-touched but whose pre-image ranges aren't determinable — the same dropout
-cases enumerated above — fails open rather than firing, the same posture
-an unknown delta takes. A delta whose touched lines fall within what the
-findings already cover, the common case, fires nothing and costs the run
-nothing. An unknown delta — the same "unknown" case the
-`land_delta` marker above already renders explicitly — does not fire on
-its own either: there is nothing to compare it against, so the gate
-degrades rather than escalates, the same fail-open posture every other
-place this anchor is consulted already takes.
+when the delta touches lines beyond those windows — a hunk counts as
+many lines as its longer side, `count` or `post_count`, so a block
+inserted beside a cited line fires once it runs past the window rather
+than counting as the one line it anchors to (issue #3532); under the
+±2-line window, any insertion longer than five lines beside a cited line
+fires; a finding that names a path with no line still vouches for the
+whole path; and a path the delta touched but whose pre-image ranges aren't
+determinable — the same dropout cases enumerated above — fails open
+rather than firing, the same posture an unknown delta takes. A delta whose
+touched lines fall within what the findings already cover, the common
+case, fires nothing and costs the run nothing. An unknown delta — the
+same "unknown" case the `land_delta` marker above already renders
+explicitly — does not fire on its own either: there is nothing to
+compare it against, so the gate degrades rather than escalates, the same
+fail-open posture every other place this anchor is consulted already
+takes.
 
 Firing still costs nothing when the run is already at a cap:
 `--max-slices` or a token/USD budget that would fire skips the extra pass
