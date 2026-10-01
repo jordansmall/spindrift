@@ -645,8 +645,9 @@ _populate_home_agent_files() {
       # Skip the driver's session-cache dir: lib/image.nix pre-creates an empty
       # placeholder there, and bwrap binds the live HOST directory at that same
       # path, so chmod'ing it would mutate a directory outside the sandbox and,
-      # on failure, abort box startup under set -e. The trailing slash is
-      # stripped because sessionCacheDirRelative has no shape validation (#2845).
+      # on failure, abort box startup under set -e. assertShape now rejects a
+      # malformed sessionCacheDirRelative at eval time (#3348); the trailing-
+      # slash strip here stays as defense in depth.
       if [ -d "$_src" ] && [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ] && [ "${_target%/}" = "${DRIVER_SESSION_CACHE_DIR%/}" ]; then
         continue
       fi
