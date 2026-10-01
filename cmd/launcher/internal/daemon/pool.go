@@ -329,18 +329,18 @@ func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
 // never be read from two different instants the way a separate
 // siblingsEngaged call followed by a separate markNoWork call used to
 // allow. "none-dispatchable" carries a second axis exit 2 doesn't: whether
-// a sibling is doing anything at all. With a sibling genuinely running (or
-// fetching, or resolving its own self-build, or sleeping out a failure
-// backoff), the issues this slot found "none dispatchable" were claimed or
-// overlap-deferred against that very sibling — routine, reported like any
-// other idle wait. With every sibling idle, merely parked on the shut
-// Awake window, or running only a butler child (see siblingsEngaged),
-// nothing that could unblock it is running or can start: a jam an
-// operator may need to clear. The jam alarm's predicate below is
-// deliberately not the same as jammed itself: jammed records the queue
-// condition this check saw (see kindBackoff.markNoWork), while the alarm
-// only fires when no sibling is doing anything a fetch, a self-build check,
-// a child, or a backoff sleep counts as (issue #3571).
+// a sibling could release a claim. With a sibling genuinely running (or
+// sleeping out a failure backoff), the issues this slot found "none
+// dispatchable" were claimed or overlap-deferred against that very
+// sibling — routine, reported like any other idle wait. With every sibling
+// idle, resolving (no claim held yet), parked on the shut Awake window, or
+// running only a butler child (see siblingsEngaged), nothing that could
+// unblock it is running or can start: a jam an operator may need to
+// clear. The jam alarm's predicate below is deliberately not the same as
+// jammed itself: jammed records the queue condition this check saw (see
+// kindBackoff.markNoWork), while the alarm only fires when no sibling is
+// doing anything a child or a backoff sleep counts as (issue #3571,
+// #3735).
 func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
@@ -461,36 +461,30 @@ func (s *state) working() bool {
 	return false
 }
 
-// siblingsEngaged reports whether any slot other than slot is doing
-// anything but waiting for its own turn: any phase but idle or
-// awaiting-window counts, since a sibling fetching, resolving its
-// self-build, running a child, or sleeping out a failure backoff can still
-// be the reason this slot's own queue read nothing dispatchable (issue
-// #3571). idle and awaiting-window are the only two phases a slot can sit
-// in indefinitely while genuinely doing nothing, which is exactly the
-// "every sibling parked" case the jam alarm exists to catch.
+// siblingsEngaged reports whether any slot other than slot could release a
+// claim the none-dispatchable read found blocked (#3922's can-it-explain-
+// the-read test): a sibling PhaseRunning a non-butler child, or one in
+// PhaseBackingOff. Every other phase, resolving included, holds no claim
+// (the claim is taken inside the child), and a new phase defaults to not
+// engaged. PhaseBackingOff is carried over from #3571 rather than derived
+// from #3922's test: a failed child's claim can outlive the backoff into
+// the slot's next resolve, which does not count, so whether backing off
+// should count at all is still open.
 //
-// One exception: a sibling PhaseRunning a chore-keyed (butler) child never
-// counts. A chore-keyed run carries no issue, so it never releases an issue
-// a dispatch/research read found blocked or overlap-deferred — a promoted
-// finding (#3880) is new work, not a release — so it can't explain a
-// none-dispatchable read (#3922). A resolving or backing-off sibling
-// carries no kind (only PhaseRunning does), so it always counts. The skip
-// ignores the reporting kind, which is safe only while the butler never
-// exits 3 (exitCodeFor maps 3 solely from waves.ErrOpenNoneDispatchable)
-// and so never reports a jam itself.
+// The butler skip ignores the reporting kind, which is safe only while the
+// butler never exits 3 (exitCodeFor maps 3 solely from
+// waves.ErrOpenNoneDispatchable) and so never reports a jam itself (#3922).
 func (s *state) siblingsEngaged(slot int) bool {
 	for sl, ss := range s.slots {
 		if sl == slot {
 			continue
 		}
-		if ss.phase == PhaseIdle || ss.phase == PhaseAwaitingWindow {
-			continue
+		switch {
+		case ss.phase == PhaseBackingOff:
+			return true
+		case ss.phase == PhaseRunning && !ss.flight.kind.choreKeyed():
+			return true
 		}
-		if ss.phase == PhaseRunning && ss.flight.kind.choreKeyed() {
-			continue
-		}
-		return true
 	}
 	return false
 }
@@ -593,12 +587,10 @@ func (p *pool) awaitBaton(ctx context.Context, slot int) {
 	default:
 	}
 	// A slot parked here is waiting for its own turn, not doing anything,
-	// so it must read as PhaseIdle: siblingsEngaged counts every other
-	// phase as engaged (a running butler sibling aside), and a slot that
-	// parked straight out of its own resolve would otherwise suppress a
-	// sibling's real jam for the whole hold. Rides in the same mutate as
-	// baton_hold so the phase is always visible to the snapshot that
-	// publishes alongside that event.
+	// so it must read as PhaseIdle in the status file rather than the
+	// "resolving" it entered with. Rides in the same mutate as baton_hold
+	// so the phase is always visible to the snapshot that publishes
+	// alongside that event.
 	p.mutate(func(s *state) []Event {
 		s.slots[slot].phase = PhaseIdle
 		return []Event{{Event: "baton_hold", Slot: intPtr(slot), Reason: batonHoldReason}}
@@ -941,16 +933,13 @@ func (p *pool) resolveTip(ctx context.Context, slot int) (Tip, error) {
 // observed: it is not the per-iteration fetch's own site, so it carries no
 // haltIfStopping guard, no backoffOrHalt, and no breaker failure — only that
 // fetch, made after pickKind finds a kind runnable, reports a genuinely
-// broken fetch. The phase is reset to idle on failure so a slot that falls
-// through into idleSleep right after is not still counted as PhaseResolving
-// by a sibling's siblingsEngaged.
+// broken fetch.
 func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 	tip, err := p.resolveTip(ctx, slot)
 	if err != nil {
 		// Includes *FeatureBranchGoneError: no claim is possible from this
 		// opportunistic call, so swallowing it here only delays the halt to
 		// runSlot's next real resolve, plus one extra ls-remote.
-		p.setPhase(slot, PhaseIdle)
 		return Tip{}, false
 	}
 	return tip, true

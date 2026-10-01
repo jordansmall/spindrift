@@ -473,11 +473,11 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	}
 }
 
-// TestPoolExit3RunningButlerSiblingIsNotEngaged pins the one exception to
-// the occupancy axis above: a sibling PhaseRunning a butler child never
-// counts as engaged, for any reporting kind, so it must not suppress a
-// jam — unlike a sibling resolving, backing off, or running a
-// dispatch/research child, which all still count.
+// TestPoolExit3RunningButlerSiblingIsNotEngaged pins which sibling phases
+// do not suppress a jam: a sibling PhaseRunning a butler child never counts
+// as engaged, for any reporting kind, and a resolving sibling holds no claim
+// yet (issue #3735), so it reads like an idle one. A sibling backing off or
+// running a dispatch/research child still counts.
 func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -489,7 +489,7 @@ func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
 		{"running butler sibling, dispatch reports", PhaseRunning, KindOf(dispatchkind.Butler), KindOf(dispatchkind.Work), true},
 		{"running butler sibling, research reports", PhaseRunning, KindOf(dispatchkind.Butler), KindOf(dispatchkind.Research), true},
 		{"running research sibling, dispatch reports", PhaseRunning, KindOf(dispatchkind.Research), KindOf(dispatchkind.Work), false},
-		{"resolving sibling (no kind), dispatch reports", PhaseResolving, "", KindOf(dispatchkind.Work), false},
+		{"resolving sibling (no kind), dispatch reports", PhaseResolving, "", KindOf(dispatchkind.Work), true},
 		{"backing-off sibling (no kind), dispatch reports", PhaseBackingOff, "", KindOf(dispatchkind.Work), false},
 	}
 	for _, tt := range tests {
@@ -595,11 +595,12 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	}
 }
 
-// TestPoolExit3WithSiblingResolvingReportsIdleNotJam pins the tightened
-// half of the jam predicate (issue #3623/#3571): a sibling blocked inside
-// ResolveTip is doing something, even though it is not (yet) running
-// a child — the old occupied-only predicate could not see that and would
-// have reported a spurious jam here.
+// TestPoolExit3WithSiblingResolvingReportsJam pins that a sibling blocked
+// inside ResolveTip does not suppress the jam alarm (issue #3735): it holds
+// no claim yet (the claim happens inside the child), so it cannot be what
+// left this slot's read none-dispatchable — no different from an idle
+// sibling. ResolveTip's single flight also makes sibling resolving windows
+// overlap by construction, so counting them would mask jams in lockstep.
 //
 // Call 1/2 are the two slots' round-1 fetches, racing each other in either
 // order: the baton no longer gates ResolveTip (issue #3625's structural
@@ -612,7 +613,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 // blocks rather than spinning the virtual clock forward and slipping into
 // a genuine, unreleased second RunChild call, so it can never issue a
 // competing fetch of its own before the test ends.
-func TestPoolExit3WithSiblingResolvingReportsIdleNotJam(t *testing.T) {
+func TestPoolExit3WithSiblingResolvingReportsJam(t *testing.T) {
 	const slots = 2
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
@@ -654,9 +655,9 @@ func TestPoolExit3WithSiblingResolvingReportsIdleNotJam(t *testing.T) {
 	<-resolving
 
 	// Slot 1 exits none-dispatchable with slot 0 resolving: this must
-	// report idle, not jam.
+	// report jam, not idle.
 	r.releaseSlot(t, 1, ChildResult{Exit: 3})
-	nw.waitForLine(t, "\"event\":\"idle\"")
+	nw.waitForLine(t, "\"event\":\"jam\"")
 
 	// End the test: cancelling ctx releases slot 0's blocked fetch (the
 	// hook itself selects on ctx.Done()) and any wait slot 1 has since
@@ -670,8 +671,8 @@ func TestPoolExit3WithSiblingResolvingReportsIdleNotJam(t *testing.T) {
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 	for _, ev := range events {
-		if ev.Event == "jam" {
-			t.Fatalf("events = %v, want no jam event: slot 0 was resolving when slot 1 exited none-dispatchable", eventNames(events))
+		if ev.Event == "idle" && ev.Slot != nil && *ev.Slot == 1 {
+			t.Fatalf("events = %v, want no idle for slot 1: slot 0 was only resolving when slot 1 exited none-dispatchable", eventNames(events))
 		}
 	}
 }
@@ -679,10 +680,8 @@ func TestPoolExit3WithSiblingResolvingReportsIdleNotJam(t *testing.T) {
 // TestPoolResolvingSlotResetsToIdleOnCancel pins the reset half of phase
 // tracking (issue #3623): a slot that returns from inside the resolving
 // span (here, ctx cancellation landing mid-fetch) must not go on
-// publishing "resolving" after it has left runSlot entirely — siblingsEngaged
-// (pool.go) counts any non-idle, non-awaiting-window phase as engaged, so a
-// stale "resolving" would keep suppressing a real sibling's jam alarm even
-// though this slot is doing nothing at all anymore.
+// publishing "resolving" in the status file after it has left runSlot
+// entirely.
 func TestPoolResolvingSlotResetsToIdleOnCancel(t *testing.T) {
 	const slots = 2
 	dir, sw := statusDir(t)
@@ -722,15 +721,14 @@ func TestPoolResolvingSlotResetsToIdleOnCancel(t *testing.T) {
 	}
 }
 
-// TestPoolExit3WithSiblingBackingOffReportsIdleNotJam extends the same
-// tightened predicate to the third engaged phase: a sibling asleep out a
-// failure backoff (not running, not resolving) still suppresses the jam
-// alarm. Slot 0's first child fails the RunChild seam itself (runErrAt/
-// runErr), landing it in backoffOrHalt's parked Sleep; slot 1's own fetch
-// is held at the onResolve hook until that Sleep is confirmed entered (the
-// sleepSignal below), so slot 1's later exit-3 is guaranteed to land while
-// slot 0 is genuinely backing off, never racing the two into some other
-// interleaving.
+// TestPoolExit3WithSiblingBackingOffReportsIdleNotJam pins that a sibling
+// asleep out a failure backoff still counts as engaged and suppresses the
+// jam alarm: the failed child's claim may still stand. Slot 0's first child
+// fails the RunChild seam itself (runErrAt/runErr), landing it in
+// backoffOrHalt's parked Sleep; slot 1's own fetch is held at the onResolve
+// hook until that Sleep is confirmed entered (the sleepSignal below), so
+// slot 1's later exit-3 is guaranteed to land while slot 0 is genuinely
+// backing off, never racing the two into some other interleaving.
 //
 // leadSlot is launched alone first and confirmed resolved (call 1) before
 // siblingSlot is launched: the baton no longer gates ResolveTip (issue
@@ -1076,13 +1074,11 @@ func TestAwaitWindowReportsAwaitingWindowThenIdle(t *testing.T) {
 	}
 }
 
-// TestJamIgnoresSiblingAwaitingWindow pins siblingsEngaged's
-// awaiting-window arm (issue #3623/#3571 review finding): a sibling parked
-// on a shut Awake window is doing nothing and must count the same as an
-// idle sibling, not as engaged. Narrowing the condition to
-// ss.phase != PhaseIdle would make a sibling parked on the window count as
-// engaged, silently suppressing the jam alarm for the entire time the pool
-// sits outside its Awake window.
+// TestJamIgnoresSiblingAwaitingWindow pins that a sibling parked on a shut
+// Awake window (issue #3623/#3571 review finding) is not listed as engaged
+// by siblingsEngaged: it holds no claim, so it reads like an idle sibling.
+// Adding that phase to the engaged cases would silently suppress the jam
+// alarm for the entire time the pool sits outside its Awake window.
 func TestJamIgnoresSiblingAwaitingWindow(t *testing.T) {
 	const slots = 2
 	r := &scriptedRunner{revisions: []string{"rev1"}}
@@ -1118,12 +1114,13 @@ func TestJamIgnoresSiblingAwaitingWindow(t *testing.T) {
 }
 
 // TestBatonParkPublishesIdle pins awaitBaton's baton arm (issue #3625
-// review finding), siblingsEngaged's other doing-nothing case alongside
-// TestJamIgnoresSiblingAwaitingWindow above: a slot parked waiting for the
-// discovery baton is waiting for its own turn, not doing anything, and
-// must read as PhaseIdle -- even though it enters awaitBaton still
-// PhaseResolving, the real state at the loop.go call site -- or a stuck
-// sibling's jam alarm silently degrades to idle.
+// review finding): a slot parked waiting for the discovery baton is waiting
+// for its own turn, not doing anything, and must read as PhaseIdle in the
+// status file -- even though it enters awaitBaton still PhaseResolving, the
+// real state at the loop.go call site. It also checks the jam consequence
+// end to end: a sibling's none-dispatchable read beside it is a jam, not an
+// idle wait. That half no longer guards the reset, since a resolving sibling
+// is not engaged either (#3735); only the phase assertion does.
 func TestBatonParkPublishesIdle(t *testing.T) {
 	const slots = 2
 	clk := &testClock{}
@@ -1337,8 +1334,6 @@ func TestIdleSleepFirstJamWaitResolvesNothingExtra(t *testing.T) {
 // opportunistic resolve must be handled: treated as no change
 // observed, not fed to the breaker and not stamped with any event — only the
 // iteration's own post-pickKind resolve reports a genuinely broken fetch.
-// It also leaves the slot PhaseIdle, not stranded PhaseResolving, so a
-// sibling's siblingsEngaged read is never fooled by it.
 func TestResolveOpportunisticFailureIsNoChangeObserved(t *testing.T) {
 	r := &scriptedRunner{resolveAt: 1, resolveErr: errors.New("boom")}
 	clk := &testClock{}
@@ -1356,10 +1351,6 @@ func TestResolveOpportunisticFailureIsNoChangeObserved(t *testing.T) {
 	if tip != (Tip{}) {
 		t.Fatalf("tip = %+v, want the zero value on failure", tip)
 	}
-	if got := p.snapshot().Slots[0].Phase; got != PhaseIdle {
-		t.Fatalf("phase after a failed opportunistic resolve = %q, want %q", got, PhaseIdle)
-	}
-
 	events := decodeEvents(t, &buf)
 	for _, ev := range events {
 		if ev.Event == "backoff" || ev.Event == "breaker_trip" || ev.Event == "tip_moved" {
