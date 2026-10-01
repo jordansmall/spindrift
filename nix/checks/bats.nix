@@ -173,7 +173,7 @@ let
     # prepends this before exec-ing the entrypoint so the bats suite
     # exercises the same bodies the image bakes in (issue #433).
     DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
-    # The 8 baked /agent/* path literals' rendered fallback preamble
+    # The baked /agent/* path literals' rendered fallback preamble
     # (issue #2531); helper.bash prepends this between DRIVER_PREAMBLE_FILE
     # and FRAGMENT_REGISTRY_FILE for the same reason, matching lib/image.nix's
     # own concatenation order.
