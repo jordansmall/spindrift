@@ -617,24 +617,27 @@ dispatch time, no `spindrift build`), adding an arbitrary Nth custom agent
 via `roster` is a `mkHarness`/image-time decision and requires a rebuild.
 
 spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
-concrete `roster` user, naming only the Filer:
+concrete `roster` user, naming the Filer, reviewer, and worker:
 
-<!-- BEGIN GENERATED DOGFOOD FILER PIN -- nix run .#regen -- DO NOT EDIT -->
-`roster = rosterLib.defaultRoster { models = { filer = "claude-haiku-4-5-20251001"; }; };`
-<!-- END GENERATED DOGFOOD FILER PIN -->
+<!-- BEGIN GENERATED DOGFOOD ROSTER PINS -- nix run .#regen -- DO NOT EDIT -->
+`roster = rosterLib.defaultRoster { models = { filer = "claude-haiku-4-5-20251001"; reviewer = "claude-opus-5-5"; worker = "claude-sonnet-5-5"; }; };`
+with `defaults.model = "claude-opus-5-5";` for the coordinator.
+<!-- END GENERATED DOGFOOD ROSTER PINS -->
 
 Filer stays a local pin because it's opt-in by design (`filerModel`'s schema
 default is empty) and the dogfood genuinely depends on it for #393's
-`agent-review-finding` filing. Scout, reviewer, and worker are all
-unmentioned and so inherit their `lib/env-schema.nix` defaults (issue
-#2434) instead:
+`agent-review-finding` filing. The reviewer, worker, and coordinator pins run
+newer models on the dogfood ahead of the schema defaults. Scout is
+unmentioned and so inherits its `lib/env-schema.nix` default (issue #2434)
+instead:
 
 <!-- BEGIN GENERATED DOGFOOD MODELS -- nix run .#regen -- DO NOT EDIT -->
-`claude-haiku-4-5-20251001`, `claude-opus-5` (issue #2433), and `claude-sonnet-5` respectively.
+`claude-haiku-4-5-20251001`.
 <!-- END GENERATED DOGFOOD MODELS -->
 
-The dogfood still inherits `defaultRoster`'s built-in per-agent effort
-defaults unchanged (issue #2386), and sets no separate `reviewEffort` knob
+The dogfood sets the coordinator's `effort` to `high`, but still inherits
+`defaultRoster`'s built-in per-agent effort defaults unchanged (issue #2386),
+and sets no separate `reviewEffort` knob
 (issue #2512): the roster's `reviewer` entry's own effort is what the
 orchestrator's code-owned review pass (issue #2387) runs at directly, the
 same way it already does for the model (issue #2427) — one mechanism instead

@@ -297,7 +297,7 @@ rec {
   # tests/default_models_gen.bash content: one exported variable per
   # lib/default-model-fixture.nix schemaDefaults leaf (issue #2514). Unwrapped by
   # a function, unlike set_box_env, because a bats test sources it as expected
-  # values. dogfoodPins.filer stays out: the Nix checks that assert against it
+  # values. dogfoodPins stays out: the Nix checks that assert against it
   # import the fixture directly, so an export here would have no consumer.
   renderDefaultModelFixtureBash =
     fixture:
@@ -420,20 +420,22 @@ rec {
     + (builtins.concatStringsSep "/" (map (n: "${n}=${rosterDefaults.${n}.effort}") rosterNames))
     + "`\n";
 
-  # docs/reference.md restates the dogfood Consumer config's Filer pin as prose;
-  # this pins that string to lib/default-model-fixture.nix's dogfoodPins.filer
-  # (issue #2514, documentedFact registry by issue #2950).
-  renderDogfoodFilerPinDoc =
+  # docs/reference.md restates the dogfood Consumer config's roster and
+  # coordinator pins as prose; this pins that string to
+  # lib/default-model-fixture.nix's dogfoodPins (issue #2514, documentedFact
+  # registry by issue #2950).
+  renderDogfoodRosterPinsDoc =
     fixture:
-    "`roster = rosterLib.defaultRoster { models = { filer = \"${fixture.dogfoodPins.filer}\"; }; };`\n";
+    let
+      p = fixture.dogfoodPins;
+    in
+    "`roster = rosterLib.defaultRoster { models = { filer = \"${p.filer}\"; reviewer = \"${p.reviewer}\"; worker = \"${p.worker}\"; }; };`\n"
+    + "with `defaults.model = \"${p.model}\";` for the coordinator.\n";
 
-  # docs/reference.md restates the scout, reviewer, and worker model literals as
-  # prose; this pins that string to the fixture's values (issue #2514,
-  # documentedFact registry by issue #2950). Filer is the separate local pin
-  # renderDogfoodFilerPinDoc handles.
-  renderDogfoodModelsDoc =
-    fixture:
-    "`${fixture.schemaDefaults.scoutModel}`, `${fixture.schemaDefaults.reviewModel}` (issue #2433), and `${fixture.schemaDefaults.workerModel}` respectively.\n";
+  # docs/reference.md restates the inherited scout model literal as prose; this
+  # pins that string to the fixture's value (issue #2514, documentedFact registry
+  # by issue #2950). The pinned agents are renderDogfoodRosterPinsDoc's.
+  renderDogfoodModelsDoc = fixture: "`${fixture.schemaDefaults.scoutModel}`.\n";
 
   # Data rows of a rendered option-surface table as `{ name; domainPath; }`, the
   # two cells callers key on. The header and separator lines have no backticked

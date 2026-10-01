@@ -14,10 +14,14 @@
     workerModel = "claude-sonnet-5";
   };
   # Separate from schemaDefaults, not merged in (issue #2514 AC4):
-  # nix/dogfood-defaults.nix's roster pins only `filer`, so a consumer can tell
-  # per key whether a value comes from that local pin or from the schema's own
-  # default.
+  # nix/dogfood-defaults.nix pins these and leaves scout on the schema default,
+  # so a consumer can tell per key whether a value comes from a local pin or
+  # from the schema's own default. `model` is the coordinator, set through the
+  # dogfood's `defaults`; the rest are roster entry names.
   dogfoodPins = {
+    model = "claude-opus-5-5";
     filer = "claude-haiku-4-5-20251001";
+    reviewer = "claude-opus-5-5";
+    worker = "claude-sonnet-5-5";
   };
 }

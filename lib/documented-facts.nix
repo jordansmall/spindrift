@@ -58,15 +58,13 @@ map assertMarkerShape [
     generated = renderers.renderRosterEffortsDoc rosterDefaults rosterNames;
   }
   {
-    name = "dogfood-doc-filer-pin-guard";
+    name = "dogfood-doc-roster-pins";
     docPath = "docs/reference.md";
-    blockName = "DOGFOOD FILER PIN";
-    # The "-guard" suffix is historical and stays for name stability: the separate
-    # guard derivation it named is gone, and this row is now the drift check.
-    sourceDesc = "lib/default-model-fixture.nix's dogfoodPins.filer";
-    beginMarker = "<!-- BEGIN GENERATED DOGFOOD FILER PIN -- nix run .#regen -- DO NOT EDIT -->\n";
-    endMarker = "<!-- END GENERATED DOGFOOD FILER PIN -->";
-    generated = renderers.renderDogfoodFilerPinDoc defaultModelFixture;
+    blockName = "DOGFOOD ROSTER PINS";
+    sourceDesc = "lib/default-model-fixture.nix's dogfoodPins";
+    beginMarker = "<!-- BEGIN GENERATED DOGFOOD ROSTER PINS -- nix run .#regen -- DO NOT EDIT -->\n";
+    endMarker = "<!-- END GENERATED DOGFOOD ROSTER PINS -->";
+    generated = renderers.renderDogfoodRosterPinsDoc defaultModelFixture;
   }
   {
     name = "dogfood-doc-models-guard";
