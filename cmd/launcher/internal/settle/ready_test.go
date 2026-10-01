@@ -2,12 +2,14 @@ package settle
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // A merge failure after CI reaches green leaves the issue at agent-complete,
@@ -238,6 +240,34 @@ func TestSelfHeal_ConflictResolveFailure_EndsFailed(t *testing.T) {
 	if containsLabel(iss.Labels, "agent-complete") {
 		t.Errorf("issue must NOT carry agent-complete after a failed conflict-resolve dispatch; labels=%v", iss.Labels)
 	}
+}
+
+// A conflict-resolve dispatch skipped because the issue's own Box is already
+// live (runner.ErrAlreadyRunning) is not a failed resolve: the live run owns the
+// issue, so selfHeal abandons without a Failed transition or comment (#3655).
+func TestSelfHeal_ConflictResolveAlreadyRunning_ReportsAbandonedNotFailed(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.MergeErrs = []error{forge.ErrMergeConflict}
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := newTestSettle(c, fc, fc)
+	d := dispatch.NewFake()
+	d.ResolveConflictErr = fmt.Errorf("resolve conflict: %w", runner.ErrAlreadyRunning)
+
+	landing, reason := s.selfHeal(d, "1", 0, testPR)
+
+	if landing != landingAbandoned {
+		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	}
+	if reason != "" {
+		t.Errorf("selfHeal reason = %q, want empty", reason)
+	}
+	assertNoTransitionOrComment(t, fc)
+	assertClaimUntouched(t, fc)
 }
 
 // When the post-force-push re-wait ends in genuine red CI or a timeout, the

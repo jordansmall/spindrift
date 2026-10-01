@@ -10,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -760,6 +761,37 @@ func TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher(t *testing.T) {
 	if len(fc.RebasedURLs) != 1 {
 		t.Errorf("Rebase called %d times, want 1", len(fc.RebasedURLs))
 	}
+}
+
+// A stale-base conflict-resolve skipped because the issue's own Box is already
+// live (runner.ErrAlreadyRunning) abandons the landing: the live run owns the
+// issue and the demoted PR, so no transition or comment is posted (#3655).
+func TestMergeImmediate_StaleBaseConflictAlreadyRunning_Abandons(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	df := dispatch.NewFake()
+	df.ResolveConflictErr = fmt.Errorf("resolve conflict: %w", runner.ErrAlreadyRunning)
+	s := newTestSettle(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, df)
+
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
+	}
+	assertNoTransitionOrComment(t, fc)
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called; fc.Merged=%q", fc.Merged)
+	}
+	want := []string{"MarkDraft:" + testPR}
+	if !slices.Equal(fc.LandingCallLog, want) {
+		t.Errorf("LandingCallLog = %v, want %v", fc.LandingCallLog, want)
+	}
+	assertClaimUntouched(t, fc)
 }
 
 // A genuine ErrMergeConflict from the stale-base preflight's rebase flips the PR
