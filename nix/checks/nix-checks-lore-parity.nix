@@ -7,14 +7,24 @@
 let
   inherit (pkgs.lib)
     assertMsg
+    concatMapStringsSep
     concatStringsSep
     drop
-    hasInfix
+    escapeRegex
     hasPrefix
     replaceStrings
     toLower
     ;
   inherit (pkgs.lib.lists) findFirstIndex;
+
+  # hasInfix would let a numeric needle like "--cores 1" match "--cores 16",
+  # so a one-sided bump of just the digit slips past parity silently (issue
+  # #3495). This is hasInfix plus "the next character, if any, is not a
+  # digit". Only the trailing side is guarded: a digit before the needle
+  # ("11--cores 1") still matches, which stays harmless only while every
+  # needle starts with a non-digit, as each one does today.
+  hasDigitSafeInfix =
+    needle: text: builtins.match (".*" + escapeRegex needle + "([^0-9].*)?") text != null;
 
   # findFirstIndex returns an index relative to the slice it searched, so this
   # re-adds the offset. Used below to slice CLAUDE.md's "## Nix edits" section
@@ -127,9 +137,9 @@ let
       let
         needle = normalize c.clause;
       in
-      assert assertMsg (hasInfix needle skillText)
+      assert assertMsg (hasDigitSafeInfix needle skillText)
         "nix-checks lore drift: ${skillDesc} no longer states \"${c.clause}\", which ${claudeDesc} restates -- ${remedy}";
-      assert assertMsg (hasInfix needle nixEditsText)
+      assert assertMsg (hasDigitSafeInfix needle nixEditsText)
         "nix-checks lore drift: ${claudeDesc} no longer states \"${c.clause}\", which ${skillDesc} teaches -- ${remedy}";
       pkgs.runCommand "nix-checks-lore-parity-clause-${c.name}" { } "touch $out";
   };
@@ -137,13 +147,74 @@ let
   # Lore texts quote the baked cores bound in prose, so a bump can leave one
   # stale.
   coresNeedle = "cores = ${imageNixCores}";
+
+  # Raw markdown, run through normalize first so these cover the same path the
+  # live surfaces take.
+  digitSafeInfixCases = [
+    {
+      needle = "--cores 1";
+      text = "so `--cores 1`\n is the one";
+      matches = true;
+    }
+    {
+      needle = "--cores 1";
+      text = "use **`--cores 1`**.";
+      matches = true;
+    }
+    {
+      needle = "--cores 1";
+      text = "use --cores 1";
+      matches = true;
+    }
+    {
+      needle = "--cores 1";
+      text = "so `--cores 16` is the one";
+      matches = false;
+    }
+    {
+      needle = "--cores 1";
+      text = "--cores 10 and --cores 2";
+      matches = false;
+    }
+    {
+      needle = "--cores 1";
+      text = "--cores 16 and later --cores 1.";
+      matches = true;
+    }
+    {
+      needle = "cores = 4";
+      text = "pins `cores = 4` (lib/image.nix)";
+      matches = true;
+    }
+    {
+      needle = "cores = 4";
+      text = "pins `cores = 48`";
+      matches = false;
+    }
+  ];
 in
 builtins.listToAttrs (map clauseCheck sharedClauses)
 // {
   nix-checks-lore-cores-matches-nix-conf =
-    assert assertMsg (hasInfix coresNeedle skillText)
+    assert assertMsg (hasDigitSafeInfix coresNeedle skillText)
       "nix-checks lore drift: ${skillDesc} does not quote \"cores = ${imageNixCores}\", the value lib/image.nix's nixConfigFile actually bakes -- update the skill's prose to match the baked bound.";
-    assert assertMsg (hasInfix coresNeedle nixEditsText)
+    assert assertMsg (hasDigitSafeInfix coresNeedle nixEditsText)
       "nix-checks lore drift: ${claudeDesc} does not quote \"cores = ${imageNixCores}\", the value lib/image.nix's nixConfigFile actually bakes -- update CLAUDE.md's prose to match the baked bound.";
     pkgs.runCommand "nix-checks-lore-cores-matches-nix-conf" { } "touch $out";
+
+  # The live texts never exercise the multi-digit case, so pin it here for
+  # both call-site shapes, a clause row and coresNeedle. The name stays
+  # outside clauseCheck's "-clause-" namespace, so no future sharedClauses
+  # row can shadow it.
+  nix-checks-lore-digit-safe-infix =
+    let
+      failed = builtins.filter (
+        c: hasDigitSafeInfix c.needle (normalize c.text) != c.matches
+      ) digitSafeInfixCases;
+    in
+    assert assertMsg (failed == [ ])
+      "nix-checks-lore-digit-safe-infix: hasDigitSafeInfix gave the wrong answer for ${
+        concatMapStringsSep ", " (c: "${builtins.toJSON c.needle} in ${builtins.toJSON c.text}") failed
+      }";
+    pkgs.runCommand "nix-checks-lore-digit-safe-infix" { } "touch $out";
 }
