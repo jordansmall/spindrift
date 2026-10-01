@@ -551,6 +551,37 @@ checkedMerge {
         touch $out
       '';
 
+  # checkRow must reject an explicit "" on each forbidden string field, yet
+  # still accept one on trackerAxisWrite (issue #3487). It iterates the
+  # renderer's own list, so it proves the guard fires for every listed field
+  # but does not pin which fields are listed.
+  backend-registry-explicit-empty-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      controlRow = {
+        name = "synthetic";
+        goVar = "Synthetic";
+        trackerAxisRead = "LOCAL";
+      };
+      controlResult = builtins.tryEval (renderers.renderBackendRegistryGo [ controlRow ]);
+      inherit (renderers) backendRegistryForbiddenEmptyFields;
+      wronglySucceeded = builtins.filter (
+        field:
+        (builtins.tryEval (renderers.renderBackendRegistryGo [ (controlRow // { ${field} = ""; }) ]))
+        .success
+      ) backendRegistryForbiddenEmptyFields;
+      exemptResult = builtins.tryEval (
+        renderers.renderBackendRegistryGo [ (controlRow // { trackerAxisWrite = ""; }) ]
+      );
+    in
+    assert assertMsg controlResult.success
+      "backend-registry-explicit-empty-guard (issue #3487): the synthetic control row (no explicit empty fields) must render successfully, but it failed -- the guard would be vacuous";
+    assert assertMsg (wronglySucceeded == [ ])
+      "backend-registry-explicit-empty-guard (issue #3487): renderBackendRegistryGo's checkRow must reject an explicit \"\" on every backendRegistryForbiddenEmptyFields entry (omit the field instead to request its default) -- field(s) that wrongly rendered successfully: ${builtins.concatStringsSep ", " wronglySucceeded}";
+    assert assertMsg exemptResult.success
+      "backend-registry-explicit-empty-guard (issue #3487): trackerAxisWrite = \"\" must still render successfully (local's exemption: Go reads trackerAxisWrite as-is with no == \"\" default), but it failed";
+    pkgs.runCommand "backend-registry-explicit-empty-guard" { } "touch $out";
+
   # Regenerate with `nix run .#regen` when lib/labels.nix changes. The raw
   # renderer output is gofmt-normalized here the same way regen normalizes it
   # (issue #2528).
