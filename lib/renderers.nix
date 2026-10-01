@@ -80,6 +80,10 @@ let
       ) 0 items;
     in
     concatStrings (map (item: "${padRight maxWidth item.path} = ${item.value};\n") items);
+  # An option-surface domain-path cell's text, shared by the renderer and
+  # optionSurfaceDomainPathMismatches so the two cannot spell it differently.
+  optionSurfacePath =
+    key: registry: "perSystem.spindrift.${builtins.concatStringsSep "." registry.${key}}";
 in
 rec {
   # Env var name -> flag name (e.g. MAX_PARALLEL -> max-parallel).
@@ -447,6 +451,20 @@ rec {
       domainPath = builtins.elemAt m 1;
     }) (builtins.filter (m: m != null) matches);
 
+  # Rows named after a registry key whose domain-path cell is not that key's
+  # path, as `{ name; expected; actual; }`. A row's name cell and the key its
+  # `path` call passes are typed separately, so they can be cross-wired
+  # (issue #3387). Rows named after no key (the editorial rows) are skipped.
+  optionSurfaceDomainPathMismatches =
+    registry: table:
+    builtins.filter (m: m.actual != m.expected) (
+      map (cells: {
+        inherit (cells) name;
+        expected = "`${optionSurfacePath cells.name registry}`";
+        actual = oneLine cells.domainPath;
+      }) (builtins.filter (cells: registry ? ${cells.name}) (optionSurfaceRowNamePaths table))
+    );
+
   # docs/reference.md's "### Option surface" table (issue #2739, documentedFact
   # registry by issue #2950), header through last row as one block: an
   # HTML-comment marker line between GFM table rows terminates the table, so a
@@ -463,12 +481,7 @@ rec {
     }:
     let
       dotted = key: registry: builtins.concatStringsSep "." registry.${key};
-      # The row-anchoring regex below must spell this prefix exactly as `path`
-      # writes it or no row matches at all, so derive its escaped form from the
-      # same string.
-      domainPathPrefix = "perSystem.spindrift.";
-      domainPathPrefixRe = builtins.replaceStrings [ "." ] [ "\\." ] domainPathPrefix;
-      path = key: registry: "${domainPathPrefix}${dotted key registry}";
+      path = optionSurfacePath;
       table = ''
         | option      | domain path | scope          | type                        | default            | meaning                                                              |
         | ----------- | ----------- | -------------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
@@ -493,22 +506,25 @@ rec {
       '';
       # Row names are read back off `table` itself, not a hand-kept side list, so
       # a wrong name breaks the render everyone reads (issue #2950 review
-      # finding). Only rows carrying a domain path count: a registry key
-      # colliding with an editorial row's name would otherwise pass the check
-      # while that row's dash rendered where its real path belongs (issue #3067).
-      domainPathRowNames = map (cells: cells.name) (
-        builtins.filter (
-          cells: builtins.match " *`${domainPathPrefixRe}[^`|]+` *" cells.domainPath != null
-        ) (optionSurfaceRowNamePaths table)
-      );
+      # finding). A row's cell is checked against the registry path for its own
+      # name below, which also catches an editorial dash rendering under a
+      # registry key's name (issues #3067, #3387).
+      rowNames = map (cells: cells.name) (optionSurfaceRowNamePaths table);
       # Forward direction only. A row with no registry key is legitimate (the
       # editorial rows), so schema-drift.nix's editorial-rows-pin holds that side.
-      rowlessKeys = builtins.filter (k: !(builtins.elem k domainPathRowNames)) (
+      rowlessKeys = builtins.filter (k: !(builtins.elem k rowNames)) (
         builtins.attrNames (structuralPaths // byNamePaths)
       );
+      domainPathMismatches = optionSurfaceDomainPathMismatches (structuralPaths // byNamePaths) table;
     in
     if rowlessKeys != [ ] then
       throw "renderOptionSurfaceTableDoc: structuralPaths/byNamePaths carries key(s) with no matching option-surface table row: ${builtins.concatStringsSep ", " rowlessKeys} -- add a matching row to this function (lib/renderers.nix)"
+    else if domainPathMismatches != [ ] then
+      throw "renderOptionSurfaceTableDoc: option-surface table row(s) whose domain path does not match its registry entry: ${
+        builtins.concatStringsSep ", " (
+          map (m: "${m.name} (expected ${m.expected}, got ${m.actual})") domainPathMismatches
+        )
+      } -- fix that row's path call in this function (lib/renderers.nix)"
     else
       table;
 
