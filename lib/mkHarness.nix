@@ -1230,8 +1230,9 @@ let
     vendorHash = buildConstants.launcherVendorHash;
     subPackages = [ "daemon" ];
     doCheck = false;
-    # No ldflags: the daemon bakes no version or revision of its own, so its
-    # path moves only when the code it is built from moves.
+    # No ldflags: the binary bakes in no version or revision. But `version`
+    # above still reaches the derivation name, so the path moves on a release
+    # version bump as well as when the code it is built from moves.
     meta.license = lib.licenses.mit;
   };
 
