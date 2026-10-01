@@ -9,6 +9,43 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.21.1 — 2026-10-01
+
+Hardening for the new butler patches, plus fewer duplicate issues from the
+Filer.
+
+No breaking changes.
+
+- **Patch pushes can't clobber anything.** The host now refuses to push a
+  patch onto the base branch, and only ever creates a fresh branch rather
+  than overwriting one that already exists.
+- **Failed patch PRs clean up after themselves.** If opening the patch PR
+  fails, the host checks whether the forge made it anyway. If it did, the
+  PR goes through the merge gate as normal; if not, the pushed branch is
+  deleted and the finding falls back to promotion. A patch PR that opened
+  just before the run lost its Ledger update also still gets watched and
+  merged instead of sitting in draft.
+- **The daily patch cap holds.** Patch slots are now reserved up front
+  alongside promotion slots, so a run that crashes or loses a takeover
+  can't let the day go past `BUTLER_MAX_PATCHES_PER_DAY`. The log status
+  for a failed reservation is now `reserve-failed` (was
+  `promotion-reserve-failed`).
+- **Tighter patch rules.** The default `BUTLER_PATCH_PATHS` now blocks
+  `CLAUDE.md`, `AGENTS.md`, `CONTEXT.md`, and `CONTRIBUTING.md` at any
+  depth, not just the repo root. A patch that would really create or
+  delete a file is now skipped with the right reason instead of failing
+  to apply. Chore names may no longer start with `-`, so one that does is
+  rejected at startup rather than running but being unselectable.
+- **Fewer duplicate findings.** The Filer keys a finding on `file:Symbol`
+  when it names one, a review round won't re-escalate a finding an earlier
+  round already filed, and the host merges two filings in the same run
+  whose line ranges overlap in the same file.
+- **Clearer errors.** Forge errors now include the forge's own message
+  (for example Forgejo's "head branch does not exist"), daemon errors no
+  longer repeat the `daemon:` prefix, and route paths containing `?` or
+  `#` are rejected up front instead of silently truncating the proxied
+  URL.
+
 ## 0.21.0 — 2026-09-29
 
 The butler can now fix small things itself: a finding that comes with a
