@@ -128,8 +128,10 @@ type Trigger struct {
 	// Beyond lists the delta locations outside the findings' named locations,
 	// sorted. A whole-path entry (no finding named the path at all) renders
 	// bare ("path"); a line-local miss renders "path:N" or "path:N-M" for the
-	// touched span. Decide fills it only on the delta-exceeded-findings Fire
-	// case and leaves it nil otherwise, gate-discovered work included.
+	// touched pre-image span, with a trailing " (+N)" when the hunk's
+	// post-image added more lines than its pre-image span covers. Decide
+	// fills it only on the delta-exceeded-findings Fire case and leaves it
+	// nil otherwise, gate-discovered work included.
 	Beyond []string
 }
 
@@ -137,6 +139,9 @@ type Trigger struct {
 // touch: answering a one-line finding commonly rewrites the cited line plus its
 // immediate neighbour, and a reflow can carry one line further, so ±2 covers the
 // ordinary fold while anything past it is a block the reviewer never read.
+// Because a hunk spans its longer side (issue #3532), an insertion of more
+// than 2*toleranceLines+1 = 5 lines beside a cited line always fires: a fold
+// answering a one-line finding never needs a block that long.
 const toleranceLines = 2
 
 // Decide reports whether one more review pass should run before settling. The
@@ -214,12 +219,12 @@ func locationsBeyond(delta landdelta.Delta, findings []Location) []string {
 		}
 		windows := mergeWindows(locs)
 		for _, r := range ranges {
-			span := window{start: r.Start, end: r.Start}
-			if r.Count > 0 {
-				span.end = r.Start + r.Count - 1
-			}
+			// A block inserted beside a cited line counts as the lines it
+			// adds, not the one line it anchors to (issue #3532); renderSpan
+			// keeps pre-image lines.
+			span := window{start: r.Start, end: r.ReachEnd()}
 			if !coveredBy(span, windows) {
-				beyond = append(beyond, beyondEntry{path: p, start: span.start, rendered: renderSpan(p, span)})
+				beyond = append(beyond, beyondEntry{path: p, start: span.start, rendered: renderSpan(p, r)})
 			}
 		}
 	}
@@ -292,17 +297,23 @@ func coveredBy(s window, windows []window) bool {
 }
 
 // renderSpan renders a touched pre-image span as the whole hunk, not the
-// uncovered sub-slice — a reviewer reads a hunk as a unit.
-func renderSpan(path string, s window) string {
-	start, end := s.start, s.end
+// uncovered sub-slice — a reviewer reads a hunk as a unit. A hunk whose post
+// side is longer gets a " (+N)" suffix (under -U0 every post-side line is an
+// added one) rather than a span naming pre-image lines nothing touched.
+func renderSpan(path string, r landdelta.Range) string {
+	start, end := r.Start, r.End()
 	if start == 0 {
 		// Line 0 is git's "inserted before line 1" header (@@ -0,0 @@), not a
 		// line any file has; locationsBeyond already compared the real span,
 		// so nudging to 1 here only affects what the run log shows.
 		start, end = 1, 1
 	}
-	if start == end {
-		return fmt.Sprintf("%s:%d", path, start)
+	rendered := fmt.Sprintf("%s:%d", path, start)
+	if start != end {
+		rendered = fmt.Sprintf("%s:%d-%d", path, start, end)
 	}
-	return fmt.Sprintf("%s:%d-%d", path, start, end)
+	if r.PostCount > r.Count {
+		rendered += fmt.Sprintf(" (+%d)", r.PostCount)
+	}
+	return rendered
 }
