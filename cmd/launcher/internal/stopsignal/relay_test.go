@@ -2,6 +2,7 @@ package stopsignal
 
 import (
 	"os"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -108,19 +109,38 @@ func TestRelaySignals_ThirdAndLaterSignalsAreNoOps(t *testing.T) {
 	}
 }
 
+// cleanup must actually silence the relay: a value sent on sig after cleanup
+// is never consumed, so neither channel closes (#3640).
 func TestRelaySignals_CleanupSilencesRelayWithoutClosingEitherChannel(t *testing.T) {
+	base := runtime.NumGoroutine()
 	sig := make(chan os.Signal, 2)
 	stop, abort, cleanup := Relay(sig)
 	cleanup()
 
+	// cleanup closes quit but does not wait for the goroutine. Sending first
+	// would race the relay's select (both quit and sig ready picks at random),
+	// so wait for the goroutine to exit before sending.
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > base && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := runtime.NumGoroutine(); got > base {
+		t.Fatalf("relay goroutine still running after cleanup: %d goroutines, baseline %d", got, base)
+	}
+
+	// Two values: a live relay would close stop on the first and abort on
+	// the second, so both assertions below bind.
+	sig <- syscall.SIGTERM
+	sig <- syscall.SIGINT
+
 	select {
 	case <-stop:
-		t.Fatal("stop closed even though sig never received a value")
+		t.Fatal("stop closed by a signal sent after cleanup")
 	case <-time.After(50 * time.Millisecond):
 	}
 	select {
 	case <-abort:
-		t.Fatal("abort closed even though sig never received a value")
+		t.Fatal("abort closed by a signal sent after cleanup")
 	case <-time.After(50 * time.Millisecond):
 	}
 }
