@@ -6440,15 +6440,32 @@ and `quickstart` packages moves it just as `cmd/launcher/daemon` and
 `cmd/launcher/internal/daemon` do. So does a
 change to any setting the wrapper bakes in — the run-input document,
 prompts/skills, or the agent image/closure the Consumer's settings
-resolve to. What does not: a commit touching only `docs/`. `daemonBin`
-builds from a file-set source (`daemonSrc`) rooted at `../cmd/launcher`
-itself, so `docs/` sits outside it and it still shares
+resolve to. So does a release version bump
+(`.release-please-manifest.json`, which `daemonBin`'s `version` reads):
+the binary bakes no version in, but the version reaches `daemonBin`'s
+derivation name, and with it its store path. `daemonWrapper`
+interpolates `${daemonBin}/bin/daemon` into its own script, so the
+wrapper's path — the `$0` it exports as `SPINDRIFT_DAEMON_PROGRAM` —
+moves with it. What does not: a commit touching only `docs/`. `daemonBin` builds from a
+file-set source (`daemonSrc`) rooted at `../cmd/launcher` itself, so
+`docs/` sits outside it and it still shares
 `launcherVendorHash` — unlike `launcherBin`, whose own `src`
 (`launcherSrc`) copies `../docs` alongside for its own checkPhase
 (#611). So `daemonBin`'s store path, and with it
 `SPINDRIFT_DAEMON_PROGRAM`, no longer moves on a documentation-only
 merge, which used to halt a daemon running under the restart-on-exit-10
 policy above for nothing (issue #3621).
+
+Because a release version bump moves the store path, a release commit
+halts the daemon with exit 10 once fetched, under every restart policy,
+even when it changes no code (issue #3702). That halt is expected, not a
+fault; the policy only decides what follows it. Under the **Self-update
+by choice** unit below, systemd restarts the daemon and its
+`ExecStartPre` advances the checkout first, so it starts straight into
+the release. Under the default policy the daemon stays stopped: advance
+the checkout to the fetched tip (`git pull --ff-only origin
+<BASE_BRANCH>`) before restarting it, or it halts again (**Self-update
+by choice** below).
 
 An evaluation that *fails* — a broken flake, a network blip reaching `nix
 eval` — is not treated as a change: it is the same class of unclassified
