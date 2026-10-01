@@ -712,6 +712,20 @@ rec {
   renderBakedSkillGatesGo =
     bakedSkills: concatStrings (map (s: "\tg[\"${s.gate}\"] = e.${s.field}\n") bakedSkills);
 
+  # renderBackendRegistryGo's fieldLine renders an explicit "" the same as
+  # omission, but mkHarness.nix defaults on absence and cmd/launcher on
+  # emptiness, so the two would read such a row differently; checkRow rejects
+  # one on these fields (issue #3487). trackerAxisWrite is exempt: cmd/launcher
+  # reads it as-is, so local's "" round-trips.
+  backendRegistryForbiddenEmptyFields = [
+    "tokenEnvVar"
+    "doctorTokenHint"
+    "doctorSlugHint"
+    "trackerAxisRead"
+    "trackerAxisFiler"
+    "forgeBackend"
+  ];
+
   # cmd/launcher/internal/backend/registry_gen.go content (issue #2521): one Go
   # `Descriptor` var per lib/backends/default.nix row, plus a Registry slice in
   # the nix list's declaration order, which is load-bearing (see that file's
@@ -745,11 +759,16 @@ rec {
         row:
         let
           unknown = builtins.filter (attr: !(builtins.elem attr knownFields)) (builtins.attrNames row);
+          explicitlyEmpty = builtins.filter (
+            field: row ? ${field} && row.${field} == ""
+          ) backendRegistryForbiddenEmptyFields;
         in
-        if unknown == [ ] then
-          row
+        if unknown != [ ] then
+          throw "lib/backends/default.nix: row '${row.name or "?"}' has unknown field(s): ${builtins.concatStringsSep ", " unknown}"
+        else if explicitlyEmpty != [ ] then
+          throw "lib/backends/default.nix: row '${row.name or "?"}' explicitly sets field(s) to \"\": ${builtins.concatStringsSep ", " explicitlyEmpty} -- omit the field instead to request its default"
         else
-          throw "lib/backends/default.nix: row '${row.name or "?"}' has unknown field(s): ${builtins.concatStringsSep ", " unknown}";
+          row;
       fieldLine =
         goName: value:
         if builtins.isBool value then
