@@ -36,7 +36,7 @@ in
     DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
     # helper.bash prepends this between DRIVER_PREAMBLE_FILE and
     # FRAGMENT_REGISTRY_FILE, matching lib/image.nix's concatenation order, so
-    # the suite checks the bytes the image really bakes for the 8 /agent/* path
+    # the suite checks the bytes the image really bakes for the /agent/* path
     # literals (issue #2531).
     AGENT_PATHS_PREAMBLE_FILE = batsHarness.internals.agentPathsPreambleFile;
     FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
