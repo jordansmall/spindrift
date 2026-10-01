@@ -5679,8 +5679,8 @@ dispatched ahead of that kind-selector parse rather than sharing its slot —
 exits without starting anything, needing no `--input` document (reading
 status is not running a daemon; the wrapper's own leading `--input <doc>`
 is accepted and ignored). stdout is the machine-readable `StatusReport`
-JSON, one object (`lockHeld`, `holder`, `live`, `stale`, `status`),
-holding this binary's "stdout is the machine stream only" line
+JSON, one object (`lockHeld`, `holder`, `live`, `stale`, `status`, and
+`holderPidGone`, which is omitted when false), holding this binary's "stdout is the machine stream only" line
 (**Event stream**, below); stderr gets one human sentence. It exits 0
 whenever it produced an answer, "no daemon running" included — a scripting
 caller reads `.live`, not the exit code, and this binary's own exit-code
@@ -6082,7 +6082,24 @@ alone collides across the hosts a shared checkout can be mounted on: a
 lock held by a *fresh* daemon that has not published yet, beside a dead
 predecessor's leftover file, reads as that predecessor's leftover rather
 than live.
-A stale file never reads as a live daemon. The probe takes a **shared**
+The same shape recurs in the window between a starting daemon's `flock`
+and its identity rewrite (`writeHolderIdentity` truncates first, which
+narrows the window but cannot close it): the lock line still names the
+dead predecessor, so every lock-content/status-content comparison agrees.
+When the holder's `host` is this host, `ReadStatus` therefore also asks
+the kernel whether that pid exists (`kill(pid, 0)`; `ESRCH` is gone,
+`EPERM` still counts as alive) and reads the file as the predecessor's
+leftover (issue #3597). In the window, `spindrift-daemon status` words the
+result as "still starting; its lock line and the published status file are
+both a predecessor's leftover" and the report carries `holderPidGone: true`.
+"A stale file never reads as a live daemon" holds
+for a holder on the reader's host; for a holder on another host (a shared
+checkout) the window stays open, since a local pid probe says nothing
+about a remote pid, and pid recycling can still in principle make a dead
+pid look alive. A generation-scoped liveness file — a fresh per-generation
+file the holder flocks and names in every status publish — would close it
+across hosts too, but costs a new file and cleanup rule for a window a
+few syscalls wide at daemon start only. The lock probe takes a **shared**
 `flock`, not an exclusive one — it still conflicts with the holder's
 exclusive lock, so success proves nobody holds it, but two concurrent
 readers never refuse each other — and it never creates the lock file it
@@ -6090,6 +6107,12 @@ probes (`probeCheckoutLock`). A starting daemon in turn retries its own
 exclusive acquire for a few milliseconds before declaring the lock held
 (`AcquireCheckoutLock`), so a reader's momentary probe window can never
 read as a second daemon and stop the real one from starting.
+
+The pid probe equates "same hostname" with "same pid namespace", so a
+reader in a separate pid namespace that shares the host's hostname (for
+example `bwrap --unshare-pid` with the host UTS namespace) gets `ESRCH` for
+a live daemon and reads it as stale, and the window wording above then
+names a predecessor rather than a mismatch.
 
 The file survives a clean stop on purpose: the last thing a stopping
 daemon publishes is `halted` with its `reason`, and a reader that finds
