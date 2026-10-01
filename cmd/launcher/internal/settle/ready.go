@@ -10,12 +10,14 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // errAbandoned marks a Terminate (ADR 0024, issue #649) that landed mid-retry,
-// so the caller skips the merge-blocked print and comment on an issue Terminate
-// already reclaimed.
-var errAbandoned = errors.New("settle: abandoned by terminate")
+// or a conflict-resolve Box skipped because the issue's own Box is already in
+// flight (issue #3655), so the caller skips the merge-blocked print and comment
+// on an issue whose state another actor owns.
+var errAbandoned = errors.New("settle: abandoned (terminated, or a live run owns the issue)")
 
 // errLandingNeverGreen marks a force-pushed head that never reached green. A
 // merge failure on an already-green PR leaves the issue agent-complete (ADR
@@ -551,7 +553,8 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 // resolveConflict dispatches a Box to resolve a genuine ErrMergeConflict hit by
 // a force-pushing rebase. It returns errAbandoned when Reclaim reaps the Box
 // mid-dispatch, since its SIGKILL can surface as crErr indistinguishably from
-// a genuine dispatch failure (issue #3523).
+// a genuine dispatch failure (issue #3523), or when the issue's own Box is
+// already running (issue #3655).
 func (s *Settle) resolveConflict(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	fmt.Printf("    #%s  landing=%s  status=conflict-resolve\n", num, pr)
 	crErr := d.ResolveConflict(pr)
@@ -563,6 +566,12 @@ func (s *Settle) resolveConflict(num string, gen uint64, pr string, d dispatch.D
 	// status=conflict-resolve-failed log line — deliberate, since num is
 	// already released and nothing reads that log line for it.
 	if s.terminated(num, gen) {
+		return errAbandoned
+	}
+	// The issue's own Box is live and owns its state, so this is no failed
+	// resolve (issue #3655).
+	if errors.Is(crErr, runner.ErrAlreadyRunning) {
+		fmt.Printf("    #%s  landing=%s  status=already-in-flight  ~~ conflict-resolve skipped; live run continues\n", num, pr)
 		return errAbandoned
 	}
 	if crErr != nil {
