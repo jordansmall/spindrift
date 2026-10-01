@@ -17,11 +17,13 @@ import (
 // produces from the same path and facts.
 func TestStoreLookupConfig_MatchesKindStoreConfig(t *testing.T) {
 	d := ecosystem.Declaration{
+		Ecosystem:       "cargo",
 		Host:            "Registry.Example.com:443",
 		UpstreamBaseURL: "https://registry.example.com:443/index",
 		RegistryName:    "mycorp",
 	}
 	facts := credresolver.StoreFacts{
+		Ecosystem:       d.Ecosystem,
 		Host:            d.Host,
 		HostKey:         registryvocab.HostKey(d.Host),
 		UpstreamBaseURL: d.UpstreamBaseURL,

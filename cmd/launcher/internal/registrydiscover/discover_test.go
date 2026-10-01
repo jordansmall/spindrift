@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -167,9 +168,9 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 	}
 }
 
-// A cargo-credentials lookup keys on RegistryName, so a declaration carrying
-// none must skip that store entirely.
-func TestDiscover_CargoCredentialsSkippedWhenNoRegistryName(t *testing.T) {
+// A cargo-credentials lookup applies only to cargo declarations, so an npm
+// declaration must skip that store entirely.
+func TestDiscover_CargoCredentialsSkippedForNonCargoDeclaration(t *testing.T) {
 	dir := t.TempDir()
 	npmrc := "registry=https://npm.example.com/\n"
 	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
@@ -235,6 +236,31 @@ func TestDiscover_CargoCredentialsOnlyStoreList_NamesStoreForNonCargoDeclaration
 	got := report.Unmatched[0].StoresSearched
 	if len(got) != 1 || got[0] != "cargo-credentials" {
 		t.Errorf("report.Unmatched[0].StoresSearched = %v, want [cargo-credentials]", got)
+	}
+}
+
+// No npm parser sets RegistryName yet, so Discover cannot reach this case;
+// firstMatch is tested directly to keep a future npm scope out of cargo's
+// credentials lookup.
+func TestFirstMatch_CargoCredentialsSkippedForNonCargoEcosystemWithRegistryName(t *testing.T) {
+	stores := []Store{
+		{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"},
+		{Name: "netrc", Path: "/home/agent/.netrc"},
+	}
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
+		if store.Name == "cargo-credentials" {
+			t.Fatalf("lookup called for cargo-credentials on a non-cargo declaration: %+v", d)
+		}
+		return false, nil
+	}
+	d := ecosystem.Declaration{Ecosystem: "npm", Host: "npm.example.com", RegistryName: "myorg"}
+
+	_, searched, found := firstMatch(stores, lookup, d)
+	if found {
+		t.Errorf("firstMatch found = true, want false")
+	}
+	if want := []string{"cargo-credentials", "netrc"}; !slices.Equal(searched, want) {
+		t.Errorf("firstMatch searched = %v, want %v", searched, want)
 	}
 }
 

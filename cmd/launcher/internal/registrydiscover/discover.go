@@ -182,6 +182,7 @@ func hostHash(host string) string {
 // different ones: npmrc on the raw host, gradle-properties on the HostKey.
 func declarationFacts(d ecosystem.Declaration) credresolver.StoreFacts {
 	return credresolver.StoreFacts{
+		Ecosystem:       d.Ecosystem,
 		Host:            d.Host,
 		HostKey:         registryvocab.HostKey(d.Host),
 		UpstreamBaseURL: d.UpstreamBaseURL,
@@ -198,9 +199,9 @@ func firstMatch(stores []Store, lookup Lookup, d ecosystem.Declaration) (store S
 	facts := declarationFacts(d)
 	for _, s := range stores {
 		searched = append(searched, s.Name)
-		// StoreApplicable (cargo-credentials only today: a declaration with
-		// no RegistryName gives that lookup nothing to key on) marks a store
-		// with nothing to search here, named above but never queried.
+		// StoreApplicable (cargo-credentials only today: its lookup only
+		// applies to a cargo declaration) marks a store with nothing to
+		// search here, named above but never queried.
 		if kind, ok := credresolver.KindBySourceKey(s.Name); ok && kind.StoreApplicable != nil && !kind.StoreApplicable(facts) {
 			continue
 		}
