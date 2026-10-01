@@ -423,10 +423,15 @@ This closes over the same route-order hazard the two-pass resolution
 described under `resolveRegistryRoutesFromFile` fixes on the other side:
 every `env`-sourced credential in the routes file is resolved, and its
 source variable unset, in a first pass, before any route's credential —
-`exec` included — is resolved in a second pass. So an `exec` helper never
-observes an unresolved `env` credential regardless of which route comes
-first in the file, and an `exec` helper's own environment is the allowlist
-above regardless of route order either way.
+`exec` included — is resolved in a second pass. So within
+`resolveRegistryRoutesFromFile` an `exec` helper never observes an
+unresolved `env` credential regardless of which route comes first in the
+file, and an `exec` helper's own environment is the allowlist above
+regardless of route order either way. The peek paths described below —
+the `validate` cross-knob check and doctor's route gate — never unset
+anything, so an allowlisted name doubling as an `env` credential source
+stays readable there; CONTEXT.md's Credential reference entry summarizes
+this, so change the two together.
 
 The trade-off is deliberate and has no per-route override today: a helper
 that needs some other ambient variable — a service-account token like
@@ -444,14 +449,14 @@ outside it entirely, and never unset anything: the launch path's own
 `registryProxyRoutesCheck(c, true)` into `ExtraCrossKnob`, whose Probe in
 `cmd/launcher/checks.go` calls `credresolver.New(route.Credential).Peek()`
 over every route before the file is ever resolved — and doctor's route gate
-(`cmd/launcher/registryroutes_doctor_checks.go`), which calls the same
-`Peek`. On either path, a route declaring `credential = { env =
-"SSH_AUTH_SOCK" }` leaves that value readable by a sibling route's `exec`
-helper, bounded only by the allowlist above. Registry store discovery
-(`cmd/launcher/internal/registrydiscover/storelookup.go`) shares the
-never-unsets property but not the hazard: its `Peek` call doesn't unset
-either, but the kind table's `exec` row carries no `StoreConfig`, and
-`storeLookupConfig` rejects any kind whose `StoreConfig` is nil, so
-discovery can never construct an `exec` Config or spawn a helper in the
-first place. This takes a pathological operator config to trigger, but an
-allowlisted name must not double as a route's `env` credential source.
+(`cmd/launcher/registryroutes_doctor_checks.go`), part of a separate
+command, which calls the same `Peek`. On either path, a route declaring
+`credential = { env = "SSH_AUTH_SOCK" }` leaves that value readable by a
+sibling route's `exec` helper, bounded only by the allowlist above. Registry
+store discovery (`cmd/launcher/internal/registrydiscover/storelookup.go`)
+shares the never-unsets property but not the hazard: its `Peek` call doesn't
+unset either, but the kind table's `exec` row carries no `StoreConfig`, and
+`storeLookupConfig` rejects any kind whose `StoreConfig` is nil, so discovery
+can never construct an `exec` Config or spawn a helper in the first place.
+This takes a pathological operator config to trigger, but an allowlisted name
+must not double as a route's `env` credential source.
