@@ -873,7 +873,9 @@ Driver entry declares:
   `agentsJsonTemplate` instead, which also takes `{ roster }`.
 - `sessionCacheDirRelative` — where the agent CLI's session transcripts
   live, relative to `$HOME`. Optional; a Driver that omits it has no
-  resumable session state (see above).
+  resumable session state (see above). When present it must be a non-empty
+  `$HOME`-relative path with no leading, trailing or doubled slash and no
+  `.`/`..` segment, checked at eval time by `assertShape`.
 - `argvShape` (ADR 0009, issue #2534) — the Driver's CLI argv-assembly
   shape, an attrset the Go/bash side walks to build the CLI invocation:
   `promptStyle` (`"flag"` or `"positional"`); `promptFlag` (required only
@@ -894,9 +896,11 @@ of the required fields above fails the build with a message naming the
 Driver and the missing attribute, before an image is ever produced.
 `sessionCacheDirRelative` and, within `argvShape`, `promptFlag`/`agentsFlag`
 are the fields this check treats as optional (`argvShape` itself is still a
-required top-level attribute). Cross-half parity with the Go registry
-(`cmd/launcher/internal/driver`) stays name-only by design (ADR 0009) —
-each half enforces its own entries' completeness independently.
+required top-level attribute). When `sessionCacheDirRelative` is present,
+the same check also validates its shape (above). Cross-half parity
+with the Go registry (`cmd/launcher/internal/driver`) stays name-only
+by design (ADR 0009) — each half enforces its own entries'
+completeness independently.
 
 A separate validator, `assertArgvShape`, checks `argvShape`'s internal
 structure — `assertShape` above only confirms the attribute is present, not

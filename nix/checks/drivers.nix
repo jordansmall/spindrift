@@ -18,9 +18,11 @@ let
     splitString
     imap0
     escapeShellArg
+    all
+    generators
     ;
   # Shared stub-cli fixture (issue #1144): drivers-render-preamble-shape uses
-  # it as-is; drivers-assert-shape-succeeds adds the four attrs renderPreamble
+  # it as-is; stubDriverComplete below adds the four attrs renderPreamble
   # doesn't read but assertShape requires.
   stubDriverBase = {
     name = "stub";
@@ -50,6 +52,15 @@ let
         "effort"
       ];
     };
+  };
+  # Shared complete-stub fixture (issue #3348): stubDriverBase plus the four
+  # attrs renderPreamble doesn't read but assertShape requires. Every
+  # assertShape check below starts from this rather than redeclaring it.
+  stubDriverComplete = stubDriverBase // {
+    name = "stub";
+    package = pkgs: pkgs.hello;
+    agentsJsonTemplate = "{}";
+    agentFilesTemplate = _: { };
   };
   # Shared defaultRoster fixture (issue #2386): the two
   # default-roster-effort checks assert the same roster defaults through
@@ -152,12 +163,7 @@ in
 
   drivers-assert-shape-succeeds =
     let
-      complete = stubDriverBase // {
-        name = "stub";
-        package = pkgs: pkgs.hello;
-        agentsJsonTemplate = "{}";
-        agentFilesTemplate = _: { };
-      };
+      complete = stubDriverComplete;
       result = builtins.tryEval (driverRegistry.assertShape "stub" complete);
     in
     assert assertMsg (result.success
@@ -646,6 +652,68 @@ in
     assert assertMsg (!(hasInfix "DRIVER_SESSION_CACHE_DIR" out))
       "renderPreamble must omit DRIVER_SESSION_CACHE_DIR entirely for a Driver entry with no sessionCacheDirRelative, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-omits-session-cache-dir-when-absent" { } "touch $out";
+
+  # Issue #3348: assertShape also validates sessionCacheDirRelative's shape
+  # when present (absence stays valid -- opencode omits it): a non-empty
+  # relative path with no empty, "." or ".." segment (so no leading/
+  # trailing/doubled slash either). tryEval can't report which condition
+  # fired, so one list of malformed values, each spliced onto an otherwise-
+  # complete entry, covers every bad shape in one check rather than one
+  # throw-case per condition.
+  drivers-assert-shape-rejects-bad-session-cache-dir-relative =
+    let
+      complete = stubDriverComplete;
+      badValues = [
+        ".stub/sessions/" # trailing slash
+        "/stub/sessions" # leading slash
+        "stub//sessions" # interior doubled slash
+        "" # empty string
+        42 # not a string
+        "./stub/sessions" # leading "." segment
+        "stub/sessions/." # trailing "." segment
+        "stub/../sessions" # interior ".." segment
+      ];
+      results = map (
+        v:
+        (builtins.tryEval (
+          driverRegistry.assertShape "stub" (complete // { sessionCacheDirRelative = v; })
+        )).success
+      ) badValues;
+      notThrown = filter (v: v != null) (
+        imap0 (i: v: if builtins.elemAt results i then v else null) badValues
+      );
+    in
+    assert assertMsg (all (success: !success) results)
+      "assertShape must throw for every malformed sessionCacheDirRelative, but did not throw for: ${
+        concatStringsSep ", " (map (v: generators.toPretty { } v) notThrown)
+      }";
+    pkgs.runCommand "drivers-assert-shape-rejects-bad-session-cache-dir-relative" { } "touch $out";
+
+  drivers-assert-shape-succeeds-with-session-cache-dir-relative =
+    let
+      complete = stubDriverComplete // {
+        sessionCacheDirRelative = ".stub/sessions";
+      };
+      result = builtins.tryEval (driverRegistry.assertShape "stub" complete);
+    in
+    assert assertMsg (result.success
+    ) "assertShape must not throw when sessionCacheDirRelative is a well-formed relative path";
+    assert assertMsg (
+      result.value == complete
+    ) "assertShape must return the Driver entry unchanged when sessionCacheDirRelative is well-formed";
+    pkgs.runCommand "drivers-assert-shape-succeeds-with-session-cache-dir-relative" { } "touch $out";
+
+  # Pins that opencode's real entry still has no sessionCacheDirRelative
+  # (claude's ".claude/projects" end-to-end value is already pinned by
+  # drivers-render-preamble-session-cache-dir).
+  drivers-session-cache-dir-relative-opencode-absent =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+    in
+    assert assertMsg (
+      !(opencodeEntry ? sessionCacheDirRelative)
+    ) "opencode Driver entry must have no sessionCacheDirRelative attribute";
+    pkgs.runCommand "drivers-session-cache-dir-relative-opencode-absent" { } "touch $out";
 
   # Issue #2152 slice C: claude's agentsJsonTemplate builds an attrset and
   # returns builtins.toJSON over the whole thing, so every scalar is encoded,
