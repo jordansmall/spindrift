@@ -115,6 +115,15 @@ func (l *CheckoutLock) Release() error {
 // back and report. A failing Hostname/Executable must not fail the acquire
 // itself — the identity line is a diagnostic, not the lock.
 func writeHolderIdentity(file *os.File, kinds []Kind) error {
+	// Truncate first so a killed predecessor's identity line is invalidated
+	// as soon as the flock is ours. This narrows the window in which a
+	// reader sees it but does not close it; ReadStatus's pid probe closes it
+	// for a same-host holder short of pid recycling or a separate pid
+	// namespace (see docs/reference.md "Status file").
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+
 	host, err := os.Hostname()
 	if err != nil {
 		host = "unknown"
@@ -133,9 +142,6 @@ func writeHolderIdentity(file *os.File, kinds []Kind) error {
 	line := fmt.Sprintf("pid=%d host=%s kind=%s started=%s%s\n",
 		os.Getpid(), host, strings.Join(names, ","), time.Now().UTC().Format(time.RFC3339), exePart)
 
-	if err := file.Truncate(0); err != nil {
-		return err
-	}
 	if _, err := file.WriteAt([]byte(line), 0); err != nil {
 		return err
 	}
