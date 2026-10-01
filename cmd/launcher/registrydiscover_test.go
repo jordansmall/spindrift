@@ -547,6 +547,55 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 	}
 }
 
+// On a disambiguation-bound error, runRegistryDiscover must still print the
+// report Discover had already built, not just the bare error: an operator
+// needs to see which hosts went unmatched even though the collision means no
+// routes file gets written. Issue #3508.
+func TestRunRegistryDiscover_DisambiguationBoundExhausted_StillPrintsReport(t *testing.T) {
+	// Same brute-forced colliding-host fixture as
+	// TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes: both
+	// hosts fold to one envPlaceholder and collide under hostHash too, so no
+	// round of suffixing can separate them and the bound trips for real.
+	// The premise guards need unexported helpers, so only that test has
+	// them: a code == 0 failure here means the fixture went stale.
+	const host1 = "a.a-a.a.a-a.a-a.a-a-a.a-a.a-a-a-a.a.a.example.com"
+	const host2 = "a.a.a.a.a-a.a.a.a.a.a.a-a-a.a.a-a-a.a.example.com"
+
+	// A non-colliding matched host, so the matched section is covered too.
+	const matchedHost = "matched.example.com"
+
+	repoDir := t.TempDir()
+	npmrc := "registry=https://" + host1 + "/\n@scope1:registry=https://" + host2 + "/\n@scope2:registry=https://" + matchedHost + "/\n"
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
+		t.Fatalf("WriteFile .npmrc: %v", err)
+	}
+
+	outPath := filepath.Join(t.TempDir(), "routes.toml")
+	stores := []registrydiscover.Store{{Name: "netrc", Path: "/fake/.netrc"}}
+	lookup := func(_ registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
+		return d.Host == matchedHost, nil
+	}
+	probe := func(string) string { return "bearer" }
+
+	var stdout, stderr strings.Builder
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	if code == 0 {
+		t.Fatalf("code = 0, want non-zero on an unresolvable collision")
+	}
+	if !strings.Contains(stdout.String(), "unmatched:") || !strings.Contains(stdout.String(), host1) || !strings.Contains(stdout.String(), host2) {
+		t.Errorf("stdout = %q, want the unmatched report naming both colliding hosts", stdout.String())
+	}
+	if want := matchedHost + " found in netrc (/fake/.netrc)"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want the matched line %q", stdout.String(), want)
+	}
+	if !strings.Contains(stderr.String(), "registry discover:") {
+		t.Errorf("stderr = %q, want the propagated disambiguation error", stderr.String())
+	}
+	if _, err := os.Stat(outPath); err == nil {
+		t.Errorf("routes file %q was written, want none on this error path", outPath)
+	}
+}
+
 // The store list must match the documented search order (netrc, npmrc,
 // cargo-credentials, gradle-properties) with paths under $HOME. Acceptance
 // criterion 3 of issue #3407: this list comes from credresolver's kind table,
