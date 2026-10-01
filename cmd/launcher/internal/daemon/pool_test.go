@@ -937,6 +937,54 @@ func TestPoolAwakeWindowClosingEmitsExactlyOneCloseAndOpenAcrossSlots(t *testing
 	}
 }
 
+// TestPoolAwakeWindowClosingWalkExhaustedCarriesReason pins that
+// awaitWindow threads Until's exhausted result through to the awake_close
+// event: when the zone-period walk exhausts untilHorizon without finding
+// an opening, the event's Reason names that degraded case rather than the
+// ordinary "outside the Awake window", and Wait is the untilHorizon
+// re-check duration, not a real opening.
+func TestPoolAwakeWindowClosingWalkExhaustedCarriesReason(t *testing.T) {
+	pw := &probeWriter{}
+	w, now := exhaustingWindow(t)
+	clk := &testClock{now: now, sleepSignal: make(chan struct{}, 1)}
+	clk.park()
+	em := NewEmitter(pw, func() time.Time { return time.Unix(0, 0).UTC() })
+
+	cfg := testConfig(1)
+	cfg.Awake = w
+	p, pctx := newPool(context.Background(), cfg, &scriptedRunner{revisions: []string{"rev1"}}, em, clk)
+	defer p.cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.awaitWindow(pctx, 0)
+	}()
+
+	clk.awaitSleep(t, 1)
+	p.cancel() // the window never truly opens in this zone; stop the loop after its first close
+	wg.Wait()
+
+	events := decodeEvents(t, &pw.Buffer)
+	var closes int
+	for _, ev := range events {
+		if ev.Event != "awake_close" {
+			continue
+		}
+		closes++
+		if ev.Reason != walkExhaustedReason {
+			t.Fatalf("awake_close reason = %q, want %q", ev.Reason, walkExhaustedReason)
+		}
+		if ev.Wait != untilHorizon.String() {
+			t.Fatalf("awake_close wait = %q, want %q (re-check, not an opening)", ev.Wait, untilHorizon.String())
+		}
+	}
+	if closes != 1 {
+		t.Fatalf("awake_close events = %d, want exactly 1 (%v)", closes, eventNames(events))
+	}
+}
+
 // TestPoolAwakeWindowCloseOrderedBeforeOpenAcrossSlots pins issue #3623's
 // core ordering property: mutate holds p.mu across both applying a state
 // change and emitting the events it returns, so one mutate's events always
@@ -1050,7 +1098,7 @@ func TestJamIgnoresSiblingAwaitingWindow(t *testing.T) {
 	// running awaitWindow itself: noteAwakeClose is the one call that
 	// writes the awaiting-window phase, and that phase write is exactly
 	// what siblingsEngaged must see as unengaged.
-	p.noteAwakeClose(1, time.Hour)
+	p.noteAwakeClose(1, time.Hour, false)
 
 	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true)
 
@@ -1901,6 +1949,59 @@ func TestPoolSnapshotState(t *testing.T) {
 			}
 			if tc.want == StateHalted && !strings.Contains(st.Reason, "host-tainted") {
 				t.Fatalf("reason = %q, want it to name host-tainted", st.Reason)
+			}
+			// No case above exhausts the Awake walk, the one non-halted
+			// source of Reason (see the *ReasonWalkExhausted tests).
+			if tc.want != StateHalted && st.Reason != "" {
+				t.Fatalf("reason = %q, want empty outside StateHalted", st.Reason)
+			}
+		})
+	}
+}
+
+// TestPoolSnapshotReasonWalkExhausted pins that snapshotLocked surfaces
+// Until's walk-exhausted degraded case (awake.go) in Status.Reason regardless
+// of which non-halted State it lands on: the window really is shut (or a
+// child is still running under a since-shut window) and NextCheck only names
+// a re-check instant, not a real reopening, so Reason is how a reader tells
+// the two apart (issue #3590).
+func TestPoolSnapshotReasonWalkExhausted(t *testing.T) {
+	tests := []struct {
+		name  string
+		start bool
+		want  State
+	}{
+		{name: "asleep", start: false, want: StateAsleep},
+		{name: "working outranks asleep", start: true, want: StateWorking},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w, now := exhaustingWindow(t)
+			clk := &testClock{now: now}
+			cfg := testConfig(1)
+			cfg.Awake = w
+			var buf bytes.Buffer
+			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
+			if tc.start {
+				p.startChild(0, KindOf(dispatchkind.Work), "rev1")
+			}
+			snap := p.snapshot()
+
+			if snap.State != tc.want {
+				t.Fatalf("state = %q, want %q", snap.State, tc.want)
+			}
+			if snap.Reason != walkExhaustedReason {
+				t.Fatalf("reason = %q, want %q", snap.Reason, walkExhaustedReason)
+			}
+			wantNextCheck := now.Add(untilHorizon).UTC().Format(time.RFC3339)
+			if len(snap.Checks) == 0 {
+				t.Fatalf("checks is empty, want at least one kind's nextCheck pinned")
+			}
+			for _, kc := range snap.Checks {
+				if kc.NextCheck != wantNextCheck {
+					t.Fatalf("kind %q nextCheck = %q, want %q (the re-check instant, not a real reopening)", kc.Kind, kc.NextCheck, wantNextCheck)
+				}
 			}
 		})
 	}

@@ -394,19 +394,17 @@ func TestWindowOpenAndUntil(t *testing.T) {
 }
 
 // buildTZif assembles a minimal TZif v1 blob by hand per tzfile(5), rather
-// than pulling one from a real zone, so a test can pin an offset-change
-// schedule no real IANA zone has. isutcnt/isstdcnt/leapcnt are left at 0:
-// Go's own TZif reader (zoneinfo_read.go) treats those arrays as optional
-// and guards every read on the actual counts, so omitting them is valid,
-// not a shortcut that happens to parse.
-func buildTZif(t *testing.T, transTimes []int32, transTypes []byte, offsets []int32, isdst []byte, abbrevIdx []byte, abbrev string) []byte {
-	t.Helper()
-	if len(offsets) != len(isdst) || len(offsets) != len(abbrevIdx) {
-		t.Fatalf("buildTZif: mismatched type slice lengths")
-	}
-	if len(transTimes) != len(transTypes) {
-		t.Fatalf("buildTZif: mismatched transition slice lengths")
-	}
+// than pulling one from a real zone, so exhaustingWindow can pin an
+// offset-change schedule no real IANA zone has, over two fixed types: +0
+// "P0" and +1 "P1" (index 1, DST). isutcnt/isstdcnt/leapcnt are
+// left at 0: Go's own TZif reader (zoneinfo_read.go) treats those arrays as
+// optional and guards every read on the actual counts, so omitting them is
+// valid, not a shortcut that happens to parse.
+func buildTZif(transTimes []int32, transTypes []byte) []byte {
+	const abbrev = "P0\x00P1\x00"
+	offsets := []int32{0, 3600}
+	isdst := []byte{0, 1}
+	abbrevIdx := []byte{0, 3}
 
 	var buf bytes.Buffer
 	buf.WriteString("TZif")
@@ -426,16 +424,12 @@ func buildTZif(t *testing.T, transTimes []int32, transTypes []byte, offsets []in
 	be4(len(abbrev))     // charcnt
 
 	for _, tt := range transTimes {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], uint32(tt))
-		buf.Write(b[:])
+		be4(int(tt))
 	}
 	buf.Write(transTypes)
 
 	for i := range offsets {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], uint32(offsets[i]))
-		buf.Write(b[:])
+		be4(int(offsets[i]))
 		buf.WriteByte(isdst[i])
 		buf.WriteByte(abbrevIdx[i])
 	}
@@ -444,24 +438,20 @@ func buildTZif(t *testing.T, transTimes []int32, transTypes []byte, offsets []in
 	return buf.Bytes()
 }
 
-// TestWindowUntilExhaustedSyntheticZone drives the untilHorizon fallback
-// with a synthetic zone (no real IANA zone behaves this way) that jumps
-// the local clock straight from 02:59:59 to 04:00:00 every day (+0 -> +1
-// at 03:00Z) and repeats 11:00-11:59 on the way back (+1 -> +0 at
-// 11:00Z). A 03:15-03:45 window's local minutes therefore never occur on
+// exhaustingWindow builds a synthetic zone (no real IANA zone behaves this
+// way) that jumps the local clock straight from 02:59:59 to 04:00:00 every
+// day (+0 -> +1 at 03:00Z) and repeats 11:00-11:59 on the way back (+1 -> +0
+// at 11:00Z). A 03:15-03:45 window's local minutes therefore never occur on
 // any day, so Until must walk every zone period out to untilHorizon and
 // report it exhausted rather than silently returning a plausible-looking
-// duration for a window that in fact never opens.
-func TestWindowUntilExhaustedSyntheticZone(t *testing.T) {
-	const abbrev = "P0\x00P1\x00"
-	offsets := []int32{0, 3600}
-	isdst := []byte{0, 1}
-	abbrevIdx := []byte{0, 3}
-
+// duration for a window that in fact never opens. Shared by awake_test.go
+// and pool_test.go so both exercise the same exhausting construction.
+func exhaustingWindow(t *testing.T) (w *Window, now time.Time) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
-	const days = 30 // well past now+untilHorizon (8d), with margin so the
-	// walk never runs off the end of the explicit transition table into
-	// TZif's "last type persists" extension before exhausting.
+	// days is well past now+untilHorizon (8d), with margin so the walk
+	// never runs off the end of the explicit transition table into TZif's
+	// "last type persists" extension before exhausting.
+	const days = 30
 	var times []int32
 	var types []byte
 	for d := 0; d < days; d++ {
@@ -472,14 +462,22 @@ func TestWindowUntilExhaustedSyntheticZone(t *testing.T) {
 		types = append(types, 0)
 	}
 
-	data := buildTZif(t, times, types, offsets, isdst, abbrevIdx, abbrev)
+	data := buildTZif(times, types)
 	loc, err := time.LoadLocationFromTZData("Synthetic/Until", data)
 	if err != nil {
 		t.Fatalf("LoadLocationFromTZData: %v", err)
 	}
 
-	w := &Window{start: 195, end: 225, loc: loc} // 03:15-03:45 local
-	now := time.Date(2026, 1, 2, 12, 0, 0, 0, loc)
+	w = &Window{start: 195, end: 225, loc: loc} // 03:15-03:45 local
+	now = time.Date(2026, 1, 2, 12, 0, 0, 0, loc)
+	return w, now
+}
+
+// TestWindowUntilExhaustedSyntheticZone asserts Until, given exhaustingWindow's
+// never-opens zone, reports exhausted with wait == untilHorizon, and that the
+// reported instant is in fact still closed.
+func TestWindowUntilExhaustedSyntheticZone(t *testing.T) {
+	w, now := exhaustingWindow(t)
 
 	wait, exhausted := w.Until(now)
 	if !exhausted {
