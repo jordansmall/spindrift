@@ -434,28 +434,31 @@ type hostRewriteCollision struct {
 // fronting separate npm and cargo prefixes does, every rewrite for that host is
 // dropped rather than kept-first, since keeping either rewrites the other wrongly.
 func buildIntreeHostRewrites(routes []registrymanifest.Route, port int) ([]bindregistry.HostRewrite, []hostRewriteCollision) {
-	var hostOrder []string
+	// Keys fold case to match ApplyInTreeBinding's own duplicate guard (issue
+	// #3706); the collision report uses each group's first-seen spelling.
+	var keyOrder []string
 	byHost := make(map[string][]registrymanifest.Route)
 	for _, route := range routes {
 		if route.UpstreamHost == "" || route.Prefix == "" {
 			continue
 		}
-		if _, seen := byHost[route.UpstreamHost]; !seen {
-			hostOrder = append(hostOrder, route.UpstreamHost)
+		key := bindregistry.FoldHost(route.UpstreamHost)
+		if _, seen := byHost[key]; !seen {
+			keyOrder = append(keyOrder, key)
 		}
-		byHost[route.UpstreamHost] = append(byHost[route.UpstreamHost], route)
+		byHost[key] = append(byHost[key], route)
 	}
 
 	var rewrites []bindregistry.HostRewrite
 	var collisions []hostRewriteCollision
-	for _, host := range hostOrder {
-		group := byHost[host]
+	for _, key := range keyOrder {
+		group := byHost[key]
 		if len(group) > 1 {
 			prefixes := make([]string, len(group))
 			for i, route := range group {
 				prefixes[i] = route.Prefix
 			}
-			collisions = append(collisions, hostRewriteCollision{Host: host, Prefixes: prefixes})
+			collisions = append(collisions, hostRewriteCollision{Host: group[0].UpstreamHost, Prefixes: prefixes})
 			continue
 		}
 		route := group[0]
@@ -489,12 +492,12 @@ func rewriteHostNames(rewrites []bindregistry.HostRewrite) string {
 func dropCollidedRoutes(routes []registrymanifest.Route, collisions []hostRewriteCollision) []registrymanifest.Route {
 	collidedHosts := make(map[string]bool, len(collisions))
 	for _, c := range collisions {
-		collidedHosts[c.Host] = true
+		collidedHosts[bindregistry.FoldHost(c.Host)] = true
 	}
 
 	var filtered []registrymanifest.Route
 	for _, route := range routes {
-		if collidedHosts[route.UpstreamHost] {
+		if collidedHosts[bindregistry.FoldHost(route.UpstreamHost)] {
 			continue
 		}
 		filtered = append(filtered, route)
