@@ -1178,23 +1178,27 @@ carries percent-encoding.
 than a spelling variant: `sparse+https://host/index` is a sparse-HTTP registry
 and `https://host/index` is a git registry index — two source kinds, two
 `SourceId`s. The prefix is therefore preserved in the key, and a pair
-differing only there still mints. Route binding is un-canonicalized too: the
-`[registries.NAME].index` host (`cargoIndexHost`) is compared byte-for-byte
-against the route's `UpstreamHost` where a route's registries are matched, so
-an uppercase-host *index* is dropped by that filter before this key ever sees
-it — as long as the manifest's own `match-host` is lowercase. Neither side
-lowercases the other, so a mixed-case `match-host` binds a mixed-case index
-and the key does then fold its host; either way the host-case axis earns its
-keep on a `[source.NAME].registry` spelling variant, not on a
-`[registries.NAME].index` one. Default ports (`:443`), percent-encoding,
-`.git` suffixes, and github.com's own path lowercasing are left alone too:
-cargo canonicalizes some of them, but the surface this render reads is a
-Target repo's `.cargo/config.toml` registry indexes, not git sources, and
-nothing observed there evidences a need — so the #3248 caution against
-guessing still governs everything past the two axes above. "Percent-encoding
-left alone" means no existing escape is decoded or re-cased; the
-`url.Parse`/`String()` round-trip does still escape a character the original
-spelling left bare, so `sparse+https://h/a b/` keys as
+differing only there still mints. Route binding is no longer on this list
+(issue #3665): the `[registries.NAME].index` host (`cargoIndexHost`) is
+matched against the route's `UpstreamHost` case-insensitively
+(`cargoRouteHostMatches`), at both the minted-name reservation and the
+binding loop, so an uppercase-host index binds a lowercase `match-host` and
+the reverse — the same case folding `registryvocab.HostKey` and the proxy's
+own rewrite already apply, though not their port handling. The key
+above then folds that index's host, so the host-case axis holds on a
+`[registries.NAME].index` spelling variant as well as a
+`[source.NAME].registry` one. Past case the compare stays verbatim on
+`host:port`, so a `cargo.example.test:443` index against a bare
+`cargo.example.test` route host still binds nothing. Default ports
+(`:443`), percent-encoding, `.git` suffixes, and github.com's own path
+lowercasing are left alone too: cargo canonicalizes some of them, but the
+surface this render reads is a Target repo's `.cargo/config.toml` registry
+indexes, not git sources, and nothing observed there evidences a need — so
+the #3248 caution against guessing still governs everything past the two
+axes above. "Percent-encoding left alone" means no existing escape is
+decoded or re-cased; the `url.Parse`/`String()` round-trip does still
+escape a character the original spelling left bare, so
+`sparse+https://h/a b/` keys as
 `sparse+https://h/a%20b`. A value that does not parse as an http(s) URL with a
 host keys on itself verbatim, which leaves the old byte-for-byte behavior in
 place wherever canonicalization has nothing to say.
