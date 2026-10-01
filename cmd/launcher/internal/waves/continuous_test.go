@@ -3091,7 +3091,7 @@ func TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons(t *testin
 	if !strings.Contains(out, "==> abort requested; terminating 1 outstanding Box(es)") {
 		t.Fatalf("stdout: got %q, want the abort-terminating line", out)
 	}
-	if !strings.Contains(out, "terminated by operator; abandoning") {
+	if !strings.Contains(out, "reclaimed; abandoning") {
 		t.Fatalf("stdout: got %q, want the abandon line from the reclaimed Box's own goroutine", out)
 	}
 }
@@ -3618,7 +3618,7 @@ func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *t
 	if len(s.FailCalls) != 0 || len(s.SettleCalls) != 0 {
 		t.Fatalf("Fail/Settle calls: got %+v / %+v, want none (abort abandons)", s.FailCalls, s.SettleCalls)
 	}
-	if !strings.Contains(out, "terminated by operator; abandoning") {
+	if !strings.Contains(out, "reclaimed; abandoning") {
 		t.Fatalf("stdout: got %q, want the abandon line from the reclaimed Box's own goroutine", out)
 	}
 }
