@@ -2034,8 +2034,9 @@ checkedMerge {
 
   # The four editorial rows carry a literal em dash in their domain-path cell
   # rather than a real path, so a registry key whose name collides with one
-  # (`settings` here) would render a silently wrong domain path unless the
-  # match is anchored to rows that carry a path (issue #3067).
+  # (`settings` here) would render a silently wrong domain path unless that
+  # row's cell is checked by value against the registry path (issues #3067,
+  # #3387).
   option-surface-doc-editorial-name-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2056,7 +2057,7 @@ checkedMerge {
       );
     in
     assert assertMsg (!driftedResult.success)
-      "option-surface-doc-editorial-name-guard (issue #3067): renderOptionSurfaceTableDoc must throw for a synthetic key (\"settings\") whose name matches an editorial row -- that row's domain-path cell is a literal em dash, not a path, so treating it as the key's row would render a silently wrong domain path";
+      "option-surface-doc-editorial-name-guard (issues #3067, #3387): renderOptionSurfaceTableDoc must throw for a synthetic key (\"settings\") whose name matches an editorial row -- that row's domain-path cell is a literal em dash, not a path, so treating it as the key's row would render a silently wrong domain path";
     pkgs.runCommand "option-surface-doc-editorial-name-guard" { } "touch $out";
 
   # The editorial rows have no registry key by design, so a forward-only
@@ -2092,6 +2093,36 @@ checkedMerge {
     assert assertMsg (builtins.length rowNames == expectedRowCount)
       "option-surface-doc-editorial-rows-pin (issue #3067): expected exactly ${builtins.toString expectedRowCount} data rows in the rendered option-surface table (one per structuralPaths/byNamePaths key plus ${builtins.toString (builtins.length editorialRowNames)} editorial), got ${builtins.toString (builtins.length rowNames)}: ${builtins.concatStringsSep ", " rowNames}";
     pkgs.runCommand "option-surface-doc-editorial-rows-pin" { } "touch $out";
+
+  # The renderer's table is inline, so a registry override cannot cross-wire a
+  # row: expected and rendered paths move together. Rendering the real table
+  # already proves it clean (the renderer throws on a mismatch), so feed the
+  # exported comparison a copy with overlays's cell swapped for nixpkgs's path
+  # (issue #3387).
+  option-surface-doc-domain-path-value-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      rendered = renderers.renderOptionSurfaceTableDoc {
+        inherit structuralPaths byNamePaths;
+        nixBuilderImage = "value-guard-image";
+      };
+      registryPath = key: "`perSystem.spindrift.${builtins.concatStringsSep "." structuralPaths.${key}}`";
+      overlaysRow = "| `overlays`  | ";
+      crossWired =
+        builtins.replaceStrings
+          [ "${overlaysRow}${registryPath "overlays"}" ]
+          [ "${overlaysRow}${registryPath "nixpkgs"}" ]
+          rendered;
+      crossWiredMismatches = renderers.optionSurfaceDomainPathMismatches (
+        structuralPaths // byNamePaths
+      ) crossWired;
+      crossWiredNames = map (m: m.name) crossWiredMismatches;
+    in
+    assert assertMsg (crossWired != rendered)
+      "option-surface-doc-domain-path-value-guard (issue #3387): the synthetic overlays->nixpkgs path swap did not change the rendered table, so this guard would be vacuous";
+    assert assertMsg (crossWiredNames == [ "overlays" ])
+      "option-surface-doc-domain-path-value-guard (issue #3387): renderOptionSurfaceTableDoc's domain-path check must flag the overlays row once its cell is swapped for nixpkgs's path -- got mismatched names: ${builtins.concatStringsSep ", " crossWiredNames}";
+    pkgs.runCommand "option-surface-doc-domain-path-value-guard" { } "touch $out";
 
   # flake-options-doc above regenerates the byName row from the same source it
   # diffs against, so it cannot catch a path renderStructuralOptionsDoc
