@@ -92,8 +92,8 @@ func TestCompute_AddedCommitDelta(t *testing.T) {
 	want := Delta{
 		Known: true, Files: 2, Insertions: 2, Deletions: 0, Paths: []string{"base.txt", "new.txt"},
 		Ranges: map[string][]Range{
-			"base.txt": {{Start: 1, Count: 0}},
-			"new.txt":  {{Start: 0, Count: 0}},
+			"base.txt": {{Start: 1, Count: 0, PostCount: 1}},
+			"new.txt":  {{Start: 0, Count: 0, PostCount: 1}},
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -149,7 +149,7 @@ func TestCompute_RebaseOntoMovedBaseWithLandCommit(t *testing.T) {
 	// (land.txt) counts, and the base movement (other.txt) must not appear.
 	want := Delta{
 		Known: true, Files: 1, Insertions: 1, Deletions: 0, Paths: []string{"land.txt"},
-		Ranges: map[string][]Range{"land.txt": {{Start: 0, Count: 0}}},
+		Ranges: map[string][]Range{"land.txt": {{Start: 0, Count: 0, PostCount: 1}}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Compute() = %+v, want %+v", got, want)
@@ -292,7 +292,7 @@ func TestParsePreImageRanges(t *testing.T) {
 				"+new1\n" +
 				"+new2\n",
 			want: map[string][]Range{
-				"foo.txt": {{Start: 3, Count: 2}},
+				"foo.txt": {{Start: 3, Count: 2, PostCount: 2}},
 			},
 		},
 		{
@@ -305,7 +305,7 @@ func TestParsePreImageRanges(t *testing.T) {
 				"+new2\n" +
 				"+new3\n",
 			want: map[string][]Range{
-				"foo.txt": {{Start: 7, Count: 0}},
+				"foo.txt": {{Start: 7, Count: 0, PostCount: 3}},
 			},
 		},
 		{
@@ -318,7 +318,7 @@ func TestParsePreImageRanges(t *testing.T) {
 				"-old2\n" +
 				"-old3\n",
 			want: map[string][]Range{
-				"foo.txt": {{Start: 4, Count: 3}},
+				"foo.txt": {{Start: 4, Count: 3, PostCount: 0}},
 			},
 		},
 		{
@@ -330,7 +330,7 @@ func TestParsePreImageRanges(t *testing.T) {
 				"-old\n" +
 				"+new\n",
 			want: map[string][]Range{
-				"foo.txt": {{Start: 12, Count: 1}},
+				"foo.txt": {{Start: 12, Count: 1, PostCount: 1}},
 			},
 		},
 		{
@@ -350,9 +350,9 @@ func TestParsePreImageRanges(t *testing.T) {
 				"+new4\n",
 			want: map[string][]Range{
 				"foo.txt": {
-					{Start: 3, Count: 1},
-					{Start: 10, Count: 2},
-					{Start: 20, Count: 0},
+					{Start: 3, Count: 1, PostCount: 1},
+					{Start: 10, Count: 2, PostCount: 2},
+					{Start: 20, Count: 0, PostCount: 1},
 				},
 			},
 		},
@@ -373,8 +373,8 @@ func TestParsePreImageRanges(t *testing.T) {
 				"+new1\n" +
 				"+new2\n",
 			want: map[string][]Range{
-				"foo.txt": {{Start: 1, Count: 1}},
-				"bar.txt": {{Start: 5, Count: 2}},
+				"foo.txt": {{Start: 1, Count: 1, PostCount: 1}},
+				"bar.txt": {{Start: 5, Count: 2, PostCount: 2}},
 			},
 		},
 		{
@@ -388,7 +388,7 @@ func TestParsePreImageRanges(t *testing.T) {
 				"-old2\n" +
 				"-old3\n",
 			want: map[string][]Range{
-				"gone.txt": {{Start: 1, Count: 3}},
+				"gone.txt": {{Start: 1, Count: 3, PostCount: 0}},
 			},
 		},
 		{
@@ -403,8 +403,8 @@ func TestParsePreImageRanges(t *testing.T) {
 				"+new5\n",
 			want: map[string][]Range{
 				"f.md": {
-					{Start: 1, Count: 0},
-					{Start: 5, Count: 1},
+					{Start: 1, Count: 0, PostCount: 1},
+					{Start: 5, Count: 1, PostCount: 1},
 				},
 			},
 		},
@@ -420,9 +420,35 @@ func TestParsePreImageRanges(t *testing.T) {
 				"+new5\n",
 			want: map[string][]Range{
 				"f.md": {
-					{Start: 1, Count: 1},
-					{Start: 5, Count: 1},
+					{Start: 1, Count: 1, PostCount: 0},
+					{Start: 5, Count: 1, PostCount: 1},
 				},
+			},
+		},
+		{
+			name: "malformed post side",
+			diff: "diff --git a/foo.txt b/foo.txt\n" +
+				"--- a/foo.txt\n" +
+				"+++ b/foo.txt\n" +
+				"@@ -5,2 +x @@\n" +
+				"-old1\n" +
+				"-old2\n",
+			want: map[string][]Range{
+				"foo.txt": {{Start: 5, Count: 2, PostCount: 0}},
+			},
+		},
+		{
+			// Atoi clamps an overflow to MaxInt, which would push
+			// ReachEnd negative; the parse degrades it to 0 instead.
+			name: "overflowing post count",
+			diff: "diff --git a/foo.txt b/foo.txt\n" +
+				"--- a/foo.txt\n" +
+				"+++ b/foo.txt\n" +
+				"@@ -5,2 +5,99999999999999999999 @@\n" +
+				"-old1\n" +
+				"-old2\n",
+			want: map[string][]Range{
+				"foo.txt": {{Start: 5, Count: 2, PostCount: 0}},
 			},
 		},
 		{
@@ -456,27 +482,54 @@ func TestParsePreImageRanges(t *testing.T) {
 	}
 }
 
-func TestDeltaRangesJSONTag(t *testing.T) {
-	withRanges := Delta{
-		Known:  true,
-		Files:  1,
-		Ranges: map[string][]Range{"foo.txt": {{Start: 3, Count: 2}}},
+func TestRangeEnd(t *testing.T) {
+	cases := []struct {
+		name          string
+		r             Range
+		end, reachEnd int
+	}{
+		{"modification", Range{Start: 10, Count: 2, PostCount: 2}, 11, 11},
+		{"growing modification", Range{Start: 10, Count: 2, PostCount: 20}, 11, 29},
+		{"shrinking modification", Range{Start: 10, Count: 5, PostCount: 1}, 14, 14},
+		{"pure insertion", Range{Start: 11, Count: 0, PostCount: 12}, 11, 22},
+		{"pure deletion", Range{Start: 4, Count: 3, PostCount: 0}, 6, 6},
+		{"legacy insertion without PostCount", Range{Start: 7, Count: 0}, 7, 7},
+		{"prepend", Range{Start: 0, Count: 0, PostCount: 5}, 0, 4},
 	}
-	b, err := json.Marshal(withRanges)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.r.End(); got != c.end {
+				t.Errorf("End() = %d, want %d", got, c.end)
+			}
+			if got := c.r.ReachEnd(); got != c.reachEnd {
+				t.Errorf("ReachEnd() = %d, want %d", got, c.reachEnd)
+			}
+		})
 	}
-	if !strings.Contains(string(b), `"ranges":{"foo.txt":[{"start":3,"count":2}]}`) {
-		t.Fatalf("json = %s, want ranges key with start/count", b)
-	}
+}
 
-	withoutRanges := Delta{Known: true}
-	b, err = json.Marshal(withoutRanges)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	if strings.Contains(string(b), `"ranges"`) {
-		t.Fatalf("json = %s, want no ranges key", b)
+func TestDeltaRangesJSONTag(t *testing.T) {
+	ranges := map[string][]Range{"foo.txt": {{Start: 3, Count: 2}}}
+	for _, tc := range []struct {
+		name  string
+		delta Delta
+		key   string
+		want  bool
+	}{
+		{"ranges", Delta{Known: true, Files: 1, Ranges: ranges}, `"ranges":{"foo.txt":[{"start":3,"count":2}]}`, true},
+		{"no ranges", Delta{Known: true}, `"ranges"`, false},
+		{"post_count", Delta{Known: true, Ranges: map[string][]Range{"foo.txt": {{Start: 3, Count: 2, PostCount: 5}}}}, `"post_count":5`, true},
+		{"zero post_count", Delta{Known: true, Ranges: ranges}, `"post_count"`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := json.Marshal(tc.delta)
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+			if got := strings.Contains(string(b), tc.key); got != tc.want {
+				t.Fatalf("json = %s, contains %s = %v, want %v", b, tc.key, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -518,7 +571,7 @@ func TestCompute_Ranges(t *testing.T) {
 
 			got := Compute(dir, anchor, "")
 
-			want := map[string][]Range{"base.txt": {{Start: 1, Count: 1}}}
+			want := map[string][]Range{"base.txt": {{Start: 1, Count: 1, PostCount: 1}}}
 			if !reflect.DeepEqual(got.Ranges, want) {
 				t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
 			}
@@ -630,7 +683,7 @@ func TestCompute_Ranges(t *testing.T) {
 
 		got := Compute(dir, anchor, "")
 
-		want := map[string][]Range{"notes.md": {{Start: 2, Count: 0}, {Start: 9, Count: 1}}}
+		want := map[string][]Range{"notes.md": {{Start: 2, Count: 0, PostCount: 1}, {Start: 9, Count: 1, PostCount: 1}}}
 		if !reflect.DeepEqual(got.Ranges, want) {
 			t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
 		}
@@ -646,7 +699,7 @@ func TestCompute_Ranges(t *testing.T) {
 
 		got := Compute(dir, anchor, "")
 
-		want := map[string][]Range{"base.txt": {{Start: 1, Count: 0}}}
+		want := map[string][]Range{"base.txt": {{Start: 1, Count: 0, PostCount: 1}}}
 		if !reflect.DeepEqual(got.Ranges, want) {
 			t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
 		}
@@ -665,7 +718,7 @@ func TestCompute_Ranges(t *testing.T) {
 
 		got := Compute(dir, anchor, "")
 
-		want := map[string][]Range{"base.txt": {{Start: 2, Count: 2}}}
+		want := map[string][]Range{"base.txt": {{Start: 2, Count: 2, PostCount: 0}}}
 		if !reflect.DeepEqual(got.Ranges, want) {
 			t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
 		}
@@ -690,7 +743,7 @@ func TestCompute_Ranges(t *testing.T) {
 
 		got := Compute(dir, anchor, "")
 
-		want := map[string][]Range{"base.txt": {{Start: 2, Count: 1}, {Start: 9, Count: 1}}}
+		want := map[string][]Range{"base.txt": {{Start: 2, Count: 1, PostCount: 1}, {Start: 9, Count: 1, PostCount: 1}}}
 		if !reflect.DeepEqual(got.Ranges, want) {
 			t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
 		}
