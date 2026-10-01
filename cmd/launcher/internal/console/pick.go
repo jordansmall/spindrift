@@ -68,7 +68,7 @@ const (
 )
 
 // blockerFailedPrefix opens a held pick's Reason when a blocker landed Failed
-// (setHeld, queue.go). View's dedup guard (renderQueueColumn, view.go) matches
+// (setHeld, queue.go). View's dedup guard (renderWorkSection, view.go) matches
 // the same constant to suppress a Reason that only restates BlockedBy, so a
 // format change on one side silently breaks the other (issue #1111).
 const blockerFailedPrefix = "blocker "
