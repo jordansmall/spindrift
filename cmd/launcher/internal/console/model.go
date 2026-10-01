@@ -128,7 +128,7 @@ type Model struct {
 	DetailModal *DetailModalState
 	// DetailCache holds every detail modal's loaded content this session,
 	// keyed by issue number, so reopening applies it synchronously with no
-	// fetch. "r" (DetailCacheInvalidatedMsg) is the only thing that clears it
+	// fetch. "R" (DetailCacheInvalidatedMsg) is the only thing that clears it
 	// (issue #1632).
 	DetailCache map[string]DetailModalCache
 }
