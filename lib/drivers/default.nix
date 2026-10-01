@@ -7,6 +7,8 @@
 let
   # sessionCacheDirRelative is deliberately absent: a Driver with no resumable
   # session state omits it (see lib/preambles.nix's renderDriverMountPreamble).
+  # When present, assertShape checks its shape: a non-empty relative path with
+  # no empty, "." or ".." segment (so no leading/trailing/doubled slash either).
   requiredAttrs = [
     "name"
     "package"
@@ -28,11 +30,35 @@ let
     driverName: entry:
     let
       missing = lib.filter (attr: !(entry ? ${attr})) requiredAttrs;
+      # isString is checked first so a non-string value short-circuits the
+      # segment check rather than throwing a type error out of splitString.
+      # A "." segment ("./x", "x/.") defeats agent/entrypoint.sh's
+      # string-equality chmod-skip guard just as a stray slash does.
+      sessionCacheDirRelativeBad =
+        entry ? sessionCacheDirRelative
+        && !(
+          builtins.isString entry.sessionCacheDirRelative
+          && !(lib.any (
+            seg:
+            lib.elem seg [
+              ""
+              "."
+              ".."
+            ]
+          ) (lib.splitString "/" entry.sessionCacheDirRelative))
+        );
+      errors =
+        lib.optional (
+          missing != [ ]
+        ) "Driver '${driverName}' is missing required attribute(s): ${lib.concatStringsSep ", " missing}"
+        ++ lib.optional sessionCacheDirRelativeBad "Driver '${driverName}' has an invalid sessionCacheDirRelative (must be a non-empty relative path with no empty, \".\" or \"..\" segment -- i.e. no leading/trailing or doubled slash), got: ${
+          if builtins.isString entry.sessionCacheDirRelative then
+            lib.generators.toPretty { } entry.sessionCacheDirRelative
+          else
+            "a ${builtins.typeOf entry.sessionCacheDirRelative}"
+        }";
     in
-    if missing == [ ] then
-      entry
-    else
-      throw "Driver '${driverName}' is missing required attribute(s): ${lib.concatStringsSep ", " missing}";
+    if errors != [ ] then throw (lib.concatStringsSep "; " errors) else entry;
 
   # Each slot must appear in a Driver's argvShape.order exactly once (ADR 0009,
   # issue #2534); the Go/bash side walks that order to assemble the CLI call.
