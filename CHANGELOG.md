@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.21.1](https://github.com/jordansmall/spindrift/compare/v0.21.0...v0.21.1) (2026-10-01)
+
+
+### Features
+
+* **forge:** add a host-side branch delete ([8d105bd](https://github.com/jordansmall/spindrift/commit/8d105bd1d896efe155a2557eafcfa0baed382834)), closes [#4112](https://github.com/jordansmall/spindrift/issues/4112)
+* **ledger:** reserve patch slots alongside promotions ([e4bd6f6](https://github.com/jordansmall/spindrift/commit/e4bd6f6148f1bf3b8faaddcc2318417580e5f6c8)), closes [#4111](https://github.com/jordansmall/spindrift/issues/4111)
+
+
+### Bug Fixes
+
+* **butler:** clean up a patch branch after a failed PR ([8c10a58](https://github.com/jordansmall/spindrift/commit/8c10a58d09280c551e504f43e8e95beaa796d5da)), closes [#4112](https://github.com/jordansmall/spindrift/issues/4112)
+* **butler:** deny prompt-input files at any depth ([c871e2e](https://github.com/jordansmall/spindrift/commit/c871e2ef7d085a8e5a82219935288b92beb4d48e)), closes [#4115](https://github.com/jordansmall/spindrift/issues/4115)
+* **butler:** forbid a leading dash in chore names ([a3ba380](https://github.com/jordansmall/spindrift/commit/a3ba380550d37c6deb91cbb558d4f65442e859bc)), closes [#4095](https://github.com/jordansmall/spindrift/issues/4095)
+* **butler:** gate landed patches despite lost Finish ([9831d52](https://github.com/jordansmall/spindrift/commit/9831d520f497a160a2667fdd0782e9200847a312))
+* **butler:** reserve patch slots before landing patches ([be64336](https://github.com/jordansmall/spindrift/commit/be64336f80ec24f0d85cbbaf7c46dd8454006a65)), closes [#4111](https://github.com/jordansmall/spindrift/issues/4111)
+* **daemon:** drop daemon: prefix from command and record errors ([ec3941f](https://github.com/jordansmall/spindrift/commit/ec3941fd761867f045914a8c8108e5c16b134e81)), closes [#4101](https://github.com/jordansmall/spindrift/issues/4101)
+* **daemon:** stop RunChild and RunDoctor prefixing errors ([de5e7a3](https://github.com/jordansmall/spindrift/commit/de5e7a3315e29f4da8047b3eb3beddb65b719550)), closes [#4101](https://github.com/jordansmall/spindrift/issues/4101)
+* **drivers:** reject malformed sessionCacheDirRelative ([547acb2](https://github.com/jordansmall/spindrift/commit/547acb2365042ee41388d24a696033cfe65eb3c6)), closes [#3348](https://github.com/jordansmall/spindrift/issues/3348)
+* **filer:** key symbol findings on file:Symbol ([78c6d45](https://github.com/jordansmall/spindrift/commit/78c6d45557a52c4fe7c868fa06dcbc303561ae3c)), closes [#4108](https://github.com/jordansmall/spindrift/issues/4108)
+* **forge:** make PushBranch create-only ([f625922](https://github.com/jordansmall/spindrift/commit/f62592287274ec3e7a3541419c2ae94735a2590f)), closes [#4104](https://github.com/jordansmall/spindrift/issues/4104)
+* **forge:** refuse pushing onto the base branch ([d08219d](https://github.com/jordansmall/spindrift/commit/d08219d865654502ed1c4480bd3a173c62fa734a)), closes [#4104](https://github.com/jordansmall/spindrift/issues/4104)
+* **launcher:** stop claiming the butler never promotes ([0b99156](https://github.com/jordansmall/spindrift/commit/0b991568beec9f1517fbdf304206d1b9d9846682)), closes [#4091](https://github.com/jordansmall/spindrift/issues/4091)
+* **registrydiscover:** follow in-tree symlinks at a ref ([1bcfc84](https://github.com/jordansmall/spindrift/commit/1bcfc84b2027900140f3c5538943fa963287eca8)), closes [#3332](https://github.com/jordansmall/spindrift/issues/3332)
+* **registryroutes:** reject ? and # in route paths ([5e29f63](https://github.com/jordansmall/spindrift/commit/5e29f63b5184899aa7b61dae4d64c13d0c5a7c93)), closes [#3321](https://github.com/jordansmall/spindrift/issues/3321)
+* **renderers:** credit mkHarness.nix in completions ([ff3b940](https://github.com/jordansmall/spindrift/commit/ff3b9401fce7f4eb5c0ac665d38c7a4eab1c9fd2)), closes [#4099](https://github.com/jordansmall/spindrift/issues/4099)
+* **renderers:** credit nix/regen.nix in regen headers ([18fe43a](https://github.com/jordansmall/spindrift/commit/18fe43a01ee931d1535f78e64a32c3a459dbe083)), closes [#4099](https://github.com/jordansmall/spindrift/issues/4099)
+* **rest:** keep the forge's message in StatusError ([2e80a73](https://github.com/jordansmall/spindrift/commit/2e80a73a402396b9e642def83ed58d846123c196)), closes [#4103](https://github.com/jordansmall/spindrift/issues/4103)
+* **review-loop:** never re-escalate a filed finding ([b6e6477](https://github.com/jordansmall/spindrift/commit/b6e64772188f1b0832cd9a02e3b429689f4153da)), closes [#4108](https://github.com/jordansmall/spindrift/issues/4108)
+* **settle:** dedup overlapping line keys within one run ([479aa82](https://github.com/jordansmall/spindrift/commit/479aa8263f76942186e00ce4d0297f23ad56dc21)), closes [#4108](https://github.com/jordansmall/spindrift/issues/4108)
+* **signalwire:** infer plain-section create/delete ([5132201](https://github.com/jordansmall/spindrift/commit/51322012fd6b1b625e4b6cb7bd42434a67e42675)), closes [#4116](https://github.com/jordansmall/spindrift/issues/4116)
+
+
+### Documentation
+
+* **butler:** cite chore.Budgets.Room in comment ([e65fcb7](https://github.com/jordansmall/spindrift/commit/e65fcb7e4887d7a74291353f2e1bead8ba54170f)), closes [#4145](https://github.com/jordansmall/spindrift/issues/4145)
+* **butler:** record patch gating after a lost Finish ([28e0be2](https://github.com/jordansmall/spindrift/commit/28e0be2e990b842203870fc74d2b236469bbf060))
+* **butler:** record patch slot reservation ([b9de497](https://github.com/jordansmall/spindrift/commit/b9de4972bfddd91058f3c77780c2a0d7eb6de62b)), closes [#4111](https://github.com/jordansmall/spindrift/issues/4111)
+* **butler:** record the create-only patch push ([b1dc5bc](https://github.com/jordansmall/spindrift/commit/b1dc5bc8e94b69a4d9076c5163b056cb71f90f2f)), closes [#4104](https://github.com/jordansmall/spindrift/issues/4104)
+* **butler:** record the failed-create recovery ([9c22139](https://github.com/jordansmall/spindrift/commit/9c22139c81487b0c0eb63d459715ef113a315b0a)), closes [#4112](https://github.com/jordansmall/spindrift/issues/4112)
+* **console:** name R as the DetailCache clearer ([05ccf14](https://github.com/jordansmall/spindrift/commit/05ccf14b821c9d983a2544e0708d7bba592cec9d)), closes [#4149](https://github.com/jordansmall/spindrift/issues/4149)
+* **console:** repoint blockerFailedPrefix dedup cross-reference ([778ae9e](https://github.com/jordansmall/spindrift/commit/778ae9e7cea493e54b3d2141c0a8eab0785774af)), closes [#4153](https://github.com/jordansmall/spindrift/issues/4153)
+* **entrypoint:** note eval-time cache dir check ([126bbe7](https://github.com/jordansmall/spindrift/commit/126bbe790bfb56e02b85ed7458765eb7b5dffebc))
+* **launcher:** credit nix/regen.nix with the flag tables ([30fd409](https://github.com/jordansmall/spindrift/commit/30fd40985538a48017ca1ef3029a1a355018e4e5)), closes [#4137](https://github.com/jordansmall/spindrift/issues/4137)
+* **nix:** repoint input-document struct comments ([5c19154](https://github.com/jordansmall/spindrift/commit/5c19154b6c247a5fb776deba1ff4ba1f4b842887)), closes [#4138](https://github.com/jordansmall/spindrift/issues/4138)
+* **reference:** split the doctor checks into a subsection ([ed97378](https://github.com/jordansmall/spindrift/commit/ed97378a606afd27241e3dd38f8f07d455509dfb)), closes [#4093](https://github.com/jordansmall/spindrift/issues/4093)
+* **registryroutes:** document the ?/# path ban ([345e679](https://github.com/jordansmall/spindrift/commit/345e6791f83090129088d7a270eba5c35baf1384))
+* **release-notes:** add 0.21.1 highlights ([3853f98](https://github.com/jordansmall/spindrift/commit/3853f989d6944ec098024a28c65626f3c9c5a504))
+
+
+### Tests
+
+* **butler:** pin hunk-shape create/delete gating ([839f359](https://github.com/jordansmall/spindrift/commit/839f3590b2b9e4a3f6fe43151a9b63b0d0118935)), closes [#4116](https://github.com/jordansmall/spindrift/issues/4116)
+* **forgejo:** assert a refused PR create keeps its message ([5ee6366](https://github.com/jordansmall/spindrift/commit/5ee6366165f0f72504ae8c26ac1ab4317c0c8968)), closes [#4103](https://github.com/jordansmall/spindrift/issues/4103)
+* **orchestrator:** blank every Box env var in handoff e2e ([5b9a20c](https://github.com/jordansmall/spindrift/commit/5b9a20c67b6daef9bdddd0805e4defba6bc8e679)), closes [#4088](https://github.com/jordansmall/spindrift/issues/4088)
+* **runner:** isolate the ISSUE_TEXT end-to-end test from Box env ([cd7b738](https://github.com/jordansmall/spindrift/commit/cd7b738909925786980cd143556e4187e120d99f)), closes [#4088](https://github.com/jordansmall/spindrift/issues/4088)
+
 ## [0.21.0](https://github.com/jordansmall/spindrift/compare/v0.20.2...v0.21.0) (2026-09-29)
 
 
