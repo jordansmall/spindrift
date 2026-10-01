@@ -6879,6 +6879,12 @@ which runs outside every slot's own goroutine.
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`, never started; `reason` is prefixed by cause, now including `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal instead carries the same `context-cancelled: …` reason a context cancellation anywhere else in the loop does), `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above), and `feature-branch-gone: …` (`--feature-branch` no longer exists on origin, see **Feature branch** above) alongside a halt-mapped child outcome, a context cancellation, a tripped breaker, or an invalid startup config |
 
+**Reasons and credentials.** A `reason` that embeds captured git or nix
+stderr (a failed `git fetch`, `git ls-remote`, or `nix eval`) has URL userinfo
+redacted first — the credentials in `scheme://user:pass@host` — and a `halt`
+reason the Status file records is the same string, so it inherits that. This
+is the only scrubbing: a `reason` is not otherwise guaranteed secret-free.
+
 **How `box` and `settled` reach the stream.** The child (a Launcher process,
 whether dispatch or research) does not write these two events to its own
 stdout — stdout already belongs to the Box and its subprocesses, and a
