@@ -2027,6 +2027,46 @@ func TestBuildIntreeHostRewrites_DuplicateUpstreamHostDropsBothAndReportsCollisi
 	}
 }
 
+// Issue #3706: hosts differing only in case are one logical host, since
+// ApplyInTreeBinding's own duplicate guard folds case; they collide exactly like
+// an identical host, reporting the first-seen spelling.
+func TestBuildIntreeHostRewrites_CaseVariantUpstreamHostsCollide(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "artifactory.example.test"},
+		{Prefix: "r1", UpstreamHost: "ARTIFACTORY.example.test"},
+		{Prefix: "r2", UpstreamHost: "distinct.example"},
+	}
+
+	rewrites, collisions := buildIntreeHostRewrites(routes, 9999)
+
+	if len(rewrites) != 1 || rewrites[0].UpstreamHost != "distinct.example" {
+		t.Errorf("rewrites = %+v, want exactly the distinct.example route surviving", rewrites)
+	}
+	if len(collisions) != 1 {
+		t.Fatalf("collisions = %+v, want exactly one collision entry", collisions)
+	}
+	if collisions[0].Host != "artifactory.example.test" {
+		t.Errorf("collisions[0].Host = %q, want first-seen spelling %q", collisions[0].Host, "artifactory.example.test")
+	}
+	if got := strings.Join(collisions[0].Prefixes, ","); got != "r0,r1" {
+		t.Errorf("collisions[0].Prefixes = %v, want [r0 r1] in table order", collisions[0].Prefixes)
+	}
+}
+
+// A port is part of the host identity: host and host:8443 stay distinct.
+func TestBuildIntreeHostRewrites_HostAndHostWithPortDoNotCollide(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "artifactory.example.test"},
+		{Prefix: "r1", UpstreamHost: "ARTIFACTORY.example.test:8443"},
+	}
+
+	rewrites, collisions := buildIntreeHostRewrites(routes, 9999)
+
+	if len(rewrites) != 2 || len(collisions) != 0 {
+		t.Errorf("rewrites = %+v, collisions = %+v, want two rewrites and no collision", rewrites, collisions)
+	}
+}
+
 // Non-blocking review finding on issue #3142: rewriteHostNames must not repeat a
 // host appearing in more than one rewrite, and must preserve first-occurrence
 // order rather than sorting.
@@ -3312,6 +3352,23 @@ func TestDropCollidedRoutes_SkipsRouteWithCollidedUpstreamHost(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "shared.example", Ecosystems: ecosystem.CargoRouteBlock("collided-one")},
 		{Prefix: "r1", UpstreamHost: "shared.example", Ecosystems: ecosystem.CargoRouteBlock("collided-two")},
+		{Prefix: "r2", UpstreamHost: "distinct.example", Ecosystems: ecosystem.CargoRouteBlock("valid-registry")},
+	}
+	_, collisions := buildIntreeHostRewrites(routes, 9999)
+
+	filtered := dropCollidedRoutes(routes, collisions)
+
+	if len(filtered) != 1 || filtered[0].Prefix != "r2" {
+		t.Errorf("filtered = %+v, want exactly one surviving route (r2/distinct.example)", filtered)
+	}
+}
+
+// Issue #3706: a case-variant twin of a collided host is the same host, so its
+// route must be dropped too.
+func TestDropCollidedRoutes_SkipsCaseVariantOfCollidedUpstreamHost(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "artifactory.example.test", Ecosystems: ecosystem.CargoRouteBlock("collided-one")},
+		{Prefix: "r1", UpstreamHost: "ARTIFACTORY.example.test", Ecosystems: ecosystem.CargoRouteBlock("collided-two")},
 		{Prefix: "r2", UpstreamHost: "distinct.example", Ecosystems: ecosystem.CargoRouteBlock("valid-registry")},
 	}
 	_, collisions := buildIntreeHostRewrites(routes, 9999)
