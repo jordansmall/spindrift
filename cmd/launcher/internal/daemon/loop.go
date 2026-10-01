@@ -354,11 +354,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	defer p.passBaton(slot, batonPassStopped)
 	// A slot that has left this function is doing nothing at all, whatever
 	// phase it last published (issue #3623): one returning mid-resolve would
-	// otherwise keep reporting "resolving", and siblingsEngaged would go on
-	// counting an exited slot as engaged, suppressing a sibling's real jam.
-	// Declared after passBaton so LIFO runs it first — the reset lands before
-	// the baton is freed, so the sibling that hand-off wakes never reads this
-	// slot as still resolving.
+	// otherwise keep reporting "resolving" in the status file. Declared after
+	// passBaton so LIFO runs it first — the reset lands before the baton is
+	// freed, so the sibling that hand-off wakes never reads this slot as
+	// still resolving.
 	defer p.setPhase(slot, PhaseIdle)
 	// wantResolve carries idleSleep's return across the loop: set when a
 	// jammed kind's wait outlived its first IdleFloor slice (idleSleep,
@@ -402,15 +401,13 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// slot happens not to prefer right now. A slot must never sleep
 			// out an idle wait holding the baton.
 			//
-			// The explicit setPhase matters here: a resolveOpportunistic
-			// call just above can have left this slot PhaseResolving on
-			// success, and siblingsEngaged (pool.go) counts that phase
-			// as engaged — a slot that fell into idleSleep still
-			// reporting PhaseResolving would suppress a sibling's real
-			// jam. The window is open by
-			// the time pickKind runs, so idle is the right phase to park
-			// in, the same one runSlot's own deferred setPhase resets to on
-			// every other exit.
+			// The explicit setPhase matters here: idleSleep publishes no
+			// phase of its own, and a resolveOpportunistic call just above
+			// can have left this slot PhaseResolving, so a sleeping slot
+			// would otherwise read as "resolving" in the status file. The
+			// window is open by the time pickKind runs, so idle is the
+			// right phase to park in, the same one runSlot's own deferred
+			// setPhase resets to on every other exit.
 			p.setPhase(slot, PhaseIdle)
 			p.passBaton(slot, batonPassIdle)
 			wantResolve = p.idleSleep(ctx, slot)
