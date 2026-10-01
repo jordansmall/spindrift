@@ -255,6 +255,49 @@ func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 	}
 }
 
+// Issue #3651: Bubble Tea drops its own signal registration on any quit, so
+// cmdConsole must hold a launcher-owned one across the whole body, including
+// the deferred cleanups that run after Run returns.
+func TestCmdConsole_HoldsStopSignalRegistrationThroughCleanup(t *testing.T) {
+	orig := installStopSignal
+	installs, releases := 0, 0
+	heldAtCleanup := false
+	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
+		installs++
+		return make(chan struct{}), make(chan struct{}), func() { releases++ }
+	}
+	t.Cleanup(func() { installStopSignal = orig })
+
+	c := baseConfig()
+	fc := forge.NewFake()
+	dir := tempLogDir(t)
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, runner.NewFake()),
+		settle:       settle.NewFake(),
+		// lc.cleanup is the last teardown to run before stopCleanup, so a hold
+		// seen here also covers launch.Wait and researchFactory.Cleanup.
+		cleanup: func() { heldAtCleanup = installs == 1 && releases == 0 },
+	}
+
+	var stdout bytes.Buffer
+	if got := cmdConsole(lc, strings.NewReader("q"), &stdout); got != 0 {
+		t.Errorf("cmdConsole = %d, want 0", got)
+	}
+	if installs != 1 {
+		t.Errorf("installStopSignal calls = %d, want 1", installs)
+	}
+	if !heldAtCleanup {
+		t.Error("stop-signal registration was not held when lc.cleanup ran")
+	}
+	if releases != 1 {
+		t.Errorf("stop-signal cleanup calls = %d, want 1", releases)
+	}
+}
+
 // Issue #1583: Bubble Tea owns the terminal in alt-screen raw mode, so a
 // dispatch's heartbeat writer echoing to os.Stdout stairsteps down the screen
 // instead of returning to column 0.

@@ -1211,8 +1211,9 @@ var snapshotGeneration = runner.SnapshotGeneration
 
 // installStopSignal is a package-level test seam, like snapshotGeneration
 // above, so tests drive waves.Config.Stop and waves.Config.Abort through
-// fake channels instead of registering a real signal handler or sending a
-// real SIGTERM/SIGINT to the test binary (#3520, #3521).
+// fake channels, or spy on cmdConsole's channel-discarding hold, instead of
+// registering a real signal handler or sending a real SIGTERM/SIGINT to the
+// test binary (#3520, #3521, #3651).
 var installStopSignal = stopsignal.Notify
 
 // exitConfigInvalid is the exit code for a bootstrap failure whose error wraps
@@ -1858,7 +1859,16 @@ func cmdBuild() int {
 // the headless exit-4 path into an in-session banner and one-key rebuild
 // (issue #652). stdin/stdout are threaded so a test can drive the real Bubble
 // Tea program with a scripted reader instead of a live TTY.
+//
+// The launcher holds its own stop-signal registration for the whole body:
+// Bubble Tea drops its own on any quit (keypress or signal), and the window
+// after Run returns covers launch.Wait's drain plus the deferred cleanups.
+// The channels are discarded because Console's Boxes have no Stop/Abort
+// wiring, so once quit it is SIGKILL-only (#3651, #3520). Taking it before
+// Bubble Tea's own also swallows a signal in the instant before Run starts.
 func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
+	_, _, stopCleanup := installStopSignal()
+	defer stopCleanup()
 	defer lc.cleanup()
 	// Bubble Tea owns the terminal in alt-screen raw mode, where a heartbeat
 	// line's bare \n moves the cursor down but not back to column 0,
