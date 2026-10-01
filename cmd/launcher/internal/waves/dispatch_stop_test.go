@@ -433,9 +433,9 @@ func TestDispatch_NilStopAndAbort_OrdinarySuccessUnaffected(t *testing.T) {
 }
 
 // releasedTo reports how many times fc moved num from InProgress to
-// Dispatchable, and whether the operator-termination comment landed on it --
-// the two halves of a released claim.
-func releasedTo(fc *forge.Fake, num string) (int, bool) {
+// Dispatchable, and whether a reclaim comment containing match landed on it
+// -- the two halves of a released claim.
+func releasedTo(fc *forge.Fake, num, match string) (int, bool) {
 	var released int
 	for _, call := range fc.TransitionStateCalls {
 		if call.Num == num && call.From == forge.InProgress && call.To == forge.Dispatchable {
@@ -444,7 +444,7 @@ func releasedTo(fc *forge.Fake, num string) (int, bool) {
 	}
 	var commented bool
 	for _, call := range fc.CommentCalls {
-		if call.Num == num && strings.Contains(call.Body, "Terminated by operator") {
+		if call.Num == num && strings.Contains(call.Body, match) {
 			commented = true
 		}
 	}
@@ -483,9 +483,9 @@ func TestDispatch_ClaimedUnblocked_StopPreClosed_ReleasesInheritedClaim(t *testi
 	if len(fr.RunCalls) != 0 {
 		t.Fatalf("RunCalls: got %d, want 0 (a pre-closed Stop must launch nothing)", len(fr.RunCalls))
 	}
-	released, commented := releasedTo(fc, "42")
+	released, commented := releasedTo(fc, "42", "Released on shutdown")
 	if released == 0 || !commented {
-		t.Fatalf("release of #42: transitions=%d commented=%v, want at least one InProgress->Dispatchable plus the operator comment (TransitionStateCalls=%+v CommentCalls=%+v)", released, commented, fc.TransitionStateCalls, fc.CommentCalls)
+		t.Fatalf("release of #42: transitions=%d commented=%v, want at least one InProgress->Dispatchable plus the drain-decline release comment (TransitionStateCalls=%+v CommentCalls=%+v)", released, commented, fc.TransitionStateCalls, fc.CommentCalls)
 	}
 }
 
@@ -518,7 +518,7 @@ func TestDispatch_DiscoveredStopPreClosed_ReleasesNothing(t *testing.T) {
 		t.Fatalf("Dispatch: got %v, want ErrSignalledStop", err)
 	}
 	for _, num := range []string{"1", "2"} {
-		released, commented := releasedTo(fc, num)
+		released, commented := releasedTo(fc, num, terminate.CommentSuffix)
 		if released != 0 || commented {
 			t.Errorf("#%s: transitions=%d commented=%v, want none (no claim was ever taken)", num, released, commented)
 		}
@@ -570,7 +570,7 @@ func TestDispatch_StopAfterClaimBeforeLaunch_ReleasesOwnClaim(t *testing.T) {
 	if len(fr.RunCalls) != 0 {
 		t.Fatalf("RunCalls: got %d, want 0 (Launch declined before arming)", len(fr.RunCalls))
 	}
-	released, commented := releasedTo(fc, "1")
+	released, commented := releasedTo(fc, "1", "Released on shutdown")
 	if released == 0 || !commented {
 		t.Fatalf("release of #1: transitions=%d commented=%v, want the claim handed back (TransitionStateCalls=%+v CommentCalls=%+v)", released, commented, fc.TransitionStateCalls, fc.CommentCalls)
 	}

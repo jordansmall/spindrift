@@ -182,7 +182,7 @@ func (g *Gate) releaseClaim(num string) {
 	}
 	delete(g.claimed, num)
 	g.mu.Unlock()
-	reclaimOne(g.it, g.cf, nil, g.reg, num)
+	reclaimOne(g.it, g.cf, nil, g.reg, num, terminate.DrainDecline)
 	g.mu.Lock()
 }
 
@@ -305,8 +305,8 @@ func (g *Gate) Signalled() bool {
 // reclaimOne runs terminate.Reclaim for a single issue, logging a failure to
 // stderr rather than returning it -- the same best-effort discipline
 // AbortInFlight uses per issue.
-func reclaimOne(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, num string) {
-	if err := terminate.Reclaim(it, cf, reaper, reg, num); err != nil {
+func reclaimOne(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, num string, trigger terminate.Trigger) {
+	if err := terminate.Reclaim(it, cf, reaper, reg, num, trigger); err != nil {
 		fmt.Fprintf(os.Stderr, "shutdown: reclaim #%s: %v\n", num, err)
 	}
 }
@@ -326,7 +326,7 @@ func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.R
 	sort.Strings(sorted)
 	fmt.Printf("==> abort requested; terminating %d outstanding Box(es)\n", len(sorted))
 	for _, num := range sorted {
-		reclaimOne(it, cf, reaper, reg, num)
+		reclaimOne(it, cf, reaper, reg, num, terminate.SignalAbort)
 	}
 }
 

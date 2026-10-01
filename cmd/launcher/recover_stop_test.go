@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -237,8 +238,8 @@ func TestRecoverByNumber_IssueFetchFails_NoWatcherLeak(t *testing.T) {
 // agent-complete -- the blocking finding's own scenario (issue #3522,
 // recoverByNumber's SettleAdopted arm). It also flips the issue to Complete first, mirroring what a
 // real settle does on that path, so a wrongly-triggered reclaim is visible
-// as a Complete->Dispatchable transition plus a "Terminated by operator"
-// comment, not just a missing one.
+// as a Complete->Dispatchable transition plus a reclaim comment under any
+// trigger, not just a missing one.
 type abortAfterSettleAdopted struct {
 	*settle.Fake
 	fc      *forge.Fake
@@ -300,8 +301,8 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 		t.Errorf("issue #42 labels = %v, want no dispatchable label %q (must not be reclaimed after settling)", iss.Labels, c.label)
 	}
 	for _, comment := range fc.CommentsFor["42"] {
-		if strings.Contains(comment.Body, "Terminated by operator") {
-			t.Errorf("issue #42 got a Terminated-by-operator comment after it already settled: %q", comment.Body)
+		if strings.Contains(comment.Body, terminate.CommentSuffix) {
+			t.Errorf("issue #42 got a reclaim comment after it already settled: %q", comment.Body)
 		}
 	}
 }
