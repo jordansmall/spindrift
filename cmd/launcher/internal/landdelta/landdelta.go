@@ -48,7 +48,22 @@ type Delta struct {
 type Range struct {
 	Start int `json:"start"`
 	Count int `json:"count"`
+	// PostCount is the hunk's post-image line count (from `+M,N`), recorded
+	// so a consumer can bound a hunk that adds more lines than it replaces
+	// (issue #3532). Zero means unknown or a pure deletion; a consumer then
+	// falls back to Count.
+	PostCount int `json:"post_count,omitempty"`
 }
+
+// End is the last pre-image line the hunk touched; a pure insertion ends
+// where it starts.
+func (r Range) End() int { return r.Start + max(r.Count, 1) - 1 }
+
+// ReachEnd stretches End to the hunk's longer side, so a hunk that adds more
+// lines than it replaces reaches as far as the lines it adds. It is a
+// comparison bound, not a pre-image line: past End it names lines nothing
+// touched.
+func (r Range) ReachEnd() int { return r.Start + max(r.Count, r.PostCount, 1) - 1 }
 
 // Summary renders Delta as the one-line, PR-visible report (issue #3244). It
 // states the zero case explicitly so a reader never has to wonder whether the
@@ -295,8 +310,10 @@ func abs(n int) int {
 // hunkHeaderRe matches a unified-diff hunk header's old side, anchored to
 // column zero so a `+`-prefixed content line that happens to start with
 // "@@" (legal diff content) can never match. Count is optional: git omits
-// ",Count" when it is 1.
-var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+`)
+// ",Count" when it is 1. It also captures the new side's start and count
+// (groups 3 and 4), both optional, so a malformed or absent post side never
+// drops the hunk: it just yields PostCount 0.
+var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(?:(\d+)(?:,(\d+))?)?`)
 
 // oldPathHeaderRe matches a `--- a/<path>` line, the pre-image path, and
 // newPathHeaderRe the `+++ b/<path>` post-image one. Hunk content takes
@@ -355,10 +372,19 @@ func parsePreImageRanges(out string) map[string][]Range {
 				continue
 			}
 		}
+		postCount := 0
+		if m[3] != "" {
+			postCount = 1
+			if m[4] != "" {
+				if postCount, err = strconv.Atoi(m[4]); err != nil {
+					postCount = 0
+				}
+			}
+		}
 		if ranges == nil {
 			ranges = map[string][]Range{}
 		}
-		ranges[path] = append(ranges[path], Range{Start: start, Count: count})
+		ranges[path] = append(ranges[path], Range{Start: start, Count: count, PostCount: postCount})
 	}
 	return ranges
 }
