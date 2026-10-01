@@ -394,7 +394,7 @@ setup() {
   local section
   section="$(issue_prompt_outcome_section)"
   [ -n "$section" ]
-  grep -qF 'SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason>' <<<"$section"
+  grep -qF 'SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<text>' <<<"$section"
   grep -q 'valid `status` values here are `ready` and `blocked`' <<<"$section"
   grep -qi 'already-resolved' <<<"$section"
   grep -qi 'ALREADY RESOLVED gate' <<<"$section"
