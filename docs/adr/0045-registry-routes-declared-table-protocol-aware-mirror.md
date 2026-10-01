@@ -404,7 +404,8 @@ an empty-valued var in the child. That guarantee is about unset names, not
 empty ones: `os.LookupEnv` reports `ok` for a set-but-empty variable, so a
 launcher running with `HOME=""` still forwards `HOME=` to the child.
 `HOME` is what a helper binary needs to locate its own config; `PATH` is
-not what finds the helper itself — `exec.Command` resolves `argv[0]`
+not what finds the helper itself — `exec.CommandContext`
+(`cmd/launcher/internal/credresolver/resolver.go:309`) resolves `argv[0]`
 through the launcher's own `PATH` at construction time, before `cmd.Env`
 applies — but the forwarded `PATH` is what the helper's *own* children,
 if it spawns any, see when resolving their argv. The
