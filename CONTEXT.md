@@ -172,11 +172,16 @@ are still private, and so are runtime inputs rather than flake values.
 Resolved once at launcher
 startup, and unset from the launcher's own environment immediately after, so
 the ambient environment cannot carry it into a Box. Within that resolution
-step, every `env` source is unset before any `exec` source runs — but an
-earlier `validate`-time peek and doctor's route gate run before the unset
-and lean on the allowlist instead, so on every path an `exec` helper sees
-only a small allowlisted environment, never another route's credential or
-the launcher's own tokens (issue #3151; see ADR 0045).
+step, every `env` source is unset before any `exec` source runs, so
+there an `exec` helper never observes another route's `env` credential.
+On every path an `exec` helper's environment is drawn from a fixed
+allowlist, never the launcher's own tokens. Peek paths never unset
+anything, and two of them run `exec` helpers: the `validate`-time
+cross-knob check, which runs before that step, and doctor's route gate,
+part of a separate command outside it entirely. On those two paths a
+credential stored under an allowlisted name stays readable by a sibling
+route's `exec` helper (issue #3151). ADR 0045 is the full record; change
+it and this entry together.
 _Avoid_: secret, credential (the value itself), token path.
 
 **Registry route**:
