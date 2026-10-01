@@ -35,6 +35,16 @@ func assertNoTransitionOrComment(t *testing.T, fc *forge.Fake) {
 	}
 }
 
+// assertClaimUntouched checks issue 1 still wears the live run's
+// agent-in-progress claim and was never demoted to agent-failed.
+func assertClaimUntouched(t *testing.T, fc *forge.Fake) {
+	t.Helper()
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, "agent-in-progress") || containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("live run's claim must stand untouched; labels=%v", iss.Labels)
+	}
+}
+
 // assertNoPRWriteAfterTermination extends assertNoTransitionOrComment with a
 // MarkReady check, for call sites whose path never reaches gateGreen's
 // MarkReady flip at all. It must not be used where termination lands during

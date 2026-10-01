@@ -152,8 +152,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		case landingFailed:
 			fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
 		case landingAbandoned:
-			// Terminate already recorded its own comment and log line, so a
-			// usage comment here would be noise.
+			// See landingAbandoned: another actor owns the issue, so a usage
+			// comment here would be noise.
 			return
 		}
 		s.postUsageComment(num, d)

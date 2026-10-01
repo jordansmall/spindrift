@@ -166,6 +166,12 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			if s.terminated(num, gen) {
 				return landingAbandoned, ""
 			}
+			// No Box started: a live run owns this issue's in-progress claim,
+			// so leave its state alone and do not retry (issue #3655).
+			if result.AlreadyInFlight {
+				fmt.Printf("    #%s  landing=%s  status=already-in-flight  ~~ fix pass %d skipped; live run continues\n", num, pr, attempt+1)
+				return landingAbandoned, ""
+			}
 			if !result.Success {
 				fmt.Printf("    #%s  landing=%s  status=fix-failed  !! fix pass %d exited non-zero — aborting self-heal\n", num, pr, attempt+1)
 				result.ReportFailureReason(num)

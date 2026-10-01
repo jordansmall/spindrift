@@ -31,7 +31,7 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 	case landingFailed:
 		fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, prURL, reason)
 	case landingAbandoned:
-		// Terminate already recorded its own comment and log line.
+		// See landingAbandoned: another actor owns the issue's comment and state.
 	}
 }
 

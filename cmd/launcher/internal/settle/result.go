@@ -70,9 +70,11 @@ const (
 	// landingMerged is CI green and the PR or push-only branch merged. The
 	// issue stays at agent-complete.
 	landingMerged
-	// landingAbandoned is the operator's Terminate (ADR 0024, issue #649)
-	// landing inside selfHeal. Terminate already did the transition, comment,
-	// and log line; callers must take no further action.
+	// landingAbandoned is either the operator's Terminate (ADR 0024, issue
+	// #649) landing inside selfHeal, which already did the transition, comment,
+	// and log line; or a fix pass or conflict-resolve Box skipped because the
+	// issue's own Box is already in flight (issue #3655), where the live run
+	// owns the issue's state. Callers must take no further action.
 	landingAbandoned
 )
 
