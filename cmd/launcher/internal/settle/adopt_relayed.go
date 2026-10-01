@@ -72,8 +72,8 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 	case landingFailed:
 		fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
 	case landingAbandoned:
-		// Terminate already recorded its own comment and log line; a usage
-		// comment here would be noise on an issue it reclaimed.
+		// See landingAbandoned: another actor owns the issue, so a usage
+		// comment here would be noise.
 		return true
 	}
 	s.postUsageComment(num, d)

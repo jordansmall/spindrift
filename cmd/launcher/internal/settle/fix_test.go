@@ -318,6 +318,35 @@ func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 	}
 }
 
+// An AlreadyInFlight fix pass never started a Box: a sibling container for this
+// issue is live and owns its in-progress claim, so selfHeal must abandon without
+// a Failed transition, a comment, or another pass (issue #3655).
+func TestSelfHeal_FixAlreadyInFlightLeavesIssueUntouched(t *testing.T) {
+	c := fixConfig(3)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{
+		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
+	})
+	s := newTestSettle(c, fc, fc)
+
+	d := dispatch.NewFake()
+	d.FixResult = dispatch.Result{AlreadyInFlight: true}
+	landing, reason := s.selfHeal(d, "1", 0, testPR)
+
+	if landing != landingAbandoned {
+		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	}
+	if reason != "" {
+		t.Errorf("selfHeal reason = %q, want empty", reason)
+	}
+	if len(d.FixCalls) != 1 {
+		t.Errorf("expected exactly 1 fix call (no retry), got %+v", d.FixCalls)
+	}
+	assertNoTransitionOrComment(t, fc)
+	assertClaimUntouched(t, fc)
+}
+
 // When d.Fix returns a Result whose Err is set, the box-never-launched case
 // (dispatch/retry.go, issue #3119), selfHeal must print that reason on stderr
 // alongside the status=fix-failed line, matching the "?? #N: %v" diagnostic
