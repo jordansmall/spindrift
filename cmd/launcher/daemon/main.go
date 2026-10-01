@@ -392,7 +392,7 @@ func summarizeSlot(s daemon.SlotStatus) string {
 }
 
 // summarizeStatus renders cmdStatus's one human sentence for stderr. It
-// covers all four cases ReadStatus's doc distinguishes, checked in this
+// covers the cases ReadStatus's doc distinguishes, checked in this
 // order because the lock, not the status file, is the liveness truth: a
 // held lock always wins over what the (possibly stale or absent) status
 // file says, and only an unheld lock lets a present file mean "stale".
@@ -407,6 +407,8 @@ func summarizeStatus(report daemon.StatusReport) string {
 		return fmt.Sprintf("daemon: live, state=%s, pid=%d, slots=[%s]", status.State, status.Pid, strings.Join(slots, " "))
 	case report.LockHeld && report.Status == nil:
 		return fmt.Sprintf("daemon: a daemon holds this checkout but has not published its status yet (%s)", report.Holder)
+	case report.LockHeld && report.HolderPidGone:
+		return fmt.Sprintf("daemon: a daemon holds this checkout and is still starting; its lock line and the published status file are both a predecessor's leftover (pid=%d, state=%s)", report.Status.Pid, report.Status.State)
 	case report.LockHeld:
 		return fmt.Sprintf("daemon: a daemon holds this checkout, but the published status file is a predecessor's leftover (pid=%d, state=%s), not this holder's (%s)", report.Status.Pid, report.Status.State, report.Holder)
 	case report.Stale:
