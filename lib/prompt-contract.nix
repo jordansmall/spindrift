@@ -622,6 +622,7 @@ rec {
     {
       id = "outcome";
       token = "SPINDRIFT_OUTCOME";
+      # issue-prompt.md's Grammar line is pinned to this (issue #3373).
       fieldShape = "issue=<num> landing=<landing-ref> status=<status> note=<text>";
       defense = "structural";
       carrier = "final-message";

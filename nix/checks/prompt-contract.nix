@@ -10,8 +10,10 @@ let
   inherit (pkgs.lib)
     assertMsg
     concatStringsSep
+    hasInfix
     hasSuffix
     removeSuffix
+    replaceStrings
     ;
   issuePromptSource = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
   researchPromptSource = builtins.readFile ../../templates/default/prompts/research-prompt.md;
@@ -725,6 +727,22 @@ in
     assert assertMsg (bad == [ ])
       "every markerChannels row's fieldShape must be a non-empty string, offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-marker-channels-every-row-field-shape-non-empty" { } "touch $out";
+
+  # issue-prompt.md's Grammar line is the one template line that restates the
+  # outcome grammar, so it is pinned to fieldShape (issue #3373). The
+  # filled-in example lines (fragments, butler/research prompts) keep their
+  # descriptive `note=<short reason>` placeholders on purpose.
+  prompt-contract-issue-prompt-grammar-matches-outcome-field-shape =
+    let
+      outcomeRow = builtins.head (builtins.filter (r: r.id == "outcome") promptContract.markerChannels);
+      expected =
+        "Grammar: `SPINDRIFT_OUTCOME "
+        + (replaceStrings [ "issue=<num>" ] [ "issue=\${ISSUE_NUMBER}" ] outcomeRow.fieldShape)
+        + "`";
+    in
+    assert assertMsg (hasInfix expected issuePromptSource)
+      "templates/default/prompts/issue-prompt.md's Grammar line must match the outcome markerChannels row's fieldShape verbatim, expected to find: ${expected}";
+    pkgs.runCommand "prompt-contract-issue-prompt-grammar-matches-outcome-field-shape" { } "touch $out";
 
   # Cross-registry drift guard, so one marker spelling cannot diverge from the
   # other: markerChannels' `token` and validateMarkers' `marker` name the same
