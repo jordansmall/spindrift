@@ -1030,8 +1030,10 @@ _Avoid_: heartbeat log, status log, activity log, event stream.
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
 to learn where the deliverable landed and whether the Dispatch is ready for
 settle, blocked, or failed. Grammar:
-`SPINDRIFT_OUTCOME issue=<num> landing=<ref> status=<status> note=<text>`
-where `note` may contain spaces and `=`. `landing` is the landing reference —
+`SPINDRIFT_OUTCOME issue=<num> landing=<landing-ref> status=<status> note=<text>`
+where `note` may contain spaces and `=`. The `outcome` row's `fieldShape` in
+`lib/prompt-contract.nix` is the source for this grammar; `issue-prompt.md`'s
+Grammar line is checked against it. `landing` is the landing reference —
 a PR URL (`github` Code Forge), a branch ref (push-only `git`), or a
 verdict-comment URL (research dispatch); `status` values are scoped to the
 Dispatch kind (`ready`/`blocked`/`ambiguous`/`already-resolved` for work, the

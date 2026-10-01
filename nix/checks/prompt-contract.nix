@@ -10,10 +10,8 @@ let
   inherit (pkgs.lib)
     assertMsg
     concatStringsSep
-    hasInfix
     hasSuffix
     removeSuffix
-    replaceStrings
     ;
   issuePromptSource = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
   researchPromptSource = builtins.readFile ../../templates/default/prompts/research-prompt.md;
@@ -730,17 +728,18 @@ in
 
   # issue-prompt.md's Grammar line is the one template line that restates the
   # outcome grammar, so it is pinned to fieldShape (issue #3373). The
-  # filled-in example lines (fragments, butler/research prompts) keep their
-  # descriptive `note=<short reason>` placeholders on purpose.
+  # filled-in example lines (issue-prompt.md's own CODE_FORGE=local step,
+  # fragments, butler/research prompts) keep their descriptive note
+  # placeholders on purpose.
   prompt-contract-issue-prompt-grammar-matches-outcome-field-shape =
     let
       outcomeRow = builtins.head (builtins.filter (r: r.id == "outcome") promptContract.markerChannels);
       expected =
-        "Grammar: `SPINDRIFT_OUTCOME "
-        + (replaceStrings [ "issue=<num>" ] [ "issue=\${ISSUE_NUMBER}" ] outcomeRow.fieldShape)
+        "Grammar: `${outcomeRow.token} "
+        + (pkgs.lib.replaceStrings [ "issue=<num>" ] [ "issue=\${ISSUE_NUMBER}" ] outcomeRow.fieldShape)
         + "`";
     in
-    assert assertMsg (hasInfix expected issuePromptSource)
+    assert assertMsg (pkgs.lib.hasInfix expected issuePromptSource)
       "templates/default/prompts/issue-prompt.md's Grammar line must match the outcome markerChannels row's fieldShape verbatim, expected to find: ${expected}";
     pkgs.runCommand "prompt-contract-issue-prompt-grammar-matches-outcome-field-shape" { } "touch $out";
 
