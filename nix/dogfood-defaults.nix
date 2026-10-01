@@ -31,16 +31,23 @@ in
     p.mandoc
   ];
   # `defaultRoster` sources models and efforts by roster entry name, not the
-  # legacy per-agent knobs (issues #2386, #2388, #2426). Scout, reviewer, and
-  # worker inherit the `lib/env-schema.nix` defaults (issues #2387, #2433,
-  # #2434, #2435, #2512); a local pin would duplicate them. `filer` is the one
-  # exception: its default is empty, so findings would stay in PR bodies (#393).
+  # legacy per-agent knobs (issues #2386, #2388, #2426). Every pinned value
+  # mirrors lib/default-model-fixture.nix's dogfoodPins. Scout inherits the
+  # `lib/env-schema.nix` default (issues #2433, #2434, #2435). `filer` is
+  # pinned because its default is empty, so findings would stay in PR bodies
+  # (#393). `reviewer` and `worker` run the 5.5 models ahead of the schema
+  # defaults; the reviewer's own roster effort (high) is what the code-owned
+  # review pass runs at, so no `reviewEffort` knob is set (issue #2512).
   roster = rosterLib.defaultRoster {
     models = {
       filer = "claude-haiku-4-5-20251001";
+      reviewer = "claude-opus-5-5";
+      worker = "claude-sonnet-5-5";
     };
   };
   defaults = {
+    model = "claude-opus-5-5";
+    effort = "high";
     mergeMode = "immediate";
     autoFormat = true;
     autoLint = true;

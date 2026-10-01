@@ -192,10 +192,10 @@ in
     grep -q '"effort":"${rosterDefaults.worker.effort}"' <<<"$worker_line" \
       || { echo "worker-only harness missing default worker effort in baked template" >&2; exit 1; }
 
-    # The dogfood harness (issue #2435 AC3): filer is the sole explicit pin
-    # (issue #616); scout, reviewer, and worker are all unmentioned in the
-    # roster and must still show up in the baked template, inherited from
-    # their lib/env-schema.nix schema defaults. Each model literal is matched
+    # The dogfood harness (issue #2435 AC3): filer, reviewer, and worker carry
+    # the dogfood's explicit pins (issue #616); scout is unmentioned in the
+    # roster and must still show up in the baked template, inherited from its
+    # lib/env-schema.nix schema default. Each model literal is matched
     # against its own agent object, not the whole template line -- none of
     # these objects nest braces (tools is an array), so `[^}]*` can't overrun
     # into the next top-level key.
@@ -206,18 +206,16 @@ in
     assert_agent_model "$dogfood_line" scout ${defaultModelFixture.schemaDefaults.scoutModel} \
       "dogfood harness" "missing the inherited model"
 
-    # Anchored to the fixture's literal "claude-opus-5"
-    # (defaultModelFixture.schemaDefaults.reviewModel), not
-    # reviewModelSchemaDefault -- same rationale as
-    # nix/checks/equivalence.nix's dogfood-roster-and-review-effort reviewer
-    # assertion: the code-owned review pass binds to this exact model, so the
-    # guard must catch a schema-default regression away from it, not just
-    # confirm the bake mirrors whatever the schema currently says.
-    assert_agent_model "$dogfood_line" reviewer ${defaultModelFixture.schemaDefaults.reviewModel} \
-      "dogfood harness" "missing the anchored claude-opus-5 model"
+    # Anchored to the fixture's hand-typed pin, not the dogfood source, for
+    # the same reason as nix/checks/equivalence.nix's
+    # dogfood-roster-and-review-effort reviewer assertion: the code-owned review
+    # pass binds to this exact model, so the guard must catch a drift away from
+    # it, not just confirm the bake mirrors whatever the config currently says.
+    assert_agent_model "$dogfood_line" reviewer ${defaultModelFixture.dogfoodPins.reviewer} \
+      "dogfood harness" "missing the pinned model"
 
-    assert_agent_model "$dogfood_line" worker ${defaultModelFixture.schemaDefaults.workerModel} \
-      "dogfood harness" "missing the inherited model"
+    assert_agent_model "$dogfood_line" worker ${defaultModelFixture.dogfoodPins.worker} \
+      "dogfood harness" "missing the pinned model"
 
     # A Consumer that sets no model knobs and passes no roster (bats harness:
     # no `defaults`, no `roster`) must still get a reviewer on the schema

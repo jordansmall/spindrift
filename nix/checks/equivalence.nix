@@ -1170,10 +1170,11 @@ in
     pkgs.runCommand "dogfood-memory-limit-platform-aware" { } "touch $out";
 
   # The dogfood config sources agent models and efforts from an explicit roster
-  # (issue #2388): `defaults` must not carry `filerModel`, the roster's `filer`
-  # entry alone pins the Filer's tuned model (#393), and scout/reviewer/worker
-  # resolve to lib/env-schema.nix defaults (#2433, #2434). Expectations anchor to
-  # defaultModelFixture, not the schema, which would pass under drift (#2435 AC2).
+  # (issue #2388): `defaults` must not carry `filerModel`, the roster's
+  # filer/reviewer/worker entries carry the dogfood's local pins (#393), and
+  # scout resolves to its lib/env-schema.nix default (#2433, #2434).
+  # Expectations anchor to defaultModelFixture, not the schema, which would pass
+  # under drift (#2435 AC2).
   dogfood-roster-and-review-effort =
     let
       inherit (pkgs.lib)
@@ -1194,9 +1195,9 @@ in
       rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
       expectedModels = {
         filer = defaultModelFixture.dogfoodPins.filer;
-        reviewer = defaultModelFixture.schemaDefaults.reviewModel;
+        reviewer = defaultModelFixture.dogfoodPins.reviewer;
         scout = defaultModelFixture.schemaDefaults.scoutModel;
-        worker = defaultModelFixture.schemaDefaults.workerModel;
+        worker = defaultModelFixture.dogfoodPins.worker;
       };
       modelMismatches = filterAttrs (
         name: model: rosterByName.${name}.model or null != model
@@ -1212,6 +1213,10 @@ in
     in
     assert assertMsg (!(defaults.defaults ? filerModel))
       "dogfood defaults must not carry the deprecated filerModel knob once a roster is set (issue #2388)";
+    assert assertMsg (defaults.defaults.model or null == defaultModelFixture.dogfoodPins.model)
+      "dogfood coordinator model ${
+        builtins.toJSON (defaults.defaults.model or null)
+      } != dogfoodPins.model ${defaultModelFixture.dogfoodPins.model}";
     assert assertMsg (
       modelMismatches == { }
     ) "dogfood roster per-agent model mismatch(es): ${builtins.toJSON modelMismatches}";
@@ -1220,12 +1225,13 @@ in
     ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
     pkgs.runCommand "dogfood-roster-and-review-effort" { } "touch $out";
 
-  # AC1 (issue #2435): the dogfood roster must name only the Filer. The resolved
+  # AC1 (issue #2435): the dogfood roster must name exactly the agents
+  # defaultModelFixture.dogfoodPins lists, besides the Filer. The resolved
   # roster can't tell an unmentioned agent from one re-pinned to the value its
   # schema default already produces, so grep the source instead, whitespace
   # tolerantly, and scan the whole file for the legacy scoutModel/reviewModel/
   # workerModel knobs, which take the same precedence as a `models` entry.
-  dogfood-roster-names-only-filer =
+  dogfood-roster-names-only-pins =
     let
       inherit (pkgs.lib)
         assertMsg
@@ -1242,11 +1248,13 @@ in
           ""
         else
           head (splitString "};" (builtins.elemAt afterModels 1));
-      named = filter (name: builtins.match ".*${name}[[:space:]]*=.*" modelsBlock != null) [
+      candidates = [
         "scout"
         "reviewer"
         "worker"
       ];
+      named = filter (name: builtins.match ".*${name}[[:space:]]*=.*" modelsBlock != null) candidates;
+      pinned = filter (name: defaultModelFixture.dogfoodPins ? ${name}) candidates;
       legacyKnobsFound = filter (knob: hasInfix knob src) [
         "scoutModel ="
         "reviewModel ="
@@ -1254,12 +1262,12 @@ in
       ];
     in
     assert assertMsg (modelsBlock != "")
-      "dogfood-roster-names-only-filer couldn't find a `models = { ... }` block in nix/dogfood-defaults.nix -- check moved or renamed";
-    assert assertMsg (named == [ ])
-      "dogfood roster's models attrset must name only filer (issue #2435 AC1); found: ${concatStringsSep ", " named}";
+      "dogfood-roster-names-only-pins couldn't find a `models = { ... }` block in nix/dogfood-defaults.nix -- check moved or renamed";
+    assert assertMsg (named == pinned)
+      "dogfood roster's models attrset must name exactly the dogfoodPins agents [${concatStringsSep ", " pinned}] besides filer (issue #2435 AC1); found: [${concatStringsSep ", " named}]";
     assert assertMsg (legacyKnobsFound == [ ])
       "dogfood-defaults.nix must not pass the legacy scoutModel/reviewModel/workerModel knobs to defaultRoster -- they take the same precedence as a `models` entry and would re-pin an agent that must stay unmentioned (issue #2435 AC1); found: ${concatStringsSep ", " legacyKnobsFound}";
-    pkgs.runCommand "dogfood-roster-names-only-filer" { } "touch $out";
+    pkgs.runCommand "dogfood-roster-names-only-pins" { } "touch $out";
 
   # driverExecBin.src must not contain *_test.go: the image drvPath must be
   # invariant under host-side launcher test churn (issue #474). A tight fileset
