@@ -233,6 +233,12 @@ type StatusReport struct {
 	Live   bool    `json:"live"`
 	Stale  bool    `json:"stale"`
 	Status *Status `json:"status,omitempty"`
+	// HolderPidGone is set when the lock holder's line is on this host, its
+	// pid no longer exists, and the status file matches that line. That is
+	// ordinarily the acquire window of issue #3597 (a fresh daemon that has
+	// not yet rewritten the identity line), but it is an observation, not a
+	// claim that a daemon is starting.
+	HolderPidGone bool `json:"holderPidGone,omitempty"`
 }
 
 // ReadStatus reads dir's status file and probes dir's lock to tell a live
@@ -268,12 +274,35 @@ func ReadStatus(dir string) (StatusReport, error) {
 	// safe unconditionally: an unparseable/absent host= yields "" via
 	// holderField, which can never equal a published Status.Host (always
 	// non-empty, see NewStatusWriter).
-	if held && status != nil && holderPid > 0 && status.Pid == holderPid && status.Host == holderHost {
-		report.Live = true
-		report.Stale = false
+	//
+	// Issue #3597: between a new daemon's Flock and its identity truncate both
+	// files are the dead predecessor's and agree, so a same-host holder pid is
+	// probed; a remote pid cannot be, so it keeps the content comparison alone.
+	correlated := held && status != nil && holderPid > 0 && status.Pid == holderPid && status.Host == holderHost
+	if correlated {
+		if holderIsLocal(holderHost) && pidGone(holderPid) {
+			report.HolderPidGone = true
+		} else {
+			report.Live = true
+			report.Stale = false
+		}
 	}
 
 	return report, nil
+}
+
+// holderIsLocal reports whether host names the machine this process runs on.
+// A hostname lookup error reads as not local, so the caller falls back to
+// trusting the lock content rather than probing a pid it cannot place.
+func holderIsLocal(host string) bool {
+	self, err := os.Hostname()
+	return err == nil && self == host
+}
+
+// pidGone reports whether the OS has no process with this pid. EPERM means
+// the process exists but belongs to another user, so it is not gone.
+func pidGone(pid int) bool {
+	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }
 
 // readStatusFile reads and parses dir's status file. A missing file is not

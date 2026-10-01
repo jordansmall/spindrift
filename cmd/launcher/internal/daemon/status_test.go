@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -209,6 +210,9 @@ func TestReadStatus_LockHeldByUsAndStatusNamesOurPid(t *testing.T) {
 	if report.Stale {
 		t.Errorf("Stale = true, want false")
 	}
+	if report.HolderPidGone {
+		t.Errorf("HolderPidGone = true, want false")
+	}
 	want := fmt.Sprintf("pid=%d", os.Getpid())
 	if !strings.Contains(report.Holder, want) {
 		t.Errorf("Holder = %q, want containing %q", report.Holder, want)
@@ -228,14 +232,7 @@ func TestReadStatus_LockHeldByUsButStatusNamesOtherPid(t *testing.T) {
 	// with a dead predecessor's status file left behind under a
 	// different pid. Write the file directly — StatusWriter.Write always
 	// stamps our own real pid, which is not what this test needs.
-	statusPath := filepath.Join(dir, statusFileName)
-	data, err := json.Marshal(Status{Pid: os.Getpid() + 1, State: StateWorking})
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if err := os.WriteFile(statusPath, data, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	writeStatusFile(t, dir, Status{Pid: os.Getpid() + 1, State: StateWorking})
 
 	report, err := ReadStatus(dir)
 	if err != nil {
@@ -249,6 +246,110 @@ func TestReadStatus_LockHeldByUsButStatusNamesOtherPid(t *testing.T) {
 	}
 	if !report.Stale {
 		t.Errorf("Stale = false, want true")
+	}
+}
+
+// TestReadStatus_LockFlockedButPredecessorIdentityLineNotLive pins issue
+// #3597: between a new daemon's Flock and its identity truncate the lock
+// file still carries a killed predecessor's identity line, and the status
+// file is the predecessor's too, so they agree on pid and host. Only asking
+// the OS whether that pid exists can tell the file is stale.
+func TestReadStatus_LockFlockedButPredecessorIdentityLineNotLive(t *testing.T) {
+	host, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("Hostname: %v", err)
+	}
+	dir := flockedWindow(t, host)
+
+	report, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatalf("ReadStatus: unexpected error: %v", err)
+	}
+	if !report.LockHeld {
+		t.Errorf("LockHeld = false, want true")
+	}
+	if report.Live {
+		t.Errorf("Live = true, want false: the holder line names a dead pid")
+	}
+	if !report.Stale {
+		t.Errorf("Stale = false, want true")
+	}
+	if !report.HolderPidGone {
+		t.Errorf("HolderPidGone = false, want true")
+	}
+}
+
+// TestReadStatus_LockFlockedRemoteHolderReadsLiveByContent pins the host
+// gate on the #3597 pid probe: a pid under a foreign hostname cannot be
+// probed from here, so a lock line and status file that agree decide alone.
+func TestReadStatus_LockFlockedRemoteHolderReadsLiveByContent(t *testing.T) {
+	dir := flockedWindow(t, "other-host")
+
+	report, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatalf("ReadStatus: unexpected error: %v", err)
+	}
+	if !report.LockHeld {
+		t.Errorf("LockHeld = false, want true")
+	}
+	if !report.Live {
+		t.Errorf("Live = false, want true: a remote holder's pid cannot be probed locally")
+	}
+	if report.Stale {
+		t.Errorf("Stale = true, want false")
+	}
+	if report.HolderPidGone {
+		t.Errorf("HolderPidGone = true, want false")
+	}
+}
+
+// flockedWindow builds the acquire window of issue #3597: the lock is
+// flocked but still carries a dead predecessor's identity line, and the
+// status file is that predecessor's too, both naming host. It returns the
+// checkout dir; the flock is released via t.Cleanup.
+func flockedWindow(t *testing.T, host string) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	// A real, reaped pid: re-exec the test binary with nothing to run. It
+	// could in principle be recycled before ReadStatus runs (known gap, see
+	// docs/reference.md).
+	child := exec.Command(os.Args[0], "-test.run=^$")
+	if err := child.Run(); err != nil {
+		t.Fatalf("run child: %v", err)
+	}
+	deadPid := child.Process.Pid
+
+	started := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	lockPath := filepath.Join(dir, checkoutLockFileName)
+	identity := fmt.Sprintf("pid=%d host=%s kind=dispatch started=%s exe=/dead\n", deadPid, host, started)
+	if err := os.WriteFile(lockPath, []byte(identity), 0o644); err != nil {
+		t.Fatalf("WriteFile lock: %v", err)
+	}
+	writeStatusFile(t, dir, Status{Pid: deadPid, Host: host, Started: started, State: StateWorking})
+
+	// Hold the lock without writing an identity: the new daemon's window.
+	f, err := os.OpenFile(lockPath, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	t.Cleanup(func() { f.Close() })
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("Flock: %v", err)
+	}
+	return dir
+}
+
+// writeStatusFile writes s directly as dir's status file — StatusWriter
+// always stamps our own real pid and host, which these tests must override.
+func writeStatusFile(t *testing.T, dir string, s Status) {
+	t.Helper()
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, statusFileName), data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 }
 
@@ -436,14 +537,7 @@ func TestReadStatus_UnreadableHolderLineReadsAsNotLive(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	statusPath := filepath.Join(dir, statusFileName)
-	data, err := json.Marshal(Status{Pid: os.Getpid(), State: StateWorking})
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if err := os.WriteFile(statusPath, data, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	writeStatusFile(t, dir, Status{Pid: os.Getpid(), State: StateWorking})
 
 	report, err := ReadStatus(dir)
 	if err != nil {
@@ -513,15 +607,7 @@ func TestReadStatus_MatchingPidDifferentHostNotLive(t *testing.T) {
 	}
 	defer lock.Release()
 
-	statusPath := filepath.Join(dir, statusFileName)
-	data, err := json.Marshal(Status{Pid: os.Getpid(), Host: "a-different-host", State: StateWorking})
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if err := os.WriteFile(statusPath, data, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
+	writeStatusFile(t, dir, Status{Pid: os.Getpid(), Host: "a-different-host", State: StateWorking})
 	report, err := ReadStatus(dir)
 	if err != nil {
 		t.Fatalf("ReadStatus: unexpected error: %v", err)
@@ -531,6 +617,9 @@ func TestReadStatus_MatchingPidDifferentHostNotLive(t *testing.T) {
 	}
 	if report.Live {
 		t.Errorf("Live = true, want false: a matching pid on a different host must not read as live")
+	}
+	if report.HolderPidGone {
+		t.Errorf("HolderPidGone = true, want false: the host differs, so the status file is not the holder line's predecessor")
 	}
 }
 
