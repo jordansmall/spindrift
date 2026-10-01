@@ -355,7 +355,12 @@ new work, not a release, so a running butler sibling can't be the reason
 another kind's read found nothing dispatchable. A running research sibling
 still counts: a reject verdict closes the issue, so it can genuinely satisfy
 a blocker. Resolving and backing-off siblings still count too (#3571) — only
-the running-a-butler-child case is carved out. The trade-off: with
+the running-a-butler-child case is carved out. (Amended by issue #3735:
+a resolving sibling no longer counts either. It holds no claim — the
+claim is taken inside the child — so it fails the same can-it-release
+test, and ResolveTip's single flight overlaps sibling resolving windows,
+which let them mask a jam in lockstep. Only backing-off siblings and
+running non-butler siblings suppress the alarm now.) The trade-off: with
 auto-promotion (ADR 0056) on, a jam may fire shortly before a promoted
 finding makes work dispatchable again. The per-kind `checks[].jammed` status
 flag was never sibling-suppressed, and this amendment doesn't touch it.
