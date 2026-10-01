@@ -282,12 +282,15 @@ func TestParse_AllowInvalidPatternIsError(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		pattern string
+		reason  string
 	}{
-		{"no leading slash", "dl"},
-		{"trailing slash", "/dl/"},
-		{"traversal segment", "/dl/../etc"},
-		{"doubled slash", "//dl"},
-		{"root pattern", "/"},
+		{"no leading slash", "dl", ""},
+		{"trailing slash", "/dl/", ""},
+		{"traversal segment", "/dl/../etc", ""},
+		{"doubled slash", "//dl", ""},
+		{"root pattern", "/", ""},
+		{"query string", "/dl?x", `must not contain "?" or "#"`},
+		{"fragment", "/dl#x", `must not contain "?" or "#"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := `
@@ -305,6 +308,9 @@ credential = { netrc = "~/.netrc" }
 			}
 			if !strings.Contains(err.Error(), fmt.Sprintf("%q", tc.pattern)) {
 				t.Errorf("expected error to name the offending pattern %q, got: %v", tc.pattern, err)
+			}
+			if !strings.Contains(err.Error(), tc.reason) {
+				t.Errorf("expected error to give the reason %q, got: %v", tc.reason, err)
 			}
 		})
 	}
@@ -724,6 +730,32 @@ path = "` + tc.path + `"
 				t.Errorf("expected error to name the route, got: %v", err)
 			}
 		})
+	}
+}
+
+// Both ecosystems splice the path key into a URL (GOPROXY, the Gradle
+// redirect), where a "?" or "#" would cut it short (issue #3321).
+func TestParse_EcosystemBlockPathURLDelimiterIsError(t *testing.T) {
+	for _, eco := range []string{"go", "gradle"} {
+		for _, p := range []string{"/" + eco + "/?x", "/" + eco + "/#x"} {
+			t.Run(eco+" "+p, func(t *testing.T) {
+				doc := `
+[[routes]]
+match-host = "repo.example.com"
+credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.` + eco + `]
+path = "` + p + `"
+`
+				_, err := Parse([]byte(doc))
+				if err == nil {
+					t.Fatalf("expected error for %s path %q, got nil", eco, p)
+				}
+				if !strings.Contains(err.Error(), `must not contain "?" or "#"`) {
+					t.Errorf("expected the URL-delimiter rejection, got: %v", err)
+				}
+			})
+		}
 	}
 }
 
