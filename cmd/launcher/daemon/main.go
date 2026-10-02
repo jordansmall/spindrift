@@ -567,20 +567,26 @@ func publishHaltedStatus(stderr io.Writer, sw *daemon.StatusWriter, kinds []daem
 }
 
 // finish is mainRun's one path from a pre-loop Halt to a return value: emit
-// the halt event, publish the halted status, and derive the exit code, all
-// from h alone. sw == nil is deliberate, not a missing argument: it is the
-// instance-lock refusal, where the status file belongs to the daemon that
-// actually holds the checkout, and a refused second instance must never
-// stomp the live holder's file (daemon.NewStatusWriter is not even
-// constructed until after the lock acquire below succeeds).
+// the halt event, print "daemon: <msg>" to stderr, publish the halted status,
+// and derive the exit code. That order is load-bearing: a merged
+// stdout+stderr stream must read halt event, diagnostic, then any
+// publishHaltedStatus write-failure warning, byte-identical to the output
+// before 580296cf. msg is a parameter because the instance-lock refusal
+// prints the bare error, not h.String()'s prefixed form. sw == nil is
+// deliberate, not a missing argument: it is the instance-lock refusal,
+// where the status file belongs to the daemon that actually holds the
+// checkout, and a refused second instance must never stomp the live
+// holder's file (daemon.NewStatusWriter is not even constructed until
+// after the lock acquire below succeeds).
 //
 // An in-loop halt never comes through here for the emit/publish half:
 // pool.halt (and invalidConfig) have already emitted the halt event and
 // published the status by the time Loop returns its Halt, so mainRun ends
 // on h.ExitCode() alone for that path — that asymmetry is intentional, not
 // a gap to "fix" by double-emitting.
-func finish(stderr io.Writer, em *daemon.Emitter, sw *daemon.StatusWriter, kinds []daemon.Kind, h daemon.Halt) int {
+func finish(stderr io.Writer, em *daemon.Emitter, sw *daemon.StatusWriter, kinds []daemon.Kind, h daemon.Halt, msg string) int {
 	em.Emit(h.Event())
+	fmt.Fprintf(stderr, "daemon: %s\n", msg)
 	if sw != nil {
 		publishHaltedStatus(stderr, sw, kinds, h.String())
 	}
@@ -778,12 +784,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	lock, err := daemon.AcquireCheckoutLock(gitDirPath, args.Kinds)
 	if err != nil {
-		// finish first, and sw nil: it only emits here (no status file
-		// exists yet), and emitting before the stderr line keeps a merged
-		// stdout+stderr stream byte-identical to the pre-refactor order.
-		code := finish(stderr, em, nil, args.Kinds, daemon.Halt{Class: daemon.HaltInstanceLock, Detail: err.Error()})
-		fmt.Fprintf(stderr, "daemon: %s\n", err)
-		return code
+		// finish keeps the pre-580296cf halt-event-then-diagnostic order. sw
+		// nil: no status file of ours exists yet. msg is the bare err.
+		return finish(stderr, em, nil, args.Kinds, daemon.Halt{Class: daemon.HaltInstanceLock, Detail: err.Error()}, err.Error())
 	}
 	// No cleanup on the crash path: the kernel drops the flock when the
 	// holder dies (including SIGKILL), so a deferred Release here only
@@ -846,8 +849,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// against the same checkout is still refused by the lock's own cheaper
 	// path rather than after a full doctor run.
 	if h := startupPreflight(preflightCtx, r, em); h.Class != daemon.HaltNone {
-		fmt.Fprintf(stderr, "daemon: %s\n", h)
-		return finish(stderr, em, statusWriter, args.Kinds, h)
+		// finish keeps the pre-580296cf halt-event-then-diagnostic order.
+		return finish(stderr, em, statusWriter, args.Kinds, h, h.String())
 	}
 
 	cfg := daemon.Config{

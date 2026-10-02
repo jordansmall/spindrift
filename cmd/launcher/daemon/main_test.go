@@ -1218,11 +1218,7 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 
 	// Hold the lock ourselves, in-process, standing in for "another daemon
 	// already running against this checkout".
-	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindOf(dispatchkind.Work)})
-	if err != nil {
-		t.Fatalf("AcquireCheckoutLock: %v", err)
-	}
-	t.Cleanup(func() { _ = lock.Release() })
+	holdCheckoutLockT(t, gitDirPath)
 
 	inputPath := filepath.Join(t.TempDir(), "input.json")
 	// A bare invocation draws from both kinds, which makes
@@ -1351,11 +1347,7 @@ func TestCmdStatus_Live(t *testing.T) {
 		t.Fatalf("gitDir(%q): %v", root, err)
 	}
 
-	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindOf(dispatchkind.Work)})
-	if err != nil {
-		t.Fatalf("AcquireCheckoutLock: %v", err)
-	}
-	t.Cleanup(func() { _ = lock.Release() })
+	holdCheckoutLockT(t, gitDirPath)
 
 	sw := daemon.NewStatusWriter(gitDirPath, time.Now)
 	if err := sw.Write(daemon.Status{
@@ -1444,11 +1436,7 @@ func TestCmdStatus_GarbageStatusFileStillReportsLiveness(t *testing.T) {
 		t.Fatalf("gitDir(%q): %v", root, err)
 	}
 
-	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindOf(dispatchkind.Work)})
-	if err != nil {
-		t.Fatalf("AcquireCheckoutLock: %v", err)
-	}
-	t.Cleanup(func() { _ = lock.Release() })
+	holdCheckoutLockT(t, gitDirPath)
 
 	statusPath := filepath.Join(gitDirPath, "spindrift-daemon.status")
 	if err := os.WriteFile(statusPath, []byte("not json"), 0o644); err != nil {
@@ -2105,7 +2093,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 
 		dir := t.TempDir()
 		sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
-		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h); got != daemon.ExitPreflightFailed {
+		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h, h.String()); got != daemon.ExitPreflightFailed {
 			t.Errorf("finish() = %d, want %d", got, daemon.ExitPreflightFailed)
 		}
 		if got := countHalts(t, &buf, h); got != 1 {
@@ -2130,7 +2118,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 
 		dir := t.TempDir()
 		sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
-		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h); got != 0 {
+		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h, h.String()); got != 0 {
 			t.Errorf("finish() = %d, want 0", got)
 		}
 		if got := countHalts(t, &buf, h); got != 1 {
@@ -2144,7 +2132,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 		h := daemon.Halt{Class: daemon.HaltInstanceLock, Detail: "held by pid 123"}
 
 		dir := t.TempDir()
-		if got := finish(&stderr, em, nil, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h); got != 1 {
+		if got := finish(&stderr, em, nil, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h, h.Detail); got != 1 {
 			t.Errorf("finish() = %d, want 1", got)
 		}
 		if got := countHalts(t, &buf, h); got != 1 {
@@ -2812,5 +2800,226 @@ func TestMainRun_EndToEndSignalDrainsThenEscalates(t *testing.T) {
 	// stops.
 	if haltReason != "context-cancelled: stop requested" && haltReason != "outcome: signalled-stop" {
 		t.Errorf("halt reason = %q, want %q or %q", haltReason, "context-cancelled: stop requested", "outcome: signalled-stop")
+	}
+}
+
+// holdCheckoutLockT takes the checkout lock for the Work kind and holds it
+// until the test ends, standing in for "another daemon already running
+// against this checkout".
+func holdCheckoutLockT(t *testing.T, gitDirPath string) {
+	t.Helper()
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindOf(dispatchkind.Work)})
+	if err != nil {
+		t.Fatalf("AcquireCheckoutLock: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+}
+
+// lockedBuffer stands in for a merged stdout+stderr terminal; mutex-guarded
+// because announceStop's goroutine can emit concurrently with mainRun.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// mergedEvent decodes line as a daemon event; ok is false for any other line
+// of a merged stdout+stderr stream, such as a "daemon: ..." diagnostic.
+func mergedEvent(line string) (ev daemon.Event, ok bool) {
+	if !strings.HasPrefix(line, "{") || json.Unmarshal([]byte(line), &ev) != nil {
+		return daemon.Event{}, false
+	}
+	return ev, true
+}
+
+// assertHaltBeforeDiagnostic asserts the shape an operator's terminal sees
+// when stdout and stderr share one stream: a "halt" event line followed,
+// later, by the "daemon: <stderrLine>" diagnostic (issue #3711). It returns
+// the lines after the diagnostic so a caller can pin what may trail it.
+func assertHaltBeforeDiagnostic(t *testing.T, merged, stderrLine string) []string {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(merged), "\n")
+	haltAt, diagAt := -1, -1
+	for i, line := range lines {
+		if ev, ok := mergedEvent(line); ok && ev.Event == "halt" {
+			if haltAt >= 0 {
+				t.Fatalf("merged output = %q, want exactly one halt event, got a duplicate halt", merged)
+			}
+			haltAt = i
+		} else if line == "daemon: "+stderrLine {
+			diagAt = i
+		}
+	}
+	if haltAt < 0 || diagAt < 0 {
+		t.Fatalf("merged output = %q, want a halt event line and %q", merged, "daemon: "+stderrLine)
+	}
+	if haltAt > diagAt {
+		t.Errorf("merged output = %q, want the halt event before %q", merged, "daemon: "+stderrLine)
+	}
+	return lines[diagAt+1:]
+}
+
+// TestMainRun_HaltEventPrecedesStderrDiagnostic pins issue #3711: every
+// pre-loop refusal emits its halt event before the "daemon: <reason>" stderr
+// line, so a terminal merging stdout and stderr reads event then diagnostic
+// (the order before 580296cf), not the reverse.
+func TestMainRun_HaltEventPrecedesStderrDiagnostic(t *testing.T) {
+	failingDoctor := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+	}
+	missingDoctor := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/nonexistent/spindrift-doctor")
+	}
+	// exec, so the kill lands on sleep itself rather than orphaning it.
+	slowDoctor := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exec sleep 30")
+	}
+	tests := []struct {
+		name     string
+		args     []string
+		doctor   func(ctx context.Context, name string, args ...string) *exec.Cmd
+		holdLock bool
+		// stopped fires the stop latch before mainRun starts, so the real
+		// installStopSignal -> announceStop -> cancelPreflight wiring
+		// cancels the slow doctor.
+		stopped  bool
+		wantCode int
+		// wantOutcome is the preflight event's outcome; "" means no
+		// preflight event is expected (the lock refuses before preflight).
+		wantOutcome string
+	}{
+		{name: "doctor exit", args: []string{"dispatch"}, doctor: failingDoctor, wantCode: daemon.ExitPreflightFailed, wantOutcome: "doctor-unclassified"},
+		{name: "doctor seam error", args: []string{"dispatch"}, doctor: missingDoctor, wantCode: daemon.ExitPreflightFailed, wantOutcome: "doctor-seam-error"},
+		{name: "feature branch gone", args: []string{"--feature-branch", "no-such-branch", "dispatch"}, doctor: failingDoctor, wantCode: daemon.ExitPreflightFailed, wantOutcome: "doctor-feature-branch-gone"},
+		{name: "instance lock", args: []string{"dispatch"}, doctor: failingDoctor, holdLock: true, wantCode: 1},
+		{name: "operator stop", args: []string{"dispatch"}, doctor: slowDoctor, stopped: true, wantCode: 0, wantOutcome: "doctor-cancelled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := capturedEnvFixtureT(t, nil)
+			origDoctor := runnerDoctorCommand
+			t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+			runnerDoctorCommand = tt.doctor
+
+			if tt.holdLock {
+				wd, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				gitDirPath, err := gitDir(wd)
+				if err != nil {
+					t.Fatalf("gitDir: %v", err)
+				}
+				holdCheckoutLockT(t, gitDirPath)
+			}
+			if tt.stopped {
+				stop, abort := make(chan struct{}), make(chan struct{})
+				close(stop)
+				origInstall := installStopSignal
+				t.Cleanup(func() { installStopSignal = origInstall })
+				installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
+					return stop, abort, func() {}
+				}
+			}
+
+			var merged lockedBuffer
+			got := mainRun(append([]string{"--input", path}, tt.args...), &merged, &merged)
+			if got != tt.wantCode {
+				t.Fatalf("mainRun() = %d, want %d; output = %q", got, tt.wantCode, merged.String())
+			}
+
+			preflightAt, haltAt, haltReason, outcome := -1, -1, "", ""
+			for i, line := range strings.Split(merged.String(), "\n") {
+				ev, ok := mergedEvent(line)
+				if !ok {
+					continue
+				}
+				switch ev.Event {
+				case "preflight":
+					preflightAt, outcome = i, ev.Outcome
+				case "halt":
+					haltAt, haltReason = i, ev.Reason
+				}
+			}
+			if outcome != tt.wantOutcome {
+				t.Errorf("preflight outcome = %q, want %q; output = %q", outcome, tt.wantOutcome, merged.String())
+			}
+			if tt.wantOutcome != "" && preflightAt > haltAt {
+				t.Errorf("merged output = %q, want the preflight event before the halt event", merged.String())
+			}
+			// The lock diagnostic is the bare error, without the halt
+			// reason's class prefix; the others print the reason itself.
+			diag := haltReason
+			if tt.holdLock {
+				prefix := daemon.Halt{Class: daemon.HaltInstanceLock}.String()
+				if !strings.HasPrefix(haltReason, prefix) {
+					t.Fatalf("halt reason = %q, want prefix %q", haltReason, prefix)
+				}
+				diag = strings.TrimPrefix(haltReason, prefix)
+			}
+			if trailing := assertHaltBeforeDiagnostic(t, merged.String(), diag); strings.TrimSpace(strings.Join(trailing, "")) != "" {
+				t.Errorf("trailing output after diagnostic = %q, want none on a writable status dir", trailing)
+			}
+		})
+	}
+}
+
+// TestFinish_StatusWriteWarningTrailsDiagnostic pins the other half of issue
+// #3711 at finish itself, with one writer standing in for a merged terminal:
+// an operator cancel still reads halt event then diagnostic, and a failed
+// status write's warning lands after both, never ahead of the halt
+// diagnostic it qualifies. Checked at finish rather than mainRun because
+// mainRun's status file lives in the git dir, which a test cannot make
+// unwritable portably.
+func TestFinish_StatusWriteWarningTrailsDiagnostic(t *testing.T) {
+	kinds := []daemon.Kind{daemon.KindOf(dispatchkind.Work)}
+	for _, tt := range []struct {
+		name        string
+		statusDir   func(t *testing.T) string
+		wantWarning bool
+	}{
+		{name: "status written", statusDir: func(t *testing.T) string { return t.TempDir() }},
+		{name: "status write fails", statusDir: func(t *testing.T) string {
+			// A path under a regular file can never be created.
+			file := filepath.Join(t.TempDir(), "file")
+			if err := os.WriteFile(file, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(file, "dir")
+		}, wantWarning: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var merged lockedBuffer
+			clock := func() time.Time { return time.Unix(0, 0).UTC() }
+			em := daemon.NewEmitter(&merged, clock)
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			h := startupPreflight(ctx, &fakePreflightRunner{}, em)
+			sw := daemon.NewStatusWriter(tt.statusDir(t), clock)
+
+			if got := finish(&merged, em, sw, kinds, h, h.String()); got != 0 {
+				t.Errorf("finish() = %d, want 0 for an operator cancel", got)
+			}
+
+			trailing := assertHaltBeforeDiagnostic(t, merged.String(), h.String())
+			if tt.wantWarning {
+				if len(trailing) != 1 || !strings.HasPrefix(trailing[0], "daemon: status file write failed: ") {
+					t.Errorf("trailing = %q, want exactly the status-write warning", trailing)
+				}
+			} else if strings.TrimSpace(strings.Join(trailing, "")) != "" {
+				t.Errorf("trailing = %q, want none", trailing)
+			}
+		})
 	}
 }
