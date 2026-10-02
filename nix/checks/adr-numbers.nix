@@ -1,8 +1,6 @@
 # Eval-level pins over docs/adr/'s four-digit ADR number prefix (issue #3631).
-# A malformed entry name is silently *skipped* by collisionsIn's grouping
-# (it never joins a group, meaningful or not) rather than mis-grouped under
-# some meaningless key, so without the well-formedness pin a badly named ADR
-# escapes the uniqueness invariant entirely instead of tripping it.
+# The uniqueness pin only ever sees wellFormedNames, so without the
+# well-formedness pin a badly named ADR escapes it instead of tripping it.
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
