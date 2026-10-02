@@ -1385,6 +1385,16 @@ in
           echo "expected the never-synthesize-a-URL clause 'Never synthesize a URL you weren't given' in filer-prompt.md" >&2
           exit 1
         }
+        grep -qF -- 'Never invent a branch name either' \
+          ${../../templates/default/prompts/filer-prompt.md} || {
+          echo "expected the never-invent-a-branch-name clause 'Never invent a branch name either' in filer-prompt.md" >&2
+          exit 1
+        }
+        grep -qF -- 'git rev-parse --abbrev-ref HEAD' \
+          ${../../templates/default/prompts/filer-prompt.md} || {
+          echo "expected the recoverable-branch-name command 'git rev-parse --abbrev-ref HEAD' in filer-prompt.md" >&2
+          exit 1
+        }
         grep -qF -- 'a fabricated `pull/DRAFT` link that 404s' \
           ${../../templates/default/prompts/filer-prompt.md} || {
           echo "expected the named observed failure clause 'a fabricated \`pull/DRAFT\` link that 404s' in filer-prompt.md" >&2
