@@ -264,3 +264,74 @@ func TestFactory_NewChore_RunForwardsChoreEnv(t *testing.T) {
 		t.Error("ISSUE_NUMBER should be absent for a chore Dispatch's Run()")
 	}
 }
+
+func issueTextFactory(t *testing.T, fr runner.Runner, resolve func(string) (string, error)) *Factory {
+	t.Helper()
+	cfg := Config{OpenPRForIssue: noOpenPR, IssueTextFor: resolve}
+	f, err := NewFactory(cfg, tempLogDir(t), fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	t.Cleanup(f.Cleanup)
+	return f
+}
+
+// One Factory outlives many dispatches in the Console and the continuous
+// loop, so a fresh Dispatch for the same issue number must re-resolve rather
+// than serve text cached by an earlier dispatch (issue #4160).
+func TestFactory_New_ResolvesIssueTextFreshPerDispatch(t *testing.T) {
+	fr := runner.NewFake()
+	text := "first body"
+	f := issueTextFactory(t, fr, func(string) (string, error) { return text, nil })
+
+	if r := f.New("7", "t").Run(); !r.Success {
+		t.Fatalf("first Run: %+v", r)
+	}
+	text = "edited body"
+	if r := f.New("7", "t").Run(); !r.Success {
+		t.Fatalf("second Run: %+v", r)
+	}
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls = %d, want 2", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].Env["ISSUE_TEXT"]; got != "first body" {
+		t.Errorf("first ISSUE_TEXT = %q, want %q", got, "first body")
+	}
+	if got := fr.RunCalls[1].Env["ISSUE_TEXT"]; got != "edited body" {
+		t.Errorf("second ISSUE_TEXT = %q, want %q", got, "edited body")
+	}
+}
+
+// Within one Dispatch every Box shares a byte-identical ISSUE_TEXT so the
+// prompt's stable prefix keeps hitting the cache (issue #3445).
+func TestFactory_New_IssueTextStableAcrossRunAndFix(t *testing.T) {
+	fr := runner.NewFake()
+	text := "first body"
+	resolved := 0
+	f := issueTextFactory(t, fr, func(string) (string, error) {
+		resolved++
+		return text, nil
+	})
+
+	d := f.New("7", "t")
+	if r := d.Run(); !r.Success {
+		t.Fatalf("Run: %+v", r)
+	}
+	text = "edited body"
+	if r := d.Fix(1, ""); !r.Success {
+		t.Fatalf("Fix: %+v", r)
+	}
+
+	if resolved != 1 {
+		t.Errorf("resolver calls = %d, want 1 per Dispatch", resolved)
+	}
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls = %d, want 2", len(fr.RunCalls))
+	}
+	for i, c := range fr.RunCalls {
+		if got := c.Env["ISSUE_TEXT"]; got != "first body" {
+			t.Errorf("RunCalls[%d] ISSUE_TEXT = %q, want %q", i, got, "first body")
+		}
+	}
+}

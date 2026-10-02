@@ -3336,6 +3336,28 @@ func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 	}
 }
 
+// One Factory built from this Config outlives many dispatches in the Console
+// and the continuous loop, so the Factory-level resolver must not memoize:
+// per-Dispatch memoizing lives in dispatch.newDispatch (issue #4160).
+func TestDispatchConfig_IssueTextForResolvesFresh(t *testing.T) {
+	it := forge.NewFake()
+	it.SetIssue(forge.Issue{Number: "7", Title: "Seventh", Body: "before"})
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), forge.NewFake(), forge.Capabilities{})
+
+	first, err := cfg.IssueTextFor("7")
+	if err != nil || !strings.Contains(first, "before") {
+		t.Fatalf("first IssueTextFor = %q, %v; want text containing %q", first, err, "before")
+	}
+	it.SetIssue(forge.Issue{Number: "7", Title: "Seventh", Body: "after"})
+	second, err := cfg.IssueTextFor("7")
+	if err != nil || !strings.Contains(second, "after") {
+		t.Fatalf("second IssueTextFor = %q, %v; want text containing %q", second, err, "after")
+	}
+	if len(it.IssueCalls) != 2 {
+		t.Errorf("tracker Issue calls = %d, want 2 (no memoization)", len(it.IssueCalls))
+	}
+}
+
 // dispatchConfig fills ReviewModelOverride/ReviewEffortOverride from the
 // ambient environment alone (issue #3171): a document's settings and the
 // schema defaults must never leak in, because those values already reached

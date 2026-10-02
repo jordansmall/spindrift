@@ -187,8 +187,9 @@ type Config struct {
 	// IssueTextFor resolves the subject issue's body, plus its recent
 	// comments when the tracker supports them, into the ISSUE_TEXT the Box
 	// receives (issue #3445). Every tracker backend goes through this one
-	// closure. A nil closure leaves ISSUE_TEXT absent; an error instead
-	// fails the dispatch (see buildBoxEnv's doc).
+	// closure; the Factory memoizes it per Dispatch. A nil closure leaves
+	// ISSUE_TEXT absent; an error instead fails the dispatch (see
+	// buildBoxEnv's doc).
 	IssueTextFor func(number string) (string, error)
 
 	// HeartbeatOut is the human-facing sink for every Box's heartbeat writer
