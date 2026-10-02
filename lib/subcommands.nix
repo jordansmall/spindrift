@@ -24,7 +24,7 @@
     # dynamicIssueCompletion: it drains agent-research, a different queue
     # (issue #556).
     name = "research";
-    usage = "[--no-build] [--yes] [--continuous] [issue...]";
+    usage = "[--no-build] [--yes] [--continuous] [--self-contained] [issue...]";
     doc = "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes";
   }
   {

@@ -544,10 +544,10 @@ func printSubcommands(w io.Writer) {
 		if e.usage != "" {
 			left += " " + e.usage
 		}
-		// 57 = the 55-char widest name+usage in subcommandRegistry plus a
+		// 76 = the 74-char widest name+usage in subcommandRegistry plus a
 		// 2-space gap. TestPrintSubcommands_ExactOutput pins the result;
 		// widen this if a later entry runs longer.
-		fmt.Fprintf(w, "  %-57s%s\n", left, e.doc)
+		fmt.Fprintf(w, "  %-76s%s\n", left, e.doc)
 	}
 }
 

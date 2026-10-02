@@ -6,7 +6,7 @@ package main
 var subcommandRegistry = []subcommandEntry{
 	{name: "console", usage: "", doc: "browse the open backlog interactively (read-only)"},
 	{name: "dispatch", usage: "[--no-build] [--yes] [--continuous] [issue...]", doc: "dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)"},
-	{name: "research", usage: "[--no-build] [--yes] [--continuous] [issue...]", doc: "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes"},
+	{name: "research", usage: "[--no-build] [--yes] [--continuous] [--self-contained] [issue...]", doc: "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes"},
 	{name: "butler", usage: "[--chore <name>] [--no-build]", doc: "one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; promotes a finding or opens a patch PR for it only through opt-in host-side gates (both off by default)"},
 	{name: "preview", usage: "[issue...]", doc: "dry-run: show what dispatch would pick up, in order"},
 	{name: "build", usage: "", doc: "realize the agent image without running any agent"},
