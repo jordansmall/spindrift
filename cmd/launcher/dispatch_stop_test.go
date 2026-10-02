@@ -140,8 +140,9 @@ func TestRunExitCode_SignalledStop_WinsOverClaimedBlocked(t *testing.T) {
 	}
 }
 
-// An abort (second signal, no prior stop observed at this seam) exits the
-// same code as a lone stop.
+// Pins the composite both-closed shape a real second Ctrl-C delivers. It does
+// not isolate abort: the closed stop short-circuits first. The AbortOnly tests
+// below are the isolators.
 func TestRunExitCode_SignalledAbort_ExitsSameCodeAsStop(t *testing.T) {
 	withClosedAbortSignal(t)
 
@@ -254,7 +255,10 @@ func TestSelectiveDispatchExitCode_SignalledStop(t *testing.T) {
 	}
 }
 
-// The abort counterpart of the stop case above.
+// The abort counterpart of the stop case above, in the both-closed shape a
+// real second Ctrl-C delivers. It does not isolate abort (the closed stop wins
+// first); TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily
+// isolates selective's abort wiring.
 func TestSelectiveDispatchExitCode_SignalledAbort(t *testing.T) {
 	withClosedAbortSignal(t)
 

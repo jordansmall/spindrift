@@ -66,7 +66,10 @@ func TestCmdRecover_SignalledStop_NoFailedLabel(t *testing.T) {
 	}
 }
 
-// The abort counterpart of the stop case above.
+// The abort counterpart of the stop case above, in the both-closed shape a
+// real second Ctrl-C delivers. It does not isolate abort (the closed stop wins
+// first); TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable isolates
+// recover's abort wiring.
 func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 	withClosedAbortSignal(t)
 
