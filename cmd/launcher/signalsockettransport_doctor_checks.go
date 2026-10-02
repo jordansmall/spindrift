@@ -29,7 +29,7 @@ func signalSocketTransportCheck(c config) doctor.Check {
 	return doctor.Check{
 		Name:   signalSocketTransportCheckName,
 		Tier:   doctor.Advisory,
-		Remedy: "set BOX_SIGNAL_CARRIER=log, or use a NETWORK_MODE that permits loopback (not no-host-loopback or none); on an indeterminate probe instead, confirm the configured container runtime is running and reachable, then re-run `spindrift doctor`",
+		Remedy: "set BOX_SIGNAL_CARRIER=log, or use a NETWORK_MODE that permits loopback (not no-host-loopback or none); on an indeterminate probe instead, " + runtimeReachableRemedy,
 		Probe: func() (any, error) {
 			if c.networkMode == runner.NetworkModeNone {
 				// Answered before the probe because the verdict cannot depend

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
@@ -208,5 +209,37 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_WIRES_TRANSPORT" }
 	}
 	if fake.RegistryProxyTransportCalls != 0 {
 		t.Errorf("RegistryProxyTransportCalls = %d, want 0 -- the wired-up row's not-configured arm must not probe (doctor must start no container)", fake.RegistryProxyTransportCalls)
+	}
+}
+
+// Both rows render adjacent in one report and share a probe, so they must
+// share one runtime-readiness clause; the full strings are pinned so
+// composing them from the constant cannot change a byte of operator output.
+func TestRegistryProxyTransportCheck_RemedySharesRuntimeReachableClauseWithSignalSocketRow(t *testing.T) {
+	c := minimalValidConfig()
+
+	cases := []struct {
+		name   string
+		remedy string
+		want   string
+	}{
+		{
+			name:   signalSocketTransportCheckName,
+			remedy: signalSocketTransportCheck(c).Remedy,
+			want:   "set BOX_SIGNAL_CARRIER=log, or use a NETWORK_MODE that permits loopback (not no-host-loopback or none); on an indeterminate probe instead, confirm the configured container runtime is running and reachable, then re-run `spindrift doctor`",
+		},
+		{
+			name:   registryProxyTransportCheckName,
+			remedy: registryProxyTransportCheck(c).Remedy,
+			want:   "confirm the configured container runtime is running and reachable, then re-run `spindrift doctor` -- only an indeterminate probe needs action here, since both a unix socket and a TCP transport are working outcomes",
+		},
+	}
+	for _, tc := range cases {
+		if tc.remedy != tc.want {
+			t.Errorf("%s Remedy = %q, want %q", tc.name, tc.remedy, tc.want)
+		}
+		if !strings.Contains(tc.remedy, runtimeReachableRemedy) {
+			t.Errorf("%s Remedy = %q, want it to contain runtimeReachableRemedy", tc.name, tc.remedy)
+		}
 	}
 }

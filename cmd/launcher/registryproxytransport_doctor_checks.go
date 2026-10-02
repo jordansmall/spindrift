@@ -26,6 +26,11 @@ var registryProxyTransportFn = func(c config) (registrymanifest.Endpoint, error)
 // SuccessMsg closure from drifting apart on a rename (issue #2853).
 const registryProxyTransportCheckName = "registry-proxy-transport"
 
+// runtimeReachableRemedy is the fix for an indeterminate transport probe, shared
+// by the registry-proxy-transport and signal-socket-transport rows since both
+// consume the same probe and render adjacent in one report.
+const runtimeReachableRemedy = "confirm the configured container runtime is running and reachable, then re-run `spindrift doctor`"
+
 // registryProxyTransportCheck builds the registry-proxy-transport row. It calls
 // the same RegistryProxyTransport a dispatch calls, so the report cannot drift
 // from real behaviour. The row never affects doctor's exit-2 classification:
@@ -35,7 +40,7 @@ func registryProxyTransportCheck(c config) doctor.Check {
 	return doctor.Check{
 		Name:   registryProxyTransportCheckName,
 		Tier:   doctor.Advisory,
-		Remedy: "confirm the configured container runtime is running and reachable, then re-run `spindrift doctor` -- only an indeterminate probe needs action here, since both a unix socket and a TCP transport are working outcomes",
+		Remedy: runtimeReachableRemedy + " -- only an indeterminate probe needs action here, since both a unix socket and a TCP transport are working outcomes",
 		Probe: func() (any, error) {
 			if c.registryProxyRoutesFile == "" {
 				return "not configured", nil
