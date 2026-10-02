@@ -73,7 +73,7 @@ setup() {
   [ -d "$WORK_DIR/.git" ]
 }
 
-# The status list comes from RESEARCH_STATUS_ENUM in the registry (issue #2504).
+# The status list is derived in Go from RESEARCH_VERDICTS (issues #2504, #4159).
 @test "SELF_CONTAINED=1's OUTCOME grammar line renders the registry status enum" {
   set_dispatch_kind research
   export SELF_CONTAINED="1"

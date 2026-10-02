@@ -106,8 +106,8 @@ setup() {
 }
 
 # The grammar line names its verdict enumeration via the registry-generated
-# ${RESEARCH_STATUS_ENUM} placeholder, so this proves _subst substitutes it in
-# the rendered prompt, not just that the template references it (issue #2504).
+# ${RESEARCH_STATUS_ENUM} placeholder, so this proves Go prompt assembly derives
+# and substitutes it in the rendered prompt (issues #2504, #4159).
 
 @test "research kind's OUTCOME grammar line renders the registry status enum" {
   set_dispatch_kind research

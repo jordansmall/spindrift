@@ -1117,10 +1117,6 @@ rec {
     else
       builtins.concatStringsSep ", " allButLast + ", or " + lastWord;
 
-  # Pipe-joined "a|b|c" grammar-placeholder rendering of an outcomeStatusSets
-  # row's statuses, for a `status=<...>` grammar example (issue #2504).
-  renderOutcomeStatusPipe = statuses: builtins.concatStringsSep "|" statuses;
-
   # cmd/launcher/flagtable_gen.go content.
   renderFlagTableGo =
     schema:

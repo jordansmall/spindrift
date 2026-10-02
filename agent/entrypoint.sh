@@ -40,10 +40,6 @@ fi
 : "${GIT_USER_NAME:?GIT_USER_NAME is required}"
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 
-# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT
-export RESEARCH_STATUS_ENUM="recommend|reject|unclear"
-# END GENERATED OUTCOME STATUS WORDS
-
 # configure_env is the shared setup every phase_* function depends on; it is not
 # itself a numbered phase.
 configure_env() {
@@ -566,7 +562,6 @@ _subst() {
     IN_PROGRESS_LABEL
     COMPLETE_LABEL
     RUN_NONCE
-    RESEARCH_STATUS_ENUM
     "${_FRAGMENT_SUBST_VARS[@]}"
   )
   local -a _assign=()

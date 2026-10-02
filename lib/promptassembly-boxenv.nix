@@ -185,8 +185,8 @@
     kind = "string";
   }
   {
-    field = "ResearchStatusEnum";
-    env = "RESEARCH_STATUS_ENUM";
+    field = "ResearchVerdicts";
+    env = "RESEARCH_VERDICTS";
     kind = "string";
   }
   {

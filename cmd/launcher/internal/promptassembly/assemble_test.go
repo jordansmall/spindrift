@@ -1288,7 +1288,6 @@ func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 	env.DispatchKind = "research"
 	env.SelfContained = false
 	env.ResumeAfterHold = true
-	env.ResearchStatusEnum = "recommend|reject|unclear"
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -1305,7 +1304,7 @@ func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 		t.Errorf("Prompt contains research-self-contained-prompt.md's text, want research-prompt.md:\n%s", result.Prompt)
 	}
 	// The OUTCOME grammar line's verdict enumeration renders from
-	// Env.ResearchStatusEnum through the RESEARCH_STATUS_ENUM allowlist
+	// Env.ResearchVerdicts through the RESEARCH_STATUS_ENUM allowlist
 	// entry (issue #2504), not a literal typed into the template.
 	if !strings.Contains(result.Prompt, "status=<recommend|reject|unclear>") {
 		t.Errorf("Prompt missing substituted RESEARCH_STATUS_ENUM in the OUTCOME grammar line:\n%s", result.Prompt)
@@ -1325,7 +1324,6 @@ func TestAssembleResearchSelfContainedRendersSelfContainedPrompt(t *testing.T) {
 	env := coveredEnv()
 	env.DispatchKind = "research"
 	env.SelfContained = true
-	env.ResearchStatusEnum = "recommend|reject|unclear"
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -1366,7 +1364,6 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 			env := coveredEnv()
 			env.DispatchKind = "research"
 			env.SelfContained = selfContained
-			env.ResearchStatusEnum = "recommend|reject|unclear"
 			env.FilerEnabled = true
 			env.BoxWriteEnabled = true
 			env.OrchestratorEnabled = false
@@ -1394,7 +1391,6 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 			env := coveredEnv()
 			env.DispatchKind = "research"
 			env.SelfContained = selfContained
-			env.ResearchStatusEnum = "recommend|reject|unclear"
 			env.FilerEnabled = false
 
 			result, err := Assemble(env, reg)
@@ -1418,7 +1414,6 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 						env := coveredEnv()
 						env.DispatchKind = "research"
 						env.SelfContained = selfContained
-						env.ResearchStatusEnum = "recommend|reject|unclear"
 						env.FilerEnabled = true
 						env.BoxWriteEnabled = boxWriteEnabled
 						env.OrchestratorEnabled = orchestratorEnabled
@@ -1450,7 +1445,6 @@ func TestAssembleFilerLabelRelayStepByKind(t *testing.T) {
 	t.Run("research + Filer: research label, never the work label", func(t *testing.T) {
 		env := coveredEnv()
 		env.DispatchKind = "research"
-		env.ResearchStatusEnum = "recommend|reject|unclear"
 		env.FilerEnabled = true
 		env.BoxWriteEnabled = true
 		env.OrchestratorEnabled = false
@@ -1512,7 +1506,6 @@ func TestAssembleResearchPromptCaveman(t *testing.T) {
 		env := coveredEnv()
 		env.DispatchKind = "research"
 		env.SelfContained = false
-		env.ResearchStatusEnum = "recommend|reject|unclear"
 
 		result, err := Assemble(env, reg)
 		if err != nil {
@@ -1534,7 +1527,6 @@ func TestAssembleResearchPromptCaveman(t *testing.T) {
 		env := coveredEnv()
 		env.DispatchKind = "research"
 		env.SelfContained = false
-		env.ResearchStatusEnum = "recommend|reject|unclear"
 		env.CavemanSkillBaked = false
 
 		result, err := Assemble(env, reg)
@@ -1562,7 +1554,6 @@ func TestAssembleResearchPromptCavemanReadOnly(t *testing.T) {
 	env := coveredEnv()
 	env.DispatchKind = "research"
 	env.SelfContained = false
-	env.ResearchStatusEnum = "recommend|reject|unclear"
 	env.BoxWriteEnabled = false
 
 	result, err := Assemble(env, reg)
@@ -1588,7 +1579,6 @@ func TestAssembleResearchSelfContainedPromptCavemanReadOnly(t *testing.T) {
 	env := coveredEnv()
 	env.DispatchKind = "research"
 	env.SelfContained = true
-	env.ResearchStatusEnum = "recommend|reject|unclear"
 	env.BoxWriteEnabled = false
 
 	result, err := Assemble(env, reg)
@@ -1612,7 +1602,6 @@ func TestAssembleResearchSelfContainedPromptCaveman(t *testing.T) {
 		env := coveredEnv()
 		env.DispatchKind = "research"
 		env.SelfContained = true
-		env.ResearchStatusEnum = "recommend|reject|unclear"
 
 		result, err := Assemble(env, reg)
 		if err != nil {
@@ -1634,7 +1623,6 @@ func TestAssembleResearchSelfContainedPromptCaveman(t *testing.T) {
 		env := coveredEnv()
 		env.DispatchKind = "research"
 		env.SelfContained = true
-		env.ResearchStatusEnum = "recommend|reject|unclear"
 		env.CavemanSkillBaked = false
 
 		result, err := Assemble(env, reg)
@@ -1661,7 +1649,6 @@ func TestAssembleResearchPromptCheckHygiene(t *testing.T) {
 		env := coveredEnv()
 		env.DispatchKind = "research"
 		env.SelfContained = false
-		env.ResearchStatusEnum = "recommend|reject|unclear"
 		env.CheckHygieneSkillBaked = true
 
 		result, err := Assemble(env, reg)
@@ -1681,7 +1668,6 @@ func TestAssembleResearchPromptCheckHygiene(t *testing.T) {
 		env := coveredEnv()
 		env.DispatchKind = "research"
 		env.SelfContained = false
-		env.ResearchStatusEnum = "recommend|reject|unclear"
 		env.CheckHygieneSkillBaked = false
 
 		result, err := Assemble(env, reg)
@@ -1708,7 +1694,6 @@ func TestAssembleResearchSelfContainedPromptCheckHygiene(t *testing.T) {
 	env := coveredEnv()
 	env.DispatchKind = "research"
 	env.SelfContained = true
-	env.ResearchStatusEnum = "recommend|reject|unclear"
 	env.CheckHygieneSkillBaked = true
 
 	result, err := Assemble(env, reg)
@@ -1735,7 +1720,6 @@ func TestAssembleResearchPromptCavemanLocalTracker(t *testing.T) {
 	env := localTrackerEnv()
 	env.DispatchKind = "research"
 	env.SelfContained = false
-	env.ResearchStatusEnum = "recommend|reject|unclear"
 	env.BoxWriteEnabled = false
 
 	result, err := Assemble(env, reg)
@@ -1763,7 +1747,6 @@ func TestAssembleResearchPromptCarrierSelectsLogOrSocketFragment(t *testing.T) {
 	base := coveredEnv()
 	base.DispatchKind = "research"
 	base.SelfContained = false
-	base.ResearchStatusEnum = "recommend|reject|unclear"
 	base.BoxWriteEnabled = false
 
 	logEnv := base
@@ -1930,7 +1913,6 @@ func TestAssembleResearchPromptCarrierSelectsLogOrSocketIssueIntentFragment(t *t
 
 	base := coveredEnv()
 	base.DispatchKind = "research"
-	base.ResearchStatusEnum = "recommend|reject|unclear"
 	base.FilerEnabled = true
 	base.BoxWriteEnabled = true
 	base.OrchestratorEnabled = false
@@ -3816,7 +3798,6 @@ func TestAssembleAdvisoryReviewerOnlyForKindWithOwnReviewerPrompt(t *testing.T) 
 			env := coveredEnv()
 			env.DispatchKind = kind
 			if kind == "research" {
-				env.ResearchStatusEnum = "recommend|reject|unclear"
 			}
 			env.OrchestratorEnabled = true
 
@@ -3881,5 +3862,46 @@ func TestAssembleWorkDriverAgentFilesReviewerStillDroppedOrchestratorOn(t *testi
 
 	if _, err := os.Stat(filepath.Join(dir, "reviewer.md")); !os.IsNotExist(err) {
 		t.Errorf("reviewer.md still exists (or unexpected stat error %v), want removed under work + ORCHESTRATOR", err)
+	}
+}
+
+// RESEARCH_STATUS_ENUM is derived from the raw RESEARCH_VERDICTS JSON in Go
+// (issue #4159), so a custom verdict set reaches the OUTCOME grammar line of
+// both research prompts, in configured order; empty keeps the default three.
+func TestAssembleResearchStatusEnumDerivedFromVerdicts(t *testing.T) {
+	reg := loadTestRegistry(t)
+	custom := `[{"verdict":"accept","label":"l-accept"},{"verdict":"decline","label":"l-decline"}]`
+	for _, selfContained := range []bool{false, true} {
+		for _, tc := range []struct{ name, verdicts, want string }{
+			{"default", "", "status=<recommend|reject|unclear>"},
+			{"custom", custom, "status=<accept|decline>"},
+		} {
+			t.Run(fmt.Sprintf("%s/selfContained=%v", tc.name, selfContained), func(t *testing.T) {
+				env := coveredEnv()
+				env.DispatchKind = "research"
+				env.SelfContained = selfContained
+				env.ResearchVerdicts = tc.verdicts
+				result, err := Assemble(env, reg)
+				if err != nil {
+					t.Fatalf("Assemble: %v", err)
+				}
+				if !strings.Contains(result.Prompt, tc.want) {
+					t.Errorf("Prompt missing %q:\n%s", tc.want, result.Prompt)
+				}
+				if strings.Contains(result.Prompt, "${RESEARCH_STATUS_ENUM}") {
+					t.Errorf("Prompt contains an unsubstituted RESEARCH_STATUS_ENUM token")
+				}
+			})
+		}
+	}
+}
+
+func TestAssembleResearchInvalidVerdictsFailsAssembly(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.DispatchKind = "research"
+	env.ResearchVerdicts = "not json"
+	if _, err := Assemble(env, reg); err == nil || !strings.Contains(err.Error(), "RESEARCH_VERDICTS") {
+		t.Fatalf("Assemble error = %v, want a RESEARCH_VERDICTS parse error", err)
 	}
 }

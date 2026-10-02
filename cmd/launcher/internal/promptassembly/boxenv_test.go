@@ -49,7 +49,7 @@ var boxEnvRows = []boxEnvRow{
 	{"InProgressLabel", "IN_PROGRESS_LABEL", "string"},
 	{"CompleteLabel", "COMPLETE_LABEL", "string"},
 	{"RunNonce", "RUN_NONCE", "string"},
-	{"ResearchStatusEnum", "RESEARCH_STATUS_ENUM", "string"},
+	{"ResearchVerdicts", "RESEARCH_VERDICTS", "string"},
 	{"ReviewModelOverride", "BOX_REVIEW_MODEL_OVERRIDE", "string"},
 	{"ReviewEffortOverride", "BOX_REVIEW_EFFORT_OVERRIDE", "string"},
 	{"ChoreName", "CHORE_NAME", "string"},

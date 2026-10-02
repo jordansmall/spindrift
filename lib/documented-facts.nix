@@ -20,7 +20,6 @@ let
   defaultModelFixture = import ./default-model-fixture.nix;
   schema = import ./env-schema.nix;
   structuralTemplateExamples = import ./structural-template-examples.nix { inherit lib; };
-  promptContract = import ./prompt-contract.nix;
   bakedSkills = import ./baked-skills.nix;
   structuralPaths = import ./structural-paths.nix;
   byNamePaths = import ./byname-paths.nix;
@@ -126,20 +125,6 @@ map assertMarkerShape [
     beginMarker = "            # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT\n";
     endMarker = "            # END GENERATED SETTINGS EXAMPLE";
     generated = renderers.renderTemplateSettingsBlock schema structuralTemplateExamples;
-  }
-  {
-    name = "outcome-status-words";
-    docPath = "agent/entrypoint.sh";
-    blockName = "OUTCOME STATUS WORDS";
-    sourceDesc = "lib/prompt-contract.nix";
-    beginMarker = "# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT\n";
-    endMarker = "# END GENERATED OUTCOME STATUS WORDS";
-    generated =
-      "export RESEARCH_STATUS_ENUM=\""
-      + (renderers.renderOutcomeStatusPipe (
-        builtins.filter (s: s != "blocked") (promptContract.outcomeStatusesFor "research")
-      ))
-      + "\"\n";
   }
   {
     name = "baked-skills-probes-gen";
