@@ -777,11 +777,14 @@ checkedMerge {
         touch $out
       '';
 
-  # Every env-var literal in cmd/launcher/main.go and backend.go must have a
-  # lib/env-schema.nix entry and the reverse (presence only; pinning values is
-  # refactor-brittle). backend.go because the per-row token knobs moved there
-  # (issue #2267); not every file in package main, since flags.go's SECRET_CMD
-  # fallback is a naming convention rather than a registered knob.
+  # Forward: every lib/env-schema.nix knob appears as a literal in main.go,
+  # backend.go, or schemaconfig_gen.go (presence only; pinning values is
+  # refactor-brittle). Kept off the whole tree so a knob cannot be satisfied
+  # by a literal only a generated or internal file carries. Reverse: every
+  # env var read anywhere in non-test cmd/launcher source must be a schema
+  # knob, a document artifact, a Box env name (promptassembly-boxenv.nix), or
+  # in nonKnobEnvNames, so a new os.Getenv in an internal package cannot go
+  # unregistered (issue #3751).
   launcher-env-coverage =
     let
       schema = import ../../lib/env-schema.nix;
@@ -790,6 +793,8 @@ checkedMerge {
         attrValues
         concatStringsSep
         filter
+        hasInfix
+        hasSuffix
         splitString
         subtractLists
         ;
@@ -803,34 +808,72 @@ checkedMerge {
       # schemaconfig_gen.go is listed before loadConfig embeds schemaConfig, so
       # the later slice wiring it in does not fail this check for knobs whose
       # env-var literal lives only in the generated file (issue #2364).
-      mainGoSrc = concatStringsSep "\n" (
+      forwardGoSrc = concatStringsSep "\n" (
         map (name: builtins.readFile (launcherDir + "/${name}")) [
           "main.go"
           "backend.go"
           "schemaconfig_gen.go"
         ]
       );
-      # Nix-computed plumbing main.go reads via getenvArtifact, not
+      # Nix-computed plumbing read via getenvArtifact/docArtifact, not
       # user-facing knobs (ADR 0020, issue #810).
       documentArtifacts = preambles.documentArtifactKeys;
       schemaEnvNames = map (e: e.env) (attrValues schema);
       # Forwarded to containers via BOX_ENV_VARS only: the Go binary never
       # reads them, so they need no os.Getenv call.
       boxEnvOnly = map (e: e.env) (filter (e: e.boxEnvOnly or false) (attrValues schema));
-      missingFromGo = filter (name: !containsLiteral ''"${name}"'' mainGoSrc) (
+      missingFromGo = filter (name: !containsLiteral ''"${name}"'' forwardGoSrc) (
         subtractLists boxEnvOnly schemaEnvNames
       );
-      # The reverse direction: the names main.go actually reads. docArtifact
-      # carries issue #2527's capability signals.
-      parts = builtins.split ''(os\.Getenv|getenv|getenvArtifact|docArtifact)\("([A-Z_][A-Z0-9_]*)"[,)]'' mainGoSrc;
+      # Per-dispatch facts the launcher forwards into the Box, read there by
+      # promptassembly/boxenv_gen.go; derived from its registry, not hand-listed.
+      boxEnvNames = map (r: r.env) (import ../../lib/promptassembly-boxenv.nix);
+      # Read by cmd/launcher but not operator-facing SPINDRIFT knobs.
+      nonKnobEnvNames = [
+        # Ambient process / toolchain environment.
+        "HOME"
+        "PATH"
+        "TERM"
+        "NO_COLOR"
+        "GH_HOST" # gh CLI host override
+        # Go ecosystem proxy settings forwarded as-is.
+        "GOPRIVATE"
+        "GONOPROXY"
+        "GONOSUMDB"
+        "GOSUMDB"
+        "GOTOOLCHAIN"
+        # Launcher-internal plumbing, never set by an operator.
+        "SPINDRIFT_REPORT_FD" # report FD handed to a child
+        "SPINDRIFT_DAEMON_PROGRAM" # daemon wrapper's own program path
+        "REGISTRY_PROXY_TCP_SECRET" # launcher-minted, read by driver-exec registry helpers
+        # Naming-convention fallback for --secret-cmd, not a registered knob.
+        "SECRET_CMD"
+      ];
+      # Reverse direction: every name read anywhere in non-test cmd/launcher
+      # source; testdata fixtures are skipped since Go never builds them.
+      # docArtifact carries issue #2527's capability signals.
+      treeGoSrc = concatStringsSep "\n" (
+        map builtins.readFile (
+          filter (f: hasSuffix ".go" f && !hasSuffix "_test.go" f && !hasInfix "/testdata/" f) (
+            map toString (pkgs.lib.filesystem.listFilesRecursive launcherDir)
+          )
+        )
+      );
+      parts = builtins.split ''(os\.Getenv|getenv|getenvArtifact|docArtifact)\("([A-Z_][A-Z0-9_]*)"[,)]'' treeGoSrc;
       goEnvNames = map (m: builtins.elemAt m 1) (filter builtins.isList parts);
-      extraInGo = subtractLists (schemaEnvNames ++ documentArtifacts) goEnvNames;
+      extraInGo = subtractLists (
+        schemaEnvNames ++ documentArtifacts ++ boxEnvNames ++ nonKnobEnvNames
+      ) goEnvNames;
+      # Without this the allowlist could only grow.
+      deadNonKnobs = subtractLists goEnvNames nonKnobEnvNames;
     in
-    assert pkgs.lib.assertMsg (
-      missingFromGo == [ ]
-    ) "schema knobs absent from main.go: ${concatStringsSep ", " missingFromGo}";
+    assert pkgs.lib.assertMsg (missingFromGo == [ ])
+      "schema knobs absent from main.go/backend.go/schemaconfig_gen.go: ${concatStringsSep ", " missingFromGo}";
     assert pkgs.lib.assertMsg (extraInGo == [ ])
-      "main.go reads env vars absent from schema/documentArtifactKeys: ${concatStringsSep ", " extraInGo}";
+      "cmd/launcher reads env vars absent from schema/documentArtifactKeys/Box env/nonKnobEnvNames: ${concatStringsSep ", " extraInGo}";
+    assert pkgs.lib.assertMsg (
+      deadNonKnobs == [ ]
+    ) "nonKnobEnvNames entries no longer read in cmd/launcher: ${concatStringsSep ", " deadNonKnobs}";
     pkgs.runCommand "launcher-env-coverage" { } "touch $out";
 
   # continuousDispatch's doc string is the single source rendered onto --help,
