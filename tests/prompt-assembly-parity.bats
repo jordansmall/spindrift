@@ -699,11 +699,41 @@ SKILL
   assert_cell_golden "github-read-only-signal-socket" initial
 }
 
+@test "production path matches the golden fixture for the orchestrator-on filer-on read-only cell, log carrier" {
+  # Nearest sibling: "orchestrator-filer-on-signal-socket", minus its
+  # BOX_SIGNAL_CARRIER override: the log default gates file-issues-relay.md
+  # and, through the filer's own prompt in .agents.json,
+  # filer-file-relay.md. The drop recap is already pinned by the direct and
+  # socket siblings; this cell pins the log/socket carrier fork.
+  export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+  export BOX_FILER_ENABLED=1
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+  unset BOX_WRITE_ENABLED
+  # Harmless on the log carrier (tests/fakes/claude prints a real
+  # SPINDRIFT_PR_INTENT line, so the nudge never fires); kept only to mirror
+  # the socket sibling below.
+  unset BOX_OUTBOX_RELAY_CAPABLE
+
+  assert_cell_golden "orchestrator-filer-on-read-only" initial
+
+  assert_review_handoff_golden "orchestrator-filer-on-read-only"
+
+  # Guards the cell's reason to exist against an UPDATE_GOLDENS regeneration
+  # that silently flips it to the socket fragment.
+  grep -qF '`SPINDRIFT_ISSUE_INTENT` lines instead, and the launcher files' \
+    "$GOLDEN_DIR/orchestrator-filer-on-read-only.prompt.txt"
+}
+
 @test "production path matches the golden fixture for the orchestrator-on filer-on read-only cell, socket carrier" {
-  # Nearest sibling: "orchestrator-filer-on", plus unset BOX_WRITE_ENABLED:
-  # FILER_FILE_RELAY on a work dispatch needs filer + orchestrator +
-  # read-only together, gating file-issues-relay-socket.md and, through the
-  # filer's own prompt in .agents.json, filer-file-relay-socket.md.
+  # Nearest sibling: "orchestrator-filer-on-read-only", plus
+  # BOX_SIGNAL_CARRIER=socket: FILER_FILE_RELAY on a work dispatch needs
+  # filer + orchestrator + read-only together, and the socket carrier gates
+  # file-issues-relay-socket.md and, through the filer's own prompt in
+  # .agents.json, filer-file-relay-socket.md.
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
