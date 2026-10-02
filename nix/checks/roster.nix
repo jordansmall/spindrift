@@ -8,7 +8,12 @@
 let
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
-  inherit (pkgs.lib) assertMsg mapAttrs hasInfix toLower;
+  inherit (pkgs.lib)
+    assertMsg
+    mapAttrs
+    hasInfix
+    toLower
+    ;
   # Issue #2560: like equivalence.nix's modelOf, but returns the whole entry
   # since callers here read both .model and .effort.
   entryFor = name: roster: builtins.head (builtins.filter (e: e.name == name) roster);
@@ -38,8 +43,9 @@ in
     ) "normalizeRosterResult must not accept a name that isn't lowercase-alnum-dash";
     assert assertMsg (result.violation == "invalid-name")
       "normalizeRosterResult must report violation == \"invalid-name\", got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "Bad_Name")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "Bad_Name"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     # Issue #2571 blocking review finding: normalizeRoster throws this exact
     # .message unmodified, so pinning the message here is the only way to pin
     # that the throwing path names the entry and the problem (AC1).
@@ -69,8 +75,9 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (!result.success)
-      "normalizeRoster must throw on a name that isn't lowercase-alnum-dash";
+    assert assertMsg (
+      !result.success
+    ) "normalizeRoster must throw on a name that isn't lowercase-alnum-dash";
     pkgs.runCommand "roster-normalize-throws-on-invalid-name" { } "touch $out";
 
   # Issue #2571 round-3 review finding: builtins.match throws its own opaque
@@ -164,15 +171,17 @@ in
     assert assertMsg (
       result.ok == false
     ) "normalizeRosterResult must not accept an entry that omits name";
-    assert assertMsg (
-      builtins.attrNames result == [
-        "entryName"
-        "message"
-        "ok"
-        "value"
-        "violation"
-      ]
-    ) "normalizeRosterResult's failure branch must return exactly the documented { ok; value; violation; entryName; message; } shape, got attrNames: ${builtins.toJSON (builtins.attrNames result)}";
+    assert assertMsg
+      (
+        builtins.attrNames result == [
+          "entryName"
+          "message"
+          "ok"
+          "value"
+          "violation"
+        ]
+      )
+      "normalizeRosterResult's failure branch must return exactly the documented { ok; value; violation; entryName; message; } shape, got attrNames: ${builtins.toJSON (builtins.attrNames result)}";
     pkgs.runCommand "roster-normalize-result-failure-shape-has-no-internal-keys" { } "touch $out";
 
   # Issue #2571 non-blocking review finding (AC1 gap): see
@@ -238,8 +247,9 @@ in
     ) "normalizeRosterResult must not accept two entries that share a name";
     assert assertMsg (result.violation == "duplicate-name")
       "normalizeRosterResult must report violation == \"duplicate-name\", got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "scout")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "scout"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     # Issue #2571 blocking review finding: see
     # roster-normalize-rejects-invalid-name above for rationale.
     assert assertMsg (hasInfix "scout" result.message)
@@ -274,8 +284,7 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (!result.success)
-      "normalizeRoster must throw when two entries share a name";
+    assert assertMsg (!result.success) "normalizeRoster must throw when two entries share a name";
     pkgs.runCommand "roster-normalize-throws-on-duplicate-name" { } "touch $out";
 
   # Issue #2571 slice 1: an entry's keys must be a subset of the documented
@@ -299,8 +308,9 @@ in
     ) "normalizeRosterResult must not accept an entry with an unknown key";
     assert assertMsg (result.violation == "unknown-key")
       "normalizeRosterResult must report violation == \"unknown-key\", got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "scout")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "scout"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     # Issue #2571 blocking review finding: see
     # roster-normalize-rejects-invalid-name above for rationale.
     assert assertMsg (hasInfix "scout" result.message)
@@ -329,8 +339,7 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (!result.success)
-      "normalizeRoster must throw on an entry with an unknown key";
+    assert assertMsg (!result.success) "normalizeRoster must throw on an entry with an unknown key";
     pkgs.runCommand "roster-normalize-throws-on-unknown-key" { } "touch $out";
 
   # Issue #2571 slice 1: every entry must carry a `model` key, even when its
@@ -351,8 +360,9 @@ in
     ) "normalizeRosterResult must not accept an entry that omits model";
     assert assertMsg (result.violation == "missing-model")
       "normalizeRosterResult must report violation == \"missing-model\", got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "scout")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "scout"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     # Issue #2571 blocking review finding: see
     # roster-normalize-rejects-invalid-name above for rationale.
     assert assertMsg (hasInfix "scout" result.message)
@@ -403,8 +413,9 @@ in
     ) "normalizeRosterResult must not accept an entry whose model isn't a string";
     assert assertMsg (result.violation == "missing-model")
       "normalizeRosterResult must report violation == \"missing-model\", got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "scout")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "scout"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     assert assertMsg (hasInfix "scout" result.message)
       "normalizeRosterResult's message must name the offending entry \"scout\", got: ${builtins.toJSON result.message}";
     assert assertMsg (hasInfix "missing model" result.message)
@@ -430,7 +441,9 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (!result.success) "normalizeRoster must throw on an entry whose model isn't a string";
+    assert assertMsg (
+      !result.success
+    ) "normalizeRoster must throw on an entry whose model isn't a string";
     pkgs.runCommand "roster-normalize-throws-on-non-string-model" { } "touch $out";
 
   # Issue #2571 slice 1: model = "" is the permanent explicit opt-out sentinel
@@ -454,8 +467,7 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (
-      result.success
+    assert assertMsg (result.success
     ) "normalizeRoster must not throw on an entry with an explicit empty model";
     assert assertMsg (builtins.length result.value == 1)
       "normalizeRoster must retain an entry with an explicit empty model in the returned list, got: ${builtins.toJSON result.value}";
@@ -510,8 +522,9 @@ in
       "normalizeRosterResult must not accept an entry whose effective promptFile doesn't exist on disk and carries no inline prompt";
     assert assertMsg (result.violation == "missing-promptfile")
       "normalizeRosterResult must report violation == \"missing-promptfile\", got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "nonesuch")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "nonesuch"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     # Issue #2571 blocking review finding: pin message content for the
     # "missing-promptfile" class too. See roster-normalize-rejects-invalid-name.
     assert assertMsg (hasInfix "nonesuch" result.message)
@@ -575,12 +588,14 @@ in
         }
       ];
     in
-    assert assertMsg (result.ok == false)
-      "normalizeRosterResult must not accept an entry whose promptFile isn't a string";
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept an entry whose promptFile isn't a string";
     assert assertMsg (result.violation == "invalid-promptfile-type")
       "normalizeRosterResult must report violation == \"invalid-promptfile-type\", got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "scout")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "scout"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     # Issue #2571 blocking review finding: see
     # roster-normalize-rejects-invalid-name above for rationale.
     assert assertMsg (hasInfix "scout" result.message)
@@ -609,8 +624,9 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (!result.success)
-      "normalizeRoster must throw when promptFile isn't a non-empty string";
+    assert assertMsg (
+      !result.success
+    ) "normalizeRoster must throw when promptFile isn't a non-empty string";
     pkgs.runCommand "roster-normalize-throws-on-invalid-promptfile-type" { } "touch $out";
 
   # Issue #2571 tied non-blocking finding (issue #2555 user story 23):
@@ -630,12 +646,14 @@ in
         }
       ];
     in
-    assert assertMsg (result.ok == false)
-      "normalizeRosterResult must not accept an entry with promptFile == \"\"";
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept an entry with promptFile == \"\"";
     assert assertMsg (result.violation == "invalid-promptfile-type")
       "normalizeRosterResult must report violation == \"invalid-promptfile-type\", got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "scout")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "scout"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     pkgs.runCommand "roster-normalize-rejects-empty-string-promptfile" { } "touch $out";
 
   # Issue #2571 round-3 review finding: a non-null, non-string prompt would
@@ -654,12 +672,14 @@ in
         }
       ];
     in
-    assert assertMsg (result.ok == false)
-      "normalizeRosterResult must not accept an entry whose prompt isn't a string or null";
+    assert assertMsg (
+      result.ok == false
+    ) "normalizeRosterResult must not accept an entry whose prompt isn't a string or null";
     assert assertMsg (result.violation == "invalid-prompt-type")
       "normalizeRosterResult must report violation == \"invalid-prompt-type\", got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "scout")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "scout"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     assert assertMsg (hasInfix "scout" result.message)
       "normalizeRosterResult's message must name the offending entry \"scout\", got: ${builtins.toJSON result.message}";
     assert assertMsg (hasInfix "prompt" result.message)
@@ -686,8 +706,9 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (!result.success)
-      "normalizeRoster must throw on an entry whose prompt isn't a string or null";
+    assert assertMsg (
+      !result.success
+    ) "normalizeRoster must throw on an entry whose prompt isn't a string or null";
     pkgs.runCommand "roster-normalize-throws-on-non-string-prompt" { } "touch $out";
 
   # Issue #2571 review fix: an empty inline `prompt = ""` must not satisfy the
@@ -710,8 +731,9 @@ in
       "normalizeRosterResult must not accept an entry with an empty inline prompt and no resolvable promptFile";
     assert assertMsg (result.violation == "missing-promptfile")
       "normalizeRosterResult must report violation == \"missing-promptfile\" for an empty inline prompt, got: ${builtins.toJSON result.violation}";
-    assert assertMsg (result.entryName == "nonesuch")
-      "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
+    assert assertMsg (
+      result.entryName == "nonesuch"
+    ) "normalizeRosterResult must name the offending entry, got: ${builtins.toJSON result.entryName}";
     # Issue #2571 blocking review finding: pin message content for the
     # "missing-promptfile" class too. See roster-normalize-rejects-invalid-name.
     assert assertMsg (hasInfix "nonesuch" result.message)
@@ -1040,9 +1062,8 @@ in
         };
       };
     in
-    assert assertMsg (
-      (entryFor "filer" roster).model == defaultModelFixture.dogfoodPins.filer
-    ) "defaultRoster byName.filer.model must set the filer entry's model, got: ${builtins.toJSON (entryFor "filer" roster).model}";
+    assert assertMsg ((entryFor "filer" roster).model == defaultModelFixture.dogfoodPins.filer)
+      "defaultRoster byName.filer.model must set the filer entry's model, got: ${builtins.toJSON (entryFor "filer" roster).model}";
     pkgs.runCommand "roster-default-roster-by-name-sets-model" { } "touch $out";
 
   # Issue #2560: byName.<name>.effort overrides that agent's default effort
@@ -1227,8 +1248,9 @@ in
     in
     assert assertMsg (builtins.length result == 1)
       "dropOptedOut must drop only the entry with an explicit empty model, got: ${builtins.toJSON result}";
-    assert assertMsg ((builtins.elemAt result 0).name == "b")
-      "dropOptedOut must retain the entry with a non-empty model, got: ${builtins.toJSON result}";
+    assert assertMsg (
+      (builtins.elemAt result 0).name == "b"
+    ) "dropOptedOut must retain the entry with a non-empty model, got: ${builtins.toJSON result}";
     pkgs.runCommand "roster-drop-opted-out-drops-only-empty-model" { } "touch $out";
 
   # Issue #2571 review fix: the identity case. dropOptedOut returns a roster
@@ -1274,8 +1296,9 @@ in
         builtins.deepSeq r r
       );
     in
-    assert assertMsg (!result.success)
-      "dropOptedOut must throw a guard error on an entry missing model, not silently succeed";
+    assert assertMsg (
+      !result.success
+    ) "dropOptedOut must throw a guard error on an entry missing model, not silently succeed";
     pkgs.runCommand "roster-drop-opted-out-rejects-missing-model" { } "touch $out";
 
   # Issue #2437: lib/roster-schema-defaults.nix is the single source of truth
@@ -1414,8 +1437,7 @@ in
       "defaultRoster's review-axis entry must track the reviewer's resolved model through every reviewer surface, stale: ${builtins.toJSON stale}";
     assert assertMsg (diverged == "x")
       "defaultRoster models.\"review-axis\" must win over the tracked models.reviewer, got: ${builtins.toJSON diverged}";
-    pkgs.runCommand "roster-default-roster-review-axis-follows-reviewer-pinned-model" { }
-      "touch $out";
+    pkgs.runCommand "roster-default-roster-review-axis-follows-reviewer-pinned-model" { } "touch $out";
 
   # Issue #3447: models."review-axis" is an independent override that wins
   # ahead of the inherited reviewModel opt-out, so the fan-out can stay alive
@@ -1435,8 +1457,8 @@ in
       "defaultRoster models.\"review-axis\" must win over the inherited reviewModel opt-out, got: ${builtins.toJSON axis.model}";
     assert assertMsg (reviewer.model == "")
       "defaultRoster's reviewer entry must keep its own explicit \"\" opt-out, got: ${builtins.toJSON reviewer.model}";
-    pkgs.runCommand "roster-default-roster-review-axis-models-override-wins-over-inherited-opt-out"
-      { } "touch $out";
+    pkgs.runCommand "roster-default-roster-review-axis-models-override-wins-over-inherited-opt-out" { }
+      "touch $out";
 
   # Issue #3419: a scoped implement worker works from a delegation excerpt, not
   # open web research, and every available tool costs a replayed schema.
@@ -1446,18 +1468,19 @@ in
       byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
       workerTools = (byName "worker").tools;
     in
-    assert assertMsg (!(builtins.elem "WebFetch" workerTools))
-      "defaultRoster's worker entry must not carry WebFetch, got: ${builtins.toJSON workerTools}";
     assert assertMsg (
-      builtins.all (t: builtins.elem t workerTools) [
+      !(builtins.elem "WebFetch" workerTools)
+    ) "defaultRoster's worker entry must not carry WebFetch, got: ${builtins.toJSON workerTools}";
+    assert assertMsg
+      (builtins.all (t: builtins.elem t workerTools) [
         "Read"
         "Bash"
         "Edit"
         "Write"
         "Glob"
         "Grep"
-      ]
-    ) "defaultRoster's worker entry must keep the implement-capable tool set, got: ${builtins.toJSON workerTools}";
+      ])
+      "defaultRoster's worker entry must keep the implement-capable tool set, got: ${builtins.toJSON workerTools}";
     pkgs.runCommand "roster-default-roster-worker-has-no-webfetch" { } "touch $out";
 
   # Issue #3422: ADR 0049 documents a provider-neutral capability profile per
@@ -1487,8 +1510,9 @@ in
     in
     assert assertMsg (warnings != [ ])
       "an explicit roster carrying reviewer but no review-axis must produce a warning, got: ${builtins.toJSON warnings}";
-    assert assertMsg (builtins.any (w: hasInfix "review-axis" w) warnings)
-      "the explicit-roster warning must name \"review-axis\", got: ${builtins.toJSON warnings}";
+    assert assertMsg (builtins.any (w: hasInfix "review-axis" w)
+      warnings
+    ) "the explicit-roster warning must name \"review-axis\", got: ${builtins.toJSON warnings}";
     pkgs.runCommand "roster-explicit-roster-without-review-axis-warns" { } "touch $out";
 
   # Issue #3447: the defaultRoster path already ships review-axis, so it must
@@ -1508,7 +1532,8 @@ in
     let
       warnings = fixtures.reviewAxisOptOutHarness.internals.rosterWarnings;
     in
-    assert assertMsg (warnings == [ ])
-      "the #392 reviewer opt-out must produce no roster warning, got: ${builtins.toJSON warnings}";
+    assert assertMsg (
+      warnings == [ ]
+    ) "the #392 reviewer opt-out must produce no roster warning, got: ${builtins.toJSON warnings}";
     pkgs.runCommand "roster-reviewer-opt-out-does-not-warn" { } "touch $out";
 }

@@ -169,9 +169,13 @@ in
               relPath = "internal/doctor/doctor.go";
               original = internalDoctorSrc;
               anchor = "the package doctor clause";
-              contents = replaceStrings [ "package doctor\n" ] [
-                "package doctor${leakFn}"
-              ] internalDoctorSrc;
+              contents =
+                replaceStrings
+                  [ "package doctor\n" ]
+                  [
+                    "package doctor${leakFn}"
+                  ]
+                  internalDoctorSrc;
             }
           ];
         }
@@ -198,9 +202,13 @@ in
               relPath = "launchgates.go";
               original = launchgatesSrc;
               anchor = "the package main clause";
-              contents = replaceStrings [ "package main\n" ] [
-                "package main${leakFn}"
-              ] launchgatesSrc;
+              contents =
+                replaceStrings
+                  [ "package main\n" ]
+                  [
+                    "package main${leakFn}"
+                  ]
+                  launchgatesSrc;
             }
           ];
         }
@@ -213,9 +221,13 @@ in
               relPath = "doctor.go";
               original = doctorMainSrc;
               anchor = "the configErr stderr line";
-              contents = replaceStrings [ ''fmt.Fprintf(stderr, "%s\n", configErr)'' ] [
-                ''fmt.Fprintf(stdout, "%s\n", configErr)''
-              ] doctorMainSrc;
+              contents =
+                replaceStrings
+                  [ ''fmt.Fprintf(stderr, "%s\n", configErr)'' ]
+                  [
+                    ''fmt.Fprintf(stdout, "%s\n", configErr)''
+                  ]
+                  doctorMainSrc;
             }
           ];
         }
@@ -248,9 +260,13 @@ in
               relPath = "launchgates.go";
               original = launchgatesSrc;
               anchor = "the package main clause";
-              contents = replaceStrings [ "package main\n" ] [
-                "package main${permittedFn}"
-              ] launchgatesSrc;
+              contents =
+                replaceStrings
+                  [ "package main\n" ]
+                  [
+                    "package main${permittedFn}"
+                  ]
+                  launchgatesSrc;
             }
           ];
         }
@@ -263,9 +279,13 @@ in
               relPath = "doctor.go";
               original = doctorMainSrc;
               anchor = "the configErr stderr line";
-              contents = replaceStrings [ ''fmt.Fprintf(stderr, "%s\n", configErr)'' ] [
-                ''fmt.Fprintf(os.Stderr, "%s\n", configErr)''
-              ] doctorMainSrc;
+              contents =
+                replaceStrings
+                  [ ''fmt.Fprintf(stderr, "%s\n", configErr)'' ]
+                  [
+                    ''fmt.Fprintf(os.Stderr, "%s\n", configErr)''
+                  ]
+                  doctorMainSrc;
             }
           ];
         }
@@ -279,9 +299,13 @@ in
       # then expand.
       fixtureFiles =
         f:
-        imap0 (i: file: file // {
-          envVar = "SRC_${replaceStrings [ "-" ] [ "_" ] f.scratchDir}_${toString i}";
-        }) f.files;
+        imap0 (
+          i: file:
+          file
+          // {
+            envVar = "SRC_${replaceStrings [ "-" ] [ "_" ] f.scratchDir}_${toString i}";
+          }
+        ) f.files;
       allFiles = concatMap fixtureFiles fixtures;
 
       # Guards the fixtures themselves: if the anchored line in the real source
@@ -291,7 +315,9 @@ in
       checkDiffers =
         file:
         assert assertMsg (!(file ? original) || file.contents != file.original)
-          "doctor-report-routing-regression: a replaceStrings fixture found no match in its source file — update its anchor to match ${file.anchor or "the real source"}";
+          "doctor-report-routing-regression: a replaceStrings fixture found no match in its source file — update its anchor to match ${
+            file.anchor or "the real source"
+          }";
         true;
 
       # ''$ escapes the shell's literal `$`, then ${file.envVar} interpolates.
@@ -339,10 +365,13 @@ in
           '';
     in
     assert builtins.all checkDiffers allFiles;
-    pkgs.runCommand "doctor-report-routing-regression" (listToAttrs (map (file: {
-      name = file.envVar;
-      value = file.contents;
-    }) allFiles))
+    pkgs.runCommand "doctor-report-routing-regression"
+      (listToAttrs (
+        map (file: {
+          name = file.envVar;
+          value = file.contents;
+        }) allFiles
+      ))
       ''
         ${concatMapStrings writeFixture fixtures}
         ${concatMapStrings runFixture fixtures}

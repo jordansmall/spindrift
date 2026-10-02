@@ -37,8 +37,9 @@ in
       bad = builtins.filter (f: f.verdict == "reject") matching;
       badIds = map (f: f.id) bad;
     in
-    assert assertMsg (matching != [ ])
-      "prompt-contract-parity: expected at least one fixture with markerPresent=true";
+    assert assertMsg (
+      matching != [ ]
+    ) "prompt-contract-parity: expected at least one fixture with markerPresent=true";
     assert assertMsg (bad == [ ])
       "prompt-contract-parity: no fixture with markerPresent=true may have verdict==\"reject\"; offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-parity-never-rejects-when-marker-present" { } "touch $out";
@@ -49,8 +50,9 @@ in
       bad = builtins.filter (f: f.verdict == "reject") matching;
       badIds = map (f: f.id) bad;
     in
-    assert assertMsg (matching != [ ])
-      "prompt-contract-parity: expected at least one fixture with gate=false";
+    assert assertMsg (
+      matching != [ ]
+    ) "prompt-contract-parity: expected at least one fixture with gate=false";
     assert assertMsg (bad == [ ])
       "prompt-contract-parity: no fixture with gate=false may have verdict==\"reject\"; offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-parity-never-rejects-when-gate-false" { } "touch $out";
@@ -77,8 +79,9 @@ in
       bad = builtins.filter (f: f.verdict == "reject") warnFixtures;
       badIds = map (f: f.id) bad;
     in
-    assert assertMsg (warnFixtures != [ ])
-      "prompt-contract-parity: expected at least one severity==\"warn\" row fixture";
+    assert assertMsg (
+      warnFixtures != [ ]
+    ) "prompt-contract-parity: expected at least one severity==\"warn\" row fixture";
     assert assertMsg (bad == [ ])
       "prompt-contract-parity: no severity==\"warn\" row fixture may have verdict==\"reject\" (a warn row's runtime validator never blocks); offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-parity-warn-rows-never-reject" { } "touch $out";
@@ -93,8 +96,9 @@ in
       "prompt-contract-parity: parityFold \"ok\" must be true (must not block at runtime)";
     assert assertMsg (parityFold "advise")
       "prompt-contract-parity: parityFold \"advise\" must be true (must not block at runtime)";
-    assert assertMsg (!(parityFold "reject"))
-      "prompt-contract-parity: parityFold \"reject\" must be false (must block at runtime)";
+    assert assertMsg (
+      !(parityFold "reject")
+    ) "prompt-contract-parity: parityFold \"reject\" must be false (must block at runtime)";
     assert assertMsg (bad == [ ])
       "prompt-contract-parity: parityFold must agree with (verdict != \"reject\") for every fixture, ${toString (builtins.length bad)} disagreed";
     pkgs.runCommand "prompt-contract-parity-fold-matches-verdict" { } "touch $out";
