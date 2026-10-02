@@ -260,6 +260,23 @@ func verbIndex(args []string) int {
 	return -1
 }
 
+// splitVerb separates the verb from the rest of args. rest holds the post-verb
+// args first, then the leading pass-through flags that preceded the verb:
+// handlers such as registry read their own first positional, so the verb's
+// own args must lead. The consequence is that a handler's "unrecognized
+// argument" error names a bad post-verb token before a bad leading flag.
+// verb is "" and rest nil when args has no verb.
+func splitVerb(args []string) (verb string, rest []string) {
+	i := verbIndex(args)
+	if i < 0 {
+		return "", nil
+	}
+	rest = make([]string, 0, len(args)-1)
+	rest = append(rest, args[i+1:]...)
+	rest = append(rest, args[:i]...)
+	return args[i], rest
+}
+
 // verbSoFar returns the verb parseFlags has accumulated into remaining so
 // far, or "" if none has appeared yet.
 func verbSoFar(remaining []string) string {

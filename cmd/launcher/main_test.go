@@ -67,6 +67,127 @@ func TestMainRun_UnknownSubcommand_PrintsHelpToStderrAndExits1(t *testing.T) {
 	}
 }
 
+// Pass-through booleans parseFlags leaves ahead of the verb must not be read
+// as the verb (issue #3784): each case reaches the verb's own handler.
+func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--self-contained", "dispatch"}, "flag --self-contained is only valid for the research subcommand"},
+		{[]string{"--yes", "recover"}, "usage: spindrift recover <issue-number>"},
+		{[]string{"--force", "registry"}, "usage: spindrift registry discover <repo-dir> <routes-file> [--force]"},
+		{[]string{"--no-build", "doctor"}, "unrecognized argument: --no-build"},
+		{[]string{"--no-build", "doctor", "--butler"}, "unrecognized argument: --no-build"},
+	}
+	for _, tc := range cases {
+		var stdout, stderr bytes.Buffer
+		code := mainRun(tc.args, &stdout, &stderr)
+		if code != 1 {
+			t.Errorf("mainRun(%v) code = %d, want 1", tc.args, code)
+		}
+		if strings.Contains(stderr.String(), "unknown subcommand") {
+			t.Errorf("mainRun(%v) stderr = %q, want the flag not read as the verb", tc.args, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), tc.want) {
+			t.Errorf("mainRun(%v) stderr = %q, want it to contain %q", tc.args, stderr.String(), tc.want)
+		}
+		if stdout.String() != "" {
+			t.Errorf("mainRun(%v) stdout = %q, want empty", tc.args, stdout.String())
+		}
+	}
+}
+
+// Flags with no verb at all print help to stderr and exit 1 (issue #3784).
+func TestMainRun_FlagsOnly_MissingSubcommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"--no-build"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	for _, want := range []string{"missing subcommand", "Usage: spindrift [flags] <subcommand>"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr missing %q, got:\n%s", want, stderr.String())
+		}
+	}
+	if stdout.String() != "" {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+// A leading flag must not displace the verb's own first positional: registry
+// reads args[0] as "discover", so splitVerb has to hand it the post-verb args
+// first. The empty repo dir makes discovery fail after the usage gate (its
+// own message goes to os.Stderr, not the handed buffer), so no routes file
+// is written.
+func TestMainRun_LeadingForceBeforeRegistry_PassesDiscoverGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir, routesFile := t.TempDir(), filepath.Join(t.TempDir(), "routes.json")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"--force", "registry", "discover", repoDir, routesFile}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("code = %d, want 1 (no registry declarations in the empty repo)", code)
+	}
+	if strings.Contains(stderr.String(), "usage: spindrift registry discover") {
+		t.Errorf("stderr = %q, want registry to get past its discover gate", stderr.String())
+	}
+	if _, err := os.Stat(routesFile); err == nil {
+		t.Errorf("routes file %s written, want none", routesFile)
+	}
+}
+
+// The leading spelling of each pass-through flag behaves exactly like the
+// verb-first one (issue #3784). REPO_SLUG empty makes bootstrap fail at
+// validation, so no runner or gh is needed; the default tracker makes
+// reconcile a no-op, and it writes to os.Stderr, so for reconcile the stderr
+// comparison only confirms both buffers stay empty.
+func TestMainRun_LeadingFlag_MatchesVerbFirstSpelling(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+	t.Setenv("ISSUE_TRACKER", "")
+
+	cases := []struct{ leading, verbFirst []string }{
+		{[]string{"--no-build", "dispatch", "42"}, []string{"dispatch", "42", "--no-build"}},
+		{[]string{"--yes", "dispatch", "42"}, []string{"dispatch", "42", "--yes"}},
+		{[]string{"--force", "reconcile"}, []string{"reconcile", "--force"}},
+		{[]string{"--self-contained", "research"}, []string{"research", "--self-contained"}},
+	}
+	for _, tc := range cases {
+		var lOut, lErr, vOut, vErr bytes.Buffer
+		lCode := mainRun(tc.leading, &lOut, &lErr)
+		vCode := mainRun(tc.verbFirst, &vOut, &vErr)
+		if lCode != vCode {
+			t.Errorf("mainRun(%v) code = %d, want %d as for %v", tc.leading, lCode, vCode, tc.verbFirst)
+		}
+		if lErr.String() != vErr.String() {
+			t.Errorf("mainRun(%v) stderr = %q, want %q as for %v", tc.leading, lErr.String(), vErr.String(), tc.verbFirst)
+		}
+		if lOut.String() != vOut.String() {
+			t.Errorf("mainRun(%v) stdout = %q, want %q as for %v", tc.leading, lOut.String(), vOut.String(), tc.verbFirst)
+		}
+		if strings.Contains(lErr.String(), "unknown subcommand") {
+			t.Errorf("mainRun(%v) stderr = %q, want the flag not read as the verb", tc.leading, lErr.String())
+		}
+	}
+}
+
+// A leading schema flag and its value are consumed by parseFlags, leaving
+// doctor's own handler to reject the stray positional. (A "--"-prefixed bogus
+// token would instead be rejected upstream by parseFlags as an unknown flag.)
+func TestMainRun_LeadingSchemaFlagBeforeDoctor_ReachesDoctor(t *testing.T) {
+	t.Setenv("MODEL", "") // restores the MODEL that parseFlags os.Setenvs
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"--model", "opus", "doctor", "extra"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "unrecognized argument: extra") {
+		t.Errorf("stderr = %q, want doctor's unrecognized-argument error", stderr.String())
+	}
+}
+
 // `research` parses like `dispatch` and reaches the same bootstrap/validate
 // prologue. A missing REPO_SLUG proves it without a real runner or gh.
 func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {

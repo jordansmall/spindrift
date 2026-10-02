@@ -2040,3 +2040,24 @@ func TestValidateChoice(t *testing.T) {
 		}
 	})
 }
+
+func TestSplitVerb(t *testing.T) {
+	cases := []struct {
+		args     []string
+		wantVerb string
+		wantRest []string
+	}{
+		{[]string{"dispatch", "42"}, "dispatch", []string{"42"}},
+		{[]string{"--force", "registry", "discover", "a", "b"}, "registry", []string{"discover", "a", "b", "--force"}},
+		{[]string{"--yes", "--no-build", "dispatch", "42"}, "dispatch", []string{"42", "--yes", "--no-build"}},
+		{[]string{"doctor"}, "doctor", []string{}},
+		{[]string{"--no-build"}, "", nil},
+		{nil, "", nil},
+	}
+	for _, tc := range cases {
+		verb, rest := splitVerb(tc.args)
+		if verb != tc.wantVerb || !slices.Equal(rest, tc.wantRest) {
+			t.Errorf("splitVerb(%v) = %q, %v; want %q, %v", tc.args, verb, rest, tc.wantVerb, tc.wantRest)
+		}
+	}
+}

@@ -2050,7 +2050,8 @@ func flushAmbientWarnings(stderr io.Writer, warnings *bytes.Buffer) {
 }
 
 // verbHandler is the uniform shape every verbHandlers entry implements. args
-// is args[1:], with the subcommand name stripped.
+// is the subcommand's args with the verb stripped: post-verb args first, then
+// any leading pass-through flags (see splitVerb).
 type verbHandler func(args []string, stderr io.Writer) int
 
 // verbHandlers is the single source of truth for which subcommands exist
@@ -2215,14 +2216,22 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	flushAmbientWarnings(stderr, &ambientWarnings)
-	if args[0] == "__complete-issues" {
+	// Pass-through booleans such as --no-build may precede the verb (issue
+	// #3784), so args[0] is not necessarily it.
+	verb, rest := splitVerb(args)
+	if verb == "" {
+		fmt.Fprint(stderr, "missing subcommand\n\n")
+		printHelp(stderr)
+		return 1
+	}
+	if verb == "__complete-issues" {
 		return cmdCompleteIssues()
 	}
-	if handler, ok := verbHandlers[args[0]]; ok {
-		return handler(args[1:], stderr)
+	if handler, ok := verbHandlers[verb]; ok {
+		return handler(rest, stderr)
 	}
 	// Unrecognized subcommand prints help rather than dispatching (issue #555).
-	fmt.Fprintf(stderr, "unknown subcommand: %s\n\n", args[0])
+	fmt.Fprintf(stderr, "unknown subcommand: %s\n\n", verb)
 	printHelp(stderr)
 	return 1
 }
