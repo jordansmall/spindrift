@@ -247,8 +247,9 @@ func backlogDedupIndex(it forge.IssueTracker, num string) map[string]string {
 type dedupOverlap struct {
 	// covered is the subset of the intent's keys already tracked, sorted.
 	covered []string
-	// refs names the distinct issues covering them -- more than one when
-	// the finding's sites are tracked by separate backlog issues. It is
+	// refs names the distinct references covering them -- backlog
+	// "#<number>" issues, this run's "<title>" peers, or both -- more than
+	// one when separate references track the finding's sites. It is
 	// built by walking covered in its sorted order, which is what makes it
 	// deterministic despite Go's randomized map order.
 	refs []string
