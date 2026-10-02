@@ -291,11 +291,12 @@ func verbSoFar(remaining []string) string {
 // arg, when set, means the flag consumes the next token as its value. short is
 // the single-letter -x form. intercepted rows are acted on by mainRun before
 // parseFlags, so lookupCliFlag skips them and parseFlags rejects them. They
-// still sit in cliFlags, so any new consumer of it must filter on
-// !f.intercepted as lookupCliFlag does.
+// still sit in cliFlags, so any new parser-side consumer of it must filter on
+// !f.intercepted as lookupCliFlag does; help rendering lists them all, like
+// the man page. doc is the one-line description shown there.
 type cliFlag struct {
-	flag, verb, arg, short string
-	intercepted            bool
+	flag, verb, arg, short, doc string
+	intercepted                 bool
 }
 
 // lookupCliFlag returns the cliFlags row matching arg that is valid after the
@@ -579,6 +580,32 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  spindrift --version      print version and revision")
 }
 
+// printCliFlags writes the Command flags block from cliFlags. Intercepted rows
+// are listed too, matching the man page's COMMAND FLAGS section.
+func printCliFlags(w io.Writer) {
+	cols := make([]string, len(cliFlags))
+	width := 0
+	for i, f := range cliFlags {
+		col := "--" + f.flag
+		if f.short != "" {
+			col += ", -" + f.short
+		}
+		if f.arg != "" {
+			col += " <" + f.arg + ">"
+		}
+		cols[i] = col
+		width = max(width, len(col))
+	}
+	fmt.Fprintln(w, "Command flags:")
+	for i, f := range cliFlags {
+		line := fmt.Sprintf("  %-*s  %s.", width, cols[i], f.doc)
+		if f.verb != "" {
+			line += " Valid only after the " + f.verb + " subcommand."
+		}
+		fmt.Fprintln(w, line)
+	}
+}
+
 // printHelpFull writes the exhaustive reference reached by `spindrift --help --all`.
 func printHelpFull(w io.Writer) {
 	fmt.Fprintln(w, "spindrift — launch waves of headless coding agents, one container per issue")
@@ -587,9 +614,7 @@ func printHelpFull(w io.Writer) {
 	fmt.Fprintln(w)
 	printSubcommands(w)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Dispatch flags:")
-	fmt.Fprintln(w, "  --no-build    fail fast if the image is absent instead of building; pair with 'spindrift build' for split build/run flows")
-	fmt.Fprintln(w, "  --yes         skip confirmation prompt when dispatching unlabeled issues (alias: --force)")
+	printCliFlags(w)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Flags (flag > flake setting > default precedence; a knob env var still")
 	fmt.Fprintln(w, "wins this release but is deprecated and warns — ADR 0020):")

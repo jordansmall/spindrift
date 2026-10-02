@@ -5,15 +5,17 @@
 # Two optional fields, defaulted where read: `short` (single-letter short form
 # without the dash, e.g. "h"; absent/null = none) and `intercepted` (bool,
 # default false: mainRun acts on the flag before parseFlags runs, so parseFlags
-# rejects it as unknown and the row only feeds completions and the man page).
+# rejects it as unknown and the row only feeds completions, the man page, and
+# `spindrift --help --all`).
 #
 # A short form is a `short` field on its long flag's row, never its own row
 # and never only doc text.
 #
 # `nix run .#regen` renders this into cmd/launcher/cliflags_gen.go, which
-# parseFlags consumes, and the shell-completion renderers and the man page's
-# COMMAND FLAGS section consume it too, so a new non-schema flag added here
-# reaches the parser, completions, and man page together.
+# parseFlags consumes and `spindrift --help --all` renders, and the
+# shell-completion renderers and the man page's COMMAND FLAGS section consume
+# it too, so a new non-schema flag added here reaches the parser, terminal
+# help, completions, and man page together.
 #
 # `--input` (the Launcher input document path, ADR 0020) is deliberately not a
 # row: the Nix wrapper/daemon passes it (lib/mkHarness.nix), users never type it.
