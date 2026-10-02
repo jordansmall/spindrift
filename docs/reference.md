@@ -3342,6 +3342,8 @@ filer:
   `CODE_FORGE=git` / `CODE_FORGE=local` runs never open one at all. The PR
   form, `Found by review during #<issue> (PR <url>)`, is used only when the
   delegation actually supplied a PR URL — the filer never synthesizes one.
+  Nor does it invent a branch name: when the delegation omits it, the filer
+  reads it from the checkout with `git rev-parse --abbrev-ref HEAD`.
 
 Filed issues carry `agent-review-finding` and **never** the dispatch label
 (`LABEL` / `ready-for-agent`) — a human promotes them, the same launch-button
