@@ -33,6 +33,18 @@ type forgejoIssueRecord struct {
 	labels     []string
 	nativeDeps []string
 	failDeps   bool // simulates a native dependencies-endpoint error
+	comments   []forgejoWireComment
+}
+
+// forgejoWireComment mirrors Forgejo's native comment JSON independently of
+// the adapter's own payload struct, so a tag typo in the adapter fails the
+// contract instead of round-tripping through a shared type.
+type forgejoWireComment struct {
+	User struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	CreatedAt string `json:"created_at"`
+	Body      string `json:"body"`
 }
 
 // forgejoHarness is a forgetest.Harness backed by an httptest server standing
@@ -99,6 +111,18 @@ func (h *forgejoHarness) FailNativeDeps(num string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.issues[num].failDeps = true
+}
+
+func (h *forgejoHarness) SeedComments(num string, comments []forge.Comment) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	wire := make([]forgejoWireComment, len(comments))
+	for i, c := range comments {
+		wire[i].User.Login = c.Author
+		wire[i].CreatedAt = c.CreatedAt
+		wire[i].Body = c.Body
+	}
+	h.issues[num].comments = wire
 }
 
 func (h *forgejoHarness) IsolatesNativeFailure() {}
@@ -209,7 +233,14 @@ func (h *forgejoHarness) handle(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case r.Method == http.MethodGet && issueCommentRe.MatchString(r.URL.Path):
-		json.NewEncoder(w).Encode([]map[string]any{})
+		// Like real Forgejo (issue #3978), serve the whole thread and ignore
+		// page/limit.
+		num := issueCommentRe.FindStringSubmatch(r.URL.Path)[1]
+		out := []forgejoWireComment{}
+		if rec, ok := h.issues[num]; ok {
+			out = append(out, rec.comments...)
+		}
+		json.NewEncoder(w).Encode(out)
 		return
 
 	case r.Method == http.MethodGet && issueRe.MatchString(r.URL.Path):
