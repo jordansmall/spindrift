@@ -68,7 +68,11 @@ ${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STE
      actually handed you a PR URL. Never synthesize a URL you weren't given:
      doing so once produced a fabricated `pull/DRAFT` link that 404s, and
      the provenance line is the only trail back from a filed finding to
-     the review that found it. For a research delegation, add no provenance
+     the review that found it. Never invent a branch name either: if the
+     delegation omitted it, read it with `git rev-parse --abbrev-ref HEAD`
+     rather than guessing. A guessed `agent/issue-<N>` is silently wrong
+     when `git.branchPrefix` is customized, and no 404 exposes it.
+     For a research delegation, add no provenance
      line of your own: the launcher appends its own `Filed from research on
      #<N>` backlink to the body automatically after you exit, and your own
      line would duplicate or contradict it. A butler delegation likewise adds
