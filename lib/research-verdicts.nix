@@ -90,10 +90,12 @@ rec {
   enumMarker = "`<RESEARCH_VERDICT_ENUM>`";
 
   # Three independent rewrites: the two markers above, plus the outcome line's
-  # status alternation, a registry-generated runtime placeholder (issue #2504)
-  # unrelated to them. Each targets a single-purpose marker, not a span between
-  # headings, so other prose in the VERDICT section is untouched, and
-  # `builtins.replaceStrings` no-ops where its target is absent.
+  # `status=<${RESEARCH_STATUS_ENUM}>` alternation. Each targets a single-purpose
+  # marker, not a span between headings, so other prose in the VERDICT section
+  # is untouched, and `builtins.replaceStrings` no-ops where its target is
+  # absent. forge.VerdictLabels.RenderPrompt (Go) ports this function so a
+  # SPINDRIFT_PROMPT_DIR override renders the same way at prompt assembly; it
+  # must stay byte-identical, which tests/prompt-assembly-parity.bats pins.
   renderPrompt =
     promptText: verdicts:
     let

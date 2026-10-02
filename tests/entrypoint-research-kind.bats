@@ -105,15 +105,18 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
-# The grammar line names its verdict enumeration via the registry-generated
-# ${RESEARCH_STATUS_ENUM} placeholder, so this proves Go prompt assembly derives
-# and substitutes it in the rendered prompt (issues #2504, #4159).
+# The prompt's verdict markers (the status=<...> alternation, the backtick
+# enum, the bullets) are rendered in Go from RESEARCH_VERDICTS at prompt
+# assembly, falling back to the default set when it is unset (issues #2504,
+# #4159, #2630). The nix-to-Go parity for them lives in
+# tests/prompt-assembly-parity.bats.
 
-@test "research kind's OUTCOME grammar line renders the registry status enum" {
+@test "research kind renders the verdict markers from the default verdict set" {
   set_dispatch_kind research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>' "$DRIVER_PROMPT_FILE"
+  ! grep -qE 'RESEARCH_VERDICT_(BULLETS|ENUM)|RESEARCH_STATUS_ENUM' "$DRIVER_PROMPT_FILE"
 }
 
 # A research driver that exits with no outcome line has no branch to push

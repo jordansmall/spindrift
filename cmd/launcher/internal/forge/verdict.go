@@ -129,9 +129,11 @@ func ResearchVerdictLabels() VerdictLabels {
 			Description: "relevant, now enriched with real context; promote it.",
 		},
 		VerdictLabel{
-			Verdict:     Reject,
-			Label:       "agent-research-reject",
-			Description: "false positive, not worth doing, or a duplicate.",
+			Verdict: Reject,
+			Label:   "agent-research-reject",
+			Description: "false positive, not worth doing, or a duplicate. " +
+				"Name the duplicate issue by number in your rationale; " +
+				"duplicate is a reason under `reject`, not a separate verdict.",
 		},
 		VerdictLabel{
 			Verdict:     Unclear,
@@ -139,6 +141,44 @@ func ResearchVerdictLabels() VerdictLabels {
 			Description: "relevance can't be determined without a human's answer.",
 		},
 	)
+}
+
+// The prompt targets RenderPrompt rewrites, mirroring lib/research-verdicts.nix's
+// renderPrompt so a prompt-dir override renders the same as the baked prompt.
+const (
+	verdictStatusTarget  = "status=<${RESEARCH_STATUS_ENUM}>"
+	verdictEnumMarker    = "`<RESEARCH_VERDICT_ENUM>`"
+	verdictBulletsMarker = "<!-- RESEARCH_VERDICT_BULLETS -->"
+)
+
+// HasVerdictTargets reports whether text carries anything RenderPrompt would
+// rewrite, so a caller can skip parsing RESEARCH_VERDICTS for a prompt that
+// never reads it.
+func HasVerdictTargets(text string) bool {
+	return strings.Contains(text, verdictStatusTarget) ||
+		strings.Contains(text, verdictEnumMarker) ||
+		strings.Contains(text, verdictBulletsMarker)
+}
+
+// RenderPrompt rewrites the outcome line's status alternation, the verdict
+// enum marker, and the verdict bullets marker in text from the configured set.
+// Text without any of them comes back unchanged, which makes an
+// already-rendered prompt a no-op. The reserved `blocked` status is never in
+// the set, so it never renders.
+func (v VerdictLabels) RenderPrompt(text string) string {
+	bullets := make([]string, len(v.entries))
+	backticked := make([]string, len(v.entries))
+	tokens := make([]string, len(v.entries))
+	for i, e := range v.entries {
+		bullets[i] = "- `" + string(e.Verdict) + "` — " + e.Description
+		backticked[i] = "`" + string(e.Verdict) + "`"
+		tokens[i] = string(e.Verdict)
+	}
+	return strings.NewReplacer(
+		verdictStatusTarget, "status=<"+strings.Join(tokens, "|")+">",
+		verdictEnumMarker, strings.Join(backticked, " / "),
+		verdictBulletsMarker, strings.Join(bullets, "\n"),
+	).Replace(text)
 }
 
 // blockedVerdict means the researcher reached no verdict at all, so it is

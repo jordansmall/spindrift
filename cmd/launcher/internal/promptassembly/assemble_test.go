@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
@@ -1304,8 +1305,8 @@ func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 		t.Errorf("Prompt contains research-self-contained-prompt.md's text, want research-prompt.md:\n%s", result.Prompt)
 	}
 	// The OUTCOME grammar line's verdict enumeration renders from
-	// Env.ResearchVerdicts through the RESEARCH_STATUS_ENUM allowlist
-	// entry (issue #2504), not a literal typed into the template.
+	// Env.ResearchVerdicts via forge.VerdictLabels.RenderPrompt
+	// (issues #2504, #4159), not a literal typed into the template.
 	if !strings.Contains(result.Prompt, "status=<recommend|reject|unclear>") {
 		t.Errorf("Prompt missing substituted RESEARCH_STATUS_ENUM in the OUTCOME grammar line:\n%s", result.Prompt)
 	}
@@ -3865,16 +3866,28 @@ func TestAssembleWorkDriverAgentFilesReviewerStillDroppedOrchestratorOn(t *testi
 	}
 }
 
-// RESEARCH_STATUS_ENUM is derived from the raw RESEARCH_VERDICTS JSON in Go
-// (issue #4159), so a custom verdict set reaches the OUTCOME grammar line of
-// both research prompts, in configured order; empty keeps the default three.
-func TestAssembleResearchStatusEnumDerivedFromVerdicts(t *testing.T) {
+// The research prompt's three verdict renderings (status alternation, verdict
+// enum, verdict bullets) are Go-derived from the raw RESEARCH_VERDICTS JSON
+// (issues #2630, #4159), so a raw-template prompt-dir override renders the
+// configured set in order; empty keeps the default three.
+func TestAssembleResearchVerdictRenderingsDerivedFromVerdicts(t *testing.T) {
 	reg := loadTestRegistry(t)
-	custom := `[{"verdict":"accept","label":"l-accept"},{"verdict":"decline","label":"l-decline"}]`
+	custom := `[{"verdict":"accept","label":"l-accept","description":"take it up"},{"verdict":"decline","label":"l-decline","description":"leave it"}]`
 	for _, selfContained := range []bool{false, true} {
-		for _, tc := range []struct{ name, verdicts, want string }{
-			{"default", "", "status=<recommend|reject|unclear>"},
-			{"custom", custom, "status=<accept|decline>"},
+		for _, tc := range []struct {
+			name, verdicts string
+			want           []string
+		}{
+			{"default", "", []string{
+				"status=<recommend|reject|unclear>",
+				"`recommend` / `reject` / `unclear`",
+				"- `recommend` — relevant, now enriched with real context; promote it.\n- `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.\n- `unclear` — relevance can't be determined without a human's answer.",
+			}},
+			{"custom", custom, []string{
+				"status=<accept|decline>",
+				"`accept` / `decline`",
+				"- `accept` — take it up\n- `decline` — leave it",
+			}},
 		} {
 			t.Run(fmt.Sprintf("%s/selfContained=%v", tc.name, selfContained), func(t *testing.T) {
 				env := coveredEnv()
@@ -3885,14 +3898,71 @@ func TestAssembleResearchStatusEnumDerivedFromVerdicts(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Assemble: %v", err)
 				}
-				if !strings.Contains(result.Prompt, tc.want) {
-					t.Errorf("Prompt missing %q:\n%s", tc.want, result.Prompt)
+				for _, w := range tc.want {
+					if !strings.Contains(result.Prompt, w) {
+						t.Errorf("Prompt missing %q:\n%s", w, result.Prompt)
+					}
 				}
-				if strings.Contains(result.Prompt, "${RESEARCH_STATUS_ENUM}") {
-					t.Errorf("Prompt contains an unsubstituted RESEARCH_STATUS_ENUM token")
+				for _, residue := range []string{"${RESEARCH_STATUS_ENUM}", "RESEARCH_VERDICT_BULLETS", "RESEARCH_VERDICT_ENUM"} {
+					if strings.Contains(result.Prompt, residue) {
+						t.Errorf("Prompt contains unrendered %q", residue)
+					}
 				}
 			})
 		}
+	}
+}
+
+// A prompt nix already rendered at eval time (the baked path) carries none of
+// the markers, so assembly with the matching RESEARCH_VERDICTS leaves it as is.
+func TestAssembleResearchBakedPromptUnchanged(t *testing.T) {
+	reg := loadTestRegistry(t)
+	custom := `[{"verdict":"accept","label":"l-accept","description":"take it up"},{"verdict":"decline","label":"l-decline","description":"leave it"}]`
+	verdicts, err := forge.ParseResearchVerdicts(custom)
+	if err != nil {
+		t.Fatalf("ParseResearchVerdicts: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(promptsDir, "research-prompt.md"))
+	if err != nil {
+		t.Fatalf("read research-prompt.md: %v", err)
+	}
+	dir, _ := promptsDirExceptSubdir(t, "research-prompt.md")
+	baked := verdicts.RenderPrompt(string(raw))
+	if forge.HasVerdictTargets(baked) {
+		t.Fatalf("baked prompt still carries a target")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "research-prompt.md"), []byte(baked), 0o644); err != nil {
+		t.Fatalf("write baked prompt: %v", err)
+	}
+
+	env := coveredEnv()
+	env.DispatchKind = "research"
+	env.ResearchVerdicts = custom
+	fromRaw, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble raw: %v", err)
+	}
+	env.PromptsDir = dir
+	fromBaked, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble baked: %v", err)
+	}
+	if fromBaked.Prompt != fromRaw.Prompt {
+		t.Errorf("baked prompt assembled differently from the raw template:\n%s\nvs\n%s", fromBaked.Prompt, fromRaw.Prompt)
+	}
+	if !strings.Contains(fromBaked.Prompt, "status=<accept|decline>") {
+		t.Errorf("baked Prompt missing status=<accept|decline>:\n%s", fromBaked.Prompt)
+	}
+}
+
+// RESEARCH_VERDICTS is read only when the base prompt carries a verdict
+// marker, so a malformed value cannot abort a work assembly.
+func TestAssembleWorkIgnoresMalformedResearchVerdicts(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.ResearchVerdicts = "not json"
+	if _, err := Assemble(env, reg); err != nil {
+		t.Fatalf("Assemble work with malformed RESEARCH_VERDICTS: %v", err)
 	}
 }
 

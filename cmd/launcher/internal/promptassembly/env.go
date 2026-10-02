@@ -163,8 +163,9 @@ type Env struct {
 	IssueText string // entrypoint.sh: $ISSUE_TEXT
 
 	// ResearchVerdicts is the raw RESEARCH_VERDICTS JSON (empty = the default
-	// set). assemblePromptBodies derives the ${RESEARCH_STATUS_ENUM} token from
-	// it, so a custom verdict set reaches a prompt-dir override (issue #4159).
+	// set). assemblePromptBodies renders the research prompt's status
+	// alternation, verdict enum, and verdict bullets from it, so a custom verdict
+	// set reaches a prompt-dir override (issues #2630, #4159).
 	ResearchVerdicts string // dispatch.go: $RESEARCH_VERDICTS
 
 	// ReviewModelOverride and ReviewEffortOverride carry an operator's explicit

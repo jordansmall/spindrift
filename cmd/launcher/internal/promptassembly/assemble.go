@@ -279,21 +279,6 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	allowlist["ISSUE_TEXT"] = issueSection
 	vars["ISSUE_TEXT"] = varBody("ISSUE_TEXT", issueSection)
 
-	// RESEARCH_STATUS_ENUM (issues #2504, #4159) is Go-derived from the raw
-	// RESEARCH_VERDICTS JSON, so it stays out of scalars too. It never includes
-	// the reserved `blocked` status.
-	researchVerdicts, err := forge.ParseResearchVerdicts(e.ResearchVerdicts)
-	if err != nil {
-		return promptBodies{}, fmt.Errorf("research status enum: %w", err)
-	}
-	var statusWords []string
-	for _, v := range researchVerdicts.Verdicts() {
-		statusWords = append(statusWords, string(v))
-	}
-	statusEnum := strings.Join(statusWords, "|")
-	allowlist["RESEARCH_STATUS_ENUM"] = statusEnum
-	vars["RESEARCH_STATUS_ENUM"] = varBody("RESEARCH_STATUS_ENUM", statusEnum)
-
 	// CHORE_PROMPT (ADR 0056, issue #3875) is the butler's ${CHORE_PROMPT}
 	// substitution: the named Chore's own prompt file, embedded into
 	// butler-prompt.md's body rather than appended like ISSUE_TEXT, since the
@@ -400,10 +385,22 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 
 	basePath := filepath.Join(e.PromptsDir, baseName)
 	baseSource := Source{Kind: SourceTemplate, Name: baseName}
-	base, err := renderFileSegments(basePath, baseSource, vars)
+	baseText, err := os.ReadFile(basePath)
 	if err != nil {
 		return promptBodies{}, fmt.Errorf("read %s: %w", baseName, err)
 	}
+	// A prompt-dir override ships the raw research markers the baked prompt
+	// has rendered at nix eval time (issues #2630, #4159). Parsing only when a
+	// target is present keeps a malformed RESEARCH_VERDICTS from failing a
+	// work or butler assembly, which never reads it.
+	if forge.HasVerdictTargets(string(baseText)) {
+		researchVerdicts, err := forge.ParseResearchVerdicts(e.ResearchVerdicts)
+		if err != nil {
+			return promptBodies{}, fmt.Errorf("research verdicts: %w", err)
+		}
+		baseText = []byte(researchVerdicts.RenderPrompt(string(baseText)))
+	}
+	base := renderSegments(string(baseText), baseSource, vars).trimTrailingNewlines()
 
 	// ContractVerdict (research) injects only research-verdict;
 	// ContractInline (butler) injects nothing at all (its OUTCOME section is
