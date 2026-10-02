@@ -54,10 +54,16 @@ func TestExtractUsage_MultiSessionFixture(t *testing.T) {
 }
 
 // TestExtractUsage_OutputTokenPlaceholderFixture pins issue #3213's
-// placeholder-vs-ground-truth behavior. The fixture's envelopes are trimmed
-// from a real claude-code 2.1.204 capture, with token magnitudes hand-authored
-// from #3213's own #3183 pass-1 evidence. It also carries a subagent spawn and
-// a duplicate message.id re-emit, so agent-split and dedup stay exercised.
+// placeholder-vs-ground-truth behavior. The envelopes are trimmed from a real
+// claude-code 2.1.204 capture; the magnitudes are the authenticated #3183
+// pass-1 figures #3213 publishes, not a stream capture. A `claude` started from
+// a Box's Bash tool runs unauthenticated (agent/env-credential-scrub.sh) and
+// reports zero for every usage figure, so regenerate only from an
+// authenticated capture. Output figures keep the real run's scale (per-message
+// at most 21 vs a result of 33,815) and are the only ones tied to it; input
+// and cache figures are scaled down and asserted only as fixture-internal
+// sums. A subagent spawn and a duplicate message.id re-emit keep agent-split
+// and dedup exercised.
 func TestExtractUsage_OutputTokenPlaceholderFixture(t *testing.T) {
 	path := filepath.Join("testdata", "output-placeholder-3183.jsonl")
 
