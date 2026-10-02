@@ -62,12 +62,16 @@ func Load(k Knobs) ([]Chore, error) {
 
 	var errs []error
 
-	enabled := make(map[string]bool, len(names))
+	enabled := make(map[string]int, len(names))
 	for _, name := range names {
-		if !enabled[name] && !promptassembly.ValidChoreName(name) {
+		switch valid := promptassembly.ValidChoreName(name); {
+		case !valid && enabled[name] == 0:
 			errs = append(errs, fmt.Errorf("BUTLER_CHORES: chore %q: invalid name format: %s", name, promptassembly.ChoreNameRule))
+		case valid && enabled[name] == 1:
+			// ledger.DayTotalsAll sums per name, so a repeat double-counts the daily budgets.
+			errs = append(errs, fmt.Errorf("BUTLER_CHORES: duplicate chore %q", name))
 		}
-		enabled[name] = true
+		enabled[name]++
 	}
 
 	everyCfg, everyErr := parseEvery(k.Every)
@@ -80,7 +84,7 @@ func Load(k Knobs) ([]Chore, error) {
 		}
 		slices.Sort(overrideNames)
 		for _, name := range overrideNames {
-			if !enabled[name] {
+			if enabled[name] == 0 {
 				errs = append(errs, fmt.Errorf("BUTLER_EVERY: override for chore %q, which is not enabled (BUTLER_CHORES=%q)", name, k.Chores))
 			}
 		}
@@ -95,7 +99,7 @@ func Load(k Knobs) ([]Chore, error) {
 		// can't fail.
 		for _, entry := range strings.Fields(k.Classes) {
 			name, _, _ := strings.Cut(entry, "=")
-			if enabled[name] || slices.Contains(builtinChores, name) {
+			if enabled[name] > 0 || slices.Contains(builtinChores, name) {
 				continue
 			}
 			errs = append(errs, fmt.Errorf("BUTLER_CHORE_CLASSES: chore %q is not enabled and not a built-in chore (BUTLER_CHORES=%q)", name, k.Chores))
@@ -114,7 +118,7 @@ func Load(k Knobs) ([]Chore, error) {
 			// fail.
 			for _, entry := range strings.Fields(k.PatchClasses) {
 				name, classesPart, _ := strings.Cut(entry, "=")
-				if !enabled[name] {
+				if enabled[name] == 0 {
 					errs = append(errs, fmt.Errorf("BUTLER_PATCH_CLASSES: chore %q is not enabled (BUTLER_CHORES=%q)", name, k.Chores))
 					continue
 				}

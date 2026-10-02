@@ -141,6 +141,16 @@ func TestLoad(t *testing.T) {
 			wantErrEach: []string{"bad/name"},
 		},
 		{
+			name:    "duplicate chore name in BUTLER_CHORES",
+			chores:  "bugs docs-drift bugs",
+			wantErr: `BUTLER_CHORES: duplicate chore "bugs"`,
+		},
+		{
+			name:        "chore name repeated thrice reported once",
+			chores:      "bugs bugs bugs",
+			wantErrEach: []string{`duplicate chore "bugs"`},
+		},
+		{
 			name:    "empty chore name in an override token",
 			chores:  "bugs",
 			every:   "=1h",
@@ -239,6 +249,9 @@ func TestLoad(t *testing.T) {
 				if err == nil {
 					t.Fatalf("Load(%q, %q, %q): got nil error, want %v each exactly once", tc.chores, tc.every, tc.classes, tc.wantErrEach)
 				}
+				if got != nil {
+					t.Errorf("Load(%q, %q, %q) = %#v on error, want nil", tc.chores, tc.every, tc.classes, got)
+				}
 				msg := err.Error()
 				for _, substr := range tc.wantErrEach {
 					if got := strings.Count(msg, substr); got != 1 {
@@ -263,6 +276,9 @@ func TestLoad(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("Load(%q, %q, %q) err = %v, want substring %q", tc.chores, tc.every, tc.classes, err, tc.wantErr)
+			}
+			if got != nil {
+				t.Errorf("Load(%q, %q, %q) = %#v on error, want nil", tc.chores, tc.every, tc.classes, got)
 			}
 		})
 	}
