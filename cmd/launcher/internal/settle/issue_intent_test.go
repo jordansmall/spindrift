@@ -1326,6 +1326,58 @@ func TestFileIssueIntentsDetailed_Dedup_SkipCarriesDupRef(t *testing.T) {
 	}
 }
 
+// One intent can be covered by both kinds of reference at once: a backlog
+// issue holds one of its sites and a peer this run filed holds the other. The
+// skip's DupRef then names both, and the rendered skipped section carries
+// them through (issue #3831).
+func TestFileIssueIntentsDetailed_Dedup_MixedKindDupRef(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "501",
+		Title:  "An earlier finding covering site a",
+		Body:   "some earlier body\n\n<!-- spindrift-dedup: site a -->",
+		Labels: []string{"agent-review-finding"},
+	})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+	const peerTitle = "peer finding at site b"
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"` + peerTitle + `","body":"body one","dedupTerms":["site b"]}`,
+			`{"title":"a finding spanning both sites","body":"body two","dedupTerms":["site a","site b"]}`,
+		},
+	}
+
+	var filed []filedIntent
+	captureStdout(t, func() {
+		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	})
+
+	if len(filed) != 2 {
+		t.Fatalf("filed = %+v, want 2 entries", filed)
+	}
+	if filed[0].Skipped {
+		t.Fatalf("filed[0] = %+v, want the peer filed", filed[0])
+	}
+	skip := filed[1]
+	if !skip.Skipped {
+		t.Fatalf("filed[1] = %+v, want Skipped (every site is covered)", skip)
+	}
+	peerRef := `this run's "` + peerTitle + `"`
+	if !strings.Contains(skip.DupRef, "#501") || !strings.Contains(skip.DupRef, peerRef) {
+		t.Errorf("DupRef = %q, want it to name both #501 and %s", skip.DupRef, peerRef)
+	}
+
+	section := buildSkippedIssuesSection(filed)
+	// #501 leads only because matchDedup walks covered in sorted key
+	// order ("site a" < "site b"), not because of its kind.
+	bullet := "- **a finding spanning both sites** — already tracked: #501, " + peerRef
+	if !strings.Contains(section, "## Skipped (deduplicated)") || !strings.Contains(section, bullet) {
+		t.Errorf("section = %q, want the bullet %q", section, bullet)
+	}
+}
+
 // Two dedup keys naming overlapping line ranges in the same file
 // ("...bundlerelay.go:80-83" and "...bundlerelay.go:80") are the same site
 // spelled at different granularity: the second must skip against the first,
