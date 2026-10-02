@@ -4,8 +4,14 @@
 # anywhere) and `arg` (placeholder when the flag takes a value; null = boolean).
 #
 # `nix run .#regen` renders this into cmd/launcher/cliflags_gen.go, which
-# parseFlags consumes, and the shell-completion renderers consume it too, so a
-# new non-schema flag added here reaches the parser and completions together.
+# parseFlags consumes, and the shell-completion renderers and the man page's
+# COMMAND FLAGS section consume it too, so a new non-schema flag added here
+# reaches the parser, completions, and man page together. Exception: the `help`
+# and `version` rows never reach parseFlags (mainRun handles --help/--version
+# first), so they only feed completions and the man page.
+#
+# `--input` (the Launcher input document path, ADR 0020) is deliberately not a
+# row: the Nix wrapper/daemon passes it (lib/mkHarness.nix), users never type it.
 [
   {
     flag = "no-build";

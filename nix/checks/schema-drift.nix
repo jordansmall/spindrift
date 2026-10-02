@@ -1486,6 +1486,16 @@ checkedMerge {
       groupChecks = concatMapStrings (g: "need -F '.SS ${g}'\n") groups;
       flagChecks = concatMapStrings (e: "need -F '${roffFlag e}'\n") nonSecret;
       secretChecks = concatMapStrings (e: "need -F '${e.env}'\n") secretEntries;
+      # Non-schema flags (lib/cli-flags.nix) each get a described .TP entry under
+      # COMMAND FLAGS, so a row added there can never miss the man page.
+      # -x: a bare prefix would also match every `.B \-\-butler\-...` schema knob.
+      cliFlagChecks = concatMapStrings (
+        r:
+        let
+          argToken = if r.arg == null then "" else " \\fI${r.arg}\\fR";
+        in
+        "need -xF '.B \\-\\-${replaceStrings [ "-" ] [ "\\-" ] r.flag}${argToken}'\n"
+      ) (import ../../lib/cli-flags.nix);
       subcommands = import ../../lib/subcommands.nix;
       subcommandChecks = concatMapStrings (s: "need -F '.B ${s.name}'\n") subcommands;
     in
@@ -1498,12 +1508,13 @@ checkedMerge {
         need() { grep -q "$@" "$man" || { echo "man page missing: $*" >&2; exit 1; }; }
         # Renders without a fatal parse error.
         mandoc -man -Tascii "$man" >/dev/null
-        for s in NAME SYNOPSIS DESCRIPTION SUBCOMMANDS OPTIONS ENVIRONMENT FILES EXAMPLES; do
+        for s in NAME SYNOPSIS DESCRIPTION SUBCOMMANDS "COMMAND FLAGS" OPTIONS ENVIRONMENT FILES EXAMPLES; do
           grep -Eq "^\.SH \"?$s" "$man" || { echo "man page missing .SH $s" >&2; exit 1; }
         done
         ${groupChecks}
         ${flagChecks}
         ${secretChecks}
+        ${cliFlagChecks}
         ${subcommandChecks}
         # A presence-style bool flag (kind = "bool", issue #2145) renders its
         # name with no italic type placeholder; it never emits \fIbool\fR.
@@ -1704,6 +1715,7 @@ checkedMerge {
   launcher-bash-completion =
     let
       schema = import ../../lib/env-schema.nix;
+      cliFlags = import ../../lib/cli-flags.nix;
       subcommandRegistry = import ../../lib/subcommands.nix;
       inherit (pkgs.lib)
         filter
@@ -1719,6 +1731,7 @@ checkedMerge {
       # covered merely because `--issue-number` contains it as a prefix.
       flagChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}'\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need '--${e.alias}'\n" else "") nonSecret;
+      cliFlagChecks = concatMapStrings (e: "need '--${e.flag}'\n") cliFlags;
       secretChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}-file'\n") secretEntries;
       secretCmdChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}-cmd'\n") secretEntries;
       # Subcommand names are plain English words that can appear in a comment,
@@ -1756,6 +1769,7 @@ checkedMerge {
         shellcheck --shell=bash "$completion"
         ${flagChecks}
         ${aliasChecks}
+        ${cliFlagChecks}
         ${secretChecks}
         ${secretCmdChecks}
         grep -qF -- '${subcommandLine}' "$completion" \
@@ -1773,6 +1787,7 @@ checkedMerge {
   launcher-fish-completion =
     let
       schema = import ../../lib/env-schema.nix;
+      cliFlags = import ../../lib/cli-flags.nix;
       subcommandRegistry = import ../../lib/subcommands.nix;
       inherit (pkgs.lib)
         filter
@@ -1788,6 +1803,7 @@ checkedMerge {
       # `-l issue` must not match inside `-l issue-number`).
       flagChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}'\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need '-l ${e.alias}'\n" else "") nonSecret;
+      cliFlagChecks = concatMapStrings (e: "need '-l ${e.flag}'\n") cliFlags;
       secretChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}-file'\n") secretEntries;
       secretCmdChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}-cmd'\n") secretEntries;
       # Subcommands render as `-a '<name>'`, and that quoted token cannot
@@ -1821,6 +1837,7 @@ checkedMerge {
         fish -n "$completion"
         ${flagChecks}
         ${aliasChecks}
+        ${cliFlagChecks}
         ${secretChecks}
         ${secretCmdChecks}
         ${subcommandChecks}
@@ -1837,6 +1854,7 @@ checkedMerge {
   launcher-zsh-completion =
     let
       schema = import ../../lib/env-schema.nix;
+      cliFlags = import ../../lib/cli-flags.nix;
       subcommandRegistry = import ../../lib/subcommands.nix;
       inherit (pkgs.lib)
         filter
@@ -1849,6 +1867,7 @@ checkedMerge {
       subcommands = map (s: s.name) subcommandRegistry;
       flagChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}:\"\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need \"'--${e.alias}:\"\n" else "") nonSecret;
+      cliFlagChecks = concatMapStrings (e: "need \"'--${e.flag}:\"\n") cliFlags;
       secretChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}-file:\"\n") secretEntries;
       secretCmdChecks = concatMapStrings (
         e: "need \"'--${renderers.toKebab e.env}-cmd:\"\n"
@@ -1879,6 +1898,7 @@ checkedMerge {
         zsh -n "$completion"
         ${flagChecks}
         ${aliasChecks}
+        ${cliFlagChecks}
         ${secretChecks}
         ${secretCmdChecks}
         ${subcommandChecks}

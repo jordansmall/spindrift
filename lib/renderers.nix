@@ -5,6 +5,7 @@
 # without a locked nixpkgs (issue #402, issue #2535).
 let
   builtinsCompat = import ./builtins-compat.nix;
+  cliFlags = import ./cli-flags.nix;
   inherit (builtinsCompat) concatStrings mapAttrsToList;
   filterAttrs =
     pred: attrs:
@@ -1464,18 +1465,7 @@ rec {
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       subcommands = map (s: s.name) subcommandRegistry;
       issuePositionalSubcommands = issueCompletionSubcommands subcommandRegistry;
-      # Hardcoded like renderManpageRoff's DISPATCH FLAGS / SYNOPSIS sections:
-      # dispatch's boolean flags and the top-level flags aren't schema entries.
-      extraFlags = [
-        "--no-build"
-        "--yes"
-        "--force"
-        "--verbose"
-        "--butler"
-        "--help"
-        "--version"
-        "--secret-cmd"
-      ];
+      extraFlags = map (e: "--" + e.flag) cliFlags;
       knobFlags = map (e: "--" + flagName e) nonSecret;
       aliasFlags = builtins.concatMap (e: map (n: "--" + n) (secondaryFlagNames e)) nonSecret;
       fileFlags = map (e: "--" + toKebab e.env + "-file") secretEntries;
@@ -1576,40 +1566,6 @@ rec {
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       subcommands = map (s: s.name) subcommandRegistry;
       issuePositionalSubcommands = issueCompletionSubcommands subcommandRegistry;
-      extraFlags = [
-        {
-          flag = "no-build";
-          doc = "fail fast if the image is absent instead of building; pair with 'spindrift build' for split build/run flows";
-        }
-        {
-          flag = "yes";
-          doc = "skip confirmation prompt when dispatching unlabeled issues (alias: --force)";
-        }
-        {
-          flag = "force";
-          doc = "skip confirmation prompt when dispatching unlabeled issues (alias: --yes)";
-        }
-        {
-          flag = "verbose";
-          doc = "show the full doctor report — every check and gate row, not just failures (short form: -v)";
-        }
-        {
-          flag = "butler";
-          doc = "make doctor also validate the butler config (exit 2 on failure)";
-        }
-        {
-          flag = "help";
-          doc = "show usage and exit";
-        }
-        {
-          flag = "version";
-          doc = "show version and exit";
-        }
-        {
-          flag = "secret-cmd";
-          doc = "templated fetch command for any secret with none of its own set; {name} substitutes the secret's kebab-case env name (sibling SECRET_CMD env var; lowest precedence)";
-        }
-      ];
       subcommandCompletions = builtins.concatStringsSep "\n" (
         map (s: "complete -c spindrift -n '__fish_use_subcommand' -f -a '${s}'") subcommands
       );
@@ -1633,7 +1589,7 @@ rec {
         map (e: "complete -c spindrift -l ${toKebab e.env}-cmd -d \"${e.doc}\"") secretEntries
       );
       extraCompletions = builtins.concatStringsSep "\n" (
-        map (e: "complete -c spindrift -l ${e.flag} -d \"${e.doc}\"") extraFlags
+        map (e: "complete -c spindrift -l ${e.flag} -d \"${e.doc}\"") cliFlags
       );
       # Dynamic positional issue-number completion (issue #556). fish's
       # `complete -a` splits a tab-separated candidate into value and
@@ -1677,16 +1633,7 @@ rec {
       fileSpec = e: "    '--${toKebab e.env}-file:${zshEsc e.doc}'\n";
       cmdSpec = e: "    '--${toKebab e.env}-cmd:${zshEsc e.doc}'\n";
       fileFlags = map (e: "--" + toKebab e.env + "-file") secretEntries;
-      extraFlagSpecs = [
-        "    '--no-build:fail fast if the image is absent instead of building it'\n"
-        "    '--yes:skip the confirmation prompt when dispatching unlabeled issues'\n"
-        "    '--force:alias for --yes'\n"
-        "    '--verbose:show the full doctor report — every check and gate row, not just failures (short form: -v)'\n"
-        "    '--butler:make doctor also validate the butler config (exit 2 on failure)'\n"
-        "    '--help:show usage'\n"
-        "    '--version:show version'\n"
-        "    '--secret-cmd:templated secret-fetch command; {name} substitutes the kebab-case env name (lowest precedence)'\n"
-      ];
+      extraFlagSpecs = map (e: "    '--${e.flag}:${zshEsc e.doc}'\n") cliFlags;
       allFlagSpecs = concatStrings (
         map knobSpec nonSecret
         ++ map secondarySpec nonSecret
@@ -1821,6 +1768,15 @@ rec {
           typeToken = if flagKind e == "bool" then "" else " \\fI${flagKind e}\\fR";
         in
         ".TP\n.B ${names}${typeToken}\n\\&${esc e.doc}. ${dfltSentence}\n";
+      # Non-schema flags come from lib/cli-flags.nix, so a row added there
+      # reaches the man page along with the parser and the completions.
+      cliFlagBlock =
+        r:
+        let
+          argToken = if r.arg == null then "" else " \\fI${esc r.arg}\\fR";
+          verbSentence = if r.verb == null then "" else " Valid only after the ${r.verb} subcommand.";
+        in
+        ".TP\n.B \\-\\-${escFlag r.flag}${argToken}\n\\&${escFlag (esc r.doc)}.${verbSentence}\n";
       groupSection =
         g:
         let
@@ -1856,17 +1812,8 @@ rec {
         .I harness.env
         in the working directory.
         .SH SUBCOMMANDS
-        ${concatStrings (map subcommandBlock subcommands)}.SH "DISPATCH FLAGS"
-        .TP
-        .B \-\-no-build
-        Fail fast if the image is absent instead of building it; pair with
-        .B spindrift build
-        for split build/run flows.
-        .TP
-        .B \-\-yes
-        Skip the confirmation prompt when dispatching unlabeled issues. Alias:
-        .BR \-\-force .
-        .TP
+        ${concatStrings (map subcommandBlock subcommands)}.SH "COMMAND FLAGS"
+        ${concatStrings (map cliFlagBlock cliFlags)}.TP
         .B \-\-continuous
         Bare-flag alias for the deprecated
         .B \-\-continuous-dispatch
