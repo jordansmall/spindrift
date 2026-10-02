@@ -360,7 +360,7 @@ let
   # trailer's, which a Consumer with no section of its own still
   # receives; TASK keeps only the posture.
   mkAdviseOnlyEnumerationDedupCheck =
-    name: file:
+    { name, file }:
     pkgs.runCommand name { } ''
       p=${batsHarness.internals.promptDir}/${file}
       # Join hard-wrapped lines before counting: the trailer prose wraps
@@ -392,7 +392,7 @@ let
   # pattern the pin counts -- else the pin would count itself. Counts
   # occurrences, not matching lines, since attribute definitions here run
   # to 200+ columns and two copies could share one physical line.
-  sliceDefinedOncePin =
+  mkSliceDefinedOncePin =
     {
       what,
       half1,
@@ -1238,7 +1238,7 @@ in
   prompts-nix-check-section-awk-defined-once =
     pkgs.runCommand "prompts-nix-check-section-awk-defined-once" { }
       ''
-        ${sliceDefinedOncePin {
+        ${mkSliceDefinedOncePin {
           what = "CHECK-section awk slice";
           # issue-prompt half is end-of-line-anchored only, not
           # start-of-line (issue #3221): the raw, unrendered template it
@@ -1247,7 +1247,7 @@ in
           half1 = "/# CHECK$/{f=1}";
           half2 = " /# REVIEW$/{exit} f";
         }}
-        ${sliceDefinedOncePin {
+        ${mkSliceDefinedOncePin {
           what = "fix-prompt CHECK-section awk slice";
           # fix-prompt half slices the rendered fix-prompt.md, where the
           # injected CHECK/COMMIT block still starts "# CHECK" on its own
@@ -1265,7 +1265,7 @@ in
   prompts-nix-research-task-slice-defined-once =
     pkgs.runCommand "prompts-nix-research-task-slice-defined-once" { }
       ''
-        ${sliceDefinedOncePin {
+        ${mkSliceDefinedOncePin {
           what = "research TASK/CONTEXT awk slice";
           half1 = "/^# TASK$/{f=1}";
           half2 = " /^# CONTEXT$/{exit} f";
@@ -2237,11 +2237,19 @@ in
 
   # Grep pin (issue #3227): covers research-prompt.md. See
   # mkAdviseOnlyEnumerationDedupCheck above for the contract this pins.
-  mkharness-prompt-research-advise-only-enumeration-dedup = mkAdviseOnlyEnumerationDedupCheck "mkharness-prompt-research-advise-only-enumeration-dedup" "research-prompt.md";
+  mkharness-prompt-research-advise-only-enumeration-dedup = mkAdviseOnlyEnumerationDedupCheck {
+    name = "mkharness-prompt-research-advise-only-enumeration-dedup";
+    file = "research-prompt.md";
+  };
 
   # Companion to mkharness-prompt-research-advise-only-enumeration-dedup
   # above, for the self-contained sub-mode prompt (issue #3227).
-  mkharness-prompt-research-self-contained-advise-only-enumeration-dedup = mkAdviseOnlyEnumerationDedupCheck "mkharness-prompt-research-self-contained-advise-only-enumeration-dedup" "research-self-contained-prompt.md";
+  mkharness-prompt-research-self-contained-advise-only-enumeration-dedup =
+    mkAdviseOnlyEnumerationDedupCheck
+      {
+        name = "mkharness-prompt-research-self-contained-advise-only-enumeration-dedup";
+        file = "research-self-contained-prompt.md";
+      };
 
   # Anti-drift check for lib/mkHarness.nix's researchPromptContentByName
   # (issue #2595 review finding B): it hand-keys exactly the research prompt
