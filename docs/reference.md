@@ -20,6 +20,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift dispatch --continuous`| **deprecated**, superseded by [Daemon](#daemon) (issue #3547) — run dispatch as a continuous slot-refill loop; bare-flag alias for the `--continuous-dispatch` bool |
 | `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](#research-dispatch) |
 | `spindrift research 42 57`       | research exactly these issues, same selective semantics as `dispatch <nums>`    |
+| `spindrift research --self-contained` | review each issue from its body and comments alone, cloning no Target repo and needing no `REPO_SLUG` or `GH_TOKEN`; `dispatch` and `recover` reject it — see [Self-contained research mode](#self-contained-research-mode) |
 | `spindrift butler [--chore <name>]` | one-shot butler sweep of the first due enabled Chore (`BUTLER_CHORES` order), or only the one named — claims the Chore's Ledger, scans the next slice of the tree, runs one advise-only Box, files findings (the host, never the Box, may promote a finding to `ready-for-agent` or land it as a patch PR, ADR 0057; both opt-in, off while `BUTLER_MAX_PROMOTIONS_PER_DAY` / `BUTLER_MAX_PATCHES_PER_DAY` stay `0`), writes a done Ledger commit; exits "no work" (2) if none is due — `local`, `github`, or `forgejo` forge, see [Butler](#butler) |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
@@ -28,7 +29,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
-| `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
+| `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |
 | `spindrift --version`            | installed version and revision                                                  |
 
