@@ -4164,3 +4164,157 @@ func setenvValue(t *testing.T, args []string, key string) string {
 	t.Fatalf("no --setenv %s found in args: %v", key, args)
 	return ""
 }
+
+// reclaimFixture stubs the cgroup seams for a Run of "leftover-box" and
+// pre-creates the leftover per-Box dir a crashed launcher would have left,
+// seeded with procs as its cgroup.procs content. The execCommand seam snapshots
+// pids.max/memory.max into gotPidsMax/gotMemoryMax, since Run's cleanup has
+// removed a reclaimed dir by the time Run returns.
+type reclaimFixture struct {
+	dir                      string
+	gotPidsMax, gotMemoryMax []byte
+	adapter                  *bwrapAdapter
+}
+
+func newReclaimFixture(t *testing.T, procs string) *reclaimFixture {
+	t.Helper()
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	f := &reclaimFixture{}
+	root := stubCgroupSeams(t,
+		func() (string, error) { return "", nil },
+		func(name string, args ...string) *exec.Cmd {
+			f.gotPidsMax, _ = os.ReadFile(filepath.Join(f.dir, "pids.max"))
+			f.gotMemoryMax, _ = os.ReadFile(filepath.Join(f.dir, "memory.max"))
+			return exec.Command(script, args...)
+		},
+	)
+	f.dir = filepath.Join(root, "spindrift-leftover-box")
+	if err := os.Mkdir(f.dir, 0o755); err != nil {
+		t.Fatalf("seed leftover cgroup dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(f.dir, "cgroup.procs"), []byte(procs), 0o644); err != nil {
+		t.Fatalf("seed cgroup.procs: %v", err)
+	}
+	f.adapter = &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	return f
+}
+
+func (f *reclaimFixture) run(t *testing.T) string {
+	t.Helper()
+	var runErr error
+	out := captureStdoutDuring(t, func() {
+		runErr = f.adapter.Run(Box{Name: "leftover-box", Env: map[string]string{}})
+	})
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	return out
+}
+
+func (f *reclaimFixture) assertNotReclaimed(t *testing.T, out, procs string) {
+	t.Helper()
+	if len(f.gotPidsMax) != 0 || len(f.gotMemoryMax) != 0 {
+		t.Errorf("limits written into a leftover dir that must not be reused: pids.max=%q memory.max=%q", f.gotPidsMax, f.gotMemoryMax)
+	}
+	if !strings.Contains(out, "without cgroup resource containment") {
+		t.Errorf("Run did not warn about running uncontained: %q", out)
+	}
+	got, err := os.ReadFile(filepath.Join(f.dir, "cgroup.procs"))
+	if err != nil {
+		t.Fatalf("leftover dir was removed or altered: %v", err)
+	}
+	if string(got) != procs {
+		t.Errorf("cgroup.procs = %q, want unchanged %q", got, procs)
+	}
+}
+
+// Issue #4164: an empty leftover per-Box dir from a crashed launcher must be
+// reclaimed, not left to fail Mkdir with EEXIST on every retry.
+func TestBwrapRun_ReclaimsEmptyLeftoverCgroupDir(t *testing.T) {
+	f := newReclaimFixture(t, "")
+	out := f.run(t)
+
+	if strings.Contains(out, "without cgroup resource containment") {
+		t.Errorf("Run warned about running uncontained despite a reclaimable leftover dir: %q", out)
+	}
+	if string(f.gotPidsMax) != "256" {
+		t.Errorf("pids.max = %q, want %q", f.gotPidsMax, "256")
+	}
+	if string(f.gotMemoryMax) != "5368709120" {
+		t.Errorf("memory.max = %q, want %q", f.gotMemoryMax, "5368709120")
+	}
+	if _, err := os.Stat(f.dir); !os.IsNotExist(err) {
+		t.Errorf("cgroup dir %s still exists after Run returned, want removed: %v", f.dir, err)
+	}
+}
+
+// A leftover dir that still holds a live PID belongs to someone else's Box and
+// must be neither removed nor reused.
+func TestBwrapRun_DoesNotReclaimLeftoverCgroupDirWithLivePID(t *testing.T) {
+	f := newReclaimFixture(t, "4242\n")
+	out := f.run(t)
+	f.assertNotReclaimed(t, out, "4242\n")
+}
+
+// An in-process sibling Run mid-launch for the same name owns the dir even
+// while its cgroup.procs still reads empty.
+func TestBwrapRun_DoesNotReclaimLeftoverCgroupDirWhileSiblingProvisioning(t *testing.T) {
+	f := newReclaimFixture(t, "")
+	release := f.adapter.beginProvisioning("leftover-box")
+	t.Cleanup(release)
+	out := f.run(t)
+	f.assertNotReclaimed(t, out, "")
+}
+
+// A sibling Run whose Box has exited but whose deferred cgroup cleanup has not
+// run yet is still tracked in running and has released its provisioning entry.
+func TestBwrapRun_DoesNotReclaimLeftoverCgroupDirOfTrackedSibling(t *testing.T) {
+	f := newReclaimFixture(t, "")
+	f.adapter.running = map[string]*os.Process{"leftover-box": {}}
+	out := f.run(t)
+	f.assertNotReclaimed(t, out, "")
+}
+
+// Inside a live Run's launch window the dir exists with an empty cgroup.procs
+// (real cgroupfs always has the file) until the post-Start PID write. A
+// sibling Run for the same name reclaiming then must not delete it.
+func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	var dir string
+	probed, reclaimed, existedAfter := false, true, false
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	root := stubCgroupSeams(t,
+		func() (string, error) { return "", nil },
+		func(name string, args ...string) *exec.Cmd {
+			if _, err := os.Stat(filepath.Join(dir, "pids.max")); err == nil && !probed {
+				probed = true
+				_ = os.WriteFile(filepath.Join(dir, "cgroup.procs"), nil, 0o644)
+				// The sibling's own provisioning entry makes the count 2.
+				release := a.beginProvisioning("launch-box")
+				reclaimed = a.reclaimLeftoverCgroupDir("launch-box", dir)
+				release()
+				_, err := os.Stat(dir)
+				existedAfter = err == nil
+			}
+			return exec.Command(script, args...)
+		},
+	)
+	dir = filepath.Join(root, "spindrift-launch-box")
+
+	var runErr error
+	captureStdoutDuring(t, func() {
+		runErr = a.Run(Box{Name: "launch-box", Env: map[string]string{}})
+	})
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	if !probed {
+		t.Fatal("execCommand seam never ran with the cgroup dir provisioned")
+	}
+	if reclaimed {
+		t.Error("reclaimLeftoverCgroupDir removed a dir inside a live Run's launch window")
+	}
+	if !existedAfter {
+		t.Error("cgroup dir missing after the in-window reclaim attempt")
+	}
+}
