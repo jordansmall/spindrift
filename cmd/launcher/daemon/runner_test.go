@@ -901,12 +901,16 @@ const childExitOnFirstSignal = `trap 'exit 7' TERM; : >"$0"; while :; do sleep 0
 
 // childExitOnSecondSignal traps both SIGTERM and SIGINT, counts them, and
 // exits 7 only on the second — the Stop-then-Abort escalation contract.
-// Marker file and busy loop as above.
+// Marker file as above. The loop sleeps in the background and blocks in the
+// `wait` builtin instead: a SIGINT that lands while bash waits on a
+// foreground child that then exits normally can be taken as handled by
+// that child, dropping the INT trap (this test flaked that way on
+// aarch64-darwin), whereas POSIX has `wait` return at once and run it.
 const childExitOnSecondSignal = `
 n=0
 trap 'n=$((n+1)); if [ "$n" -ge 2 ]; then exit 7; fi' TERM INT
 : >"$0"
-while :; do sleep 0.05; done`
+while :; do sleep 0.05 & wait $!; done`
 
 // startChild starts a RunChild call on its own goroutine with the given
 // Stop/Abort latch and hands back the channels its result or error lands
