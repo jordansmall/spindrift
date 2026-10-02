@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // ErrUnsupportedCell marks an Env combination Assemble cannot render: an
@@ -247,20 +248,18 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	// because I/O is out of its scope.
 	gates["SKILLS_FOUND"] = e.SkillsFound != ""
 
-	// The substitution allowlist: the fixed scalars below (RESEARCH_STATUS_ENUM
-	// came from issue #2504) plus every registry row's var and extraSubstVars,
-	// one flat set shared by every render in this function rather than scoped
-	// per-fragment.
+	// The substitution allowlist: the fixed scalars below plus every registry
+	// row's var and extraSubstVars, one flat set shared by every render in this
+	// function rather than scoped per-fragment.
 	scalars := map[string]string{
-		"ISSUE_NUMBER":         e.IssueNumber,
-		"ISSUE_TITLE":          e.IssueTitle,
-		"BRANCH":               e.Branch,
-		"BASE_BRANCH":          e.BaseBranch,
-		"IN_PROGRESS_LABEL":    e.InProgressLabel,
-		"COMPLETE_LABEL":       e.CompleteLabel,
-		"RUN_NONCE":            e.RunNonce,
-		"RESEARCH_STATUS_ENUM": e.ResearchStatusEnum,
-		"DISPATCH_KEY":         e.DispatchKey,
+		"ISSUE_NUMBER":      e.IssueNumber,
+		"ISSUE_TITLE":       e.IssueTitle,
+		"BRANCH":            e.Branch,
+		"BASE_BRANCH":       e.BaseBranch,
+		"IN_PROGRESS_LABEL": e.InProgressLabel,
+		"COMPLETE_LABEL":    e.CompleteLabel,
+		"RUN_NONCE":         e.RunNonce,
+		"DISPATCH_KEY":      e.DispatchKey,
 	}
 
 	// vars is the segment-attributed twin of allowlist: same keys, bodies
@@ -279,6 +278,21 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	issueSection := issueTextSection(e)
 	allowlist["ISSUE_TEXT"] = issueSection
 	vars["ISSUE_TEXT"] = varBody("ISSUE_TEXT", issueSection)
+
+	// RESEARCH_STATUS_ENUM (issues #2504, #4159) is Go-derived from the raw
+	// RESEARCH_VERDICTS JSON, so it stays out of scalars too. It never includes
+	// the reserved `blocked` status.
+	researchVerdicts, err := forge.ParseResearchVerdicts(e.ResearchVerdicts)
+	if err != nil {
+		return promptBodies{}, fmt.Errorf("research status enum: %w", err)
+	}
+	var statusWords []string
+	for _, v := range researchVerdicts.Verdicts() {
+		statusWords = append(statusWords, string(v))
+	}
+	statusEnum := strings.Join(statusWords, "|")
+	allowlist["RESEARCH_STATUS_ENUM"] = statusEnum
+	vars["RESEARCH_STATUS_ENUM"] = varBody("RESEARCH_STATUS_ENUM", statusEnum)
 
 	// CHORE_PROMPT (ADR 0056, issue #3875) is the butler's ${CHORE_PROMPT}
 	// substitution: the named Chore's own prompt file, embedded into

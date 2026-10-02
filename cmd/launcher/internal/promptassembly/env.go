@@ -162,11 +162,10 @@ type Env struct {
 	// fixed-name list byte for byte and substitutes each name's raw value.
 	IssueText string // entrypoint.sh: $ISSUE_TEXT
 
-	// ResearchStatusEnum is the regen-generated research-kind verdict enumeration
-	// (lib/prompt-contract.nix's outcomeStatusesFor "research", issue #2504), an
-	// eighth fixed _subst name so the research prompts' OUTCOME grammar line
-	// renders the registry's status set instead of a hand-typed literal.
-	ResearchStatusEnum string // entrypoint.sh: $RESEARCH_STATUS_ENUM
+	// ResearchVerdicts is the raw RESEARCH_VERDICTS JSON (empty = the default
+	// set). assemblePromptBodies derives the ${RESEARCH_STATUS_ENUM} token from
+	// it, so a custom verdict set reaches a prompt-dir override (issue #4159).
+	ResearchVerdicts string // dispatch.go: $RESEARCH_VERDICTS
 
 	// ReviewModelOverride and ReviewEffortOverride carry an operator's explicit
 	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (issue #3171), forwarded only when

@@ -635,6 +635,18 @@ let
   # the bot-maintained source of truth (ADR-0010).
   spindriftVersion = (builtins.fromJSON (builtins.readFile ../.release-please-manifest.json)).".";
 
+  # internal/forge's own Go files without its backend subpackages (github,
+  # forgejo, ...): the Box's import closure reaches only the shared verdict
+  # vocabulary at the top level (promptassembly, issue #4159), and the
+  # subpackages would drag in seambundle and the host-side REST clients.
+  forgeTopLevelFiles = lib.fileset.unions (
+    lib.mapAttrsToList (n: _: ../cmd/launcher/internal/forge + "/${n}") (
+      lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".go" n && !lib.hasSuffix "_test.go" n) (
+        builtins.readDir ../cmd/launcher/internal/forge
+      )
+    )
+  );
+
   # In-box Driver runner (issue #626): runs one Driver invocation, direct or
   # inside the Project devShell, tees the stream to a log path, and filters
   # heartbeats in-process, so there is one in-box Go unit rather than two.
@@ -729,6 +741,10 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/registryprobe)
+        forgeTopLevelFiles
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/backend)
       ];
     };
     # Same go.mod/go.sum as launcherBin, but not the same vendorHash: `go mod
@@ -801,6 +817,13 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/deltareview)
+        forgeTopLevelFiles
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/backend)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/retry)
       ];
     };
     # Its own hash, not driverExecBin's: the orchestrator's fileset (above)
