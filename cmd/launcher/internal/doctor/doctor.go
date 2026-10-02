@@ -285,14 +285,12 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	results := RunChecksFailFast(connectivityChecks)
 	if cerr := FirstRequiredError(results); cerr != nil {
 		// RunChecksFailFast stops at the first Required failure, so that result is
-		// always the last element. cmdDoctor already prints cerr to stderr, so
-		// writing the failing row's MISSING line here too would double-report it.
-		// It never prints the Remedy, so write that one line or the remedy reaches
-		// the operator nowhere.
+		// always the last element. Callers surface the returned error (doctorReport
+		// prints it to stderr), so its MISSING row is not written here (it would
+		// double-report); WithRemedy carries any Remedy on that error, leaving
+		// nothing of the failure on stdout.
 		rep.Results(results[:len(results)-1])
-		failing := results[len(results)-1]
-		rep.remedyLine(failing.Check.Remedy, cerr.Error())
-		return cerr
+		return WithRemedy(results[len(results)-1])
 	}
 	rep.Results(results)
 
