@@ -1522,8 +1522,9 @@ checkedMerge {
         r:
         let
           argToken = if r.arg == null then "" else " \\fI${r.arg}\\fR";
+          shortToken = renderers.manShortToken r;
         in
-        "need -xF '.B \\-\\-${replaceStrings [ "-" ] [ "\\-" ] r.flag}${argToken}'\n"
+        "need -xF '.B \\-\\-${replaceStrings [ "-" ] [ "\\-" ] r.flag}${shortToken}${argToken}'\n"
       ) (import ../../lib/cli-flags.nix);
       subcommands = import ../../lib/subcommands.nix;
       subcommandChecks = concatMapStrings (s: "need -F '.B ${s.name}'\n") subcommands;
@@ -1760,7 +1761,9 @@ checkedMerge {
       # covered merely because `--issue-number` contains it as a prefix.
       flagChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}'\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need '--${e.alias}'\n" else "") nonSecret;
-      cliFlagChecks = concatMapStrings (e: "need '--${e.flag}'\n") cliFlags;
+      cliFlagChecks = concatMapStrings (
+        e: "need '--${e.flag}'\n" + (if renderers.hasShort e then "need '-${e.short}'\n" else "")
+      ) cliFlags;
       secretChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}-file'\n") secretEntries;
       secretCmdChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}-cmd'\n") secretEntries;
       # Subcommand names are plain English words that can appear in a comment,
@@ -1832,7 +1835,11 @@ checkedMerge {
       # `-l issue` must not match inside `-l issue-number`).
       flagChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}'\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need '-l ${e.alias}'\n" else "") nonSecret;
-      cliFlagChecks = concatMapStrings (e: "need '-l ${e.flag}'\n") cliFlags;
+      # A short form shares its long flag's `complete` line, so pin the adjacent
+      # `-s X -l LONG` pair rather than a bare `-s X` that could match elsewhere.
+      cliFlagChecks = concatMapStrings (
+        e: if renderers.hasShort e then "needF '-s ${e.short} -l ${e.flag} '\n" else "need '-l ${e.flag}'\n"
+      ) cliFlags;
       secretChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}-file'\n") secretEntries;
       secretCmdChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}-cmd'\n") secretEntries;
       # Subcommands render as `-a '<name>'`, and that quoted token cannot
@@ -1896,7 +1903,9 @@ checkedMerge {
       subcommands = map (s: s.name) subcommandRegistry;
       flagChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}:\"\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need \"'--${e.alias}:\"\n" else "") nonSecret;
-      cliFlagChecks = concatMapStrings (e: "need \"'--${e.flag}:\"\n") cliFlags;
+      cliFlagChecks = concatMapStrings (
+        e: "need \"'--${e.flag}:\"\n" + (if renderers.hasShort e then "need \"'-${e.short}:\"\n" else "")
+      ) cliFlags;
       secretChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}-file:\"\n") secretEntries;
       secretCmdChecks = concatMapStrings (
         e: "need \"'--${renderers.toKebab e.env}-cmd:\"\n"
