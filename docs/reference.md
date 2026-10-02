@@ -3463,12 +3463,28 @@ the first filing, however long the chain of overlapping ranges grows. Two
 keys of the same intent never chain onto each other, though; only keys
 from earlier intents count. This aliasing never reaches into the
 backlog: two findings a few lines apart in a long-lived file are
-distinct there and both still file. The two direct filing paths (`gh`,
-Forgejo) never reach the Launcher, so their dedup stays entirely the
-Filer's own: it runs the open-issue search above itself, keyed on the
-finding's site rather than its prose, and appends the same marker line
-to the body it files, keeping the marker format identical across both
-write mechanisms.
+distinct there and both still file.
+
+Backlog matching is exact, so a `file:<line>` key is only as stable as
+the line it names, and goes stale across runs two ways (issue #3812). A
+defect whose line shifts after an unrelated edit gets a new key that
+misses the backlog issue's, so it files twice. An unrelated new defect
+landing on a line an open or closed finding issue's key already claims
+matches exactly, so that key is treated as already tracked: a single-key
+intent is dropped, while a multi-site intent still files, covering its
+uncovered sites (the per-site rule above). On the two direct filing
+paths (`gh`, Forgejo), the Filer's open-issue search is likewise keyed
+on the literal line. This is an accepted limitation: there is no fuzzy
+or context-hash backlog matching, following #4108's decision that line
+aliasing never reaches into the backlog. The mitigation is in the Filer
+prompt, which keys on the nearest enclosing symbol and uses a bare line
+only when none exists.
+
+The two direct filing paths (`gh`, Forgejo) never reach the Launcher,
+so their dedup stays entirely the Filer's own: it runs the open-issue
+search above itself, keyed on the finding's site rather than its prose,
+and appends the same marker line to the body it files, keeping the
+marker format identical across both write mechanisms.
 
 ##### Filing volume on the status output
 

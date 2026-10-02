@@ -23,11 +23,18 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_
      catches only exact keys and overlapping line ranges, so one defect
      sent under two different keys files twice.
    - Every finding's dedup key is its *site*, not its prose:
-     `path/to/file.go:Symbol` where the finding names a symbol — never a
-     line or line range, even when the finding also cites lines — else
-     `path/to/file.go:<line>`. Key on the code the finding is about (the
-     symbol under test), not the test file or line where the defect was
-     noticed. The Standards and Spec review axes word the same defect
+     `path/to/file.go:Symbol` where Symbol is the symbol the finding names,
+     else the nearest enclosing symbol (function, method, type, or test)
+     the site sits inside — never a line or line range, even when the
+     finding also cites lines. Fall back to `path/to/file.go:<line>` only
+     when no symbol encloses the site (a top-level import block, an unkeyed
+     data file): a line key is brittle across runs, since matching
+     is exact — once the code shifts, the same defect files again, and an
+     unrelated defect landing on that line is wrongly treated as already
+     tracked. Key on the code the finding is about (the symbol under
+     test), not the test file or line where the defect was noticed; a test
+     function is the enclosing symbol only when the finding is about the
+     test itself. The Standards and Spec review axes word the same defect
      differently, so only the site is stable across them — never key on
      wording. One key per finding; add a second only when a finding
      genuinely spans two sites.
