@@ -149,6 +149,20 @@ func TestQueryOpenIssues(t *testing.T) {
 			want: []string{"2"},
 		},
 		{
+			// The other-family filter can drop every listed issue, leaving
+			// nothing to dispatch.
+			name: "everything filtered yields nil",
+			setup: func() (config, *forge.Fake) {
+				c := baseConfig()
+				workInProgress := c.inProgressLabel
+				c = applyDispatchKind(c, dispatchkind.Research)
+				fc := forge.NewFake(forge.ResearchDispatchLabels())
+				fc.SetIssue(forge.Issue{Number: "1", Title: "worker has this one", Labels: []string{c.label, workInProgress}})
+				return c, fc
+			},
+			want: nil,
+		},
+		{
 			// Work-only operation — no research labels defined anywhere —
 			// must discover normally: the filter is a no-op when no issue
 			// carries the label it checks for.
@@ -189,9 +203,9 @@ func TestQueryOpenIssues(t *testing.T) {
 			if err != nil {
 				t.Fatalf("queryOpenIssues: %v", err)
 			}
-			got := make([]string, len(issues))
-			for i, iss := range issues {
-				got[i] = iss.number
+			var got []string
+			for _, iss := range issues {
+				got = append(got, iss.number)
 			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got %+v, want %+v", got, tc.want)
